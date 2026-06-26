@@ -25,8 +25,11 @@ remain easy to audit because it writes files into other repositories.
 - Validate manifest paths before deriving target destinations or anchors.
 - Treat Windows drive/root anchors and backslash-separated parent traversal as
   unsafe manifest paths, even when tests run on POSIX.
+- Validate resolved pack source paths so template symlinks cannot escape the
+  pack root.
 - Validate resolved write and backup paths so target-repo symlinks cannot
   redirect installer writes outside the target repo.
+- Reject occupied non-file target paths with a controlled installer error.
 - Keep platform selection behavior covered by tests when adding adapters or
   install modes.
 - Run `git diff --check` against installed target paths after writes unless
@@ -56,7 +59,10 @@ Add or update tests when changing:
 - Does the change preserve existing target files by default?
 - Are manifest `source`, `target`, and `anchor` paths validated before any
   file writes?
+- Are resolved pack source paths still inside the pack root?
 - Are resolved destination and backup paths still inside the target repo?
+- Do occupied directories, broken symlinks, and other non-file target paths
+  fail without a traceback?
 - Are new templates listed in `manifest.json` and documented in `README.md`?
 - Do tests exercise the behavior through the CLI, not only helper functions?
 - Does the installer still work with only Python 3.10+ stdlib dependencies?

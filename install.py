@@ -86,6 +86,14 @@ def validate_pack_source(source: Path) -> None:
     except ValueError:
         raise SystemExit(f"error: unsafe source path in manifest: {source}") from None
     validate_relative_manifest_path("source", relative_source)
+    try:
+        source.resolve(strict=False).relative_to(ROOT.resolve())
+    except (OSError, RuntimeError) as error:
+        raise SystemExit(
+            f"error: cannot resolve source path in manifest: {source} ({error})"
+        ) from None
+    except ValueError:
+        raise SystemExit(f"error: unsafe source path in manifest: {source}") from None
 
 
 def validate_resolved_target_path(target: Path, path: Path, label: str) -> None:
@@ -216,6 +224,8 @@ def install_file(
     source = file.source
     destination = target / file.target
     validate_resolved_target_path(target, destination, "target path")
+    if path_is_occupied(destination) and not destination.is_file():
+        raise SystemExit(f"error: target exists and is not a file: {file.target}")
     new_content = source.read_bytes()
     if destination.exists():
         current = destination.read_bytes()

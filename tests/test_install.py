@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import install
@@ -260,6 +261,31 @@ class InstallTests(unittest.TestCase):
         self.assertIn("target path resolves outside target repo", result.stdout)
         self.assertFalse(outside_target.exists())
 
+    def test_rejects_existing_target_directory(self) -> None:
+        root = self.make_repo(".gemini")
+        target = root / ".agents/skills/trellis-review-pr/SKILL.md"
+        target.mkdir(parents=True)
+
+        result = self.run_install(root, "--force")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("target exists and is not a file", result.stdout)
+        self.assertNotIn("Traceback", result.stdout)
+
+    def test_rejects_existing_broken_target_symlink(self) -> None:
+        root = self.make_repo(".gemini")
+        target = root / ".agents/skills/trellis-review-pr/SKILL.md"
+        target.parent.mkdir(parents=True)
+        missing_target = root / ".agents/skills/trellis-review-pr/missing.md"
+        target.symlink_to(missing_target)
+
+        result = self.run_install(root, "--force")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("target exists and is not a file", result.stdout)
+        self.assertNotIn("Traceback", result.stdout)
+        self.assertFalse(missing_target.exists())
+
     def test_diff_check_is_limited_to_installed_paths(self) -> None:
         root = self.make_repo(".gemini")
         unrelated = root / "unrelated.txt"
@@ -346,6 +372,26 @@ class InstallTests(unittest.TestCase):
             with self.subTest(source=source):
                 with self.assertRaisesRegex(SystemExit, "unsafe source path"):
                     install.validate_manifest([self.valid_pack_file(source=source)])
+
+    def test_manifest_rejects_source_symlink_resolved_outside_pack_root(self) -> None:
+        pack_tempdir = tempfile.TemporaryDirectory(
+            prefix="trellis-review-pr-pack-root-"
+        )
+        outside_tempdir = tempfile.TemporaryDirectory(
+            prefix="trellis-review-pr-pack-outside-"
+        )
+        self.addCleanup(pack_tempdir.cleanup)
+        self.addCleanup(outside_tempdir.cleanup)
+        pack_root = Path(pack_tempdir.name)
+        outside_source = Path(outside_tempdir.name) / "secret.md"
+        outside_source.write_text("outside\n", encoding="utf-8")
+        source = pack_root / "templates/source.md"
+        source.parent.mkdir(parents=True)
+        source.symlink_to(outside_source)
+
+        with mock.patch.object(install, "ROOT", pack_root):
+            with self.assertRaisesRegex(SystemExit, "unsafe source path"):
+                install.validate_manifest([self.valid_pack_file(source=source)])
 
     def test_adapters_reference_installed_shared_skill(self) -> None:
         _, files = install.load_manifest()

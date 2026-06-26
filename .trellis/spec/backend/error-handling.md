@@ -40,7 +40,8 @@ failing path or conflict and the user action, such as re-running with
 ## Common Mistakes
 
 - Do not let Python tracebacks leak for expected user errors like a missing
-  `.trellis/config.yaml` or conflicting target file.
+  `.trellis/config.yaml`, conflicting target file, or target path occupied by a
+  directory or other non-file.
 - Do not collapse conflicts into success. Tests expect conflict handling to
   leave the target file untouched.
 - Do not silently ignore safety flags that cannot take effect.
