@@ -1,6 +1,12 @@
 # Trellis Review PR Pack
 
-Install a reusable Trellis PR review loop into Trellis-managed repositories.
+[![Trellis](https://img.shields.io/badge/Trellis-trytrellis.app-255E63)](https://trytrellis.app/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Tests](https://img.shields.io/badge/tests-unittest-2E7D32)](#verify)
+[![Source](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/platypeeps/trellis-review-pr-pack)
+
+Install a reusable Trellis PR review loop into
+[Trellis-managed repositories](https://trytrellis.app/).
 
 The pack includes:
 
@@ -66,4 +72,3 @@ This pack is intentionally shaped like the eventual Trellis upstream change:
   template directories.
 - Add template distribution tests and package verification in the Trellis CLI
   repo.
-
