@@ -57,11 +57,28 @@ def validate_manifest(files: list[PackFile]) -> None:
     for file in files:
         if file.platform not in PLATFORMS:
             raise SystemExit(f"error: unknown platform {file.platform!r} in manifest")
+        validate_pack_source(file.source)
+        validate_relative_manifest_path("target", file.target)
+        if file.anchor is not None:
+            validate_relative_manifest_path("anchor", file.anchor)
         if file.target in seen_targets:
             raise SystemExit(f"error: duplicate target in manifest: {file.target}")
         seen_targets.add(file.target)
         if not file.source.is_file():
             raise SystemExit(f"error: missing pack template {file.source}")
+
+
+def validate_relative_manifest_path(field: str, path: Path) -> None:
+    if path.is_absolute() or ".." in path.parts:
+        raise SystemExit(f"error: unsafe {field} path in manifest: {path}")
+
+
+def validate_pack_source(source: Path) -> None:
+    try:
+        relative_source = source.relative_to(ROOT)
+    except ValueError:
+        raise SystemExit(f"error: unsafe source path in manifest: {source}") from None
+    validate_relative_manifest_path("source", relative_source)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

@@ -16,6 +16,27 @@ INSTALLER = PACK_ROOT / "install.py"
 
 
 class InstallTests(unittest.TestCase):
+    def valid_pack_file(
+        self,
+        *,
+        source: Path | None = None,
+        target: Path = Path(".agents/skills/trellis-review-pr/SKILL.md"),
+        anchor: Path | None = None,
+    ) -> install.PackFile:
+        if source is None:
+            source = (
+                install.ROOT
+                / "templates/.agents/skills/trellis-review-pr/SKILL.md"
+            )
+        return install.PackFile(
+            platform="shared",
+            kind="skill",
+            source=source,
+            target=target,
+            anchor=anchor,
+            install="always",
+        )
+
     def make_repo(self, *platform_dirs: str) -> Path:
         tempdir = tempfile.TemporaryDirectory(prefix="trellis-review-pr-pack-test-")
         self.addCleanup(tempdir.cleanup)
@@ -233,6 +254,24 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(len({file.target for file in files}), len(files))
         for file in files:
             self.assertTrue(file.source.is_file(), file.source)
+
+    def test_manifest_rejects_unsafe_target_paths(self) -> None:
+        for target in [Path("/tmp/pwn"), Path("../outside"), Path(".agents/../x")]:
+            with self.subTest(target=target):
+                with self.assertRaisesRegex(SystemExit, "unsafe target path"):
+                    install.validate_manifest([self.valid_pack_file(target=target)])
+
+    def test_manifest_rejects_unsafe_anchor_paths(self) -> None:
+        for anchor in [Path("/tmp"), Path("../.github"), Path(".github/../x")]:
+            with self.subTest(anchor=anchor):
+                with self.assertRaisesRegex(SystemExit, "unsafe anchor path"):
+                    install.validate_manifest([self.valid_pack_file(anchor=anchor)])
+
+    def test_manifest_rejects_unsafe_source_paths(self) -> None:
+        for source in [Path("/tmp/pwn"), install.ROOT / ".." / "outside"]:
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(SystemExit, "unsafe source path"):
+                    install.validate_manifest([self.valid_pack_file(source=source)])
 
     def test_adapters_reference_installed_shared_skill(self) -> None:
         _, files = install.load_manifest()

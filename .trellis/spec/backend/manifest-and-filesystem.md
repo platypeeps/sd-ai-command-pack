@@ -31,6 +31,27 @@ Reference files:
 - `install.py`, `PackFile`
 - `install.py`, `load_manifest()`
 
+## Manifest Path Safety
+
+Validate manifest paths before any target-repo writes:
+
+- `source` must stay inside the pack root and must not contain `..` path
+  components after it is made relative to the pack root.
+- `target` must be a relative path and must not contain `..` path components.
+- `anchor` must be a relative path and must not contain `..` path components.
+
+Keep these checks in `validate_manifest()` so malformed or hostile manifests
+fail before target validation, selection, backups, or file copies.
+
+Reference files:
+
+- `install.py`, `validate_manifest()`
+- `install.py`, `validate_relative_manifest_path()`
+- `install.py`, `validate_pack_source()`
+- `tests/test_install.py`, `test_manifest_rejects_unsafe_target_paths`
+- `tests/test_install.py`, `test_manifest_rejects_unsafe_anchor_paths`
+- `tests/test_install.py`, `test_manifest_rejects_unsafe_source_paths`
+
 ## Target Validation
 
 The installer requires `.trellis/config.yaml` in the target repository before
