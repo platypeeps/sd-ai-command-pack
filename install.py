@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 
 ROOT = Path(__file__).resolve().parent
@@ -69,7 +69,14 @@ def validate_manifest(files: list[PackFile]) -> None:
 
 
 def validate_relative_manifest_path(field: str, path: Path) -> None:
-    if path.is_absolute() or ".." in path.parts:
+    windows_path = PureWindowsPath(str(path))
+    if (
+        path.is_absolute()
+        or bool(windows_path.drive)
+        or bool(windows_path.root)
+        or ".." in path.parts
+        or ".." in windows_path.parts
+    ):
         raise SystemExit(f"error: unsafe {field} path in manifest: {path}")
 
 

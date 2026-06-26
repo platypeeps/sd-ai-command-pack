@@ -310,19 +310,39 @@ class InstallTests(unittest.TestCase):
             self.assertTrue(file.source.is_file(), file.source)
 
     def test_manifest_rejects_unsafe_target_paths(self) -> None:
-        for target in [Path("/tmp/pwn"), Path("../outside"), Path(".agents/../x")]:
+        for target in [
+            Path("/tmp/pwn"),
+            Path("../outside"),
+            Path(".agents/../x"),
+            Path(r"C:tmp\pwn"),
+            Path("C:/tmp/pwn"),
+            Path(r"\\server\share\pwn"),
+            Path(r".agents\..\x"),
+        ]:
             with self.subTest(target=target):
                 with self.assertRaisesRegex(SystemExit, "unsafe target path"):
                     install.validate_manifest([self.valid_pack_file(target=target)])
 
     def test_manifest_rejects_unsafe_anchor_paths(self) -> None:
-        for anchor in [Path("/tmp"), Path("../.github"), Path(".github/../x")]:
+        for anchor in [
+            Path("/tmp"),
+            Path("../.github"),
+            Path(".github/../x"),
+            Path(r"C:.github"),
+            Path(r"\.github"),
+            Path(r".github\..\x"),
+        ]:
             with self.subTest(anchor=anchor):
                 with self.assertRaisesRegex(SystemExit, "unsafe anchor path"):
                     install.validate_manifest([self.valid_pack_file(anchor=anchor)])
 
     def test_manifest_rejects_unsafe_source_paths(self) -> None:
-        for source in [Path("/tmp/pwn"), install.ROOT / ".." / "outside"]:
+        for source in [
+            Path("/tmp/pwn"),
+            install.ROOT / ".." / "outside",
+            install.ROOT / r"C:tmp\pwn",
+            install.ROOT / r"templates\..\install.py",
+        ]:
             with self.subTest(source=source):
                 with self.assertRaisesRegex(SystemExit, "unsafe source path"):
                     install.validate_manifest([self.valid_pack_file(source=source)])

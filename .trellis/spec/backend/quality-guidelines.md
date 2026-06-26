@@ -23,6 +23,8 @@ remain easy to audit because it writes files into other repositories.
 - Use `pathlib.Path` for filesystem work.
 - Keep pack files declared in `manifest.json`.
 - Validate manifest paths before deriving target destinations or anchors.
+- Treat Windows drive/root anchors and backslash-separated parent traversal as
+  unsafe manifest paths, even when tests run on POSIX.
 - Validate resolved write and backup paths so target-repo symlinks cannot
   redirect installer writes outside the target repo.
 - Keep platform selection behavior covered by tests when adding adapters or

@@ -39,6 +39,9 @@ Validate manifest paths before any target-repo writes:
   components after it is made relative to the pack root.
 - `target` must be a relative path and must not contain `..` path components.
 - `anchor` must be a relative path and must not contain `..` path components.
+- Reject Windows drive and root anchors too, including drive-relative paths such
+  as `C:tmp\pwn`, drive-absolute paths such as `C:\tmp\pwn`, UNC paths, and
+  backslash-separated `..` traversal.
 
 Keep these checks in `validate_manifest()` so malformed or hostile manifests
 fail before target validation, selection, backups, or file copies.
