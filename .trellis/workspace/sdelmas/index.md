@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 1
+- **Total Sessions**: 2
 - **Last Active**: 2026-06-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~39 | Active |
+| `journal-1.md` | ~77 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 2 | 2026-06-26 | Harden review pack installer PR | `f8a5e2a`, `ca64957`, `15c98d6`, `0509920`, `8a1d3e6`, `61d3ff4` | `codex/review-pack-robustness` |
 | 1 | 2026-06-26 | Bootstrap Trellis specs | `2ca8cbb` | `codex/bootstrap-trellis-specs` |
 <!-- @@@/auto:session-history -->
 
