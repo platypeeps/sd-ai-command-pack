@@ -1,0 +1,37 @@
+{
+  "name": "trellis-review-pr-pack",
+  "version": "0.1.0",
+  "description": "Install the project-local Trellis PR review loop skill and thin platform adapters into Trellis repos.",
+  "requiresTrellis": true,
+  "files": [
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/trellis-review-pr/SKILL.md",
+      "target": ".agents/skills/trellis-review-pr/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/trellis/review-pr.toml",
+      "target": ".gemini/commands/trellis/review-pr.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
+      "source": "templates/.github/prompts/review-pr.prompt.md",
+      "target": ".github/prompts/review-pr.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.opencode/commands/trellis/review-pr.md",
+      "target": ".opencode/commands/trellis/review-pr.md",
+      "anchor": ".opencode"
+    }
+  ]
+}
+
