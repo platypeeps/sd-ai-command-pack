@@ -24,7 +24,10 @@ remain easy to audit because it writes files into other repositories.
 - Keep pack files declared in `manifest.json`.
 - Keep platform selection behavior covered by tests when adding adapters or
   install modes.
-- Run `git diff --check` after writes unless `--skip-diff-check` is requested.
+- Run `git diff --check` against installed target paths after writes unless
+  `--skip-diff-check` is requested.
+- Keep force-overwrite behavior covered by tests, including backup behavior
+  when `--backup` is used.
 
 ## Testing Requirements
 
@@ -38,6 +41,7 @@ Add or update tests when changing:
 
 - CLI flags or argument behavior
 - conflict and force handling
+- backup behavior
 - platform selection and anchor rules
 - template paths or manifest semantics
 

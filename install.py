@@ -14,6 +14,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 MANIFEST_PATH = ROOT / "manifest.json"
+PLATFORMS = ("gemini", "github", "opencode", "shared")
+ALWAYS_INSTALL = "always"
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,13 @@ class PackFile:
     target: Path
     anchor: Path | None
     install: str
+
+
+@dataclass(frozen=True)
+class InstallResult:
+    file: PackFile
+    status: str
+    backup: Path | None = None
 
 
 def load_manifest() -> tuple[dict, list[PackFile]]:
@@ -43,6 +52,18 @@ def load_manifest() -> tuple[dict, list[PackFile]]:
     return raw, files
 
 
+def validate_manifest(files: list[PackFile]) -> None:
+    seen_targets: set[Path] = set()
+    for file in files:
+        if file.platform not in PLATFORMS:
+            raise SystemExit(f"error: unknown platform {file.platform!r} in manifest")
+        if file.target in seen_targets:
+            raise SystemExit(f"error: duplicate target in manifest: {file.target}")
+        seen_targets.add(file.target)
+        if not file.source.is_file():
+            raise SystemExit(f"error: missing pack template {file.source}")
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Install trellis-review-pr skill and command adapters."
@@ -56,10 +77,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--platform",
         action="append",
-        choices=["gemini", "github", "opencode", "shared"],
+        choices=PLATFORMS,
         help=(
             "Install only this platform adapter. Repeat to select several. "
-            "The shared skill is always installed unless platform filters exclude it."
+            "The shared skill is always installed with selected adapters."
         ),
     )
     parser.add_argument(
@@ -71,6 +92,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--force",
         action="store_true",
         help="Overwrite existing files that differ from the pack templates.",
+    )
+    parser.add_argument(
+        "--backup",
+        action="store_true",
+        help="With --force, save overwritten files next to the original with a .bak suffix.",
     )
     parser.add_argument(
         "--dry-run",
@@ -104,10 +130,13 @@ def selected_files(
     platform_filter = set(platforms or [])
 
     for file in files:
+        if file.install == ALWAYS_INSTALL:
+            selected.append(file)
+            continue
         if platform_filter and file.platform not in platform_filter:
             skipped.append((file, "platform not selected"))
             continue
-        if file.install == "always" or install_all or platform_filter:
+        if install_all or platform_filter:
             selected.append(file)
             continue
         if file.anchor and not (target / file.anchor).exists():
@@ -118,34 +147,58 @@ def selected_files(
     return selected, skipped
 
 
-def install_file(file: PackFile, target: Path, *, force: bool, dry_run: bool) -> str:
+def next_backup_path(destination: Path) -> Path:
+    candidate = destination.with_name(f"{destination.name}.bak")
+    if not candidate.exists():
+        return candidate
+
+    index = 1
+    while True:
+        candidate = destination.with_name(f"{destination.name}.bak{index}")
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
+def install_file(
+    file: PackFile,
+    target: Path,
+    *,
+    force: bool,
+    dry_run: bool,
+    backup: bool,
+) -> InstallResult:
     source = file.source
     destination = target / file.target
-    if not source.is_file():
-        raise SystemExit(f"error: missing pack template {source}")
-
     new_content = source.read_bytes()
     if destination.exists():
         current = destination.read_bytes()
         if current == new_content:
-            return "unchanged"
+            return InstallResult(file, "unchanged")
         if not force:
-            return "conflict"
+            return InstallResult(file, "conflict")
+        backup_path = next_backup_path(destination) if backup else None
         if not dry_run:
             destination.parent.mkdir(parents=True, exist_ok=True)
+            if backup_path:
+                shutil.copyfile(destination, backup_path)
             shutil.copyfile(source, destination)
-        return "overwritten"
+        return InstallResult(file, "overwritten", backup_path)
 
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
-    return "created"
+    return InstallResult(file, "created")
 
 
-def run_diff_check(target: Path) -> int:
+def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
+    command = ["git", "diff", "--check"]
+    if paths:
+        command.extend(["--", *(str(path) for path in paths)])
+
     try:
         result = subprocess.run(
-            ["git", "diff", "--check"],
+            command,
             cwd=target,
             text=True,
             stdout=subprocess.PIPE,
@@ -163,9 +216,13 @@ def run_diff_check(target: Path) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
+    if args.backup and not args.force:
+        raise SystemExit("error: --backup requires --force")
+
     target = Path(args.target).resolve()
     manifest, files = load_manifest()
 
+    validate_manifest(files)
     require_trellis_repo(target)
     selected, skipped = selected_files(files, target, args.platform, args.all)
 
@@ -174,17 +231,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print("mode: dry-run")
 
-    results: list[tuple[PackFile, str]] = []
+    results: list[InstallResult] = []
     for file in selected:
-        status = install_file(file, target, force=args.force, dry_run=args.dry_run)
-        results.append((file, status))
+        result = install_file(
+            file,
+            target,
+            force=args.force,
+            dry_run=args.dry_run,
+            backup=args.backup,
+        )
+        results.append(result)
 
-    for file, status in results:
-        print(f"{status:11} {file.target}")
+    for result in results:
+        print(f"{result.status:11} {result.file.target}")
+        if result.backup:
+            print(f"{'backup':11} {result.backup.relative_to(target)}")
     for file, reason in skipped:
         print(f"skipped     {file.target} ({reason})")
 
-    conflicts = [file for file, status in results if status == "conflict"]
+    conflicts = [result.file for result in results if result.status == "conflict"]
     if conflicts:
         print("")
         print("Conflicts:")
@@ -194,7 +259,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if not args.dry_run and not args.skip_diff_check:
-        diff_status = run_diff_check(target)
+        diff_paths = [result.file.target for result in results if result.status != "conflict"]
+        diff_status = run_diff_check(target, diff_paths)
         if diff_status != 0:
             return diff_status
 
@@ -203,4 +269,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

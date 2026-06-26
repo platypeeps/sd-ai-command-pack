@@ -46,6 +46,8 @@ Reference file:
 Use `selected_files()` for platform filtering and anchor checks:
 
 - `install: "always"` files are selected by default.
+- `install: "always"` files are also selected when `--platform` filters are
+  present; adapters depend on the shared skill being installed.
 - `--all` selects all adapters even when platform directories are absent.
 - `--platform` selects only requested platforms and bypasses anchor detection
   for those selected platforms.
@@ -64,9 +66,17 @@ Use `install_file()` for copy behavior:
 - Return `unchanged` when the target already has identical bytes.
 - Return `conflict` and leave the target untouched when content differs and
   `--force` is absent.
+- With `--force --backup`, copy the previous target file next to the original
+  with a `.bak` suffix before overwriting it.
 - Copy with `shutil.copyfile()` only after creating the target parent
   directory.
 - In `--dry-run` mode, report the planned status without creating files.
+
+## Diff Checks
+
+Run the final `git diff --check` only against manifest-selected target paths.
+The installer should not fail because an unrelated tracked file in the target
+repo already has whitespace errors.
 
 Reference files:
 
@@ -80,3 +90,5 @@ Reference files:
 - Do not hard-code new template paths only in Python.
 - Do not preserve mutable installer state between runs.
 - Do not overwrite user files without `--force`.
+- Do not run repo-wide validation that reports unrelated target work as an
+  installer failure.

@@ -46,6 +46,7 @@ PR_URL=$(gh pr view --json url --jq .url)
 HEAD_BRANCH=$(gh pr view --json headRefName --jq .headRefName)
 HEAD_SHA=$(gh pr view --json headRefOid --jq .headRefOid)
 BASE_BRANCH=$(gh pr view --json baseRefName --jq .baseRefName)
+LOCAL_HEAD=$(git rev-parse HEAD)
 gh pr view --json number,url,isDraft,headRefName,headRefOid,baseRefName,state,reviewRequests,latestReviews,statusCheckRollup
 ```
 
@@ -55,8 +56,21 @@ Capture:
 - `PR_URL`
 - `HEAD_BRANCH`
 - `HEAD_SHA`
+- `LOCAL_HEAD`
 - `BASE_BRANCH`
 - `REPO_FULL`, `OWNER`, and `REPO`
+
+Before marking the PR ready or requesting review, confirm local `HEAD` matches
+the PR head SHA:
+
+```bash
+test "$LOCAL_HEAD" = "$HEAD_SHA"
+```
+
+If the SHAs differ, stop and report both values. Usually this means local
+commits have not been pushed, the wrong branch is checked out, or the remote PR
+branch changed. Push the intended local commits or check out the PR head before
+continuing; do not request Copilot review on stale remote code.
 
 If the PR is draft, mark it ready:
 
