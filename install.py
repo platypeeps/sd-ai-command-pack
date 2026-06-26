@@ -177,7 +177,7 @@ def install_file(
             return InstallResult(file, "unchanged")
         if not force:
             return InstallResult(file, "conflict")
-        backup_path = next_backup_path(destination) if backup else None
+        backup_path = next_backup_path(destination) if backup and not dry_run else None
         if not dry_run:
             destination.parent.mkdir(parents=True, exist_ok=True)
             if backup_path:
@@ -192,6 +192,9 @@ def install_file(
 
 
 def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
+    if paths == []:
+        return 0
+
     command = ["git", "diff", "--check"]
     if paths:
         command.extend(["--", *(str(path) for path in paths)])

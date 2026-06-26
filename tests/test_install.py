@@ -142,6 +142,22 @@ class InstallTests(unittest.TestCase):
         )
         self.assertIn("Trellis PR Review Loop", target.read_text(encoding="utf-8"))
 
+    def test_dry_run_force_backup_does_not_report_or_write_backup(self) -> None:
+        root = self.make_repo(".gemini")
+        target = root / ".agents/skills/trellis-review-pr/SKILL.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("local edit\n", encoding="utf-8")
+
+        result = self.run_install(root, "--dry-run", "--force", "--backup")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("overwritten", result.stdout)
+        self.assertNotIn("backup", result.stdout)
+        self.assertFalse(
+            (root / ".agents/skills/trellis-review-pr/SKILL.md.bak").exists()
+        )
+        self.assertEqual(target.read_text(encoding="utf-8"), "local edit\n")
+
     def test_backup_requires_force(self) -> None:
         root = self.make_repo(".gemini")
 
@@ -195,6 +211,20 @@ class InstallTests(unittest.TestCase):
 
         self.assertNotEqual(bad_result, 0)
         self.assertEqual(missing_result, 0)
+
+    def test_empty_scoped_diff_check_does_not_run_repo_wide(self) -> None:
+        root = self.make_repo()
+        bad = root / "bad.txt"
+        bad.write_text("clean\n", encoding="utf-8")
+        self.run_git(root, "add", "bad.txt")
+        bad.write_text("bad   \n", encoding="utf-8")
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = install.run_diff_check(root, [])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(output.getvalue(), "")
 
     def test_manifest_sources_exist_and_targets_are_unique(self) -> None:
         _, files = install.load_manifest()
