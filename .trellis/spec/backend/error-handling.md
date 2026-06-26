@@ -15,6 +15,8 @@ expressed through process exit codes and concise terminal output.
   `require_trellis_repo()` and missing template checks in `install_file()`.
 - Use integer return codes from `main()` for expected command outcomes:
   `0` for success and `2` for file conflicts.
+- Reject incompatible flag combinations early, such as `--backup` without
+  `--force`.
 - Avoid custom exception classes until there is more than one caller that needs
   structured recovery.
 
@@ -38,8 +40,10 @@ failing path or conflict and the user action, such as re-running with
 ## Common Mistakes
 
 - Do not let Python tracebacks leak for expected user errors like a missing
-  `.trellis/config.yaml` or conflicting target file.
+  `.trellis/config.yaml`, conflicting target file, or target path occupied by a
+  directory or other non-file.
 - Do not collapse conflicts into success. Tests expect conflict handling to
   leave the target file untouched.
+- Do not silently ignore safety flags that cannot take effect.
 - Do not use `check=True` for commands whose failure should be reported as a
   normal installer result.

@@ -25,6 +25,8 @@ The shared skill should continue to define:
 
 - required local checks before starting, including `gh --version`,
   `gh auth status`, and PR resolution from the current branch
+- a local `HEAD` versus PR `headRefOid` check before marking a PR ready or
+  requesting review, so Copilot reviews the pushed code the user intends
 - dirty working-tree classification before staging or committing
 - the Copilot review request path and fallback
 - polling behavior that avoids fetching full comment bodies on every interval

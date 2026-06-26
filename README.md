@@ -37,14 +37,19 @@ python3 install.py /path/to/repo --dry-run
 python3 install.py /path/to/repo --all
 python3 install.py /path/to/repo --platform gemini --platform github
 python3 install.py /path/to/repo --force
+python3 install.py /path/to/repo --force --backup
 ```
 
 By default, existing files with different content are reported as conflicts and
-left untouched. Use `--force` to overwrite them.
+left untouched. Use `--force` to overwrite them. Add `--backup` with `--force`
+to save overwritten files next to the original with a `.bak` suffix.
+
+Platform filters always include the shared `.agents` skill because every
+adapter delegates to it.
 
 ## Verify
 
-The installer runs `git diff --check` in the target repo unless
+The installer runs `git diff --check` on installed pack paths unless
 `--skip-diff-check` is passed.
 
 Run the pack tests with:

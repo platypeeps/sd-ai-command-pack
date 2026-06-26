@@ -34,6 +34,7 @@ skipped     .opencode/commands/trellis/review-pr.md (anchor .opencode not presen
 
 - Print every selected file result.
 - Print every skipped file and the reason.
+- Print backup paths created by `--force --backup`.
 - Print conflict paths and the exact retry hint.
 - Print `git diff --check` output when that validation fails.
 
