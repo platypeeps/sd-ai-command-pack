@@ -179,6 +179,28 @@ class InstallTests(unittest.TestCase):
         )
         self.assertEqual(target.read_text(encoding="utf-8"), "local edit\n")
 
+    def test_force_backup_does_not_write_through_existing_backup_symlink(self) -> None:
+        root = self.make_repo(".gemini")
+        outside_tempdir = tempfile.TemporaryDirectory(
+            prefix="trellis-review-pr-pack-outside-"
+        )
+        self.addCleanup(outside_tempdir.cleanup)
+        outside_backup = Path(outside_tempdir.name) / "outside-backup"
+        target = root / ".agents/skills/trellis-review-pr/SKILL.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("local edit\n", encoding="utf-8")
+        target.with_name("SKILL.md.bak").symlink_to(outside_backup)
+
+        result = self.run_install(root, "--force", "--backup")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("SKILL.md.bak1", result.stdout)
+        self.assertEqual(
+            target.with_name("SKILL.md.bak1").read_text(encoding="utf-8"),
+            "local edit\n",
+        )
+        self.assertFalse(outside_backup.exists())
+
     def test_backup_requires_force(self) -> None:
         root = self.make_repo(".gemini")
 
@@ -205,6 +227,38 @@ class InstallTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(".trellis/config.yaml not found", result.stdout)
+
+    def test_rejects_target_path_resolved_outside_repo(self) -> None:
+        root = self.make_repo()
+        outside_tempdir = tempfile.TemporaryDirectory(
+            prefix="trellis-review-pr-pack-outside-"
+        )
+        self.addCleanup(outside_tempdir.cleanup)
+        outside = Path(outside_tempdir.name)
+        (root / ".agents").symlink_to(outside, target_is_directory=True)
+
+        result = self.run_install(root)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("target path resolves outside target repo", result.stdout)
+        self.assertFalse((outside / "skills/trellis-review-pr/SKILL.md").exists())
+
+    def test_rejects_existing_target_symlink_resolved_outside_repo(self) -> None:
+        root = self.make_repo(".gemini")
+        outside_tempdir = tempfile.TemporaryDirectory(
+            prefix="trellis-review-pr-pack-outside-"
+        )
+        self.addCleanup(outside_tempdir.cleanup)
+        outside_target = Path(outside_tempdir.name) / "outside-target"
+        target = root / ".agents/skills/trellis-review-pr/SKILL.md"
+        target.parent.mkdir(parents=True)
+        target.symlink_to(outside_target)
+
+        result = self.run_install(root, "--force")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("target path resolves outside target repo", result.stdout)
+        self.assertFalse(outside_target.exists())
 
     def test_diff_check_is_limited_to_installed_paths(self) -> None:
         root = self.make_repo(".gemini")

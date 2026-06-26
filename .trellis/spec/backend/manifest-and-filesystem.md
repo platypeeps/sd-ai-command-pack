@@ -84,11 +84,17 @@ Reference files:
 
 Use `install_file()` for copy behavior:
 
+- Before reading, backing up, or writing a target path, validate that the
+  resolved destination stays inside the resolved target repository. This
+  catches existing symlinks in the target repo that would otherwise redirect a
+  relative manifest path outside the repo.
 - Return `unchanged` when the target already has identical bytes.
 - Return `conflict` and leave the target untouched when content differs and
   `--force` is absent.
 - With `--force --backup`, copy the previous target file next to the original
   with a `.bak` suffix before overwriting it.
+- Backup candidates must also resolve inside the target repo, and an existing
+  symlinked `.bak` path counts as occupied even when the symlink is broken.
 - Copy with `shutil.copyfile()` only after creating the target parent
   directory.
 - In `--dry-run` mode, report the planned status without creating files.

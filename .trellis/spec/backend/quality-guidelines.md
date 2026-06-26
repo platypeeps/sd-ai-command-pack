@@ -23,6 +23,8 @@ remain easy to audit because it writes files into other repositories.
 - Use `pathlib.Path` for filesystem work.
 - Keep pack files declared in `manifest.json`.
 - Validate manifest paths before deriving target destinations or anchors.
+- Validate resolved write and backup paths so target-repo symlinks cannot
+  redirect installer writes outside the target repo.
 - Keep platform selection behavior covered by tests when adding adapters or
   install modes.
 - Run `git diff --check` against installed target paths after writes unless
@@ -52,6 +54,7 @@ Add or update tests when changing:
 - Does the change preserve existing target files by default?
 - Are manifest `source`, `target`, and `anchor` paths validated before any
   file writes?
+- Are resolved destination and backup paths still inside the target repo?
 - Are new templates listed in `manifest.json` and documented in `README.md`?
 - Do tests exercise the behavior through the CLI, not only helper functions?
 - Does the installer still work with only Python 3.10+ stdlib dependencies?

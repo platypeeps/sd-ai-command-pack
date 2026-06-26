@@ -81,6 +81,21 @@ def validate_pack_source(source: Path) -> None:
     validate_relative_manifest_path("source", relative_source)
 
 
+def validate_resolved_target_path(target: Path, path: Path, label: str) -> None:
+    try:
+        target_root = target.resolve()
+        resolved_path = path.resolve(strict=False)
+    except (OSError, RuntimeError) as error:
+        raise SystemExit(f"error: cannot resolve {label}: {path} ({error})") from None
+
+    try:
+        resolved_path.relative_to(target_root)
+    except ValueError:
+        raise SystemExit(
+            f"error: {label} resolves outside target repo: {path}"
+        ) from None
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Install trellis-review-pr skill and command adapters."
@@ -164,15 +179,21 @@ def selected_files(
     return selected, skipped
 
 
-def next_backup_path(destination: Path) -> Path:
+def path_is_occupied(path: Path) -> bool:
+    return path.exists() or path.is_symlink()
+
+
+def next_backup_path(target: Path, destination: Path) -> Path:
     candidate = destination.with_name(f"{destination.name}.bak")
-    if not candidate.exists():
+    if not path_is_occupied(candidate):
+        validate_resolved_target_path(target, candidate, "backup path")
         return candidate
 
     index = 1
     while True:
         candidate = destination.with_name(f"{destination.name}.bak{index}")
-        if not candidate.exists():
+        if not path_is_occupied(candidate):
+            validate_resolved_target_path(target, candidate, "backup path")
             return candidate
         index += 1
 
@@ -187,6 +208,7 @@ def install_file(
 ) -> InstallResult:
     source = file.source
     destination = target / file.target
+    validate_resolved_target_path(target, destination, "target path")
     new_content = source.read_bytes()
     if destination.exists():
         current = destination.read_bytes()
@@ -194,7 +216,9 @@ def install_file(
             return InstallResult(file, "unchanged")
         if not force:
             return InstallResult(file, "conflict")
-        backup_path = next_backup_path(destination) if backup and not dry_run else None
+        backup_path = (
+            next_backup_path(target, destination) if backup and not dry_run else None
+        )
         if not dry_run:
             destination.parent.mkdir(parents=True, exist_ok=True)
             if backup_path:
