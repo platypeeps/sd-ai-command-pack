@@ -586,7 +586,7 @@ class InstallTests(unittest.TestCase):
             "open PRs: none",
             "Trellis active tasks: none",
             "confirmed PR #$pr_number merged",
-            "gh pr list --state merged --head",
+            'gh pr list --state merged --head="$branch"',
             "pruned $REMOTE after remote branch deletion",
             "default branch is unknown; skipped branch inventory checks",
             'grep -F -x -v "$DEFAULT_BRANCH"',
@@ -594,8 +594,14 @@ class InstallTests(unittest.TestCase):
             'git remote get-url "$REMOTE"',
             'gh repo view "$repo_slug"',
             "github_repo_from_remote_url()",
+            'gh pr view \\',
+            '-- "$branch"',
+            'git rev-parse --verify "refs/heads/$branch^{commit}"',
+            'git branch -D -- "$branch"',
             "ls_remote_status",
+            'git ls-remote --exit-code "$REMOTE" "refs/heads/$branch"',
             'elif [ "$ls_remote_status" -eq 2 ]; then',
+            'git push "$REMOTE" ":refs/heads/$branch"',
             "failed to check whether remote branch $REMOTE/$branch exists",
         ]:
             self.assertIn(text, script)

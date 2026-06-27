@@ -246,9 +246,10 @@ view_pr_for_branch() {
   local branch="$1"
   local pr_data
   pr_data="$(
-    gh pr view "$branch" \
+    gh pr view \
       --json number,state,mergedAt,url,headRefName,headRefOid \
       --jq '[.number, .state, .mergedAt, .url, .headRefName, .headRefOid] | @tsv' \
+      -- "$branch" \
       2>/dev/null ||
       true
   )"
@@ -257,7 +258,7 @@ view_pr_for_branch() {
     return 0
   fi
 
-  gh pr list --state merged --head "$branch" --limit 1 \
+  gh pr list --state merged --head="$branch" --limit 1 \
     --json number,state,mergedAt,url,headRefName,headRefOid \
     --jq '.[0] | select(. != null) | [.number, .state, .mergedAt, .url, .headRefName, .headRefOid] | @tsv' \
     2>/dev/null ||
@@ -306,7 +307,7 @@ cleanup_current_branch_if_merged() {
     add_anomaly "PR #$pr_number head is $pr_head, not $branch; left the branch untouched"
     return 0
   fi
-  local_head_oid="$(git rev-parse "$branch")"
+  local_head_oid="$(git rev-parse --verify "refs/heads/$branch^{commit}")"
   if [ -n "$pr_head_oid" ] && [ "$local_head_oid" != "$pr_head_oid" ]; then
     add_anomaly "local $branch is at $local_head_oid, but merged PR #$pr_number ended at $pr_head_oid; left the branch untouched"
     return 0
@@ -324,7 +325,7 @@ cleanup_current_branch_if_merged() {
   if [ "$DRY_RUN" -eq 1 ]; then
     add_action "would delete local branch $branch"
   elif git show-ref --verify --quiet "refs/heads/$branch"; then
-    if git branch -D "$branch"; then
+    if git branch -D -- "$branch"; then
       add_action "deleted local branch $branch"
     else
       add_anomaly "failed to delete local branch $branch"
@@ -337,14 +338,14 @@ cleanup_current_branch_if_merged() {
   fi
 
   set +e
-  git ls-remote --exit-code --heads "$REMOTE" "$branch" >/dev/null 2>&1
+  git ls-remote --exit-code "$REMOTE" "refs/heads/$branch" >/dev/null 2>&1
   local ls_remote_status=$?
   set -e
 
   if [ "$ls_remote_status" -eq 0 ]; then
     if [ "$DRY_RUN" -eq 1 ]; then
       add_action "would delete remote branch $REMOTE/$branch"
-    elif git push "$REMOTE" --delete "$branch"; then
+    elif git push "$REMOTE" ":refs/heads/$branch"; then
       add_action "deleted remote branch $REMOTE/$branch"
       if git fetch --prune "$REMOTE"; then
         add_action "pruned $REMOTE after remote branch deletion"
