@@ -316,6 +316,8 @@ cleanup_current_branch_if_merged() {
   local pr_head
   local pr_head_oid
   local local_head_oid
+  local ls_remote_output
+  local remote_head_oid
 
   if [ -z "$branch" ]; then
     add_anomaly "detached HEAD; skipped branch cleanup"
@@ -379,11 +381,21 @@ cleanup_current_branch_if_merged() {
   fi
 
   set +e
-  git ls-remote --exit-code "$REMOTE" "refs/heads/$branch" >/dev/null 2>&1
+  ls_remote_output="$(git ls-remote --exit-code "$REMOTE" "refs/heads/$branch" 2>/dev/null)"
   local ls_remote_status=$?
   set -e
 
   if [ "$ls_remote_status" -eq 0 ]; then
+    remote_head_oid="${ls_remote_output%%$'\n'*}"
+    remote_head_oid="${remote_head_oid%%$'\t'*}"
+    if [ -z "$remote_head_oid" ]; then
+      add_anomaly "failed to read remote branch head for $REMOTE/$branch"
+      return 0
+    fi
+    if [ -n "$pr_head_oid" ] && [ "$remote_head_oid" != "$pr_head_oid" ]; then
+      add_anomaly "remote branch $REMOTE/$branch is at $remote_head_oid, but merged PR #$pr_number ended at $pr_head_oid; left the remote branch untouched"
+      return 0
+    fi
     if [ "$DRY_RUN" -eq 1 ]; then
       add_action "would delete remote branch $REMOTE/$branch"
     elif git push "$REMOTE" ":refs/heads/$branch"; then

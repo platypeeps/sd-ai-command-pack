@@ -74,6 +74,63 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         return result.stdout.strip()
 
+    def make_housekeeping_repo(self) -> tuple[Path, Path, Path, str]:
+        tempdir = tempfile.TemporaryDirectory(prefix="trellis-housekeeping-test-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        repo = root / "work"
+        remote = root / "origin.git"
+        stub_bin = root / "bin"
+        repo.mkdir()
+        remote.mkdir()
+        stub_bin.mkdir()
+
+        self.run_git(remote, "init", "--bare")
+        self.run_git(repo, "init", "-b", "main")
+        self.run_git(repo, "config", "user.email", "test@example.com")
+        self.run_git(repo, "config", "user.name", "Test User")
+        (repo / ".trellis/scripts").mkdir(parents=True)
+        (repo / ".trellis/config.yaml").write_text("# test\n", encoding="utf-8")
+        (repo / ".trellis/scripts/get_context.py").write_text(
+            "print('(no active tasks assigned to you)')\n",
+            encoding="utf-8",
+        )
+        (repo / "README.md").write_text("# Test\n", encoding="utf-8")
+        self.run_git(repo, "add", ".")
+        self.run_git(repo, "commit", "-m", "initial")
+        self.run_git(repo, "remote", "add", "origin", str(remote))
+        self.run_git(repo, "push", "-u", "origin", "main")
+        self.run_git(remote, "symbolic-ref", "HEAD", "refs/heads/main")
+        self.run_git(repo, "fetch", "origin")
+        self.run_git(repo, "remote", "set-head", "origin", "-a")
+        self.run_git(repo, "switch", "-c", "feature/cleanup")
+        (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+        self.run_git(repo, "add", "feature.txt")
+        self.run_git(repo, "commit", "-m", "feature")
+        self.run_git(repo, "push", "-u", "origin", "feature/cleanup")
+        head_oid = self.git_output(repo, "rev-parse", "HEAD")
+        return repo, remote, stub_bin, head_oid
+
+    def write_housekeeping_gh_stub(self, stub_bin: Path, head_oid: str) -> None:
+        (stub_bin / "gh").write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "if [ \"${1:-}\" = pr ] && [ \"${2:-}\" = view ]; then\n"
+            f"  printf '6\\tMERGED\\t2026-06-27T17:00:00Z\\thttps://example.test/pr/6\\tfeature/cleanup\\t{head_oid}\\n'\n"
+            "elif [ \"${1:-}\" = pr ] && [ \"${2:-}\" = list ]; then\n"
+            "  exit 0\n"
+            "elif [ \"${1:-}\" = issue ] && [ \"${2:-}\" = list ]; then\n"
+            "  exit 0\n"
+            "elif [ \"${1:-}\" = repo ] && [ \"${2:-}\" = view ]; then\n"
+            "  printf 'main\\n'\n"
+            "else\n"
+            "  printf 'unexpected gh invocation: %s\\n' \"$*\" >&2\n"
+            "  exit 1\n"
+            "fi\n",
+            encoding="utf-8",
+        )
+        (stub_bin / "gh").chmod(0o755)
+
     def run_install(
         self,
         root: Path,
@@ -622,6 +679,8 @@ class InstallTests(unittest.TestCase):
             'git ls-remote --exit-code "$REMOTE" "refs/heads/$branch"',
             'elif [ "$ls_remote_status" -eq 2 ]; then',
             'git push "$REMOTE" ":refs/heads/$branch"',
+            "remote branch $REMOTE/$branch is at $remote_head_oid",
+            "left the remote branch untouched",
             'git rev-parse --verify "refs/heads/$DEFAULT_BRANCH^{commit}"',
             'git rev-parse --verify "refs/remotes/$REMOTE/$DEFAULT_BRANCH^{commit}"',
             'kept_remote_branch="$REMOTE/$START_BRANCH"',
@@ -636,59 +695,8 @@ class InstallTests(unittest.TestCase):
     def test_housekeeping_dry_run_previews_branch_cleanup_without_final_state_anomaly(
         self,
     ) -> None:
-        tempdir = tempfile.TemporaryDirectory(prefix="trellis-housekeeping-test-")
-        self.addCleanup(tempdir.cleanup)
-        root = Path(tempdir.name)
-        repo = root / "work"
-        remote = root / "origin.git"
-        stub_bin = root / "bin"
-        repo.mkdir()
-        remote.mkdir()
-        stub_bin.mkdir()
-
-        self.run_git(remote, "init", "--bare")
-        self.run_git(repo, "init", "-b", "main")
-        self.run_git(repo, "config", "user.email", "test@example.com")
-        self.run_git(repo, "config", "user.name", "Test User")
-        (repo / ".trellis/scripts").mkdir(parents=True)
-        (repo / ".trellis/config.yaml").write_text("# test\n", encoding="utf-8")
-        (repo / ".trellis/scripts/get_context.py").write_text(
-            "print('(no active tasks assigned to you)')\n",
-            encoding="utf-8",
-        )
-        (repo / "README.md").write_text("# Test\n", encoding="utf-8")
-        self.run_git(repo, "add", ".")
-        self.run_git(repo, "commit", "-m", "initial")
-        self.run_git(repo, "remote", "add", "origin", str(remote))
-        self.run_git(repo, "push", "-u", "origin", "main")
-        self.run_git(remote, "symbolic-ref", "HEAD", "refs/heads/main")
-        self.run_git(repo, "fetch", "origin")
-        self.run_git(repo, "remote", "set-head", "origin", "-a")
-        self.run_git(repo, "switch", "-c", "feature/cleanup")
-        (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
-        self.run_git(repo, "add", "feature.txt")
-        self.run_git(repo, "commit", "-m", "feature")
-        self.run_git(repo, "push", "-u", "origin", "feature/cleanup")
-        head_oid = self.git_output(repo, "rev-parse", "HEAD")
-
-        (stub_bin / "gh").write_text(
-            "#!/usr/bin/env bash\n"
-            "set -euo pipefail\n"
-            "if [ \"${1:-}\" = pr ] && [ \"${2:-}\" = view ]; then\n"
-            f"  printf '6\\tMERGED\\t2026-06-27T17:00:00Z\\thttps://example.test/pr/6\\tfeature/cleanup\\t{head_oid}\\n'\n"
-            "elif [ \"${1:-}\" = pr ] && [ \"${2:-}\" = list ]; then\n"
-            "  exit 0\n"
-            "elif [ \"${1:-}\" = issue ] && [ \"${2:-}\" = list ]; then\n"
-            "  exit 0\n"
-            "elif [ \"${1:-}\" = repo ] && [ \"${2:-}\" = view ]; then\n"
-            "  printf 'main\\n'\n"
-            "else\n"
-            "  printf 'unexpected gh invocation: %s\\n' \"$*\" >&2\n"
-            "  exit 1\n"
-            "fi\n",
-            encoding="utf-8",
-        )
-        (stub_bin / "gh").chmod(0o755)
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        self.write_housekeeping_gh_stub(stub_bin, head_oid)
 
         result = subprocess.run(
             [
@@ -717,6 +725,40 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(
             self.git_output(repo, "branch", "--show-current"),
             "feature/cleanup",
+        )
+
+    def test_housekeeping_skips_remote_delete_when_remote_branch_moved(self) -> None:
+        repo, remote, stub_bin, merged_head_oid = self.make_housekeeping_repo()
+        self.write_housekeeping_gh_stub(stub_bin, merged_head_oid)
+        (repo / "remote-only.txt").write_text("new remote commit\n", encoding="utf-8")
+        self.run_git(repo, "add", "remote-only.txt")
+        self.run_git(repo, "commit", "-m", "remote branch moved")
+        moved_head_oid = self.git_output(repo, "rev-parse", "HEAD")
+        self.run_git(repo, "push", "origin", "feature/cleanup")
+        self.run_git(repo, "reset", "--hard", merged_head_oid)
+
+        result = subprocess.run(
+            ["bash", str(install.ROOT / "templates/scripts/trellis-housekeeping.sh")],
+            cwd=repo,
+            env={**os.environ, "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("deleted local branch feature/cleanup", result.stdout)
+        self.assertIn(
+            f"remote branch origin/feature/cleanup is at {moved_head_oid}",
+            result.stdout,
+        )
+        self.assertIn(f"merged PR #6 ended at {merged_head_oid}", result.stdout)
+        self.assertIn("left the remote branch untouched", result.stdout)
+        self.assertNotIn("deleted remote branch origin/feature/cleanup", result.stdout)
+        self.assertEqual(
+            self.git_output(remote, "rev-parse", "refs/heads/feature/cleanup"),
+            moved_head_oid,
         )
 
     def test_manifest_sources_do_not_have_trailing_whitespace(self) -> None:
