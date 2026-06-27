@@ -32,6 +32,8 @@ The shared skill should continue to define:
 - polling behavior that avoids fetching full comment bodies on every interval
 - thread-aware review inspection through GraphQL when using `gh`
 - CI check inspection and failed-log routing
+- standing permission to reply to review comments and resolve addressed review
+  threads without asking for separate approval
 - reply, resolve, fix, commit, and push behavior
 - the five-round limit before asking the user to continue
 - automatic Trellis finish-work after a clean final review

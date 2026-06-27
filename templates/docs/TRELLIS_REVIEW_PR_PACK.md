@@ -26,6 +26,9 @@ in the shared skills and `scripts/trellis-full-check.sh`.
 4. Use `/trellis:review-pr` for the PR loop. It should run the local
    full-check/Prism path before requesting GitHub Copilot review.
 5. Request Copilot only when explicitly wanted or as a final remote pass.
+6. Let `/trellis:review-pr` reply to and resolve review threads as part of the
+   normal loop once findings are fixed, rebutted with evidence, or confirmed
+   already addressed.
 
 ## Commands
 

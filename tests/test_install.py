@@ -462,6 +462,18 @@ class InstallTests(unittest.TestCase):
         self.assertIn(".build/review/gito", script)
         self.assertIn('gito review --vs "$base_ref" --out "$out_dir"', script)
 
+    def test_review_pr_skill_allows_reply_and_resolve_for_addressed_threads(self) -> None:
+        skill = (
+            install.ROOT
+            / "templates/.agents/skills/trellis-review-pr/SKILL.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("standing permission to reply", skill)
+        self.assertIn("review threads during this loop", skill)
+        self.assertIn("fixed, rebutted with evidence", skill)
+        self.assertIn("confirmed already addressed", skill)
+        self.assertIn("Do not resolve valid unaddressed or ambiguous threads", skill)
+
     def test_manifest_sources_do_not_have_trailing_whitespace(self) -> None:
         _, files = install.load_manifest()
 

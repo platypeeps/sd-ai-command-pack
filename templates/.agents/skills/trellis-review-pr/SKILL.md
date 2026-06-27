@@ -28,9 +28,15 @@ when local review is clean and a remote review is intentionally warranted.
   permission to continue.
 - Treat Copilot and other bot comments as actionable by default, but verify
   against the current diff, project specs, and tests before changing code.
+- The user grants standing permission to reply to review comments and resolve
+  review threads during this loop. Do not ask for separate permission before
+  replying or resolving once a thread is fixed, rebutted with evidence, or
+  confirmed already addressed.
 - If a comment is wrong or would regress behavior, reply with a concise
   rebuttal explaining the evidence, then resolve the review thread when the
   platform permits it.
+- Do not resolve valid unaddressed or ambiguous threads. Ask the user when a
+  comment requires product judgment, scope expansion, or a tradeoff decision.
 - End by recommending documentation, spec, prompt, or pre-commit improvements
   that would prevent avoidable Copilot feedback next time. Do not apply those
   recommendations unless the user asks.

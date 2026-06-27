@@ -31,6 +31,9 @@ guessing.
 - Markdown prompts should use concise numbered steps.
 - The shared skill should keep safety rules and final report requirements in
   explicit sections.
+- The shared skill should keep standing permission for review-thread
+  reply/resolve actions scoped to fixed, rebutted, or already-addressed
+  threads.
 
 ## Testing Requirements
 
