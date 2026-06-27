@@ -1,7 +1,7 @@
 {
   "name": "trellis-review-pr-pack",
-  "version": "0.1.0",
-  "description": "Install the project-local Trellis PR review loop skill and thin platform adapters into Trellis repos.",
+  "version": "0.2.0",
+  "description": "Install project-local Trellis review/full-check workflows, Prism rules, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
   "files": [
     {
@@ -12,10 +12,59 @@
       "install": "always"
     },
     {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/trellis-full-check/SKILL.md",
+      "target": ".agents/skills/trellis-full-check/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "script",
+      "source": "templates/scripts/trellis-full-check.sh",
+      "target": "scripts/trellis-full-check.sh",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "config",
+      "source": "templates/.prism/rules.json",
+      "target": ".prism/rules.json",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "doc",
+      "source": "templates/docs/TRELLIS_REVIEW_PR_PACK.md",
+      "target": "docs/TRELLIS_REVIEW_PR_PACK.md",
+      "install": "always"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
+      "source": "templates/.claude/commands/trellis/review-pr.md",
+      "target": ".claude/commands/trellis/review-pr.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
+      "source": "templates/.claude/commands/trellis/full-check.md",
+      "target": ".claude/commands/trellis/full-check.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "gemini",
       "kind": "command",
       "source": "templates/.gemini/commands/trellis/review-pr.toml",
       "target": ".gemini/commands/trellis/review-pr.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/trellis/full-check.toml",
+      "target": ".gemini/commands/trellis/full-check.toml",
       "anchor": ".gemini"
     },
     {
@@ -26,12 +75,25 @@
       "anchor": ".github"
     },
     {
+      "platform": "github",
+      "kind": "prompt",
+      "source": "templates/.github/prompts/full-check.prompt.md",
+      "target": ".github/prompts/full-check.prompt.md",
+      "anchor": ".github"
+    },
+    {
       "platform": "opencode",
       "kind": "command",
       "source": "templates/.opencode/commands/trellis/review-pr.md",
       "target": ".opencode/commands/trellis/review-pr.md",
       "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.opencode/commands/trellis/full-check.md",
+      "target": ".opencode/commands/trellis/full-check.md",
+      "anchor": ".opencode"
     }
   ]
 }
-

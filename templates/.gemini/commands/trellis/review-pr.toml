@@ -6,11 +6,11 @@ prompt = """
 Run the Trellis PR review loop for the current branch's pull request.
 
 1. Read `.agents/skills/trellis-review-pr/SKILL.md`.
-2. Follow that skill exactly: mark the PR ready, request GitHub Copilot review,
-   wait for completion, address/rebut/resolve comments, check CI, commit and
-   push appropriate fixes, and repeat until Copilot produces no new actionable
-   comments.
-3. Stop before a sixth review loop and ask the user whether to continue.
+2. Follow that skill exactly: run the local full-check/Prism review first,
+   decide whether remote Copilot review is warranted, inspect comments and CI,
+   address or rebut feedback, commit and push appropriate fixes, and repeat
+   until no new actionable comments remain.
+3. Stop before a sixth remote review loop and ask the user whether to continue.
 4. End with the documentation/pre-commit recommendations requested by the
    skill.
 """
