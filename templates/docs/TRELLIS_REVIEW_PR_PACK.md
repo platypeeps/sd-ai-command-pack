@@ -1,0 +1,110 @@
+# Trellis review PR pack
+
+This repo has the reusable Trellis review-cycle setup installed from
+`platypeeps/trellis-review-pr-pack`.
+
+## What is installed
+
+- `.agents/skills/trellis-review-pr/SKILL.md`: local-review-first PR workflow.
+- `.agents/skills/trellis-full-check/SKILL.md`: full local verification workflow.
+- `scripts/trellis-full-check.sh`: canonical script used by all command surfaces.
+- `.prism/rules.json`: default Prism review rules for repo-specific checks.
+- Platform adapters under `.claude/`, `.gemini/`, `.github/prompts/`, and
+  `.opencode/` when those platform folders exist.
+
+The command and prompt files are entry points only. The workflow behavior lives
+in the shared skills and `scripts/trellis-full-check.sh`.
+
+## Recommended review loop
+
+1. Iterate with the narrowest deterministic checks for the files you touched.
+2. Run `/trellis:full-check` or `bash scripts/trellis-full-check.sh` before PR
+   readiness, before asking for remote review, and after substantial review
+   fixes.
+3. Fix deterministic failures first, then verify any Prism findings against the
+   actual code before changing behavior.
+4. Use `/trellis:review-pr` for the PR loop. It should run the local
+   full-check/Prism path before requesting GitHub Copilot review.
+5. Request Copilot only when explicitly wanted or as a final remote pass.
+
+## Commands
+
+Use the platform-native command when available:
+
+```bash
+/trellis:full-check
+/trellis:review-pr
+```
+
+Use the script directly from any shell:
+
+```bash
+bash scripts/trellis-full-check.sh
+```
+
+The full-check script runs `git diff --check`, `git diff --cached --check`,
+detected package scripts, and local Prism review when Prism is available and
+configured.
+
+## Configuration
+
+Common environment variables:
+
+- `TRELLIS_FULL_CHECK_BASE_REF`: base ref for branch review. Defaults to
+  `origin/main`.
+- `TRELLIS_FULL_CHECK_NPM_SCRIPTS`: space-separated package scripts to run.
+- `TRELLIS_FULL_CHECK_SKIP_NPM=1`: skip package scripts.
+- `TRELLIS_FULL_CHECK_PRISM=0`: skip Prism review.
+- `TRELLIS_FULL_CHECK_PRISM=required`: fail if Prism is missing or cannot run.
+- `TRELLIS_FULL_CHECK_PRISM_RULES`: explicit Prism rules file. Defaults to
+  `.prism/rules.json` when present.
+- `TRELLIS_FULL_CHECK_GITO=1`: opt into Gito review.
+- `TRELLIS_FULL_CHECK_GITO_BASE_REF`: base ref for Gito review. Defaults to
+  `TRELLIS_FULL_CHECK_BASE_REF`, then `origin/main`.
+- `TRELLIS_FULL_CHECK_GITO_OUT_DIR`: output folder for Gito reports. Defaults
+  to `.build/review/gito`.
+
+Prism is enabled by default when the executable is present. If Prism is missing
+or credentials/config are unavailable, the script reports the skip and continues
+unless `TRELLIS_FULL_CHECK_PRISM=required` is set.
+
+Gito is opt-in because it can require `uvx`, cache access outside the repo,
+network access, and configured LLM credentials. When enabled, Gito writes
+reports to `.build/review/gito` by default so generated review artifacts do not
+land at the repository root.
+
+## CI cadence
+
+Run the full-check locally before deliberately triggering expensive remote CI
+or remote AI review. Repos can still use labels such as `full-ci`, manual
+workflow dispatch, or ready-for-review transitions for GitHub-side expensive
+checks.
+
+## Updating the pack
+
+To refresh installed assets from the pack checkout:
+
+```bash
+python3 /path/to/trellis-review-pr-pack/install.py /path/to/target/repo --force
+```
+
+Use `--dry-run` first when you want to inspect which files would change.
+Use `--backup` with `--force` if the target repo may have local edits that need
+to be preserved next to the overwritten files.
+
+## Troubleshooting
+
+- Missing `/trellis:full-check` command: reinstall the pack and include the
+  platform adapter for the tool you are using.
+- `scripts/trellis-full-check.sh` is missing: reinstall the pack; every target
+  repo should receive the shared script.
+- Prism authentication/config failure: configure Prism locally, set
+  `TRELLIS_FULL_CHECK_PRISM=0` to skip it, or set
+  `TRELLIS_FULL_CHECK_PRISM=required` when review must be mandatory.
+- Gito fails due to cache or network sandboxing: run from an environment with
+  the needed access, or leave `TRELLIS_FULL_CHECK_GITO` unset.
+- Root-level `code-review-report.*` files appear after manual Gito runs: move
+  or delete them, then rerun through `TRELLIS_FULL_CHECK_GITO=1
+  bash scripts/trellis-full-check.sh` so reports go under `.build/review/gito`.
+- Stale generated cache causes type or build failures: clear the repo-specific
+  generated cache and rerun the deterministic check that failed.

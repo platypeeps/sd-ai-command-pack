@@ -1,14 +1,15 @@
 ---
 name: trellis-review-pr
-description: Use when the user asks to ready a pull request, request a GitHub Copilot code review, address review comments or CI failures, and repeat until Copilot stops producing new actionable comments.
+description: Use when the user asks to ready a pull request, run the local Prism-first review cycle, optionally request a GitHub Copilot code review, address review comments or CI failures, and repeat until no actionable comments remain.
 ---
 
 # Trellis PR Review Loop
 
 Use this project-local skill for `/trellis:review-pr` style work. It turns a
-draft PR into a ready PR, requests GitHub Copilot review, waits for that review
-to finish, addresses actionable feedback and CI failures, and repeats until no
-new Copilot comments appear.
+draft or in-progress PR into a reviewed PR by running the local full-check and
+Prism review first, inspecting existing comments and CI, and requesting GitHub
+Copilot review only when the user explicitly asks for a remote/final pass or
+when local review is clean and a remote review is intentionally warranted.
 
 ## Safety Rules
 
@@ -19,10 +20,12 @@ new Copilot comments appear.
 - Do not stage unrelated work. If the working tree is dirty before the first
   review loop, classify the paths. Commit/push only changes that clearly belong
   to this PR; ask before touching anything ambiguous.
-- Count one loop as: trigger Copilot review, wait for completion, inspect
-  review/CI state, address findings, and push any resulting commit. After five
-  loops, stop before starting a sixth and ask the user for permission to
-  continue.
+- Run the local full-check before requesting paid/remote Copilot review. Use:
+  `bash scripts/trellis-full-check.sh`.
+- Count one remote loop as: trigger Copilot review, wait for completion,
+  inspect review/CI state, address findings, and push any resulting commit.
+  After five remote loops, stop before starting a sixth and ask the user for
+  permission to continue.
 - Treat Copilot and other bot comments as actionable by default, but verify
   against the current diff, project specs, and tests before changing code.
 - If a comment is wrong or would regress behavior, reply with a concise
@@ -72,15 +75,42 @@ commits have not been pushed, the wrong branch is checked out, or the remote PR
 branch changed. Push the intended local commits or check out the PR head before
 continuing; do not request Copilot review on stale remote code.
 
-If the PR is draft, mark it ready:
+If the PR is draft, do not mark it ready until the local full-check has passed
+unless the user explicitly asked to mark it ready immediately. This keeps
+`ready_for_review` workflows from starting before local review is clean.
+
+## Step 2: Run Local Full Check
+
+Run the local full-check gate before requesting a remote review:
 
 ```bash
-gh pr ready "$PR_NUMBER"
+bash scripts/trellis-full-check.sh
 ```
 
-If it is already ready, continue.
+If `scripts/trellis-full-check.sh` is missing, stop and report that the review
+cycle pack is not fully installed. Do not fall back to Copilot-first review.
 
-## Step 2: Trigger Copilot Review
+If full-check fails, fix the smallest correct set of issues, run the relevant
+checks again, commit and push the fixes, then return to Step 1 to refresh PR
+state. Do not request Copilot review on code that has not passed the local gate
+unless the user explicitly asks for a remote diagnostic despite local failures.
+
+## Step 3: Decide Whether To Trigger Copilot Review
+
+After local full-check passes:
+
+- If the PR is draft and the user asked to ready it, mark it ready:
+
+  ```bash
+  gh pr ready "$PR_NUMBER"
+  ```
+
+- If the user asked for local review only, skip Copilot and continue to Step 5
+  to inspect existing comments and CI.
+- If the user asked for a final remote review, or if project policy says to run
+  one before merge, trigger Copilot review.
+
+Record a remote review round only when Copilot is actually requested.
 
 Record a UTC trigger timestamp and the current head SHA before requesting a
 review:
@@ -109,9 +139,10 @@ If both fail, stop and report the exact GitHub error. Do not assume a magic
 `@copilot review` comment works unless the repository or organization docs
 explicitly say that trigger is enabled.
 
-## Step 3: Wait For Review Completion
+## Step 4: Wait For Review Completion
 
-Poll every 30 seconds with lightweight PR metadata only. Keep updates short.
+Skip this step if no remote Copilot review was requested. Otherwise, poll every
+30 seconds with lightweight PR metadata only. Keep updates short.
 
 ```bash
 gh pr view "$PR_NUMBER" --json reviewRequests,latestReviews,headRefOid,updatedAt
@@ -140,7 +171,7 @@ Consider the Copilot review complete when:
 If review status is ambiguous for more than 20 minutes, report the state and ask
 whether to keep waiting.
 
-## Step 4: Inspect Comments, Prior Threads, And CI
+## Step 5: Inspect Comments, Prior Threads, And CI
 
 Fetch thread-aware review data. Prefer platform/GitHub tools that expose review
 thread ids and resolution state. If using `gh`, use GraphQL:
@@ -220,7 +251,7 @@ Do not ignore prior unresolved comments from earlier review rounds; the loop is
 done only when prior unresolved threads, new Copilot feedback, and CI failures
 are all handled.
 
-## Step 5: Reply, Resolve, Fix, Commit, And Push
+## Step 6: Reply, Resolve, Fix, Commit, And Push
 
 For a rebuttal or clarification on a review comment, reply to the review
 comment:
@@ -253,46 +284,52 @@ When files change:
    the touched scope.
 2. Stage only intended files.
 3. Commit with a review-round message, for example:
-   `address Copilot review feedback` or
-   `address Copilot review feedback round N`.
+   `address local review feedback`,
+   `address Copilot review feedback`, or
+   `address review feedback round N`.
 4. Push the current branch.
 
 ```bash
 git status -sb
 git add <intended paths>
-git commit -m "address Copilot review feedback"
+git commit -m "address review feedback"
 git push
 ```
 
 If no files changed because every finding was rebutted/resolved, skip the
 commit but still continue to the next review-trigger decision.
 
-## Step 6: Repeat Or Stop
+## Step 7: Repeat Or Stop
 
-Trigger another Copilot review after every round that produced a code/docs
-change or resolved/rebutted actionable Copilot feedback. Compare the new thread
-ids and timestamps with the prior snapshot.
+Run local full-check again after every round that produced a code/docs change.
+Trigger another Copilot review only when the prior remote review produced
+actionable feedback that has now been fixed or rebutted and the user still
+wants a remote loop. Compare the new thread ids and timestamps with the prior
+snapshot.
 
 Stop when:
 
-- the latest Copilot review produces no new actionable comments;
+- local full-check passes;
+- the latest remote Copilot review, if requested, produces no new actionable
+  comments;
 - all prior review threads are resolved or intentionally left with a documented
   user decision;
 - CI is passing or any non-passing check is documented as unrelated/flaky with
   user-visible evidence; and
 - the working tree is clean and the branch is pushed.
 
-If the loop would start round 6, ask:
+If the remote loop would start round 6, ask:
 
-> Copilot review has already run five rounds. Continue another round?
+> Copilot review has already run five remote rounds. Continue another round?
 
 Do not continue until the user approves.
 
-## Step 7: Finish Work Automatically
+## Step 8: Finish Work Automatically
 
-After the loop stops because Copilot produced no new actionable comments, run
-the Trellis finish-work flow automatically before the final report. Do not ask
-whether to run it; the absence of new Copilot comments is the trigger.
+After the loop stops because local full-check passes and no requested remote
+review produced new actionable comments, run the Trellis finish-work flow
+automatically before the final report. Do not ask whether to run it; a clean
+review loop is the trigger.
 
 1. Read `.agents/skills/trellis-finish-work/SKILL.md`.
 2. Follow that skill exactly to archive completed task state and record the
@@ -315,11 +352,12 @@ reported a concrete blocker.
 Report:
 
 - PR number and URL.
-- Number of Copilot rounds completed.
+- Whether local full-check passed and whether Prism/Gito ran or were skipped.
+- Number of remote Copilot rounds completed.
 - Comments fixed, rebutted, or left for user decision.
 - Commits pushed during the loop.
 - Finish-work actions and any archive/journal commits pushed.
 - CI status.
 - Final working-tree state.
 - Recommended internal documentation, spec, prompt, or pre-commit changes that
-  would have caught avoidable mistakes before invoking Copilot.
+  would have caught avoidable mistakes before invoking remote review.

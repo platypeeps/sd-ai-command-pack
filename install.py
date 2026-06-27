@@ -14,7 +14,7 @@ from pathlib import Path, PureWindowsPath
 
 ROOT = Path(__file__).resolve().parent
 MANIFEST_PATH = ROOT / "manifest.json"
-PLATFORMS = ("gemini", "github", "opencode", "shared")
+PLATFORMS = ("claude", "gemini", "github", "opencode", "shared")
 ALWAYS_INSTALL = "always"
 
 
@@ -113,7 +113,7 @@ def validate_resolved_target_path(target: Path, path: Path, label: str) -> None:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Install trellis-review-pr skill and command adapters."
+        description="Install Trellis review-cycle skills, full-check script, and command adapters."
     )
     parser.add_argument(
         "target",
