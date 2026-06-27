@@ -75,3 +75,44 @@ Hardened the Trellis review PR pack installer, expanded tests and specs, opened 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Add Trellis housekeeping command
+
+**Date**: 2026-06-27
+**Task**: Add Trellis housekeeping command
+**Branch**: `codex/add-housekeeping-command`
+
+### Summary
+
+Added the post-merge housekeeping command and automatic review-loop housekeeping dispatch, then addressed PR review feedback around branch deletion safety, default-branch refs, scoped GitHub checks, dry-run previews, and remote-head verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b6a141c` | (see git log) |
+| `e7d53ff` | (see git log) |
+| `a419ef4` | (see git log) |
+| `e1ad6d7` | (see git log) |
+| `1db1a00` | (see git log) |
+| `8873a79` | (see git log) |
+| `4f3da9f` | (see git log) |
+| `1b467f5` | (see git log) |
+| `593a472` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
