@@ -462,6 +462,21 @@ class InstallTests(unittest.TestCase):
         self.assertIn(".build/review/gito", script)
         self.assertIn('gito review --vs "$base_ref" --out "$out_dir"', script)
 
+    def test_full_check_script_warns_when_node_cannot_inspect_scripts(self) -> None:
+        script = (
+            install.ROOT / "templates/scripts/trellis-full-check.sh"
+        ).read_text(encoding="utf-8")
+
+        node_guard = 'elif ! have node; then'
+        script_loop = 'for script_name in $scripts; do'
+        self.assertIn(node_guard, script)
+        self.assertIn(
+            "node not found on PATH; cannot inspect package.json scripts; "
+            "skipping package scripts.",
+            script,
+        )
+        self.assertLess(script.index(node_guard), script.index(script_loop))
+
     def test_review_pr_skill_allows_reply_and_resolve_for_addressed_threads(self) -> None:
         skill = (
             install.ROOT

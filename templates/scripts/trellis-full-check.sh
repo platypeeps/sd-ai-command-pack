@@ -184,6 +184,8 @@ main() {
 
     if ! have "$runner"; then
       warn "$runner not found on PATH; skipping package scripts."
+    elif ! have node; then
+      warn "node not found on PATH; cannot inspect package.json scripts; skipping package scripts."
     else
       local script_name
       for script_name in $scripts; do
