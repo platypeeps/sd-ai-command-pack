@@ -20,7 +20,7 @@ Usage: bash scripts/trellis-housekeeping.sh [options]
 Post-merge housekeeping for a single active Trellis development stream.
 
 Options:
-  --dry-run              Print cleanup actions without switching or deleting branches.
+  --dry-run              Preview cleanup without running mutating git commands.
   --keep-remote-branch   Leave the merged remote branch on GitHub.
   --remote <name>        Remote to fetch, prune, pull, and clean. Defaults to origin.
   -h, --help             Show this help.
@@ -137,6 +137,30 @@ configure_github_repo_scope() {
   fi
 }
 
+gh_pr_view() {
+  if [ -n "$GITHUB_REPO_SLUG" ]; then
+    gh pr view "${GH_REPO_ARGS[@]}" "$@"
+  else
+    gh pr view "$@"
+  fi
+}
+
+gh_pr_list() {
+  if [ -n "$GITHUB_REPO_SLUG" ]; then
+    gh pr list "${GH_REPO_ARGS[@]}" "$@"
+  else
+    gh pr list "$@"
+  fi
+}
+
+gh_issue_list() {
+  if [ -n "$GITHUB_REPO_SLUG" ]; then
+    gh issue list "${GH_REPO_ARGS[@]}" "$@"
+  else
+    gh issue list "$@"
+  fi
+}
+
 detect_default_branch() {
   local symbolic
   symbolic="$(git symbolic-ref --quiet --short "refs/remotes/$REMOTE/HEAD" 2>/dev/null || true)"
@@ -234,6 +258,13 @@ fast_forward_default_branch() {
   fi
 
   if [ "$(current_branch)" != "$DEFAULT_BRANCH" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      if git show-ref --verify --quiet "refs/remotes/$REMOTE/$DEFAULT_BRANCH"; then
+        add_action "would run: git pull --ff-only $REMOTE $DEFAULT_BRANCH"
+      else
+        add_anomaly "remote default ref $REMOTE/$DEFAULT_BRANCH does not exist"
+      fi
+    fi
     return 0
   fi
 
@@ -256,7 +287,7 @@ view_pr_for_branch() {
   local branch="$1"
   local pr_data
   pr_data="$(
-    gh pr view "${GH_REPO_ARGS[@]}" \
+    gh_pr_view \
       --json number,state,mergedAt,url,headRefName,headRefOid \
       --jq '[.number, .state, .mergedAt, .url, .headRefName, .headRefOid] | @tsv' \
       -- "$branch" \
@@ -268,7 +299,7 @@ view_pr_for_branch() {
     return 0
   fi
 
-  gh pr list "${GH_REPO_ARGS[@]}" --state merged --head="$branch" --limit 1 \
+  gh_pr_list --state merged --head="$branch" --limit 1 \
     --json number,state,mergedAt,url,headRefName,headRefOid \
     --jq '.[0] | select(. != null) | [.number, .state, .mergedAt, .url, .headRefName, .headRefOid] | @tsv' \
     2>/dev/null ||
@@ -327,7 +358,7 @@ cleanup_current_branch_if_merged() {
   switch_to_default_branch
   fast_forward_default_branch
 
-  if [ "$(current_branch)" != "$DEFAULT_BRANCH" ]; then
+  if [ "$DRY_RUN" -eq 0 ] && [ "$(current_branch)" != "$DEFAULT_BRANCH" ]; then
     add_anomaly "still on $branch; skipped branch deletion"
     return 0
   fi
@@ -380,7 +411,7 @@ check_open_prs() {
     return 0
   fi
 
-  if ! open_prs="$(gh pr list "${GH_REPO_ARGS[@]}" --state open --limit 100 --json number,title,headRefName --jq '.[] | "#\(.number) \(.headRefName): \(.title)"' 2>/dev/null)"; then
+  if ! open_prs="$(gh_pr_list --state open --limit 100 --json number,title,headRefName --jq '.[] | "#\(.number) \(.headRefName): \(.title)"' 2>/dev/null)"; then
     add_anomaly "failed to list open PRs"
     return 0
   fi
@@ -401,7 +432,7 @@ check_open_issues() {
     return 0
   fi
 
-  if ! open_issues="$(gh issue list "${GH_REPO_ARGS[@]}" --state open --limit 100 --json number,title --jq '.[] | "#\(.number): \(.title)"' 2>/dev/null)"; then
+  if ! open_issues="$(gh_issue_list --state open --limit 100 --json number,title --jq '.[] | "#\(.number): \(.title)"' 2>/dev/null)"; then
     add_anomaly "failed to list open issues"
     return 0
   fi
@@ -511,6 +542,15 @@ check_final_git_state() {
   fi
 }
 
+record_dry_run_final_state_note() {
+  add_expected "dry-run preview: skipped final git-state verification because no fetch, pull, switch, or branch deletion was performed"
+  if working_tree_is_clean; then
+    add_expected "working tree: clean"
+  else
+    add_anomaly "working tree is dirty; dry-run did not change it"
+  fi
+}
+
 print_report() {
   section "Tasks performed"
   print_list "${ACTIONS[@]}"
@@ -563,7 +603,11 @@ main() {
     cleanup_current_branch_if_merged "$START_BRANCH"
   fi
 
-  check_final_git_state
+  if [ "$DRY_RUN" -eq 1 ]; then
+    record_dry_run_final_state_note
+  else
+    check_final_git_state
+  fi
   check_open_prs
   check_open_issues
   check_trellis_tasks

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import subprocess
 import sys
 import tempfile
@@ -60,6 +61,18 @@ class InstallTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stdout)
+
+    def git_output(self, root: Path, *args: str) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        return result.stdout.strip()
 
     def run_install(
         self,
@@ -588,9 +601,12 @@ class InstallTests(unittest.TestCase):
             "unable to resolve GitHub PR metadata for $branch",
             "confirmed PR #$pr_number merged",
             'GH_REPO_ARGS=(--repo "$GITHUB_REPO_SLUG")',
-            'gh pr list "${GH_REPO_ARGS[@]}" --state merged --head="$branch"',
-            'gh pr list "${GH_REPO_ARGS[@]}" --state open',
-            'gh issue list "${GH_REPO_ARGS[@]}" --state open',
+            "gh_pr_view()",
+            'gh pr view "${GH_REPO_ARGS[@]}" "$@"',
+            'gh pr view "$@"',
+            'gh_pr_list --state merged --head="$branch"',
+            "gh_pr_list --state open",
+            "gh_issue_list --state open",
             "pruned $REMOTE after remote branch deletion",
             "default branch is unknown; skipped branch inventory checks",
             'grep -F -x -v "$DEFAULT_BRANCH"',
@@ -598,7 +614,6 @@ class InstallTests(unittest.TestCase):
             'git remote get-url "$REMOTE"',
             'gh repo view "$GITHUB_REPO_SLUG"',
             "github_repo_from_remote_url()",
-            'gh pr view "${GH_REPO_ARGS[@]}" \\',
             '"${GH_REPO_ARGS[@]}"',
             '-- "$branch"',
             'git rev-parse --verify "refs/heads/$branch^{commit}"',
@@ -613,8 +628,96 @@ class InstallTests(unittest.TestCase):
             'grep -F -x -v "$kept_remote_branch"',
             "and kept $kept_remote_branch",
             "failed to check whether remote branch $REMOTE/$branch exists",
+            "dry-run preview: skipped final git-state verification",
+            "would run: git pull --ff-only $REMOTE $DEFAULT_BRANCH",
         ]:
             self.assertIn(text, script)
+
+    def test_housekeeping_dry_run_previews_branch_cleanup_without_final_state_anomaly(
+        self,
+    ) -> None:
+        tempdir = tempfile.TemporaryDirectory(prefix="trellis-housekeeping-test-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        repo = root / "work"
+        remote = root / "origin.git"
+        stub_bin = root / "bin"
+        repo.mkdir()
+        remote.mkdir()
+        stub_bin.mkdir()
+
+        self.run_git(remote, "init", "--bare")
+        self.run_git(repo, "init", "-b", "main")
+        self.run_git(repo, "config", "user.email", "test@example.com")
+        self.run_git(repo, "config", "user.name", "Test User")
+        (repo / ".trellis/scripts").mkdir(parents=True)
+        (repo / ".trellis/config.yaml").write_text("# test\n", encoding="utf-8")
+        (repo / ".trellis/scripts/get_context.py").write_text(
+            "print('(no active tasks assigned to you)')\n",
+            encoding="utf-8",
+        )
+        (repo / "README.md").write_text("# Test\n", encoding="utf-8")
+        self.run_git(repo, "add", ".")
+        self.run_git(repo, "commit", "-m", "initial")
+        self.run_git(repo, "remote", "add", "origin", str(remote))
+        self.run_git(repo, "push", "-u", "origin", "main")
+        self.run_git(remote, "symbolic-ref", "HEAD", "refs/heads/main")
+        self.run_git(repo, "fetch", "origin")
+        self.run_git(repo, "remote", "set-head", "origin", "-a")
+        self.run_git(repo, "switch", "-c", "feature/cleanup")
+        (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+        self.run_git(repo, "add", "feature.txt")
+        self.run_git(repo, "commit", "-m", "feature")
+        self.run_git(repo, "push", "-u", "origin", "feature/cleanup")
+        head_oid = self.git_output(repo, "rev-parse", "HEAD")
+
+        (stub_bin / "gh").write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "if [ \"${1:-}\" = pr ] && [ \"${2:-}\" = view ]; then\n"
+            f"  printf '6\\tMERGED\\t2026-06-27T17:00:00Z\\thttps://example.test/pr/6\\tfeature/cleanup\\t{head_oid}\\n'\n"
+            "elif [ \"${1:-}\" = pr ] && [ \"${2:-}\" = list ]; then\n"
+            "  exit 0\n"
+            "elif [ \"${1:-}\" = issue ] && [ \"${2:-}\" = list ]; then\n"
+            "  exit 0\n"
+            "elif [ \"${1:-}\" = repo ] && [ \"${2:-}\" = view ]; then\n"
+            "  printf 'main\\n'\n"
+            "else\n"
+            "  printf 'unexpected gh invocation: %s\\n' \"$*\" >&2\n"
+            "  exit 1\n"
+            "fi\n",
+            encoding="utf-8",
+        )
+        (stub_bin / "gh").chmod(0o755)
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/trellis-housekeeping.sh"),
+                "--dry-run",
+            ],
+            cwd=repo,
+            env={**os.environ, "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("would run: git fetch --prune origin", result.stdout)
+        self.assertIn("confirmed PR #6 merged", result.stdout)
+        self.assertIn("would switch to main", result.stdout)
+        self.assertIn("would run: git pull --ff-only origin main", result.stdout)
+        self.assertIn("would delete local branch feature/cleanup", result.stdout)
+        self.assertIn("would delete remote branch origin/feature/cleanup", result.stdout)
+        self.assertIn("dry-run preview: skipped final git-state verification", result.stdout)
+        self.assertNotIn("still on feature/cleanup; skipped branch deletion", result.stdout)
+        self.assertNotIn("current branch is feature/cleanup, expected main", result.stdout)
+        self.assertEqual(
+            self.git_output(repo, "branch", "--show-current"),
+            "feature/cleanup",
+        )
 
     def test_manifest_sources_do_not_have_trailing_whitespace(self) -> None:
         _, files = install.load_manifest()

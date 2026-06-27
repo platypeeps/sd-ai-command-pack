@@ -72,15 +72,17 @@ manual action.
 - If the current branch has an open PR, no PR, or inaccessible PR metadata,
   leave it alone and report an anomaly.
 - Do not stage, commit, or push unrelated work as part of housekeeping.
-- Use `--dry-run` when the user wants a preview before branch switching or
-  deletion.
+- Use `--dry-run` when the user wants a preview before any mutating git
+  command, including fetch, pull, branch switching, or branch deletion. Dry-run
+  output records that final git-state verification was skipped because the repo
+  was not changed.
 - If the script exits nonzero, report the anomalies instead of retrying with
   stronger deletion commands.
 
 ## Options
 
-- `--dry-run`: show what would be cleaned up without switching or deleting
-  branches.
+- `--dry-run`: show what would be cleaned up without running mutating git
+  commands such as fetch, pull, branch switching, or branch deletion.
 - `--keep-remote-branch`: delete the merged local branch but leave the remote
   branch on GitHub.
 - `--remote <name>`: use a remote other than `origin`.
