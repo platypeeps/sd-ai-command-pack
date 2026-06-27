@@ -602,6 +602,8 @@ class InstallTests(unittest.TestCase):
             'git ls-remote --exit-code "$REMOTE" "refs/heads/$branch"',
             'elif [ "$ls_remote_status" -eq 2 ]; then',
             'git push "$REMOTE" ":refs/heads/$branch"',
+            'git rev-parse --verify "refs/heads/$DEFAULT_BRANCH^{commit}"',
+            'git rev-parse --verify "refs/remotes/$REMOTE/$DEFAULT_BRANCH^{commit}"',
             "failed to check whether remote branch $REMOTE/$branch exists",
         ]:
             self.assertIn(text, script)

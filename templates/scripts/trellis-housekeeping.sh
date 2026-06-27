@@ -453,8 +453,8 @@ check_final_git_state() {
   fi
 
   if git show-ref --verify --quiet "refs/heads/$DEFAULT_BRANCH" && git show-ref --verify --quiet "refs/remotes/$REMOTE/$DEFAULT_BRANCH"; then
-    local_head="$(git rev-parse "$DEFAULT_BRANCH")"
-    remote_head="$(git rev-parse "$REMOTE/$DEFAULT_BRANCH")"
+    local_head="$(git rev-parse --verify "refs/heads/$DEFAULT_BRANCH^{commit}")"
+    remote_head="$(git rev-parse --verify "refs/remotes/$REMOTE/$DEFAULT_BRANCH^{commit}")"
     if [ "$local_head" = "$remote_head" ]; then
       add_expected "$DEFAULT_BRANCH matches $REMOTE/$DEFAULT_BRANCH"
     else
