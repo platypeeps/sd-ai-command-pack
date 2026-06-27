@@ -113,7 +113,7 @@ def validate_resolved_target_path(target: Path, path: Path, label: str) -> None:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Install Trellis review-cycle skills, full-check script, and command adapters."
+        description="Install Trellis review-cycle shared assets and command adapters."
     )
     parser.add_argument(
         "target",
@@ -127,7 +127,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         choices=PLATFORMS,
         help=(
             "Install only this platform adapter. Repeat to select several. "
-            "The shared skill is always installed with selected adapters."
+            "Shared skills, scripts, Prism rules, and docs are always installed."
         ),
     )
     parser.add_argument(

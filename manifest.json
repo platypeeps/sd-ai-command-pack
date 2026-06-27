@@ -1,7 +1,7 @@
 {
   "name": "trellis-review-pr-pack",
   "version": "0.2.0",
-  "description": "Install the project-local Trellis PR review loop, full-check script, and thin platform adapters into Trellis repos.",
+  "description": "Install project-local Trellis review/full-check workflows, Prism rules, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
   "files": [
     {

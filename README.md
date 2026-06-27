@@ -25,7 +25,7 @@ The pack includes:
 - `.opencode/commands/trellis/full-check.md`
 
 The shared skills own the workflows. Platform command and prompt files are thin
-entry points that tell the agent to load the shared skill.
+entry points that tell the agent to load the appropriate shared skill.
 The installed `docs/TRELLIS_REVIEW_PR_PACK.md` file gives humans and agents a
 repo-local usage guide for the commands, script, environment variables, local
 Prism/Gito behavior, and troubleshooting steps.
@@ -87,7 +87,7 @@ python3 -m unittest discover -s tests
 
 | Platform | Installed When |
 | --- | --- |
-| Shared skills, script, Prism rules | Always |
+| Shared skills, script, Prism rules, usage guide | Always |
 | Claude Code | `.claude/` exists, or `--all` / `--platform claude` |
 | Gemini CLI | `.gemini/` exists, or `--all` / `--platform gemini` |
 | GitHub Copilot | `.github/` exists, or `--all` / `--platform github` |
