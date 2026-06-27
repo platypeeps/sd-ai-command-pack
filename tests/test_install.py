@@ -591,6 +591,12 @@ class InstallTests(unittest.TestCase):
             "default branch is unknown; skipped branch inventory checks",
             'grep -F -x -v "$DEFAULT_BRANCH"',
             'grep -F -x -v "$REMOTE/$DEFAULT_BRANCH"',
+            'git remote get-url "$REMOTE"',
+            'gh repo view "$repo_slug"',
+            "github_repo_from_remote_url()",
+            "ls_remote_status",
+            'elif [ "$ls_remote_status" -eq 2 ]; then',
+            "failed to check whether remote branch $REMOTE/$branch exists",
         ]:
             self.assertIn(text, script)
 

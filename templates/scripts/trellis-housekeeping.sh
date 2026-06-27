@@ -124,6 +124,8 @@ fetch_and_prune() {
 }
 
 detect_default_branch() {
+  local remote_url
+  local repo_slug
   local symbolic
   symbolic="$(git symbolic-ref --quiet --short "refs/remotes/$REMOTE/HEAD" 2>/dev/null || true)"
   if [ -n "$symbolic" ]; then
@@ -132,7 +134,13 @@ detect_default_branch() {
   fi
 
   if have gh; then
-    DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)"
+    remote_url="$(git remote get-url "$REMOTE" 2>/dev/null || true)"
+    repo_slug="$(github_repo_from_remote_url "$remote_url" || true)"
+    if [ -n "$repo_slug" ]; then
+      DEFAULT_BRANCH="$(gh repo view "$repo_slug" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)"
+    else
+      DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)"
+    fi
     if [ -n "$DEFAULT_BRANCH" ]; then
       return 0
     fi
@@ -145,6 +153,37 @@ detect_default_branch() {
   else
     add_anomaly "could not detect the default branch for $REMOTE"
   fi
+}
+
+github_repo_from_remote_url() {
+  local url="$1"
+  local slug=""
+
+  case "$url" in
+    git@github.com:*)
+      slug="${url#git@github.com:}"
+      ;;
+    ssh://git@github.com/*)
+      slug="${url#ssh://git@github.com/}"
+      ;;
+    https://github.com/*)
+      slug="${url#https://github.com/}"
+      ;;
+    http://github.com/*)
+      slug="${url#http://github.com/}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  slug="${slug%.git}"
+  slug="${slug%/}"
+  if [ -z "$slug" ] || [ "$slug" = "${slug#*/}" ]; then
+    return 1
+  fi
+
+  printf '%s\n' "$slug"
 }
 
 switch_to_default_branch() {
@@ -297,7 +336,12 @@ cleanup_current_branch_if_merged() {
     return 0
   fi
 
-  if git ls-remote --exit-code --heads "$REMOTE" "$branch" >/dev/null 2>&1; then
+  set +e
+  git ls-remote --exit-code --heads "$REMOTE" "$branch" >/dev/null 2>&1
+  local ls_remote_status=$?
+  set -e
+
+  if [ "$ls_remote_status" -eq 0 ]; then
     if [ "$DRY_RUN" -eq 1 ]; then
       add_action "would delete remote branch $REMOTE/$branch"
     elif git push "$REMOTE" --delete "$branch"; then
@@ -310,8 +354,10 @@ cleanup_current_branch_if_merged() {
     else
       add_anomaly "failed to delete remote branch $REMOTE/$branch"
     fi
-  else
+  elif [ "$ls_remote_status" -eq 2 ]; then
     add_action "remote branch $REMOTE/$branch is already absent"
+  else
+    add_anomaly "failed to check whether remote branch $REMOTE/$branch exists"
   fi
 }
 
