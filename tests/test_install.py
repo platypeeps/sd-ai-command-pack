@@ -587,6 +587,10 @@ class InstallTests(unittest.TestCase):
             "Trellis active tasks: none",
             "confirmed PR #$pr_number merged",
             "gh pr list --state merged --head",
+            "pruned $REMOTE after remote branch deletion",
+            "default branch is unknown; skipped branch inventory checks",
+            'grep -F -x -v "$DEFAULT_BRANCH"',
+            'grep -F -x -v "$REMOTE/$DEFAULT_BRANCH"',
         ]:
             self.assertIn(text, script)
 

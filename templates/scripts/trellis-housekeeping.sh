@@ -302,6 +302,11 @@ cleanup_current_branch_if_merged() {
       add_action "would delete remote branch $REMOTE/$branch"
     elif git push "$REMOTE" --delete "$branch"; then
       add_action "deleted remote branch $REMOTE/$branch"
+      if git fetch --prune "$REMOTE"; then
+        add_action "pruned $REMOTE after remote branch deletion"
+      else
+        add_anomaly "deleted remote branch $REMOTE/$branch, but git fetch --prune $REMOTE failed"
+      fi
     else
       add_anomaly "failed to delete remote branch $REMOTE/$branch"
     fi
@@ -395,7 +400,12 @@ check_final_git_state() {
     add_anomaly "working tree is dirty after housekeeping"
   fi
 
-  if [ -n "$DEFAULT_BRANCH" ] && git show-ref --verify --quiet "refs/heads/$DEFAULT_BRANCH" && git show-ref --verify --quiet "refs/remotes/$REMOTE/$DEFAULT_BRANCH"; then
+  if [ -z "$DEFAULT_BRANCH" ]; then
+    add_anomaly "default branch is unknown; skipped branch inventory checks"
+    return 0
+  fi
+
+  if git show-ref --verify --quiet "refs/heads/$DEFAULT_BRANCH" && git show-ref --verify --quiet "refs/remotes/$REMOTE/$DEFAULT_BRANCH"; then
     local_head="$(git rev-parse "$DEFAULT_BRANCH")"
     remote_head="$(git rev-parse "$REMOTE/$DEFAULT_BRANCH")"
     if [ "$local_head" = "$remote_head" ]; then
@@ -403,9 +413,13 @@ check_final_git_state() {
     else
       add_anomaly "$DEFAULT_BRANCH does not match $REMOTE/$DEFAULT_BRANCH"
     fi
+  elif ! git show-ref --verify --quiet "refs/heads/$DEFAULT_BRANCH"; then
+    add_anomaly "local default branch $DEFAULT_BRANCH does not exist"
+  else
+    add_anomaly "remote default branch $REMOTE/$DEFAULT_BRANCH does not exist"
   fi
 
-  extra_local="$(git for-each-ref --format='%(refname:short)' refs/heads | grep -v "^${DEFAULT_BRANCH}$" || true)"
+  extra_local="$(git for-each-ref --format='%(refname:short)' refs/heads | grep -F -x -v "$DEFAULT_BRANCH" || true)"
   if [ -z "$extra_local" ]; then
     add_expected "local branches: only $DEFAULT_BRANCH"
   else
@@ -414,9 +428,9 @@ check_final_git_state() {
 
   extra_remote="$(
     git for-each-ref --format='%(refname:short)' "refs/remotes/$REMOTE" |
-      grep -v "^${REMOTE}$" |
-      grep -v "^${REMOTE}/HEAD$" |
-      grep -v "^${REMOTE}/${DEFAULT_BRANCH}$" ||
+      grep -F -x -v "$REMOTE" |
+      grep -F -x -v "$REMOTE/HEAD" |
+      grep -F -x -v "$REMOTE/$DEFAULT_BRANCH" ||
       true
   )"
   if [ -z "$extra_remote" ]; then
