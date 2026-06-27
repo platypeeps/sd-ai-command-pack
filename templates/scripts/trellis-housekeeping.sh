@@ -65,6 +65,32 @@ print_list() {
   done
 }
 
+valid_merge_strategy() {
+  case "$1" in
+    merge|squash|rebase)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+valid_github_repo_slug() {
+  local slug="$1"
+  local owner
+  local name
+
+  case "$slug" in
+    ""|/*|*/|*/*/*|*" "*|*$'\t'*|*$'\n'*)
+      return 1
+      ;;
+  esac
+  owner="${slug%%/*}"
+  name="${slug#*/}"
+  [ -n "$owner" ] && [ -n "$name" ] && [ "$owner" != "$slug" ]
+}
+
 parse_args() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -83,15 +109,12 @@ parse_args() {
           printf 'error: --merge-strategy requires a value\n' >&2
           exit 2
         fi
-        case "$1" in
-          merge|squash|rebase)
-            MERGE_STRATEGY="$1"
-            ;;
-          *)
-            printf 'error: --merge-strategy must be merge, squash, or rebase\n' >&2
-            exit 2
-            ;;
-        esac
+        if valid_merge_strategy "$1"; then
+          MERGE_STRATEGY="$1"
+        else
+          printf 'error: --merge-strategy must be merge, squash, or rebase\n' >&2
+          exit 2
+        fi
         ;;
       --keep-remote-branch)
         DELETE_REMOTE_BRANCH=0
@@ -155,10 +178,19 @@ fetch_and_prune() {
 }
 
 configure_github_repo_scope() {
+  local configured_slug
   local remote_url
 
-  GITHUB_REPO_SLUG="${TRELLIS_HOUSEKEEPING_GITHUB_REPO:-}"
+  configured_slug="${TRELLIS_HOUSEKEEPING_GITHUB_REPO:-}"
+  GITHUB_REPO_SLUG=""
   GH_REPO_ARGS=()
+  if [ -n "$configured_slug" ]; then
+    if valid_github_repo_slug "$configured_slug"; then
+      GITHUB_REPO_SLUG="$configured_slug"
+    else
+      add_anomaly "TRELLIS_HOUSEKEEPING_GITHUB_REPO must be an owner/repo slug; ignored invalid override"
+    fi
+  fi
   if [ -z "$GITHUB_REPO_SLUG" ]; then
     remote_url="$(git remote get-url "$REMOTE" 2>/dev/null || true)"
     GITHUB_REPO_SLUG="$(github_repo_from_remote_url "$remote_url" || true)"
@@ -252,7 +284,7 @@ github_repo_from_remote_url() {
 
   slug="${slug%.git}"
   slug="${slug%/}"
-  if [ -z "$slug" ] || [ "$slug" = "${slug#*/}" ]; then
+  if ! valid_github_repo_slug "$slug"; then
     return 1
   fi
 
@@ -366,12 +398,12 @@ unresolved_review_thread_count() {
   local page_unresolved
   local gh_status
   local -a graphql_args
-  if [ -z "$GITHUB_REPO_SLUG" ]; then
+  if ! valid_github_repo_slug "$GITHUB_REPO_SLUG"; then
     return 1
   fi
   owner="${GITHUB_REPO_SLUG%%/*}"
   name="${GITHUB_REPO_SLUG#*/}"
-  if [ -z "$owner" ] || [ -z "$name" ] || [ "$owner" = "$name" ]; then
+  if [ -z "$owner" ] || [ -z "$name" ]; then
     return 1
   fi
 
@@ -547,6 +579,10 @@ maybe_finalize_ready_open_pr() {
   fi
   if ! have gh; then
     add_anomaly "gh not found; skipped auto-finalize and merge"
+    return 0
+  fi
+  if ! valid_merge_strategy "$MERGE_STRATEGY"; then
+    add_anomaly "merge strategy is invalid; expected merge, squash, or rebase; skipped auto-finalize and merge"
     return 0
   fi
 

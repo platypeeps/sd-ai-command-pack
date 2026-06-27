@@ -924,6 +924,70 @@ class InstallTests(unittest.TestCase):
             "feature/cleanup",
         )
 
+    def test_housekeeping_rejects_invalid_github_repo_override(self) -> None:
+        repo, _, stub_bin, _ = self.make_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_finalize_gh_stub(stub_bin, marker)
+        self.write_trellis_finalize_stub(stub_bin)
+
+        result = subprocess.run(
+            ["bash", str(install.ROOT / "templates/scripts/trellis-housekeeping.sh")],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "TRELLIS_HOUSEKEEPING_GITHUB_REPO": "example",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "TRELLIS_HOUSEKEEPING_GITHUB_REPO must be an owner/repo slug",
+            result.stdout,
+        )
+        self.assertIn(
+            "could not derive GitHub repo from origin; skipped auto-finalize and merge",
+            result.stdout,
+        )
+        self.assertNotIn("trellis-finalize created", result.stdout)
+        self.assertFalse(marker.exists())
+
+    def test_housekeeping_rejects_invalid_env_merge_strategy_before_finalize(
+        self,
+    ) -> None:
+        repo, _, stub_bin, _ = self.make_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_finalize_gh_stub(stub_bin, marker)
+        self.write_trellis_finalize_stub(stub_bin)
+
+        result = subprocess.run(
+            ["bash", str(install.ROOT / "templates/scripts/trellis-housekeeping.sh")],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "TRELLIS_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+                "TRELLIS_HOUSEKEEPING_MERGE_STRATEGY": "fast-forward",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "merge strategy is invalid; expected merge, squash, or rebase",
+            result.stdout,
+        )
+        self.assertNotIn("trellis-finalize created", result.stdout)
+        self.assertFalse((repo / ".trellis/workspace/sdelmas/journal-1.md").exists())
+        self.assertFalse(marker.exists())
+
     def test_housekeeping_reports_review_thread_inspection_failure(
         self,
     ) -> None:

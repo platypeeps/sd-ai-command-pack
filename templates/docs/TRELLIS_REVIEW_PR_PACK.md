@@ -107,8 +107,9 @@ Common environment variables:
   `TRELLIS_FULL_CHECK_BASE_REF`, then `origin/main`.
 - `TRELLIS_FULL_CHECK_GITO_OUT_DIR`: output folder for Gito reports. Defaults
   to `.build/review/gito`.
-- `TRELLIS_HOUSEKEEPING_FINALIZE_COMMAND`: command to run before auto-merging a
-  ready PR. Defaults to `trellis-finalize`.
+- `TRELLIS_HOUSEKEEPING_FINALIZE_COMMAND`: executable name/path to run before
+  auto-merging a ready PR. Arguments are not parsed; use a wrapper executable
+  for custom argument lists. Defaults to `trellis-finalize`.
 - `TRELLIS_HOUSEKEEPING_GITHUB_REPO`: explicit `owner/repo` slug when the
   selected remote URL cannot be parsed as a GitHub repository.
 - `TRELLIS_HOUSEKEEPING_MERGE_STRATEGY`: auto-merge strategy: `merge`,
