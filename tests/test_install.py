@@ -131,7 +131,12 @@ class InstallTests(unittest.TestCase):
         )
         (stub_bin / "gh").chmod(0o755)
 
-    def write_auto_finalize_gh_stub(self, stub_bin: Path, marker: Path) -> None:
+    def write_auto_finalize_gh_stub(
+        self,
+        stub_bin: Path,
+        marker: Path,
+        graphql_body: str = "  printf '0\\tfalse\\t\\n'\n",
+    ) -> None:
         (stub_bin / "gh").write_text(
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
@@ -142,7 +147,7 @@ class InstallTests(unittest.TestCase):
             "if [ \"${1:-}\" = repo ] && [ \"${2:-}\" = view ]; then\n"
             "  printf 'main\\n'\n"
             "elif [ \"${1:-}\" = api ] && [ \"${2:-}\" = graphql ]; then\n"
-            "  printf '0\\n'\n"
+            f"{graphql_body}"
             "elif [ \"${1:-}\" = pr ] && [ \"${2:-}\" = view ]; then\n"
             "  state=\"$(pr_state)\"\n"
             "  head=\"$(head_oid)\"\n"
@@ -872,6 +877,87 @@ class InstallTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(remote_branch.returncode, 2, remote_branch.stdout)
+
+    def test_housekeeping_counts_unresolved_review_threads_across_pages(
+        self,
+    ) -> None:
+        repo, _, stub_bin, _ = self.make_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_finalize_gh_stub(
+            stub_bin,
+            marker,
+            graphql_body=(
+                "  args=\" $* \"\n"
+                "  if [[ \"$args\" == *\"cursor=PAGE2\"* ]]; then\n"
+                "    printf '1\\tfalse\\t\\n'\n"
+                "  else\n"
+                "    printf '0\\ttrue\\tPAGE2\\n'\n"
+                "  fi\n"
+            ),
+        )
+        self.write_trellis_finalize_stub(stub_bin)
+
+        result = subprocess.run(
+            ["bash", str(install.ROOT / "templates/scripts/trellis-housekeeping.sh")],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "TRELLIS_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "PR #6 has 1 unresolved review thread(s); skipped auto-finalize and merge",
+            result.stdout,
+        )
+        self.assertNotIn("trellis-finalize created", result.stdout)
+        self.assertFalse(marker.exists())
+        self.assertEqual(
+            self.git_output(repo, "branch", "--show-current"),
+            "feature/cleanup",
+        )
+
+    def test_housekeeping_reports_review_thread_inspection_failure(
+        self,
+    ) -> None:
+        repo, _, stub_bin, _ = self.make_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_finalize_gh_stub(
+            stub_bin,
+            marker,
+            graphql_body="  exit 42\n",
+        )
+        self.write_trellis_finalize_stub(stub_bin)
+
+        result = subprocess.run(
+            ["bash", str(install.ROOT / "templates/scripts/trellis-housekeeping.sh")],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "TRELLIS_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "failed to inspect review threads for PR #6; skipped auto-finalize and merge",
+            result.stdout,
+        )
+        self.assertIn("==> Expected clean state", result.stdout)
+        self.assertIn("==> Anomalies", result.stdout)
+        self.assertNotIn("trellis-finalize created", result.stdout)
+        self.assertFalse(marker.exists())
 
     def test_manifest_sources_do_not_have_trailing_whitespace(self) -> None:
         _, files = install.load_manifest()

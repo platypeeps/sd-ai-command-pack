@@ -359,6 +359,13 @@ unresolved_review_thread_count() {
   local pr_number="$1"
   local owner
   local name
+  local cursor=""
+  local has_next_page="true"
+  local unresolved_count=0
+  local page_data
+  local page_unresolved
+  local gh_status
+  local -a graphql_args
   if [ -z "$GITHUB_REPO_SLUG" ]; then
     return 1
   fi
@@ -368,13 +375,37 @@ unresolved_review_thread_count() {
     return 1
   fi
 
-  gh api graphql \
-    -F owner="$owner" \
-    -F name="$name" \
-    -F number="$pr_number" \
-    -f query='query($owner:String!, $name:String!, $number:Int!) { repository(owner:$owner, name:$name) { pullRequest(number:$number) { reviewThreads(first: 100) { nodes { isResolved } } } } }' \
-    --jq '[.data.repository.pullRequest.reviewThreads.nodes[]? | select(.isResolved == false)] | length' \
-    2>/dev/null
+  while [ "$has_next_page" = "true" ]; do
+    graphql_args=(-F owner="$owner" -F name="$name" -F number="$pr_number")
+    if [ -n "$cursor" ]; then
+      graphql_args+=(-F cursor="$cursor")
+    fi
+
+    set +e
+    page_data="$(
+      gh api graphql \
+        "${graphql_args[@]}" \
+        -f query='query($owner:String!, $name:String!, $number:Int!, $cursor:String) { repository(owner:$owner, name:$name) { pullRequest(number:$number) { reviewThreads(first: 100, after: $cursor) { nodes { isResolved } pageInfo { hasNextPage endCursor } } } } }' \
+        --jq '[([.data.repository.pullRequest.reviewThreads.nodes[]? | select(.isResolved == false)] | length), (.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false), (.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // "")] | @tsv' \
+        2>/dev/null
+    )"
+    gh_status=$?
+    set -e
+    if [ "$gh_status" -ne 0 ] || [ -z "$page_data" ]; then
+      return 1
+    fi
+
+    IFS=$'\t' read -r page_unresolved has_next_page cursor <<<"$page_data"
+    if ! [[ "$page_unresolved" =~ ^[0-9]+$ ]]; then
+      return 1
+    fi
+    unresolved_count=$((unresolved_count + page_unresolved))
+    if [ "$has_next_page" = "true" ] && [ -z "$cursor" ]; then
+      return 1
+    fi
+  done
+
+  printf '%s\n' "$unresolved_count"
 }
 
 remote_branch_head_oid() {
