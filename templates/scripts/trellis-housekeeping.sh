@@ -304,7 +304,7 @@ cleanup_current_branch_if_merged() {
 
   pr_data="$(view_pr_for_branch "$branch")"
   if [ -z "$pr_data" ]; then
-    add_anomaly "no GitHub PR found for $branch; left the branch untouched"
+    add_anomaly "unable to resolve GitHub PR metadata for $branch; no PR was found or gh failed, so the branch was left untouched"
     return 0
   fi
 
@@ -443,6 +443,7 @@ check_final_git_state() {
   local remote_head
   local extra_local
   local extra_remote
+  local kept_remote_branch
 
   final_branch="$(current_branch)"
   if [ -n "$DEFAULT_BRANCH" ] && [ "$final_branch" = "$DEFAULT_BRANCH" ]; then
@@ -483,6 +484,11 @@ check_final_git_state() {
     add_anomaly "extra local branches remain: $(printf '%s' "$extra_local" | paste -sd ',' -)"
   fi
 
+  kept_remote_branch=""
+  if [ "$DELETE_REMOTE_BRANCH" -eq 0 ] && [ -n "$START_BRANCH" ] && [ "$START_BRANCH" != "$DEFAULT_BRANCH" ]; then
+    kept_remote_branch="$REMOTE/$START_BRANCH"
+  fi
+
   extra_remote="$(
     git for-each-ref --format='%(refname:short)' "refs/remotes/$REMOTE" |
       grep -F -x -v "$REMOTE" |
@@ -490,8 +496,16 @@ check_final_git_state() {
       grep -F -x -v "$REMOTE/$DEFAULT_BRANCH" ||
       true
   )"
+  if [ -n "$kept_remote_branch" ]; then
+    extra_remote="$(printf '%s\n' "$extra_remote" | grep -F -x -v "$kept_remote_branch" || true)"
+  fi
+
   if [ -z "$extra_remote" ]; then
-    add_expected "remote branches: only $REMOTE/HEAD and $REMOTE/$DEFAULT_BRANCH"
+    if [ -n "$kept_remote_branch" ] && git show-ref --verify --quiet "refs/remotes/$REMOTE/$START_BRANCH"; then
+      add_expected "remote branches: only $REMOTE/HEAD, $REMOTE/$DEFAULT_BRANCH, and kept $kept_remote_branch"
+    else
+      add_expected "remote branches: only $REMOTE/HEAD and $REMOTE/$DEFAULT_BRANCH"
+    fi
   else
     add_anomaly "extra remote-tracking branches remain: $(printf '%s' "$extra_remote" | paste -sd ',' -)"
   fi

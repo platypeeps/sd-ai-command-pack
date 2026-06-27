@@ -585,6 +585,7 @@ class InstallTests(unittest.TestCase):
             "Anomalies",
             "open PRs: none",
             "Trellis active tasks: none",
+            "unable to resolve GitHub PR metadata for $branch",
             "confirmed PR #$pr_number merged",
             'GH_REPO_ARGS=(--repo "$GITHUB_REPO_SLUG")',
             'gh pr list "${GH_REPO_ARGS[@]}" --state merged --head="$branch"',
@@ -608,6 +609,9 @@ class InstallTests(unittest.TestCase):
             'git push "$REMOTE" ":refs/heads/$branch"',
             'git rev-parse --verify "refs/heads/$DEFAULT_BRANCH^{commit}"',
             'git rev-parse --verify "refs/remotes/$REMOTE/$DEFAULT_BRANCH^{commit}"',
+            'kept_remote_branch="$REMOTE/$START_BRANCH"',
+            'grep -F -x -v "$kept_remote_branch"',
+            "and kept $kept_remote_branch",
             "failed to check whether remote branch $REMOTE/$branch exists",
         ]:
             self.assertIn(text, script)
