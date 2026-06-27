@@ -9,6 +9,8 @@
 Use these specs when changing files under `templates/`, especially:
 
 - `templates/.agents/skills/trellis-review-pr/SKILL.md`
+- `templates/.agents/skills/trellis-full-check/SKILL.md`
+- `templates/.agents/skills/trellis-housekeeping/SKILL.md`
 - `templates/.gemini/commands/trellis/review-pr.toml`
 - `templates/.github/prompts/review-pr.prompt.md`
 - `templates/.opencode/commands/trellis/review-pr.md`
@@ -47,7 +49,7 @@ git diff --check
 Also verify:
 
 - Each platform adapter still tells the agent to read the shared skill.
-- The shared skill includes safety rules, loop limit, CI handling, thread-aware
-  review inspection, finish-work behavior, and final report expectations.
+- Detailed workflow shared skills include safety rules and final report
+  expectations for their command.
 - Any new adapter is listed in `manifest.json`, described in `README.md`, and
   covered by installer tests.

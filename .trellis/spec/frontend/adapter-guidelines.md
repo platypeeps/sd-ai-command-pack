@@ -12,16 +12,18 @@ load the shared skill and summarize the required behavior.
 Reference files:
 
 - `templates/.agents/skills/trellis-review-pr/SKILL.md`
+- `templates/.agents/skills/trellis-full-check/SKILL.md`
+- `templates/.agents/skills/trellis-housekeeping/SKILL.md`
 - `templates/.gemini/commands/trellis/review-pr.toml`
 - `templates/.github/prompts/review-pr.prompt.md`
 - `templates/.opencode/commands/trellis/review-pr.md`
 
 ## Shared Skill Pattern
 
-Keep detailed workflow rules in
-`templates/.agents/skills/trellis-review-pr/SKILL.md`.
+Keep detailed workflow rules in the matching shared skill under
+`templates/.agents/skills/<command>/SKILL.md`.
 
-The shared skill should continue to define:
+The `trellis-review-pr` shared skill should continue to define:
 
 - required local checks before starting, including `gh --version`,
   `gh auth status`, and PR resolution from the current branch
@@ -39,16 +41,24 @@ The shared skill should continue to define:
 - automatic Trellis finish-work after a clean final review
 - the final report fields
 
+The `trellis-full-check` shared skill should continue to define the canonical
+local verification script, deterministic checks, Prism behavior, optional Gito
+behavior, skipped-check reporting, and no-edit safety rules.
+
+The `trellis-housekeeping` shared skill should continue to define the
+post-merge task list, the expected clean-state report, anomaly reporting, and
+safety rules that prevent deleting branches unless GitHub confirms the PR is
+merged and the local branch head matches that PR.
+
 ## Platform Adapter Pattern
 
 Adapters should stay short and parallel:
 
-1. State the command goal: run the Trellis PR review loop.
-2. Tell the agent to read `.agents/skills/trellis-review-pr/SKILL.md`.
-3. Summarize the loop: ready PR, request Copilot review, wait, inspect
-   comments and CI, address or rebut feedback, commit, push, repeat.
-4. Include the sixth-loop stop condition.
-5. Include the final documentation or pre-commit recommendations.
+1. State the command goal.
+2. Tell the agent to read the matching `.agents/skills/<command>/SKILL.md`.
+3. Summarize only the command's high-level behavior.
+4. Include any command-specific safety stop condition.
+5. Include the expected final reporting shape.
 
 The Gemini adapter uses TOML because Gemini commands require it. GitHub Copilot
 and OpenCode adapters use Markdown.

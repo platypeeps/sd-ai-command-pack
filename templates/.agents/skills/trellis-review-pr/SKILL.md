@@ -37,6 +37,9 @@ when local review is clean and a remote review is intentionally warranted.
   platform permits it.
 - Do not resolve valid unaddressed or ambiguous threads. Ask the user when a
   comment requires product judgment, scope expansion, or a tradeoff decision.
+- If the PR state is `MERGED` at startup, during polling, or before the final
+  report, stop the review loop and run post-merge housekeeping automatically
+  with `bash scripts/trellis-housekeeping.sh`.
 - End by recommending documentation, spec, prompt, or pre-commit improvements
   that would prevent avoidable Copilot feedback next time. Do not apply those
   recommendations unless the user asks.
@@ -84,6 +87,27 @@ continuing; do not request Copilot review on stale remote code.
 If the PR is draft, do not mark it ready until the local full-check has passed
 unless the user explicitly asked to mark it ready immediately. This keeps
 `ready_for_review` workflows from starting before local review is clean.
+
+## Step 1.5: Post-Merge Auto-Dispatch
+
+If the PR is already merged, do not continue the review loop. Run housekeeping
+inside the active session:
+
+```bash
+PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq .state)
+if [ "$PR_STATE" = "MERGED" ]; then
+  bash scripts/trellis-housekeeping.sh
+fi
+```
+
+If `scripts/trellis-housekeeping.sh` is missing, read
+`.agents/skills/trellis-housekeeping/SKILL.md` if present and report that the
+pack should be reinstalled because the canonical script is absent.
+
+This auto-dispatch is session-local. It works when the active agent observes
+the merge through `gh`, including a user merging the PR while the session is
+still running. It is not a background GitHub webhook and cannot wake a closed
+or idle tool session by itself.
 
 ## Step 2: Run Local Full Check
 
@@ -330,7 +354,7 @@ If the remote loop would start round 6, ask:
 
 Do not continue until the user approves.
 
-## Step 8: Finish Work Automatically
+## Step 8: Finish Work And Post-Merge Housekeeping Automatically
 
 After the loop stops because local full-check passes and no requested remote
 review produced new actionable comments, run the Trellis finish-work flow
@@ -353,6 +377,22 @@ the routing in `trellis-finish-work` rather than forcing a commit. The PR review
 loop is complete only after finish-work has either completed successfully or
 reported a concrete blocker.
 
+Before the final report, refresh PR state:
+
+```bash
+PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq .state)
+```
+
+If `PR_STATE` is `MERGED`, immediately run:
+
+```bash
+bash scripts/trellis-housekeeping.sh
+```
+
+Then include the housekeeping clean-state/anomaly report in the final response.
+If housekeeping reports anomalies, do not mask them; they are the post-merge
+handoff.
+
 ## Final Report
 
 Report:
@@ -363,6 +403,8 @@ Report:
 - Comments fixed, rebutted, or left for user decision.
 - Commits pushed during the loop.
 - Finish-work actions and any archive/journal commits pushed.
+- Housekeeping actions if the PR was already merged or became merged during the
+  active session.
 - CI status.
 - Final working-tree state.
 - Recommended internal documentation, spec, prompt, or pre-commit changes that

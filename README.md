@@ -5,24 +5,31 @@
 [![Tests](https://img.shields.io/badge/tests-unittest-2E7D32)](#verify)
 [![Source](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/platypeeps/trellis-review-pr-pack)
 
-Install a reusable Trellis PR review and full-check loop into
+Install reusable Trellis PR review, full-check, and post-merge housekeeping
+workflows into
 [Trellis-managed repositories](https://trytrellis.app/).
 
 The pack includes:
 
 - `.agents/skills/trellis-review-pr/SKILL.md`
 - `.agents/skills/trellis-full-check/SKILL.md`
+- `.agents/skills/trellis-housekeeping/SKILL.md`
 - `scripts/trellis-full-check.sh`
+- `scripts/trellis-housekeeping.sh`
 - `.prism/rules.json`
 - `docs/TRELLIS_REVIEW_PR_PACK.md`
 - `.claude/commands/trellis/review-pr.md`
 - `.claude/commands/trellis/full-check.md`
+- `.claude/commands/trellis/housekeeping.md`
 - `.gemini/commands/trellis/review-pr.toml`
 - `.gemini/commands/trellis/full-check.toml`
+- `.gemini/commands/trellis/housekeeping.toml`
 - `.github/prompts/review-pr.prompt.md`
 - `.github/prompts/full-check.prompt.md`
+- `.github/prompts/housekeeping.prompt.md`
 - `.opencode/commands/trellis/review-pr.md`
 - `.opencode/commands/trellis/full-check.md`
+- `.opencode/commands/trellis/housekeeping.md`
 
 The shared skills own the workflows. Platform command and prompt files are thin
 entry points that tell the agent to load the appropriate shared skill.
@@ -37,9 +44,19 @@ cache access, network access, and configured LLM credentials. When enabled,
 Gito writes reports to `.build/review/gito` by default; override with
 `TRELLIS_FULL_CHECK_GITO_OUT_DIR` when needed.
 
+`/trellis:housekeeping` is for post-merge cleanup after a single active
+development stream lands. It fetches/prunes, confirms the current feature
+branch's PR is merged and the local branch head matches that PR before deleting
+anything, switches to the default branch, fast-forwards it, removes the merged
+local and remote branch, and finishes with a condensed "expected clean state"
+plus anomalies report.
+
 `/trellis:review-pr` is local-review-first. It runs the full-check/Prism path
 before requesting a paid or remote GitHub Copilot review, and treats Copilot as
 an explicit final pass rather than the default convergence mechanism.
+If an active review-pr session observes that the PR is `MERGED`, it stops the
+review loop and runs `/trellis:housekeeping` automatically. This is session
+automation, not a background webhook; it cannot wake an inactive tool session.
 
 ## Install
 
@@ -50,9 +67,9 @@ python3 install.py /path/to/trellis/repo
 ```
 
 The installer requires `.trellis/config.yaml` in the target repo. It always
-installs the shared `.agents` skills, full-check script, Prism rules, and usage
-guide. It installs platform adapters only when the target repo already has the
-corresponding platform directory.
+installs the shared `.agents` skills, full-check and housekeeping scripts,
+Prism rules, and usage guide. It installs platform adapters only when the
+target repo already has the corresponding platform directory.
 
 Useful options:
 
@@ -68,9 +85,9 @@ By default, existing files with different content are reported as conflicts and
 left untouched. Use `--force` to overwrite them. Add `--backup` with `--force`
 to save overwritten files next to the original with a `.bak` suffix.
 
-Platform filters always include the shared skills, full-check script, and Prism
-rules, plus the usage guide, because every adapter delegates to the shared
-workflow.
+Platform filters always include the shared skills, full-check and housekeeping
+scripts, Prism rules, and usage guide, because every adapter delegates to the
+shared workflow.
 
 ## Verify
 
@@ -87,7 +104,7 @@ python3 -m unittest discover -s tests
 
 | Platform | Installed When |
 | --- | --- |
-| Shared skills, script, Prism rules, usage guide | Always |
+| Shared skills, scripts, Prism rules, usage guide | Always |
 | Claude Code | `.claude/` exists, or `--all` / `--platform claude` |
 | Gemini CLI | `.gemini/` exists, or `--all` / `--platform gemini` |
 | GitHub Copilot | `.github/` exists, or `--all` / `--platform github` |
@@ -100,6 +117,8 @@ This pack is intentionally shaped like the eventual Trellis upstream change:
 - Move the shared skill to
   `packages/cli/src/templates/common/bundled-skills/trellis-review-pr/SKILL.md`.
 - Move the full-check skill and script to the equivalent shared template
+  locations.
+- Move the housekeeping skill and script to the equivalent shared template
   locations.
 - Move command templates into Trellis' common or platform-specific command
   template directories.
