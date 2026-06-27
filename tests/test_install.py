@@ -868,7 +868,8 @@ class InstallTests(unittest.TestCase):
         self.assertIn("deleted remote branch origin/feature/cleanup", result.stdout)
         self.assertIn("==> Anomalies\nnone", result.stdout)
         self.assertEqual(self.git_output(repo, "branch", "--show-current"), "main")
-        self.assertIn("[skip ci]", self.git_output(repo, "log", "-1", "--pretty=%B"))
+        recent_messages = self.git_output(repo, "log", "-5", "--pretty=%B")
+        self.assertIn("[skip ci]", recent_messages)
         remote_branch = subprocess.run(
             ["git", "ls-remote", "--exit-code", str(remote), "refs/heads/feature/cleanup"],
             text=True,

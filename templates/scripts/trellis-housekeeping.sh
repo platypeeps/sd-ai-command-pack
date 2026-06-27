@@ -21,7 +21,7 @@ usage() {
   cat <<'EOF'
 Usage: bash scripts/trellis-housekeeping.sh [options]
 
-Post-merge housekeeping for a single active Trellis development stream.
+End-of-stream housekeeping for a single active Trellis development stream.
 
 Options:
   --dry-run              Preview cleanup without running mutating git commands.
