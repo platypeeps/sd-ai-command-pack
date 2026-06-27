@@ -10,6 +10,8 @@ EXPECTED=()
 ANOMALIES=()
 DEFAULT_BRANCH=""
 START_BRANCH=""
+GITHUB_REPO_SLUG=""
+GH_REPO_ARGS=()
 
 usage() {
   cat <<'EOF'
@@ -123,9 +125,19 @@ fetch_and_prune() {
   fi
 }
 
-detect_default_branch() {
+configure_github_repo_scope() {
   local remote_url
-  local repo_slug
+
+  GITHUB_REPO_SLUG=""
+  GH_REPO_ARGS=()
+  remote_url="$(git remote get-url "$REMOTE" 2>/dev/null || true)"
+  GITHUB_REPO_SLUG="$(github_repo_from_remote_url "$remote_url" || true)"
+  if [ -n "$GITHUB_REPO_SLUG" ]; then
+    GH_REPO_ARGS=(--repo "$GITHUB_REPO_SLUG")
+  fi
+}
+
+detect_default_branch() {
   local symbolic
   symbolic="$(git symbolic-ref --quiet --short "refs/remotes/$REMOTE/HEAD" 2>/dev/null || true)"
   if [ -n "$symbolic" ]; then
@@ -134,10 +146,8 @@ detect_default_branch() {
   fi
 
   if have gh; then
-    remote_url="$(git remote get-url "$REMOTE" 2>/dev/null || true)"
-    repo_slug="$(github_repo_from_remote_url "$remote_url" || true)"
-    if [ -n "$repo_slug" ]; then
-      DEFAULT_BRANCH="$(gh repo view "$repo_slug" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)"
+    if [ -n "$GITHUB_REPO_SLUG" ]; then
+      DEFAULT_BRANCH="$(gh repo view "$GITHUB_REPO_SLUG" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)"
     else
       DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)"
     fi
@@ -246,7 +256,7 @@ view_pr_for_branch() {
   local branch="$1"
   local pr_data
   pr_data="$(
-    gh pr view \
+    gh pr view "${GH_REPO_ARGS[@]}" \
       --json number,state,mergedAt,url,headRefName,headRefOid \
       --jq '[.number, .state, .mergedAt, .url, .headRefName, .headRefOid] | @tsv' \
       -- "$branch" \
@@ -258,7 +268,7 @@ view_pr_for_branch() {
     return 0
   fi
 
-  gh pr list --state merged --head="$branch" --limit 1 \
+  gh pr list "${GH_REPO_ARGS[@]}" --state merged --head="$branch" --limit 1 \
     --json number,state,mergedAt,url,headRefName,headRefOid \
     --jq '.[0] | select(. != null) | [.number, .state, .mergedAt, .url, .headRefName, .headRefOid] | @tsv' \
     2>/dev/null ||
@@ -370,7 +380,7 @@ check_open_prs() {
     return 0
   fi
 
-  if ! open_prs="$(gh pr list --state open --limit 100 --json number,title,headRefName --jq '.[] | "#\(.number) \(.headRefName): \(.title)"' 2>/dev/null)"; then
+  if ! open_prs="$(gh pr list "${GH_REPO_ARGS[@]}" --state open --limit 100 --json number,title,headRefName --jq '.[] | "#\(.number) \(.headRefName): \(.title)"' 2>/dev/null)"; then
     add_anomaly "failed to list open PRs"
     return 0
   fi
@@ -391,7 +401,7 @@ check_open_issues() {
     return 0
   fi
 
-  if ! open_issues="$(gh issue list --state open --limit 100 --json number,title --jq '.[] | "#\(.number): \(.title)"' 2>/dev/null)"; then
+  if ! open_issues="$(gh issue list "${GH_REPO_ARGS[@]}" --state open --limit 100 --json number,title --jq '.[] | "#\(.number): \(.title)"' 2>/dev/null)"; then
     add_anomaly "failed to list open issues"
     return 0
   fi
@@ -526,6 +536,7 @@ main() {
   START_BRANCH="$(current_branch)"
   printf 'start branch: %s\n' "${START_BRANCH:-detached HEAD}"
 
+  configure_github_repo_scope
   fetch_and_prune
   detect_default_branch
   if [ -n "$DEFAULT_BRANCH" ]; then
