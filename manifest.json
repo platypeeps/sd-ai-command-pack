@@ -1,7 +1,7 @@
 {
   "name": "trellis-review-pr-pack",
   "version": "0.2.0",
-  "description": "Install project-local Trellis review/full-check workflows, Prism rules, usage guide, and platform adapters into Trellis repos.",
+  "description": "Install project-local Trellis review/full-check/housekeeping workflows, Prism rules, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
   "files": [
     {
@@ -20,9 +20,23 @@
     },
     {
       "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/trellis-housekeeping/SKILL.md",
+      "target": ".agents/skills/trellis-housekeeping/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
       "kind": "script",
       "source": "templates/scripts/trellis-full-check.sh",
       "target": "scripts/trellis-full-check.sh",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "script",
+      "source": "templates/scripts/trellis-housekeeping.sh",
+      "target": "scripts/trellis-housekeeping.sh",
       "install": "always"
     },
     {
@@ -54,6 +68,13 @@
       "anchor": ".claude"
     },
     {
+      "platform": "claude",
+      "kind": "command",
+      "source": "templates/.claude/commands/trellis/housekeeping.md",
+      "target": ".claude/commands/trellis/housekeeping.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "gemini",
       "kind": "command",
       "source": "templates/.gemini/commands/trellis/review-pr.toml",
@@ -65,6 +86,13 @@
       "kind": "command",
       "source": "templates/.gemini/commands/trellis/full-check.toml",
       "target": ".gemini/commands/trellis/full-check.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/trellis/housekeeping.toml",
+      "target": ".gemini/commands/trellis/housekeeping.toml",
       "anchor": ".gemini"
     },
     {
@@ -82,6 +110,13 @@
       "anchor": ".github"
     },
     {
+      "platform": "github",
+      "kind": "prompt",
+      "source": "templates/.github/prompts/housekeeping.prompt.md",
+      "target": ".github/prompts/housekeeping.prompt.md",
+      "anchor": ".github"
+    },
+    {
       "platform": "opencode",
       "kind": "command",
       "source": "templates/.opencode/commands/trellis/review-pr.md",
@@ -93,6 +128,13 @@
       "kind": "command",
       "source": "templates/.opencode/commands/trellis/full-check.md",
       "target": ".opencode/commands/trellis/full-check.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.opencode/commands/trellis/housekeeping.md",
+      "target": ".opencode/commands/trellis/housekeeping.md",
       "anchor": ".opencode"
     }
   ]

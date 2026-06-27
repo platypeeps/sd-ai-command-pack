@@ -7,13 +7,15 @@ This repo has the reusable Trellis review-cycle setup installed from
 
 - `.agents/skills/trellis-review-pr/SKILL.md`: local-review-first PR workflow.
 - `.agents/skills/trellis-full-check/SKILL.md`: full local verification workflow.
-- `scripts/trellis-full-check.sh`: canonical script used by all command surfaces.
+- `.agents/skills/trellis-housekeeping/SKILL.md`: post-merge cleanup workflow.
+- `scripts/trellis-full-check.sh`: canonical full-check script.
+- `scripts/trellis-housekeeping.sh`: canonical post-merge housekeeping script.
 - `.prism/rules.json`: default Prism review rules for repo-specific checks.
 - Platform adapters under `.claude/`, `.gemini/`, `.github/prompts/`, and
   `.opencode/` when those platform folders exist.
 
 The command and prompt files are entry points only. The workflow behavior lives
-in the shared skills and `scripts/trellis-full-check.sh`.
+in the shared skills and scripts.
 
 ## Recommended review loop
 
@@ -29,6 +31,13 @@ in the shared skills and `scripts/trellis-full-check.sh`.
 6. Let `/trellis:review-pr` reply to and resolve review threads as part of the
    normal loop once findings are fixed, rebutted with evidence, or confirmed
    already addressed.
+7. After the PR merges, run `/trellis:housekeeping` to get back to the default
+   branch, prune/delete the merged development stream, and see the condensed
+   clean-state/anomaly report.
+8. If `/trellis:review-pr` sees the PR is already merged or becomes merged
+   during the active session, it auto-dispatches housekeeping before the final
+   report. This does not wake inactive sessions; it only runs when the active
+   agent observes the merge.
 
 ## Commands
 
@@ -36,6 +45,7 @@ Use the platform-native command when available:
 
 ```bash
 /trellis:full-check
+/trellis:housekeeping
 /trellis:review-pr
 ```
 
@@ -43,11 +53,36 @@ Use the script directly from any shell:
 
 ```bash
 bash scripts/trellis-full-check.sh
+bash scripts/trellis-housekeeping.sh
 ```
 
 The full-check script runs `git diff --check`, `git diff --cached --check`,
 detected package scripts, and local Prism review when Prism is available and
 configured.
+
+The housekeeping script performs the usual post-merge cleanup for a single
+active development stream: fetch/prune `origin`, confirm the current feature
+branch's PR is merged and the local branch head matches that PR before deleting
+it, switch to the default branch, fast-forward from `origin`, delete the merged
+local and remote branch, and then report the expected clean state plus
+anomalies.
+
+A clean housekeeping run should end with:
+
+```text
+==> Expected clean state
+- branch: main
+- working tree: clean
+- main matches origin/main
+- local branches: only main
+- remote branches: only origin/HEAD and origin/main
+- open PRs: none
+- open issues: none
+- Trellis active tasks: none
+
+==> Anomalies
+none
+```
 
 ## Configuration
 
@@ -83,6 +118,13 @@ or remote AI review. Repos can still use labels such as `full-ci`, manual
 workflow dispatch, or ready-for-review transitions for GitHub-side expensive
 checks.
 
+## Housekeeping cadence
+
+Run housekeeping after a PR is merged and any finish-work journal commit has
+landed. If the command reports anomalies, treat them as the next manual action:
+dirty files, an unmerged PR, extra branches, open PRs/issues, or remaining
+Trellis tasks mean the repo is not yet in the expected clean state.
+
 ## Updating the pack
 
 To refresh installed assets from the pack checkout:
@@ -99,8 +141,12 @@ to be preserved next to the overwritten files.
 
 - Missing `/trellis:full-check` command: reinstall the pack and include the
   platform adapter for the tool you are using.
+- Missing `/trellis:housekeeping` command: reinstall the pack and include the
+  platform adapter for the tool you are using.
 - `scripts/trellis-full-check.sh` is missing: reinstall the pack; every target
   repo should receive the shared script.
+- `scripts/trellis-housekeeping.sh` is missing: reinstall the pack; every
+  target repo should receive the shared script.
 - Prism authentication/config failure: configure Prism locally, set
   `TRELLIS_FULL_CHECK_PRISM=0` to skip it, or set
   `TRELLIS_FULL_CHECK_PRISM=required` when review must be mandatory.

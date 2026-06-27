@@ -23,10 +23,10 @@ guessing.
 
 ## Required Patterns
 
-- Every adapter must instruct the agent to read
-  `.agents/skills/trellis-review-pr/SKILL.md`.
-- Every adapter must mention the review loop, the sixth-loop stop condition,
-  and the final documentation/pre-commit recommendations.
+- Every adapter must instruct the agent to read the matching shared skill under
+  `.agents/skills/<command>/SKILL.md`.
+- Every adapter must mention its command's core loop or task list, safety
+  stop condition, and final report expectation.
 - New adapters need README documentation and installer tests.
 - Markdown prompts should use concise numbered steps.
 - The shared skill should keep safety rules and final report requirements in
@@ -34,6 +34,8 @@ guessing.
 - The shared skill should keep standing permission for review-thread
   reply/resolve actions scoped to fixed, rebutted, or already-addressed
   threads.
+- The housekeeping skill should keep its expected clean-state output and
+  anomaly reporting explicit.
 
 ## Testing Requirements
 

@@ -87,17 +87,23 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".agents/skills/trellis-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/trellis-full-check/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/trellis-housekeeping/SKILL.md").is_file())
         self.assertTrue((root / "scripts/trellis-full-check.sh").is_file())
+        self.assertTrue((root / "scripts/trellis-housekeeping.sh").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
         self.assertTrue((root / "docs/TRELLIS_REVIEW_PR_PACK.md").is_file())
         self.assertTrue((root / ".gemini/commands/trellis/review-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/trellis/full-check.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/trellis/housekeeping.toml").is_file())
         self.assertTrue((root / ".github/prompts/review-pr.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/full-check.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/housekeeping.prompt.md").is_file())
         self.assertFalse((root / ".claude/commands/trellis/review-pr.md").exists())
         self.assertFalse((root / ".claude/commands/trellis/full-check.md").exists())
+        self.assertFalse((root / ".claude/commands/trellis/housekeeping.md").exists())
         self.assertFalse((root / ".opencode/commands/trellis/review-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/trellis/full-check.md").exists())
+        self.assertFalse((root / ".opencode/commands/trellis/housekeeping.md").exists())
 
     def test_platform_filter_still_installs_shared_assets(self) -> None:
         root = self.make_repo(".claude", ".gemini", ".github", ".opencode")
@@ -107,17 +113,23 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".agents/skills/trellis-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/trellis-full-check/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/trellis-housekeeping/SKILL.md").is_file())
         self.assertTrue((root / "scripts/trellis-full-check.sh").is_file())
+        self.assertTrue((root / "scripts/trellis-housekeeping.sh").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
         self.assertTrue((root / "docs/TRELLIS_REVIEW_PR_PACK.md").is_file())
         self.assertTrue((root / ".gemini/commands/trellis/review-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/trellis/full-check.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/trellis/housekeeping.toml").is_file())
         self.assertFalse((root / ".claude/commands/trellis/review-pr.md").exists())
         self.assertFalse((root / ".claude/commands/trellis/full-check.md").exists())
+        self.assertFalse((root / ".claude/commands/trellis/housekeeping.md").exists())
         self.assertFalse((root / ".github/prompts/review-pr.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/full-check.prompt.md").exists())
+        self.assertFalse((root / ".github/prompts/housekeeping.prompt.md").exists())
         self.assertFalse((root / ".opencode/commands/trellis/review-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/trellis/full-check.md").exists())
+        self.assertFalse((root / ".opencode/commands/trellis/housekeeping.md").exists())
 
     def test_all_installs_every_adapter_without_anchors(self) -> None:
         root = self.make_repo()
@@ -127,17 +139,23 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".agents/skills/trellis-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/trellis-full-check/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/trellis-housekeeping/SKILL.md").is_file())
         self.assertTrue((root / "scripts/trellis-full-check.sh").is_file())
+        self.assertTrue((root / "scripts/trellis-housekeeping.sh").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
         self.assertTrue((root / "docs/TRELLIS_REVIEW_PR_PACK.md").is_file())
         self.assertTrue((root / ".claude/commands/trellis/review-pr.md").is_file())
         self.assertTrue((root / ".claude/commands/trellis/full-check.md").is_file())
+        self.assertTrue((root / ".claude/commands/trellis/housekeeping.md").is_file())
         self.assertTrue((root / ".gemini/commands/trellis/review-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/trellis/full-check.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/trellis/housekeeping.toml").is_file())
         self.assertTrue((root / ".github/prompts/review-pr.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/full-check.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/housekeeping.prompt.md").is_file())
         self.assertTrue((root / ".opencode/commands/trellis/review-pr.md").is_file())
         self.assertTrue((root / ".opencode/commands/trellis/full-check.md").is_file())
+        self.assertTrue((root / ".opencode/commands/trellis/housekeeping.md").is_file())
 
     def test_installed_adapters_can_resolve_shared_skill(self) -> None:
         root = self.make_repo(".claude", ".gemini", ".github", ".opencode")
@@ -147,10 +165,14 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         review_skill = root / ".agents/skills/trellis-review-pr/SKILL.md"
         full_check_skill = root / ".agents/skills/trellis-full-check/SKILL.md"
+        housekeeping_skill = root / ".agents/skills/trellis-housekeeping/SKILL.md"
         full_check_script = root / "scripts/trellis-full-check.sh"
+        housekeeping_script = root / "scripts/trellis-housekeeping.sh"
         self.assertTrue(review_skill.is_file())
         self.assertTrue(full_check_skill.is_file())
+        self.assertTrue(housekeeping_skill.is_file())
         self.assertTrue(full_check_script.is_file())
+        self.assertTrue(housekeeping_script.is_file())
         for adapter in [
             root / ".claude/commands/trellis/review-pr.md",
             root / ".gemini/commands/trellis/review-pr.toml",
@@ -172,6 +194,16 @@ class InstallTests(unittest.TestCase):
             content = adapter.read_text(encoding="utf-8")
             self.assertIn(".agents/skills/trellis-full-check/SKILL.md", content)
             self.assertIn("scripts/trellis-full-check.sh", content)
+        for adapter in [
+            root / ".claude/commands/trellis/housekeeping.md",
+            root / ".gemini/commands/trellis/housekeeping.toml",
+            root / ".github/prompts/housekeeping.prompt.md",
+            root / ".opencode/commands/trellis/housekeeping.md",
+        ]:
+            self.assertTrue(adapter.is_file(), adapter)
+            content = adapter.read_text(encoding="utf-8")
+            self.assertIn(".agents/skills/trellis-housekeeping/SKILL.md", content)
+            self.assertIn("scripts/trellis-housekeeping.sh", content)
 
     def test_conflict_requires_force(self) -> None:
         root = self.make_repo(".gemini")
@@ -261,11 +293,14 @@ class InstallTests(unittest.TestCase):
         self.assertIn("mode: dry-run", result.stdout)
         self.assertFalse((root / ".agents/skills/trellis-review-pr/SKILL.md").exists())
         self.assertFalse((root / ".agents/skills/trellis-full-check/SKILL.md").exists())
+        self.assertFalse((root / ".agents/skills/trellis-housekeeping/SKILL.md").exists())
         self.assertFalse((root / "scripts/trellis-full-check.sh").exists())
+        self.assertFalse((root / "scripts/trellis-housekeeping.sh").exists())
         self.assertFalse((root / ".prism/rules.json").exists())
         self.assertFalse((root / "docs/TRELLIS_REVIEW_PR_PACK.md").exists())
         self.assertFalse((root / ".opencode/commands/trellis/review-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/trellis/full-check.md").exists())
+        self.assertFalse((root / ".opencode/commands/trellis/housekeeping.md").exists())
 
     def test_rejects_non_trellis_repo(self) -> None:
         tempdir = tempfile.TemporaryDirectory(prefix="trellis-review-pr-pack-test-")
@@ -450,6 +485,12 @@ class InstallTests(unittest.TestCase):
             if "full-check" in file.target.name:
                 self.assertIn(".agents/skills/trellis-full-check/SKILL.md", content)
                 self.assertIn("scripts/trellis-full-check.sh", content)
+            elif "housekeeping" in file.target.name:
+                self.assertIn(
+                    ".agents/skills/trellis-housekeeping/SKILL.md",
+                    content,
+                )
+                self.assertIn("scripts/trellis-housekeeping.sh", content)
             else:
                 self.assertIn(".agents/skills/trellis-review-pr/SKILL.md", content)
 
@@ -488,6 +529,66 @@ class InstallTests(unittest.TestCase):
         self.assertIn("fixed, rebutted with evidence", skill)
         self.assertIn("confirmed already addressed", skill)
         self.assertIn("Do not resolve valid unaddressed or ambiguous threads", skill)
+
+    def test_review_pr_skill_auto_dispatches_housekeeping_after_merge(self) -> None:
+        skill = (
+            install.ROOT
+            / "templates/.agents/skills/trellis-review-pr/SKILL.md"
+        ).read_text(encoding="utf-8")
+        adapter_paths = [
+            install.ROOT / "templates/.claude/commands/trellis/review-pr.md",
+            install.ROOT / "templates/.gemini/commands/trellis/review-pr.toml",
+            install.ROOT / "templates/.github/prompts/review-pr.prompt.md",
+            install.ROOT / "templates/.opencode/commands/trellis/review-pr.md",
+        ]
+
+        self.assertIn("Post-Merge Auto-Dispatch", skill)
+        self.assertIn('PR_STATE" = "MERGED"', skill)
+        self.assertIn("bash scripts/trellis-housekeeping.sh", skill)
+        self.assertIn("not a background GitHub webhook", skill)
+        for adapter_path in adapter_paths:
+            content = adapter_path.read_text(encoding="utf-8")
+            self.assertIn("becomes merged during the active session", content)
+            self.assertIn("housekeeping auto-dispatch", content)
+
+    def test_housekeeping_skill_and_script_describe_expected_clean_state(self) -> None:
+        skill = (
+            install.ROOT
+            / "templates/.agents/skills/trellis-housekeeping/SKILL.md"
+        ).read_text(encoding="utf-8")
+        script = (
+            install.ROOT / "templates/scripts/trellis-housekeeping.sh"
+        ).read_text(encoding="utf-8")
+        result = subprocess.run(
+            [
+                "bash",
+                "-n",
+                str(install.ROOT / "templates/scripts/trellis-housekeeping.sh"),
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        for text in [
+            "Expected clean state",
+            "Anomalies",
+            "default branch checked out",
+            "no open PRs",
+            "no active Trellis tasks",
+        ]:
+            self.assertIn(text, skill)
+        for text in [
+            "Expected clean state",
+            "Anomalies",
+            "open PRs: none",
+            "Trellis active tasks: none",
+            "confirmed PR #$pr_number merged",
+            "gh pr list --state merged --head",
+        ]:
+            self.assertIn(text, script)
 
     def test_manifest_sources_do_not_have_trailing_whitespace(self) -> None:
         _, files = install.load_manifest()

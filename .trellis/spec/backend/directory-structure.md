@@ -33,7 +33,7 @@ logic.
 - Keep installable payloads under `templates/` and describe them in
   `manifest.json`; do not hard-code new template paths only in Python.
 - Keep platform adapters thin. The shared workflow belongs in
-  `templates/.agents/skills/trellis-review-pr/SKILL.md`.
+  the matching `templates/.agents/skills/<command>/SKILL.md` file.
 - Keep tests in `tests/test_install.py` unless test volume grows enough to
   justify splitting by behavior.
 
