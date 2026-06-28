@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 4
+- **Total Sessions**: 5
 - **Last Active**: 2026-06-27
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~152 | Active |
+| `journal-1.md` | ~188 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 5 | 2026-06-27 | Auto-finalize housekeeping PR review | `91ad595`, `2a545a8`, `be87ca7`, `85d4fb3` | `codex/auto-finalize-housekeeping` |
 | 4 | 2026-06-27 | Add Trellis housekeeping command | `b6a141c`, `e7d53ff`, `a419ef4`, `e1ad6d7`, `1db1a00`, `8873a79`, `4f3da9f`, `1b467f5`, `593a472` | `codex/add-housekeeping-command` |
 | 3 | 2026-06-27 | Allow review thread replies and resolve follow-up | `ae337af`, `9fad716` | `codex/review-cycle-full-check` |
 | 2 | 2026-06-26 | Harden review pack installer PR | `f8a5e2a`, `ca64957`, `15c98d6`, `0509920`, `8a1d3e6`, `61d3ff4` | `codex/review-pack-robustness` |

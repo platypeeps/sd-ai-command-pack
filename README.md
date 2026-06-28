@@ -44,12 +44,16 @@ cache access, network access, and configured LLM credentials. When enabled,
 Gito writes reports to `.build/review/gito` by default; override with
 `TRELLIS_FULL_CHECK_GITO_OUT_DIR` when needed.
 
-`/trellis:housekeeping` is for post-merge cleanup after a single active
-development stream lands. It fetches/prunes, confirms the current feature
-branch's PR is merged and the local branch head matches that PR before deleting
-anything, switches to the default branch, fast-forwards it, removes the merged
-local and remote branch, and finishes with a condensed "expected clean state"
-plus anomalies report.
+`/trellis:housekeeping` is for ending a single active development stream. If
+the current feature branch has an open PR that is clean, green, comment-clean,
+and exactly matches the local and remote branch heads, it can run
+`trellis-finalize`, push the journal commit back to the PR branch with a
+best-effort `[skip ci]` marker, merge the PR, and then continue into normal
+post-merge cleanup. If that gate is not satisfied, it behaves as a post-merge
+cleanup command: fetch/prune, confirm the current feature branch's PR is merged
+and the local branch head matches that PR before deleting anything, switch to
+the default branch, fast-forward it, remove the merged local and remote branch,
+and finish with a condensed "expected clean state" plus anomalies report.
 
 `/trellis:review-pr` is local-review-first. It runs the full-check/Prism path
 before requesting a paid or remote GitHub Copilot review, and treats Copilot as

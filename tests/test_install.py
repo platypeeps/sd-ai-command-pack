@@ -131,6 +131,63 @@ class InstallTests(unittest.TestCase):
         )
         (stub_bin / "gh").chmod(0o755)
 
+    def write_auto_finalize_gh_stub(
+        self,
+        stub_bin: Path,
+        marker: Path,
+        graphql_body: str = "  printf '0\\tfalse\\t\\n'\n",
+    ) -> None:
+        (stub_bin / "gh").write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "branch='feature/cleanup'\n"
+            f"marker={str(marker)!r}\n"
+            "head_oid() { git rev-parse \"refs/heads/$branch\"; }\n"
+            "pr_state() { if [ -f \"$marker\" ]; then printf 'MERGED'; else printf 'OPEN'; fi; }\n"
+            "if [ \"${1:-}\" = repo ] && [ \"${2:-}\" = view ]; then\n"
+            "  printf 'main\\n'\n"
+            "elif [ \"${1:-}\" = api ] && [ \"${2:-}\" = graphql ]; then\n"
+            f"{graphql_body}"
+            "elif [ \"${1:-}\" = pr ] && [ \"${2:-}\" = view ]; then\n"
+            "  state=\"$(pr_state)\"\n"
+            "  head=\"$(head_oid)\"\n"
+            "  args=\" $* \"\n"
+            "  if [[ \"$args\" == *isDraft* ]]; then\n"
+            "    printf '6\\t%s\\tfalse\\thttps://example.test/pr/6\\tfeature/cleanup\\t%s\\tmain\\tCLEAN\\t0\\t2\\n' \"$state\" \"$head\"\n"
+            "  else\n"
+            "    merged_at=''\n"
+            "    if [ \"$state\" = MERGED ]; then merged_at='2026-06-27T18:00:00Z'; fi\n"
+            "    printf '6\\t%s\\t%s\\thttps://example.test/pr/6\\tfeature/cleanup\\t%s\\n' \"$state\" \"$merged_at\" \"$head\"\n"
+            "  fi\n"
+            "elif [ \"${1:-}\" = pr ] && [ \"${2:-}\" = merge ]; then\n"
+            "  remote=\"$(git remote get-url origin)\"\n"
+            "  head=\"$(git rev-parse HEAD)\"\n"
+            "  git --git-dir=\"$remote\" update-ref refs/heads/main \"$head\"\n"
+            "  touch \"$marker\"\n"
+            "elif [ \"${1:-}\" = pr ] && [ \"${2:-}\" = list ]; then\n"
+            "  exit 0\n"
+            "elif [ \"${1:-}\" = issue ] && [ \"${2:-}\" = list ]; then\n"
+            "  exit 0\n"
+            "else\n"
+            "  printf 'unexpected gh invocation: %s\\n' \"$*\" >&2\n"
+            "  exit 1\n"
+            "fi\n",
+            encoding="utf-8",
+        )
+        (stub_bin / "gh").chmod(0o755)
+
+    def write_trellis_finalize_stub(self, stub_bin: Path) -> None:
+        (stub_bin / "trellis-finalize").write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "mkdir -p .trellis/workspace/sdelmas\n"
+            "printf 'finalized\\n' >> .trellis/workspace/sdelmas/journal-1.md\n"
+            "git add .trellis/workspace/sdelmas/journal-1.md\n"
+            "git commit -m 'chore: record journal'\n",
+            encoding="utf-8",
+        )
+        (stub_bin / "trellis-finalize").chmod(0o755)
+
     def run_install(
         self,
         root: Path,
@@ -655,6 +712,14 @@ class InstallTests(unittest.TestCase):
             "Anomalies",
             "open PRs: none",
             "Trellis active tasks: none",
+            "--no-auto-finalize",
+            "--run-finalize-ci",
+            "--merge-strategy",
+            "view_open_pr_readiness_for_branch()",
+            "unresolved_review_thread_count()",
+            "PR #$pr_number is open, green, comment-clean",
+            "pushed finalize journal entries to $REMOTE/$START_BRANCH",
+            "failed to merge PR #$pr_number after finalize",
             "unable to resolve GitHub PR metadata for $branch",
             "confirmed PR #$pr_number merged",
             'GH_REPO_ARGS=(--repo "$GITHUB_REPO_SLUG")',
@@ -740,7 +805,11 @@ class InstallTests(unittest.TestCase):
         result = subprocess.run(
             ["bash", str(install.ROOT / "templates/scripts/trellis-housekeeping.sh")],
             cwd=repo,
-            env={**os.environ, "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"},
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "TRELLIS_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -760,6 +829,200 @@ class InstallTests(unittest.TestCase):
             self.git_output(remote, "rev-parse", "refs/heads/feature/cleanup"),
             moved_head_oid,
         )
+
+    def test_housekeeping_auto_finalizes_green_comment_clean_pr_then_cleans_up(
+        self,
+    ) -> None:
+        repo, remote, stub_bin, _ = self.make_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_finalize_gh_stub(stub_bin, marker)
+        self.write_trellis_finalize_stub(stub_bin)
+
+        result = subprocess.run(
+            ["bash", str(install.ROOT / "templates/scripts/trellis-housekeeping.sh")],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "TRELLIS_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "PR #6 is open, green, comment-clean, and matches local feature/cleanup",
+            result.stdout,
+        )
+        self.assertIn("trellis-finalize created 1 commit(s)", result.stdout)
+        self.assertIn("added [skip ci] to the finalize commit", result.stdout)
+        self.assertIn(
+            "pushed finalize journal entries to origin/feature/cleanup",
+            result.stdout,
+        )
+        self.assertIn("merged PR #6 with merge strategy", result.stdout)
+        self.assertIn("deleted local branch feature/cleanup", result.stdout)
+        self.assertIn("deleted remote branch origin/feature/cleanup", result.stdout)
+        self.assertIn("==> Anomalies\nnone", result.stdout)
+        self.assertEqual(self.git_output(repo, "branch", "--show-current"), "main")
+        recent_messages = self.git_output(repo, "log", "-5", "--pretty=%B")
+        self.assertIn("[skip ci]", recent_messages)
+        remote_branch = subprocess.run(
+            ["git", "ls-remote", "--exit-code", str(remote), "refs/heads/feature/cleanup"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(remote_branch.returncode, 2, remote_branch.stdout)
+
+    def test_housekeeping_counts_unresolved_review_threads_across_pages(
+        self,
+    ) -> None:
+        repo, _, stub_bin, _ = self.make_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_finalize_gh_stub(
+            stub_bin,
+            marker,
+            graphql_body=(
+                "  args=\" $* \"\n"
+                "  if [[ \"$args\" == *\"cursor=PAGE2\"* ]]; then\n"
+                "    printf '1\\tfalse\\t\\n'\n"
+                "  else\n"
+                "    printf '0\\ttrue\\tPAGE2\\n'\n"
+                "  fi\n"
+            ),
+        )
+        self.write_trellis_finalize_stub(stub_bin)
+
+        result = subprocess.run(
+            ["bash", str(install.ROOT / "templates/scripts/trellis-housekeeping.sh")],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "TRELLIS_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "PR #6 has 1 unresolved review thread(s); skipped auto-finalize and merge",
+            result.stdout,
+        )
+        self.assertNotIn("trellis-finalize created", result.stdout)
+        self.assertFalse(marker.exists())
+        self.assertEqual(
+            self.git_output(repo, "branch", "--show-current"),
+            "feature/cleanup",
+        )
+
+    def test_housekeeping_rejects_invalid_github_repo_override(self) -> None:
+        repo, _, stub_bin, _ = self.make_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_finalize_gh_stub(stub_bin, marker)
+        self.write_trellis_finalize_stub(stub_bin)
+
+        result = subprocess.run(
+            ["bash", str(install.ROOT / "templates/scripts/trellis-housekeeping.sh")],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "TRELLIS_HOUSEKEEPING_GITHUB_REPO": "example",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "TRELLIS_HOUSEKEEPING_GITHUB_REPO must be an owner/repo slug",
+            result.stdout,
+        )
+        self.assertIn(
+            "could not derive GitHub repo from origin; skipped auto-finalize and merge",
+            result.stdout,
+        )
+        self.assertNotIn("trellis-finalize created", result.stdout)
+        self.assertFalse(marker.exists())
+
+    def test_housekeeping_rejects_invalid_env_merge_strategy_before_finalize(
+        self,
+    ) -> None:
+        repo, _, stub_bin, _ = self.make_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_finalize_gh_stub(stub_bin, marker)
+        self.write_trellis_finalize_stub(stub_bin)
+
+        result = subprocess.run(
+            ["bash", str(install.ROOT / "templates/scripts/trellis-housekeeping.sh")],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "TRELLIS_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+                "TRELLIS_HOUSEKEEPING_MERGE_STRATEGY": "fast-forward",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "merge strategy is invalid; expected merge, squash, or rebase",
+            result.stdout,
+        )
+        self.assertNotIn("trellis-finalize created", result.stdout)
+        self.assertFalse((repo / ".trellis/workspace/sdelmas/journal-1.md").exists())
+        self.assertFalse(marker.exists())
+
+    def test_housekeeping_reports_review_thread_inspection_failure(
+        self,
+    ) -> None:
+        repo, _, stub_bin, _ = self.make_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_finalize_gh_stub(
+            stub_bin,
+            marker,
+            graphql_body="  exit 42\n",
+        )
+        self.write_trellis_finalize_stub(stub_bin)
+
+        result = subprocess.run(
+            ["bash", str(install.ROOT / "templates/scripts/trellis-housekeeping.sh")],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "TRELLIS_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "failed to inspect review threads for PR #6; skipped auto-finalize and merge",
+            result.stdout,
+        )
+        self.assertIn("==> Expected clean state", result.stdout)
+        self.assertIn("==> Anomalies", result.stdout)
+        self.assertNotIn("trellis-finalize created", result.stdout)
+        self.assertFalse(marker.exists())
 
     def test_manifest_sources_do_not_have_trailing_whitespace(self) -> None:
         _, files = install.load_manifest()
