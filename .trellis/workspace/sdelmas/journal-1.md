@@ -150,3 +150,39 @@ Added the post-merge housekeeping command and automatic review-loop housekeeping
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Auto-finalize housekeeping PR review
+
+**Date**: 2026-06-27
+**Task**: Auto-finalize housekeeping PR review
+**Branch**: `codex/auto-finalize-housekeeping`
+
+### Summary
+
+Added the auto-finalize housekeeping flow, then addressed PR review feedback for paginated review-thread inspection, help text and skip-CI test robustness, env validation, and finalize-command documentation.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `91ad595` | (see git log) |
+| `2a545a8` | (see git log) |
+| `be87ca7` | (see git log) |
+| `85d4fb3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
