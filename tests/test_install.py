@@ -911,7 +911,7 @@ class InstallTests(unittest.TestCase):
         for file in protected:
             self.assertIsNone(install.legacy_adapter_target(file), file.target)
 
-    def test_refresh_specs_wrappers_include_architecture_overview_gate(self) -> None:
+    def test_refresh_specs_wrappers_include_repospec_and_architecture_gates(self) -> None:
         adapter_paths = [
             install.ROOT / "templates/.claude/commands/sd/refresh-specs.md",
             install.ROOT / "templates/.gemini/commands/sd/refresh-specs.toml",
@@ -923,6 +923,10 @@ class InstallTests(unittest.TestCase):
             content = adapter_path.read_text(encoding="utf-8")
             self.assertIn("trellis-update-spec/SKILL.md", content)
             self.assertIn("without modifying", content)
+            self.assertIn("repospec artifact", content)
+            self.assertIn("maintenance infrastructure", content)
+            self.assertIn("instead of hand-editing generated output", content)
+            self.assertIn("no infrastructure", content)
             self.assertIn("ARCHITECTURE.md", content)
             self.assertIn("docs/ARCHITECTURE.md", content)
             self.assertIn(".trellis/spec/**/architecture*.md", content)

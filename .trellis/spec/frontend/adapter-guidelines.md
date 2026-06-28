@@ -63,7 +63,17 @@ The `refresh-specs` command is intentionally adapter-only in this pack. Do not
 copy, fork, or modify Trellis' built-in `trellis-update-spec` skill in
 `templates/.agents/skills/`. Each wrapper should locate the existing skill in
 the target repo, follow that skill as-is for its `.trellis/spec/` update
-process, and then perform the pack-specific architectural-overview gate:
+process, then refresh repo-owned repospec artifacts through existing
+maintenance infrastructure when available, and then perform the pack-specific
+architectural-overview gate:
+
+- If the repo has checked-in infrastructure for maintaining a repospec artifact
+  (docs, scripts, package tasks, make targets, or similar), use that
+  infrastructure to refresh the artifact.
+- Do not hand-edit generated repospec output unless repo docs explicitly say
+  that file is the source of truth.
+- Do not create new repospec infrastructure or a new repospec artifact unless
+  the user asks.
 
 - Search for an existing architecture overview, such as `ARCHITECTURE.md`,
   `docs/ARCHITECTURE.md`, or `.trellis/spec/**/architecture*.md`.
@@ -71,8 +81,8 @@ process, and then perform the pack-specific architectural-overview gate:
   services, command surfaces, data flow, persistence, external integrations,
   config/env, or runtime/deployment topology.
 - Do not create a new overview unless the user asks.
-- Report `Update-spec skill`, `Spec updates`, `Architectural overview`, and
-  `Validation` in the final response.
+- Report `Update-spec skill`, `Spec updates`, `Repospec`,
+  `Architectural overview`, and `Validation` in the final response.
 
 These adapter-only wrappers are intentional exceptions to the usual
 pack-shared-skill adapter pattern. Do not force them to read

@@ -16,8 +16,9 @@ This repo has the reusable Trellis review-cycle setup installed from
 
 The command and prompt files are entry points only. The workflow behavior lives
 in the shared skills and scripts. The refresh-specs wrapper runs the
-Trellis-provided `trellis-update-spec` skill as-is, then performs the
-architecture-overview check.
+Trellis-provided `trellis-update-spec` skill as-is, refreshes repo-owned
+repospec artifacts through existing maintenance infrastructure when available,
+and then performs the architecture-overview check.
 The continue and finish-work wrappers run Trellis' existing
 `trellis-continue` and `trellis-finish-work` skills as-is.
 The slash command namespace is `sd`, not `trellis`, so these pack-owned wrappers
@@ -85,7 +86,11 @@ skills without changing them.
 
 The refresh-specs wrapper reads the existing Trellis `trellis-update-spec` skill
 from the target repo, follows it as-is to update `.trellis/spec/`, and then
-checks for an existing architectural overview. Candidate overview paths include
+checks whether the repo has checked-in infrastructure for maintaining a repospec
+artifact. When repo docs, scripts, package tasks, make targets, or similar
+commands describe how to generate or refresh the repospec, the wrapper uses that
+infrastructure instead of hand-editing generated output. It then checks for an
+existing architectural overview. Candidate overview paths include
 `ARCHITECTURE.md`, `ARCHITECTURE_OVERVIEW.md`, `docs/ARCHITECTURE.md`,
 `docs/ARCHITECTURE_OVERVIEW.md`, and `.trellis/spec/**/architecture*.md`. If an
 overview exists and the work changes high-level architecture such as packages,
