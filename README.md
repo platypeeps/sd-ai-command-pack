@@ -95,7 +95,8 @@ without modifying or replacing it. After the update-spec pass, it checks whether
 the repo has checked-in infrastructure for maintaining a repospec artifact, such
 as repo docs, scripts, package tasks, or make targets. When that infrastructure
 exists, the command uses it to refresh the repospec artifact instead of
-hand-editing generated output. It then checks whether the repo already has an
+hand-editing generated output. If that refresh uses Repomix, the output map
+must be `docs/repomix-map.md`. It then checks whether the repo already has an
 architectural overview such as `ARCHITECTURE.md`, `docs/ARCHITECTURE.md`, or a
 `.trellis/spec/**/architecture*.md` document. It updates that overview only
 when the completed work changes high-level architecture; otherwise it reports

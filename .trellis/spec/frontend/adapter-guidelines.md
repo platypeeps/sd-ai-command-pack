@@ -74,6 +74,9 @@ architectural-overview gate:
   that file is the source of truth.
 - Do not create new repospec infrastructure or a new repospec artifact unless
   the user asks.
+- When the repospec refresh uses Repomix, require the generated output path to
+  be `docs/repomix-map.md`; do not leave a differently named Repomix map as the
+  final artifact.
 
 - Search for an existing architecture overview, such as `ARCHITECTURE.md`,
   `docs/ARCHITECTURE.md`, or `.trellis/spec/**/architecture*.md`.

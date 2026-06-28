@@ -19,7 +19,9 @@ the repo's architectural overview when one exists and the work warrants it.
    the repospec is generated or refreshed. If that infrastructure exists, use it
    to refresh the repospec artifact instead of hand-editing generated output. Do
    not create new repospec infrastructure or a new repospec artifact unless the
-   user asks.
+   user asks. When the repospec refresh uses Repomix, ensure the generated
+   output is written to `docs/repomix-map.md`; report a blocker rather than
+   leaving a differently named Repomix map as the final artifact.
 4. After the repospec pass, check whether the repo already has an
    architectural overview. Search existing files, especially `ARCHITECTURE.md`,
    `ARCHITECTURE_OVERVIEW.md`, `docs/ARCHITECTURE.md`,

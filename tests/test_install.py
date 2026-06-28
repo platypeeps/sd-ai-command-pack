@@ -926,6 +926,8 @@ class InstallTests(unittest.TestCase):
             self.assertIn("repospec artifact", content)
             self.assertIn("maintenance infrastructure", content)
             self.assertIn("instead of hand-editing generated output", content)
+            self.assertIn("Repomix", content)
+            self.assertIn("docs/repomix-map.md", content)
             self.assertIn("no infrastructure", content)
             self.assertIn("ARCHITECTURE.md", content)
             self.assertIn("docs/ARCHITECTURE.md", content)

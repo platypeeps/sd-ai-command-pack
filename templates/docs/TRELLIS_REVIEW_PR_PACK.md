@@ -89,7 +89,8 @@ from the target repo, follows it as-is to update `.trellis/spec/`, and then
 checks whether the repo has checked-in infrastructure for maintaining a repospec
 artifact. When repo docs, scripts, package tasks, make targets, or similar
 commands describe how to generate or refresh the repospec, the wrapper uses that
-infrastructure instead of hand-editing generated output. It then checks for an
+infrastructure instead of hand-editing generated output. If that refresh uses
+Repomix, the output map must be `docs/repomix-map.md`. It then checks for an
 existing architectural overview. Candidate overview paths include
 `ARCHITECTURE.md`, `ARCHITECTURE_OVERVIEW.md`, `docs/ARCHITECTURE.md`,
 `docs/ARCHITECTURE_OVERVIEW.md`, and `.trellis/spec/**/architecture*.md`. If an
