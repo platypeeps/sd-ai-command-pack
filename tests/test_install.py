@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import subprocess
 import sys
@@ -73,6 +74,62 @@ class InstallTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout)
         return result.stdout.strip()
+
+    def shared_manifest_files(self, kind: str) -> list[install.PackFile]:
+        _, files = install.load_manifest()
+        return [
+            file
+            for file in files
+            if file.platform == "shared" and file.kind == kind
+        ]
+
+    def assert_shell_syntax_valid(self, script: Path) -> None:
+        result = subprocess.run(
+            ["bash", "-n", str(script)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def assert_prism_rules_valid(self, rules_path: Path) -> None:
+        rules = json.loads(rules_path.read_text(encoding="utf-8"))
+
+        self.assertIsInstance(rules, dict)
+        self.assertLessEqual(
+            set(rules),
+            {"focus", "severityOverrides", "required"},
+        )
+
+        focus = rules.get("focus")
+        self.assertIsInstance(focus, list)
+        self.assertGreater(len(focus), 0)
+        for item in focus:
+            self.assertIsInstance(item, str)
+            self.assertTrue(item)
+
+        severity_overrides = rules.get("severityOverrides")
+        self.assertIsInstance(severity_overrides, dict)
+        self.assertGreater(len(severity_overrides), 0)
+        for category, severity in severity_overrides.items():
+            self.assertIsInstance(category, str)
+            self.assertTrue(category)
+            self.assertIn(severity, {"low", "medium", "high"})
+
+        required = rules.get("required")
+        self.assertIsInstance(required, list)
+        self.assertGreater(len(required), 0)
+        seen_ids: set[str] = set()
+        for check in required:
+            self.assertIsInstance(check, dict)
+            self.assertEqual(set(check), {"id", "text"})
+            self.assertIsInstance(check["id"], str)
+            self.assertTrue(check["id"])
+            self.assertNotIn(check["id"], seen_ids)
+            seen_ids.add(check["id"])
+            self.assertIsInstance(check["text"], str)
+            self.assertTrue(check["text"])
 
     def make_housekeeping_repo(self) -> tuple[Path, Path, Path, str]:
         tempdir = tempfile.TemporaryDirectory(prefix="trellis-housekeeping-test-")
@@ -331,6 +388,24 @@ class InstallTests(unittest.TestCase):
             content = adapter.read_text(encoding="utf-8")
             self.assertIn(".agents/skills/trellis-housekeeping/SKILL.md", content)
             self.assertIn("scripts/trellis-housekeeping.sh", content)
+
+    def test_installed_shared_scripts_and_prism_rules_are_valid(self) -> None:
+        root = self.make_repo(".gemini")
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        script_files = self.shared_manifest_files("script")
+        self.assertGreater(len(script_files), 0)
+        for file in script_files:
+            installed_script = root / file.target
+            self.assertTrue(installed_script.is_file(), installed_script)
+            self.assertEqual(installed_script.read_bytes(), file.source.read_bytes())
+            self.assert_shell_syntax_valid(installed_script)
+
+        prism_rules = root / ".prism/rules.json"
+        self.assertTrue(prism_rules.is_file())
+        self.assert_prism_rules_valid(prism_rules)
 
     def test_conflict_requires_force(self) -> None:
         root = self.make_repo(".gemini")
@@ -644,6 +719,23 @@ class InstallTests(unittest.TestCase):
             script,
         )
         self.assertLess(script.index(node_guard), script.index(script_loop))
+
+    def test_shared_script_templates_are_shell_syntax_valid(self) -> None:
+        script_files = self.shared_manifest_files("script")
+
+        self.assertGreater(len(script_files), 0)
+        for file in script_files:
+            self.assert_shell_syntax_valid(file.source)
+
+    def test_prism_rules_template_has_valid_shape(self) -> None:
+        prism_rules_files = [
+            file
+            for file in self.shared_manifest_files("config")
+            if file.target == Path(".prism/rules.json")
+        ]
+
+        self.assertEqual(len(prism_rules_files), 1)
+        self.assert_prism_rules_valid(prism_rules_files[0].source)
 
     def test_review_pr_skill_allows_reply_and_resolve_for_addressed_threads(self) -> None:
         skill = (
