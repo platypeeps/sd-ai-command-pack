@@ -225,3 +225,36 @@ Added sd-namespaced command wrappers, refresh-specs architecture/repospec guidan
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: Resolve PR merge conflict
+
+**Date**: 2026-06-28
+**Task**: Resolve PR merge conflict
+**Branch**: `codex/update-spec-architecture-wrapper`
+
+### Summary
+
+Merged origin/main into PR #10, resolved the tests/test_install.py conflict by preserving both shared script/Prism validation and obsolete adapter cleanup coverage, hardened the test helpers after local review findings, and confirmed PR mergeability plus CI.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ba9b936` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
