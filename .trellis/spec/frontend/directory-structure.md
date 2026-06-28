@@ -8,16 +8,17 @@
 
 This repository does not contain a browser frontend, React app, or visual UI.
 The frontend-like surface is the set of platform command and prompt adapters
-that users invoke from Gemini, GitHub Copilot, and OpenCode.
+that users invoke from Claude, Gemini, GitHub Copilot, and OpenCode.
 
 ## Directory Layout
 
 ```text
 templates/
 ├── .agents/skills/<command>/SKILL.md               # Shared workflows
-├── .gemini/commands/trellis/<command>.toml         # Gemini command adapters
-├── .github/prompts/<command>.prompt.md             # GitHub Copilot prompts
-└── .opencode/commands/trellis/<command>.md         # OpenCode command adapters
+├── .claude/commands/sd/<command>.md                # Claude command adapters
+├── .gemini/commands/sd/<command>.toml              # Gemini command adapters
+├── .github/prompts/sd-<command>.prompt.md          # GitHub Copilot prompts
+└── .opencode/commands/sd/<command>.md              # OpenCode command adapters
 ```
 
 ## Module Organization
@@ -30,16 +31,17 @@ templates/
 ## Naming Conventions
 
 - Use command names consistently across platform adapters, such as
-  `review-pr`, `full-check`, and `housekeeping`.
-- Keep Trellis command files under a `trellis/` command namespace.
+  `continue`, `finish-work`, `review-pr`, `full-check`, and `housekeeping`.
+- Keep pack-owned command adapters under the `sd` namespace so they do not
+  collide with Trellis-owned generated command files.
 - Use platform-native file formats: TOML for Gemini commands and Markdown for
-  GitHub Copilot and OpenCode prompts.
+  Claude, GitHub Copilot, and OpenCode prompts.
 
 ## Examples
 
-- `templates/.gemini/commands/trellis/review-pr.toml` contains a short prompt
+- `templates/.gemini/commands/sd/review-pr.toml` contains a short prompt
   that tells Gemini to load the matching shared skill.
-- `templates/.github/prompts/review-pr.prompt.md` mirrors the same entry-point
+- `templates/.github/prompts/sd-review-pr.prompt.md` mirrors the same entry-point
   instructions for GitHub Copilot.
-- `templates/.opencode/commands/trellis/review-pr.md` mirrors the same
+- `templates/.opencode/commands/sd/review-pr.md` mirrors the same
   entry-point instructions for OpenCode.

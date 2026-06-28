@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import shutil
 import subprocess
@@ -16,6 +17,10 @@ ROOT = Path(__file__).resolve().parent
 MANIFEST_PATH = ROOT / "manifest.json"
 PLATFORMS = ("claude", "gemini", "github", "opencode", "shared")
 ALWAYS_INSTALL = "always"
+LEGACY_PACK_COMMANDS = frozenset(
+    {"full-check", "housekeeping", "refresh-specs", "review-pr"}
+)
+FORCE_PRESERVED_TARGETS = frozenset({Path(".prism/rules.json")})
 
 
 @dataclass(frozen=True)
@@ -33,6 +38,13 @@ class InstallResult:
     file: PackFile
     status: str
     backup: Path | None = None
+
+
+@dataclass(frozen=True)
+class LegacyCleanupResult:
+    target: Path
+    status: str
+    reason: str | None = None
 
 
 def load_manifest() -> tuple[dict, list[PackFile]]:
@@ -138,7 +150,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite existing files that differ from the pack templates.",
+        help=(
+            "Overwrite existing files that differ from the pack templates, "
+            "except .prism/rules.json."
+        ),
     )
     parser.add_argument(
         "--backup",
@@ -231,6 +246,8 @@ def install_file(
         current = destination.read_bytes()
         if current == new_content:
             return InstallResult(file, "unchanged")
+        if file.target in FORCE_PRESERVED_TARGETS:
+            return InstallResult(file, "preserved")
         if not force:
             return InstallResult(file, "conflict")
         backup_path = (
@@ -247,6 +264,88 @@ def install_file(
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
     return InstallResult(file, "created")
+
+
+def legacy_adapter_target(file: PackFile) -> Path | None:
+    command_name = file.target.stem.removeprefix("sd-").removesuffix(".prompt")
+    if command_name not in LEGACY_PACK_COMMANDS:
+        return None
+
+    target = file.target.as_posix()
+    if file.kind == "command" and "/commands/sd/" in target:
+        return Path(target.replace("/commands/sd/", "/commands/trellis/"))
+    if (
+        file.platform == "github"
+        and file.kind == "prompt"
+        and file.target.name.startswith("sd-")
+    ):
+        return file.target.with_name(file.target.name.removeprefix("sd-"))
+    return None
+
+
+def legacy_adapter_contents(file: PackFile) -> set[bytes]:
+    content = file.source.read_bytes()
+    contents = {content}
+    contents.add(content.replace(b'description = "SD: ', b'description = "Trellis: '))
+    return contents
+
+
+def cleanup_legacy_adapters(
+    selected: list[PackFile],
+    target: Path,
+    *,
+    dry_run: bool,
+    force: bool,
+) -> list[LegacyCleanupResult]:
+    results: list[LegacyCleanupResult] = []
+    seen: set[Path] = set()
+    for file in selected:
+        legacy_target = legacy_adapter_target(file)
+        if legacy_target is None or legacy_target in seen:
+            continue
+        seen.add(legacy_target)
+
+        destination = target / legacy_target
+        validate_resolved_target_path(target, destination, "legacy adapter path")
+        if not path_is_occupied(destination):
+            continue
+        if path_is_occupied(destination) and not (
+            destination.is_file() or destination.is_symlink()
+        ):
+            results.append(
+                LegacyCleanupResult(
+                    legacy_target,
+                    "legacy-conflict",
+                    "target exists and is not a file",
+                )
+            )
+            continue
+        content_matches_template = (
+            not destination.is_symlink()
+            and destination.read_bytes() in legacy_adapter_contents(file)
+        )
+        if not force and not content_matches_template:
+            reason = (
+                "target is a symlink"
+                if destination.is_symlink()
+                else "content differs from pack template"
+            )
+            results.append(
+                LegacyCleanupResult(
+                    legacy_target,
+                    "legacy-conflict",
+                    reason,
+                )
+            )
+            continue
+
+        status = "would-remove" if dry_run else "removed"
+        if not dry_run:
+            destination.unlink()
+            with contextlib.suppress(OSError):
+                destination.parent.rmdir()
+        results.append(LegacyCleanupResult(legacy_target, status))
+    return results
 
 
 def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
@@ -319,8 +418,37 @@ def main(argv: list[str] | None = None) -> int:
         print("Re-run with --force to overwrite these files.")
         return 2
 
+    legacy_results = cleanup_legacy_adapters(
+        selected,
+        target,
+        dry_run=args.dry_run,
+        force=args.force,
+    )
+    for result in legacy_results:
+        suffix = f" ({result.reason})" if result.reason else ""
+        print(f"{result.status:11} {result.target}{suffix}")
+
+    legacy_conflicts = [
+        result for result in legacy_results if result.status == "legacy-conflict"
+    ]
+    if legacy_conflicts:
+        print("")
+        print("Legacy adapter conflicts:")
+        for result in legacy_conflicts:
+            suffix = f" ({result.reason})" if result.reason else ""
+            print(f"- {result.target}{suffix}")
+        print("Re-run with --force to remove these legacy adapter files.")
+        return 2
+
     if not args.dry_run and not args.skip_diff_check:
-        diff_paths = [result.file.target for result in results if result.status != "conflict"]
+        diff_paths = [
+            result.file.target
+            for result in results
+            if result.status not in {"conflict", "preserved"}
+        ]
+        diff_paths.extend(
+            result.target for result in legacy_results if result.status == "removed"
+        )
         diff_status = run_diff_check(target, diff_paths)
         if diff_status != 0:
             return diff_status

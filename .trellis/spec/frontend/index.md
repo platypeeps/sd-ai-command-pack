@@ -11,9 +11,22 @@ Use these specs when changing files under `templates/`, especially:
 - `templates/.agents/skills/trellis-review-pr/SKILL.md`
 - `templates/.agents/skills/trellis-full-check/SKILL.md`
 - `templates/.agents/skills/trellis-housekeeping/SKILL.md`
-- `templates/.gemini/commands/trellis/review-pr.toml`
-- `templates/.github/prompts/review-pr.prompt.md`
-- `templates/.opencode/commands/trellis/review-pr.md`
+- `templates/.claude/commands/sd/continue.md`
+- `templates/.claude/commands/sd/finish-work.md`
+- `templates/.claude/commands/sd/review-pr.md`
+- `templates/.claude/commands/sd/refresh-specs.md`
+- `templates/.gemini/commands/sd/continue.toml`
+- `templates/.gemini/commands/sd/finish-work.toml`
+- `templates/.gemini/commands/sd/review-pr.toml`
+- `templates/.gemini/commands/sd/refresh-specs.toml`
+- `templates/.github/prompts/sd-continue.prompt.md`
+- `templates/.github/prompts/sd-finish-work.prompt.md`
+- `templates/.github/prompts/sd-review-pr.prompt.md`
+- `templates/.github/prompts/sd-refresh-specs.prompt.md`
+- `templates/.opencode/commands/sd/continue.md`
+- `templates/.opencode/commands/sd/finish-work.md`
+- `templates/.opencode/commands/sd/review-pr.md`
+- `templates/.opencode/commands/sd/refresh-specs.md`
 
 This repo has no React app, browser UI, hooks, CSS, or client-side state. The
 user-facing layer is prompt and command text that other AI platforms execute.

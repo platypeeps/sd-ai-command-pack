@@ -12,11 +12,16 @@ remain easy to audit because it writes files into other repositories.
 ## Forbidden Patterns
 
 - Do not overwrite user files unless `--force` is set.
+- Do not overwrite an existing `.prism/rules.json` or report it as a conflict;
+  preserve repo-specific review rules during pack refreshes.
 - Do not stage, commit, or modify the target repo beyond the manifest-listed
   files.
 - Do not duplicate platform install rules in several places; update
   `manifest.json` and let `selected_files()` apply the rules.
 - Do not replace structured parsing with ad hoc string parsing for JSON.
+- Do not preserve edited legacy `/trellis:*` adapter files with a separate keep
+  status; report them as conflicts by default and remove them when `--force` is
+  set.
 
 ## Required Patterns
 
