@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,9 +17,26 @@ import install
 
 PACK_ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = PACK_ROOT / "install.py"
+SECRET_MARKERS = (
+    "AKIA",
+    "BEGIN PRIVATE KEY",
+    "xoxb-",
+    "ghp_",
+    "gho_",
+    "/Users/",
+    "\\Users\\",
+)
 
 
 class InstallTests(unittest.TestCase):
+    _bash_path: str | None
+    _manifest_files: list[install.PackFile]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._bash_path = shutil.which("bash")
+        _, cls._manifest_files = install.load_manifest()
+
     def valid_pack_file(
         self,
         *,
@@ -73,6 +92,127 @@ class InstallTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout)
         return result.stdout.strip()
+
+    def shared_manifest_files(self, kind: str) -> list[install.PackFile]:
+        return [
+            file
+            for file in self._manifest_files
+            if file.platform == "shared" and file.kind == kind
+        ]
+
+    def assert_shell_syntax_valid(self, script: Path) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        result = subprocess.run(
+            [self._bash_path, "-n", str(script)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, f"{script}: {result.stdout}")
+
+    def assert_prism_rules_valid(self, rules_path: Path) -> None:
+        rules = json.loads(rules_path.read_text(encoding="utf-8"))
+
+        self.assertIsInstance(rules, dict, f"{rules_path}: root must be an object")
+        self.assertEqual(
+            set(rules),
+            {"focus", "severityOverrides", "required"},
+            f"{rules_path}: unexpected Prism rules keys",
+        )
+
+        focus = rules["focus"]
+        self.assertIsInstance(focus, list, f"{rules_path}: focus must be a list")
+        self.assertGreater(len(focus), 0, f"{rules_path}: focus must not be empty")
+        for index, item in enumerate(focus):
+            self.assertIsInstance(
+                item,
+                str,
+                f"{rules_path}: focus[{index}] must be a string",
+            )
+            self.assertTrue(item, f"{rules_path}: focus[{index}] must not be empty")
+
+        severity_overrides = rules["severityOverrides"]
+        self.assertIsInstance(
+            severity_overrides,
+            dict,
+            f"{rules_path}: severityOverrides must be an object",
+        )
+        self.assertGreater(
+            len(severity_overrides),
+            0,
+            f"{rules_path}: severityOverrides must not be empty",
+        )
+        for category, severity in severity_overrides.items():
+            self.assertIsInstance(
+                category,
+                str,
+                f"{rules_path}: severityOverrides key must be a string",
+            )
+            self.assertTrue(
+                category,
+                f"{rules_path}: severityOverrides key must not be empty",
+            )
+            self.assertIn(
+                severity,
+                {"low", "medium", "high"},
+                f"{rules_path}: severity for {category!r} is invalid",
+            )
+
+        required = rules["required"]
+        self.assertIsInstance(
+            required,
+            list,
+            f"{rules_path}: required must be a list",
+        )
+        self.assertGreater(len(required), 0, f"{rules_path}: required must not be empty")
+        seen_ids: set[str] = set()
+        for index, check in enumerate(required):
+            self.assertIsInstance(
+                check,
+                dict,
+                f"{rules_path}: required[{index}] must be an object",
+            )
+            self.assertEqual(
+                set(check),
+                {"id", "text"},
+                f"{rules_path}: required[{index}] keys are invalid",
+            )
+            self.assertIsInstance(
+                check["id"],
+                str,
+                f"{rules_path}: required[{index}].id must be a string",
+            )
+            self.assertTrue(
+                check["id"],
+                f"{rules_path}: required[{index}].id must not be empty",
+            )
+            self.assertNotIn(
+                check["id"],
+                seen_ids,
+                f"{rules_path}: duplicate required id {check['id']!r}",
+            )
+            seen_ids.add(check["id"])
+            self.assertIsInstance(
+                check["text"],
+                str,
+                f"{rules_path}: required[{index}].text must be a string",
+            )
+            self.assertTrue(
+                check["text"],
+                f"{rules_path}: required[{index}].text must not be empty",
+            )
+
+    def assert_no_secret_markers(self, file_path: Path) -> None:
+        content = file_path.read_text(encoding="utf-8")
+        for marker in SECRET_MARKERS:
+            self.assertNotIn(
+                marker,
+                content,
+                f"{file_path}: contains blocked secret marker {marker!r}",
+            )
 
     def make_housekeeping_repo(self) -> tuple[Path, Path, Path, str]:
         tempdir = tempfile.TemporaryDirectory(prefix="trellis-housekeeping-test-")
@@ -527,6 +667,30 @@ class InstallTests(unittest.TestCase):
         self.assertTrue(
             (root / ".github/prompts/sd-refresh-specs.prompt.md").is_file()
         )
+
+    def test_installed_shared_scripts_and_prism_rules_are_valid(self) -> None:
+        root = self.make_repo(".gemini")
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        script_files = self.shared_manifest_files("script")
+        self.assertGreater(len(script_files), 0)
+        for file in script_files:
+            installed_script = root / file.target
+            self.assertTrue(installed_script.is_file(), installed_script)
+            self.assertEqual(
+                installed_script.read_bytes(),
+                file.source.read_bytes(),
+                f"{installed_script}: installer should copy script bytes exactly",
+            )
+            self.assert_shell_syntax_valid(installed_script)
+            self.assert_no_secret_markers(installed_script)
+
+        prism_rules = root / ".prism/rules.json"
+        self.assertTrue(prism_rules.is_file())
+        self.assert_prism_rules_valid(prism_rules)
+        self.assert_no_secret_markers(prism_rules)
 
     def test_install_removes_obsolete_nested_opencode_adapter(self) -> None:
         root = self.make_repo(".opencode")
@@ -1138,6 +1302,29 @@ class InstallTests(unittest.TestCase):
             script,
         )
         self.assertLess(script.index(node_guard), script.index(script_loop))
+
+    def test_shared_script_templates_are_shell_syntax_valid(self) -> None:
+        script_files = self.shared_manifest_files("script")
+
+        self.assertGreater(len(script_files), 0)
+        for file in script_files:
+            self.assert_shell_syntax_valid(file.source)
+            self.assert_no_secret_markers(file.source)
+
+    def test_prism_rules_template_has_valid_shape(self) -> None:
+        prism_rules_files = [
+            file
+            for file in self.shared_manifest_files("config")
+            if file.target == Path(".prism/rules.json")
+        ]
+
+        self.assertEqual(
+            len(prism_rules_files),
+            1,
+            "manifest must contain exactly one shared .prism/rules.json config",
+        )
+        self.assert_prism_rules_valid(prism_rules_files[0].source)
+        self.assert_no_secret_markers(prism_rules_files[0].source)
 
     def test_review_pr_skill_allows_reply_and_resolve_for_addressed_threads(self) -> None:
         skill = (
