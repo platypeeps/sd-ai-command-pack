@@ -239,17 +239,23 @@ Merged origin/main into PR #10, resolved the tests/test_install.py conflict by p
 
 ### Main Changes
 
-(Add details)
+- Merged `origin/main` into PR #10 to clear the dirty merge state.
+- Preserved both sides of the `tests/test_install.py` conflict: shared script/Prism validation from `main` and obsolete adapter/doc cleanup coverage from the PR branch.
+- Hardened the test helpers with cached manifest loading, bash availability checks, clearer Prism rules assertions, script byte-copy messages, and lightweight secret-marker guards.
+- Pushed the merge-resolution commit and confirmed the PR returned to a clean merge state with passing CI.
 
 ### Git Commits
 
 | Hash | Message |
 |------|---------|
-| `ba9b936` | (see git log) |
+| `ba9b936` | Merge main and resolve test conflicts |
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] `python3 -B -m unittest discover -s tests` - 58 tests passed locally.
+- [OK] `git diff --check` - passed.
+- [OK] `TRELLIS_FULL_CHECK_PRISM=skip bash scripts/trellis-full-check.sh` - deterministic full-check path completed; Prism was skipped after two provider invalid-JSON failures.
+- [OK] GitHub Actions `unittest (3.10)` and `unittest (3.13)` - passed on PR #10.
 
 ### Status
 
