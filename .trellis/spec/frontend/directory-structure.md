@@ -31,7 +31,8 @@ templates/
 ## Naming Conventions
 
 - Use command names consistently across platform adapters, such as
-  `continue`, `finish-work`, `review-pr`, `full-check`, and `housekeeping`.
+  `continue`, `finish-work`, `review-pr`, `full-check`, `housekeeping`, and
+  `refresh-specs`.
 - Keep pack-owned command adapters under the `sd` namespace so they do not
   collide with Trellis-owned generated command files.
 - Use platform-native file formats: TOML for Gemini commands and Markdown for

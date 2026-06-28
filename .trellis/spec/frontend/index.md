@@ -13,18 +13,26 @@ Use these specs when changing files under `templates/`, especially:
 - `templates/.agents/skills/trellis-housekeeping/SKILL.md`
 - `templates/.claude/commands/sd/continue.md`
 - `templates/.claude/commands/sd/finish-work.md`
+- `templates/.claude/commands/sd/full-check.md`
+- `templates/.claude/commands/sd/housekeeping.md`
 - `templates/.claude/commands/sd/review-pr.md`
 - `templates/.claude/commands/sd/refresh-specs.md`
 - `templates/.gemini/commands/sd/continue.toml`
 - `templates/.gemini/commands/sd/finish-work.toml`
+- `templates/.gemini/commands/sd/full-check.toml`
+- `templates/.gemini/commands/sd/housekeeping.toml`
 - `templates/.gemini/commands/sd/review-pr.toml`
 - `templates/.gemini/commands/sd/refresh-specs.toml`
 - `templates/.github/prompts/sd-continue.prompt.md`
 - `templates/.github/prompts/sd-finish-work.prompt.md`
+- `templates/.github/prompts/sd-full-check.prompt.md`
+- `templates/.github/prompts/sd-housekeeping.prompt.md`
 - `templates/.github/prompts/sd-review-pr.prompt.md`
 - `templates/.github/prompts/sd-refresh-specs.prompt.md`
 - `templates/.opencode/commands/sd/continue.md`
 - `templates/.opencode/commands/sd/finish-work.md`
+- `templates/.opencode/commands/sd/full-check.md`
+- `templates/.opencode/commands/sd/housekeeping.md`
 - `templates/.opencode/commands/sd/review-pr.md`
 - `templates/.opencode/commands/sd/refresh-specs.md`
 
