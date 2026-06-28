@@ -465,6 +465,26 @@ class InstallTests(unittest.TestCase):
         self.assertIn("removed", result.stdout)
         self.assertIn(".github/prompts/review-pr.prompt.md", result.stdout)
 
+    def test_force_does_not_remove_non_pack_refresh_specs_legacy_adapter(self) -> None:
+        root = self.make_repo(".github")
+        legacy_refresh_specs = root / ".github/prompts/refresh-specs.prompt.md"
+        legacy_refresh_specs.parent.mkdir(parents=True)
+        legacy_refresh_specs.write_text(
+            "custom refresh specs command\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_install(root, "--force")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(
+            legacy_refresh_specs.read_text(encoding="utf-8"),
+            "custom refresh specs command\n",
+        )
+        self.assertTrue(
+            (root / ".github/prompts/sd-refresh-specs.prompt.md").is_file()
+        )
+
     def test_conflict_requires_force(self) -> None:
         root = self.make_repo(".gemini")
         target = root / ".agents/skills/trellis-review-pr/SKILL.md"
@@ -850,8 +870,16 @@ class InstallTests(unittest.TestCase):
         protected = [
             file
             for file in files
-            if file.target.name.startswith(("continue", "finish-work", "sd-continue"))
-            or file.target.name.startswith("sd-finish-work")
+            if file.target.name.startswith(
+                (
+                    "continue",
+                    "finish-work",
+                    "refresh-specs",
+                    "sd-continue",
+                    "sd-finish-work",
+                    "sd-refresh-specs",
+                )
+            )
         ]
 
         self.assertGreater(len(protected), 0)

@@ -18,7 +18,7 @@ MANIFEST_PATH = ROOT / "manifest.json"
 PLATFORMS = ("claude", "gemini", "github", "opencode", "shared")
 ALWAYS_INSTALL = "always"
 LEGACY_PACK_COMMANDS = frozenset(
-    {"full-check", "housekeeping", "refresh-specs", "review-pr"}
+    {"full-check", "housekeeping", "review-pr"}
 )
 FORCE_PRESERVED_TARGETS = frozenset({Path(".prism/rules.json")})
 
