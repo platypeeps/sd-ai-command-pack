@@ -14,12 +14,18 @@ Reference files:
 - `templates/.agents/skills/trellis-review-pr/SKILL.md`
 - `templates/.agents/skills/trellis-full-check/SKILL.md`
 - `templates/.agents/skills/trellis-housekeeping/SKILL.md`
+- `templates/.agents/skills/sd-continue/SKILL.md`
+- `templates/.agents/skills/sd-finish-work/SKILL.md`
+- `templates/.agents/skills/sd-full-check/SKILL.md`
+- `templates/.agents/skills/sd-housekeeping/SKILL.md`
+- `templates/.agents/skills/sd-review-pr/SKILL.md`
+- `templates/.agents/skills/sd-refresh-specs/SKILL.md`
 - `templates/.claude/commands/sd/continue.md`
 - `templates/.claude/commands/sd/finish-work.md`
 - `templates/.claude/commands/sd/review-pr.md`
 - `templates/.gemini/commands/sd/review-pr.toml`
 - `templates/.github/prompts/sd-review-pr.prompt.md`
-- `templates/.opencode/commands/sd/review-pr.md`
+- `templates/.opencode/commands/sd-review-pr.md`
 
 ## Shared Skill Pattern
 
@@ -52,6 +58,23 @@ The `trellis-housekeeping` shared skill should continue to define the
 post-merge task list, the expected clean-state report, anomaly reporting, and
 safety rules that prevent deleting branches unless GitHub confirms the PR is
 merged and the local branch head matches that PR.
+
+Codex does not read the platform command adapter directories for slash-command
+completion. It exposes enabled skills in the slash list, so this pack also
+installs thin `sd-*` wrapper skills under `.agents/skills/`. Keep those wrappers
+parallel with the platform `sd` adapters.
+
+GitHub Copilot prompt adapters use `.github/prompts/sd-<command>.prompt.md`
+with YAML frontmatter descriptions and `mode: agent`, so prompt completion has
+explicit metadata and runs in agent mode. OpenCode command adapters use flat
+`.opencode/commands/sd-<command>.md` filenames because OpenCode derives command
+names from markdown filenames in `.opencode/commands/`.
+
+Gemini CLI command adapters use TOML under `.gemini/commands/sd/<command>.toml`
+because Gemini derives command names from paths under `.gemini/commands/`, with
+subdirectories becoming colon namespaces. Keep the `sd/` directory for Gemini;
+it is what makes `/sd:<command>` appear. Give every Gemini command a useful
+one-line `description`, since Gemini shows it in `/help`.
 
 The `continue` and `finish-work` commands are adapter-only aliases in this
 pack. Do not copy, fork, or modify Trellis' built-in `trellis-continue` or
@@ -103,7 +126,7 @@ Adapters should stay short and parallel:
 5. Include the expected final reporting shape.
 
 The Gemini adapter uses TOML because Gemini commands require it. GitHub Copilot
-and OpenCode adapters use Markdown.
+and OpenCode adapters use Markdown with short YAML frontmatter metadata.
 
 ## Drift Control
 

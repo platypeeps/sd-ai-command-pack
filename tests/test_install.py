@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,9 +17,26 @@ import install
 
 PACK_ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = PACK_ROOT / "install.py"
+SECRET_MARKERS = (
+    "AKIA",
+    "BEGIN PRIVATE KEY",
+    "xoxb-",
+    "ghp_",
+    "gho_",
+    "/Users/",
+    "\\Users\\",
+)
 
 
 class InstallTests(unittest.TestCase):
+    _bash_path: str | None
+    _manifest_files: list[install.PackFile]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._bash_path = shutil.which("bash")
+        _, cls._manifest_files = install.load_manifest()
+
     def valid_pack_file(
         self,
         *,
@@ -41,7 +59,7 @@ class InstallTests(unittest.TestCase):
         )
 
     def make_repo(self, *platform_dirs: str) -> Path:
-        tempdir = tempfile.TemporaryDirectory(prefix="trellis-review-pr-pack-test-")
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-test-")
         self.addCleanup(tempdir.cleanup)
 
         root = Path(tempdir.name)
@@ -76,60 +94,125 @@ class InstallTests(unittest.TestCase):
         return result.stdout.strip()
 
     def shared_manifest_files(self, kind: str) -> list[install.PackFile]:
-        _, files = install.load_manifest()
         return [
             file
-            for file in files
+            for file in self._manifest_files
             if file.platform == "shared" and file.kind == kind
         ]
 
     def assert_shell_syntax_valid(self, script: Path) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
         result = subprocess.run(
-            ["bash", "-n", str(script)],
+            [self._bash_path, "-n", str(script)],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=False,
         )
-        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(result.returncode, 0, f"{script}: {result.stdout}")
 
     def assert_prism_rules_valid(self, rules_path: Path) -> None:
         rules = json.loads(rules_path.read_text(encoding="utf-8"))
 
-        self.assertIsInstance(rules, dict)
-        self.assertLessEqual(
+        self.assertIsInstance(rules, dict, f"{rules_path}: root must be an object")
+        self.assertEqual(
             set(rules),
             {"focus", "severityOverrides", "required"},
+            f"{rules_path}: unexpected Prism rules keys",
         )
 
-        focus = rules.get("focus")
-        self.assertIsInstance(focus, list)
-        self.assertGreater(len(focus), 0)
-        for item in focus:
-            self.assertIsInstance(item, str)
-            self.assertTrue(item)
+        focus = rules["focus"]
+        self.assertIsInstance(focus, list, f"{rules_path}: focus must be a list")
+        self.assertGreater(len(focus), 0, f"{rules_path}: focus must not be empty")
+        for index, item in enumerate(focus):
+            self.assertIsInstance(
+                item,
+                str,
+                f"{rules_path}: focus[{index}] must be a string",
+            )
+            self.assertTrue(item, f"{rules_path}: focus[{index}] must not be empty")
 
-        severity_overrides = rules.get("severityOverrides")
-        self.assertIsInstance(severity_overrides, dict)
-        self.assertGreater(len(severity_overrides), 0)
+        severity_overrides = rules["severityOverrides"]
+        self.assertIsInstance(
+            severity_overrides,
+            dict,
+            f"{rules_path}: severityOverrides must be an object",
+        )
+        self.assertGreater(
+            len(severity_overrides),
+            0,
+            f"{rules_path}: severityOverrides must not be empty",
+        )
         for category, severity in severity_overrides.items():
-            self.assertIsInstance(category, str)
-            self.assertTrue(category)
-            self.assertIn(severity, {"low", "medium", "high"})
+            self.assertIsInstance(
+                category,
+                str,
+                f"{rules_path}: severityOverrides key must be a string",
+            )
+            self.assertTrue(
+                category,
+                f"{rules_path}: severityOverrides key must not be empty",
+            )
+            self.assertIn(
+                severity,
+                {"low", "medium", "high"},
+                f"{rules_path}: severity for {category!r} is invalid",
+            )
 
-        required = rules.get("required")
-        self.assertIsInstance(required, list)
-        self.assertGreater(len(required), 0)
+        required = rules["required"]
+        self.assertIsInstance(
+            required,
+            list,
+            f"{rules_path}: required must be a list",
+        )
+        self.assertGreater(len(required), 0, f"{rules_path}: required must not be empty")
         seen_ids: set[str] = set()
-        for check in required:
-            self.assertIsInstance(check, dict)
-            self.assertEqual(set(check), {"id", "text"})
-            self.assertIsInstance(check["id"], str)
-            self.assertTrue(check["id"])
-            self.assertNotIn(check["id"], seen_ids)
+        for index, check in enumerate(required):
+            self.assertIsInstance(
+                check,
+                dict,
+                f"{rules_path}: required[{index}] must be an object",
+            )
+            self.assertEqual(
+                set(check),
+                {"id", "text"},
+                f"{rules_path}: required[{index}] keys are invalid",
+            )
+            self.assertIsInstance(
+                check["id"],
+                str,
+                f"{rules_path}: required[{index}].id must be a string",
+            )
+            self.assertTrue(
+                check["id"],
+                f"{rules_path}: required[{index}].id must not be empty",
+            )
+            self.assertNotIn(
+                check["id"],
+                seen_ids,
+                f"{rules_path}: duplicate required id {check['id']!r}",
+            )
             seen_ids.add(check["id"])
-            self.assertIsInstance(check["text"], str)
-            self.assertTrue(check["text"])
+            self.assertIsInstance(
+                check["text"],
+                str,
+                f"{rules_path}: required[{index}].text must be a string",
+            )
+            self.assertTrue(
+                check["text"],
+                f"{rules_path}: required[{index}].text must not be empty",
+            )
+
+    def assert_no_secret_markers(self, file_path: Path) -> None:
+        content = file_path.read_text(encoding="utf-8")
+        for marker in SECRET_MARKERS:
+            self.assertNotIn(
+                marker,
+                content,
+                f"{file_path}: contains blocked secret marker {marker!r}",
+            )
 
     def make_housekeeping_repo(self) -> tuple[Path, Path, Path, str]:
         tempdir = tempfile.TemporaryDirectory(prefix="trellis-housekeeping-test-")
@@ -272,10 +355,16 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".agents/skills/trellis-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/trellis-full-check/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/trellis-housekeeping/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-continue/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-finish-work/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-full-check/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-housekeeping/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-refresh-specs/SKILL.md").is_file())
         self.assertTrue((root / "scripts/trellis-full-check.sh").is_file())
         self.assertTrue((root / "scripts/trellis-housekeeping.sh").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
-        self.assertTrue((root / "docs/TRELLIS_REVIEW_PR_PACK.md").is_file())
+        self.assertTrue((root / "docs/SD_AI_COMMAND_PACK.md").is_file())
         self.assertTrue((root / ".gemini/commands/sd/continue.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
@@ -294,12 +383,12 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".claude/commands/sd/full-check.md").exists())
         self.assertFalse((root / ".claude/commands/sd/housekeeping.md").exists())
         self.assertFalse((root / ".claude/commands/sd/refresh-specs.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/continue.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/finish-work.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/review-pr.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/full-check.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/housekeeping.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/refresh-specs.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-continue.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-finish-work.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-full-check.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-housekeeping.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-refresh-specs.md").exists())
 
     def test_platform_filter_still_installs_shared_assets(self) -> None:
         root = self.make_repo(".claude", ".gemini", ".github", ".opencode")
@@ -313,7 +402,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / "scripts/trellis-full-check.sh").is_file())
         self.assertTrue((root / "scripts/trellis-housekeeping.sh").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
-        self.assertTrue((root / "docs/TRELLIS_REVIEW_PR_PACK.md").is_file())
+        self.assertTrue((root / "docs/SD_AI_COMMAND_PACK.md").is_file())
         self.assertTrue((root / ".gemini/commands/sd/continue.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
@@ -332,12 +421,12 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".github/prompts/sd-full-check.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-housekeeping.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-refresh-specs.prompt.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/continue.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/finish-work.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/review-pr.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/full-check.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/housekeeping.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/refresh-specs.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-continue.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-finish-work.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-full-check.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-housekeeping.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-refresh-specs.md").exists())
 
     def test_all_installs_every_adapter_without_anchors(self) -> None:
         root = self.make_repo()
@@ -351,7 +440,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / "scripts/trellis-full-check.sh").is_file())
         self.assertTrue((root / "scripts/trellis-housekeeping.sh").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
-        self.assertTrue((root / "docs/TRELLIS_REVIEW_PR_PACK.md").is_file())
+        self.assertTrue((root / "docs/SD_AI_COMMAND_PACK.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/continue.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/finish-work.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/review-pr.md").is_file())
@@ -370,12 +459,12 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".github/prompts/sd-full-check.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-housekeeping.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-refresh-specs.prompt.md").is_file())
-        self.assertTrue((root / ".opencode/commands/sd/continue.md").is_file())
-        self.assertTrue((root / ".opencode/commands/sd/finish-work.md").is_file())
-        self.assertTrue((root / ".opencode/commands/sd/review-pr.md").is_file())
-        self.assertTrue((root / ".opencode/commands/sd/full-check.md").is_file())
-        self.assertTrue((root / ".opencode/commands/sd/housekeeping.md").is_file())
-        self.assertTrue((root / ".opencode/commands/sd/refresh-specs.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd-continue.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd-finish-work.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd-review-pr.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd-full-check.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd-housekeeping.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd-refresh-specs.md").is_file())
 
     def test_installed_adapters_can_resolve_shared_skill(self) -> None:
         root = self.make_repo(".claude", ".gemini", ".github", ".opencode")
@@ -397,7 +486,7 @@ class InstallTests(unittest.TestCase):
             root / ".claude/commands/sd/continue.md",
             root / ".gemini/commands/sd/continue.toml",
             root / ".github/prompts/sd-continue.prompt.md",
-            root / ".opencode/commands/sd/continue.md",
+            root / ".opencode/commands/sd-continue.md",
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             self.assertIn(
@@ -408,7 +497,7 @@ class InstallTests(unittest.TestCase):
             root / ".claude/commands/sd/finish-work.md",
             root / ".gemini/commands/sd/finish-work.toml",
             root / ".github/prompts/sd-finish-work.prompt.md",
-            root / ".opencode/commands/sd/finish-work.md",
+            root / ".opencode/commands/sd-finish-work.md",
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             self.assertIn(
@@ -419,7 +508,7 @@ class InstallTests(unittest.TestCase):
             root / ".claude/commands/sd/review-pr.md",
             root / ".gemini/commands/sd/review-pr.toml",
             root / ".github/prompts/sd-review-pr.prompt.md",
-            root / ".opencode/commands/sd/review-pr.md",
+            root / ".opencode/commands/sd-review-pr.md",
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             self.assertIn(
@@ -430,7 +519,7 @@ class InstallTests(unittest.TestCase):
             root / ".claude/commands/sd/full-check.md",
             root / ".gemini/commands/sd/full-check.toml",
             root / ".github/prompts/sd-full-check.prompt.md",
-            root / ".opencode/commands/sd/full-check.md",
+            root / ".opencode/commands/sd-full-check.md",
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             content = adapter.read_text(encoding="utf-8")
@@ -440,7 +529,7 @@ class InstallTests(unittest.TestCase):
             root / ".claude/commands/sd/housekeeping.md",
             root / ".gemini/commands/sd/housekeeping.toml",
             root / ".github/prompts/sd-housekeeping.prompt.md",
-            root / ".opencode/commands/sd/housekeeping.md",
+            root / ".opencode/commands/sd-housekeeping.md",
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             content = adapter.read_text(encoding="utf-8")
@@ -450,7 +539,7 @@ class InstallTests(unittest.TestCase):
             root / ".claude/commands/sd/refresh-specs.md",
             root / ".gemini/commands/sd/refresh-specs.toml",
             root / ".github/prompts/sd-refresh-specs.prompt.md",
-            root / ".opencode/commands/sd/refresh-specs.md",
+            root / ".opencode/commands/sd-refresh-specs.md",
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             content = adapter.read_text(encoding="utf-8")
@@ -460,11 +549,13 @@ class InstallTests(unittest.TestCase):
             self.assertIn("not warranted", content)
 
     def test_install_removes_legacy_trellis_namespace_adapters(self) -> None:
-        root = self.make_repo(".gemini", ".github")
+        root = self.make_repo(".gemini", ".github", ".opencode")
         legacy_gemini = root / ".gemini/commands/trellis/review-pr.toml"
         legacy_github = root / ".github/prompts/review-pr.prompt.md"
+        legacy_opencode = root / ".opencode/commands/trellis/review-pr.md"
         legacy_gemini.parent.mkdir(parents=True)
         legacy_github.parent.mkdir(parents=True)
+        legacy_opencode.parent.mkdir(parents=True)
         legacy_gemini.write_bytes(
             (
                 install.ROOT / "templates/.gemini/commands/sd/review-pr.toml"
@@ -478,17 +569,27 @@ class InstallTests(unittest.TestCase):
                 install.ROOT / "templates/.github/prompts/sd-review-pr.prompt.md"
             ).read_bytes()
         )
+        legacy_opencode.write_bytes(
+            install.strip_yaml_frontmatter(
+                (
+                    install.ROOT / "templates/.opencode/commands/sd-review-pr.md"
+                ).read_bytes()
+            )
+        )
 
         result = self.run_install(root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertFalse(legacy_gemini.exists())
         self.assertFalse(legacy_github.exists())
+        self.assertFalse(legacy_opencode.exists())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd-review-pr.md").is_file())
         self.assertIn("removed", result.stdout)
         self.assertIn(".gemini/commands/trellis/review-pr.toml", result.stdout)
         self.assertIn(".github/prompts/review-pr.prompt.md", result.stdout)
+        self.assertIn(".opencode/commands/trellis/review-pr.md", result.stdout)
 
     def test_install_reports_modified_legacy_namespace_adapter_conflict(self) -> None:
         root = self.make_repo(".github")
@@ -525,7 +626,7 @@ class InstallTests(unittest.TestCase):
     def test_force_removes_legacy_namespace_symlink_without_following_it(self) -> None:
         root = self.make_repo(".github")
         outside_tempdir = tempfile.TemporaryDirectory(
-            prefix="trellis-review-pr-pack-outside-"
+            prefix="sd-ai-command-pack-outside-"
         )
         self.addCleanup(outside_tempdir.cleanup)
         outside_target = Path(outside_tempdir.name) / "outside-command.md"
@@ -578,12 +679,84 @@ class InstallTests(unittest.TestCase):
         for file in script_files:
             installed_script = root / file.target
             self.assertTrue(installed_script.is_file(), installed_script)
-            self.assertEqual(installed_script.read_bytes(), file.source.read_bytes())
+            self.assertEqual(
+                installed_script.read_bytes(),
+                file.source.read_bytes(),
+                f"{installed_script}: installer should copy script bytes exactly",
+            )
             self.assert_shell_syntax_valid(installed_script)
+            self.assert_no_secret_markers(installed_script)
 
         prism_rules = root / ".prism/rules.json"
         self.assertTrue(prism_rules.is_file())
         self.assert_prism_rules_valid(prism_rules)
+        self.assert_no_secret_markers(prism_rules)
+
+    def test_install_removes_obsolete_nested_opencode_adapter(self) -> None:
+        root = self.make_repo(".opencode")
+        obsolete = root / ".opencode/commands/sd/review-pr.md"
+        obsolete.parent.mkdir(parents=True)
+        current = (
+            install.ROOT / "templates/.opencode/commands/sd-review-pr.md"
+        ).read_bytes()
+        obsolete.write_bytes(install.strip_yaml_frontmatter(current))
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(obsolete.exists())
+        self.assertTrue((root / ".opencode/commands/sd-review-pr.md").is_file())
+        self.assertIn("removed", result.stdout)
+        self.assertIn(".opencode/commands/sd/review-pr.md", result.stdout)
+
+    def test_install_reports_modified_obsolete_opencode_adapter_conflict(self) -> None:
+        root = self.make_repo(".opencode")
+        obsolete = root / ".opencode/commands/sd/review-pr.md"
+        obsolete.parent.mkdir(parents=True)
+        obsolete.write_text("custom local command\n", encoding="utf-8")
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertEqual(
+            obsolete.read_text(encoding="utf-8"),
+            "custom local command\n",
+        )
+        self.assertTrue((root / ".opencode/commands/sd-review-pr.md").is_file())
+        self.assertIn("obsolete-conflict", result.stdout)
+        self.assertIn("content differs from pack template", result.stdout)
+        self.assertIn("Re-run with --force", result.stdout)
+
+    def test_force_removes_modified_obsolete_opencode_adapter(self) -> None:
+        root = self.make_repo(".opencode")
+        obsolete = root / ".opencode/commands/sd/review-pr.md"
+        obsolete.parent.mkdir(parents=True)
+        obsolete.write_text("custom local command\n", encoding="utf-8")
+
+        result = self.run_install(root, "--force")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(obsolete.exists())
+        self.assertTrue((root / ".opencode/commands/sd-review-pr.md").is_file())
+        self.assertIn("removed", result.stdout)
+        self.assertIn(".opencode/commands/sd/review-pr.md", result.stdout)
+
+    def test_install_removes_obsolete_pack_guide(self) -> None:
+        root = self.make_repo()
+        obsolete = root / "docs/TRELLIS_REVIEW_PR_PACK.md"
+        obsolete.parent.mkdir(parents=True)
+        current = (
+            install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md"
+        ).read_bytes()
+        obsolete.write_bytes(install.old_pack_identity_variant(current))
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(obsolete.exists())
+        self.assertTrue((root / "docs/SD_AI_COMMAND_PACK.md").is_file())
+        self.assertIn("removed", result.stdout)
+        self.assertIn("docs/TRELLIS_REVIEW_PR_PACK.md", result.stdout)
 
     def test_conflict_requires_force(self) -> None:
         root = self.make_repo(".gemini")
@@ -693,7 +866,7 @@ class InstallTests(unittest.TestCase):
     def test_force_backup_does_not_write_through_existing_backup_symlink(self) -> None:
         root = self.make_repo(".gemini")
         outside_tempdir = tempfile.TemporaryDirectory(
-            prefix="trellis-review-pr-pack-outside-"
+            prefix="sd-ai-command-pack-outside-"
         )
         self.addCleanup(outside_tempdir.cleanup)
         outside_backup = Path(outside_tempdir.name) / "outside-backup"
@@ -733,14 +906,14 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / "scripts/trellis-full-check.sh").exists())
         self.assertFalse((root / "scripts/trellis-housekeeping.sh").exists())
         self.assertFalse((root / ".prism/rules.json").exists())
-        self.assertFalse((root / "docs/TRELLIS_REVIEW_PR_PACK.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/review-pr.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/full-check.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/housekeeping.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd/refresh-specs.md").exists())
+        self.assertFalse((root / "docs/SD_AI_COMMAND_PACK.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-full-check.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-housekeeping.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-refresh-specs.md").exists())
 
     def test_rejects_non_trellis_repo(self) -> None:
-        tempdir = tempfile.TemporaryDirectory(prefix="trellis-review-pr-pack-test-")
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-test-")
         self.addCleanup(tempdir.cleanup)
 
         result = self.run_install(Path(tempdir.name))
@@ -751,7 +924,7 @@ class InstallTests(unittest.TestCase):
     def test_rejects_target_path_resolved_outside_repo(self) -> None:
         root = self.make_repo()
         outside_tempdir = tempfile.TemporaryDirectory(
-            prefix="trellis-review-pr-pack-outside-"
+            prefix="sd-ai-command-pack-outside-"
         )
         self.addCleanup(outside_tempdir.cleanup)
         outside = Path(outside_tempdir.name)
@@ -766,7 +939,7 @@ class InstallTests(unittest.TestCase):
     def test_rejects_existing_target_symlink_resolved_outside_repo(self) -> None:
         root = self.make_repo(".gemini")
         outside_tempdir = tempfile.TemporaryDirectory(
-            prefix="trellis-review-pr-pack-outside-"
+            prefix="sd-ai-command-pack-outside-"
         )
         self.addCleanup(outside_tempdir.cleanup)
         outside_target = Path(outside_tempdir.name) / "outside-target"
@@ -894,10 +1067,10 @@ class InstallTests(unittest.TestCase):
 
     def test_manifest_rejects_source_symlink_resolved_outside_pack_root(self) -> None:
         pack_tempdir = tempfile.TemporaryDirectory(
-            prefix="trellis-review-pr-pack-root-"
+            prefix="sd-ai-command-pack-root-"
         )
         outside_tempdir = tempfile.TemporaryDirectory(
-            prefix="trellis-review-pr-pack-outside-"
+            prefix="sd-ai-command-pack-outside-"
         )
         self.addCleanup(pack_tempdir.cleanup)
         self.addCleanup(outside_tempdir.cleanup)
@@ -942,6 +1115,92 @@ class InstallTests(unittest.TestCase):
             else:
                 self.assertIn(".agents/skills/trellis-review-pr/SKILL.md", content)
 
+    def test_codex_visible_sd_skill_wrappers_reference_workflows(self) -> None:
+        expected = {
+            "sd-continue": ".agents/skills/trellis-continue/SKILL.md",
+            "sd-finish-work": ".agents/skills/trellis-finish-work/SKILL.md",
+            "sd-review-pr": ".agents/skills/trellis-review-pr/SKILL.md",
+            "sd-full-check": ".agents/skills/trellis-full-check/SKILL.md",
+            "sd-housekeeping": ".agents/skills/trellis-housekeeping/SKILL.md",
+            "sd-refresh-specs": "trellis-update-spec/SKILL.md",
+        }
+
+        for skill_name, target in expected.items():
+            skill_path = (
+                install.ROOT / f"templates/.agents/skills/{skill_name}/SKILL.md"
+            )
+            content = skill_path.read_text(encoding="utf-8")
+            self.assertIn(f"name: {skill_name}", content)
+            self.assertIn(target, content)
+
+        refresh_specs = (
+            install.ROOT / "templates/.agents/skills/sd-refresh-specs/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("repospec artifact", refresh_specs)
+        self.assertIn("docs/repomix-map.md", refresh_specs)
+        self.assertIn("Architectural overview", refresh_specs)
+
+    def test_github_and_opencode_entries_are_completion_visible(self) -> None:
+        commands = [
+            "continue",
+            "finish-work",
+            "review-pr",
+            "full-check",
+            "housekeeping",
+            "refresh-specs",
+        ]
+
+        for command in commands:
+            github_path = (
+                install.ROOT / f"templates/.github/prompts/sd-{command}.prompt.md"
+            )
+            github_content = github_path.read_text(encoding="utf-8")
+            self.assertTrue(github_content.startswith("---\n"), github_path)
+            self.assertIn("description:", github_content)
+            self.assertIn("mode: agent", github_content)
+
+            opencode_path = install.ROOT / f"templates/.opencode/commands/sd-{command}.md"
+            opencode_content = opencode_path.read_text(encoding="utf-8")
+            self.assertTrue(opencode_content.startswith("---\n"), opencode_path)
+            self.assertIn("description:", opencode_content)
+
+    def test_gemini_entries_use_namespaced_toml_completion_shape(self) -> None:
+        expected_descriptions = {
+            "continue": "Run the Trellis continue workflow.",
+            "finish-work": "Run the Trellis finish-work workflow.",
+            "review-pr": "Run the Trellis PR review loop.",
+            "full-check": "Run the Trellis full-check gate.",
+            "housekeeping": "Run Trellis end-of-stream housekeeping.",
+            "refresh-specs": (
+                "Refresh Trellis specs, repospec artifacts, and architecture docs."
+            ),
+        }
+        _, files = install.load_manifest()
+        gemini_commands = [
+            file
+            for file in files
+            if file.platform == "gemini" and file.kind == "command"
+        ]
+
+        self.assertEqual(len(gemini_commands), len(expected_descriptions))
+        for file in gemini_commands:
+            command_name = file.target.stem
+            self.assertIn(command_name, expected_descriptions)
+            self.assertEqual(file.target.parent, Path(".gemini/commands/sd"))
+            self.assertEqual(
+                file.source.parent.relative_to(install.ROOT),
+                Path("templates") / file.target.parent,
+            )
+            self.assertEqual(file.target.suffix, ".toml")
+            self.assertFalse(file.target.name.startswith("sd-"), file.target)
+
+            content = file.source.read_text(encoding="utf-8")
+            self.assertIn(
+                f'description = "{expected_descriptions[command_name]}"',
+                content,
+            )
+            self.assertIn('prompt = """', content)
+
     def test_command_adapters_use_pack_owned_sd_namespace(self) -> None:
         _, files = install.load_manifest()
 
@@ -953,8 +1212,15 @@ class InstallTests(unittest.TestCase):
         self.assertGreater(len(github_prompt_files), 0)
         for file in command_files:
             source = file.source.relative_to(install.ROOT).as_posix()
-            self.assertIn("/commands/sd/", source)
-            self.assertIn("/commands/sd/", file.target.as_posix())
+            if file.platform == "opencode":
+                self.assertEqual(Path(".opencode/commands"), file.target.parent)
+                self.assertTrue(file.source.name.startswith("sd-"), file.source)
+                self.assertTrue(file.target.name.startswith("sd-"), file.target)
+                self.assertNotIn("/commands/sd/", source)
+                self.assertNotIn("/commands/sd/", file.target.as_posix())
+            else:
+                self.assertIn("/commands/sd/", source)
+                self.assertIn("/commands/sd/", file.target.as_posix())
             self.assertNotIn("/commands/trellis/", source)
             self.assertNotIn("/commands/trellis/", file.target.as_posix())
         for file in github_prompt_files:
@@ -988,10 +1254,11 @@ class InstallTests(unittest.TestCase):
 
     def test_refresh_specs_wrappers_include_repospec_and_architecture_gates(self) -> None:
         adapter_paths = [
+            install.ROOT / "templates/.agents/skills/sd-refresh-specs/SKILL.md",
             install.ROOT / "templates/.claude/commands/sd/refresh-specs.md",
             install.ROOT / "templates/.gemini/commands/sd/refresh-specs.toml",
             install.ROOT / "templates/.github/prompts/sd-refresh-specs.prompt.md",
-            install.ROOT / "templates/.opencode/commands/sd/refresh-specs.md",
+            install.ROOT / "templates/.opencode/commands/sd-refresh-specs.md",
         ]
 
         for adapter_path in adapter_paths:
@@ -1042,6 +1309,7 @@ class InstallTests(unittest.TestCase):
         self.assertGreater(len(script_files), 0)
         for file in script_files:
             self.assert_shell_syntax_valid(file.source)
+            self.assert_no_secret_markers(file.source)
 
     def test_prism_rules_template_has_valid_shape(self) -> None:
         prism_rules_files = [
@@ -1050,8 +1318,13 @@ class InstallTests(unittest.TestCase):
             if file.target == Path(".prism/rules.json")
         ]
 
-        self.assertEqual(len(prism_rules_files), 1)
+        self.assertEqual(
+            len(prism_rules_files),
+            1,
+            "manifest must contain exactly one shared .prism/rules.json config",
+        )
         self.assert_prism_rules_valid(prism_rules_files[0].source)
+        self.assert_no_secret_markers(prism_rules_files[0].source)
 
     def test_review_pr_skill_allows_reply_and_resolve_for_addressed_threads(self) -> None:
         skill = (
@@ -1074,7 +1347,7 @@ class InstallTests(unittest.TestCase):
             install.ROOT / "templates/.claude/commands/sd/review-pr.md",
             install.ROOT / "templates/.gemini/commands/sd/review-pr.toml",
             install.ROOT / "templates/.github/prompts/sd-review-pr.prompt.md",
-            install.ROOT / "templates/.opencode/commands/sd/review-pr.md",
+            install.ROOT / "templates/.opencode/commands/sd-review-pr.md",
         ]
 
         self.assertIn("Post-Merge Auto-Dispatch", skill)

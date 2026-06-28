@@ -9,6 +9,7 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
@@ -275,6 +276,13 @@ def legacy_adapter_target(file: PackFile) -> Path | None:
     if file.kind == "command" and "/commands/sd/" in target:
         return Path(target.replace("/commands/sd/", "/commands/trellis/"))
     if (
+        file.platform == "opencode"
+        and file.kind == "command"
+        and file.target.parent == Path(".opencode/commands")
+        and file.target.name.startswith("sd-")
+    ):
+        return Path(".opencode/commands/trellis") / f"{command_name}.md"
+    if (
         file.platform == "github"
         and file.kind == "prompt"
         and file.target.name.startswith("sd-")
@@ -283,33 +291,101 @@ def legacy_adapter_target(file: PackFile) -> Path | None:
     return None
 
 
+def obsolete_adapter_target(file: PackFile) -> Path | None:
+    if file.platform == "shared" and file.kind == "doc":
+        if file.target == Path("docs/SD_AI_COMMAND_PACK.md"):
+            return Path("docs/TRELLIS_REVIEW_PR_PACK.md")
+    if (
+        file.platform == "opencode"
+        and file.kind == "command"
+        and file.target.parent == Path(".opencode/commands")
+        and file.target.name.startswith("sd-")
+        and file.target.suffix == ".md"
+    ):
+        command_name = file.target.stem.removeprefix("sd-")
+        return Path(".opencode/commands/sd") / f"{command_name}.md"
+    return None
+
+
+def strip_yaml_frontmatter(content: bytes) -> bytes:
+    if not content.startswith(b"---\n"):
+        return content
+    end = content.find(b"\n---\n", len(b"---\n"))
+    if end == -1:
+        return content
+    stripped = content[end + len(b"\n---\n") :]
+    if stripped.startswith(b"\n"):
+        return stripped[1:]
+    return stripped
+
+
+def toml_description_variant(
+    content: bytes,
+    command_name: str,
+    namespace: str,
+) -> bytes:
+    lines = content.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        if line.startswith(b"description = "):
+            lines[index] = f'description = "{namespace}: {command_name}"\n'.encode(
+                "utf-8"
+            )
+            return b"".join(lines)
+    return content
+
+
+def old_pack_identity_variant(content: bytes) -> bytes:
+    replacements = (
+        (b"sd-ai-command-pack", b"trellis-review-pr-pack"),
+        (b"SD AI Command Pack", b"Trellis Review PR Pack"),
+        (b"SD AI command pack", b"Trellis review PR pack"),
+        (b"SD AI command setup", b"Trellis review-cycle setup"),
+        (b"SD_AI_COMMAND_PACK", b"TRELLIS_REVIEW_PR_PACK"),
+    )
+    for new, old in replacements:
+        content = content.replace(new, old)
+    return content
+
+
 def legacy_adapter_contents(file: PackFile) -> set[bytes]:
     content = file.source.read_bytes()
     contents = {content}
-    contents.add(content.replace(b'description = "SD: ', b'description = "Trellis: '))
+    contents.add(strip_yaml_frontmatter(content))
+    contents.add(old_pack_identity_variant(content))
+    contents.add(old_pack_identity_variant(strip_yaml_frontmatter(content)))
+    if file.platform == "gemini" and file.kind == "command":
+        command_name = file.target.stem.removeprefix("sd-").removesuffix(".prompt")
+        contents.add(toml_description_variant(content, command_name, "SD"))
+        contents.add(toml_description_variant(content, command_name, "Trellis"))
+    contents.update(
+        item.replace(b'description = "SD: ', b'description = "Trellis: ')
+        for item in list(contents)
+    )
     return contents
 
 
-def cleanup_legacy_adapters(
+def cleanup_adapter_targets(
     selected: list[PackFile],
     target: Path,
     *,
     dry_run: bool,
     force: bool,
+    target_for_file: Callable[[PackFile], Path | None],
+    conflict_status: str,
 ) -> list[LegacyCleanupResult]:
     results: list[LegacyCleanupResult] = []
     seen: set[Path] = set()
     for file in selected:
-        legacy_target = legacy_adapter_target(file)
-        if legacy_target is None or legacy_target in seen:
+        cleanup_target = target_for_file(file)
+        if cleanup_target is None or cleanup_target in seen:
             continue
-        seen.add(legacy_target)
+        seen.add(cleanup_target)
 
-        destination = target / legacy_target
+        destination = target / cleanup_target
         validate_resolved_target_path(
             target,
             destination.parent,
-            "legacy adapter parent path",
+            "adapter cleanup parent path",
         )
         if not path_is_occupied(destination):
             continue
@@ -318,8 +394,8 @@ def cleanup_legacy_adapters(
         ):
             results.append(
                 LegacyCleanupResult(
-                    legacy_target,
-                    "legacy-conflict",
+                    cleanup_target,
+                    conflict_status,
                     "target exists and is not a file",
                 )
             )
@@ -336,8 +412,8 @@ def cleanup_legacy_adapters(
             )
             results.append(
                 LegacyCleanupResult(
-                    legacy_target,
-                    "legacy-conflict",
+                    cleanup_target,
+                    conflict_status,
                     reason,
                 )
             )
@@ -348,8 +424,42 @@ def cleanup_legacy_adapters(
             destination.unlink()
             with contextlib.suppress(OSError):
                 destination.parent.rmdir()
-        results.append(LegacyCleanupResult(legacy_target, status))
+        results.append(LegacyCleanupResult(cleanup_target, status))
     return results
+
+
+def cleanup_legacy_adapters(
+    selected: list[PackFile],
+    target: Path,
+    *,
+    dry_run: bool,
+    force: bool,
+) -> list[LegacyCleanupResult]:
+    return cleanup_adapter_targets(
+        selected,
+        target,
+        dry_run=dry_run,
+        force=force,
+        target_for_file=legacy_adapter_target,
+        conflict_status="legacy-conflict",
+    )
+
+
+def cleanup_obsolete_adapters(
+    selected: list[PackFile],
+    target: Path,
+    *,
+    dry_run: bool,
+    force: bool,
+) -> list[LegacyCleanupResult]:
+    return cleanup_adapter_targets(
+        selected,
+        target,
+        dry_run=dry_run,
+        force=force,
+        target_for_file=obsolete_adapter_target,
+        conflict_status="obsolete-conflict",
+    )
 
 
 def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
@@ -444,6 +554,28 @@ def main(argv: list[str] | None = None) -> int:
         print("Re-run with --force to remove these legacy adapter files.")
         return 2
 
+    obsolete_results = cleanup_obsolete_adapters(
+        selected,
+        target,
+        dry_run=args.dry_run,
+        force=args.force,
+    )
+    for result in obsolete_results:
+        suffix = f" ({result.reason})" if result.reason else ""
+        print(f"{result.status:11} {result.target}{suffix}")
+
+    obsolete_conflicts = [
+        result for result in obsolete_results if result.status == "obsolete-conflict"
+    ]
+    if obsolete_conflicts:
+        print("")
+        print("Obsolete adapter conflicts:")
+        for result in obsolete_conflicts:
+            suffix = f" ({result.reason})" if result.reason else ""
+            print(f"- {result.target}{suffix}")
+        print("Re-run with --force to remove these obsolete adapter files.")
+        return 2
+
     if not args.dry_run and not args.skip_diff_check:
         diff_paths = [
             result.file.target
@@ -452,6 +584,9 @@ def main(argv: list[str] | None = None) -> int:
         ]
         diff_paths.extend(
             result.target for result in legacy_results if result.status == "removed"
+        )
+        diff_paths.extend(
+            result.target for result in obsolete_results if result.status == "removed"
         )
         diff_status = run_diff_check(target, diff_paths)
         if diff_status != 0:

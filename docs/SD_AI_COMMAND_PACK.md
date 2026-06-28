@@ -1,13 +1,15 @@
-# Trellis review PR pack
+# SD AI command pack
 
-This repo has the reusable Trellis review-cycle setup installed from
-`platypeeps/trellis-review-pr-pack`.
+This repo has the reusable SD AI command setup installed from
+`platypeeps/sd-ai-command-pack`.
 
 ## What is installed
 
 - `.agents/skills/trellis-review-pr/SKILL.md`: local-review-first PR workflow.
 - `.agents/skills/trellis-full-check/SKILL.md`: full local verification workflow.
 - `.agents/skills/trellis-housekeeping/SKILL.md`: post-merge cleanup workflow.
+- `.agents/skills/sd-*/SKILL.md`: Codex-visible wrappers for the same `sd`
+  entry points.
 - `scripts/trellis-full-check.sh`: canonical full-check script.
 - `scripts/trellis-housekeeping.sh`: canonical post-merge housekeeping script.
 - `.prism/rules.json`: default Prism review rules for repo-specific checks.
@@ -19,46 +21,59 @@ in the shared skills and scripts. The refresh-specs wrapper runs the
 Trellis-provided `trellis-update-spec` skill as-is, refreshes repo-owned
 repospec artifacts through existing maintenance infrastructure when available,
 and then performs the architecture-overview check.
+Codex exposes the pack entry points as skills named `sd-continue`,
+`sd-finish-work`, `sd-full-check`, `sd-housekeeping`, `sd-review-pr`, and
+`sd-refresh-specs`; type `/sd` in Codex command completion or invoke them with
+`$sd-review-pr`-style skill mentions.
 The continue and finish-work wrappers run Trellis' existing
 `trellis-continue` and `trellis-finish-work` skills as-is.
 The slash command namespace is `sd`, not `trellis`, so these pack-owned wrappers
 do not collide with generated Trellis commands during future `trellis update`
-runs. GitHub Copilot prompt files use `sd-<command>.prompt.md` for the same
-reason.
+runs. GitHub Copilot prompt files and OpenCode command files use flat
+`sd-<command>` filenames so completion lists can surface them when you type
+`/sd`.
+For Gemini CLI, the project command files intentionally live under
+`.gemini/commands/sd/`; Gemini maps a file such as
+`.gemini/commands/sd/review-pr.toml` to `/sd:review-pr` and shows the TOML
+`description` in `/help`. If the commands were installed while Gemini CLI was
+already running, use `/commands reload`, then `/commands list` to confirm the
+loaded project command files.
 
 ## Recommended review loop
 
 1. Iterate with the narrowest deterministic checks for the files you touched.
-2. Use `/sd:continue` when resuming an in-progress Trellis task.
-3. Run `/sd:full-check` or `bash scripts/trellis-full-check.sh` before PR
+2. Use the continue command when resuming an in-progress Trellis task.
+3. Run the full-check command or `bash scripts/trellis-full-check.sh` before PR
    readiness, before asking for remote review, and after substantial review
    fixes.
 4. Fix deterministic failures first, then verify any Prism findings against the
    actual code before changing behavior.
-5. Use `/sd:review-pr` for the PR loop. It should run the local
+5. Use the review-pr command for the PR loop. It should run the local
    full-check/Prism path before requesting GitHub Copilot review.
 6. Request Copilot only when explicitly wanted or as a final remote pass.
-7. Let `/sd:review-pr` reply to and resolve review threads as part of the
+7. Let the review-pr command reply to and resolve review threads as part of the
    normal loop once findings are fixed, rebutted with evidence, or confirmed
    already addressed.
-8. Run `/sd:refresh-specs` when the work taught you a durable
+8. Run the refresh-specs command when the work taught you a durable
    implementation contract or convention. It runs the existing update-spec skill
    and also checks whether an existing architectural overview needs to be
    updated.
-9. Run `/sd:finish-work` when the coding session is complete and you need the
-   Trellis finish-work skill's quality gate, archive, journal, and commit
+9. Run the finish-work command when the coding session is complete and you need
+   the Trellis finish-work skill's quality gate, archive, journal, and commit
    reminder behavior.
-10. After the PR merges, run `/sd:housekeeping` to get back to the default
+10. After the PR merges, run the housekeeping command to get back to the default
    branch, prune/delete the merged development stream, and see the condensed
    clean-state/anomaly report.
-11. If `/sd:review-pr` sees the PR is already merged or becomes merged
+11. If the review-pr command sees the PR is already merged or becomes merged
    during the active session, it auto-dispatches housekeeping before the final
    report. This does not wake inactive sessions; it only runs when the active
    agent observes the merge.
 
 ## Commands
 
-Use the platform-native command when available:
+Use the platform-native command when available.
+
+Claude Code and Gemini CLI:
 
 ```bash
 /sd:continue
@@ -68,6 +83,20 @@ Use the platform-native command when available:
 /sd:review-pr
 /sd:refresh-specs
 ```
+
+GitHub Copilot prompt files, OpenCode command files, and Codex skills:
+
+```bash
+/sd-continue
+/sd-finish-work
+/sd-full-check
+/sd-housekeeping
+/sd-review-pr
+/sd-refresh-specs
+```
+
+In Codex, you can also invoke the enabled skills explicitly with
+`$sd-review-pr`-style skill mentions.
 
 Use the script directly from any shell:
 
@@ -182,7 +211,7 @@ Trellis tasks mean the repo is not yet in the expected clean state.
 To refresh installed assets from the pack checkout:
 
 ```bash
-python3 /path/to/trellis-review-pr-pack/install.py /path/to/target/repo --force
+python3 /path/to/sd-ai-command-pack/install.py /path/to/target/repo --force
 ```
 
 Use `--dry-run` first when you want to inspect which files would change.
@@ -198,17 +227,14 @@ they are removed while the `sd` replacement is installed.
 
 ## Troubleshooting
 
-- Missing `/sd:continue` command: reinstall the pack and include the platform
-  adapter for the tool you are using.
-- Missing `/sd:finish-work` command: reinstall the pack and include the
-  platform adapter for the tool you are using.
-- Missing `/sd:full-check` command: reinstall the pack and include the
-  platform adapter for the tool you are using.
-- Missing `/sd:housekeeping` command: reinstall the pack and include the
-  platform adapter for the tool you are using.
-- Missing `/sd:refresh-specs` command: reinstall the pack and include the
-  platform adapter for the tool you are using.
-- `/sd:refresh-specs` reports a missing `trellis-update-spec` skill: run
+- Missing an `sd-*` command: reinstall the pack and include the platform
+  adapter for the tool you are using. Claude and Gemini expose these as
+  `/sd:<command>`; GitHub Copilot, OpenCode, and Codex expose flat
+  `/sd-<command>` entries.
+- In Gemini CLI, after reinstalling run `/commands reload` and then
+  `/commands list`; the loaded project files should include
+  `.gemini/commands/sd/<command>.toml`.
+- The refresh-specs command reports a missing `trellis-update-spec` skill: run
   `trellis update` in the target repo so the Trellis-provided skill files are
   present, then retry the wrapper command.
 - `scripts/trellis-full-check.sh` is missing: reinstall the pack; every target

@@ -138,6 +138,16 @@ Reference files:
 - `tests/test_install.py`, `test_conflict_requires_force`
 - `tests/test_install.py`, `test_dry_run_does_not_write_files`
 
+## Obsolete Adapter Cleanup
+
+When a pack-owned adapter path moves for platform-discovery reasons, remove the
+old generated target if it still matches a known pack template variant. If the
+old target contains custom content, report `obsolete-conflict` and leave it
+untouched unless `--force` is supplied. This currently protects the OpenCode
+move from nested `.opencode/commands/sd/<command>.md` files to flat
+`.opencode/commands/sd-<command>.md` files, and the pack rename from
+`docs/TRELLIS_REVIEW_PR_PACK.md` to `docs/SD_AI_COMMAND_PACK.md`.
+
 ## Anti-Patterns
 
 - Do not infer installable files by scanning `templates/`.

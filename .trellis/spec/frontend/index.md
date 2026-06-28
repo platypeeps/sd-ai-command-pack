@@ -11,6 +11,12 @@ Use these specs when changing files under `templates/`, especially:
 - `templates/.agents/skills/trellis-review-pr/SKILL.md`
 - `templates/.agents/skills/trellis-full-check/SKILL.md`
 - `templates/.agents/skills/trellis-housekeeping/SKILL.md`
+- `templates/.agents/skills/sd-continue/SKILL.md`
+- `templates/.agents/skills/sd-finish-work/SKILL.md`
+- `templates/.agents/skills/sd-full-check/SKILL.md`
+- `templates/.agents/skills/sd-housekeeping/SKILL.md`
+- `templates/.agents/skills/sd-review-pr/SKILL.md`
+- `templates/.agents/skills/sd-refresh-specs/SKILL.md`
 - `templates/.claude/commands/sd/continue.md`
 - `templates/.claude/commands/sd/finish-work.md`
 - `templates/.claude/commands/sd/full-check.md`
@@ -29,12 +35,12 @@ Use these specs when changing files under `templates/`, especially:
 - `templates/.github/prompts/sd-housekeeping.prompt.md`
 - `templates/.github/prompts/sd-review-pr.prompt.md`
 - `templates/.github/prompts/sd-refresh-specs.prompt.md`
-- `templates/.opencode/commands/sd/continue.md`
-- `templates/.opencode/commands/sd/finish-work.md`
-- `templates/.opencode/commands/sd/full-check.md`
-- `templates/.opencode/commands/sd/housekeeping.md`
-- `templates/.opencode/commands/sd/review-pr.md`
-- `templates/.opencode/commands/sd/refresh-specs.md`
+- `templates/.opencode/commands/sd-continue.md`
+- `templates/.opencode/commands/sd-finish-work.md`
+- `templates/.opencode/commands/sd-full-check.md`
+- `templates/.opencode/commands/sd-housekeeping.md`
+- `templates/.opencode/commands/sd-review-pr.md`
+- `templates/.opencode/commands/sd-refresh-specs.md`
 
 This repo has no React app, browser UI, hooks, CSS, or client-side state. The
 user-facing layer is prompt and command text that other AI platforms execute.
