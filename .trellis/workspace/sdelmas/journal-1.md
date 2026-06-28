@@ -186,3 +186,42 @@ Added the auto-finalize housekeeping flow, then addressed PR review feedback for
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: Add sd command wrappers and refresh-specs guidance
+
+**Date**: 2026-06-28
+**Task**: Add sd command wrappers and refresh-specs guidance
+**Branch**: `codex/update-spec-architecture-wrapper`
+
+### Summary
+
+Added sd-namespaced command wrappers, refresh-specs architecture/repospec guidance, review-driven adapter safety fixes, and legacy symlink cleanup hardening for the review PR pack.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1c538d0` | (see git log) |
+| `06299d0` | (see git log) |
+| `1d67526` | (see git log) |
+| `3c0a162` | (see git log) |
+| `e66a1ee` | (see git log) |
+| `a5523f9` | (see git log) |
+| `f6ac7fa` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
