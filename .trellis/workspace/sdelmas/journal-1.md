@@ -264,3 +264,42 @@ Merged origin/main into PR #10, resolved the tests/test_install.py conflict by p
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: Address PR journal review feedback
+
+**Date**: 2026-06-28
+**Task**: Address PR journal review feedback
+**Branch**: `codex/update-spec-architecture-wrapper`
+
+### Summary
+
+Addressed Copilot review comments on the Trellis journal by replacing Session 7 placeholders with concrete main changes, commit subject, and testing details; replied to and resolved the three GitHub review threads; confirmed local checks and CI.
+
+### Main Changes
+
+- Replaced the Session 7 journal placeholders for main changes, commit subject, and testing results.
+- Posted replies on all three Copilot review comments with the fixing commit reference.
+- Resolved the three addressed GitHub review threads.
+- Re-ran local checks and confirmed the PR remained mergeable with passing CI before recording this session.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `98d20a2` | address PR journal review feedback |
+
+### Testing
+
+- [OK] `python3 -B -m unittest discover -s tests` - 58 tests passed locally.
+- [OK] `git diff --check` - passed.
+- [OK] `TRELLIS_FULL_CHECK_PRISM=skip bash scripts/trellis-full-check.sh` - deterministic full-check path completed; Prism skipped due to the repeated provider invalid-JSON failure seen earlier.
+- [OK] GitHub Actions `unittest (3.10)` and `unittest (3.13)` - passed on PR #10 for commit `98d20a2` before this journal entry.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
