@@ -27,6 +27,17 @@ guessing.
   matching shared skill under `.agents/skills/<command>/SKILL.md`. The
   adapter-only `continue`, `finish-work`, and `refresh-specs` wrappers are the
   exception: they read Trellis-provided skills from the target repo instead.
+- Codex-visible `sd-*` wrappers live under `.agents/skills/` because Codex
+  command completion surfaces enabled skills, not the other platforms' command
+  adapter files. Keep their behavior aligned with the platform `sd` adapters.
+- GitHub Copilot prompt adapters must use flat `sd-<command>.prompt.md`
+  filenames with a description and `mode: agent` frontmatter.
+- Gemini command adapters must use `.gemini/commands/sd/<command>.toml`; do
+  not flatten them to `sd-<command>.toml`, because the `sd/` directory is what
+  Gemini maps to the `/sd:<command>` namespace. Each file must include a useful
+  `description` and a `prompt` string.
+- OpenCode command adapters must use flat `.opencode/commands/sd-<command>.md`
+  filenames so slash completion can find them by the `sd` prefix.
 - Every adapter must mention its command's core loop or task list, safety
   stop condition, and final report expectation.
 - New adapters need README documentation and installer tests.

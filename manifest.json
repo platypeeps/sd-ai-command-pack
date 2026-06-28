@@ -1,7 +1,7 @@
 {
-  "name": "trellis-review-pr-pack",
+  "name": "sd-ai-command-pack",
   "version": "0.3.0",
-  "description": "Install project-local Trellis continue, finish-work, review, full-check, housekeeping, and refresh-specs workflows, Prism rules, usage guide, and platform adapters into Trellis repos.",
+  "description": "Install project-local SD AI command workflows, Prism rules, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
   "files": [
     {
@@ -23,6 +23,48 @@
       "kind": "skill",
       "source": "templates/.agents/skills/trellis-housekeeping/SKILL.md",
       "target": ".agents/skills/trellis-housekeeping/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-continue/SKILL.md",
+      "target": ".agents/skills/sd-continue/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-finish-work/SKILL.md",
+      "target": ".agents/skills/sd-finish-work/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
+      "target": ".agents/skills/sd-review-pr/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-full-check/SKILL.md",
+      "target": ".agents/skills/sd-full-check/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-housekeeping/SKILL.md",
+      "target": ".agents/skills/sd-housekeeping/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-refresh-specs/SKILL.md",
+      "target": ".agents/skills/sd-refresh-specs/SKILL.md",
       "install": "always"
     },
     {
@@ -49,8 +91,8 @@
     {
       "platform": "shared",
       "kind": "doc",
-      "source": "templates/docs/TRELLIS_REVIEW_PR_PACK.md",
-      "target": "docs/TRELLIS_REVIEW_PR_PACK.md",
+      "source": "templates/docs/SD_AI_COMMAND_PACK.md",
+      "target": "docs/SD_AI_COMMAND_PACK.md",
       "install": "always"
     },
     {
@@ -182,43 +224,43 @@
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd/continue.md",
-      "target": ".opencode/commands/sd/continue.md",
+      "source": "templates/.opencode/commands/sd-continue.md",
+      "target": ".opencode/commands/sd-continue.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd/finish-work.md",
-      "target": ".opencode/commands/sd/finish-work.md",
+      "source": "templates/.opencode/commands/sd-finish-work.md",
+      "target": ".opencode/commands/sd-finish-work.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd/review-pr.md",
-      "target": ".opencode/commands/sd/review-pr.md",
+      "source": "templates/.opencode/commands/sd-review-pr.md",
+      "target": ".opencode/commands/sd-review-pr.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd/full-check.md",
-      "target": ".opencode/commands/sd/full-check.md",
+      "source": "templates/.opencode/commands/sd-full-check.md",
+      "target": ".opencode/commands/sd-full-check.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd/housekeeping.md",
-      "target": ".opencode/commands/sd/housekeeping.md",
+      "source": "templates/.opencode/commands/sd-housekeeping.md",
+      "target": ".opencode/commands/sd-housekeeping.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd/refresh-specs.md",
-      "target": ".opencode/commands/sd/refresh-specs.md",
+      "source": "templates/.opencode/commands/sd-refresh-specs.md",
+      "target": ".opencode/commands/sd-refresh-specs.md",
       "anchor": ".opencode"
     }
   ]

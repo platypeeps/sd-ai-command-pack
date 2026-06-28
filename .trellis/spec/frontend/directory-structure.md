@@ -18,7 +18,7 @@ templates/
 ├── .claude/commands/sd/<command>.md                # Claude command adapters
 ├── .gemini/commands/sd/<command>.toml              # Gemini command adapters
 ├── .github/prompts/sd-<command>.prompt.md          # GitHub Copilot prompts
-└── .opencode/commands/sd/<command>.md              # OpenCode command adapters
+└── .opencode/commands/sd-<command>.md              # OpenCode command adapters
 ```
 
 ## Module Organization
@@ -34,7 +34,12 @@ templates/
   `continue`, `finish-work`, `review-pr`, `full-check`, `housekeeping`, and
   `refresh-specs`.
 - Keep pack-owned command adapters under the `sd` namespace so they do not
-  collide with Trellis-owned generated command files.
+  collide with Trellis-owned generated command files. Claude and Gemini express
+  that namespace through directories; GitHub Copilot and OpenCode express it
+  through flat `sd-<command>` filenames that their command lists can surface.
+- Do not flatten Gemini command files. `.gemini/commands/sd/review-pr.toml`
+  becomes `/sd:review-pr` because Gemini maps command subdirectories to colon
+  namespaces.
 - Use platform-native file formats: TOML for Gemini commands and Markdown for
   Claude, GitHub Copilot, and OpenCode prompts.
 
@@ -44,5 +49,5 @@ templates/
   that tells Gemini to load the matching shared skill.
 - `templates/.github/prompts/sd-review-pr.prompt.md` mirrors the same entry-point
   instructions for GitHub Copilot.
-- `templates/.opencode/commands/sd/review-pr.md` mirrors the same
+- `templates/.opencode/commands/sd-review-pr.md` mirrors the same
   entry-point instructions for OpenCode.
