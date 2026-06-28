@@ -74,6 +74,11 @@ process, and then perform the pack-specific architectural-overview gate:
 - Report `Update-spec skill`, `Spec updates`, `Architectural overview`, and
   `Validation` in the final response.
 
+These adapter-only wrappers are intentional exceptions to the usual
+pack-shared-skill adapter pattern. Do not force them to read
+`.agents/skills/<command>/SKILL.md` unless this pack also starts installing and
+owning that matching shared skill.
+
 ## Platform Adapter Pattern
 
 Adapters should stay short and parallel:

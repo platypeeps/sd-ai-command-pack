@@ -306,7 +306,11 @@ def cleanup_legacy_adapters(
         seen.add(legacy_target)
 
         destination = target / legacy_target
-        validate_resolved_target_path(target, destination, "legacy adapter path")
+        validate_resolved_target_path(
+            target,
+            destination.parent,
+            "legacy adapter parent path",
+        )
         if not path_is_occupied(destination):
             continue
         if path_is_occupied(destination) and not (

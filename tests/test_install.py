@@ -465,6 +465,31 @@ class InstallTests(unittest.TestCase):
         self.assertIn("removed", result.stdout)
         self.assertIn(".github/prompts/review-pr.prompt.md", result.stdout)
 
+    def test_force_removes_legacy_namespace_symlink_without_following_it(self) -> None:
+        root = self.make_repo(".github")
+        outside_tempdir = tempfile.TemporaryDirectory(
+            prefix="trellis-review-pr-pack-outside-"
+        )
+        self.addCleanup(outside_tempdir.cleanup)
+        outside_target = Path(outside_tempdir.name) / "outside-command.md"
+        outside_target.write_text("outside command\n", encoding="utf-8")
+        legacy_github = root / ".github/prompts/review-pr.prompt.md"
+        legacy_github.parent.mkdir(parents=True)
+        legacy_github.symlink_to(outside_target)
+
+        result = self.run_install(root, "--force")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(legacy_github.exists())
+        self.assertFalse(legacy_github.is_symlink())
+        self.assertEqual(
+            outside_target.read_text(encoding="utf-8"),
+            "outside command\n",
+        )
+        self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
+        self.assertIn("removed", result.stdout)
+        self.assertIn(".github/prompts/review-pr.prompt.md", result.stdout)
+
     def test_force_does_not_remove_non_pack_refresh_specs_legacy_adapter(self) -> None:
         root = self.make_repo(".github")
         legacy_refresh_specs = root / ".github/prompts/refresh-specs.prompt.md"

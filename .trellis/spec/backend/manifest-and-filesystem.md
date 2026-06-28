@@ -127,6 +127,10 @@ legacy adapter path exists with other file content, report `legacy-conflict`
 and leave it untouched unless `--force` is supplied. With `--force`, remove the
 legacy file or symlink so the `sd` replacement becomes the only pack-owned
 adapter. Do not introduce a separate keep status for legacy adapter files.
+Validate the resolved parent directory before inspecting or unlinking legacy
+adapter paths, but do not resolve the final path when it is a symlink slated for
+conflict reporting or removal; unlinking the symlink itself is safe when its
+parent remains inside the target repo.
 
 Reference files:
 
