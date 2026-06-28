@@ -14,9 +14,12 @@ Reference files:
 - `templates/.agents/skills/trellis-review-pr/SKILL.md`
 - `templates/.agents/skills/trellis-full-check/SKILL.md`
 - `templates/.agents/skills/trellis-housekeeping/SKILL.md`
-- `templates/.gemini/commands/trellis/review-pr.toml`
-- `templates/.github/prompts/review-pr.prompt.md`
-- `templates/.opencode/commands/trellis/review-pr.md`
+- `templates/.claude/commands/sd/continue.md`
+- `templates/.claude/commands/sd/finish-work.md`
+- `templates/.claude/commands/sd/review-pr.md`
+- `templates/.gemini/commands/sd/review-pr.toml`
+- `templates/.github/prompts/sd-review-pr.prompt.md`
+- `templates/.opencode/commands/sd/review-pr.md`
 
 ## Shared Skill Pattern
 
@@ -50,6 +53,45 @@ post-merge task list, the expected clean-state report, anomaly reporting, and
 safety rules that prevent deleting branches unless GitHub confirms the PR is
 merged and the local branch head matches that PR.
 
+The `continue` and `finish-work` commands are adapter-only aliases in this
+pack. Do not copy, fork, or modify Trellis' built-in `trellis-continue` or
+`trellis-finish-work` skills in `templates/.agents/skills/`. Each wrapper
+should read the matching Trellis-provided skill from the target repo and follow
+it as-is.
+
+The `refresh-specs` command is intentionally adapter-only in this pack. Do not
+copy, fork, or modify Trellis' built-in `trellis-update-spec` skill in
+`templates/.agents/skills/`. Each wrapper should locate the existing skill in
+the target repo, follow that skill as-is for its `.trellis/spec/` update
+process, then refresh repo-owned repospec artifacts through existing
+maintenance infrastructure when available, and then perform the pack-specific
+architectural-overview gate:
+
+- If the repo has checked-in infrastructure for maintaining a repospec artifact
+  (docs, scripts, package tasks, make targets, or similar), use that
+  infrastructure to refresh the artifact.
+- Do not hand-edit generated repospec output unless repo docs explicitly say
+  that file is the source of truth.
+- Do not create new repospec infrastructure or a new repospec artifact unless
+  the user asks.
+- When the repospec refresh uses Repomix, require the generated output path to
+  be `docs/repomix-map.md`; do not leave a differently named Repomix map as the
+  final artifact.
+
+- Search for an existing architecture overview, such as `ARCHITECTURE.md`,
+  `docs/ARCHITECTURE.md`, or `.trellis/spec/**/architecture*.md`.
+- Update it only when the work changes high-level architecture: packages,
+  services, command surfaces, data flow, persistence, external integrations,
+  config/env, or runtime/deployment topology.
+- Do not create a new overview unless the user asks.
+- Report `Update-spec skill`, `Spec updates`, `Repospec`,
+  `Architectural overview`, and `Validation` in the final response.
+
+These adapter-only wrappers are intentional exceptions to the usual
+pack-shared-skill adapter pattern. Do not force them to read
+`.agents/skills/<command>/SKILL.md` unless this pack also starts installing and
+owning that matching shared skill.
+
 ## Platform Adapter Pattern
 
 Adapters should stay short and parallel:
@@ -65,8 +107,8 @@ and OpenCode adapters use Markdown.
 
 ## Drift Control
 
-When changing adapter wording, check all adapters in the same pass. The current
-three adapters intentionally have equivalent prompt text with only format-level
+When changing adapter wording, check all adapters in the same pass. The
+adapters intentionally have equivalent prompt text with only format-level
 differences.
 
 When changing workflow details, change the shared skill first. Adapter text

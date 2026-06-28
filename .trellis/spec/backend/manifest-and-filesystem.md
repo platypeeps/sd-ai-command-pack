@@ -100,8 +100,13 @@ Use `install_file()` for copy behavior:
 - Return `unchanged` when the target already has identical bytes.
 - Return `conflict` and leave the target untouched when content differs and
   `--force` is absent.
+- Return `preserved` and leave the target untouched when content differs and
+  the target is `.prism/rules.json`, regardless of `--force`; repo-local Prism
+  rules are intentionally protected during pack refreshes and must not be
+  reported as conflicts.
 - With `--force --backup`, copy the previous target file next to the original
-  with a `.bak` suffix before overwriting it.
+  with a `.bak` suffix before overwriting it. Do not create backups for
+  preserved `.prism/rules.json` files because they are not overwritten.
 - Backup candidates must also resolve inside the target repo, and an existing
   symlinked `.bak` path counts as occupied even when the symlink is broken.
 - Copy with `shutil.copyfile()` only after creating the target parent
@@ -113,6 +118,19 @@ Use `install_file()` for copy behavior:
 Run the final `git diff --check` only against manifest-selected target paths.
 The installer should not fail because an unrelated tracked file in the target
 repo already has whitespace errors.
+
+## Legacy Adapter Cleanup
+
+When installing `sd` adapter files, remove old pack-generated `/trellis:*`
+adapter files whose content still matches a known pack template variant. If a
+legacy adapter path exists with other file content, report `legacy-conflict`
+and leave it untouched unless `--force` is supplied. With `--force`, remove the
+legacy file or symlink so the `sd` replacement becomes the only pack-owned
+adapter. Do not introduce a separate keep status for legacy adapter files.
+Validate the resolved parent directory before inspecting or unlinking legacy
+adapter paths, but do not resolve the final path when it is a symlink slated for
+conflict reporting or removal; unlinking the symlink itself is safe when its
+parent remains inside the target repo.
 
 Reference files:
 
@@ -126,5 +144,7 @@ Reference files:
 - Do not hard-code new template paths only in Python.
 - Do not preserve mutable installer state between runs.
 - Do not overwrite user files without `--force`.
+- Do not overwrite `.prism/rules.json` even with `--force`; users commonly tune
+  Prism rules per repo after the initial install.
 - Do not run repo-wide validation that reports unrelated target work as an
   installer failure.

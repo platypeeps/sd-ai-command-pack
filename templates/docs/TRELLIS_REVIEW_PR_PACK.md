@@ -15,26 +15,43 @@ This repo has the reusable Trellis review-cycle setup installed from
   `.opencode/` when those platform folders exist.
 
 The command and prompt files are entry points only. The workflow behavior lives
-in the shared skills and scripts.
+in the shared skills and scripts. The refresh-specs wrapper runs the
+Trellis-provided `trellis-update-spec` skill as-is, refreshes repo-owned
+repospec artifacts through existing maintenance infrastructure when available,
+and then performs the architecture-overview check.
+The continue and finish-work wrappers run Trellis' existing
+`trellis-continue` and `trellis-finish-work` skills as-is.
+The slash command namespace is `sd`, not `trellis`, so these pack-owned wrappers
+do not collide with generated Trellis commands during future `trellis update`
+runs. GitHub Copilot prompt files use `sd-<command>.prompt.md` for the same
+reason.
 
 ## Recommended review loop
 
 1. Iterate with the narrowest deterministic checks for the files you touched.
-2. Run `/trellis:full-check` or `bash scripts/trellis-full-check.sh` before PR
+2. Use `/sd:continue` when resuming an in-progress Trellis task.
+3. Run `/sd:full-check` or `bash scripts/trellis-full-check.sh` before PR
    readiness, before asking for remote review, and after substantial review
    fixes.
-3. Fix deterministic failures first, then verify any Prism findings against the
+4. Fix deterministic failures first, then verify any Prism findings against the
    actual code before changing behavior.
-4. Use `/trellis:review-pr` for the PR loop. It should run the local
+5. Use `/sd:review-pr` for the PR loop. It should run the local
    full-check/Prism path before requesting GitHub Copilot review.
-5. Request Copilot only when explicitly wanted or as a final remote pass.
-6. Let `/trellis:review-pr` reply to and resolve review threads as part of the
+6. Request Copilot only when explicitly wanted or as a final remote pass.
+7. Let `/sd:review-pr` reply to and resolve review threads as part of the
    normal loop once findings are fixed, rebutted with evidence, or confirmed
    already addressed.
-7. After the PR merges, run `/trellis:housekeeping` to get back to the default
+8. Run `/sd:refresh-specs` when the work taught you a durable
+   implementation contract or convention. It runs the existing update-spec skill
+   and also checks whether an existing architectural overview needs to be
+   updated.
+9. Run `/sd:finish-work` when the coding session is complete and you need the
+   Trellis finish-work skill's quality gate, archive, journal, and commit
+   reminder behavior.
+10. After the PR merges, run `/sd:housekeeping` to get back to the default
    branch, prune/delete the merged development stream, and see the condensed
    clean-state/anomaly report.
-8. If `/trellis:review-pr` sees the PR is already merged or becomes merged
+11. If `/sd:review-pr` sees the PR is already merged or becomes merged
    during the active session, it auto-dispatches housekeeping before the final
    report. This does not wake inactive sessions; it only runs when the active
    agent observes the merge.
@@ -44,9 +61,12 @@ in the shared skills and scripts.
 Use the platform-native command when available:
 
 ```bash
-/trellis:full-check
-/trellis:housekeeping
-/trellis:review-pr
+/sd:continue
+/sd:finish-work
+/sd:full-check
+/sd:housekeeping
+/sd:review-pr
+/sd:refresh-specs
 ```
 
 Use the script directly from any shell:
@@ -59,6 +79,25 @@ bash scripts/trellis-housekeeping.sh
 The full-check script runs `git diff --check`, `git diff --cached --check`,
 detected package scripts, and local Prism review when Prism is available and
 configured.
+
+The continue and finish-work wrappers read `.agents/skills/trellis-continue/`
+or `.agents/skills/trellis-finish-work/` and follow those Trellis-provided
+skills without changing them.
+
+The refresh-specs wrapper reads the existing Trellis `trellis-update-spec` skill
+from the target repo, follows it as-is to update `.trellis/spec/`, and then
+checks whether the repo has checked-in infrastructure for maintaining a repospec
+artifact. When repo docs, scripts, package tasks, make targets, or similar
+commands describe how to generate or refresh the repospec, the wrapper uses that
+infrastructure instead of hand-editing generated output. If that refresh uses
+Repomix, the output map must be `docs/repomix-map.md`. It then checks for an
+existing architectural overview. Candidate overview paths include
+`ARCHITECTURE.md`, `ARCHITECTURE_OVERVIEW.md`, `docs/ARCHITECTURE.md`,
+`docs/ARCHITECTURE_OVERVIEW.md`, and `.trellis/spec/**/architecture*.md`. If an
+overview exists and the work changes high-level architecture such as packages,
+command surfaces, data flow, persistence, external integrations, config/env, or
+runtime/deployment topology, the wrapper updates it. Otherwise it leaves the
+overview untouched and reports `not present` or `not warranted`.
 
 The housekeeping script ends a single active development stream. On an open PR,
 it first checks a strict auto-finalize gate: the working tree is clean, the
@@ -148,14 +187,30 @@ python3 /path/to/trellis-review-pr-pack/install.py /path/to/target/repo --force
 
 Use `--dry-run` first when you want to inspect which files would change.
 Use `--backup` with `--force` if the target repo may have local edits that need
-to be preserved next to the overwritten files.
+to be preserved next to the overwritten files. An existing `.prism/rules.json`
+that differs from the pack template is reported as `preserved` and is never
+overwritten or reported as a conflict, so repo-specific Prism rules are not
+replaced during a pack refresh.
+Reinstalling the pack removes old pack-generated `/trellis:*` adapter files
+when they still match the pack templates. Legacy adapter files with other
+content are reported as conflicts unless `--force` is supplied; with `--force`,
+they are removed while the `sd` replacement is installed.
 
 ## Troubleshooting
 
-- Missing `/trellis:full-check` command: reinstall the pack and include the
+- Missing `/sd:continue` command: reinstall the pack and include the platform
+  adapter for the tool you are using.
+- Missing `/sd:finish-work` command: reinstall the pack and include the
   platform adapter for the tool you are using.
-- Missing `/trellis:housekeeping` command: reinstall the pack and include the
+- Missing `/sd:full-check` command: reinstall the pack and include the
   platform adapter for the tool you are using.
+- Missing `/sd:housekeeping` command: reinstall the pack and include the
+  platform adapter for the tool you are using.
+- Missing `/sd:refresh-specs` command: reinstall the pack and include the
+  platform adapter for the tool you are using.
+- `/sd:refresh-specs` reports a missing `trellis-update-spec` skill: run
+  `trellis update` in the target repo so the Trellis-provided skill files are
+  present, then retry the wrapper command.
 - `scripts/trellis-full-check.sh` is missing: reinstall the pack; every target
   repo should receive the shared script.
 - `scripts/trellis-housekeeping.sh` is missing: reinstall the pack; every

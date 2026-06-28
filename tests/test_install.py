@@ -276,18 +276,30 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / "scripts/trellis-housekeeping.sh").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
         self.assertTrue((root / "docs/TRELLIS_REVIEW_PR_PACK.md").is_file())
-        self.assertTrue((root / ".gemini/commands/trellis/review-pr.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/trellis/full-check.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/trellis/housekeeping.toml").is_file())
-        self.assertTrue((root / ".github/prompts/review-pr.prompt.md").is_file())
-        self.assertTrue((root / ".github/prompts/full-check.prompt.md").is_file())
-        self.assertTrue((root / ".github/prompts/housekeeping.prompt.md").is_file())
-        self.assertFalse((root / ".claude/commands/trellis/review-pr.md").exists())
-        self.assertFalse((root / ".claude/commands/trellis/full-check.md").exists())
-        self.assertFalse((root / ".claude/commands/trellis/housekeeping.md").exists())
-        self.assertFalse((root / ".opencode/commands/trellis/review-pr.md").exists())
-        self.assertFalse((root / ".opencode/commands/trellis/full-check.md").exists())
-        self.assertFalse((root / ".opencode/commands/trellis/housekeeping.md").exists())
+        self.assertTrue((root / ".gemini/commands/sd/continue.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/full-check.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/housekeeping.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/refresh-specs.toml").is_file())
+        self.assertTrue((root / ".github/prompts/sd-continue.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-finish-work.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-full-check.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-housekeeping.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-refresh-specs.prompt.md").is_file())
+        self.assertFalse((root / ".claude/commands/sd/continue.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/finish-work.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/review-pr.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/full-check.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/housekeeping.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/refresh-specs.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/continue.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/finish-work.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/review-pr.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/full-check.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/housekeeping.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/refresh-specs.md").exists())
 
     def test_platform_filter_still_installs_shared_assets(self) -> None:
         root = self.make_repo(".claude", ".gemini", ".github", ".opencode")
@@ -302,18 +314,30 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / "scripts/trellis-housekeeping.sh").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
         self.assertTrue((root / "docs/TRELLIS_REVIEW_PR_PACK.md").is_file())
-        self.assertTrue((root / ".gemini/commands/trellis/review-pr.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/trellis/full-check.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/trellis/housekeeping.toml").is_file())
-        self.assertFalse((root / ".claude/commands/trellis/review-pr.md").exists())
-        self.assertFalse((root / ".claude/commands/trellis/full-check.md").exists())
-        self.assertFalse((root / ".claude/commands/trellis/housekeeping.md").exists())
-        self.assertFalse((root / ".github/prompts/review-pr.prompt.md").exists())
-        self.assertFalse((root / ".github/prompts/full-check.prompt.md").exists())
-        self.assertFalse((root / ".github/prompts/housekeeping.prompt.md").exists())
-        self.assertFalse((root / ".opencode/commands/trellis/review-pr.md").exists())
-        self.assertFalse((root / ".opencode/commands/trellis/full-check.md").exists())
-        self.assertFalse((root / ".opencode/commands/trellis/housekeeping.md").exists())
+        self.assertTrue((root / ".gemini/commands/sd/continue.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/full-check.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/housekeeping.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/refresh-specs.toml").is_file())
+        self.assertFalse((root / ".claude/commands/sd/continue.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/finish-work.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/review-pr.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/full-check.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/housekeeping.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/refresh-specs.md").exists())
+        self.assertFalse((root / ".github/prompts/sd-continue.prompt.md").exists())
+        self.assertFalse((root / ".github/prompts/sd-finish-work.prompt.md").exists())
+        self.assertFalse((root / ".github/prompts/sd-review-pr.prompt.md").exists())
+        self.assertFalse((root / ".github/prompts/sd-full-check.prompt.md").exists())
+        self.assertFalse((root / ".github/prompts/sd-housekeeping.prompt.md").exists())
+        self.assertFalse((root / ".github/prompts/sd-refresh-specs.prompt.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/continue.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/finish-work.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/review-pr.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/full-check.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/housekeeping.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/refresh-specs.md").exists())
 
     def test_all_installs_every_adapter_without_anchors(self) -> None:
         root = self.make_repo()
@@ -328,18 +352,30 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / "scripts/trellis-housekeeping.sh").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
         self.assertTrue((root / "docs/TRELLIS_REVIEW_PR_PACK.md").is_file())
-        self.assertTrue((root / ".claude/commands/trellis/review-pr.md").is_file())
-        self.assertTrue((root / ".claude/commands/trellis/full-check.md").is_file())
-        self.assertTrue((root / ".claude/commands/trellis/housekeeping.md").is_file())
-        self.assertTrue((root / ".gemini/commands/trellis/review-pr.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/trellis/full-check.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/trellis/housekeeping.toml").is_file())
-        self.assertTrue((root / ".github/prompts/review-pr.prompt.md").is_file())
-        self.assertTrue((root / ".github/prompts/full-check.prompt.md").is_file())
-        self.assertTrue((root / ".github/prompts/housekeeping.prompt.md").is_file())
-        self.assertTrue((root / ".opencode/commands/trellis/review-pr.md").is_file())
-        self.assertTrue((root / ".opencode/commands/trellis/full-check.md").is_file())
-        self.assertTrue((root / ".opencode/commands/trellis/housekeeping.md").is_file())
+        self.assertTrue((root / ".claude/commands/sd/continue.md").is_file())
+        self.assertTrue((root / ".claude/commands/sd/finish-work.md").is_file())
+        self.assertTrue((root / ".claude/commands/sd/review-pr.md").is_file())
+        self.assertTrue((root / ".claude/commands/sd/full-check.md").is_file())
+        self.assertTrue((root / ".claude/commands/sd/housekeeping.md").is_file())
+        self.assertTrue((root / ".claude/commands/sd/refresh-specs.md").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/continue.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/full-check.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/housekeeping.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/refresh-specs.toml").is_file())
+        self.assertTrue((root / ".github/prompts/sd-continue.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-finish-work.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-full-check.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-housekeeping.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-refresh-specs.prompt.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd/continue.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd/finish-work.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd/review-pr.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd/full-check.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd/housekeeping.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd/refresh-specs.md").is_file())
 
     def test_installed_adapters_can_resolve_shared_skill(self) -> None:
         root = self.make_repo(".claude", ".gemini", ".github", ".opencode")
@@ -358,10 +394,32 @@ class InstallTests(unittest.TestCase):
         self.assertTrue(full_check_script.is_file())
         self.assertTrue(housekeeping_script.is_file())
         for adapter in [
-            root / ".claude/commands/trellis/review-pr.md",
-            root / ".gemini/commands/trellis/review-pr.toml",
-            root / ".github/prompts/review-pr.prompt.md",
-            root / ".opencode/commands/trellis/review-pr.md",
+            root / ".claude/commands/sd/continue.md",
+            root / ".gemini/commands/sd/continue.toml",
+            root / ".github/prompts/sd-continue.prompt.md",
+            root / ".opencode/commands/sd/continue.md",
+        ]:
+            self.assertTrue(adapter.is_file(), adapter)
+            self.assertIn(
+                ".agents/skills/trellis-continue/SKILL.md",
+                adapter.read_text(encoding="utf-8"),
+            )
+        for adapter in [
+            root / ".claude/commands/sd/finish-work.md",
+            root / ".gemini/commands/sd/finish-work.toml",
+            root / ".github/prompts/sd-finish-work.prompt.md",
+            root / ".opencode/commands/sd/finish-work.md",
+        ]:
+            self.assertTrue(adapter.is_file(), adapter)
+            self.assertIn(
+                ".agents/skills/trellis-finish-work/SKILL.md",
+                adapter.read_text(encoding="utf-8"),
+            )
+        for adapter in [
+            root / ".claude/commands/sd/review-pr.md",
+            root / ".gemini/commands/sd/review-pr.toml",
+            root / ".github/prompts/sd-review-pr.prompt.md",
+            root / ".opencode/commands/sd/review-pr.md",
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             self.assertIn(
@@ -369,25 +427,145 @@ class InstallTests(unittest.TestCase):
                 adapter.read_text(encoding="utf-8"),
             )
         for adapter in [
-            root / ".claude/commands/trellis/full-check.md",
-            root / ".gemini/commands/trellis/full-check.toml",
-            root / ".github/prompts/full-check.prompt.md",
-            root / ".opencode/commands/trellis/full-check.md",
+            root / ".claude/commands/sd/full-check.md",
+            root / ".gemini/commands/sd/full-check.toml",
+            root / ".github/prompts/sd-full-check.prompt.md",
+            root / ".opencode/commands/sd/full-check.md",
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             content = adapter.read_text(encoding="utf-8")
             self.assertIn(".agents/skills/trellis-full-check/SKILL.md", content)
             self.assertIn("scripts/trellis-full-check.sh", content)
         for adapter in [
-            root / ".claude/commands/trellis/housekeeping.md",
-            root / ".gemini/commands/trellis/housekeeping.toml",
-            root / ".github/prompts/housekeeping.prompt.md",
-            root / ".opencode/commands/trellis/housekeeping.md",
+            root / ".claude/commands/sd/housekeeping.md",
+            root / ".gemini/commands/sd/housekeeping.toml",
+            root / ".github/prompts/sd-housekeeping.prompt.md",
+            root / ".opencode/commands/sd/housekeeping.md",
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             content = adapter.read_text(encoding="utf-8")
             self.assertIn(".agents/skills/trellis-housekeeping/SKILL.md", content)
             self.assertIn("scripts/trellis-housekeeping.sh", content)
+        for adapter in [
+            root / ".claude/commands/sd/refresh-specs.md",
+            root / ".gemini/commands/sd/refresh-specs.toml",
+            root / ".github/prompts/sd-refresh-specs.prompt.md",
+            root / ".opencode/commands/sd/refresh-specs.md",
+        ]:
+            self.assertTrue(adapter.is_file(), adapter)
+            content = adapter.read_text(encoding="utf-8")
+            self.assertIn("trellis-update-spec/SKILL.md", content)
+            self.assertIn("without modifying", content)
+            self.assertIn("architectural overview", content)
+            self.assertIn("not warranted", content)
+
+    def test_install_removes_legacy_trellis_namespace_adapters(self) -> None:
+        root = self.make_repo(".gemini", ".github")
+        legacy_gemini = root / ".gemini/commands/trellis/review-pr.toml"
+        legacy_github = root / ".github/prompts/review-pr.prompt.md"
+        legacy_gemini.parent.mkdir(parents=True)
+        legacy_github.parent.mkdir(parents=True)
+        legacy_gemini.write_bytes(
+            (
+                install.ROOT / "templates/.gemini/commands/sd/review-pr.toml"
+            ).read_bytes().replace(
+                b'description = "SD: ',
+                b'description = "Trellis: ',
+            )
+        )
+        legacy_github.write_bytes(
+            (
+                install.ROOT / "templates/.github/prompts/sd-review-pr.prompt.md"
+            ).read_bytes()
+        )
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(legacy_gemini.exists())
+        self.assertFalse(legacy_github.exists())
+        self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
+        self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
+        self.assertIn("removed", result.stdout)
+        self.assertIn(".gemini/commands/trellis/review-pr.toml", result.stdout)
+        self.assertIn(".github/prompts/review-pr.prompt.md", result.stdout)
+
+    def test_install_reports_modified_legacy_namespace_adapter_conflict(self) -> None:
+        root = self.make_repo(".github")
+        legacy_github = root / ".github/prompts/review-pr.prompt.md"
+        legacy_github.parent.mkdir(parents=True)
+        legacy_github.write_text("custom local command\n", encoding="utf-8")
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertEqual(
+            legacy_github.read_text(encoding="utf-8"),
+            "custom local command\n",
+        )
+        self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
+        self.assertIn("legacy-conflict", result.stdout)
+        self.assertIn("content differs from pack template", result.stdout)
+        self.assertIn("Re-run with --force", result.stdout)
+
+    def test_force_removes_modified_legacy_namespace_adapter(self) -> None:
+        root = self.make_repo(".github")
+        legacy_github = root / ".github/prompts/review-pr.prompt.md"
+        legacy_github.parent.mkdir(parents=True)
+        legacy_github.write_text("custom local command\n", encoding="utf-8")
+
+        result = self.run_install(root, "--force")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(legacy_github.exists())
+        self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
+        self.assertIn("removed", result.stdout)
+        self.assertIn(".github/prompts/review-pr.prompt.md", result.stdout)
+
+    def test_force_removes_legacy_namespace_symlink_without_following_it(self) -> None:
+        root = self.make_repo(".github")
+        outside_tempdir = tempfile.TemporaryDirectory(
+            prefix="trellis-review-pr-pack-outside-"
+        )
+        self.addCleanup(outside_tempdir.cleanup)
+        outside_target = Path(outside_tempdir.name) / "outside-command.md"
+        outside_target.write_text("outside command\n", encoding="utf-8")
+        legacy_github = root / ".github/prompts/review-pr.prompt.md"
+        legacy_github.parent.mkdir(parents=True)
+        legacy_github.symlink_to(outside_target)
+
+        result = self.run_install(root, "--force")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(legacy_github.exists())
+        self.assertFalse(legacy_github.is_symlink())
+        self.assertEqual(
+            outside_target.read_text(encoding="utf-8"),
+            "outside command\n",
+        )
+        self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
+        self.assertIn("removed", result.stdout)
+        self.assertIn(".github/prompts/review-pr.prompt.md", result.stdout)
+
+    def test_force_does_not_remove_non_pack_refresh_specs_legacy_adapter(self) -> None:
+        root = self.make_repo(".github")
+        legacy_refresh_specs = root / ".github/prompts/refresh-specs.prompt.md"
+        legacy_refresh_specs.parent.mkdir(parents=True)
+        legacy_refresh_specs.write_text(
+            "custom refresh specs command\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_install(root, "--force")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(
+            legacy_refresh_specs.read_text(encoding="utf-8"),
+            "custom refresh specs command\n",
+        )
+        self.assertTrue(
+            (root / ".github/prompts/sd-refresh-specs.prompt.md").is_file()
+        )
 
     def test_installed_shared_scripts_and_prism_rules_are_valid(self) -> None:
         root = self.make_repo(".gemini")
@@ -421,6 +599,62 @@ class InstallTests(unittest.TestCase):
         forced = self.run_install(root, "--force")
         self.assertEqual(forced.returncode, 0, forced.stdout)
         self.assertIn("Trellis PR Review Loop", target.read_text(encoding="utf-8"))
+
+    def test_force_preserves_existing_prism_rules(self) -> None:
+        root = self.make_repo(".gemini")
+        target = root / ".agents/skills/trellis-review-pr/SKILL.md"
+        prism_rules = root / ".prism/rules.json"
+        target.parent.mkdir(parents=True)
+        prism_rules.parent.mkdir(parents=True)
+        target.write_text("local edit\n", encoding="utf-8")
+        prism_rules.write_text('{"custom": true}\n', encoding="utf-8")
+
+        result = self.run_install(root, "--force", "--backup")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("preserved", result.stdout)
+        self.assertIn(".prism/rules.json", result.stdout)
+        self.assertIn("Trellis PR Review Loop", target.read_text(encoding="utf-8"))
+        self.assertEqual(
+            prism_rules.read_text(encoding="utf-8"),
+            '{"custom": true}\n',
+        )
+        self.assertFalse(prism_rules.with_name("rules.json.bak").exists())
+
+    def test_preserves_existing_prism_rules_without_force(self) -> None:
+        root = self.make_repo(".gemini")
+        prism_rules = root / ".prism/rules.json"
+        prism_rules.parent.mkdir(parents=True)
+        prism_rules.write_text('{"custom": true}\n', encoding="utf-8")
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("preserved", result.stdout)
+        self.assertIn(".prism/rules.json", result.stdout)
+        self.assertNotIn("Conflicts:", result.stdout)
+        self.assertNotIn("Re-run with --force", result.stdout)
+        self.assertEqual(
+            prism_rules.read_text(encoding="utf-8"),
+            '{"custom": true}\n',
+        )
+
+    def test_force_preserved_prism_rules_are_excluded_from_diff_check(self) -> None:
+        root = self.make_repo()
+        prism_rules = root / ".prism/rules.json"
+        prism_rules.parent.mkdir(parents=True)
+        prism_rules.write_text('{"custom": false}\n', encoding="utf-8")
+        self.run_git(root, "add", ".prism/rules.json")
+        prism_rules.write_text('{"custom": true}   \n', encoding="utf-8")
+
+        result = self.run_install(root, "--force", skip_diff_check=False)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("preserved", result.stdout)
+        self.assertEqual(
+            prism_rules.read_text(encoding="utf-8"),
+            '{"custom": true}   \n',
+        )
 
     def test_force_backup_preserves_overwritten_file(self) -> None:
         root = self.make_repo(".gemini")
@@ -500,9 +734,10 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / "scripts/trellis-housekeeping.sh").exists())
         self.assertFalse((root / ".prism/rules.json").exists())
         self.assertFalse((root / "docs/TRELLIS_REVIEW_PR_PACK.md").exists())
-        self.assertFalse((root / ".opencode/commands/trellis/review-pr.md").exists())
-        self.assertFalse((root / ".opencode/commands/trellis/full-check.md").exists())
-        self.assertFalse((root / ".opencode/commands/trellis/housekeeping.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/review-pr.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/full-check.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/housekeeping.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd/refresh-specs.md").exists())
 
     def test_rejects_non_trellis_repo(self) -> None:
         tempdir = tempfile.TemporaryDirectory(prefix="trellis-review-pr-pack-test-")
@@ -684,7 +919,13 @@ class InstallTests(unittest.TestCase):
         self.assertGreater(len(adapter_files), 0)
         for file in adapter_files:
             content = file.source.read_text(encoding="utf-8")
-            if "full-check" in file.target.name:
+            if "continue" in file.target.name:
+                self.assertIn(".agents/skills/trellis-continue/SKILL.md", content)
+                self.assertIn("Follow that skill exactly", content)
+            elif "finish-work" in file.target.name:
+                self.assertIn(".agents/skills/trellis-finish-work/SKILL.md", content)
+                self.assertIn("Follow that skill exactly", content)
+            elif "full-check" in file.target.name:
                 self.assertIn(".agents/skills/trellis-full-check/SKILL.md", content)
                 self.assertIn("scripts/trellis-full-check.sh", content)
             elif "housekeeping" in file.target.name:
@@ -693,8 +934,83 @@ class InstallTests(unittest.TestCase):
                     content,
                 )
                 self.assertIn("scripts/trellis-housekeeping.sh", content)
+            elif "refresh-specs" in file.target.name:
+                self.assertIn("trellis-update-spec/SKILL.md", content)
+                self.assertIn("without modifying", content)
+                self.assertIn("architectural overview", content)
+                self.assertIn("Do not create a new overview unless", content)
             else:
                 self.assertIn(".agents/skills/trellis-review-pr/SKILL.md", content)
+
+    def test_command_adapters_use_pack_owned_sd_namespace(self) -> None:
+        _, files = install.load_manifest()
+
+        command_files = [file for file in files if file.kind == "command"]
+        github_prompt_files = [
+            file for file in files if file.platform == "github" and file.kind == "prompt"
+        ]
+        self.assertGreater(len(command_files), 0)
+        self.assertGreater(len(github_prompt_files), 0)
+        for file in command_files:
+            source = file.source.relative_to(install.ROOT).as_posix()
+            self.assertIn("/commands/sd/", source)
+            self.assertIn("/commands/sd/", file.target.as_posix())
+            self.assertNotIn("/commands/trellis/", source)
+            self.assertNotIn("/commands/trellis/", file.target.as_posix())
+        for file in github_prompt_files:
+            self.assertTrue(file.source.name.startswith("sd-"), file.source)
+            self.assertTrue(file.target.name.startswith("sd-"), file.target)
+
+        self.assertFalse((install.ROOT / "templates/.claude/commands/trellis").exists())
+        self.assertFalse((install.ROOT / "templates/.gemini/commands/trellis").exists())
+        self.assertFalse((install.ROOT / "templates/.opencode/commands/trellis").exists())
+
+    def test_legacy_cleanup_does_not_target_trellis_owned_commands(self) -> None:
+        _, files = install.load_manifest()
+        protected = [
+            file
+            for file in files
+            if file.target.name.startswith(
+                (
+                    "continue",
+                    "finish-work",
+                    "refresh-specs",
+                    "sd-continue",
+                    "sd-finish-work",
+                    "sd-refresh-specs",
+                )
+            )
+        ]
+
+        self.assertGreater(len(protected), 0)
+        for file in protected:
+            self.assertIsNone(install.legacy_adapter_target(file), file.target)
+
+    def test_refresh_specs_wrappers_include_repospec_and_architecture_gates(self) -> None:
+        adapter_paths = [
+            install.ROOT / "templates/.claude/commands/sd/refresh-specs.md",
+            install.ROOT / "templates/.gemini/commands/sd/refresh-specs.toml",
+            install.ROOT / "templates/.github/prompts/sd-refresh-specs.prompt.md",
+            install.ROOT / "templates/.opencode/commands/sd/refresh-specs.md",
+        ]
+
+        for adapter_path in adapter_paths:
+            content = adapter_path.read_text(encoding="utf-8")
+            self.assertIn("trellis-update-spec/SKILL.md", content)
+            self.assertIn("without modifying", content)
+            self.assertIn("repospec artifact", content)
+            self.assertIn("maintenance infrastructure", content)
+            self.assertIn("instead of hand-editing generated output", content)
+            self.assertIn("Repomix", content)
+            self.assertIn("docs/repomix-map.md", content)
+            self.assertIn("no infrastructure", content)
+            self.assertIn("ARCHITECTURE.md", content)
+            self.assertIn("docs/ARCHITECTURE.md", content)
+            self.assertIn(".trellis/spec/**/architecture*.md", content)
+            self.assertIn("Do not create a new overview unless", content)
+            self.assertIn("changes high-level architecture", content)
+            self.assertIn("not present", content)
+            self.assertIn("not warranted", content)
 
     def test_full_check_script_writes_gito_reports_to_artifact_dir(self) -> None:
         script = (
@@ -755,10 +1071,10 @@ class InstallTests(unittest.TestCase):
             / "templates/.agents/skills/trellis-review-pr/SKILL.md"
         ).read_text(encoding="utf-8")
         adapter_paths = [
-            install.ROOT / "templates/.claude/commands/trellis/review-pr.md",
-            install.ROOT / "templates/.gemini/commands/trellis/review-pr.toml",
-            install.ROOT / "templates/.github/prompts/review-pr.prompt.md",
-            install.ROOT / "templates/.opencode/commands/trellis/review-pr.md",
+            install.ROOT / "templates/.claude/commands/sd/review-pr.md",
+            install.ROOT / "templates/.gemini/commands/sd/review-pr.toml",
+            install.ROOT / "templates/.github/prompts/sd-review-pr.prompt.md",
+            install.ROOT / "templates/.opencode/commands/sd/review-pr.md",
         ]
 
         self.assertIn("Post-Merge Auto-Dispatch", skill)

@@ -23,8 +23,10 @@ guessing.
 
 ## Required Patterns
 
-- Every adapter must instruct the agent to read the matching shared skill under
-  `.agents/skills/<command>/SKILL.md`.
+- Every pack-owned workflow adapter must instruct the agent to read the
+  matching shared skill under `.agents/skills/<command>/SKILL.md`. The
+  adapter-only `continue`, `finish-work`, and `refresh-specs` wrappers are the
+  exception: they read Trellis-provided skills from the target repo instead.
 - Every adapter must mention its command's core loop or task list, safety
   stop condition, and final report expectation.
 - New adapters need README documentation and installer tests.

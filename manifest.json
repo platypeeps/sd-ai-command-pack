@@ -1,7 +1,7 @@
 {
   "name": "trellis-review-pr-pack",
-  "version": "0.2.0",
-  "description": "Install project-local Trellis review/full-check/housekeeping workflows, Prism rules, usage guide, and platform adapters into Trellis repos.",
+  "version": "0.3.0",
+  "description": "Install project-local Trellis continue, finish-work, review, full-check, housekeeping, and refresh-specs workflows, Prism rules, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
   "files": [
     {
@@ -56,85 +56,169 @@
     {
       "platform": "claude",
       "kind": "command",
-      "source": "templates/.claude/commands/trellis/review-pr.md",
-      "target": ".claude/commands/trellis/review-pr.md",
+      "source": "templates/.claude/commands/sd/continue.md",
+      "target": ".claude/commands/sd/continue.md",
       "anchor": ".claude"
     },
     {
       "platform": "claude",
       "kind": "command",
-      "source": "templates/.claude/commands/trellis/full-check.md",
-      "target": ".claude/commands/trellis/full-check.md",
+      "source": "templates/.claude/commands/sd/finish-work.md",
+      "target": ".claude/commands/sd/finish-work.md",
       "anchor": ".claude"
     },
     {
       "platform": "claude",
       "kind": "command",
-      "source": "templates/.claude/commands/trellis/housekeeping.md",
-      "target": ".claude/commands/trellis/housekeeping.md",
+      "source": "templates/.claude/commands/sd/review-pr.md",
+      "target": ".claude/commands/sd/review-pr.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
+      "source": "templates/.claude/commands/sd/full-check.md",
+      "target": ".claude/commands/sd/full-check.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
+      "source": "templates/.claude/commands/sd/housekeeping.md",
+      "target": ".claude/commands/sd/housekeeping.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
+      "source": "templates/.claude/commands/sd/refresh-specs.md",
+      "target": ".claude/commands/sd/refresh-specs.md",
       "anchor": ".claude"
     },
     {
       "platform": "gemini",
       "kind": "command",
-      "source": "templates/.gemini/commands/trellis/review-pr.toml",
-      "target": ".gemini/commands/trellis/review-pr.toml",
+      "source": "templates/.gemini/commands/sd/continue.toml",
+      "target": ".gemini/commands/sd/continue.toml",
       "anchor": ".gemini"
     },
     {
       "platform": "gemini",
       "kind": "command",
-      "source": "templates/.gemini/commands/trellis/full-check.toml",
-      "target": ".gemini/commands/trellis/full-check.toml",
+      "source": "templates/.gemini/commands/sd/finish-work.toml",
+      "target": ".gemini/commands/sd/finish-work.toml",
       "anchor": ".gemini"
     },
     {
       "platform": "gemini",
       "kind": "command",
-      "source": "templates/.gemini/commands/trellis/housekeeping.toml",
-      "target": ".gemini/commands/trellis/housekeeping.toml",
+      "source": "templates/.gemini/commands/sd/review-pr.toml",
+      "target": ".gemini/commands/sd/review-pr.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/full-check.toml",
+      "target": ".gemini/commands/sd/full-check.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/housekeeping.toml",
+      "target": ".gemini/commands/sd/housekeeping.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/refresh-specs.toml",
+      "target": ".gemini/commands/sd/refresh-specs.toml",
       "anchor": ".gemini"
     },
     {
       "platform": "github",
       "kind": "prompt",
-      "source": "templates/.github/prompts/review-pr.prompt.md",
-      "target": ".github/prompts/review-pr.prompt.md",
+      "source": "templates/.github/prompts/sd-continue.prompt.md",
+      "target": ".github/prompts/sd-continue.prompt.md",
       "anchor": ".github"
     },
     {
       "platform": "github",
       "kind": "prompt",
-      "source": "templates/.github/prompts/full-check.prompt.md",
-      "target": ".github/prompts/full-check.prompt.md",
+      "source": "templates/.github/prompts/sd-finish-work.prompt.md",
+      "target": ".github/prompts/sd-finish-work.prompt.md",
       "anchor": ".github"
     },
     {
       "platform": "github",
       "kind": "prompt",
-      "source": "templates/.github/prompts/housekeeping.prompt.md",
-      "target": ".github/prompts/housekeeping.prompt.md",
+      "source": "templates/.github/prompts/sd-review-pr.prompt.md",
+      "target": ".github/prompts/sd-review-pr.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
+      "source": "templates/.github/prompts/sd-full-check.prompt.md",
+      "target": ".github/prompts/sd-full-check.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
+      "source": "templates/.github/prompts/sd-housekeeping.prompt.md",
+      "target": ".github/prompts/sd-housekeeping.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
+      "source": "templates/.github/prompts/sd-refresh-specs.prompt.md",
+      "target": ".github/prompts/sd-refresh-specs.prompt.md",
       "anchor": ".github"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/trellis/review-pr.md",
-      "target": ".opencode/commands/trellis/review-pr.md",
+      "source": "templates/.opencode/commands/sd/continue.md",
+      "target": ".opencode/commands/sd/continue.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/trellis/full-check.md",
-      "target": ".opencode/commands/trellis/full-check.md",
+      "source": "templates/.opencode/commands/sd/finish-work.md",
+      "target": ".opencode/commands/sd/finish-work.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/trellis/housekeeping.md",
-      "target": ".opencode/commands/trellis/housekeeping.md",
+      "source": "templates/.opencode/commands/sd/review-pr.md",
+      "target": ".opencode/commands/sd/review-pr.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.opencode/commands/sd/full-check.md",
+      "target": ".opencode/commands/sd/full-check.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.opencode/commands/sd/housekeeping.md",
+      "target": ".opencode/commands/sd/housekeeping.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.opencode/commands/sd/refresh-specs.md",
+      "target": ".opencode/commands/sd/refresh-specs.md",
       "anchor": ".opencode"
     }
   ]

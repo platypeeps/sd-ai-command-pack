@@ -27,7 +27,7 @@ status followed by the target path:
 
 ```text
 created     .agents/skills/trellis-review-pr/SKILL.md
-skipped     .opencode/commands/trellis/review-pr.md (anchor .opencode not present)
+skipped     .opencode/commands/sd/review-pr.md (anchor .opencode not present)
 ```
 
 ## What to Log
@@ -35,6 +35,10 @@ skipped     .opencode/commands/trellis/review-pr.md (anchor .opencode not presen
 - Print every selected file result.
 - Print every skipped file and the reason.
 - Print backup paths created by `--force --backup`.
+- Print `preserved` for `.prism/rules.json` when existing repo-local rules
+  differ from the pack template; do this with or without `--force`.
+- Print `legacy-conflict` for old `/trellis:*` adapter files that differ from
+  known pack templates and need `--force` before removal.
 - Print conflict paths and the exact retry hint.
 - Print `git diff --check` output when that validation fails.
 
