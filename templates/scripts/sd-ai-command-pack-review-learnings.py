@@ -50,7 +50,7 @@ TRELLIS_JOURNAL_PLACEHOLDERS = (
 _FILE_HEADER_RE = re.compile(r"^\+\+\+ b/(.+)$")
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 _NEGATIVE_ARRAY_OFFSET_RE = re.compile(
-    r"\$\{[^}\n]*(?:\[\s*-\d+\]|\[(?:@|\*)\]\s*:\s*-\d+)"
+    r"\$\{[^}\n]*(?:\[\s*-\d+\]|\[(?:@|\*)\]\s*:\s*-\d+|(?:@|\*)\s*:\s*-\d+)"
 )
 _GREP_EXPECTED_EMPTY_RE = re.compile(r"\bgrep\b[^#\n]*\s-[A-Za-z]*v[A-Za-z]*\b")
 _CLASSIFY_WITH_FILES_RE = re.compile(r"classify-ci-changes\.sh\b.*\$\{files\[@\]\}")
