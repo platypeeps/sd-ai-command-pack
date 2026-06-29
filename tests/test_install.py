@@ -1368,6 +1368,10 @@ class InstallTests(unittest.TestCase):
 
         cases = [
             (
+                "scripts/sd-ai-command-pack-review-learnings.py",
+                "scripts/sd-review-learnings.py",
+            ),
+            (
                 "scripts/sd-ai-command-pack-full-check.sh",
                 "scripts/sd-command-pack-full-check.sh",
             ),
@@ -2971,6 +2975,8 @@ class InstallTests(unittest.TestCase):
         (root / ".agents/skills/sd-review-pr/SKILL.md").unlink()
         obsolete = root / "scripts/trellis-full-check.sh"
         obsolete.write_text("# obsolete\n", encoding="utf-8")
+        obsolete_review_learnings = root / "scripts/sd-review-learnings.py"
+        obsolete_review_learnings.write_text("# obsolete\n", encoding="utf-8")
 
         result = subprocess.run(
             [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
@@ -2988,6 +2994,10 @@ class InstallTests(unittest.TestCase):
         )
         self.assertIn(
             "obsolete pack artifact still exists: scripts/trellis-full-check.sh",
+            result.stdout,
+        )
+        self.assertIn(
+            "obsolete pack artifact still exists: scripts/sd-review-learnings.py",
             result.stdout,
         )
 
@@ -3031,6 +3041,68 @@ class InstallTests(unittest.TestCase):
         self.assertIn(
             "error: docs/repomix-map.md mentions obsolete pack names",
             strict_result.stdout,
+        )
+
+    def run_source_audit(self, root: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                "--repo",
+                str(root),
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+    def test_install_audit_skips_inside_pack_source_checkout(self) -> None:
+        root = self.make_repo()
+        # Recreate the markers unique to the pack's own source tree.
+        (root / "install.py").write_text("# installer\n", encoding="utf-8")
+        (root / "manifest.json").write_text("{}\n", encoding="utf-8")
+        (root / "templates").mkdir()
+
+        result = self.run_source_audit(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("skipping install audit", result.stdout)
+        self.assertIn("source checkout", result.stdout)
+
+    def test_install_audit_still_fails_for_missing_targets_in_consumer_repo(
+        self,
+    ) -> None:
+        # No installer/manifest/templates markers -> a consumer repo. A missing
+        # installed-targets snapshot must stay a hard failure (guard not loosened).
+        root = self.make_repo()
+
+        result = self.run_source_audit(root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("installed-targets.txt is missing", result.stdout)
+
+    def test_install_audit_runs_in_source_checkout_once_installed(self) -> None:
+        # Source markers present but an installed footprint exists -> the audit
+        # must still run rather than skip (dogfood install case).
+        root = self.make_repo()
+        (root / "install.py").write_text("# installer\n", encoding="utf-8")
+        (root / "manifest.json").write_text("{}\n", encoding="utf-8")
+        (root / "templates").mkdir()
+        snapshot = root / install.INSTALLED_TARGETS_FILE
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        snapshot.write_text(
+            "scripts/sd-ai-command-pack-full-check.sh\n", encoding="utf-8"
+        )
+
+        result = self.run_source_audit(root)
+
+        self.assertNotIn("skipping install audit", result.stdout)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "installed target is missing: "
+            "scripts/sd-ai-command-pack-full-check.sh",
+            result.stdout,
         )
 
     def test_shared_script_templates_are_syntax_valid(self) -> None:

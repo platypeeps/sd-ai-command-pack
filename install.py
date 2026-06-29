@@ -74,6 +74,9 @@ OBSOLETE_SHARED_SCRIPT_TARGETS = {
     ),
 }
 OBSOLETE_RENAMED_TARGETS = {
+    Path("scripts/sd-ai-command-pack-review-learnings.py"): (
+        Path("scripts/sd-review-learnings.py"),
+    ),
     Path(".agents/skills/sd-update-spec/SKILL.md"): (
         Path(".agents/skills/sd-refresh-specs/SKILL.md"),
     ),

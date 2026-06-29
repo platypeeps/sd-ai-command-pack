@@ -11,6 +11,15 @@ from pathlib import Path
 
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
 
+# Files unique to the sd-ai-command-pack source checkout. A consumer repo never
+# has all three (it receives shipped scripts, but not the installer, manifest, or
+# template tree), so this is a safe signal that there is nothing installed to audit.
+SOURCE_REPO_MARKERS = (
+    Path("install.py"),
+    Path("manifest.json"),
+    Path("templates"),
+)
+
 OBSOLETE_PATHS = [
     Path(".agents/skills/trellis-review-pr/SKILL.md"),
     Path(".agents/skills/trellis-full-check/SKILL.md"),
@@ -27,6 +36,7 @@ OBSOLETE_PATHS = [
     Path("docs/TRELLIS_REVIEW_PR_PACK.md"),
     Path("scripts/trellis-full-check.sh"),
     Path("scripts/trellis-housekeeping.sh"),
+    Path("scripts/sd-review-learnings.py"),
     Path("scripts/sd-command-pack-full-check.sh"),
     Path("scripts/sd-command-pack-housekeeping.sh"),
     Path("scripts/sd-command-pack-review-scope.sh"),
@@ -70,12 +80,17 @@ OBSOLETE_REFERENCE_PATTERNS = [
     ".opencode/commands/sd-refresh-specs.md",
     "scripts/trellis-full-check.sh",
     "scripts/trellis-housekeeping.sh",
+    "scripts/sd-review-learnings.py",
     "sd-command-pack-",
 ]
 
 
 def is_disabled(value: str | None) -> bool:
     return (value or "").lower() in {"0", "false", "no", "skip", "none"}
+
+
+def is_pack_source_checkout(root: Path) -> bool:
+    return all((root / marker).exists() for marker in SOURCE_REPO_MARKERS)
 
 
 def load_installed_targets(root: Path) -> tuple[set[str], list[str]]:
@@ -216,6 +231,14 @@ def main() -> int:
 
     args = parse_args()
     root = Path(args.repo).resolve()
+
+    if is_pack_source_checkout(root) and not (root / INSTALLED_TARGETS_FILE).exists():
+        print(
+            "skipping install audit: running inside the sd-ai-command-pack "
+            "source checkout (no installed footprint to audit)"
+        )
+        return 0
+
     strict_references = args.strict_references or os.environ.get(
         "SD_AI_COMMAND_PACK_INSTALL_AUDIT_STRICT_REFS", ""
     ).lower() in {"1", "true", "yes", "required"}
