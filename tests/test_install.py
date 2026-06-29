@@ -300,6 +300,7 @@ class InstallTests(unittest.TestCase):
             "scripts/sd-ai-command-pack-full-check.sh",
             "scripts/sd-ai-command-pack-housekeeping.sh",
             "scripts/sd-ai-command-pack-review-scope.sh",
+            "scripts/sd-ai-command-pack-review-learnings.py",
             "scripts/sd-ai-command-pack-install-audit.py",
             "scripts/sd-ai-command-pack-pr-body-scope.py",
             "scripts/sd-ai-command-pack-update-spec-kb.py",
@@ -478,10 +479,12 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".agents/skills/sd-continue/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-start/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-finish-work/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-review-learnings/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-update-spec/SKILL.md").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-housekeeping.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-scope.sh").is_file())
+        self.assertTrue((root / "scripts/sd-ai-command-pack-review-learnings.py").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-install-audit.py").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-pr-body-scope.py").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-update-spec-kb.py").is_file())
@@ -492,6 +495,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".gemini/commands/sd/start.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/review-learnings.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/full-check.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/housekeeping.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/update-spec.toml").is_file())
@@ -499,6 +503,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".github/prompts/sd-start.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-finish-work.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-review-learnings.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-full-check.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-housekeeping.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-update-spec.prompt.md").is_file())
@@ -511,6 +516,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".cursor/commands/sd-start.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-finish-work.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-pr.md").is_file())
+        self.assertTrue((root / ".cursor/commands/sd-review-learnings.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-full-check.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-housekeeping.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-update-spec.md").is_file())
@@ -518,6 +524,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".claude/commands/sd/start.md").exists())
         self.assertFalse((root / ".claude/commands/sd/finish-work.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-pr.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/review-learnings.md").exists())
         self.assertFalse((root / ".claude/commands/sd/full-check.md").exists())
         self.assertFalse((root / ".claude/commands/sd/housekeeping.md").exists())
         self.assertFalse((root / ".claude/commands/sd/update-spec.md").exists())
@@ -525,6 +532,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".opencode/commands/sd-start.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-finish-work.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-review-learnings.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-full-check.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-housekeeping.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-update-spec.md").exists())
@@ -585,11 +593,13 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".agents/skills/sd-start/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-review-learnings/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-full-check/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-housekeeping/SKILL.md").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-housekeeping.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-scope.sh").is_file())
+        self.assertTrue((root / "scripts/sd-ai-command-pack-review-learnings.py").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-pr-body-scope.py").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-update-spec-kb.py").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
@@ -602,6 +612,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".gemini/commands/sd/start.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/review-learnings.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/full-check.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/housekeeping.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/update-spec.toml").is_file())
@@ -609,6 +620,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".claude/commands/sd/start.md").exists())
         self.assertFalse((root / ".claude/commands/sd/finish-work.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-pr.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/review-learnings.md").exists())
         self.assertFalse((root / ".claude/commands/sd/full-check.md").exists())
         self.assertFalse((root / ".claude/commands/sd/housekeeping.md").exists())
         self.assertFalse((root / ".claude/commands/sd/update-spec.md").exists())
@@ -616,6 +628,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".cursor/commands/sd-start.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-finish-work.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-review-pr.md").exists())
+        self.assertFalse((root / ".cursor/commands/sd-review-learnings.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-full-check.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-housekeeping.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-update-spec.md").exists())
@@ -623,6 +636,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".github/prompts/sd-start.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-finish-work.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-review-pr.prompt.md").exists())
+        self.assertFalse((root / ".github/prompts/sd-review-learnings.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-full-check.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-housekeeping.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-update-spec.prompt.md").exists())
@@ -631,6 +645,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".opencode/commands/sd-start.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-finish-work.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-review-learnings.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-full-check.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-housekeeping.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-update-spec.md").exists())
@@ -643,11 +658,13 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".agents/skills/sd-start/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-review-learnings/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-full-check/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-housekeeping/SKILL.md").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-housekeeping.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-scope.sh").is_file())
+        self.assertTrue((root / "scripts/sd-ai-command-pack-review-learnings.py").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-pr-body-scope.py").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-update-spec-kb.py").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
@@ -660,6 +677,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".claude/commands/sd/start.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/finish-work.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/review-pr.md").is_file())
+        self.assertTrue((root / ".claude/commands/sd/review-learnings.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/full-check.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/housekeeping.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/update-spec.md").is_file())
@@ -667,6 +685,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".cursor/commands/sd-start.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-finish-work.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-pr.md").is_file())
+        self.assertTrue((root / ".cursor/commands/sd-review-learnings.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-full-check.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-housekeeping.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-update-spec.md").is_file())
@@ -674,6 +693,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".gemini/commands/sd/start.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/review-learnings.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/full-check.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/housekeeping.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/update-spec.toml").is_file())
@@ -681,6 +701,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".github/prompts/sd-start.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-finish-work.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-review-learnings.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-full-check.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-housekeeping.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-update-spec.prompt.md").is_file())
@@ -693,6 +714,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".opencode/commands/sd-start.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-finish-work.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-review-pr.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd-review-learnings.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-full-check.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-housekeeping.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-update-spec.md").is_file())
@@ -704,13 +726,17 @@ class InstallTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         review_skill = root / ".agents/skills/sd-review-pr/SKILL.md"
+        review_learnings_skill = root / ".agents/skills/sd-review-learnings/SKILL.md"
         full_check_skill = root / ".agents/skills/sd-full-check/SKILL.md"
         housekeeping_skill = root / ".agents/skills/sd-housekeeping/SKILL.md"
+        review_learnings_script = root / "scripts/sd-ai-command-pack-review-learnings.py"
         full_check_script = root / "scripts/sd-ai-command-pack-full-check.sh"
         housekeeping_script = root / "scripts/sd-ai-command-pack-housekeeping.sh"
         self.assertTrue(review_skill.is_file())
+        self.assertTrue(review_learnings_skill.is_file())
         self.assertTrue(full_check_skill.is_file())
         self.assertTrue(housekeeping_skill.is_file())
+        self.assertTrue(review_learnings_script.is_file())
         self.assertTrue(full_check_script.is_file())
         self.assertTrue(housekeeping_script.is_file())
         for adapter in [
@@ -761,6 +787,17 @@ class InstallTests(unittest.TestCase):
                 ".agents/skills/sd-review-pr/SKILL.md",
                 adapter.read_text(encoding="utf-8"),
             )
+        for adapter in [
+            root / ".claude/commands/sd/review-learnings.md",
+            root / ".cursor/commands/sd-review-learnings.md",
+            root / ".gemini/commands/sd/review-learnings.toml",
+            root / ".github/prompts/sd-review-learnings.prompt.md",
+            root / ".opencode/commands/sd-review-learnings.md",
+        ]:
+            self.assertTrue(adapter.is_file(), adapter)
+            content = adapter.read_text(encoding="utf-8")
+            self.assertIn(".agents/skills/sd-review-learnings/SKILL.md", content)
+            self.assertIn("scripts/sd-ai-command-pack-review-learnings.py", content)
         for adapter in [
             root / ".claude/commands/sd/full-check.md",
             root / ".cursor/commands/sd-full-check.md",
@@ -1776,6 +1813,7 @@ class InstallTests(unittest.TestCase):
         )
         for expected in (
             "scripts/sd-ai-command-pack-review-scope.sh",
+            "scripts/sd-ai-command-pack-review-learnings.py",
             "scripts/sd-ai-command-pack-pr-body-scope.py",
             "scripts/sd-ai-command-pack-update-spec-kb.py",
             "docs/SD_AI_COMMAND_PACK.md",
@@ -2317,6 +2355,9 @@ class InstallTests(unittest.TestCase):
                 self.assertIn(".agents/skills/sd-update-spec/SKILL.md", content)
                 self.assertIn("Trellis update-spec first", content)
                 self.assertIn(".obsidian-kb", content)
+            elif "review-learnings" in file.target.name:
+                self.assertIn(".agents/skills/sd-review-learnings/SKILL.md", content)
+                self.assertIn("scripts/sd-ai-command-pack-review-learnings.py", content)
             else:
                 self.assertIn(".agents/skills/sd-review-pr/SKILL.md", content)
 
@@ -2343,6 +2384,13 @@ class InstallTests(unittest.TestCase):
         self.assertIn("# SD PR Review Loop", review_pr)
         self.assertIn("standing permission to reply", review_pr)
         self.assertIn("bash scripts/sd-ai-command-pack-full-check.sh", review_pr)
+
+        review_learnings = (
+            install.ROOT / "templates/.agents/skills/sd-review-learnings/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("name: sd-review-learnings", review_learnings)
+        self.assertIn("# SD Review Learnings", review_learnings)
+        self.assertIn("scripts/sd-ai-command-pack-review-learnings.py", review_learnings)
 
         full_check = (
             install.ROOT / "templates/.agents/skills/sd-full-check/SKILL.md"
@@ -2376,6 +2424,7 @@ class InstallTests(unittest.TestCase):
             "continue",
             "finish-work",
             "review-pr",
+            "review-learnings",
             "full-check",
             "housekeeping",
             "update-spec",
@@ -2405,6 +2454,7 @@ class InstallTests(unittest.TestCase):
             "continue": "Run the Trellis continue workflow.",
             "finish-work": "Run the Trellis finish-work workflow.",
             "review-pr": "Run the SD PR review loop.",
+            "review-learnings": "Detect and update repo review learnings.",
             "full-check": "Run the SD full-check gate.",
             "housekeeping": "Run SD end-of-stream housekeeping.",
             "update-spec": "Run the SD update-spec workflow.",
@@ -2578,6 +2628,7 @@ class InstallTests(unittest.TestCase):
             "scripts/sd-ai-command-pack-full-check.sh",
             "scripts/sd-ai-command-pack-housekeeping.sh",
             "scripts/sd-ai-command-pack-review-scope.sh",
+            "scripts/sd-ai-command-pack-review-learnings.py",
             "scripts/sd-ai-command-pack-install-audit.py",
             "scripts/sd-ai-command-pack-pr-body-scope.py",
             "scripts/sd-ai-command-pack-update-spec-kb.py",
@@ -2994,6 +3045,98 @@ class InstallTests(unittest.TestCase):
             else:
                 self.fail(f"unexpected script template suffix: {file.source}")
             self.assert_no_secret_markers(file.source)
+
+    def test_review_learnings_script_detects_local_patterns(self) -> None:
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-test-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        script_path = (
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py"
+        )
+        tool = root / "scripts/tool.sh"
+        tool.parent.mkdir(parents=True, exist_ok=True)
+        tool.write_text(
+            "#!/usr/bin/env bash\nset -euo pipefail\nscratch=\"$(mktemp)\"\n",
+            encoding="utf-8",
+        )
+        diff = root / "diff.patch"
+        diff.write_text(
+            "diff --git a/scripts/tool.sh b/scripts/tool.sh\n"
+            "new file mode 100755\n"
+            "index 0000000..1111111\n"
+            "--- /dev/null\n"
+            "+++ b/scripts/tool.sh\n"
+            "@@ -0,0 +1,3 @@\n"
+            "+#!/usr/bin/env bash\n"
+            "+set -euo pipefail\n"
+            "+scratch=\"$(mktemp)\"\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(script_path),
+                "--repo-root",
+                str(root),
+                "--diff-from",
+                str(diff),
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("[sd-review-learnings:portability]", result.stdout)
+        self.assertIn("mktemp", result.stdout)
+
+    def test_review_learnings_script_updates_managed_block(self) -> None:
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-test-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        script_path = (
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py"
+        )
+        target = root / "docs/review-learnings.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# Review Learnings\n\nHuman notes stay.\n", encoding="utf-8")
+        diff = root / "diff.patch"
+        diff.write_text("", encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(script_path),
+                "--repo-root",
+                str(root),
+                "--diff-from",
+                str(diff),
+                "--update",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        content = target.read_text(encoding="utf-8")
+        self.assertIn("Human notes stay.", content)
+        self.assertIn("<!-- sd-review-learnings:start -->", content)
+        self.assertIn("No local review-cycle findings detected", content)
+
+    def test_review_learnings_script_resolves_github_repo_generically(self) -> None:
+        script = (
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("gh", script)
+        self.assertIn("repo", script)
+        self.assertIn("nameWithOwner", script)
+        self.assertNotIn("answerbook", script)
+        self.assertNotIn("mezmo_benchmark", script)
 
     def test_update_spec_kb_script_builds_gitignored_symlink_folder(self) -> None:
         root = self.make_repo()

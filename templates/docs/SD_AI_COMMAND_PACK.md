@@ -12,6 +12,8 @@ first; they cover `npm install -g @mindfoldhq/trellis@latest` and
 ## What is installed
 
 - `.agents/skills/sd-review-pr/SKILL.md`: local-review-first PR workflow.
+- `.agents/skills/sd-review-learnings/SKILL.md`: review feedback learning
+  capture workflow.
 - `.agents/skills/sd-full-check/SKILL.md`: full local verification workflow.
 - `.agents/skills/sd-housekeeping/SKILL.md`: post-merge cleanup workflow.
 - `.agents/skills/sd-*/SKILL.md`: Codex-visible `sd` entry points, including
@@ -21,6 +23,8 @@ first; they cover `npm install -g @mindfoldhq/trellis@latest` and
 - `scripts/sd-ai-command-pack-housekeeping.sh`: canonical post-merge housekeeping script.
 - `scripts/sd-ai-command-pack-review-scope.sh`: copied/generated file scope
   preflight for mixed PRs.
+- `scripts/sd-ai-command-pack-review-learnings.py`: local review feedback
+  pattern scanner and managed learning-block updater.
 - `scripts/sd-ai-command-pack-install-audit.py`: structural post-install audit
   for missing installed targets, obsolete pack artifacts, and stale generated
   repository-map references.
@@ -43,9 +47,9 @@ Trellis-provided `trellis-update-spec` skill as-is, refreshes repo-owned
 repospec artifacts through existing maintenance infrastructure when available,
 and then performs the architecture-overview check.
 Codex exposes the pack entry points as skills named `sd-start`, `sd-continue`,
-`sd-finish-work`, `sd-full-check`, `sd-housekeeping`, `sd-review-pr`, and
-`sd-update-spec`; type `/sd` in Codex command completion or invoke them with
-`$sd-review-pr`-style skill mentions.
+`sd-finish-work`, `sd-full-check`, `sd-housekeeping`, `sd-review-pr`,
+`sd-review-learnings`, and `sd-update-spec`; type `/sd` in Codex command
+completion or invoke them with `$sd-review-pr`-style skill mentions.
 The start, continue, and finish-work wrappers run Trellis' existing
 `trellis-start`, `trellis-continue`, and `trellis-finish-work` skills as-is.
 The slash command namespace is `sd`, not `trellis`, so these pack-owned wrappers
@@ -77,17 +81,19 @@ loaded project command files.
 7. Let the review-pr command reply to and resolve review threads as part of the
    normal loop once findings are fixed, rebutted with evidence, or confirmed
    already addressed.
-8. Run the update-spec command when the work taught you a durable
+8. Use the review-learnings command when review comments repeat across PRs and
+   you want to capture repo-specific preventive guidance.
+9. Run the update-spec command when the work taught you a durable
    implementation contract or convention. It runs the existing update-spec skill
    and also checks whether an existing architectural overview needs to be
    updated.
-9. Run the finish-work command when the coding session is complete and you need
+10. Run the finish-work command when the coding session is complete and you need
    the Trellis finish-work skill's quality gate, archive, journal, and commit
    reminder behavior.
-10. After the PR merges, run the housekeeping command to get back to the default
+11. After the PR merges, run the housekeeping command to get back to the default
    branch, prune/delete the merged development stream, and see the condensed
    clean-state/anomaly report.
-11. If the review-pr command sees the PR is already merged or becomes merged
+12. If the review-pr command sees the PR is already merged or becomes merged
    during the active session, it auto-dispatches housekeeping before the final
    report. This does not wake inactive sessions; it only runs when the active
    agent observes the merge.
@@ -113,6 +119,7 @@ Claude Code and Gemini CLI:
 /sd:full-check
 /sd:housekeeping
 /sd:review-pr
+/sd:review-learnings
 /sd:update-spec
 ```
 
@@ -126,6 +133,7 @@ Codex skills:
 /sd-full-check
 /sd-housekeeping
 /sd-review-pr
+/sd-review-learnings
 /sd-update-spec
 ```
 
@@ -153,6 +161,7 @@ Use the script directly from any shell:
 ```bash
 bash scripts/sd-ai-command-pack-full-check.sh
 bash scripts/sd-ai-command-pack-housekeeping.sh
+python3 scripts/sd-ai-command-pack-review-learnings.py --base origin/main --include-working-tree
 ```
 
 The full-check script runs `git diff --check`, `git diff --cached --check`,

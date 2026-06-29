@@ -18,6 +18,7 @@
   `scripts/sd-ai-command-pack-full-check.sh`,
   `scripts/sd-ai-command-pack-housekeeping.sh`,
   `scripts/sd-ai-command-pack-review-scope.sh`,
+  `scripts/sd-ai-command-pack-review-learnings.py`,
   `scripts/sd-ai-command-pack-install-audit.py`,
   `scripts/sd-ai-command-pack-pr-body-scope.py`, and
   `scripts/sd-ai-command-pack-update-spec-kb.py`.

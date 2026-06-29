@@ -36,6 +36,13 @@
     {
       "platform": "shared",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-learnings/SKILL.md",
+      "target": ".agents/skills/sd-review-learnings/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-full-check/SKILL.md",
       "target": ".agents/skills/sd-full-check/SKILL.md",
       "install": "always"
@@ -73,6 +80,13 @@
       "kind": "script",
       "source": "templates/scripts/sd-ai-command-pack-review-scope.sh",
       "target": "scripts/sd-ai-command-pack-review-scope.sh",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "script",
+      "source": "templates/scripts/sd-ai-command-pack-review-learnings.py",
+      "target": "scripts/sd-ai-command-pack-review-learnings.py",
       "install": "always"
     },
     {
@@ -141,6 +155,13 @@
     {
       "platform": "claude",
       "kind": "command",
+      "source": "templates/.claude/commands/sd/review-learnings.md",
+      "target": ".claude/commands/sd/review-learnings.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
       "source": "templates/.claude/commands/sd/full-check.md",
       "target": ".claude/commands/sd/full-check.md",
       "anchor": ".claude"
@@ -190,6 +211,13 @@
     {
       "platform": "cursor",
       "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-learnings.md",
+      "target": ".cursor/commands/sd-review-learnings.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
       "source": "templates/.cursor/commands/sd-full-check.md",
       "target": ".cursor/commands/sd-full-check.md",
       "anchor": ".cursor"
@@ -234,6 +262,13 @@
       "kind": "command",
       "source": "templates/.gemini/commands/sd/review-pr.toml",
       "target": ".gemini/commands/sd/review-pr.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/review-learnings.toml",
+      "target": ".gemini/commands/sd/review-learnings.toml",
       "anchor": ".gemini"
     },
     {
@@ -295,6 +330,13 @@
     {
       "platform": "github",
       "kind": "prompt",
+      "source": "templates/.github/prompts/sd-review-learnings.prompt.md",
+      "target": ".github/prompts/sd-review-learnings.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
       "source": "templates/.github/prompts/sd-full-check.prompt.md",
       "target": ".github/prompts/sd-full-check.prompt.md",
       "anchor": ".github"
@@ -339,6 +381,13 @@
       "kind": "command",
       "source": "templates/.opencode/commands/sd-review-pr.md",
       "target": ".opencode/commands/sd-review-pr.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.opencode/commands/sd-review-learnings.md",
+      "target": ".opencode/commands/sd-review-learnings.md",
       "anchor": ".opencode"
     },
     {

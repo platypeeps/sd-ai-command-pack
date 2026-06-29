@@ -9,10 +9,10 @@
 Install reusable AI workflow helpers into
 [Trellis-managed repositories](https://trytrellis.app/). The current pack is
 focused on Trellis enrichment: start, continue, finish-work, PR review,
-full-check, post-merge housekeeping, and update-spec wrapper workflows. The
-repository and `sd` command namespace are intentionally broader than that
-initial scope, so future skills, commands, scripts, docs, or rules may cover
-adjacent AI workflow support that is not strictly Trellis-specific.
+review learnings, full-check, post-merge housekeeping, and update-spec wrapper
+workflows. The repository and `sd` command namespace are intentionally broader
+than that initial scope, so future skills, commands, scripts, docs, or rules
+may cover adjacent AI workflow support that is not strictly Trellis-specific.
 
 This pack only works in a repo that already has Trellis installed and
 initialized. If `trellis` is not available yet, follow the official
@@ -30,9 +30,11 @@ The current Trellis-focused pack includes:
 - `.agents/skills/sd-housekeeping/SKILL.md`
 - `.agents/skills/sd-update-spec/SKILL.md`
 - `.agents/skills/sd-review-pr/SKILL.md`
+- `.agents/skills/sd-review-learnings/SKILL.md`
 - `scripts/sd-ai-command-pack-full-check.sh`
 - `scripts/sd-ai-command-pack-housekeeping.sh`
 - `scripts/sd-ai-command-pack-review-scope.sh`
+- `scripts/sd-ai-command-pack-review-learnings.py`
 - `scripts/sd-ai-command-pack-install-audit.py`
 - `scripts/sd-ai-command-pack-pr-body-scope.py`
 - `scripts/sd-ai-command-pack-update-spec-kb.py`
@@ -45,10 +47,12 @@ The current Trellis-focused pack includes:
 - `.claude/commands/sd/housekeeping.md`
 - `.claude/commands/sd/update-spec.md`
 - `.claude/commands/sd/review-pr.md`
+- `.claude/commands/sd/review-learnings.md`
 - `.cursor/commands/sd-start.md`
 - `.cursor/commands/sd-continue.md`
 - `.cursor/commands/sd-finish-work.md`
 - `.cursor/commands/sd-review-pr.md`
+- `.cursor/commands/sd-review-learnings.md`
 - `.cursor/commands/sd-full-check.md`
 - `.cursor/commands/sd-housekeeping.md`
 - `.cursor/commands/sd-update-spec.md`
@@ -59,10 +63,12 @@ The current Trellis-focused pack includes:
 - `.gemini/commands/sd/full-check.toml`
 - `.gemini/commands/sd/housekeeping.toml`
 - `.gemini/commands/sd/update-spec.toml`
+- `.gemini/commands/sd/review-learnings.toml`
 - `.github/prompts/sd-start.prompt.md`
 - `.github/prompts/sd-continue.prompt.md`
 - `.github/prompts/sd-finish-work.prompt.md`
 - `.github/prompts/sd-review-pr.prompt.md`
+- `.github/prompts/sd-review-learnings.prompt.md`
 - `.github/prompts/sd-full-check.prompt.md`
 - `.github/prompts/sd-housekeeping.prompt.md`
 - `.github/prompts/sd-update-spec.prompt.md`
@@ -72,6 +78,7 @@ The current Trellis-focused pack includes:
 - `.opencode/commands/sd-continue.md`
 - `.opencode/commands/sd-finish-work.md`
 - `.opencode/commands/sd-review-pr.md`
+- `.opencode/commands/sd-review-learnings.md`
 - `.opencode/commands/sd-full-check.md`
 - `.opencode/commands/sd-housekeeping.md`
 - `.opencode/commands/sd-update-spec.md`
@@ -79,9 +86,9 @@ The current Trellis-focused pack includes:
 The shared skills own the workflows. Platform command and prompt files are thin
 entry points that tell the agent to load the appropriate shared skill.
 Codex exposes pack entry points as enabled skills named `sd-start`, `sd-continue`,
-`sd-finish-work`, `sd-full-check`, `sd-housekeeping`, `sd-review-pr`, and
-`sd-update-spec`; type `/sd` in Codex command completion or invoke them
-explicitly with `$sd-review-pr`-style skill mentions.
+`sd-finish-work`, `sd-full-check`, `sd-housekeeping`, `sd-review-pr`,
+`sd-review-learnings`, and `sd-update-spec`; type `/sd` in Codex command
+completion or invoke them explicitly with `$sd-review-pr`-style skill mentions.
 User-facing command adapters live under the `sd` namespace so pack-owned
 wrappers do not collide with Trellis-owned generated `/trellis:*` commands on
 future `trellis update` runs. Cursor command files, GitHub Copilot prompt
@@ -151,6 +158,14 @@ default convergence mechanism. The default remote reviewer is GitHub Copilot's
 If an active review-pr session observes that the PR is `MERGED`, it stops the
 review loop and runs the housekeeping command automatically. This is session
 automation, not a background webhook; it cannot wake an inactive tool session.
+
+The review-learnings command scans local diffs for repeat mechanical
+review-cycle patterns, can include recent Copilot review comments via
+`--github-days`, and updates a managed block in `docs/review-learnings.md` or a
+`--target` file when `--update` is passed. Use it to turn repeated review
+feedback into repo-specific instructions, checklists, tests, or preflight gates;
+keep repo-specific invariants in the target repo and reusable signatures in the
+pack.
 
 The update-spec command runs the existing Trellis `trellis-update-spec` skill
 without modifying or replacing it. After the update-spec pass, it checks whether
