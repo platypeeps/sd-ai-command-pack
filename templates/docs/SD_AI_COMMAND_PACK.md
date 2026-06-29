@@ -229,7 +229,9 @@ overview untouched and reports `not present` or `not warranted`.
 
 The update-spec wrapper also runs
 `scripts/sd-ai-command-pack-update-spec-kb.py` to maintain `.obsidian-kb/` in the
-repo root and ensure that folder is listed in `.gitignore`. The folder contains
+repo root and ensure that folder is listed in `.gitignore` inside a managed
+`sd-ai-command-pack obsidian-kb` marker block. For local-only installs, the same
+managed block is written to `.git/info/exclude` instead. The folder contains
 symlinks to repository-knowledge files such as README files, agent instructions,
 architecture and decision docs, `.trellis/spec/**/*.md`, `.trellis/workflow.md`,
 `.trellis/config.yaml`, repo-owned repospec or Repomix outputs such as
@@ -381,6 +383,21 @@ To refresh installed assets from the pack checkout:
 ```bash
 python3 /path/to/sd-ai-command-pack/install.py /path/to/target/repo --force
 ```
+
+For a personal setup that should not add generated framework files to the
+shared GitHub repository, install with:
+
+```bash
+python3 /path/to/sd-ai-command-pack/install.py /path/to/target/repo --local-only
+```
+
+Local-only mode runs `trellis init --yes --skip-existing --codex` when Trellis
+is not initialized yet, passes through requested installer platforms such as
+`--platform cursor`, and writes Trellis plus sd-ai-command-pack generated paths
+to `.git/info/exclude`. It also creates `.sd-ai-command-pack/local-only.txt` so
+pack helpers keep generated local state, including `.obsidian-kb/`, out of
+tracked `.gitignore`. If a generated framework file is already tracked by Git,
+the installer stops because clone-local excludes cannot hide tracked files.
 
 Use `--dry-run` first when you want to inspect which files would change.
 Use `--backup` with `--force` if the target repo may have local edits that need

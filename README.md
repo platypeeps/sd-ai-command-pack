@@ -184,7 +184,9 @@ when the completed work changes high-level architecture; otherwise it reports
 
 The command also runs `scripts/sd-ai-command-pack-update-spec-kb.py` to maintain
 `.obsidian-kb/` in the repo root and ensure that folder is listed in
-`.gitignore`. The folder contains symlinks to repo files that are useful as
+`.gitignore` inside a managed `sd-ai-command-pack obsidian-kb` marker block.
+For local-only installs, the same managed block is written to `.git/info/exclude`
+instead. The folder contains symlinks to repo files that are useful as
 knowledge-base context, such as README files, agent instructions, architecture
 and decision docs, `.trellis/spec/**/*.md`, `.trellis/workflow.md`,
 `.trellis/config.yaml`, repo-owned repospec or Repomix outputs such as
@@ -232,11 +234,27 @@ Useful options:
 
 ```bash
 python3 install.py /path/to/repo --dry-run
+python3 install.py /path/to/repo --local-only
 python3 install.py /path/to/repo --all
 python3 install.py /path/to/repo --platform cursor --platform gemini
 python3 install.py /path/to/repo --force
 python3 install.py /path/to/repo --force --backup
 ```
+
+Use `--local-only` when you want Trellis and this pack available in one clone
+without adding generated framework files to the shared GitHub repository. In
+that mode the installer requires the target to be the Git repo root, runs
+`trellis init --yes --skip-existing --codex` when `.trellis/config.yaml` is
+missing, adds any requested platform flags such as `--cursor` or `--gemini`,
+then writes a managed local block to `.git/info/exclude` for Trellis and
+sd-ai-command-pack paths. It also writes `.sd-ai-command-pack/local-only.txt`
+so pack helpers know this checkout should use clone-local excludes, including
+for `.obsidian-kb/`, instead of modifying tracked `.gitignore`.
+
+Local-only mode intentionally refuses to manage paths that are already tracked
+by Git, because `.git/info/exclude` cannot hide changes to tracked files. Remove
+existing Trellis or pack-generated files from Git tracking first, or use the
+normal tracked install when the repository should share one setup.
 
 By default, existing files with different content are reported as conflicts and
 left untouched. Use `--force` to overwrite them. The exception is an existing

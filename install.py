@@ -52,6 +52,67 @@ LEGACY_PACK_COMMANDS = frozenset(
 TRELLIS_INSTALL_DOCS_URL = "https://docs.trytrellis.app/start/install-and-first-task"
 FORCE_PRESERVED_TARGETS = frozenset({Path(".prism/rules.json")})
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
+LOCAL_ONLY_MARKER_FILE = Path(".sd-ai-command-pack/local-only.txt")
+LOCAL_ONLY_EXCLUDE_START = "# sd-ai-command-pack local-only start"
+LOCAL_ONLY_EXCLUDE_END = "# sd-ai-command-pack local-only end"
+LOCAL_ONLY_TRELLIS_EXCLUDES = (
+    "AGENTS.md",
+    ".trellis/",
+    ".agents/skills/trellis-*/",
+    ".claude/commands/trellis/",
+    ".claude/hooks/",
+    ".claude/skills/trellis-*/",
+    ".codex/agents/trellis-*.toml",
+    ".codex/config.toml",
+    ".codex/hooks.json",
+    ".codex/hooks/",
+    ".cursor/agents/trellis-*.md",
+    ".cursor/commands/trellis-*.md",
+    ".cursor/hooks.json",
+    ".cursor/hooks/",
+    ".cursor/skills/trellis-*/",
+    ".gemini/commands/trellis/",
+    ".gemini/hooks/",
+    ".gemini/agents/trellis-*.md",
+    ".github/hooks/trellis.json",
+    ".github/copilot/hooks.json",
+    ".github/skills/trellis-*/",
+    ".opencode/commands/trellis/",
+    ".opencode/lib/trellis-context.js",
+    ".opencode/skills/trellis-*/",
+    ".obsidian-kb/",
+)
+LOCAL_ONLY_TRACKED_CHECK_PATHS = (
+    ".trellis",
+    ".agents/skills/trellis-*",
+    ".claude/commands/trellis",
+    ".claude/hooks",
+    ".claude/skills/trellis-*",
+    ".codex/agents/trellis-*.toml",
+    ".codex/hooks.json",
+    ".codex/hooks",
+    ".cursor/agents/trellis-*.md",
+    ".cursor/commands/trellis-*.md",
+    ".cursor/hooks.json",
+    ".cursor/hooks",
+    ".cursor/skills/trellis-*",
+    ".gemini/commands/trellis",
+    ".gemini/hooks",
+    ".gemini/agents/trellis-*.md",
+    ".github/hooks/trellis.json",
+    ".github/copilot/hooks.json",
+    ".github/skills/trellis-*",
+    ".opencode/commands/trellis",
+    ".opencode/lib/trellis-context.js",
+    ".opencode/skills/trellis-*",
+)
+TRELLIS_INIT_PLATFORM_FLAGS = {
+    "claude": "--claude",
+    "cursor": "--cursor",
+    "gemini": "--gemini",
+    "github": "--copilot",
+    "opencode": "--opencode",
+}
 OBSOLETE_SHARED_SKILL_TARGETS = {
     Path(".agents/skills/sd-review-pr/SKILL.md"): Path(
         ".agents/skills/trellis-review-pr/SKILL.md"
@@ -139,6 +200,13 @@ class LegacyCleanupResult:
     status: str
     reason: str | None = None
     backup: Path | None = None
+
+
+@dataclass(frozen=True)
+class LocalOnlyResult:
+    status: str
+    target: Path
+    detail: str | None = None
 
 
 def load_manifest() -> tuple[dict, list[PackFile]]:
@@ -263,6 +331,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--local-only",
+        action="store_true",
+        help=(
+            "Set up Trellis and this pack for only the current checkout. "
+            "When Trellis is missing, run `trellis init --yes --skip-existing` "
+            "first, then add generated Trellis and pack paths to "
+            ".git/info/exclude instead of changing tracked ignore files."
+        ),
+    )
+    parser.add_argument(
+        "--skip-trellis-init",
+        action="store_true",
+        help=(
+            "With --local-only, do not run `trellis init` automatically; "
+            "require an existing .trellis/config.yaml."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print planned changes without writing files.",
@@ -282,6 +368,125 @@ def require_trellis_repo(target: Path) -> None:
             "(.trellis/config.yaml not found). Install Trellis and run "
             f"`trellis init` first: {TRELLIS_INSTALL_DOCS_URL}"
         )
+
+
+def git_output(target: Path, *args: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=target,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def require_git_repo_for_local_only(target: Path) -> None:
+    repo_root = git_output(target, "rev-parse", "--show-toplevel")
+    if not repo_root:
+        raise SystemExit("error: --local-only requires the target to be a Git repo")
+    try:
+        resolved_repo = Path(repo_root).resolve()
+        resolved_target = target.resolve()
+    except OSError as error:
+        raise SystemExit(f"error: cannot resolve target repo: {error}") from None
+    if resolved_repo != resolved_target:
+        raise SystemExit(
+            "error: --local-only target must be the Git repo root "
+            f"(got {target}, repo root is {resolved_repo})"
+        )
+
+
+def git_info_exclude_path(target: Path) -> Path:
+    exclude_path = git_output(target, "rev-parse", "--git-path", "info/exclude")
+    if not exclude_path:
+        raise SystemExit("error: cannot find .git/info/exclude for --local-only")
+    path = Path(exclude_path)
+    if not path.is_absolute():
+        path = target / path
+    return path
+
+
+def trellis_init_platforms(
+    platforms: list[str] | None,
+    install_all: bool,
+) -> list[str]:
+    if install_all:
+        return sorted(TRELLIS_INIT_PLATFORM_FLAGS)
+    return sorted(
+        platform
+        for platform in set(platforms or [])
+        if platform in TRELLIS_INIT_PLATFORM_FLAGS
+    )
+
+
+def trellis_init_command(
+    platforms: list[str] | None,
+    install_all: bool,
+) -> list[str]:
+    command = ["trellis", "init", "--yes", "--skip-existing", "--codex"]
+    command.extend(
+        TRELLIS_INIT_PLATFORM_FLAGS[platform]
+        for platform in trellis_init_platforms(platforms, install_all)
+    )
+    return command
+
+
+def ensure_trellis_for_local_only(
+    target: Path,
+    *,
+    platforms: list[str] | None,
+    install_all: bool,
+    dry_run: bool,
+    skip_trellis_init: bool,
+) -> LocalOnlyResult:
+    if (target / ".trellis" / "config.yaml").is_file():
+        return LocalOnlyResult("trellis-present", Path(".trellis/config.yaml"))
+    if skip_trellis_init:
+        require_trellis_repo(target)
+
+    command = trellis_init_command(platforms, install_all)
+    if dry_run:
+        return LocalOnlyResult(
+            "would-init-trellis-local",
+            Path(".trellis/config.yaml"),
+            " ".join(command),
+        )
+
+    if shutil.which("trellis") is None:
+        raise SystemExit(
+            "error: --local-only needs `trellis` on PATH to initialize this "
+            f"repo first: {TRELLIS_INSTALL_DOCS_URL}"
+        )
+
+    result = subprocess.run(
+        command,
+        cwd=target,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if result.returncode != 0:
+        output = result.stdout.rstrip()
+        if output:
+            print(output)
+        raise SystemExit("error: trellis init failed for --local-only") from None
+    if not (target / ".trellis" / "config.yaml").is_file():
+        raise SystemExit(
+            "error: trellis init completed but .trellis/config.yaml is missing"
+        )
+    return LocalOnlyResult(
+        "initialized-trellis-local",
+        Path(".trellis/config.yaml"),
+        " ".join(command),
+    )
 
 
 def has_active_trellis_platform(target: Path, platform: str) -> bool:
@@ -456,6 +661,145 @@ def installed_targets_content(selected: list[PackFile]) -> str:
     targets.add(INSTALLED_TARGETS_FILE.as_posix())
     targets = sorted(targets)
     return "\n".join(targets) + "\n"
+
+
+def local_only_pack_excludes(selected: list[PackFile]) -> tuple[str, ...]:
+    paths = {file.target.as_posix() for file in selected}
+    paths.add(INSTALLED_TARGETS_FILE.as_posix())
+    paths.add(LOCAL_ONLY_MARKER_FILE.as_posix())
+    paths.add(".sd-ai-command-pack/")
+    return tuple(sorted(paths))
+
+
+def local_only_exclude_patterns(selected: list[PackFile]) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            (
+                *LOCAL_ONLY_TRELLIS_EXCLUDES,
+                *local_only_pack_excludes(selected),
+            )
+        )
+    )
+
+
+def local_only_tracked_check_specs(selected: list[PackFile]) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            (
+                *LOCAL_ONLY_TRACKED_CHECK_PATHS,
+                *(file.target.as_posix() for file in selected),
+                INSTALLED_TARGETS_FILE.as_posix(),
+                LOCAL_ONLY_MARKER_FILE.as_posix(),
+            )
+        )
+    )
+
+
+def tracked_paths(target: Path, specs: Iterable[str]) -> list[str]:
+    spec_list = list(specs)
+    if not spec_list:
+        return []
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--", *spec_list],
+            cwd=target,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+    except FileNotFoundError:
+        return []
+    if result.returncode != 0:
+        raise SystemExit(f"error: git ls-files failed: {result.stdout}") from None
+    return [line for line in result.stdout.splitlines() if line]
+
+
+def reject_tracked_local_only_paths(target: Path, selected: list[PackFile]) -> None:
+    tracked = tracked_paths(target, local_only_tracked_check_specs(selected))
+    if not tracked:
+        return
+    print("error: --local-only cannot manage paths that are already tracked:")
+    for path in tracked[:20]:
+        print(f"- {path}")
+    if len(tracked) > 20:
+        print(f"- ... {len(tracked) - 20} more")
+    raise SystemExit(
+        "Remove these paths from Git tracking or use the normal tracked install."
+    )
+
+
+def local_only_exclude_block(patterns: Iterable[str]) -> str:
+    lines = [
+        LOCAL_ONLY_EXCLUDE_START,
+        "# Generated by `python3 install.py --local-only`.",
+        "# Keeps personal Trellis and SD AI command pack files out of commits.",
+        *patterns,
+        LOCAL_ONLY_EXCLUDE_END,
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def merge_local_only_exclude_block(current: str, block: str) -> str:
+    start_index = current.find(LOCAL_ONLY_EXCLUDE_START)
+    end_index = current.find(LOCAL_ONLY_EXCLUDE_END)
+    has_start = start_index != -1
+    has_end = end_index != -1
+    if has_start != has_end or (has_start and end_index < start_index):
+        raise SystemExit(
+            "error: .git/info/exclude has incomplete sd-ai-command-pack "
+            "local-only markers"
+        )
+    if has_start:
+        replace_end = end_index + len(LOCAL_ONLY_EXCLUDE_END)
+        if replace_end < len(current) and current[replace_end] == "\n":
+            replace_end += 1
+        return current[:start_index] + block + current[replace_end:]
+    if not current:
+        return block
+    prefix = current
+    if not prefix.endswith("\n"):
+        prefix += "\n"
+    if not prefix.endswith("\n\n"):
+        prefix += "\n"
+    return prefix + block
+
+
+def ensure_local_only_exclude(
+    target: Path,
+    selected: list[PackFile],
+    *,
+    dry_run: bool,
+) -> LocalOnlyResult:
+    exclude_path = git_info_exclude_path(target)
+    validate_resolved_target_path(exclude_path.parent.parent, exclude_path, "git exclude path")
+    current = exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
+    block = local_only_exclude_block(local_only_exclude_patterns(selected))
+    merged = merge_local_only_exclude_block(current, block)
+    if merged == current:
+        return LocalOnlyResult("local-exclude-unchanged", exclude_path)
+    if dry_run:
+        return LocalOnlyResult("would-update-local-exclude", exclude_path)
+    exclude_path.parent.mkdir(parents=True, exist_ok=True)
+    exclude_path.write_text(merged, encoding="utf-8")
+    status = "local-exclude-updated" if current else "local-exclude-created"
+    return LocalOnlyResult(status, exclude_path)
+
+
+def write_local_only_marker(target: Path, *, dry_run: bool) -> LocalOnlyResult:
+    marker = target / LOCAL_ONLY_MARKER_FILE
+    content = (
+        "This checkout was set up with `sd-ai-command-pack --local-only`.\n"
+        "Generated Trellis and SD AI command pack files are ignored through "
+        ".git/info/exclude for this local clone.\n"
+    )
+    if marker.exists() and marker.read_text(encoding="utf-8") == content:
+        return LocalOnlyResult("local-only-marker-unchanged", LOCAL_ONLY_MARKER_FILE)
+    if dry_run:
+        return LocalOnlyResult("would-write-local-only-marker", LOCAL_ONLY_MARKER_FILE)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(content, encoding="utf-8")
+    return LocalOnlyResult("local-only-marker-written", LOCAL_ONLY_MARKER_FILE)
 
 
 def install_installed_targets_file(
@@ -903,22 +1247,58 @@ def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
     return result.returncode
 
 
+def display_path(target: Path, path: Path) -> Path:
+    try:
+        return path.relative_to(target)
+    except ValueError:
+        return path
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     if args.backup and not args.force:
         raise SystemExit("error: --backup requires --force")
+    if args.skip_trellis_init and not args.local_only:
+        raise SystemExit("error: --skip-trellis-init requires --local-only")
 
     target = Path(args.target).resolve()
     manifest, files = load_manifest()
 
     validate_manifest(files)
-    require_trellis_repo(target)
+    local_only_results: list[LocalOnlyResult] = []
+    if args.local_only:
+        require_git_repo_for_local_only(target)
+        local_only_results.append(
+            ensure_trellis_for_local_only(
+                target,
+                platforms=args.platform,
+                install_all=args.all,
+                dry_run=args.dry_run,
+                skip_trellis_init=args.skip_trellis_init,
+            )
+        )
+    else:
+        require_trellis_repo(target)
     selected, skipped = selected_files(files, target, args.platform, args.all)
+    if args.local_only:
+        reject_tracked_local_only_paths(target, selected)
+        local_only_results.append(
+            ensure_local_only_exclude(
+                target,
+                selected,
+                dry_run=args.dry_run,
+            )
+        )
 
     print(f"{manifest['name']} {manifest['version']}")
     print(f"target: {target}")
     if args.dry_run:
         print("mode: dry-run")
+    if args.local_only:
+        print("mode: local-only")
+    for result in local_only_results:
+        suffix = f" ({result.detail})" if result.detail else ""
+        print(f"{result.status:25} {display_path(target, result.target)}{suffix}")
 
     results: list[InstallResult] = []
     for file in selected:
@@ -945,11 +1325,18 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=args.dry_run,
         )
     )
+    if args.local_only:
+        local_only_results.append(
+            write_local_only_marker(target, dry_run=args.dry_run)
+        )
 
     for result in results:
         print(f"{result.status:11} {result.file.target}")
         if result.backup:
             print(f"{'backup':11} {result.backup.relative_to(target)}")
+    for result in local_only_results[2:]:
+        suffix = f" ({result.detail})" if result.detail else ""
+        print(f"{result.status:25} {display_path(target, result.target)}{suffix}")
     for file, reason in skipped:
         print(f"skipped     {file.target} ({reason})")
 

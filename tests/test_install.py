@@ -73,6 +73,59 @@ class InstallTests(unittest.TestCase):
                 self.activate_trellis_platform(root, platform)
         return root
 
+    def make_git_repo_without_trellis(self) -> Path:
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-test-")
+        self.addCleanup(tempdir.cleanup)
+
+        root = Path(tempdir.name)
+        self.run_git(root, "init")
+        return root
+
+    def write_trellis_stub(self, bin_dir: Path, log_path: Path, *, exit_code: int = 0) -> None:
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        (bin_dir / "trellis").write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            f"printf '%s\\n' \"$*\" >> {str(log_path)!r}\n"
+            f"if [ {exit_code} -ne 0 ]; then exit {exit_code}; fi\n"
+            "if [ \"${1:-}\" = init ]; then\n"
+            "  mkdir -p .trellis .agents/skills/trellis-start .codex/hooks\n"
+            "  printf '# local trellis\\n' > .trellis/config.yaml\n"
+            "  printf '# trellis start\\n' > .agents/skills/trellis-start/SKILL.md\n"
+            "  printf '# agents\\n' > AGENTS.md\n"
+            "  printf '# codex\\n' > .codex/config.toml\n"
+            "  printf '{}\\n' > .codex/hooks.json\n"
+            "  printf '# hook\\n' > .codex/hooks/session-start.py\n"
+            "  for arg in \"$@\"; do\n"
+            "    case \"$arg\" in\n"
+            "      --cursor)\n"
+            "        mkdir -p .cursor/agents .cursor/commands\n"
+            "        printf '# cursor agent\\n' > .cursor/agents/trellis-check.md\n"
+            "        printf '# cursor\\n' > .cursor/commands/trellis-continue.md\n"
+            "        ;;\n"
+            "      --gemini)\n"
+            "        mkdir -p .gemini/commands/trellis\n"
+            "        printf '# gemini\\n' > .gemini/commands/trellis/continue.toml\n"
+            "        ;;\n"
+            "      --claude)\n"
+            "        mkdir -p .claude/commands/trellis\n"
+            "        printf '# claude\\n' > .claude/commands/trellis/continue.md\n"
+            "        ;;\n"
+            "      --copilot)\n"
+            "        mkdir -p .github/hooks\n"
+            "        printf '{}\\n' > .github/hooks/trellis.json\n"
+            "        ;;\n"
+            "      --opencode)\n"
+            "        mkdir -p .opencode/commands/trellis\n"
+            "        printf '# opencode\\n' > .opencode/commands/trellis/continue.md\n"
+            "        ;;\n"
+            "    esac\n"
+            "  done\n"
+            "fi\n",
+            encoding="utf-8",
+        )
+        (bin_dir / "trellis").chmod(0o755)
+
     def activate_trellis_platform(self, root: Path, platform: str) -> None:
         marker = install.ACTIVE_TRELLIS_PLATFORM_MARKERS[platform][0]
         destination = root / marker
@@ -433,14 +486,18 @@ class InstallTests(unittest.TestCase):
         root: Path,
         *args: str,
         skip_diff_check: bool = True,
+        extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         command = [sys.executable, str(INSTALLER), str(root), *args]
         if skip_diff_check:
             command.append("--skip-diff-check")
+        env = self.installer_subprocess_env()
+        if extra_env:
+            env = {**(env or os.environ.copy()), **extra_env}
         return subprocess.run(
             command,
             cwd=PACK_ROOT,
-            env=self.installer_subprocess_env(),
+            env=env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -2048,6 +2105,277 @@ class InstallTests(unittest.TestCase):
         ):
             self.assertFalse((target / unexpected).exists(), unexpected)
 
+    def test_local_only_bootstraps_trellis_and_excludes_generated_files(self) -> None:
+        root = self.make_git_repo_without_trellis()
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        bin_dir = Path(tools_tempdir.name) / "bin"
+        trellis_log = Path(tools_tempdir.name) / "trellis-args.log"
+        self.write_trellis_stub(bin_dir, trellis_log)
+
+        result = self.run_install(
+            root,
+            "--local-only",
+            "--platform",
+            "cursor",
+            extra_env={"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("mode: local-only", result.stdout)
+        self.assertIn("initialized-trellis-local", result.stdout)
+        self.assertIn("local-exclude", result.stdout)
+        self.assertIn("local-only-marker-written", result.stdout)
+        self.assertTrue((root / ".trellis/config.yaml").is_file())
+        self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".cursor/commands/sd-review-pr.md").is_file())
+        self.assertEqual(
+            trellis_log.read_text(encoding="utf-8").strip(),
+            "init --yes --skip-existing --codex --cursor",
+        )
+
+        exclude = Path(
+            self.git_output(root, "rev-parse", "--git-path", "info/exclude")
+        )
+        if not exclude.is_absolute():
+            exclude = root / exclude
+        exclude_text = exclude.read_text(encoding="utf-8")
+        for expected in (
+            install.LOCAL_ONLY_EXCLUDE_START,
+            "AGENTS.md",
+            ".trellis/",
+            ".agents/skills/sd-review-pr/SKILL.md",
+            ".codex/config.toml",
+            ".codex/hooks/",
+            ".cursor/agents/trellis-*.md",
+            ".cursor/commands/sd-review-pr.md",
+            "scripts/sd-ai-command-pack-full-check.sh",
+            ".sd-ai-command-pack/",
+            ".obsidian-kb/",
+            install.LOCAL_ONLY_EXCLUDE_END,
+        ):
+            self.assertIn(expected, exclude_text)
+        self.assertTrue((root / install.LOCAL_ONLY_MARKER_FILE).is_file())
+        self.assertEqual(self.git_output(root, "status", "--short"), "")
+
+    def test_local_only_dry_run_does_not_init_trellis_or_write_exclude(self) -> None:
+        root = self.make_git_repo_without_trellis()
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        bin_dir = Path(tools_tempdir.name) / "bin"
+        trellis_log = Path(tools_tempdir.name) / "trellis-args.log"
+        self.write_trellis_stub(bin_dir, trellis_log)
+
+        result = self.run_install(
+            root,
+            "--local-only",
+            "--dry-run",
+            "--platform",
+            "gemini",
+            extra_env={"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("mode: dry-run", result.stdout)
+        self.assertIn("mode: local-only", result.stdout)
+        self.assertIn("would-init-trellis-local", result.stdout)
+        self.assertIn("would-update-local-exclude", result.stdout)
+        self.assertIn("would-write-local-only-marker", result.stdout)
+        self.assertFalse((root / ".trellis/config.yaml").exists())
+        self.assertFalse(trellis_log.exists())
+        self.assertFalse((root / install.LOCAL_ONLY_MARKER_FILE).exists())
+
+    def test_local_only_rejects_tracked_framework_paths(self) -> None:
+        root = self.make_repo()
+        self.run_git(root, "add", ".trellis/config.yaml")
+
+        result = self.run_install(root, "--local-only")
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("already tracked", result.stdout)
+        self.assertIn(".trellis/config.yaml", result.stdout)
+
+    def test_local_only_requires_git_repo(self) -> None:
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-test-")
+        self.addCleanup(tempdir.cleanup)
+        target = Path(tempdir.name)
+
+        result = self.run_install(target, "--local-only")
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("--local-only requires the target to be a Git repo", result.stdout)
+
+    def test_local_only_skip_trellis_init_requires_existing_trellis(self) -> None:
+        root = self.make_git_repo_without_trellis()
+
+        result = self.run_install(root, "--local-only", "--skip-trellis-init")
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn(".trellis/config.yaml not found", result.stdout)
+
+    def test_local_only_reports_missing_trellis_command(self) -> None:
+        root = self.make_git_repo_without_trellis()
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        bin_dir = Path(tools_tempdir.name) / "bin"
+        bin_dir.mkdir()
+        git_path = shutil.which("git")
+        self.assertIsNotNone(git_path)
+        (bin_dir / "git").write_text(
+            "#!/bin/sh\n"
+            f"exec {git_path!r} \"$@\"\n",
+            encoding="utf-8",
+        )
+        (bin_dir / "git").chmod(0o755)
+
+        result = self.run_install(
+            root,
+            "--local-only",
+            extra_env={"PATH": str(bin_dir)},
+        )
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("needs `trellis` on PATH", result.stdout)
+
+    def test_skip_trellis_init_requires_local_only(self) -> None:
+        root = self.make_repo()
+
+        result = self.run_install(root, "--skip-trellis-init")
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("--skip-trellis-init requires --local-only", result.stdout)
+
+    def test_local_only_git_helpers_handle_errors(self) -> None:
+        root = self.make_git_repo_without_trellis()
+        subdir = root / "nested"
+        subdir.mkdir()
+
+        with self.assertRaisesRegex(SystemExit, "Git repo root"):
+            install.require_git_repo_for_local_only(subdir)
+
+        with mock.patch.object(subprocess, "run", side_effect=FileNotFoundError):
+            self.assertIsNone(install.git_output(root, "status"))
+            self.assertEqual(install.tracked_paths(root, ["anything"]), [])
+
+        with mock.patch.object(install, "git_output", return_value=str(root)):
+            with mock.patch.object(Path, "resolve", side_effect=OSError("boom")):
+                with self.assertRaisesRegex(SystemExit, "cannot resolve target repo"):
+                    install.require_git_repo_for_local_only(root)
+
+        with mock.patch.object(install, "git_output", return_value=None):
+            with self.assertRaisesRegex(SystemExit, "cannot find .git/info/exclude"):
+                install.git_info_exclude_path(root)
+
+        self.assertEqual(install.tracked_paths(root, []), [])
+        failed = subprocess.CompletedProcess(
+            ["git", "ls-files"],
+            1,
+            stdout="fatal: bad pathspec\n",
+        )
+        with mock.patch.object(subprocess, "run", return_value=failed):
+            with self.assertRaisesRegex(SystemExit, "git ls-files failed"):
+                install.tracked_paths(root, ["bad"])
+
+    def test_local_only_trellis_init_error_paths(self) -> None:
+        root = self.make_git_repo_without_trellis()
+
+        self.assertEqual(
+            install.trellis_init_platforms(["cursor"], install_all=True),
+            sorted(install.TRELLIS_INIT_PLATFORM_FLAGS),
+        )
+
+        failed = subprocess.CompletedProcess(
+            ["trellis", "init"],
+            2,
+            stdout="trellis exploded\n",
+        )
+        with mock.patch.object(shutil, "which", return_value="/bin/trellis"):
+            with mock.patch.object(subprocess, "run", return_value=failed):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    with self.assertRaisesRegex(SystemExit, "trellis init failed"):
+                        install.ensure_trellis_for_local_only(
+                            root,
+                            platforms=[],
+                            install_all=False,
+                            dry_run=False,
+                            skip_trellis_init=False,
+                        )
+                self.assertEqual(output.getvalue(), "trellis exploded\n")
+
+        succeeded_without_config = subprocess.CompletedProcess(
+            ["trellis", "init"],
+            0,
+            stdout="",
+        )
+        with mock.patch.object(shutil, "which", return_value="/bin/trellis"):
+            with mock.patch.object(
+                subprocess,
+                "run",
+                return_value=succeeded_without_config,
+            ):
+                with self.assertRaisesRegex(
+                    SystemExit,
+                    "trellis init completed",
+                ):
+                    install.ensure_trellis_for_local_only(
+                        root,
+                        platforms=[],
+                        install_all=False,
+                        dry_run=False,
+                        skip_trellis_init=False,
+                    )
+
+    def test_local_only_tracking_rejection_reports_overflow(self) -> None:
+        root = self.make_git_repo_without_trellis()
+        tracked = [f"path-{index}.txt" for index in range(22)]
+
+        with mock.patch.object(install, "tracked_paths", return_value=tracked):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                with self.assertRaisesRegex(SystemExit, "Remove these paths"):
+                    install.reject_tracked_local_only_paths(root, [])
+
+        self.assertIn("path-0.txt", output.getvalue())
+        self.assertIn("2 more", output.getvalue())
+
+    def test_local_only_exclude_block_edge_cases(self) -> None:
+        block = install.local_only_exclude_block(["one/"])
+
+        with self.assertRaisesRegex(SystemExit, "incomplete"):
+            install.merge_local_only_exclude_block(
+                f"{install.LOCAL_ONLY_EXCLUDE_START}\none/\n",
+                block,
+            )
+
+        current = (
+            "before\n"
+            f"{install.LOCAL_ONLY_EXCLUDE_START}\n"
+            "old/\n"
+            f"{install.LOCAL_ONLY_EXCLUDE_END}\n"
+            "after\n"
+        )
+        self.assertEqual(
+            install.merge_local_only_exclude_block(current, block),
+            f"before\n{block}after\n",
+        )
+        self.assertEqual(install.merge_local_only_exclude_block("", block), block)
+        self.assertEqual(
+            install.merge_local_only_exclude_block("manual", block),
+            f"manual\n\n{block}",
+        )
+
+    def test_local_only_exclude_and_marker_are_idempotent(self) -> None:
+        root = self.make_git_repo_without_trellis()
+
+        install.ensure_local_only_exclude(root, [], dry_run=False)
+        exclude_result = install.ensure_local_only_exclude(root, [], dry_run=False)
+        self.assertEqual(exclude_result.status, "local-exclude-unchanged")
+
+        install.write_local_only_marker(root, dry_run=False)
+        marker_result = install.write_local_only_marker(root, dry_run=False)
+        self.assertEqual(marker_result.status, "local-only-marker-unchanged")
+
     def test_rejects_target_path_resolved_outside_repo(self) -> None:
         root = self.make_repo()
         outside_tempdir = tempfile.TemporaryDirectory(
@@ -3299,6 +3627,8 @@ class InstallTests(unittest.TestCase):
 
         gitignore = (root / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("dist/\n", gitignore)
+        self.assertIn("# sd-ai-command-pack obsidian-kb start", gitignore)
+        self.assertIn("# sd-ai-command-pack obsidian-kb end", gitignore)
         self.assertEqual(gitignore.count(".obsidian-kb/"), 1)
         for relative_path in (
             "README.md",
@@ -3339,6 +3669,65 @@ class InstallTests(unittest.TestCase):
             (root / ".gitignore").read_text(encoding="utf-8").count(".obsidian-kb/"),
             1,
         )
+
+    def test_update_spec_kb_uses_local_exclude_for_local_only_install(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        marker = root / install.LOCAL_ONLY_MARKER_FILE
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("local only\n", encoding="utf-8")
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        (root / ".gitignore").write_text("dist/\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("gitignore: local-exclude added", result.stdout)
+        self.assertEqual((root / ".gitignore").read_text(encoding="utf-8"), "dist/\n")
+        exclude = Path(self.git_output(root, "rev-parse", "--git-path", "info/exclude"))
+        if not exclude.is_absolute():
+            exclude = root / exclude
+        exclude_text = exclude.read_text(encoding="utf-8")
+        self.assertIn("# sd-ai-command-pack obsidian-kb start", exclude_text)
+        self.assertIn("# sd-ai-command-pack obsidian-kb end", exclude_text)
+        self.assertIn(".obsidian-kb/", exclude_text)
+        self.assertTrue((root / ".obsidian-kb/README.md").is_symlink())
+
+    def test_update_spec_kb_upgrades_unmarked_gitignore_entry(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        (root / ".gitignore").write_text(
+            "dist/\n.obsidian-kb/\nlogs/\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("gitignore: updated", result.stdout)
+        gitignore = (root / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("dist/\n", gitignore)
+        self.assertIn("logs/\n", gitignore)
+        self.assertIn("# sd-ai-command-pack obsidian-kb start", gitignore)
+        self.assertIn("# sd-ai-command-pack obsidian-kb end", gitignore)
+        self.assertEqual(gitignore.count(".obsidian-kb/"), 1)
 
     def test_pr_body_scope_script_warns_without_body(self) -> None:
         root = self.make_repo()
