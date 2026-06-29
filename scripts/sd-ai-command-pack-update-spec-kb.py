@@ -82,6 +82,8 @@ def repo_root() -> Path:
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
         text=True,
+        encoding="utf-8",
+        errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -266,6 +268,8 @@ def git_info_exclude_path(root: Path) -> Path | None:
         ["git", "rev-parse", "--git-path", "info/exclude"],
         cwd=root,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         check=False,

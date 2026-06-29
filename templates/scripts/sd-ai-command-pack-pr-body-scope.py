@@ -146,6 +146,8 @@ def _run_git(root: Path, *args: str) -> tuple[int, str, str]:
         cwd=root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     return result.returncode, result.stdout, result.stderr
