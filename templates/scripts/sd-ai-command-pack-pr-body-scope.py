@@ -174,7 +174,7 @@ def _load_changed_files(
 ) -> tuple[list[str], str | None]:
     if changed_files_path is not None:
         try:
-            return _split_changed_files(changed_files_path.read_text(encoding="utf-8")), None
+            return _split_changed_files(changed_files_path.read_text(encoding="utf-8", errors="replace")), None
         except OSError as exc:
             return [], f"cannot read changed files list {changed_files_path}: {exc}"
         except UnicodeError as exc:
@@ -190,7 +190,7 @@ def _load_changed_files(
 def _load_body(body_file: Path | None) -> tuple[str | None, str | None]:
     if body_file is not None:
         try:
-            return body_file.read_text(encoding="utf-8"), None
+            return body_file.read_text(encoding="utf-8", errors="replace"), None
         except OSError as exc:
             return None, f"cannot read PR body file {body_file}: {exc}"
         except UnicodeError as exc:
@@ -219,7 +219,7 @@ def _load_installed_target_patterns(root: Path) -> tuple[tuple[str, ...], str | 
     if not targets_path.is_file():
         return (), None
     try:
-        targets = _split_changed_files(targets_path.read_text(encoding="utf-8"))
+        targets = _split_changed_files(targets_path.read_text(encoding="utf-8", errors="replace"))
     except OSError as exc:
         return (), f"cannot read installed targets file {targets_path}: {exc}"
     except UnicodeError as exc:
@@ -233,7 +233,7 @@ def _load_config_rules(config_path: Path | None) -> tuple[tuple[ScopeRule, ...],
     if not config_path.is_file():
         return (), None
     try:
-        raw: Any = json.loads(config_path.read_text(encoding="utf-8"))
+        raw: Any = json.loads(config_path.read_text(encoding="utf-8", errors="replace"))
     except OSError as exc:
         return (), f"cannot read PR body scope config {config_path}: {exc}"
     except UnicodeError as exc:

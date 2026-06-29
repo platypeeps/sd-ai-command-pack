@@ -210,7 +210,7 @@ class LocalOnlyResult:
 
 
 def load_manifest() -> tuple[dict, list[PackFile]]:
-    raw = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    raw = json.loads(MANIFEST_PATH.read_text(encoding="utf-8", errors="replace"))
     files: list[PackFile] = []
     for item in raw.get("files", []):
         files.append(
@@ -593,7 +593,7 @@ def install_file(
 
 
 def normalize_managed_block_template(file: PackFile) -> str:
-    block = file.source.read_text(encoding="utf-8").strip("\n") + "\n"
+    block = file.source.read_text(encoding="utf-8", errors="replace").strip("\n") + "\n"
     if COPILOT_GUIDANCE_START not in block or COPILOT_GUIDANCE_END not in block:
         raise SystemExit(
             f"error: managed block template missing markers: {file.source}"
@@ -642,17 +642,17 @@ def install_managed_block(
 
     block = normalize_managed_block_template(file)
     if destination.exists():
-        current = destination.read_text(encoding="utf-8")
+        current = destination.read_text(encoding="utf-8", errors="replace")
         merged = merge_managed_block(current, block)
         if merged == current:
             return InstallResult(file, "unchanged")
         if not dry_run:
-            destination.write_text(merged, encoding="utf-8")
+            destination.write_text(merged, encoding="utf-8", errors="replace")
         return InstallResult(file, "updated")
 
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(block, encoding="utf-8")
+        destination.write_text(block, encoding="utf-8", errors="replace")
     return InstallResult(file, "created")
 
 
@@ -773,7 +773,7 @@ def ensure_local_only_exclude(
 ) -> LocalOnlyResult:
     exclude_path = git_info_exclude_path(target)
     validate_resolved_target_path(exclude_path.parent.parent, exclude_path, "git exclude path")
-    current = exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
+    current = exclude_path.read_text(encoding="utf-8", errors="replace") if exclude_path.exists() else ""
     block = local_only_exclude_block(local_only_exclude_patterns(selected))
     merged = merge_local_only_exclude_block(current, block)
     if merged == current:
@@ -781,7 +781,7 @@ def ensure_local_only_exclude(
     if dry_run:
         return LocalOnlyResult("would-update-local-exclude", exclude_path)
     exclude_path.parent.mkdir(parents=True, exist_ok=True)
-    exclude_path.write_text(merged, encoding="utf-8")
+    exclude_path.write_text(merged, encoding="utf-8", errors="replace")
     status = "local-exclude-updated" if current else "local-exclude-created"
     return LocalOnlyResult(status, exclude_path)
 
@@ -793,12 +793,12 @@ def write_local_only_marker(target: Path, *, dry_run: bool) -> LocalOnlyResult:
         "Generated Trellis and SD AI command pack files are ignored through "
         ".git/info/exclude for this local clone.\n"
     )
-    if marker.exists() and marker.read_text(encoding="utf-8") == content:
+    if marker.exists() and marker.read_text(encoding="utf-8", errors="replace") == content:
         return LocalOnlyResult("local-only-marker-unchanged", LOCAL_ONLY_MARKER_FILE)
     if dry_run:
         return LocalOnlyResult("would-write-local-only-marker", LOCAL_ONLY_MARKER_FILE)
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(content, encoding="utf-8")
+    marker.write_text(content, encoding="utf-8", errors="replace")
     return LocalOnlyResult("local-only-marker-written", LOCAL_ONLY_MARKER_FILE)
 
 
@@ -821,16 +821,16 @@ def install_installed_targets_file(
 
     content = installed_targets_content(selected)
     if destination.exists():
-        current = destination.read_text(encoding="utf-8")
+        current = destination.read_text(encoding="utf-8", errors="replace")
         if current == content:
             return InstallResult(file, "unchanged")
         if not dry_run:
-            destination.write_text(content, encoding="utf-8")
+            destination.write_text(content, encoding="utf-8", errors="replace")
         return InstallResult(file, "updated")
 
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(content, encoding="utf-8")
+        destination.write_text(content, encoding="utf-8", errors="replace")
     return InstallResult(file, "created")
 
 

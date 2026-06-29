@@ -101,7 +101,8 @@ def load_installed_targets(root: Path) -> tuple[set[str], list[str]]:
     targets: set[str] = set()
     failures: list[str] = []
     for line_number, raw_line in enumerate(
-        targets_file.read_text(encoding="utf-8").splitlines(), start=1
+        targets_file.read_text(encoding="utf-8", errors="replace").splitlines(),
+        start=1,
     ):
         line = raw_line.strip()
         if not line or line.startswith("#"):
