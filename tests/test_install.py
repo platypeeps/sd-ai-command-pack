@@ -3039,6 +3039,7 @@ class InstallTests(unittest.TestCase):
         self.assertIn("SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK", script)
         self.assertIn("run_sd_ai_command_pack_pr_body_scope_check", script)
         self.assertIn("run_ci_classification_report()", script)
+        self.assertIn("scripts/classify-ci-changes.sh", script)
         self.assertIn("scripts/classify_ci_changes.sh", script)
         self.assertIn("CI change classification: current diff", script)
         self.assertIn("sd-ai-command-pack-ci-paths", script)
@@ -3123,12 +3124,12 @@ class InstallTests(unittest.TestCase):
         self.run_git(root, "add", ".")
         self.run_git(root, "commit", "-m", "install command pack")
 
-        classifier = root / "scripts/classify_ci_changes.sh"
+        classifier = root / "scripts/classify-ci-changes.sh"
         classifier.write_text(
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
-            "input=\"${1:-/dev/stdin}\"\n"
-            "count=\"$(grep -c . \"$input\" || true)\"\n"
+            "if [ \"${1:-}\" = \"--\" ]; then shift; fi\n"
+            "count=\"$#\"\n"
             "printf 'docs_only=false\\n'\n"
             "printf 'app_required=true\\n'\n"
             "printf 'expensive_required=false\\n'\n"

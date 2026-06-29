@@ -31,7 +31,7 @@ The script runs:
    CI/review diffs, plus any repo-added categories in
    `.sd-ai-command-pack/pr-body-scope.json`.
 6. Current-diff CI classification reporting through
-   `scripts/classify_ci_changes.sh` when that script exists.
+   `scripts/classify-ci-changes.sh` when that script exists.
 7. Optional package-script checks when `package.json`, Node.js, and the
    selected package runner are available. The default script-name probe looks
    for common entries: `typecheck`, `lint`, `test:unit`, `test:integration`,

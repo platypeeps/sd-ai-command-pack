@@ -267,9 +267,16 @@ collect_current_changed_paths() {
 }
 
 run_ci_classification_report() {
-  local script="scripts/classify_ci_changes.sh"
-  if [ ! -f "$script" ]; then
-    warn "$script not found; skipping current-diff CI classification report."
+  local script=""
+  local candidate
+  for candidate in scripts/classify-ci-changes.sh scripts/classify_ci_changes.sh; do
+    if [ -f "$candidate" ]; then
+      script="$candidate"
+      break
+    fi
+  done
+  if [ -z "$script" ]; then
+    warn "scripts/classify-ci-changes.sh or scripts/classify_ci_changes.sh not found; skipping current-diff CI classification report."
     return 0
   fi
 
@@ -277,16 +284,22 @@ run_ci_classification_report() {
   paths_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-ci-paths.XXXXXX")"
   collect_current_changed_paths "$paths_file"
 
-  if [ ! -s "$paths_file" ]; then
+  local -a changed_paths=()
+  local path
+  while IFS= read -r path; do
+    changed_paths+=("$path")
+  done <"$paths_file"
+
+  if [ "${#changed_paths[@]}" -eq 0 ]; then
     rm -f "$paths_file"
     warn "No current changed paths; skipping current-diff CI classification report."
     return 0
   fi
 
   section "CI change classification: current diff"
-  printf 'changed_paths=%s\n' "$(wc -l <"$paths_file" | tr -d ' ')"
+  printf 'changed_paths=%s\n' "${#changed_paths[@]}"
   local status=0
-  bash "$script" "$paths_file" || status=$?
+  bash "$script" -- "${changed_paths[@]}" || status=$?
   rm -f "$paths_file"
   return "$status"
 }

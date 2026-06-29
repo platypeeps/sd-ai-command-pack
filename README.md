@@ -320,11 +320,11 @@ repos can add runtime, docs, or other categories by committing
 `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`, or `REVIEW_PREFLIGHT_PR_BODY` to provide the
 body without calling `gh`.
 
-When a target repo provides `scripts/classify_ci_changes.sh`, the full-check
-script prints a current-diff CI classification section before optional
-repo-specific checks run. That gives agents and reviewers a local `docs_only`,
-`app_required`, and `expensive_required` signal before spending remote CI
-budget.
+When a target repo provides `scripts/classify-ci-changes.sh` (or the legacy
+`scripts/classify_ci_changes.sh` name), the full-check script prints a
+current-diff CI classification section before optional repo-specific checks run.
+That gives agents and reviewers a local `docs_only`, `app_required`, and
+`expensive_required` signal before spending remote CI budget.
 
 ## Verify
 

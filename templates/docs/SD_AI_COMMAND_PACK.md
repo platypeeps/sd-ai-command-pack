@@ -170,7 +170,7 @@ repo-local review preflight when
 `scripts/check-review-preflight.mjs` when that Node.js script exists, the
 post-install audit, the tooling/generated file scope preflight, the PR-body
 scope preflight, current-diff CI classification when
-`scripts/classify_ci_changes.sh` exists, optional package-script checks when a
+`scripts/classify-ci-changes.sh` exists, optional package-script checks when a
 `package.json`, Node.js, and the selected package runner are available, and
 local Prism review when `prism` is available and configured. The install audit
 checks `.sd-ai-command-pack/installed-targets.txt` for missing targets, fails on

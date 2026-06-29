@@ -113,6 +113,7 @@ DEFAULT_RULES = (
         patterns=(
             ".github/workflows/**",
             ".pre-commit-config.yaml",
+            "scripts/classify-ci-changes.sh",
             "scripts/classify_ci_changes.sh",
             "scripts/check-review-preflight.mjs",
             "scripts/sd-ai-command-pack-review-scope.sh",
