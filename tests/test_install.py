@@ -1647,6 +1647,30 @@ class InstallTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "incomplete"):
             install.merge_managed_block(reversed_markers, "replacement\n")
 
+    def test_managed_block_update_preserves_invalid_existing_bytes(self) -> None:
+        root = self.make_repo(".github")
+        managed_file = install.PackFile(
+            platform="github",
+            kind=install.MANAGED_BLOCK_KIND,
+            source=(
+                install.ROOT
+                / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
+            ),
+            target=Path(".github/copilot-instructions.md"),
+            anchor=Path(".github"),
+            install="if-anchor-exists",
+        )
+        destination = root / managed_file.target
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"Repo-specific bytes: \xff\n")
+
+        result = install.install_managed_block(managed_file, root, dry_run=False)
+
+        self.assertEqual(result.status, "updated")
+        content = destination.read_bytes()
+        self.assertIn(b"Repo-specific bytes: \xff\n", content)
+        self.assertIn(install.COPILOT_GUIDANCE_START.encode("utf-8"), content)
+
     def test_install_file_unit_covers_core_status_branches(self) -> None:
         # Exercise the write/conflict/overwrite engine directly so its coverage
         # does not depend solely on the subprocess-coverage mechanism.
@@ -2187,13 +2211,25 @@ class InstallTests(unittest.TestCase):
 
     def test_local_only_rejects_tracked_framework_paths(self) -> None:
         root = self.make_repo()
-        self.run_git(root, "add", ".trellis/config.yaml")
+        (root / "AGENTS.md").write_text("# Agent instructions\n", encoding="utf-8")
+        codex_config = root / ".codex/config.toml"
+        codex_config.parent.mkdir(parents=True, exist_ok=True)
+        codex_config.write_text("hooks = true\n", encoding="utf-8")
+        self.run_git(
+            root,
+            "add",
+            ".trellis/config.yaml",
+            "AGENTS.md",
+            ".codex/config.toml",
+        )
 
         result = self.run_install(root, "--local-only")
 
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("already tracked", result.stdout)
         self.assertIn(".trellis/config.yaml", result.stdout)
+        self.assertIn("AGENTS.md", result.stdout)
+        self.assertIn(".codex/config.toml", result.stdout)
 
     def test_local_only_requires_git_repo(self) -> None:
         tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-test-")
@@ -3161,6 +3197,61 @@ class InstallTests(unittest.TestCase):
         self.assertIn("app_required=true", result.stdout)
         self.assertIn("fixture_count=", result.stdout)
 
+    def test_full_check_script_preserves_legacy_ci_classifier_file_contract(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "install command pack")
+
+        classifier = root / "scripts/classify_ci_changes.sh"
+        classifier.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "if [ \"${1:-}\" = \"--\" ]; then\n"
+            "  printf 'legacy classifier received argv mode\\n' >&2\n"
+            "  exit 9\n"
+            "fi\n"
+            "input=\"${1:-}\"\n"
+            "if [ ! -f \"$input\" ]; then\n"
+            "  printf 'legacy classifier expected a file path\\n' >&2\n"
+            "  exit 8\n"
+            "fi\n"
+            "count=\"$(grep -c . \"$input\" || true)\"\n"
+            "printf 'docs_only=false\\n'\n"
+            "printf 'fixture_count=%s\\n' \"$count\"\n",
+            encoding="utf-8",
+        )
+        classifier.chmod(0o755)
+        (root / "docs").mkdir(exist_ok=True)
+        (root / "docs/local.md").write_text("local change\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-full-check.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_NPM": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("CI change classification: current diff", result.stdout)
+        self.assertIn("docs_only=false", result.stdout)
+        self.assertIn("fixture_count=", result.stdout)
+
     def test_full_check_script_runs_repo_local_review_preflight_when_available(
         self,
     ) -> None:
@@ -3775,6 +3866,28 @@ class InstallTests(unittest.TestCase):
         self.assertIn("# sd-ai-command-pack obsidian-kb start", gitignore)
         self.assertIn("# sd-ai-command-pack obsidian-kb end", gitignore)
         self.assertEqual(gitignore.count(".obsidian-kb/"), 1)
+
+    def test_update_spec_kb_preserves_invalid_existing_gitignore_bytes(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        (root / ".gitignore").write_bytes(b"dist-\xff/\n.obsidian-kb/\n")
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("gitignore: updated", result.stdout)
+        gitignore = (root / ".gitignore").read_bytes()
+        self.assertIn(b"dist-\xff/\n", gitignore)
+        self.assertIn(b"# sd-ai-command-pack obsidian-kb start\n", gitignore)
 
     def test_pr_body_scope_script_warns_without_body(self) -> None:
         root = self.make_repo()

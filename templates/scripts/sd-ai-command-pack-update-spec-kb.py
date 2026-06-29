@@ -248,13 +248,13 @@ def merge_kb_ignore_block(current: str) -> tuple[str, bool]:
 
 
 def ensure_ignore_file(path: Path, *, local: bool) -> str:
-    original = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+    original = path.read_text(encoding="utf-8", errors="surrogateescape") if path.exists() else ""
     merged, had_existing_entry = merge_kb_ignore_block(original)
     if merged == original:
         return "local-exclude present" if local else "present"
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(merged, encoding="utf-8", errors="replace")
+    path.write_text(merged, encoding="utf-8", errors="surrogateescape")
     status = "updated" if had_existing_entry else "added"
     if local:
         return f"local-exclude {status}"

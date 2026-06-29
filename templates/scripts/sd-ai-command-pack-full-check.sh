@@ -299,7 +299,11 @@ run_ci_classification_report() {
   section "CI change classification: current diff"
   printf 'changed_paths=%s\n' "${#changed_paths[@]}"
   local status=0
-  bash "$script" -- "${changed_paths[@]}" || status=$?
+  if [ "$script" = "scripts/classify_ci_changes.sh" ]; then
+    bash "$script" "$paths_file" || status=$?
+  else
+    bash "$script" -- "${changed_paths[@]}" || status=$?
+  fi
   rm -f "$paths_file"
   return "$status"
 }
