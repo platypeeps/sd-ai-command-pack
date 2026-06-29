@@ -47,4 +47,7 @@
   copied, or adapter files repeat the same issue.
 - When deterministic local checks already cover a repeated issue class, prefer
   one concise pointer to the failing check over repeated inline comments.
+- Separate current, non-outdated unresolved findings from stale or outdated review threads.
+  Treat copied or generated payloads as source/sync-contract review surfaces
+  instead of style-review surfaces.
 <!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:END -->

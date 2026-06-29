@@ -320,6 +320,9 @@ class InstallTests(unittest.TestCase):
             ".sd-ai-command-pack/pr-body-scope.json",
             "Group duplicate root causes into one comment",
             "deterministic local checks",
+            "current, non-outdated unresolved",
+            "stale or outdated review threads",
+            "copied or generated",
         ):
             self.assertIn(expected, content)
 
@@ -3163,6 +3166,51 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("[sd-review-learnings:portability]", result.stdout)
         self.assertIn("mktemp", result.stdout)
+
+    def test_review_learnings_script_allows_shell_default_expansions(self) -> None:
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-test-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        script_path = (
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py"
+        )
+        tool = root / "scripts/tool.sh"
+        tool.parent.mkdir(parents=True, exist_ok=True)
+        tool.write_text(
+            "#!/usr/bin/env bash\nset -euo pipefail\nmode=\"${TOOL_MODE:-0}\"\n",
+            encoding="utf-8",
+        )
+        diff = root / "diff.patch"
+        diff.write_text(
+            "diff --git a/scripts/tool.sh b/scripts/tool.sh\n"
+            "new file mode 100755\n"
+            "index 0000000..1111111\n"
+            "--- /dev/null\n"
+            "+++ b/scripts/tool.sh\n"
+            "@@ -0,0 +1,3 @@\n"
+            "+#!/usr/bin/env bash\n"
+            "+set -euo pipefail\n"
+            "+mode=\"${TOOL_MODE:-0}\"\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(script_path),
+                "--repo-root",
+                str(root),
+                "--diff-from",
+                str(diff),
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("no local review-cycle findings detected", result.stdout)
 
     def test_review_learnings_script_updates_managed_block(self) -> None:
         tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-test-")

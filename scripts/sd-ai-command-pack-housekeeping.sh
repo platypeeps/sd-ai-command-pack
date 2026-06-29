@@ -28,6 +28,10 @@ Options:
   --keep-remote-branch   Leave the merged remote branch on GitHub.
   --remote <name>        Remote to fetch, prune, pull, and clean. Defaults to origin.
   -h, --help             Show this help.
+
+Environment:
+  SD_AI_COMMAND_PACK_HOUSEKEEPING_MERGE_STRATEGY
+                          Default merge strategy when --merge-strategy is not set.
 EOF
 }
 
