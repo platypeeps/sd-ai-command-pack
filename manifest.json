@@ -1,35 +1,22 @@
 {
   "name": "sd-ai-command-pack",
   "version": "0.3.0",
+  "license": "MIT",
   "description": "Install project-local SD AI command workflows, Prism rules, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
   "files": [
     {
       "platform": "shared",
       "kind": "skill",
-      "source": "templates/.agents/skills/trellis-review-pr/SKILL.md",
-      "target": ".agents/skills/trellis-review-pr/SKILL.md",
-      "install": "always"
-    },
-    {
-      "platform": "shared",
-      "kind": "skill",
-      "source": "templates/.agents/skills/trellis-full-check/SKILL.md",
-      "target": ".agents/skills/trellis-full-check/SKILL.md",
-      "install": "always"
-    },
-    {
-      "platform": "shared",
-      "kind": "skill",
-      "source": "templates/.agents/skills/trellis-housekeeping/SKILL.md",
-      "target": ".agents/skills/trellis-housekeeping/SKILL.md",
-      "install": "always"
-    },
-    {
-      "platform": "shared",
-      "kind": "skill",
       "source": "templates/.agents/skills/sd-continue/SKILL.md",
       "target": ".agents/skills/sd-continue/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-start/SKILL.md",
+      "target": ".agents/skills/sd-start/SKILL.md",
       "install": "always"
     },
     {
@@ -63,22 +50,43 @@
     {
       "platform": "shared",
       "kind": "skill",
-      "source": "templates/.agents/skills/sd-refresh-specs/SKILL.md",
-      "target": ".agents/skills/sd-refresh-specs/SKILL.md",
+      "source": "templates/.agents/skills/sd-update-spec/SKILL.md",
+      "target": ".agents/skills/sd-update-spec/SKILL.md",
       "install": "always"
     },
     {
       "platform": "shared",
       "kind": "script",
-      "source": "templates/scripts/trellis-full-check.sh",
-      "target": "scripts/trellis-full-check.sh",
+      "source": "templates/scripts/sd-ai-command-pack-full-check.sh",
+      "target": "scripts/sd-ai-command-pack-full-check.sh",
       "install": "always"
     },
     {
       "platform": "shared",
       "kind": "script",
-      "source": "templates/scripts/trellis-housekeeping.sh",
-      "target": "scripts/trellis-housekeeping.sh",
+      "source": "templates/scripts/sd-ai-command-pack-housekeeping.sh",
+      "target": "scripts/sd-ai-command-pack-housekeeping.sh",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "script",
+      "source": "templates/scripts/sd-ai-command-pack-review-scope.sh",
+      "target": "scripts/sd-ai-command-pack-review-scope.sh",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "script",
+      "source": "templates/scripts/sd-ai-command-pack-pr-body-scope.py",
+      "target": "scripts/sd-ai-command-pack-pr-body-scope.py",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "script",
+      "source": "templates/scripts/sd-ai-command-pack-update-spec-kb.py",
+      "target": "scripts/sd-ai-command-pack-update-spec-kb.py",
       "install": "always"
     },
     {
@@ -94,6 +102,13 @@
       "source": "templates/docs/SD_AI_COMMAND_PACK.md",
       "target": "docs/SD_AI_COMMAND_PACK.md",
       "install": "always"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
+      "source": "templates/.claude/commands/sd/start.md",
+      "target": ".claude/commands/sd/start.md",
+      "anchor": ".claude"
     },
     {
       "platform": "claude",
@@ -133,9 +148,65 @@
     {
       "platform": "claude",
       "kind": "command",
-      "source": "templates/.claude/commands/sd/refresh-specs.md",
-      "target": ".claude/commands/sd/refresh-specs.md",
+      "source": "templates/.claude/commands/sd/update-spec.md",
+      "target": ".claude/commands/sd/update-spec.md",
       "anchor": ".claude"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-start.md",
+      "target": ".cursor/commands/sd-start.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-continue.md",
+      "target": ".cursor/commands/sd-continue.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-finish-work.md",
+      "target": ".cursor/commands/sd-finish-work.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-pr.md",
+      "target": ".cursor/commands/sd-review-pr.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-full-check.md",
+      "target": ".cursor/commands/sd-full-check.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-housekeeping.md",
+      "target": ".cursor/commands/sd-housekeeping.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-update-spec.md",
+      "target": ".cursor/commands/sd-update-spec.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/start.toml",
+      "target": ".gemini/commands/sd/start.toml",
+      "anchor": ".gemini"
     },
     {
       "platform": "gemini",
@@ -175,9 +246,23 @@
     {
       "platform": "gemini",
       "kind": "command",
-      "source": "templates/.gemini/commands/sd/refresh-specs.toml",
-      "target": ".gemini/commands/sd/refresh-specs.toml",
+      "source": "templates/.gemini/commands/sd/update-spec.toml",
+      "target": ".gemini/commands/sd/update-spec.toml",
       "anchor": ".gemini"
+    },
+    {
+      "platform": "github",
+      "kind": "managed-block",
+      "source": "templates/.github/copilot-instructions.sd-ai-command-pack.md",
+      "target": ".github/copilot-instructions.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
+      "source": "templates/.github/prompts/sd-start.prompt.md",
+      "target": ".github/prompts/sd-start.prompt.md",
+      "anchor": ".github"
     },
     {
       "platform": "github",
@@ -217,9 +302,16 @@
     {
       "platform": "github",
       "kind": "prompt",
-      "source": "templates/.github/prompts/sd-refresh-specs.prompt.md",
-      "target": ".github/prompts/sd-refresh-specs.prompt.md",
+      "source": "templates/.github/prompts/sd-update-spec.prompt.md",
+      "target": ".github/prompts/sd-update-spec.prompt.md",
       "anchor": ".github"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.opencode/commands/sd-start.md",
+      "target": ".opencode/commands/sd-start.md",
+      "anchor": ".opencode"
     },
     {
       "platform": "opencode",
@@ -259,8 +351,8 @@
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd-refresh-specs.md",
-      "target": ".opencode/commands/sd-refresh-specs.md",
+      "source": "templates/.opencode/commands/sd-update-spec.md",
+      "target": ".opencode/commands/sd-update-spec.md",
       "anchor": ".opencode"
     }
   ]

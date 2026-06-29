@@ -1,0 +1,8 @@
+[run]
+include =
+    install.py
+parallel = True
+
+[report]
+show_missing = True
+fail_under = 100

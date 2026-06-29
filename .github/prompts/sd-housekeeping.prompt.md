@@ -1,16 +1,17 @@
 ---
-description: Run Trellis end-of-stream housekeeping.
+description: Run SD end-of-stream housekeeping.
 mode: agent
 ---
 
 # Housekeeping
 
-Run end-of-stream Trellis housekeeping for the current repository.
+Run SD end-of-stream housekeeping for the current repository.
 
-1. Read `.agents/skills/trellis-housekeeping/SKILL.md`.
-2. Follow that skill exactly: run `bash scripts/trellis-housekeeping.sh`,
-   auto-finalize and merge a current feature-branch PR only when the shared
-   skill's strict green/comment-clean/matching-head gate passes, then perform
-   post-merge cleanup, prune refs, and verify the final repo state.
+1. Read `.agents/skills/sd-housekeeping/SKILL.md`.
+2. Follow that skill exactly: run the SD finish-work flow before cleanup when
+   handling a current feature-branch PR, then run
+   `bash scripts/sd-ai-command-pack-housekeeping.sh` to merge only when the shared skill's
+   strict green/comment-clean/matching-head gate passes, perform post-merge
+   cleanup, prune refs, and verify the final repo state.
 3. Report the condensed expected clean state plus any anomalies. Do not stage,
    commit, or push unrelated work.

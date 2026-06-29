@@ -26,8 +26,10 @@ Keep output stable and easy to scan. Existing per-file lines use an aligned
 status followed by the target path:
 
 ```text
-created     .agents/skills/trellis-review-pr/SKILL.md
+created     .agents/skills/sd-review-pr/SKILL.md
 skipped     .opencode/commands/sd-review-pr.md (anchor .opencode not present)
+skipped     .cursor/commands/sd-review-pr.md (active Trellis cursor install not detected)
+skipped     .github/prompts/sd-review-pr.prompt.md (active Trellis github install not detected)
 ```
 
 ## What to Log
