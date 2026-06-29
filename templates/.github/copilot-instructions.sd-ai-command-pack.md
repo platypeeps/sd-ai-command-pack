@@ -18,8 +18,15 @@
   `scripts/sd-ai-command-pack-full-check.sh`,
   `scripts/sd-ai-command-pack-housekeeping.sh`,
   `scripts/sd-ai-command-pack-review-scope.sh`,
+  `scripts/sd-ai-command-pack-install-audit.py`,
   `scripts/sd-ai-command-pack-pr-body-scope.py`, and
   `scripts/sd-ai-command-pack-update-spec-kb.py`.
+- Do not leave line comments on wording, spelling, links, formatting, examples,
+  or implementation details inside copied Trellis skills/agents/commands or
+  copied SD command-pack skills/prompts/scripts/docs/rules. Only comment when
+  the PR changes local integration around those files, exposes secrets, breaks
+  repository wiring, or makes the copied-file inventory/documentation
+  inconsistent.
 - For mixed PRs, spend review budget on app behavior, data contracts, specs,
   tests, operator docs, and repo-owned scripts. Only comment on copied
   Trellis/SD AI command pack files for obvious syntax breakage, secret leakage,

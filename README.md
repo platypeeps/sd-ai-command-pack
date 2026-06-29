@@ -33,6 +33,7 @@ The current Trellis-focused pack includes:
 - `scripts/sd-ai-command-pack-full-check.sh`
 - `scripts/sd-ai-command-pack-housekeeping.sh`
 - `scripts/sd-ai-command-pack-review-scope.sh`
+- `scripts/sd-ai-command-pack-install-audit.py`
 - `scripts/sd-ai-command-pack-pr-body-scope.py`
 - `scripts/sd-ai-command-pack-update-spec-kb.py`
 - `.prism/rules.json`
@@ -252,11 +253,22 @@ into the managed block so later installs can keep it refreshed. The block also
 steers mixed PR reviews toward app behavior, data contracts, specs, tests,
 operator docs, and repo-owned scripts instead of copied pack or Trellis payloads
 unless those files have obvious syntax, secret, or integration-goal issues. It
-also asks Copilot to group duplicate root causes and point to deterministic
-local checks when they already cover a repeated issue class.
+also tells Copilot not to leave line comments on wording, spelling, links,
+formatting, examples, or implementation details inside copied Trellis or copied
+SD command-pack files. It asks Copilot to group duplicate root causes and point
+to deterministic local checks when they already cover a repeated issue class.
 
-The full-check script also runs `scripts/sd-ai-command-pack-review-scope.sh`. That
-helper reads `.sd-ai-command-pack/installed-targets.txt`, reports changed
+The full-check script also runs `scripts/sd-ai-command-pack-install-audit.py`.
+That helper checks `.sd-ai-command-pack/installed-targets.txt` for missing
+installed targets, fails on obsolete pack artifacts such as old `trellis-*`
+full-check/housekeeping files or `sd-refresh-specs` adapters, and warns when
+known generated repository maps still mention obsolete pack names. Set
+`SD_AI_COMMAND_PACK_INSTALL_AUDIT=0` to skip it or
+`SD_AI_COMMAND_PACK_INSTALL_AUDIT_STRICT_REFS=1` to make stale repository-map
+references fail.
+
+The full-check script also runs `scripts/sd-ai-command-pack-review-scope.sh`.
+That helper reads `.sd-ai-command-pack/installed-targets.txt`, reports changed
 pack/Trellis runtime files, known repository-map files when present, and
 Trellis workspace journal/index files as integration-only review surface. When
 the GitHub CLI can resolve a current PR, it can also ensure mixed PRs include a

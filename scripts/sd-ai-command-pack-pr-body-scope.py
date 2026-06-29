@@ -116,6 +116,7 @@ DEFAULT_RULES = (
             "scripts/classify_ci_changes.sh",
             "scripts/check-review-preflight.mjs",
             "scripts/sd-ai-command-pack-review-scope.sh",
+            "scripts/sd-ai-command-pack-install-audit.py",
             "scripts/sd-ai-command-pack-pr-body-scope.py",
             "scripts/sd-ai-command-pack-full-check.sh",
         ),

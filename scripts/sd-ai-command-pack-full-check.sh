@@ -189,6 +189,36 @@ run_sd_ai_command_pack_scope_check() {
   run "SD AI command pack tooling/generated scope check" bash "$script"
 }
 
+run_sd_ai_command_pack_install_audit() {
+  local mode="${SD_AI_COMMAND_PACK_INSTALL_AUDIT:-1}"
+  local script="scripts/sd-ai-command-pack-install-audit.py"
+
+  if is_disabled "$mode"; then
+    warn "Skipping install audit because SD_AI_COMMAND_PACK_INSTALL_AUDIT=$mode."
+    return 0
+  fi
+
+  if [ ! -f "$script" ]; then
+    if [ "$mode" = "required" ]; then
+      printf 'Install audit is required but %s is missing.\n' "$script" >&2
+      exit 127
+    fi
+    warn "$script not found; skipping install audit."
+    return 0
+  fi
+
+  if ! have python3; then
+    if [ "$mode" = "required" ]; then
+      printf 'Install audit is required but python3 is not found on PATH.\n' >&2
+      exit 127
+    fi
+    warn "python3 not found on PATH; skipping install audit."
+    return 0
+  fi
+
+  run "SD AI command pack install audit" python3 "$script"
+}
+
 run_sd_ai_command_pack_pr_body_scope_check() {
   local mode="${SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK:-auto}"
   local script="scripts/sd-ai-command-pack-pr-body-scope.py"
@@ -304,6 +334,7 @@ main() {
   run "Whitespace check: unstaged diff" git diff --check
   run "Whitespace check: staged diff" git diff --cached --check
   run_review_preflight
+  run_sd_ai_command_pack_install_audit
   run_sd_ai_command_pack_scope_check
   run_sd_ai_command_pack_pr_body_scope_check
   run_ci_classification_report

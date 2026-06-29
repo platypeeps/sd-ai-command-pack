@@ -78,6 +78,13 @@
     {
       "platform": "shared",
       "kind": "script",
+      "source": "templates/scripts/sd-ai-command-pack-install-audit.py",
+      "target": "scripts/sd-ai-command-pack-install-audit.py",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "script",
       "source": "templates/scripts/sd-ai-command-pack-pr-body-scope.py",
       "target": "scripts/sd-ai-command-pack-pr-body-scope.py",
       "install": "always"

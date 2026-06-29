@@ -300,8 +300,11 @@ class InstallTests(unittest.TestCase):
             "scripts/sd-ai-command-pack-full-check.sh",
             "scripts/sd-ai-command-pack-housekeeping.sh",
             "scripts/sd-ai-command-pack-review-scope.sh",
+            "scripts/sd-ai-command-pack-install-audit.py",
             "scripts/sd-ai-command-pack-pr-body-scope.py",
             "scripts/sd-ai-command-pack-update-spec-kb.py",
+            "Do not leave line comments on wording",
+            "copied SD command-pack skills/prompts/scripts/docs/rules",
             "app behavior",
             "data contracts",
             "repo-owned scripts",
@@ -479,6 +482,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-housekeeping.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-scope.sh").is_file())
+        self.assertTrue((root / "scripts/sd-ai-command-pack-install-audit.py").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-pr-body-scope.py").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-update-spec-kb.py").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
@@ -2574,6 +2578,7 @@ class InstallTests(unittest.TestCase):
             "scripts/sd-ai-command-pack-full-check.sh",
             "scripts/sd-ai-command-pack-housekeeping.sh",
             "scripts/sd-ai-command-pack-review-scope.sh",
+            "scripts/sd-ai-command-pack-install-audit.py",
             "scripts/sd-ai-command-pack-pr-body-scope.py",
             "scripts/sd-ai-command-pack-update-spec-kb.py",
         }
@@ -2595,7 +2600,12 @@ class InstallTests(unittest.TestCase):
         )
         self.assertNotIn("scripts/trellis-full-check.sh", script_targets)
         self.assertNotIn("scripts/trellis-housekeeping.sh", script_targets)
+        audit_script = (
+            install.ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"
+        ).read_text(encoding="utf-8")
         for content in (manifest_text, *script_texts):
+            if content == audit_script:
+                continue
             self.assertNotIn("sd-command-pack", content)
             self.assertNotIn("SD_COMMAND_PACK", content)
             self.assertNotIn("sd_command_pack", content)
@@ -2871,6 +2881,105 @@ class InstallTests(unittest.TestCase):
             "Review preflight is required but no command is configured and "
             "scripts/check-review-preflight.mjs is missing",
             result.stdout,
+        )
+
+    def test_full_check_script_runs_install_audit(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-full-check.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
+                "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK": "0",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("SD AI command pack install audit", result.stdout)
+        self.assertIn("install audit passed", result.stdout)
+
+    def test_install_audit_detects_missing_and_obsolete_artifacts(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        (root / ".agents/skills/sd-review-pr/SKILL.md").unlink()
+        obsolete = root / "scripts/trellis-full-check.sh"
+        obsolete.write_text("# obsolete\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "installed target is missing: .agents/skills/sd-review-pr/SKILL.md",
+            result.stdout,
+        )
+        self.assertIn(
+            "obsolete pack artifact still exists: scripts/trellis-full-check.sh",
+            result.stdout,
+        )
+
+    def test_install_audit_warns_or_fails_for_stale_repo_map_refs(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        (root / "docs/repomix-map.md").write_text(
+            "old docs mention scripts/trellis-full-check.sh\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("warning: docs/repomix-map.md mentions obsolete pack names", result.stdout)
+        self.assertIn("install audit passed", result.stdout)
+
+        strict_result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/sd-ai-command-pack-install-audit.py",
+                "--strict-references",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(strict_result.returncode, 1, strict_result.stdout)
+        self.assertIn(
+            "error: docs/repomix-map.md mentions obsolete pack names",
+            strict_result.stdout,
         )
 
     def test_shared_script_templates_are_syntax_valid(self) -> None:

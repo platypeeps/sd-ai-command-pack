@@ -21,6 +21,9 @@ first; they cover `npm install -g @mindfoldhq/trellis@latest` and
 - `scripts/sd-ai-command-pack-housekeeping.sh`: canonical post-merge housekeeping script.
 - `scripts/sd-ai-command-pack-review-scope.sh`: copied/generated file scope
   preflight for mixed PRs.
+- `scripts/sd-ai-command-pack-install-audit.py`: structural post-install audit
+  for missing installed targets, obsolete pack artifacts, and stale generated
+  repository-map references.
 - `scripts/sd-ai-command-pack-pr-body-scope.py`: configurable PR-body scope
   preflight for broad behavior-changing diffs.
 - `scripts/sd-ai-command-pack-update-spec-kb.py`: Obsidian KB symlink-folder
@@ -138,9 +141,12 @@ explicitly about those integrations. For mixed PRs, it tells Copilot to spend
 review budget on app behavior, data contracts, specs, tests, operator docs, and
 repo-owned scripts, and to comment on copied Trellis/SD-pack files only for
 obvious syntax breakage, secret leakage, or a direct mismatch with the PR's
-stated tooling goal. It also asks Copilot to group duplicate root causes and
-point to deterministic local checks when they already cover a repeated issue
-class.
+stated tooling goal. It explicitly tells Copilot not to leave line comments on
+wording, spelling, links, formatting, examples, or implementation details inside
+copied Trellis skills/agents/commands or copied SD command-pack
+skills/prompts/scripts/docs/rules. It also asks Copilot to group duplicate root
+causes and point to deterministic local checks when they already cover a
+repeated issue class.
 
 Use the script directly from any shell:
 
@@ -153,11 +159,15 @@ The full-check script runs `git diff --check`, `git diff --cached --check`,
 repo-local review preflight when
 `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND` is configured, or through
 `scripts/check-review-preflight.mjs` when that Node.js script exists, the
-tooling/generated file scope preflight, the PR-body scope preflight,
-current-diff CI classification when `scripts/classify_ci_changes.sh` exists,
-optional package-script checks when a `package.json`, Node.js, and the selected
-package runner are available, and local Prism review when `prism` is available
-and configured. The copied/generated scope preflight reads
+post-install audit, the tooling/generated file scope preflight, the PR-body
+scope preflight, current-diff CI classification when
+`scripts/classify_ci_changes.sh` exists, optional package-script checks when a
+`package.json`, Node.js, and the selected package runner are available, and
+local Prism review when `prism` is available and configured. The install audit
+checks `.sd-ai-command-pack/installed-targets.txt` for missing targets, fails on
+obsolete pack artifacts such as old `trellis-*` full-check/housekeeping files
+or `sd-refresh-specs` adapters, and warns when known generated repository maps
+still mention obsolete pack names. The copied/generated scope preflight reads
 `.sd-ai-command-pack/installed-targets.txt`, reports changed pack/Trellis
 runtime files, known repository-map files when present, and Trellis workspace
 journal/index files as integration-only review surface. When the GitHub CLI can
@@ -278,6 +288,11 @@ Common environment variables:
   `scripts/check-review-preflight.mjs` fallback is unavailable.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND`: repo-specific review
   preflight command to run with `bash -lc`.
+- `SD_AI_COMMAND_PACK_INSTALL_AUDIT=0`: skip the structural post-install audit.
+- `SD_AI_COMMAND_PACK_INSTALL_AUDIT=required`: fail if the full-check cannot run
+  the audit script.
+- `SD_AI_COMMAND_PACK_INSTALL_AUDIT_STRICT_REFS=1`: fail, rather than warn, when
+  known generated repository maps mention obsolete pack names.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS`: space-separated package scripts
   to run when `package.json` and the selected package runner are available.
   The older `SD_AI_COMMAND_PACK_FULL_CHECK_NPM_SCRIPTS` name is still accepted for
