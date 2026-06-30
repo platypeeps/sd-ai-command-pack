@@ -321,16 +321,20 @@ For a rebuttal or clarification on a review comment, reply to the review
 comment:
 
 ```bash
+COMMENT_DATABASE_ID="<review comment database id>"
+
 gh api -X POST \
-  "repos/$OWNER/$REPO/pulls/comments/{comment_database_id}/replies" \
+  "repos/$OWNER/$REPO/pulls/comments/$COMMENT_DATABASE_ID/replies" \
   -f body="..."
 ```
 
 Resolve a review thread after either fixing it or posting a rebuttal:
 
 ```bash
+THREAD_NODE_ID="<review thread node id>"
+
 gh api graphql \
-  -F threadId="THREAD_NODE_ID" \
+  -F threadId="$THREAD_NODE_ID" \
   -f query='
 mutation($threadId:ID!) {
   resolveReviewThread(input:{threadId:$threadId}) {

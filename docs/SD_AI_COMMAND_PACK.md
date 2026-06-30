@@ -273,6 +273,9 @@ Windows PowerShell:
 New-Item -ItemType SymbolicLink -Path "C:\path\to\vault\Repo-KB" -Target "C:\path\to\repo\.obsidian-kb"
 ```
 
+Windows symlink creation may require PowerShell running as Administrator or
+Developer Mode enabled.
+
 The housekeeping command ends a single active development stream. On an open
 PR, it runs the SD finish-work flow before actual cleanup and pushes any
 archive or journal commits that finish-work creates. It then runs the

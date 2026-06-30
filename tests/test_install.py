@@ -2386,6 +2386,8 @@ class InstallTests(unittest.TestCase):
             self.assertIn("scripts/sd-ai-command-pack-update-spec-kb.py", content)
             self.assertIn("ln -s /absolute/path/to/repo/.obsidian-kb", content)
             self.assertIn("New-Item -ItemType SymbolicLink", content)
+            self.assertIn("PowerShell running as Administrator", content)
+            self.assertIn("Developer Mode enabled", content)
 
         gitignore = (install.ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn(".obsidian-kb/", gitignore)
@@ -3720,6 +3722,15 @@ class InstallTests(unittest.TestCase):
         self.assertIn("fixed, rebutted with evidence", skill)
         self.assertIn("confirmed already addressed", skill)
         self.assertIn("Do not resolve valid unaddressed or ambiguous threads", skill)
+        self.assertIn('COMMENT_DATABASE_ID="<review comment database id>"', skill)
+        self.assertIn(
+            '"repos/$OWNER/$REPO/pulls/comments/$COMMENT_DATABASE_ID/replies"',
+            skill,
+        )
+        self.assertIn('THREAD_NODE_ID="<review thread node id>"', skill)
+        self.assertIn('-F threadId="$THREAD_NODE_ID"', skill)
+        self.assertNotIn("{comment_database_id}", skill)
+        self.assertNotIn('-F threadId="THREAD_NODE_ID"', skill)
 
     def test_review_pr_remote_reviewer_is_configurable(self) -> None:
         skill_paths = [

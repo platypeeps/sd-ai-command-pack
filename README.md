@@ -231,6 +231,9 @@ For Windows PowerShell:
 New-Item -ItemType SymbolicLink -Path "C:\path\to\vault\Repo-KB" -Target "C:\path\to\repo\.obsidian-kb"
 ```
 
+Windows symlink creation may require PowerShell running as Administrator or
+Developer Mode enabled.
+
 ## Install
 
 Prerequisite: install Trellis and run `trellis init` in the target repository
