@@ -17,11 +17,14 @@ logic.
 .
 ├── install.py                  # Python CLI and installer implementation
 ├── manifest.json               # Pack metadata and installable file manifest
+├── scripts/                     # Dogfooded pack-owned helper scripts
 ├── templates/                  # Files copied into target Trellis repos
 │   ├── .agents/skills/...
+│   ├── .cursor/commands/...
 │   ├── .gemini/commands/...
 │   ├── .github/prompts/...
-│   └── .opencode/commands/...
+│   ├── .opencode/commands/...
+│   └── scripts/...              # Helper scripts installed into target repos
 ├── tests/
 │   └── test_install.py         # unittest coverage for installer behavior
 └── README.md                   # User-facing install and verify docs
@@ -43,8 +46,14 @@ logic.
   `selected_files`, and `run_diff_check`.
 - Use `Path` objects for filesystem paths, matching `ROOT`, `MANIFEST_PATH`,
   and `PackFile.source` / `PackFile.target`.
+- Use `sd-ai-command-pack` as the canonical pack slug for repository names,
+  script filenames, generated state folders, managed-block names, and docs that
+  refer to the pack. Use `SD_AI_COMMAND_PACK_*` for pack-owned environment
+  variables and `sd_ai_command_pack_*` for pack-owned Python helpers. Treat
+  older `sd-command-pack`, `SD_COMMAND_PACK_*`, and `sd_command_pack_*` forms as
+  legacy installer cleanup aliases only.
 - Platform identifiers in manifests and CLI arguments are lowercase strings:
-  `shared`, `gemini`, `github`, and `opencode`.
+  `shared`, `claude`, `cursor`, `gemini`, `github`, and `opencode`.
 
 ## Examples
 

@@ -69,16 +69,21 @@ Reference file:
 
 ## Selection Rules
 
-Use `selected_files()` for platform filtering and anchor checks:
+Use `selected_files()` for platform filtering, anchor checks, and active
+Trellis platform detection:
 
 - `install: "always"` files are selected by default.
 - `install: "always"` files are also selected when `--platform` filters are
   present; adapters depend on the shared skill being installed.
-- `--all` selects all adapters even when platform directories are absent.
-- `--platform` selects only requested platforms and bypasses anchor detection
-  for those selected platforms.
-- Default adapter installation depends on the target anchor directory, such as
-  `.gemini`, `.github`, or `.opencode`.
+- `--all` selects all adapters even when platform directories or active
+  Trellis platform markers are absent.
+- `--platform` selects only requested platforms and bypasses anchor and active
+  marker detection for those selected platforms.
+- Default adapter installation depends on both the target anchor directory,
+  such as `.cursor`, `.gemini`, `.github`, or `.opencode`, and a Trellis-owned
+  marker for that platform. A generic `.github` directory used only for Actions
+  must not cause GitHub Copilot prompt files or managed instruction blocks to
+  install.
 
 Reference files:
 
@@ -119,6 +124,24 @@ Run the final `git diff --check` only against manifest-selected target paths.
 The installer should not fail because an unrelated tracked file in the target
 repo already has whitespace errors.
 
+## Trellis Gitignore Maintenance
+
+For normal tracked installs, maintain a repo root `.gitignore` block between
+`# sd-ai-command-pack trellis-gitignore start` and
+`# sd-ai-command-pack trellis-gitignore end`. The block must ignore Trellis
+local/runtime paths such as `.trellis/.developer`, `.trellis/.runtime/`,
+`.trellis/.cache/`, `.trellis/.backup-*`, `.trellis/worktrees/`, and
+`.trellis/.template-hashes.json` without blanket-ignoring `.trellis/`. It must
+also ignore local AI-tool state under `.claude/`, `.codex/`, `.gemini/`, and
+`.opencode/` without blanket-ignoring those platform directories, so shared
+Trellis and SD command-pack adapters remain trackable.
+
+When adding the block, migrate exact unmarked `.trellis`, `.trellis/`,
+`/.trellis`, and `/.trellis/` entries into the managed block so Trellis specs,
+tasks, workflow, scripts, and shared runtime files remain trackable. Keep
+`--local-only` installs on `.git/info/exclude`; local-only mode must not modify
+tracked `.gitignore`.
+
 ## Legacy Adapter Cleanup
 
 When installing `sd` adapter files, remove old pack-generated `/trellis:*`
@@ -145,8 +168,10 @@ old generated target if it still matches a known pack template variant. If the
 old target contains custom content, report `obsolete-conflict` and leave it
 untouched unless `--force` is supplied. This currently protects the OpenCode
 move from nested `.opencode/commands/sd/<command>.md` files to flat
-`.opencode/commands/sd-<command>.md` files, and the pack rename from
-`docs/TRELLIS_REVIEW_PR_PACK.md` to `docs/SD_AI_COMMAND_PACK.md`.
+`.opencode/commands/sd-<command>.md` files, the pack rename from
+`docs/TRELLIS_REVIEW_PR_PACK.md` to `docs/SD_AI_COMMAND_PACK.md`, and old
+generated `sd-command-pack-*` script filenames replaced by the canonical
+`sd-ai-command-pack-*` names.
 
 ## Anti-Patterns
 

@@ -1,27 +1,174 @@
 #!/usr/bin/env python3
-"""Install the Trellis PR review loop extension pack into a Trellis repo."""
+"""Install the SD AI command pack into a Trellis repo."""
 
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
 
 ROOT = Path(__file__).resolve().parent
 MANIFEST_PATH = ROOT / "manifest.json"
-PLATFORMS = ("claude", "gemini", "github", "opencode", "shared")
+PLATFORMS = ("claude", "cursor", "gemini", "github", "opencode", "shared")
 ALWAYS_INSTALL = "always"
-LEGACY_PACK_COMMANDS = frozenset(
-    {"full-check", "housekeeping", "review-pr"}
-)
+ACTIVE_TRELLIS_PLATFORM_MARKERS = {
+    "claude": (
+        Path(".claude/commands/trellis/continue.md"),
+        Path(".claude/hooks/session-start.py"),
+        Path(".claude/skills/trellis-before-dev/SKILL.md"),
+    ),
+    "cursor": (
+        Path(".cursor/commands/trellis-continue.md"),
+        Path(".cursor/hooks.json"),
+        Path(".cursor/skills/trellis-before-dev/SKILL.md"),
+    ),
+    "gemini": (
+        Path(".gemini/commands/trellis/continue.toml"),
+        Path(".gemini/hooks/session-start.py"),
+        Path(".gemini/agents/trellis-check.md"),
+    ),
+    "github": (
+        Path(".github/hooks/trellis.json"),
+        Path(".github/copilot/hooks.json"),
+        Path(".github/skills/trellis-before-dev/SKILL.md"),
+    ),
+    "opencode": (
+        Path(".opencode/commands/trellis/continue.md"),
+        Path(".opencode/lib/trellis-context.js"),
+        Path(".opencode/skills/trellis-before-dev/SKILL.md"),
+    ),
+}
+TRELLIS_INSTALL_DOCS_URL = "https://docs.trytrellis.app/start/install-and-first-task"
 FORCE_PRESERVED_TARGETS = frozenset({Path(".prism/rules.json")})
+INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
+LOCAL_ONLY_MARKER_FILE = Path(".sd-ai-command-pack/local-only.txt")
+LOCAL_ONLY_EXCLUDE_START = "# sd-ai-command-pack local-only start"
+LOCAL_ONLY_EXCLUDE_END = "# sd-ai-command-pack local-only end"
+TRELLIS_GITIGNORE_TARGET = Path(".gitignore")
+TRELLIS_GITIGNORE_START = "# sd-ai-command-pack trellis-gitignore start"
+TRELLIS_GITIGNORE_END = "# sd-ai-command-pack trellis-gitignore end"
+LOCAL_ENV_GITIGNORE_PATTERNS = (
+    ".env",
+    ".env.*",
+    "!.env.example",
+)
+TRELLIS_GITIGNORE_PATTERNS = (
+    ".trellis/.developer",
+    ".trellis/.backup-*",
+    ".trellis/worktrees/",
+    ".trellis/.template-hashes.json",
+    ".trellis/.runtime/",
+    ".trellis/.cache/",
+)
+PLATFORM_LOCAL_GITIGNORE_PATTERNS = (
+    ".claude/settings.local.json",
+    ".claude/**/*.local.*",
+    ".claude/**/.cache/",
+    ".claude/**/cache/",
+    ".claude/**/logs/",
+    ".claude/**/*.log",
+    ".codex/**/*.local.*",
+    ".codex/**/.cache/",
+    ".codex/**/cache/",
+    ".codex/**/logs/",
+    ".codex/**/sessions/",
+    ".codex/**/tmp/",
+    ".codex/**/*.log",
+    ".gemini/settings.local.json",
+    ".gemini/**/*.local.*",
+    ".gemini/**/.cache/",
+    ".gemini/**/cache/",
+    ".gemini/**/logs/",
+    ".gemini/**/tmp/",
+    ".gemini/**/*.log",
+    ".opencode/**/*.local.*",
+    ".opencode/**/.cache/",
+    ".opencode/**/cache/",
+    ".opencode/**/logs/",
+    ".opencode/**/tmp/",
+    ".opencode/**/state/",
+    ".opencode/**/sessions/",
+    ".opencode/node_modules/",
+    ".opencode/**/*.log",
+)
+TRELLIS_BLANKET_GITIGNORE_ENTRIES = frozenset(
+    {
+        ".trellis",
+        ".trellis/",
+        "/.trellis",
+        "/.trellis/",
+    }
+)
+LOCAL_ONLY_TRELLIS_EXCLUDES = (
+    "AGENTS.md",
+    ".trellis/",
+    ".agents/skills/trellis-*/",
+    ".claude/commands/trellis/",
+    ".claude/hooks/",
+    ".claude/skills/trellis-*/",
+    ".codex/agents/trellis-*.toml",
+    ".codex/config.toml",
+    ".codex/hooks.json",
+    ".codex/hooks/",
+    ".cursor/agents/trellis-*.md",
+    ".cursor/commands/trellis-*.md",
+    ".cursor/hooks.json",
+    ".cursor/hooks/",
+    ".cursor/skills/trellis-*/",
+    ".gemini/commands/trellis/",
+    ".gemini/hooks/",
+    ".gemini/agents/trellis-*.md",
+    ".github/hooks/trellis.json",
+    ".github/copilot/hooks.json",
+    ".github/skills/trellis-*/",
+    ".opencode/commands/trellis/",
+    ".opencode/lib/trellis-context.js",
+    ".opencode/skills/trellis-*/",
+    ".obsidian-kb/",
+)
+LOCAL_ONLY_TRACKED_CHECK_PATHS = (
+    "AGENTS.md",
+    ".trellis",
+    ".agents/skills/trellis-*",
+    ".claude/commands/trellis",
+    ".claude/hooks",
+    ".claude/skills/trellis-*",
+    ".codex/agents/trellis-*.toml",
+    ".codex/config.toml",
+    ".codex/hooks.json",
+    ".codex/hooks",
+    ".cursor/agents/trellis-*.md",
+    ".cursor/commands/trellis-*.md",
+    ".cursor/hooks.json",
+    ".cursor/hooks",
+    ".cursor/skills/trellis-*",
+    ".gemini/commands/trellis",
+    ".gemini/hooks",
+    ".gemini/agents/trellis-*.md",
+    ".github/hooks/trellis.json",
+    ".github/copilot/hooks.json",
+    ".github/skills/trellis-*",
+    ".opencode/commands/trellis",
+    ".opencode/lib/trellis-context.js",
+    ".opencode/skills/trellis-*",
+)
+TRELLIS_INIT_PLATFORM_FLAGS = {
+    "claude": "--claude",
+    "cursor": "--cursor",
+    "gemini": "--gemini",
+    "github": "--copilot",
+    "opencode": "--opencode",
+}
+MANAGED_BLOCK_KIND = "managed-block"
+COPILOT_INSTRUCTIONS_TARGET = Path(".github/copilot-instructions.md")
+COPILOT_GUIDANCE_START = "<!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START -->"
+COPILOT_GUIDANCE_END = "<!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:END -->"
 
 
 @dataclass(frozen=True)
@@ -42,14 +189,14 @@ class InstallResult:
 
 
 @dataclass(frozen=True)
-class LegacyCleanupResult:
-    target: Path
+class LocalOnlyResult:
     status: str
-    reason: str | None = None
+    target: Path
+    detail: str | None = None
 
 
 def load_manifest() -> tuple[dict, list[PackFile]]:
-    raw = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    raw = json.loads(MANIFEST_PATH.read_text(encoding="utf-8", errors="surrogateescape"))
     files: list[PackFile] = []
     for item in raw.get("files", []):
         files.append(
@@ -124,9 +271,16 @@ def validate_resolved_target_path(target: Path, path: Path, label: str) -> None:
         ) from None
 
 
+def target_destination(target: Path, relative_path: Path, label: str = "target path") -> Path:
+    validate_relative_manifest_path("target", relative_path)
+    destination = target / relative_path
+    validate_resolved_target_path(target, destination, label)
+    return destination
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Install Trellis review-cycle shared assets and command adapters."
+        description="Install SD AI command pack shared assets and command adapters."
     )
     parser.add_argument(
         "target",
@@ -139,27 +293,53 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="append",
         choices=PLATFORMS,
         help=(
-            "Install only this platform adapter. Repeat to select several. "
+            "Install only this platform adapter, even if no active Trellis "
+            "marker is detected. Repeat to select several. "
             "Shared skills, scripts, Prism rules, and docs are always installed."
         ),
     )
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Install all adapters even if the platform directory is not present.",
+        help=(
+            "Install all adapters even if platform directories or active Trellis "
+            "markers are not present."
+        ),
     )
     parser.add_argument(
         "--force",
         action="store_true",
         help=(
-            "Overwrite existing files that differ from the pack templates, "
-            "except .prism/rules.json."
+            "Overwrite existing files that differ from the pack templates "
+            "(except .prism/rules.json). Add --backup to save .bak copies "
+            "before overwriting."
         ),
     )
     parser.add_argument(
         "--backup",
         action="store_true",
-        help="With --force, save overwritten files next to the original with a .bak suffix.",
+        help=(
+            "With --force, save a .bak copy next to each overwritten or "
+            "deleted file before changing it."
+        ),
+    )
+    parser.add_argument(
+        "--local-only",
+        action="store_true",
+        help=(
+            "Set up Trellis and this pack for only the current checkout. "
+            "When Trellis is missing, run `trellis init --yes --skip-existing` "
+            "first, then add generated Trellis and pack paths to "
+            ".git/info/exclude instead of changing tracked ignore files."
+        ),
+    )
+    parser.add_argument(
+        "--skip-trellis-init",
+        action="store_true",
+        help=(
+            "With --local-only, do not run `trellis init` automatically; "
+            "require an existing .trellis/config.yaml."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -178,8 +358,157 @@ def require_trellis_repo(target: Path) -> None:
     if not (target / ".trellis" / "config.yaml").is_file():
         raise SystemExit(
             f"error: {target} does not look like a Trellis repo "
-            "(.trellis/config.yaml not found)"
+            "(.trellis/config.yaml not found). Install Trellis and run "
+            f"`trellis init` first: {TRELLIS_INSTALL_DOCS_URL}"
         )
+
+
+def git_output(
+    target: Path,
+    *args: str,
+    required: bool = False,
+    context: str = "run git",
+) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=target,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+    except FileNotFoundError:
+        if required:
+            raise SystemExit(f"error: git is required to {context}") from None
+        return None
+    if result.returncode != 0:
+        if required:
+            detail = result.stdout.strip()
+            suffix = f": {detail}" if detail else f" (exit status {result.returncode})"
+            raise SystemExit(f"error: failed to {context}{suffix}") from None
+        return None
+    return result.stdout.strip()
+
+
+def require_git_repo_for_local_only(target: Path) -> None:
+    repo_root = git_output(
+        target,
+        "rev-parse",
+        "--show-toplevel",
+        required=True,
+        context="verify --local-only target Git repository",
+    )
+    if not repo_root:
+        raise SystemExit("error: --local-only requires the target to be a Git repo")
+    try:
+        resolved_repo = Path(repo_root).resolve()
+        resolved_target = target.resolve()
+    except OSError as error:
+        raise SystemExit(f"error: cannot resolve target repo: {error}") from None
+    if resolved_repo != resolved_target:
+        raise SystemExit(
+            "error: --local-only target must be the Git repo root "
+            f"(got {target}, repo root is {resolved_repo})"
+        )
+
+
+def git_info_exclude_path(target: Path) -> Path:
+    exclude_path = git_output(
+        target,
+        "rev-parse",
+        "--git-path",
+        "info/exclude",
+        required=True,
+        context="find .git/info/exclude for --local-only",
+    )
+    if not exclude_path:
+        raise SystemExit("error: cannot find .git/info/exclude for --local-only")
+    path = Path(exclude_path)
+    if not path.is_absolute():
+        path = target / path
+    return path
+
+
+def trellis_init_platforms(
+    platforms: list[str] | None,
+    install_all: bool,
+) -> list[str]:
+    if install_all:
+        return sorted(TRELLIS_INIT_PLATFORM_FLAGS)
+    return sorted(
+        platform
+        for platform in set(platforms or [])
+        if platform in TRELLIS_INIT_PLATFORM_FLAGS
+    )
+
+
+def trellis_init_command(
+    platforms: list[str] | None,
+    install_all: bool,
+) -> list[str]:
+    command = ["trellis", "init", "--yes", "--skip-existing", "--codex"]
+    command.extend(
+        TRELLIS_INIT_PLATFORM_FLAGS[platform]
+        for platform in trellis_init_platforms(platforms, install_all)
+    )
+    return command
+
+
+def ensure_trellis_for_local_only(
+    target: Path,
+    *,
+    platforms: list[str] | None,
+    install_all: bool,
+    dry_run: bool,
+    skip_trellis_init: bool,
+) -> LocalOnlyResult:
+    if (target / ".trellis" / "config.yaml").is_file():
+        return LocalOnlyResult("trellis-present", Path(".trellis/config.yaml"))
+    if skip_trellis_init:
+        require_trellis_repo(target)
+
+    command = trellis_init_command(platforms, install_all)
+    if dry_run:
+        return LocalOnlyResult(
+            "would-init-trellis-local",
+            Path(".trellis/config.yaml"),
+            " ".join(command),
+        )
+
+    if shutil.which("trellis") is None:
+        raise SystemExit(
+            "error: --local-only needs `trellis` on PATH to initialize this "
+            f"repo first: {TRELLIS_INSTALL_DOCS_URL}"
+        )
+
+    result = subprocess.run(
+        command,
+        cwd=target,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if result.returncode != 0:
+        output = result.stdout.rstrip()
+        if output:
+            print(output)
+        raise SystemExit("error: trellis init failed for --local-only") from None
+    if not (target / ".trellis" / "config.yaml").is_file():
+        raise SystemExit(
+            "error: trellis init completed but .trellis/config.yaml is missing"
+        )
+    return LocalOnlyResult(
+        "initialized-trellis-local",
+        Path(".trellis/config.yaml"),
+        " ".join(command),
+    )
+
+
+def has_active_trellis_platform(target: Path, platform: str) -> bool:
+    markers = ACTIVE_TRELLIS_PLATFORM_MARKERS.get(platform, ())
+    return any((target / marker).is_file() for marker in markers)
 
 
 def selected_files(
@@ -204,6 +533,14 @@ def selected_files(
             continue
         if file.anchor and not (target / file.anchor).exists():
             skipped.append((file, f"anchor {file.anchor} not present"))
+            continue
+        if not has_active_trellis_platform(target, file.platform):
+            skipped.append(
+                (
+                    file,
+                    f"active Trellis {file.platform} install not detected",
+                )
+            )
             continue
         selected.append(file)
 
@@ -238,8 +575,7 @@ def install_file(
     backup: bool,
 ) -> InstallResult:
     source = file.source
-    destination = target / file.target
-    validate_resolved_target_path(target, destination, "target path")
+    destination = target_destination(target, file.target)
     if path_is_occupied(destination) and not destination.is_file():
         raise SystemExit(f"error: target exists and is not a file: {file.target}")
     new_content = source.read_bytes()
@@ -267,199 +603,337 @@ def install_file(
     return InstallResult(file, "created")
 
 
-def legacy_adapter_target(file: PackFile) -> Path | None:
-    command_name = file.target.stem.removeprefix("sd-").removesuffix(".prompt")
-    if command_name not in LEGACY_PACK_COMMANDS:
-        return None
-
-    target = file.target.as_posix()
-    if file.kind == "command" and "/commands/sd/" in target:
-        return Path(target.replace("/commands/sd/", "/commands/trellis/"))
-    if (
-        file.platform == "opencode"
-        and file.kind == "command"
-        and file.target.parent == Path(".opencode/commands")
-        and file.target.name.startswith("sd-")
-    ):
-        return Path(".opencode/commands/trellis") / f"{command_name}.md"
-    if (
-        file.platform == "github"
-        and file.kind == "prompt"
-        and file.target.name.startswith("sd-")
-    ):
-        return file.target.with_name(file.target.name.removeprefix("sd-"))
-    return None
+def normalize_managed_block_template(file: PackFile) -> str:
+    block = file.source.read_text(encoding="utf-8", errors="surrogateescape").strip("\n") + "\n"
+    if COPILOT_GUIDANCE_START not in block or COPILOT_GUIDANCE_END not in block:
+        raise SystemExit(
+            f"error: managed block template missing markers: {file.source}"
+        )
+    return block
 
 
-def obsolete_adapter_target(file: PackFile) -> Path | None:
-    if file.platform == "shared" and file.kind == "doc":
-        if file.target == Path("docs/SD_AI_COMMAND_PACK.md"):
-            return Path("docs/TRELLIS_REVIEW_PR_PACK.md")
-    if (
-        file.platform == "opencode"
-        and file.kind == "command"
-        and file.target.parent == Path(".opencode/commands")
-        and file.target.name.startswith("sd-")
-        and file.target.suffix == ".md"
-    ):
-        command_name = file.target.stem.removeprefix("sd-")
-        return Path(".opencode/commands/sd") / f"{command_name}.md"
-    return None
+def merge_managed_block(current: str, block: str) -> str:
+    start_index = current.find(COPILOT_GUIDANCE_START)
+    end_index = current.find(COPILOT_GUIDANCE_END)
+    has_start = start_index != -1
+    has_end = end_index != -1
+    if has_start != has_end or (has_start and end_index < start_index):
+        raise SystemExit(
+            "error: .github/copilot-instructions.md has incomplete "
+            "sd-ai-command-pack managed block markers"
+        )
+    if has_start:
+        replace_end = end_index + len(COPILOT_GUIDANCE_END)
+        if replace_end < len(current) and current[replace_end] == "\n":
+            replace_end += 1
+        return current[:start_index] + block + current[replace_end:]
+
+    if not current.strip():
+        return block
+    if not current.endswith("\n"):
+        return current + "\n\n" + block
+    if not current.endswith("\n\n"):
+        return current + "\n" + block
+    return current + block
 
 
-def strip_yaml_frontmatter(content: bytes) -> bytes:
-    if not content.startswith(b"---\n"):
-        return content
-    end = content.find(b"\n---\n", len(b"---\n"))
-    if end == -1:
-        return content
-    stripped = content[end + len(b"\n---\n") :]
-    if stripped.startswith(b"\n"):
-        return stripped[1:]
-    return stripped
+def trellis_gitignore_block() -> str:
+    lines = [
+        TRELLIS_GITIGNORE_START,
+        "# Generated by `python3 install.py`. DO NOT EDIT MANUALLY.",
+        "# Ignore local/runtime files without hiding shared Trellis or AI-tool adapters.",
+        "# Common local secrets and environment files.",
+        *LOCAL_ENV_GITIGNORE_PATTERNS,
+        "",
+        "# Trellis local/runtime state.",
+        *TRELLIS_GITIGNORE_PATTERNS,
+        "",
+        "# AI-tool local state; keep shared platform adapters tracked.",
+        *PLATFORM_LOCAL_GITIGNORE_PATTERNS,
+        TRELLIS_GITIGNORE_END,
+    ]
+    return "\n".join(lines) + "\n"
 
 
-def toml_description_variant(
-    content: bytes,
-    command_name: str,
-    namespace: str,
-) -> bytes:
-    lines = content.splitlines(keepends=True)
-    for index, line in enumerate(lines):
-        if line.startswith(b"description = "):
-            lines[index] = f'description = "{namespace}: {command_name}"\n'.encode(
-                "utf-8"
-            )
-            return b"".join(lines)
-    return content
+def remove_unmanaged_trellis_blanket_entries(current: str) -> tuple[str, bool]:
+    lines = current.splitlines()
+    kept: list[str] = []
+    removed = False
+    for line in lines:
+        if line.strip() in TRELLIS_BLANKET_GITIGNORE_ENTRIES:
+            removed = True
+            continue
+        kept.append(line)
+    merged = "\n".join(kept)
+    if merged and current.endswith("\n"):
+        merged += "\n"
+    return merged, removed
 
 
-def old_pack_identity_variant(content: bytes) -> bytes:
-    replacements = (
-        (b"sd-ai-command-pack", b"trellis-review-pr-pack"),
-        (b"SD AI Command Pack", b"Trellis Review PR Pack"),
-        (b"SD AI command pack", b"Trellis review PR pack"),
-        (b"SD AI command setup", b"Trellis review-cycle setup"),
-        (b"SD_AI_COMMAND_PACK", b"TRELLIS_REVIEW_PR_PACK"),
+def merge_trellis_gitignore_block(current: str) -> str:
+    block = trellis_gitignore_block()
+    start_index = current.find(TRELLIS_GITIGNORE_START)
+    end_index = current.find(TRELLIS_GITIGNORE_END)
+    has_start = start_index != -1
+    has_end = end_index != -1
+    if has_start != has_end or (has_start and end_index < start_index):
+        raise SystemExit(
+            "error: .gitignore has incomplete sd-ai-command-pack "
+            "trellis-gitignore markers"
+        )
+    if has_start:
+        replace_end = end_index + len(TRELLIS_GITIGNORE_END)
+        if replace_end < len(current) and current[replace_end] == "\n":
+            replace_end += 1
+        return current[:start_index] + block + current[replace_end:]
+
+    prefix, _ = remove_unmanaged_trellis_blanket_entries(current)
+    if not prefix.strip():
+        return block
+    if not prefix.endswith("\n"):
+        prefix += "\n"
+    if not prefix.endswith("\n\n"):
+        prefix += "\n"
+    return prefix + block
+
+
+def install_trellis_gitignore(target: Path, *, dry_run: bool) -> InstallResult:
+    file = PackFile(
+        platform="shared",
+        kind="generated-gitignore",
+        source=MANIFEST_PATH,
+        target=TRELLIS_GITIGNORE_TARGET,
+        anchor=None,
+        install=ALWAYS_INSTALL,
     )
-    for new, old in replacements:
-        content = content.replace(new, old)
-    return content
+    destination = target_destination(target, file.target)
+    if path_is_occupied(destination) and not destination.is_file():
+        raise SystemExit(f"error: target exists and is not a file: {file.target}")
 
-
-def legacy_adapter_contents(file: PackFile) -> set[bytes]:
-    content = file.source.read_bytes()
-    contents = {content}
-    contents.add(strip_yaml_frontmatter(content))
-    contents.add(old_pack_identity_variant(content))
-    contents.add(old_pack_identity_variant(strip_yaml_frontmatter(content)))
-    if file.platform == "gemini" and file.kind == "command":
-        command_name = file.target.stem.removeprefix("sd-").removesuffix(".prompt")
-        contents.add(toml_description_variant(content, command_name, "SD"))
-        contents.add(toml_description_variant(content, command_name, "Trellis"))
-    contents.update(
-        item.replace(b'description = "SD: ', b'description = "Trellis: ')
-        for item in list(contents)
+    current = (
+        destination.read_text(encoding="utf-8", errors="surrogateescape")
+        if destination.exists()
+        else ""
     )
-    return contents
+    merged = merge_trellis_gitignore_block(current)
+    if merged == current:
+        return InstallResult(file, "unchanged")
+    if not dry_run:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(merged, encoding="utf-8", errors="surrogateescape")
+    return InstallResult(file, "updated" if destination.exists() else "created")
 
 
-def cleanup_adapter_targets(
-    selected: list[PackFile],
+def install_managed_block(
+    file: PackFile,
     target: Path,
     *,
     dry_run: bool,
-    force: bool,
-    target_for_file: Callable[[PackFile], Path | None],
-    conflict_status: str,
-) -> list[LegacyCleanupResult]:
-    results: list[LegacyCleanupResult] = []
-    seen: set[Path] = set()
-    for file in selected:
-        cleanup_target = target_for_file(file)
-        if cleanup_target is None or cleanup_target in seen:
-            continue
-        seen.add(cleanup_target)
+) -> InstallResult:
+    if file.target != COPILOT_INSTRUCTIONS_TARGET:
+        raise SystemExit(f"error: unsupported managed block target: {file.target}")
 
-        destination = target / cleanup_target
-        validate_resolved_target_path(
-            target,
-            destination.parent,
-            "adapter cleanup parent path",
-        )
-        if not path_is_occupied(destination):
-            continue
-        if path_is_occupied(destination) and not (
-            destination.is_file() or destination.is_symlink()
-        ):
-            results.append(
-                LegacyCleanupResult(
-                    cleanup_target,
-                    conflict_status,
-                    "target exists and is not a file",
-                )
-            )
-            continue
-        content_matches_template = (
-            not destination.is_symlink()
-            and destination.read_bytes() in legacy_adapter_contents(file)
-        )
-        if not force and not content_matches_template:
-            reason = (
-                "target is a symlink"
-                if destination.is_symlink()
-                else "content differs from pack template"
-            )
-            results.append(
-                LegacyCleanupResult(
-                    cleanup_target,
-                    conflict_status,
-                    reason,
-                )
-            )
-            continue
+    destination = target_destination(target, file.target)
+    if path_is_occupied(destination) and not destination.is_file():
+        raise SystemExit(f"error: target exists and is not a file: {file.target}")
 
-        status = "would-remove" if dry_run else "removed"
+    block = normalize_managed_block_template(file)
+    if destination.exists():
+        current = destination.read_text(encoding="utf-8", errors="surrogateescape")
+        merged = merge_managed_block(current, block)
+        if merged == current:
+            return InstallResult(file, "unchanged")
         if not dry_run:
-            destination.unlink()
-            with contextlib.suppress(OSError):
-                destination.parent.rmdir()
-        results.append(LegacyCleanupResult(cleanup_target, status))
-    return results
+            destination.write_text(merged, encoding="utf-8", errors="surrogateescape")
+        return InstallResult(file, "updated")
+
+    if not dry_run:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(block, encoding="utf-8", errors="surrogateescape")
+    return InstallResult(file, "created")
 
 
-def cleanup_legacy_adapters(
+def installed_targets_content(
+    selected: list[PackFile],
+    *,
+    extra_targets: Iterable[Path] = (),
+) -> str:
+    targets = {file.target.as_posix() for file in selected}
+    targets.update(target.as_posix() for target in extra_targets)
+    targets.add(INSTALLED_TARGETS_FILE.as_posix())
+    targets = sorted(targets)
+    return "\n".join(targets) + "\n"
+
+
+def local_only_pack_excludes(selected: list[PackFile]) -> tuple[str, ...]:
+    paths = {file.target.as_posix() for file in selected}
+    paths.add(INSTALLED_TARGETS_FILE.as_posix())
+    paths.add(LOCAL_ONLY_MARKER_FILE.as_posix())
+    paths.add(".sd-ai-command-pack/")
+    return tuple(sorted(paths))
+
+
+def local_only_exclude_patterns(selected: list[PackFile]) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            (
+                *LOCAL_ONLY_TRELLIS_EXCLUDES,
+                *local_only_pack_excludes(selected),
+            )
+        )
+    )
+
+
+def local_only_tracked_check_specs(selected: list[PackFile]) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            (
+                *LOCAL_ONLY_TRACKED_CHECK_PATHS,
+                *(file.target.as_posix() for file in selected),
+                INSTALLED_TARGETS_FILE.as_posix(),
+                LOCAL_ONLY_MARKER_FILE.as_posix(),
+            )
+        )
+    )
+
+
+def tracked_paths(target: Path, specs: Iterable[str]) -> list[str]:
+    spec_list = list(specs)
+    if not spec_list:
+        return []
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--", *spec_list],
+            cwd=target,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+    except FileNotFoundError:
+        raise SystemExit("error: git is required to check tracked --local-only paths") from None
+    if result.returncode != 0:
+        raise SystemExit(f"error: git ls-files failed: {result.stdout}") from None
+    return [line for line in result.stdout.splitlines() if line]
+
+
+def reject_tracked_local_only_paths(target: Path, selected: list[PackFile]) -> None:
+    tracked = tracked_paths(target, local_only_tracked_check_specs(selected))
+    if not tracked:
+        return
+    print("error: --local-only cannot manage paths that are already tracked:")
+    for path in tracked[:20]:
+        print(f"- {path}")
+    if len(tracked) > 20:
+        print(f"- ... {len(tracked) - 20} more")
+    raise SystemExit(
+        "Remove these paths from Git tracking or use the normal tracked install."
+    )
+
+
+def local_only_exclude_block(patterns: Iterable[str]) -> str:
+    lines = [
+        LOCAL_ONLY_EXCLUDE_START,
+        "# Generated by `python3 install.py --local-only`.",
+        "# Keeps personal Trellis and SD AI command pack files out of commits.",
+        *patterns,
+        LOCAL_ONLY_EXCLUDE_END,
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def merge_local_only_exclude_block(current: str, block: str) -> str:
+    start_index = current.find(LOCAL_ONLY_EXCLUDE_START)
+    end_index = current.find(LOCAL_ONLY_EXCLUDE_END)
+    has_start = start_index != -1
+    has_end = end_index != -1
+    if has_start != has_end or (has_start and end_index < start_index):
+        raise SystemExit(
+            "error: .git/info/exclude has incomplete sd-ai-command-pack "
+            "local-only markers"
+        )
+    if has_start:
+        replace_end = end_index + len(LOCAL_ONLY_EXCLUDE_END)
+        if replace_end < len(current) and current[replace_end] == "\n":
+            replace_end += 1
+        return current[:start_index] + block + current[replace_end:]
+    if not current:
+        return block
+    prefix = current
+    if not prefix.endswith("\n"):
+        prefix += "\n"
+    if not prefix.endswith("\n\n"):
+        prefix += "\n"
+    return prefix + block
+
+
+def ensure_local_only_exclude(
+    target: Path,
+    selected: list[PackFile],
+    *,
+    dry_run: bool,
+) -> LocalOnlyResult:
+    exclude_path = git_info_exclude_path(target)
+    validate_resolved_target_path(exclude_path.parent.parent, exclude_path, "git exclude path")
+    current = exclude_path.read_text(encoding="utf-8", errors="surrogateescape") if exclude_path.exists() else ""
+    block = local_only_exclude_block(local_only_exclude_patterns(selected))
+    merged = merge_local_only_exclude_block(current, block)
+    if merged == current:
+        return LocalOnlyResult("local-exclude-unchanged", exclude_path)
+    if dry_run:
+        return LocalOnlyResult("would-update-local-exclude", exclude_path)
+    exclude_path.parent.mkdir(parents=True, exist_ok=True)
+    exclude_path.write_text(merged, encoding="utf-8", errors="surrogateescape")
+    status = "local-exclude-updated" if current else "local-exclude-created"
+    return LocalOnlyResult(status, exclude_path)
+
+
+def write_local_only_marker(target: Path, *, dry_run: bool) -> LocalOnlyResult:
+    marker = target / LOCAL_ONLY_MARKER_FILE
+    content = (
+        "This checkout was set up with `sd-ai-command-pack --local-only`.\n"
+        "Generated Trellis and SD AI command pack files are ignored through "
+        ".git/info/exclude for this local clone.\n"
+    )
+    if marker.exists() and marker.read_text(encoding="utf-8", errors="surrogateescape") == content:
+        return LocalOnlyResult("local-only-marker-unchanged", LOCAL_ONLY_MARKER_FILE)
+    if dry_run:
+        return LocalOnlyResult("would-write-local-only-marker", LOCAL_ONLY_MARKER_FILE)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(content, encoding="utf-8", errors="surrogateescape")
+    return LocalOnlyResult("local-only-marker-written", LOCAL_ONLY_MARKER_FILE)
+
+
+def install_installed_targets_file(
     selected: list[PackFile],
     target: Path,
     *,
     dry_run: bool,
-    force: bool,
-) -> list[LegacyCleanupResult]:
-    return cleanup_adapter_targets(
-        selected,
-        target,
-        dry_run=dry_run,
-        force=force,
-        target_for_file=legacy_adapter_target,
-        conflict_status="legacy-conflict",
+    extra_targets: Iterable[Path] = (),
+) -> InstallResult:
+    file = PackFile(
+        platform="shared",
+        kind="generated-manifest",
+        source=MANIFEST_PATH,
+        target=INSTALLED_TARGETS_FILE,
+        anchor=None,
+        install=ALWAYS_INSTALL,
     )
+    destination = target_destination(target, file.target)
 
+    content = installed_targets_content(selected, extra_targets=extra_targets)
+    if destination.exists():
+        current = destination.read_text(encoding="utf-8", errors="surrogateescape")
+        if current == content:
+            return InstallResult(file, "unchanged")
+        if not dry_run:
+            destination.write_text(content, encoding="utf-8", errors="surrogateescape")
+        return InstallResult(file, "updated")
 
-def cleanup_obsolete_adapters(
-    selected: list[PackFile],
-    target: Path,
-    *,
-    dry_run: bool,
-    force: bool,
-) -> list[LegacyCleanupResult]:
-    return cleanup_adapter_targets(
-        selected,
-        target,
-        dry_run=dry_run,
-        force=force,
-        target_for_file=obsolete_adapter_target,
-        conflict_status="obsolete-conflict",
-    )
+    if not dry_run:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(content, encoding="utf-8", errors="surrogateescape")
+    return InstallResult(file, "created")
 
 
 def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
@@ -488,38 +962,108 @@ def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
     return result.returncode
 
 
+def display_path(target: Path, path: Path) -> Path:
+    try:
+        return path.relative_to(target)
+    except ValueError:
+        return path
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     if args.backup and not args.force:
         raise SystemExit("error: --backup requires --force")
+    if args.skip_trellis_init and not args.local_only:
+        raise SystemExit("error: --skip-trellis-init requires --local-only")
 
     target = Path(args.target).resolve()
     manifest, files = load_manifest()
 
     validate_manifest(files)
-    require_trellis_repo(target)
-    selected, skipped = selected_files(files, target, args.platform, args.all)
+    local_only_results: list[LocalOnlyResult] = []
+    if args.local_only:
+        require_git_repo_for_local_only(target)
+        selected, skipped = selected_files(files, target, args.platform, args.all)
+        reject_tracked_local_only_paths(target, selected)
+        local_only_results.append(
+            ensure_trellis_for_local_only(
+                target,
+                platforms=args.platform,
+                install_all=args.all,
+                dry_run=args.dry_run,
+                skip_trellis_init=args.skip_trellis_init,
+            )
+        )
+    else:
+        require_trellis_repo(target)
+        selected, skipped = selected_files(files, target, args.platform, args.all)
+    if args.local_only:
+        local_only_results.append(
+            ensure_local_only_exclude(
+                target,
+                selected,
+                dry_run=args.dry_run,
+            )
+        )
 
     print(f"{manifest['name']} {manifest['version']}")
     print(f"target: {target}")
     if args.dry_run:
         print("mode: dry-run")
+    if args.local_only:
+        print("mode: local-only")
+    for result in local_only_results:
+        suffix = f" ({result.detail})" if result.detail else ""
+        print(f"{result.status:25} {display_path(target, result.target)}{suffix}")
 
     results: list[InstallResult] = []
-    for file in selected:
-        result = install_file(
-            file,
-            target,
-            force=args.force,
-            dry_run=args.dry_run,
-            backup=args.backup,
+    generated_targets: list[Path] = []
+    if not args.local_only:
+        results.append(
+            install_trellis_gitignore(
+                target,
+                dry_run=args.dry_run,
+            )
         )
+        generated_targets.append(TRELLIS_GITIGNORE_TARGET)
+
+    for file in selected:
+        if file.kind == MANAGED_BLOCK_KIND:
+            result = install_managed_block(
+                file,
+                target,
+                dry_run=args.dry_run,
+            )
+        else:
+            result = install_file(
+                file,
+                target,
+                force=args.force,
+                dry_run=args.dry_run,
+                backup=args.backup,
+            )
         results.append(result)
+
+    results.append(
+        install_installed_targets_file(
+            selected,
+            target,
+            dry_run=args.dry_run,
+            extra_targets=generated_targets,
+        )
+    )
+    if args.local_only:
+        local_only_results.append(
+            write_local_only_marker(target, dry_run=args.dry_run)
+        )
 
     for result in results:
         print(f"{result.status:11} {result.file.target}")
         if result.backup:
             print(f"{'backup':11} {result.backup.relative_to(target)}")
+    for result in local_only_results[2:]:
+        suffix = f" ({result.detail})" if result.detail else ""
+        print(f"{result.status:25} {display_path(target, result.target)}{suffix}")
     for file, reason in skipped:
         print(f"skipped     {file.target} ({reason})")
 
@@ -532,62 +1076,12 @@ def main(argv: list[str] | None = None) -> int:
         print("Re-run with --force to overwrite these files.")
         return 2
 
-    legacy_results = cleanup_legacy_adapters(
-        selected,
-        target,
-        dry_run=args.dry_run,
-        force=args.force,
-    )
-    for result in legacy_results:
-        suffix = f" ({result.reason})" if result.reason else ""
-        print(f"{result.status:11} {result.target}{suffix}")
-
-    legacy_conflicts = [
-        result for result in legacy_results if result.status == "legacy-conflict"
-    ]
-    if legacy_conflicts:
-        print("")
-        print("Legacy adapter conflicts:")
-        for result in legacy_conflicts:
-            suffix = f" ({result.reason})" if result.reason else ""
-            print(f"- {result.target}{suffix}")
-        print("Re-run with --force to remove these legacy adapter files.")
-        return 2
-
-    obsolete_results = cleanup_obsolete_adapters(
-        selected,
-        target,
-        dry_run=args.dry_run,
-        force=args.force,
-    )
-    for result in obsolete_results:
-        suffix = f" ({result.reason})" if result.reason else ""
-        print(f"{result.status:11} {result.target}{suffix}")
-
-    obsolete_conflicts = [
-        result for result in obsolete_results if result.status == "obsolete-conflict"
-    ]
-    if obsolete_conflicts:
-        print("")
-        print("Obsolete adapter conflicts:")
-        for result in obsolete_conflicts:
-            suffix = f" ({result.reason})" if result.reason else ""
-            print(f"- {result.target}{suffix}")
-        print("Re-run with --force to remove these obsolete adapter files.")
-        return 2
-
     if not args.dry_run and not args.skip_diff_check:
         diff_paths = [
             result.file.target
             for result in results
             if result.status not in {"conflict", "preserved"}
         ]
-        diff_paths.extend(
-            result.target for result in legacy_results if result.status == "removed"
-        )
-        diff_paths.extend(
-            result.target for result in obsolete_results if result.status == "removed"
-        )
         diff_status = run_diff_check(target, diff_paths)
         if diff_status != 0:
             return diff_status
