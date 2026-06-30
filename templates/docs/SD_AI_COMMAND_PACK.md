@@ -12,22 +12,24 @@ first; they cover `npm install -g @mindfoldhq/trellis@latest` and
 ## What is installed
 
 - `.agents/skills/sd-review-pr/SKILL.md`: local-review-first PR workflow.
+- `.agents/skills/sd-review-local/SKILL.md`: local review provider fix loop.
 - `.agents/skills/sd-review-learnings/SKILL.md`: review feedback learning
   capture workflow.
 - `.agents/skills/sd-full-check/SKILL.md`: full local verification workflow.
 - `.agents/skills/sd-housekeeping/SKILL.md`: post-merge cleanup workflow.
 - `.agents/skills/sd-*/SKILL.md`: Codex-visible `sd` entry points, including
-  the full `sd-review-pr`, `sd-full-check`, and `sd-housekeeping` workflows
-  plus adapter-only aliases.
+  the full `sd-review-pr`, `sd-review-local`, `sd-full-check`, and
+  `sd-housekeeping` workflows plus adapter-only aliases.
 - `scripts/sd-ai-command-pack-full-check.sh`: canonical full-check script.
 - `scripts/sd-ai-command-pack-housekeeping.sh`: canonical post-merge housekeeping script.
 - `scripts/sd-ai-command-pack-review-scope.sh`: copied/generated file scope
   preflight for mixed PRs.
+- `scripts/sd-ai-command-pack-review-local.sh`: local Prism/Gito and configured
+  review-tool runner for the review-local loop.
 - `scripts/sd-ai-command-pack-review-learnings.py`: local review feedback
   pattern scanner and managed learning-block updater.
 - `scripts/sd-ai-command-pack-install-audit.py`: structural post-install audit
-  for missing installed targets, obsolete pack artifacts, and stale generated
-  repository-map references.
+  for missing installed targets and unlisted pack-like files.
 - `scripts/sd-ai-command-pack-pr-body-scope.py`: configurable PR-body scope
   preflight for broad behavior-changing diffs.
 - `scripts/sd-ai-command-pack-update-spec-kb.py`: Obsidian KB symlink-folder
@@ -48,8 +50,9 @@ repospec artifacts through existing maintenance infrastructure when available,
 and then performs the architecture-overview check.
 Codex exposes the pack entry points as skills named `sd-start`, `sd-continue`,
 `sd-finish-work`, `sd-full-check`, `sd-housekeeping`, `sd-review-pr`,
-`sd-review-learnings`, and `sd-update-spec`; type `/sd` in Codex command
-completion or invoke them with `$sd-review-pr`-style skill mentions.
+`sd-review-local`, `sd-review-learnings`, and `sd-update-spec`; type `/sd` in
+Codex command completion or invoke them with `$sd-review-pr`-style skill
+mentions.
 The start, continue, and finish-work wrappers run Trellis' existing
 `trellis-start`, `trellis-continue`, and `trellis-finish-work` skills as-is.
 The slash command namespace is `sd`, not `trellis`, so these pack-owned wrappers
@@ -73,27 +76,30 @@ loaded project command files.
    review fixes.
 4. Fix deterministic failures first, then verify findings from any available
    local review provider against the actual code before changing behavior.
-5. Use the review-pr command for the PR loop. It should run the local
+5. Use the review-local command when you want a local Prism/Gito or configured
+   review-tool loop before involving a remote reviewer. It asks which findings
+   to fix and repeats until no items are selected.
+6. Use the review-pr command for the PR loop. It should run the local
    full-check path, including any configured local review providers, before
    requesting remote review.
-6. Request the configured remote reviewer, defaulting to GitHub Copilot, only
+7. Request the configured remote reviewer, defaulting to GitHub Copilot, only
    when explicitly wanted or as a final remote pass.
-7. Let the review-pr command reply to and resolve review threads as part of the
+8. Let the review-pr command reply to and resolve review threads as part of the
    normal loop once findings are fixed, rebutted with evidence, or confirmed
    already addressed.
-8. Use the review-learnings command when review comments repeat across PRs and
+9. Use the review-learnings command when review comments repeat across PRs and
    you want to capture repo-specific preventive guidance.
-9. Run the update-spec command when the work taught you a durable
+10. Run the update-spec command when the work taught you a durable
    implementation contract or convention. It runs the existing update-spec skill
    and also checks whether an existing architectural overview needs to be
    updated.
-10. Run the finish-work command when the coding session is complete and you need
+11. Run the finish-work command when the coding session is complete and you need
    the Trellis finish-work skill's quality gate, archive, journal, and commit
    reminder behavior.
-11. After the PR merges, run the housekeeping command to get back to the default
+12. After the PR merges, run the housekeeping command to get back to the default
    branch, prune/delete the merged development stream, and see the condensed
    clean-state/anomaly report.
-12. If the review-pr command sees the PR is already merged or becomes merged
+13. If the review-pr command sees the PR is already merged or becomes merged
    during the active session, it auto-dispatches housekeeping before the final
    report. This does not wake inactive sessions; it only runs when the active
    agent observes the merge.
@@ -119,6 +125,7 @@ Claude Code and Gemini CLI:
 /sd:full-check
 /sd:housekeeping
 /sd:review-pr
+/sd:review-local
 /sd:review-learnings
 /sd:update-spec
 ```
@@ -133,6 +140,7 @@ Codex skills:
 /sd-full-check
 /sd-housekeeping
 /sd-review-pr
+/sd-review-local
 /sd-review-learnings
 /sd-update-spec
 ```
@@ -160,6 +168,7 @@ Use the script directly from any shell:
 
 ```bash
 bash scripts/sd-ai-command-pack-full-check.sh
+bash scripts/sd-ai-command-pack-review-local.sh
 bash scripts/sd-ai-command-pack-housekeeping.sh
 python3 scripts/sd-ai-command-pack-review-learnings.py --base origin/main --include-working-tree
 ```
@@ -173,18 +182,23 @@ scope preflight, current-diff CI classification when
 `scripts/classify-ci-changes.sh` exists, optional package-script checks when a
 `package.json`, Node.js, and the selected package runner are available, and
 local Prism review when `prism` is available and configured. The install audit
-checks `.sd-ai-command-pack/installed-targets.txt` for missing targets, fails on
-obsolete pack artifacts such as old `trellis-*` full-check/housekeeping files
-or `sd-refresh-specs` adapters, and warns when known generated repository maps
-still mention obsolete pack names. The copied/generated scope preflight reads
+checks `.sd-ai-command-pack/installed-targets.txt` for missing targets and
+reports pack-like files that are not listed in the installed-targets snapshot.
+The copied/generated scope preflight reads
 `.sd-ai-command-pack/installed-targets.txt`, reports changed pack/Trellis
 runtime files, known repository-map files when present, and Trellis workspace
 journal/index files as integration-only review surface. When the GitHub CLI can
 resolve a current PR, it checks that the PR body includes a
 `Tooling/generated scope:` section before review cycles spend attention on
 copied or generated surfaces. In CI or local preflights where `gh pr view`
-should not run, pass the PR body through `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` or the
-compatibility fallback `REVIEW_PREFLIGHT_PR_BODY`.
+should not run, pass the PR body through `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`.
+
+The review-local script defaults to Prism plus Gito and is intentionally
+tool-stack aware. Pass tool names as arguments, set
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS`, or configure a third-party tool with
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND`. The review-local command uses
+that script output to ask which findings to fix, applies only selected fixes,
+and repeats the same tool stack until the user selects no more items.
 
 The PR-body scope preflight is generic and config-driven. By default it checks
 pack/Trellis generated files, housekeeping automation files, and CI/review
@@ -239,6 +253,10 @@ architecture and decision docs, `.trellis/spec/**/*.md`, `.trellis/workflow.md`,
 when present. It should avoid secrets, caches, build output, dependency/vendor
 directories, `.git/`, `.trellis/workspace/`, and broad source trees unless a
 specific source entrypoint is intentionally maintained as repo documentation.
+The helper also creates and refreshes `.obsidian-kb/Dashboard.md`, a generated
+Markdown landing page that groups and links to the current KB symlinks. If a
+user-owned file already exists at that path, the helper leaves it untouched and
+reports a conflict.
 
 To expose the generated knowledge folder inside an Obsidian vault, create a
 symlink from the vault to the repo's `.obsidian-kb` folder.
@@ -302,17 +320,12 @@ Common environment variables:
 - `SD_AI_COMMAND_PACK_INSTALL_AUDIT=0`: skip the structural post-install audit.
 - `SD_AI_COMMAND_PACK_INSTALL_AUDIT=required`: fail if the full-check cannot run
   the audit script.
-- `SD_AI_COMMAND_PACK_INSTALL_AUDIT_STRICT_REFS=1`: fail, rather than warn, when
-  known generated repository maps mention obsolete pack names.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS`: space-separated package scripts
   to run when `package.json` and the selected package runner are available.
-  The older `SD_AI_COMMAND_PACK_FULL_CHECK_NPM_SCRIPTS` name is still accepted for
-  compatibility.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_RUNNER`: package runner. Defaults to
   `npm` when package-script checks apply.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS=1`: skip package-script
-  checks. The older `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_NPM=1` name is still
-  accepted for compatibility.
+  checks.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0`: skip Prism review.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=required`: fail if Prism is missing,
   unauthenticated, or has provider/model configuration failures.
@@ -327,6 +340,20 @@ Common environment variables:
   `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then `origin/main`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR`: output folder for Gito reports. Defaults
   to `.build/review/gito`.
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS`: local review tool list for
+  `sd-review-local`. Defaults to `prism gito`; accepts spaces or commas.
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MODE=0`: skip Prism in the local review
+  runner. Defaults to required when Prism is selected.
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MODE=0`: skip Gito in the local review
+  runner. Defaults to required when Gito is selected.
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND`: command for a repo-specific
+  or third-party local review tool, run with `bash -lc`.
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF`: base ref for review-local Gito
+  review. Defaults to `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF`, then
+  `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then `origin/main`.
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_OUT_DIR`: output folder for review-local
+  Gito reports. Defaults to `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR`, then
+  `.build/review/gito`.
 - `SD_AI_COMMAND_PACK_SCOPE_CHECK=0`: skip tooling/generated file scope checks.
 - `SD_AI_COMMAND_PACK_SCOPE_CHECK_GH=required`: fail when `gh` cannot resolve the
   current PR for the tooling/generated scope body check. Defaults to optional.
@@ -334,8 +361,6 @@ Common environment variables:
   Defaults to `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then `origin/main`.
 - `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`: explicit PR body text for tooling/generated
   scope checks when `gh pr view` should not be used.
-- `REVIEW_PREFLIGHT_PR_BODY`: compatibility fallback for the same PR body text
-  when a repo-local preflight already provides it.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK=0`: skip configurable PR-body scope
   checks.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK=required`: fail if the pack-provided
@@ -345,7 +370,7 @@ Common environment variables:
   `.sd-ai-command-pack/pr-body-scope.json` when present.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`: explicit PR body text for
   configurable PR-body scope checks. Falls back to
-  `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`, then `REVIEW_PREFLIGHT_PR_BODY`.
+  `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHANGED_FILES`: explicit newline- or
   NUL-delimited changed path list for configurable PR-body scope checks.
 - `SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO`: explicit `owner/repo` slug when the
@@ -405,10 +430,6 @@ to be preserved next to the overwritten files. An existing `.prism/rules.json`
 that differs from the pack template is reported as `preserved` and is never
 overwritten or reported as a conflict, so repo-specific Prism rules are not
 replaced during a pack refresh.
-Reinstalling the pack removes old pack-generated `/trellis:*` adapter files
-when they still match the pack templates. Legacy adapter files with other
-content are reported as conflicts unless `--force` is supplied; with `--force`,
-they are removed while the `sd` replacement is installed.
 
 ## Troubleshooting
 

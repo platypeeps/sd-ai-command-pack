@@ -145,9 +145,8 @@ check_pr_body_scope() {
     return 0
   fi
 
-  if [ "${SD_AI_COMMAND_PACK_SCOPE_PR_BODY+x}" ] || [ "${REVIEW_PREFLIGHT_PR_BODY+x}" ]; then
-    local explicit_body="${SD_AI_COMMAND_PACK_SCOPE_PR_BODY-${REVIEW_PREFLIGHT_PR_BODY-}}"
-    if ! github_pr_body_mentions_scope "$explicit_body"; then
+  if [ "${SD_AI_COMMAND_PACK_SCOPE_PR_BODY+x}" ]; then
+    if ! github_pr_body_mentions_scope "$SD_AI_COMMAND_PACK_SCOPE_PR_BODY"; then
       fail "tooling/generated files changed, but the provided PR body does not include a Tooling/generated scope: section"
     fi
     return 0

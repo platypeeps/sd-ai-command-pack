@@ -60,6 +60,10 @@ AI command pack extensions.
      - Refresh existing KB symlinks when their targets changed, and remove stale
        symlinks that point to files no longer relevant. Do not delete or
        overwrite non-symlink files in `.obsidian-kb/`; report them as conflicts.
+     - Create and maintain `.obsidian-kb/Dashboard.md` as a generated Markdown
+       landing page that groups and links to the current KB symlinks. If a
+       user-owned file already exists at that path, do not overwrite it; report a
+       conflict.
      - Do not link dependency/vendor directories, build output, caches, logs,
        secrets, `.git/`, `.trellis/workspace/`, or broad source trees unless a
        specific source entrypoint is intentionally maintained as repo
@@ -70,8 +74,8 @@ AI command pack extensions.
    - `Spec updates`: paths changed, or `none`
    - `Repospec`: refreshed path/tool, `not present`, or `no infrastructure`
    - `Architectural overview`: updated path, `not present`, or `not warranted`
-   - `Obsidian KB`: `.obsidian-kb` created/refreshed, symlink count, gitignore
-     state, and any conflicts
+   - `Obsidian KB`: `.obsidian-kb` created/refreshed, symlink count, dashboard
+     state, gitignore state, and any conflicts
    - `Obsidian vault link`: example command for linking this repo's
      `.obsidian-kb` folder into a vault, such as
      `ln -s /absolute/path/to/repo/.obsidian-kb /absolute/path/to/vault/Repo-KB`

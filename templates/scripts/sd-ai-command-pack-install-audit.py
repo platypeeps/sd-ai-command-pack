@@ -20,28 +20,6 @@ SOURCE_REPO_MARKERS = (
     Path("templates"),
 )
 
-OBSOLETE_PATHS = [
-    Path(".agents/skills/trellis-review-pr/SKILL.md"),
-    Path(".agents/skills/trellis-full-check/SKILL.md"),
-    Path(".agents/skills/trellis-housekeeping/SKILL.md"),
-    Path(".agents/skills/sd-refresh-specs/SKILL.md"),
-    Path(".claude/commands/sd/refresh-specs.md"),
-    Path(".cursor/commands/sd-refresh-specs.md"),
-    Path(".gemini/commands/sd/refresh-specs.toml"),
-    Path(".github/prompts/sd-refresh-specs.prompt.md"),
-    Path(".opencode/commands/sd-refresh-specs.md"),
-    Path(".opencode/commands/sd/review-pr.md"),
-    Path(".opencode/commands/sd/full-check.md"),
-    Path(".opencode/commands/sd/housekeeping.md"),
-    Path("docs/TRELLIS_REVIEW_PR_PACK.md"),
-    Path("scripts/trellis-full-check.sh"),
-    Path("scripts/trellis-housekeeping.sh"),
-    Path("scripts/sd-review-learnings.py"),
-    Path("scripts/sd-command-pack-full-check.sh"),
-    Path("scripts/sd-command-pack-housekeeping.sh"),
-    Path("scripts/sd-command-pack-review-scope.sh"),
-]
-
 PACK_FILE_PATTERNS = [
     ".agents/skills/sd-*/*",
     ".claude/commands/sd/*",
@@ -58,32 +36,6 @@ PACK_FILE_PATTERNS = [
 LOCAL_ALLOWED_PACK_FILES = {
     ".sd-ai-command-pack/pr-body-scope.json",
 }
-
-REPO_MAP_CANDIDATES = [
-    Path("docs/repomix-map.md"),
-    Path("docs/repo-map.md"),
-    Path("docs/repospec.md"),
-    Path("docs/REPOSPEC.md"),
-    Path("REPOSPEC.md"),
-]
-
-OBSOLETE_REFERENCE_PATTERNS = [
-    "trellis-review-pr-pack",
-    ".agents/skills/trellis-review-pr/SKILL.md",
-    ".agents/skills/trellis-full-check/SKILL.md",
-    ".agents/skills/trellis-housekeeping/SKILL.md",
-    ".agents/skills/sd-refresh-specs/SKILL.md",
-    ".claude/commands/sd/refresh-specs.md",
-    ".cursor/commands/sd-refresh-specs.md",
-    ".gemini/commands/sd/refresh-specs.toml",
-    ".github/prompts/sd-refresh-specs.prompt.md",
-    ".opencode/commands/sd-refresh-specs.md",
-    "scripts/trellis-full-check.sh",
-    "scripts/trellis-housekeeping.sh",
-    "scripts/sd-review-learnings.py",
-    "sd-command-pack-",
-]
-
 
 def is_disabled(value: str | None) -> bool:
     return (value or "").lower() in {"0", "false", "no", "skip", "none"}
@@ -164,10 +116,6 @@ def audit_structural_state(root: Path, targets: set[str]) -> list[str]:
         if not path_exists(root, Path(target)):
             failures.append(f"installed target is missing: {target}")
 
-    for obsolete_path in OBSOLETE_PATHS:
-        if path_exists(root, obsolete_path):
-            failures.append(f"obsolete pack artifact still exists: {obsolete_path.as_posix()}")
-
     allowed = set(targets) | LOCAL_ALLOWED_PACK_FILES
     for relative_path in collect_pack_like_files(root):
         if relative_path not in allowed:
@@ -179,35 +127,6 @@ def audit_structural_state(root: Path, targets: set[str]) -> list[str]:
     return failures
 
 
-def audit_stale_references(root: Path, strict_references: bool) -> tuple[list[str], list[str]]:
-    failures: list[str] = []
-    warnings: list[str] = []
-
-    for candidate in REPO_MAP_CANDIDATES:
-        path = root / candidate
-        if not path.exists() or not path.is_file():
-            continue
-
-        content = path.read_text(encoding="utf-8", errors="replace")
-        matched = [
-            pattern for pattern in OBSOLETE_REFERENCE_PATTERNS if pattern in content
-        ]
-        if not matched:
-            continue
-
-        message = (
-            f"{candidate.as_posix()} mentions obsolete pack names: "
-            + ", ".join(sorted(set(matched)))
-            + "; refresh the generated repository map or mark the history intentional"
-        )
-        if strict_references:
-            failures.append(message)
-        else:
-            warnings.append(message)
-
-    return failures, warnings
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Audit the installed sd-ai-command-pack footprint."
@@ -216,11 +135,6 @@ def parse_args() -> argparse.Namespace:
         "--repo",
         default=".",
         help="target repository root to audit; defaults to the current directory",
-    )
-    parser.add_argument(
-        "--strict-references",
-        action="store_true",
-        help="fail when generated repository maps mention obsolete pack names",
     )
     return parser.parse_args()
 
@@ -240,19 +154,9 @@ def main() -> int:
         )
         return 0
 
-    strict_references = args.strict_references or os.environ.get(
-        "SD_AI_COMMAND_PACK_INSTALL_AUDIT_STRICT_REFS", ""
-    ).lower() in {"1", "true", "yes", "required"}
-
     targets, failures = load_installed_targets(root)
     if targets:
         failures.extend(audit_structural_state(root, targets))
-
-    reference_failures, warnings = audit_stale_references(root, strict_references)
-    failures.extend(reference_failures)
-
-    for warning in warnings:
-        print(f"warning: {warning}")
 
     if failures:
         for failure in failures:

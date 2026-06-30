@@ -8,11 +8,12 @@
 
 Install reusable AI workflow helpers into
 [Trellis-managed repositories](https://trytrellis.app/). The current pack is
-focused on Trellis enrichment: start, continue, finish-work, PR review,
-review learnings, full-check, post-merge housekeeping, and update-spec wrapper
-workflows. The repository and `sd` command namespace are intentionally broader
-than that initial scope, so future skills, commands, scripts, docs, or rules
-may cover adjacent AI workflow support that is not strictly Trellis-specific.
+focused on Trellis enrichment: start, continue, finish-work, local review, PR
+review, review learnings, full-check, post-merge housekeeping, and update-spec
+wrapper workflows. The repository and `sd` command namespace are intentionally
+broader than that initial scope, so future skills, commands, scripts, docs, or
+rules may cover adjacent AI workflow support that is not strictly
+Trellis-specific.
 
 This pack only works in a repo that already has Trellis installed and
 initialized. If `trellis` is not available yet, follow the official
@@ -30,10 +31,12 @@ The current Trellis-focused pack includes:
 - `.agents/skills/sd-housekeeping/SKILL.md`
 - `.agents/skills/sd-update-spec/SKILL.md`
 - `.agents/skills/sd-review-pr/SKILL.md`
+- `.agents/skills/sd-review-local/SKILL.md`
 - `.agents/skills/sd-review-learnings/SKILL.md`
 - `scripts/sd-ai-command-pack-full-check.sh`
 - `scripts/sd-ai-command-pack-housekeeping.sh`
 - `scripts/sd-ai-command-pack-review-scope.sh`
+- `scripts/sd-ai-command-pack-review-local.sh`
 - `scripts/sd-ai-command-pack-review-learnings.py`
 - `scripts/sd-ai-command-pack-install-audit.py`
 - `scripts/sd-ai-command-pack-pr-body-scope.py`
@@ -47,11 +50,13 @@ The current Trellis-focused pack includes:
 - `.claude/commands/sd/housekeeping.md`
 - `.claude/commands/sd/update-spec.md`
 - `.claude/commands/sd/review-pr.md`
+- `.claude/commands/sd/review-local.md`
 - `.claude/commands/sd/review-learnings.md`
 - `.cursor/commands/sd-start.md`
 - `.cursor/commands/sd-continue.md`
 - `.cursor/commands/sd-finish-work.md`
 - `.cursor/commands/sd-review-pr.md`
+- `.cursor/commands/sd-review-local.md`
 - `.cursor/commands/sd-review-learnings.md`
 - `.cursor/commands/sd-full-check.md`
 - `.cursor/commands/sd-housekeeping.md`
@@ -60,6 +65,7 @@ The current Trellis-focused pack includes:
 - `.gemini/commands/sd/continue.toml`
 - `.gemini/commands/sd/finish-work.toml`
 - `.gemini/commands/sd/review-pr.toml`
+- `.gemini/commands/sd/review-local.toml`
 - `.gemini/commands/sd/full-check.toml`
 - `.gemini/commands/sd/housekeeping.toml`
 - `.gemini/commands/sd/update-spec.toml`
@@ -68,6 +74,7 @@ The current Trellis-focused pack includes:
 - `.github/prompts/sd-continue.prompt.md`
 - `.github/prompts/sd-finish-work.prompt.md`
 - `.github/prompts/sd-review-pr.prompt.md`
+- `.github/prompts/sd-review-local.prompt.md`
 - `.github/prompts/sd-review-learnings.prompt.md`
 - `.github/prompts/sd-full-check.prompt.md`
 - `.github/prompts/sd-housekeeping.prompt.md`
@@ -78,6 +85,7 @@ The current Trellis-focused pack includes:
 - `.opencode/commands/sd-continue.md`
 - `.opencode/commands/sd-finish-work.md`
 - `.opencode/commands/sd-review-pr.md`
+- `.opencode/commands/sd-review-local.md`
 - `.opencode/commands/sd-review-learnings.md`
 - `.opencode/commands/sd-full-check.md`
 - `.opencode/commands/sd-housekeeping.md`
@@ -87,8 +95,9 @@ The shared skills own the workflows. Platform command and prompt files are thin
 entry points that tell the agent to load the appropriate shared skill.
 Codex exposes pack entry points as enabled skills named `sd-start`, `sd-continue`,
 `sd-finish-work`, `sd-full-check`, `sd-housekeeping`, `sd-review-pr`,
-`sd-review-learnings`, and `sd-update-spec`; type `/sd` in Codex command
-completion or invoke them explicitly with `$sd-review-pr`-style skill mentions.
+`sd-review-local`, `sd-review-learnings`, and `sd-update-spec`; type `/sd` in
+Codex command completion or invoke them explicitly with `$sd-review-pr`-style
+skill mentions.
 User-facing command adapters live under the `sd` namespace so pack-owned
 wrappers do not collide with Trellis-owned generated `/trellis:*` commands on
 future `trellis update` runs. Cursor command files, GitHub Copilot prompt
@@ -128,6 +137,16 @@ opt-in through `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=1` because it may invoke `uvx
 local cache access, network access, and configured LLM credentials. When
 enabled, Gito writes reports to `.build/review/gito` by default; override with
 `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR` when needed.
+
+The review-local command (`/sd:review-local` in Claude/Gemini;
+`sd-review-local` in Cursor, GitHub Copilot, OpenCode, and Codex) runs local
+review providers and enters a user-selected fix loop. By default it runs Prism
+and Gito through `scripts/sd-ai-command-pack-review-local.sh`, presents grouped
+findings, asks which findings to fix, fixes only selected items, and repeats the
+same local review stack until no items are selected or no actionable findings
+remain. Use `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS` or pass tool names to the
+script to run a specific stack, and configure third-party tools with
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND`.
 
 The start, continue, and finish-work commands are local namespace aliases for
 the Trellis-provided `trellis-start`, `trellis-continue`, and
@@ -194,6 +213,10 @@ and decision docs, `.trellis/spec/**/*.md`, `.trellis/workflow.md`,
 when present. It should avoid secrets, caches, build output, dependency/vendor
 directories, `.git/`, `.trellis/workspace/`, and broad source trees unless a
 specific source entrypoint is intentionally maintained as repo documentation.
+The helper also creates and refreshes `.obsidian-kb/Dashboard.md`, a generated
+Markdown landing page that groups and links to the current KB symlinks. If a
+user-owned file already exists at that path, the helper leaves it untouched and
+reports a conflict.
 
 To expose that generated folder inside an Obsidian vault, create a symlink from
 the vault to the repo's `.obsidian-kb` folder. For macOS/Linux:
@@ -222,9 +245,10 @@ python3 install.py /path/to/trellis/repo
 
 The installer requires `.trellis/config.yaml` in the target repo and will fail
 with the Trellis install link if that marker is missing. It always installs the
-shared `.agents` skills, full-check, housekeeping, review-scope, PR-body scope,
-and update-spec KB scripts, Prism rules, usage guide, and the generated
-`.sd-ai-command-pack/installed-targets.txt` snapshot used by the scope checks.
+shared `.agents` skills, full-check, housekeeping, review-scope, review-local,
+PR-body scope, and update-spec KB scripts, Prism rules, usage guide, and the
+generated `.sd-ai-command-pack/installed-targets.txt` snapshot used by the scope
+checks.
 It installs platform adapters only when the target repo has the corresponding
 platform directory and a Trellis-owned marker for that platform, such as a
 Trellis command, hook, skill, or Copilot hook file. A plain `.github` directory
@@ -260,19 +284,14 @@ By default, existing files with different content are reported as conflicts and
 left untouched. Use `--force` to overwrite them. The exception is an existing
 `.prism/rules.json`: once it differs from the pack template, it is reported as
 `preserved` and is never overwritten or reported as a conflict. Add `--backup`
-with `--force` to save a `.bak` copy of every overwritten or deleted file next
-to the original before it is changed.
-When installing the `sd` adapters, the installer also removes old
-pack-generated `/trellis:*` adapter files when their content still matches the
-pack templates. Legacy or obsolete adapter files with other content are
-reported as conflicts and left in place unless `--force` is supplied; with
-`--force` they are deleted (add `--backup` to keep a `.bak` copy of each removed
-file first) while the `sd` replacement is installed.
+with `--force` to save a `.bak` copy of every overwritten file next to the
+original before it is changed.
 
 Platform filters always include the shared skills, full-check, housekeeping,
-review-scope, PR-body scope, and update-spec KB scripts, Prism rules, usage
-guide, and installed-targets snapshot, because the review, full-check,
-housekeeping, and update-spec adapters delegate to those shared assets.
+review-scope, review-local, PR-body scope, and update-spec KB scripts, Prism
+rules, usage guide, and installed-targets snapshot, because the review,
+full-check, housekeeping, and update-spec adapters delegate to those shared
+assets.
 `--platform` and `--all`
 are explicit overrides for repairing or bootstrapping adapters when the active
 Trellis platform markers are missing. The update-spec adapter delegates to
@@ -293,12 +312,8 @@ to deterministic local checks when they already cover a repeated issue class.
 
 The full-check script also runs `scripts/sd-ai-command-pack-install-audit.py`.
 That helper checks `.sd-ai-command-pack/installed-targets.txt` for missing
-installed targets, fails on obsolete pack artifacts such as old `trellis-*`
-full-check/housekeeping files or `sd-refresh-specs` adapters, and warns when
-known generated repository maps still mention obsolete pack names. Set
-`SD_AI_COMMAND_PACK_INSTALL_AUDIT=0` to skip it or
-`SD_AI_COMMAND_PACK_INSTALL_AUDIT_STRICT_REFS=1` to make stale repository-map
-references fail.
+installed targets and reports pack-like files that are not listed in the
+installed-targets snapshot. Set `SD_AI_COMMAND_PACK_INSTALL_AUDIT=0` to skip it.
 
 The full-check script also runs `scripts/sd-ai-command-pack-review-scope.sh`.
 That helper reads `.sd-ai-command-pack/installed-targets.txt`, reports changed
@@ -307,8 +322,7 @@ Trellis workspace journal/index files as integration-only review surface. When
 the GitHub CLI can resolve a current PR, it can also ensure mixed PRs include a
 `Tooling/generated scope:` section in the PR body. In CI or local preflights
 where `gh pr view` should not run, pass the PR body through
-`SD_AI_COMMAND_PACK_SCOPE_PR_BODY` or the compatibility fallback
-`REVIEW_PREFLIGHT_PR_BODY`.
+`SD_AI_COMMAND_PACK_SCOPE_PR_BODY`.
 
 The full-check script also runs `scripts/sd-ai-command-pack-pr-body-scope.py`.
 That pack-provided checker is generic and config-driven: by default it checks
@@ -317,14 +331,12 @@ tooling files for matching PR-body sections when a PR body is provided. Target
 repos can add runtime, docs, or other categories by committing
 `.sd-ai-command-pack/pr-body-scope.json` with a `rules` list of `label`,
 `headings`, and `patterns`. Use `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`,
-`SD_AI_COMMAND_PACK_SCOPE_PR_BODY`, or `REVIEW_PREFLIGHT_PR_BODY` to provide the
-body without calling `gh`.
+or `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` to provide the body without calling `gh`.
 
-When a target repo provides `scripts/classify-ci-changes.sh` (or the legacy
-`scripts/classify_ci_changes.sh` name), the full-check script prints a
-current-diff CI classification section before optional repo-specific checks run.
-That gives agents and reviewers a local `docs_only`, `app_required`, and
-`expensive_required` signal before spending remote CI budget.
+When a target repo provides `scripts/classify-ci-changes.sh`, the full-check
+script prints a current-diff CI classification section before optional
+repo-specific checks run. That gives agents and reviewers a local `docs_only`,
+`app_required`, and `expensive_required` signal before spending remote CI budget.
 
 ## Verify
 

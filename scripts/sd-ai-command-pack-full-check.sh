@@ -267,16 +267,9 @@ collect_current_changed_paths() {
 }
 
 run_ci_classification_report() {
-  local script=""
-  local candidate
-  for candidate in scripts/classify-ci-changes.sh scripts/classify_ci_changes.sh; do
-    if [ -f "$candidate" ]; then
-      script="$candidate"
-      break
-    fi
-  done
-  if [ -z "$script" ]; then
-    warn "scripts/classify-ci-changes.sh or scripts/classify_ci_changes.sh not found; skipping current-diff CI classification report."
+  local script="scripts/classify-ci-changes.sh"
+  if [ ! -f "$script" ]; then
+    warn "$script not found; skipping current-diff CI classification report."
     return 0
   fi
 
@@ -299,11 +292,7 @@ run_ci_classification_report() {
   section "CI change classification: current diff"
   printf 'changed_paths=%s\n' "${#changed_paths[@]}"
   local status=0
-  if [ "$script" = "scripts/classify_ci_changes.sh" ]; then
-    bash "$script" "$paths_file" || status=$?
-  else
-    bash "$script" -- "${changed_paths[@]}" || status=$?
-  fi
+  bash "$script" -- "${changed_paths[@]}" || status=$?
   rm -f "$paths_file"
   return "$status"
 }
@@ -356,10 +345,10 @@ main() {
   run_sd_ai_command_pack_pr_body_scope_check
   run_ci_classification_report
 
-  local skip_package_scripts="${SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS:-${SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_NPM:-0}}"
+  local skip_package_scripts="${SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS:-0}"
   if [ -f "package.json" ] && ! is_enabled "$skip_package_scripts"; then
     local runner="${SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_RUNNER:-npm}"
-    local scripts="${SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS:-${SD_AI_COMMAND_PACK_FULL_CHECK_NPM_SCRIPTS:-typecheck lint test:unit test:integration build test:e2e}}"
+    local scripts="${SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS:-typecheck lint test:unit test:integration build test:e2e}"
 
     if ! have "$runner"; then
       warn "Package runner $runner not found on PATH; skipping package-script checks."

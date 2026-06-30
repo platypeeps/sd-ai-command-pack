@@ -4,15 +4,13 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
-from typing import Union
 
 
 ROOT = Path(__file__).resolve().parent
@@ -46,9 +44,6 @@ ACTIVE_TRELLIS_PLATFORM_MARKERS = {
         Path(".opencode/skills/trellis-before-dev/SKILL.md"),
     ),
 }
-LEGACY_PACK_COMMANDS = frozenset(
-    {"full-check", "housekeeping", "review-pr"}
-)
 TRELLIS_INSTALL_DOCS_URL = "https://docs.trytrellis.app/start/install-and-first-task"
 FORCE_PRESERVED_TARGETS = frozenset({Path(".prism/rules.json")})
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
@@ -115,64 +110,6 @@ TRELLIS_INIT_PLATFORM_FLAGS = {
     "github": "--copilot",
     "opencode": "--opencode",
 }
-OBSOLETE_SHARED_SKILL_TARGETS = {
-    Path(".agents/skills/sd-review-pr/SKILL.md"): Path(
-        ".agents/skills/trellis-review-pr/SKILL.md"
-    ),
-    Path(".agents/skills/sd-full-check/SKILL.md"): Path(
-        ".agents/skills/trellis-full-check/SKILL.md"
-    ),
-    Path(".agents/skills/sd-housekeeping/SKILL.md"): Path(
-        ".agents/skills/trellis-housekeeping/SKILL.md"
-    ),
-}
-OBSOLETE_SHARED_SCRIPT_TARGETS = {
-    Path("scripts/sd-ai-command-pack-full-check.sh"): (
-        Path("scripts/trellis-full-check.sh"),
-        Path("scripts/sd-command-pack-full-check.sh"),
-    ),
-    Path("scripts/sd-ai-command-pack-housekeeping.sh"): (
-        Path("scripts/trellis-housekeeping.sh"),
-        Path("scripts/sd-command-pack-housekeeping.sh"),
-    ),
-}
-OBSOLETE_RENAMED_TARGETS = {
-    Path("scripts/sd-ai-command-pack-review-learnings.py"): (
-        Path("scripts/sd-review-learnings.py"),
-    ),
-    Path(".agents/skills/sd-update-spec/SKILL.md"): (
-        Path(".agents/skills/sd-refresh-specs/SKILL.md"),
-    ),
-    Path("scripts/sd-ai-command-pack-review-scope.sh"): (
-        Path("scripts/sd-command-pack-review-scope.sh"),
-    ),
-    Path("scripts/sd-ai-command-pack-pr-body-scope.py"): (
-        Path("scripts/sd-command-pack-pr-body-scope.py"),
-    ),
-    Path("scripts/sd-ai-command-pack-update-spec-kb.py"): (
-        Path("scripts/sd-ai-command-pack-refresh-specs-kb.py"),
-        Path("scripts/sd-command-pack-update-spec-kb.py"),
-        Path("scripts/sd-command-pack-refresh-specs-kb.py"),
-    ),
-    Path(".claude/commands/sd/update-spec.md"): (
-        Path(".claude/commands/sd/refresh-specs.md"),
-    ),
-    Path(".cursor/commands/sd-update-spec.md"): (
-        Path(".cursor/commands/sd-refresh-specs.md"),
-    ),
-    Path(".gemini/commands/sd/update-spec.toml"): (
-        Path(".gemini/commands/sd/refresh-specs.toml"),
-    ),
-    Path(".github/prompts/sd-update-spec.prompt.md"): (
-        Path(".github/prompts/sd-refresh-specs.prompt.md"),
-    ),
-    Path(".opencode/commands/sd-update-spec.md"): (
-        Path(".opencode/commands/sd-refresh-specs.md"),
-    ),
-}
-OBSOLETE_RENAMED_TARGET_VALUES = frozenset(
-    target for targets in OBSOLETE_RENAMED_TARGETS.values() for target in targets
-)
 MANAGED_BLOCK_KIND = "managed-block"
 COPILOT_INSTRUCTIONS_TARGET = Path(".github/copilot-instructions.md")
 COPILOT_GUIDANCE_START = "<!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START -->"
@@ -193,14 +130,6 @@ class PackFile:
 class InstallResult:
     file: PackFile
     status: str
-    backup: Path | None = None
-
-
-@dataclass(frozen=True)
-class LegacyCleanupResult:
-    target: Path
-    status: str
-    reason: str | None = None
     backup: Path | None = None
 
 
@@ -320,8 +249,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help=(
             "Overwrite existing files that differ from the pack templates "
-            "(except .prism/rules.json) and delete conflicting legacy/obsolete "
-            "adapter files. Add --backup to save .bak copies before deleting."
+            "(except .prism/rules.json). Add --backup to save .bak copies "
+            "before overwriting."
         ),
     )
     parser.add_argument(
@@ -571,11 +500,6 @@ def install_file(
             return InstallResult(file, "unchanged")
         if file.target in FORCE_PRESERVED_TARGETS:
             return InstallResult(file, "preserved")
-        if current in legacy_adapter_contents(file):
-            if not dry_run:
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(source, destination)
-            return InstallResult(file, "updated")
         if not force:
             return InstallResult(file, "conflict")
         backup_path = (
@@ -836,393 +760,6 @@ def install_installed_targets_file(
     return InstallResult(file, "created")
 
 
-def legacy_adapter_target(file: PackFile) -> Path | None:
-    command_name = file.target.stem.removeprefix("sd-").removesuffix(".prompt")
-    if command_name not in LEGACY_PACK_COMMANDS:
-        return None
-
-    target = file.target.as_posix()
-    if file.kind == "command" and "/commands/sd/" in target:
-        return Path(target.replace("/commands/sd/", "/commands/trellis/"))
-    if (
-        file.platform in {"cursor", "opencode"}
-        and file.kind == "command"
-        and file.target.parent == Path(f".{file.platform}/commands")
-        and file.target.name.startswith("sd-")
-    ):
-        if file.platform == "cursor":
-            return Path(".cursor/commands") / f"trellis-{command_name}.md"
-        return Path(".opencode/commands/trellis") / f"{command_name}.md"
-    if (
-        file.platform == "github"
-        and file.kind == "prompt"
-        and file.target.name.startswith("sd-")
-    ):
-        return file.target.with_name(file.target.name.removeprefix("sd-"))
-    return None
-
-
-CleanupTargets = Union[Path, Iterable[Path], None]
-
-
-def obsolete_adapter_target(file: PackFile) -> CleanupTargets:
-    targets: list[Path] = []
-    if file.target in OBSOLETE_RENAMED_TARGETS:
-        targets.extend(OBSOLETE_RENAMED_TARGETS[file.target])
-    if file.platform == "shared" and file.kind == "skill":
-        if file.target in OBSOLETE_SHARED_SKILL_TARGETS:
-            targets.append(OBSOLETE_SHARED_SKILL_TARGETS[file.target])
-    if file.platform == "shared" and file.kind == "script":
-        if file.target in OBSOLETE_SHARED_SCRIPT_TARGETS:
-            targets.extend(OBSOLETE_SHARED_SCRIPT_TARGETS[file.target])
-    if file.platform == "shared" and file.kind == "doc":
-        if file.target == Path("docs/SD_AI_COMMAND_PACK.md"):
-            targets.append(Path("docs/TRELLIS_REVIEW_PR_PACK.md"))
-    if (
-        file.platform == "opencode"
-        and file.kind == "command"
-        and file.target.parent == Path(".opencode/commands")
-        and file.target.name.startswith("sd-")
-        and file.target.suffix == ".md"
-    ):
-        command_name = file.target.stem.removeprefix("sd-")
-        targets.append(Path(".opencode/commands/sd") / f"{command_name}.md")
-    return tuple(targets) if targets else None
-
-
-def strip_yaml_frontmatter(content: bytes) -> bytes:
-    if not content.startswith(b"---\n"):
-        return content
-    end = content.find(b"\n---\n", len(b"---\n"))
-    if end == -1:
-        return content
-    stripped = content[end + len(b"\n---\n") :]
-    if stripped.startswith(b"\n"):
-        return stripped[1:]
-    return stripped
-
-
-def toml_description_variant(
-    content: bytes,
-    command_name: str,
-    namespace: str,
-) -> bytes:
-    lines = content.splitlines(keepends=True)
-    for index, line in enumerate(lines):
-        if line.startswith(b"description = "):
-            lines[index] = f'description = "{namespace}: {command_name}"\n'.encode(
-                "utf-8"
-            )
-            return b"".join(lines)
-    return content
-
-
-def old_pack_identity_variant(content: bytes) -> bytes:
-    replacements = (
-        (b"sd-ai-command-pack", b"trellis-review-pr-pack"),
-        (b"SD AI Command Pack", b"Trellis Review PR Pack"),
-        (b"SD AI command pack", b"Trellis review PR pack"),
-        (b"SD AI command setup", b"Trellis review-cycle setup"),
-        (b"SD_AI_COMMAND_PACK", b"TRELLIS_REVIEW_PR_PACK"),
-    )
-    for new, old in replacements:
-        content = content.replace(new, old)
-    return content
-
-
-def old_pack_owned_entity_variant(content: bytes) -> bytes:
-    replacements = (
-        (b"scripts/sd-ai-command-pack-", b"scripts/sd-command-pack-"),
-        (b"sd-ai-command-pack-ci-paths", b"sd-command-pack-ci-paths"),
-        (b"SD_AI_COMMAND_PACK_", b"SD_COMMAND_PACK_"),
-        (b"SD AI command pack", b"SD command-pack"),
-        (b"SD AI command pack", b"SD command pack"),
-        (b"sd_ai_command_pack", b"sd_command_pack"),
-    )
-    for new, old in replacements:
-        content = content.replace(new, old)
-    return content
-
-
-def old_trellis_pack_owned_entity_variant(content: bytes) -> bytes:
-    replacements = (
-        (b"sd-command-pack-full-check.sh", b"trellis-full-check.sh"),
-        (b"sd-command-pack-housekeeping.sh", b"trellis-housekeeping.sh"),
-        (b"SD_COMMAND_PACK_FULL_CHECK_", b"TRELLIS_FULL_CHECK_"),
-        (b"SD_COMMAND_PACK_HOUSEKEEPING_", b"TRELLIS_HOUSEKEEPING_"),
-        (b"SD command-pack full check", b"Trellis full check"),
-        (b"SD command-pack housekeeping", b"Trellis housekeeping"),
-    )
-    for new, old in replacements:
-        content = content.replace(new, old)
-    return content
-
-
-def old_review_skill_name_variant(content: bytes) -> bytes:
-    replacements = (
-        (b"name: sd-review-pr", b"name: trellis-review-pr"),
-        (b"# SD PR Review Loop", b"# Trellis PR Review Loop"),
-        (
-            b"Use this project-local skill for `sd-review-pr` and "
-            b"`/sd:review-pr` style work.",
-            b"Use this project-local skill for `/trellis:review-pr` style work.",
-        ),
-        (b"SD PR review loop", b"Trellis PR review loop"),
-    )
-    for new, old in replacements:
-        content = content.replace(new, old)
-    content = content.replace(
-        b"Use this project-local skill for `/trellis:review-pr` style work.\n"
-        b"It turns a draft or in-progress PR into a reviewed PR by running the local\n"
-        b"full-check and Prism review first, inspecting existing comments and CI, and\n"
-        b"requesting GitHub Copilot review only when the user explicitly asks for a\n"
-        b"remote/final pass or when local review is clean and a remote review is\n"
-        b"intentionally warranted.",
-        b"Use this project-local skill for `/trellis:review-pr` style work. It turns a\n"
-        b"draft or in-progress PR into a reviewed PR by running the local full-check and\n"
-        b"Prism review first, inspecting existing comments and CI, and requesting GitHub\n"
-        b"Copilot review only when the user explicitly asks for a remote/final pass or\n"
-        b"when local review is clean and a remote review is intentionally warranted.",
-    )
-    return content
-
-
-def old_full_check_skill_name_variant(content: bytes) -> bytes:
-    replacements = (
-        (b"name: sd-full-check", b"name: trellis-full-check"),
-        (b"# SD Full Check", b"# Trellis Full Check"),
-        (
-            b"Run this project-local skill for `sd-full-check` and "
-            b"`/sd:full-check` style\nwork. It is an optional but strongly "
-            b"recommended PR-readiness gate, not an\nevery-edit requirement.",
-            b"Run this project-local skill for `/trellis:full-check` style work. "
-            b"It is an\noptional but strongly recommended PR-readiness gate, "
-            b"not an every-edit\nrequirement.",
-        ),
-    )
-    for new, old in replacements:
-        content = content.replace(new, old)
-    return content
-
-
-def old_housekeeping_skill_name_variant(content: bytes) -> bytes:
-    replacements = (
-        (b"name: sd-housekeeping", b"name: trellis-housekeeping"),
-        (b"# SD Housekeeping", b"# Trellis Housekeeping"),
-        (
-            b"Run this project-local skill for `sd-housekeeping` and "
-            b"`/sd:housekeeping` style\nwork when the user wants a ready PR "
-            b"wrapped up and merged, or after a PR has\nmerged and the repo "
-            b"should return to a clean default-branch state.",
-            b"Run this project-local skill for `/trellis:housekeeping` style "
-            b"work when the\nuser wants a ready PR wrapped up and merged, or "
-            b"after a PR has merged and the\nrepo should return to a clean "
-            b"default-branch state.",
-        ),
-    )
-    for new, old in replacements:
-        content = content.replace(new, old)
-    return content
-
-
-def old_shared_skill_name_variant(file: PackFile, content: bytes) -> bytes:
-    if file.target == Path(".agents/skills/sd-review-pr/SKILL.md"):
-        return old_review_skill_name_variant(content)
-    if file.target == Path(".agents/skills/sd-full-check/SKILL.md"):
-        return old_full_check_skill_name_variant(content)
-    if file.target == Path(".agents/skills/sd-housekeeping/SKILL.md"):
-        return old_housekeeping_skill_name_variant(content)
-    return content
-
-
-def old_refresh_specs_generated_content_matches(content: bytes) -> bool:
-    has_old_identity = any(
-        phrase in content
-        for phrase in (
-            b"sd-refresh-specs",
-            b"refresh-specs",
-            b"Refresh Specs",
-            b"Refresh Trellis specs",
-        )
-    )
-    has_trellis_foundation = b"trellis-update-spec/SKILL.md" in content
-    has_pack_extensions = (
-        b"repospec artifact" in content
-        and (
-            b"architectural overview" in content
-            or b"ARCHITECTURE.md" in content
-        )
-        and (
-            b"sd-ai-command-pack-refresh-specs-kb.py" in content
-            or b"sd-command-pack-refresh-specs-kb.py" in content
-            or b".obsidian-kb" in content
-        )
-    )
-    return has_old_identity and has_trellis_foundation and has_pack_extensions
-
-
-def legacy_adapter_contents(file: PackFile) -> set[bytes]:
-    content = file.source.read_bytes()
-    contents = {content}
-    contents.add(strip_yaml_frontmatter(content))
-    contents.add(old_pack_identity_variant(content))
-    contents.add(old_pack_identity_variant(strip_yaml_frontmatter(content)))
-    if file.target in OBSOLETE_SHARED_SKILL_TARGETS:
-        contents.add(old_shared_skill_name_variant(file, content))
-    if file.platform == "gemini" and file.kind == "command":
-        command_name = file.target.stem.removeprefix("sd-").removesuffix(".prompt")
-        contents.add(toml_description_variant(content, command_name, "SD"))
-        contents.add(toml_description_variant(content, command_name, "Trellis"))
-    contents.update(
-        item.replace(b'description = "SD: ', b'description = "Trellis: ')
-        for item in list(contents)
-    )
-    contents.update(old_pack_owned_entity_variant(item) for item in list(contents))
-    contents.update(
-        old_trellis_pack_owned_entity_variant(item) for item in list(contents)
-    )
-    return contents
-
-
-def cleanup_content_matches_template(
-    file: PackFile,
-    cleanup_target: Path,
-    content: bytes,
-) -> bool:
-    if content in legacy_adapter_contents(file):
-        return True
-    if (
-        cleanup_target in OBSOLETE_RENAMED_TARGET_VALUES
-        and old_refresh_specs_generated_content_matches(content)
-    ):
-        return True
-    return False
-
-
-def normalize_cleanup_targets(cleanup_targets: CleanupTargets) -> tuple[Path, ...]:
-    if cleanup_targets is None:
-        return ()
-    if isinstance(cleanup_targets, Path):
-        return (cleanup_targets,)
-    return tuple(cleanup_targets)
-
-
-def cleanup_adapter_targets(
-    selected: list[PackFile],
-    target: Path,
-    *,
-    dry_run: bool,
-    force: bool,
-    backup: bool,
-    target_for_file: Callable[[PackFile], CleanupTargets],
-    conflict_status: str,
-) -> list[LegacyCleanupResult]:
-    results: list[LegacyCleanupResult] = []
-    seen: set[Path] = set()
-    for file in selected:
-        for cleanup_target in normalize_cleanup_targets(target_for_file(file)):
-            if cleanup_target in seen:
-                continue
-            seen.add(cleanup_target)
-
-            destination = target / cleanup_target
-            validate_resolved_target_path(
-                target,
-                destination.parent,
-                "adapter cleanup parent path",
-            )
-            if not path_is_occupied(destination):
-                continue
-            if path_is_occupied(destination) and not (
-                destination.is_file() or destination.is_symlink()
-            ):
-                results.append(
-                    LegacyCleanupResult(
-                        cleanup_target,
-                        conflict_status,
-                        "target exists and is not a file",
-                    )
-                )
-                continue
-            content_matches_template = (
-                not destination.is_symlink()
-                and cleanup_content_matches_template(
-                    file,
-                    cleanup_target,
-                    destination.read_bytes(),
-                )
-            )
-            if not force and not content_matches_template:
-                reason = (
-                    "target is a symlink"
-                    if destination.is_symlink()
-                    else "content differs from pack template"
-                )
-                results.append(
-                    LegacyCleanupResult(
-                        cleanup_target,
-                        conflict_status,
-                        reason,
-                    )
-                )
-                continue
-
-            status = "would-remove" if dry_run else "removed"
-            backup_path: Path | None = None
-            if not dry_run:
-                if backup:
-                    backup_path = next_backup_path(target, destination)
-                    if destination.is_symlink():
-                        backup_path.symlink_to(destination.readlink())
-                    else:
-                        shutil.copyfile(destination, backup_path)
-                destination.unlink()
-                with contextlib.suppress(OSError):
-                    destination.parent.rmdir()
-            results.append(
-                LegacyCleanupResult(cleanup_target, status, backup=backup_path)
-            )
-    return results
-
-
-def cleanup_legacy_adapters(
-    selected: list[PackFile],
-    target: Path,
-    *,
-    dry_run: bool,
-    force: bool,
-    backup: bool,
-) -> list[LegacyCleanupResult]:
-    return cleanup_adapter_targets(
-        selected,
-        target,
-        dry_run=dry_run,
-        force=force,
-        backup=backup,
-        target_for_file=legacy_adapter_target,
-        conflict_status="legacy-conflict",
-    )
-
-
-def cleanup_obsolete_adapters(
-    selected: list[PackFile],
-    target: Path,
-    *,
-    dry_run: bool,
-    force: bool,
-    backup: bool,
-) -> list[LegacyCleanupResult]:
-    return cleanup_adapter_targets(
-        selected,
-        target,
-        dry_run=dry_run,
-        force=force,
-        backup=backup,
-        target_for_file=obsolete_adapter_target,
-        conflict_status="obsolete-conflict",
-    )
-
-
 def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
     if paths == []:
         return 0
@@ -1270,6 +807,8 @@ def main(argv: list[str] | None = None) -> int:
     local_only_results: list[LocalOnlyResult] = []
     if args.local_only:
         require_git_repo_for_local_only(target)
+        selected, skipped = selected_files(files, target, args.platform, args.all)
+        reject_tracked_local_only_paths(target, selected)
         local_only_results.append(
             ensure_trellis_for_local_only(
                 target,
@@ -1281,9 +820,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         require_trellis_repo(target)
-    selected, skipped = selected_files(files, target, args.platform, args.all)
+        selected, skipped = selected_files(files, target, args.platform, args.all)
     if args.local_only:
-        reject_tracked_local_only_paths(target, selected)
         local_only_results.append(
             ensure_local_only_exclude(
                 target,
@@ -1351,74 +889,12 @@ def main(argv: list[str] | None = None) -> int:
         print("Re-run with --force to overwrite these files.")
         return 2
 
-    legacy_results = cleanup_legacy_adapters(
-        selected,
-        target,
-        dry_run=args.dry_run,
-        force=args.force,
-        backup=args.backup,
-    )
-    for result in legacy_results:
-        suffix = f" ({result.reason})" if result.reason else ""
-        print(f"{result.status:11} {result.target}{suffix}")
-        if result.backup:
-            print(f"{'backup':11} {result.backup.relative_to(target)}")
-
-    legacy_conflicts = [
-        result for result in legacy_results if result.status == "legacy-conflict"
-    ]
-    if legacy_conflicts:
-        print("")
-        print("Legacy adapter conflicts:")
-        for result in legacy_conflicts:
-            suffix = f" ({result.reason})" if result.reason else ""
-            print(f"- {result.target}{suffix}")
-        print(
-            "Re-run with --force to delete these legacy adapter files. "
-            "Add --backup to save a .bak copy of each removed file first."
-        )
-        return 2
-
-    obsolete_results = cleanup_obsolete_adapters(
-        selected,
-        target,
-        dry_run=args.dry_run,
-        force=args.force,
-        backup=args.backup,
-    )
-    for result in obsolete_results:
-        suffix = f" ({result.reason})" if result.reason else ""
-        print(f"{result.status:11} {result.target}{suffix}")
-        if result.backup:
-            print(f"{'backup':11} {result.backup.relative_to(target)}")
-
-    obsolete_conflicts = [
-        result for result in obsolete_results if result.status == "obsolete-conflict"
-    ]
-    if obsolete_conflicts:
-        print("")
-        print("Obsolete adapter conflicts:")
-        for result in obsolete_conflicts:
-            suffix = f" ({result.reason})" if result.reason else ""
-            print(f"- {result.target}{suffix}")
-        print(
-            "Re-run with --force to delete these obsolete adapter files. "
-            "Add --backup to save a .bak copy of each removed file first."
-        )
-        return 2
-
     if not args.dry_run and not args.skip_diff_check:
         diff_paths = [
             result.file.target
             for result in results
             if result.status not in {"conflict", "preserved"}
         ]
-        diff_paths.extend(
-            result.target for result in legacy_results if result.status == "removed"
-        )
-        diff_paths.extend(
-            result.target for result in obsolete_results if result.status == "removed"
-        )
         diff_status = run_diff_check(target, diff_paths)
         if diff_status != 0:
             return diff_status

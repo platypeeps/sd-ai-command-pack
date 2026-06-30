@@ -1,6 +1,6 @@
 {
   "name": "sd-ai-command-pack",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "license": "MIT",
   "description": "Install project-local SD AI command workflows, Prism rules, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
@@ -31,6 +31,13 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".agents/skills/sd-review-pr/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local/SKILL.md",
+      "target": ".agents/skills/sd-review-local/SKILL.md",
       "install": "always"
     },
     {
@@ -80,6 +87,13 @@
       "kind": "script",
       "source": "templates/scripts/sd-ai-command-pack-review-scope.sh",
       "target": "scripts/sd-ai-command-pack-review-scope.sh",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "script",
+      "source": "templates/scripts/sd-ai-command-pack-review-local.sh",
+      "target": "scripts/sd-ai-command-pack-review-local.sh",
       "install": "always"
     },
     {
@@ -155,6 +169,13 @@
     {
       "platform": "claude",
       "kind": "command",
+      "source": "templates/.claude/commands/sd/review-local.md",
+      "target": ".claude/commands/sd/review-local.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
       "source": "templates/.claude/commands/sd/review-learnings.md",
       "target": ".claude/commands/sd/review-learnings.md",
       "anchor": ".claude"
@@ -211,6 +232,13 @@
     {
       "platform": "cursor",
       "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-local.md",
+      "target": ".cursor/commands/sd-review-local.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
       "source": "templates/.cursor/commands/sd-review-learnings.md",
       "target": ".cursor/commands/sd-review-learnings.md",
       "anchor": ".cursor"
@@ -262,6 +290,13 @@
       "kind": "command",
       "source": "templates/.gemini/commands/sd/review-pr.toml",
       "target": ".gemini/commands/sd/review-pr.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/review-local.toml",
+      "target": ".gemini/commands/sd/review-local.toml",
       "anchor": ".gemini"
     },
     {
@@ -330,6 +365,13 @@
     {
       "platform": "github",
       "kind": "prompt",
+      "source": "templates/.github/prompts/sd-review-local.prompt.md",
+      "target": ".github/prompts/sd-review-local.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
       "source": "templates/.github/prompts/sd-review-learnings.prompt.md",
       "target": ".github/prompts/sd-review-learnings.prompt.md",
       "anchor": ".github"
@@ -381,6 +423,13 @@
       "kind": "command",
       "source": "templates/.opencode/commands/sd-review-pr.md",
       "target": ".opencode/commands/sd-review-pr.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.opencode/commands/sd-review-local.md",
+      "target": ".opencode/commands/sd-review-local.md",
       "anchor": ".opencode"
     },
     {
