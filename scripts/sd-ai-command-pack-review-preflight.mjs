@@ -651,12 +651,66 @@ function documentationGuardFiles() {
   return [...new Set(files)].sort();
 }
 
-function currentDiffStats() {
+function gitStdout(args) {
+  const result = spawnSync('git', args, {
+    cwd: rootDir,
+    encoding: 'utf8',
+  });
+
+  if (result.error || result.status !== 0) {
+    return '';
+  }
+
+  return result.stdout.trim();
+}
+
+function gitRefExists(ref) {
+  return spawnSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
+    cwd: rootDir,
+    encoding: 'utf8',
+  }).status === 0;
+}
+
+function defaultReviewBaseRef() {
+  const configured = process.env.SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF
+    || process.env.SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF;
+  if (configured) {
+    return configured;
+  }
+
+  if (gitRefExists('origin/HEAD')) {
+    return 'origin/HEAD';
+  }
+
+  const upstream = gitStdout(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
+  if (upstream) {
+    return upstream;
+  }
+
+  const remoteRefs = gitStdout(['for-each-ref', '--format=%(refname:short)', 'refs/remotes'])
+    .split('\n')
+    .map((ref) => ref.trim())
+    .filter((ref) => ref && !ref.endsWith('/HEAD'));
+
+  return remoteRefs[0] || '';
+}
+
+function currentDiffSources(kind) {
+  const baseRef = defaultReviewBaseRef();
   const sources = [
-    { args: ['diff', '--numstat', '--cached'], label: 'staged diff' },
-    { args: ['diff', '--numstat', 'origin/main...HEAD'], label: 'branch diff' },
-    { args: ['diff', '--numstat'], label: 'working tree diff' },
+    { args: ['diff', kind, '--cached'], label: 'staged diff' },
   ];
+
+  if (baseRef) {
+    sources.push({ args: ['diff', kind, `${baseRef}...HEAD`], label: 'branch diff' });
+  }
+
+  sources.push({ args: ['diff', kind], label: 'working tree diff' });
+  return sources;
+}
+
+function currentDiffStats() {
+  const sources = currentDiffSources('--numstat');
 
   for (const source of sources) {
     const result = spawnSync('git', source.args, {
@@ -679,11 +733,7 @@ function currentDiffStats() {
 }
 
 function currentChangedPaths() {
-  const sources = [
-    { args: ['diff', '--name-only', '--cached'], label: 'staged diff' },
-    { args: ['diff', '--name-only', 'origin/main...HEAD'], label: 'branch diff' },
-    { args: ['diff', '--name-only'], label: 'working tree diff' },
-  ];
+  const sources = currentDiffSources('--name-only');
 
   for (const source of sources) {
     const result = spawnSync('git', source.args, {

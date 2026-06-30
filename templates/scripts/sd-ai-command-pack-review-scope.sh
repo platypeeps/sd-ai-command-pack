@@ -4,7 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 TARGETS_FILE="${SD_AI_COMMAND_PACK_TARGETS_FILE:-$REPO_ROOT/.sd-ai-command-pack/installed-targets.txt}"
-BASE_REF="${SD_AI_COMMAND_PACK_SCOPE_BASE_REF:-${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-origin/main}}"
 MODE="${SD_AI_COMMAND_PACK_SCOPE_CHECK:-auto}"
 GH_MODE="${SD_AI_COMMAND_PACK_SCOPE_CHECK_GH:-auto}"
 scope_categories=()
@@ -40,11 +39,54 @@ has_ref() {
   git rev-parse --verify --quiet "$1^{commit}" >/dev/null
 }
 
+default_review_base_ref() {
+  local ref
+
+  if has_ref "origin/HEAD"; then
+    printf 'origin/HEAD'
+    return
+  fi
+
+  ref="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+  if [ -n "$ref" ]; then
+    printf '%s' "$ref"
+    return
+  fi
+
+  ref="$(git for-each-ref --format='%(refname:short)' refs/remotes 2>/dev/null | grep -v '/HEAD$' | head -n 1 || true)"
+  if [ -n "$ref" ]; then
+    printf '%s' "$ref"
+    return
+  fi
+
+  printf 'HEAD'
+}
+
+scope_base_ref() {
+  if [ -n "${SD_AI_COMMAND_PACK_SCOPE_BASE_REF:-}" ]; then
+    printf '%s' "$SD_AI_COMMAND_PACK_SCOPE_BASE_REF"
+    return
+  fi
+  if [ -n "${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-}" ]; then
+    printf '%s' "$SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF"
+    return
+  fi
+  default_review_base_ref
+}
+
+normalize_repo_path() {
+  local path="${1#./}"
+  printf '%s' "${path//\\//}"
+}
+
 collect_changed_files() {
-  if has_ref "$BASE_REF"; then
-    git diff --name-only "$BASE_REF"...HEAD
+  local base_ref
+  base_ref="$(scope_base_ref)"
+
+  if has_ref "$base_ref"; then
+    git diff --name-only "$base_ref"...HEAD
   else
-    warn "Could not resolve $BASE_REF; copied-file scope check will use local changes only."
+    warn "Could not resolve $base_ref; copied-file scope check will use local changes only."
   fi
 
   git diff --cached --name-only
@@ -53,10 +95,15 @@ collect_changed_files() {
 }
 
 is_trellis_runtime_path() {
-  local path="$1"
+  local path
+  path="$(normalize_repo_path "$1")"
 
   case "$path" in
-    .trellis/scripts/*|.trellis/agents/*|.cursor/hooks.json|.cursor/hooks/*|.github/hooks/trellis.json|.opencode/lib/trellis-context.js)
+    .trellis/scripts/*|.trellis/agents/*|.cursor/hooks.json|.cursor/hooks/*|.github/hooks/trellis.json|.opencode/lib/trellis-context.js|\
+    .agents/skills/trellis-*/*|.claude/skills/trellis-*/*|.cursor/skills/trellis-*/*|.gemini/skills/trellis-*/*|.github/skills/trellis-*/*|.opencode/skills/trellis-*/*|\
+    .cursor/commands/trellis-*.md|.claude/commands/trellis/*|.gemini/commands/trellis/*|.opencode/commands/trellis/*|\
+    .claude/agents/trellis-*.md|.cursor/agents/trellis-*.md|.gemini/agents/trellis-*.md|.opencode/agents/trellis-*.md|\
+    .github/agents/trellis-*.agent.md)
       return 0
       ;;
     .github/prompts/continue.prompt.md|.github/prompts/finish-work.prompt.md)
@@ -64,38 +111,20 @@ is_trellis_runtime_path() {
       ;;
   esac
 
-  if [[ "$path" =~ ^\.(agents|claude|cursor|gemini|github|opencode)/skills/trellis-[^/]+/ ]]; then
-    return 0
-  fi
-
-  if [[ "$path" =~ ^\.cursor/commands/trellis-[^/]+\.md$ ]]; then
-    return 0
-  fi
-
-  if [[ "$path" =~ ^\.(claude|gemini|opencode)/commands/trellis/ ]]; then
-    return 0
-  fi
-
-  if [[ "$path" =~ ^\.(claude|cursor|gemini|opencode)/agents/trellis-[^/]+\.md$ ]]; then
-    return 0
-  fi
-
-  if [[ "$path" =~ ^\.github/agents/trellis-[^/]+\.agent\.md$ ]]; then
-    return 0
-  fi
-
   return 1
 }
 
 is_pack_target_path() {
-  local path="$1"
+  local path
+  path="$(normalize_repo_path "$1")"
 
   [[ -f "$TARGETS_FILE" ]] || return 1
   grep -Fxq -- "$path" "$TARGETS_FILE"
 }
 
 is_copied_review_scope_path() {
-  local path="$1"
+  local path
+  path="$(normalize_repo_path "$1")"
 
   if is_pack_target_path "$path" || is_trellis_runtime_path "$path"; then
     return 0
@@ -105,7 +134,8 @@ is_copied_review_scope_path() {
 }
 
 is_repository_map_scope_path() {
-  local path="$1"
+  local path
+  path="$(normalize_repo_path "$1")"
 
   case "$path" in
     docs/repomix-map.md|scripts/update_repomix)
@@ -117,7 +147,8 @@ is_repository_map_scope_path() {
 }
 
 is_trellis_journal_scope_path() {
-  local path="$1"
+  local path
+  path="$(normalize_repo_path "$1")"
 
   case "$path" in
     .trellis/workspace/*/journal-*.md|.trellis/workspace/*/index.md)

@@ -16,14 +16,14 @@ block.
 1. Run a local scan first:
 
    ```bash
-   python3 scripts/sd-ai-command-pack-review-learnings.py --base origin/main --include-working-tree
+   python3 scripts/sd-ai-command-pack-review-learnings.py --include-working-tree
    ```
 
 2. When the user asks to record or refresh learnings, update the repo learning
    file:
 
    ```bash
-   python3 scripts/sd-ai-command-pack-review-learnings.py --base origin/main --include-working-tree --update
+   python3 scripts/sd-ai-command-pack-review-learnings.py --include-working-tree --update
    ```
 
 3. To include recent Copilot review comments, add a window:
@@ -35,7 +35,10 @@ block.
 4. If the repository already has a preferred review-learning file, use
    `--target PATH`. Otherwise the default is `docs/review-learnings.md`.
 
-5. Treat the managed block as a starting point. Convert durable lessons into the
+5. If the branch diff should be compared against a specific ref, pass
+   `--base REF` explicitly. Otherwise use the script's repo-default behavior.
+
+6. Treat the managed block as a starting point. Convert durable lessons into the
    repo's real source of truth: Copilot instructions, PR checklist, preflight
    checks, Trellis specs, or tests. Keep repo-specific policy in the repo; keep
    reusable command behavior in the command pack.

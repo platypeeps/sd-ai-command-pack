@@ -43,6 +43,13 @@
     {
       "platform": "shared",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local-all/SKILL.md",
+      "target": ".agents/skills/sd-review-local-all/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-learnings/SKILL.md",
       "target": ".agents/skills/sd-review-learnings/SKILL.md",
       "install": "always"
@@ -183,6 +190,13 @@
     {
       "platform": "claude",
       "kind": "command",
+      "source": "templates/.claude/commands/sd/review-local-all.md",
+      "target": ".claude/commands/sd/review-local-all.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
       "source": "templates/.claude/commands/sd/review-learnings.md",
       "target": ".claude/commands/sd/review-learnings.md",
       "anchor": ".claude"
@@ -246,6 +260,13 @@
     {
       "platform": "cursor",
       "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-local-all.md",
+      "target": ".cursor/commands/sd-review-local-all.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
       "source": "templates/.cursor/commands/sd-review-learnings.md",
       "target": ".cursor/commands/sd-review-learnings.md",
       "anchor": ".cursor"
@@ -304,6 +325,13 @@
       "kind": "command",
       "source": "templates/.gemini/commands/sd/review-local.toml",
       "target": ".gemini/commands/sd/review-local.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/review-local-all.toml",
+      "target": ".gemini/commands/sd/review-local-all.toml",
       "anchor": ".gemini"
     },
     {
@@ -379,6 +407,13 @@
     {
       "platform": "github",
       "kind": "prompt",
+      "source": "templates/.github/prompts/sd-review-local-all.prompt.md",
+      "target": ".github/prompts/sd-review-local-all.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
       "source": "templates/.github/prompts/sd-review-learnings.prompt.md",
       "target": ".github/prompts/sd-review-learnings.prompt.md",
       "anchor": ".github"
@@ -437,6 +472,13 @@
       "kind": "command",
       "source": "templates/.opencode/commands/sd-review-local.md",
       "target": ".opencode/commands/sd-review-local.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.opencode/commands/sd-review-local-all.md",
+      "target": ".opencode/commands/sd-review-local-all.md",
       "anchor": ".opencode"
     },
     {

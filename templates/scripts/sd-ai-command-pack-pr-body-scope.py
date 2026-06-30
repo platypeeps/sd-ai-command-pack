@@ -285,14 +285,17 @@ def _resolve_config_path(root: Path, explicit_config: Path | None) -> tuple[Path
 
 def _merge_rules(rules: tuple[ScopeRule, ...]) -> tuple[ScopeRule, ...]:
     merged: dict[tuple[str, tuple[str, ...]], list[str]] = {}
+    seen_patterns: dict[tuple[str, tuple[str, ...]], set[str]] = {}
     order: list[tuple[str, tuple[str, ...]]] = []
     for rule in rules:
         key = (rule.label, rule.headings)
         if key not in merged:
             merged[key] = []
+            seen_patterns[key] = set()
             order.append(key)
         for pattern in rule.patterns:
-            if pattern not in merged[key]:
+            if pattern not in seen_patterns[key]:
+                seen_patterns[key].add(pattern)
                 merged[key].append(pattern)
 
     return tuple(

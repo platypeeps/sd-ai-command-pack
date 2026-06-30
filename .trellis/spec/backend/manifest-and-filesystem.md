@@ -124,6 +124,24 @@ Run the final `git diff --check` only against manifest-selected target paths.
 The installer should not fail because an unrelated tracked file in the target
 repo already has whitespace errors.
 
+## Trellis Gitignore Maintenance
+
+For normal tracked installs, maintain a repo root `.gitignore` block between
+`# sd-ai-command-pack trellis-gitignore start` and
+`# sd-ai-command-pack trellis-gitignore end`. The block must ignore Trellis
+local/runtime paths such as `.trellis/.developer`, `.trellis/.runtime/`,
+`.trellis/.cache/`, `.trellis/.backup-*`, `.trellis/worktrees/`, and
+`.trellis/.template-hashes.json` without blanket-ignoring `.trellis/`. It must
+also ignore local AI-tool state under `.claude/`, `.codex/`, `.gemini/`, and
+`.opencode/` without blanket-ignoring those platform directories, so shared
+Trellis and SD command-pack adapters remain trackable.
+
+When adding the block, migrate exact unmarked `.trellis`, `.trellis/`,
+`/.trellis`, and `/.trellis/` entries into the managed block so Trellis specs,
+tasks, workflow, scripts, and shared runtime files remain trackable. Keep
+`--local-only` installs on `.git/info/exclude`; local-only mode must not modify
+tracked `.gitignore`.
+
 ## Legacy Adapter Cleanup
 
 When installing `sd` adapter files, remove old pack-generated `/trellis:*`

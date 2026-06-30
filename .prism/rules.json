@@ -10,6 +10,7 @@
     "security": "high",
     "correctness": "high",
     "testing": "medium",
+    "maintainability": "medium",
     "docs": "medium",
     "style": "low"
   },

@@ -54,13 +54,21 @@ The script runs:
   failure, or provider/model configuration failure should fail the command.
 - Gito is opt-in because it may invoke `uvx`, use a cache outside the repo, and
   require LLM credentials or network access. Set `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=1` to
-  run it. Reports are written to `.build/review/gito` by default.
+  run it. Reports are written to `.build/review/gito` by default. When Gito
+  reports a provider rate limit such as `ClientError: 429` or `Slow down`, the
+  script retries with bounded exponential backoff.
+- Prism and Gito review scans use the pack-managed standard exclusions for
+  top-level AI/tooling/cache directories such as `.github/`, `.claude/`,
+  `.codex/`, `.gemini/`, `.opencode/`, `.agents/`, `.build/`, `.git/`,
+  `.pytest_cache/`, `.obsidian-kb/`, `.trellis/`, `.ruff_cache/`, `.venv/`,
+  `.sd-ai-command-pack/`, and `node_modules/`.
 - If the script reports skipped checks, include those skips in the final report.
 
 ## Useful Environment Variables
 
-- `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`: base ref for branch review. Defaults to
-  `origin/main`.
+- `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`: explicit base ref for branch review.
+  When unset, the script uses the discovered remote default ref, then the
+  current branch upstream, then the first available remote ref.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT=0`: skip
   repo-local review preflight.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT=required`: fail if no configured
@@ -87,10 +95,18 @@ The script runs:
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_RULES`: explicit Prism rules file.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_FAIL_ON`: Prism fail threshold. Defaults to `high`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=1`: run Gito review after Prism.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF`: base ref for Gito review. Defaults to
-  `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then `origin/main`.
+- `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF`: base ref for Gito review.
+  Defaults to `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then the same discovered
+  default branch sequence used by branch review.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR`: Gito report output directory. Defaults to
   `.build/review/gito`.
+- `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS`: max Gito attempts for
+  provider rate limits. Defaults to the review-local Gito value, then `2`.
+- `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_DELAY_SECONDS`: initial Gito retry
+  delay for rate limits. Defaults to the review-local Gito value, then `30`.
+- `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_MAX_DELAY_SECONDS`: maximum Gito
+  retry delay after exponential backoff. Defaults to the review-local Gito
+  value, then `120`.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK=0`: skip configurable PR-body scope
   checks.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CONFIG`: explicit JSON config path for
@@ -101,6 +117,9 @@ The script runs:
 - `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`: explicit PR body text for tooling/generated
   and PR-body scope checks in local or CI contexts where `gh pr view` should
   not be used.
+- `REVIEW_PREFLIGHT_PR_BODY`: deprecated fallback for older target repos. Prefer
+  `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` or
+  `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`.
 
 ## Expected Report
 

@@ -50,6 +50,56 @@ INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
 LOCAL_ONLY_MARKER_FILE = Path(".sd-ai-command-pack/local-only.txt")
 LOCAL_ONLY_EXCLUDE_START = "# sd-ai-command-pack local-only start"
 LOCAL_ONLY_EXCLUDE_END = "# sd-ai-command-pack local-only end"
+TRELLIS_GITIGNORE_TARGET = Path(".gitignore")
+TRELLIS_GITIGNORE_START = "# sd-ai-command-pack trellis-gitignore start"
+TRELLIS_GITIGNORE_END = "# sd-ai-command-pack trellis-gitignore end"
+TRELLIS_GITIGNORE_PATTERNS = (
+    ".trellis/.developer",
+    ".trellis/.backup-*",
+    ".trellis/worktrees/",
+    ".trellis/.template-hashes.json",
+    ".trellis/.runtime/",
+    ".trellis/.cache/",
+)
+PLATFORM_LOCAL_GITIGNORE_PATTERNS = (
+    ".claude/settings.local.json",
+    ".claude/**/*.local.*",
+    ".claude/**/.cache/",
+    ".claude/**/cache/",
+    ".claude/**/logs/",
+    ".claude/**/*.log",
+    ".codex/**/*.local.*",
+    ".codex/**/.cache/",
+    ".codex/**/cache/",
+    ".codex/**/logs/",
+    ".codex/**/sessions/",
+    ".codex/**/tmp/",
+    ".codex/**/*.log",
+    ".gemini/settings.local.json",
+    ".gemini/**/*.local.*",
+    ".gemini/**/.cache/",
+    ".gemini/**/cache/",
+    ".gemini/**/logs/",
+    ".gemini/**/tmp/",
+    ".gemini/**/*.log",
+    ".opencode/**/*.local.*",
+    ".opencode/**/.cache/",
+    ".opencode/**/cache/",
+    ".opencode/**/logs/",
+    ".opencode/**/tmp/",
+    ".opencode/**/state/",
+    ".opencode/**/sessions/",
+    ".opencode/node_modules/",
+    ".opencode/**/*.log",
+)
+TRELLIS_BLANKET_GITIGNORE_ENTRIES = frozenset(
+    {
+        ".trellis",
+        ".trellis/",
+        "/.trellis",
+        "/.trellis/",
+    }
+)
 LOCAL_ONLY_TRELLIS_EXCLUDES = (
     "AGENTS.md",
     ".trellis/",
@@ -216,6 +266,13 @@ def validate_resolved_target_path(target: Path, path: Path, label: str) -> None:
         ) from None
 
 
+def target_destination(target: Path, relative_path: Path, label: str = "target path") -> Path:
+    validate_relative_manifest_path("target", relative_path)
+    destination = target / relative_path
+    validate_resolved_target_path(target, destination, label)
+    return destination
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Install SD AI command pack shared assets and command adapters."
@@ -301,25 +358,42 @@ def require_trellis_repo(target: Path) -> None:
         )
 
 
-def git_output(target: Path, *args: str) -> str | None:
+def git_output(
+    target: Path,
+    *args: str,
+    required: bool = False,
+    context: str = "run git",
+) -> str | None:
     try:
         result = subprocess.run(
             ["git", *args],
             cwd=target,
             text=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
             check=False,
         )
     except FileNotFoundError:
+        if required:
+            raise SystemExit(f"error: git is required to {context}") from None
         return None
     if result.returncode != 0:
+        if required:
+            detail = result.stdout.strip()
+            suffix = f": {detail}" if detail else f" (exit status {result.returncode})"
+            raise SystemExit(f"error: failed to {context}{suffix}") from None
         return None
     return result.stdout.strip()
 
 
 def require_git_repo_for_local_only(target: Path) -> None:
-    repo_root = git_output(target, "rev-parse", "--show-toplevel")
+    repo_root = git_output(
+        target,
+        "rev-parse",
+        "--show-toplevel",
+        required=True,
+        context="verify --local-only target Git repository",
+    )
     if not repo_root:
         raise SystemExit("error: --local-only requires the target to be a Git repo")
     try:
@@ -335,7 +409,14 @@ def require_git_repo_for_local_only(target: Path) -> None:
 
 
 def git_info_exclude_path(target: Path) -> Path:
-    exclude_path = git_output(target, "rev-parse", "--git-path", "info/exclude")
+    exclude_path = git_output(
+        target,
+        "rev-parse",
+        "--git-path",
+        "info/exclude",
+        required=True,
+        context="find .git/info/exclude for --local-only",
+    )
     if not exclude_path:
         raise SystemExit("error: cannot find .git/info/exclude for --local-only")
     path = Path(exclude_path)
@@ -489,8 +570,7 @@ def install_file(
     backup: bool,
 ) -> InstallResult:
     source = file.source
-    destination = target / file.target
-    validate_resolved_target_path(target, destination, "target path")
+    destination = target_destination(target, file.target)
     if path_is_occupied(destination) and not destination.is_file():
         raise SystemExit(f"error: target exists and is not a file: {file.target}")
     new_content = source.read_bytes()
@@ -552,6 +632,90 @@ def merge_managed_block(current: str, block: str) -> str:
     return current + block
 
 
+def trellis_gitignore_block() -> str:
+    lines = [
+        TRELLIS_GITIGNORE_START,
+        "# Generated by `python3 install.py`.",
+        "# Ignore local/runtime files without hiding shared Trellis or AI-tool adapters.",
+        "# Trellis local/runtime state.",
+        *TRELLIS_GITIGNORE_PATTERNS,
+        "",
+        "# AI-tool local state; keep shared platform adapters tracked.",
+        *PLATFORM_LOCAL_GITIGNORE_PATTERNS,
+        TRELLIS_GITIGNORE_END,
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def remove_unmanaged_trellis_blanket_entries(current: str) -> tuple[str, bool]:
+    lines = current.splitlines()
+    kept: list[str] = []
+    removed = False
+    for line in lines:
+        if line.strip() in TRELLIS_BLANKET_GITIGNORE_ENTRIES:
+            removed = True
+            continue
+        kept.append(line)
+    merged = "\n".join(kept)
+    if merged and current.endswith("\n"):
+        merged += "\n"
+    return merged, removed
+
+
+def merge_trellis_gitignore_block(current: str) -> str:
+    block = trellis_gitignore_block()
+    start_index = current.find(TRELLIS_GITIGNORE_START)
+    end_index = current.find(TRELLIS_GITIGNORE_END)
+    has_start = start_index != -1
+    has_end = end_index != -1
+    if has_start != has_end or (has_start and end_index < start_index):
+        raise SystemExit(
+            "error: .gitignore has incomplete sd-ai-command-pack "
+            "trellis-gitignore markers"
+        )
+    if has_start:
+        replace_end = end_index + len(TRELLIS_GITIGNORE_END)
+        if replace_end < len(current) and current[replace_end] == "\n":
+            replace_end += 1
+        return current[:start_index] + block + current[replace_end:]
+
+    prefix, _ = remove_unmanaged_trellis_blanket_entries(current)
+    if not prefix.strip():
+        return block
+    if not prefix.endswith("\n"):
+        prefix += "\n"
+    if not prefix.endswith("\n\n"):
+        prefix += "\n"
+    return prefix + block
+
+
+def install_trellis_gitignore(target: Path, *, dry_run: bool) -> InstallResult:
+    file = PackFile(
+        platform="shared",
+        kind="generated-gitignore",
+        source=MANIFEST_PATH,
+        target=TRELLIS_GITIGNORE_TARGET,
+        anchor=None,
+        install=ALWAYS_INSTALL,
+    )
+    destination = target_destination(target, file.target)
+    if path_is_occupied(destination) and not destination.is_file():
+        raise SystemExit(f"error: target exists and is not a file: {file.target}")
+
+    current = (
+        destination.read_text(encoding="utf-8", errors="surrogateescape")
+        if destination.exists()
+        else ""
+    )
+    merged = merge_trellis_gitignore_block(current)
+    if merged == current:
+        return InstallResult(file, "unchanged")
+    if not dry_run:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(merged, encoding="utf-8", errors="surrogateescape")
+    return InstallResult(file, "updated" if destination.exists() else "created")
+
+
 def install_managed_block(
     file: PackFile,
     target: Path,
@@ -561,8 +725,7 @@ def install_managed_block(
     if file.target != COPILOT_INSTRUCTIONS_TARGET:
         raise SystemExit(f"error: unsupported managed block target: {file.target}")
 
-    destination = target / file.target
-    validate_resolved_target_path(target, destination, "target path")
+    destination = target_destination(target, file.target)
     if path_is_occupied(destination) and not destination.is_file():
         raise SystemExit(f"error: target exists and is not a file: {file.target}")
 
@@ -582,8 +745,13 @@ def install_managed_block(
     return InstallResult(file, "created")
 
 
-def installed_targets_content(selected: list[PackFile]) -> str:
+def installed_targets_content(
+    selected: list[PackFile],
+    *,
+    extra_targets: Iterable[Path] = (),
+) -> str:
     targets = {file.target.as_posix() for file in selected}
+    targets.update(target.as_posix() for target in extra_targets)
     targets.add(INSTALLED_TARGETS_FILE.as_posix())
     targets = sorted(targets)
     return "\n".join(targets) + "\n"
@@ -635,7 +803,7 @@ def tracked_paths(target: Path, specs: Iterable[str]) -> list[str]:
             check=False,
         )
     except FileNotFoundError:
-        return []
+        raise SystemExit("error: git is required to check tracked --local-only paths") from None
     if result.returncode != 0:
         raise SystemExit(f"error: git ls-files failed: {result.stdout}") from None
     return [line for line in result.stdout.splitlines() if line]
@@ -733,6 +901,7 @@ def install_installed_targets_file(
     target: Path,
     *,
     dry_run: bool,
+    extra_targets: Iterable[Path] = (),
 ) -> InstallResult:
     file = PackFile(
         platform="shared",
@@ -742,10 +911,9 @@ def install_installed_targets_file(
         anchor=None,
         install=ALWAYS_INSTALL,
     )
-    destination = target / file.target
-    validate_resolved_target_path(target, destination, "target path")
+    destination = target_destination(target, file.target)
 
-    content = installed_targets_content(selected)
+    content = installed_targets_content(selected, extra_targets=extra_targets)
     if destination.exists():
         current = destination.read_text(encoding="utf-8", errors="surrogateescape")
         if current == content:
@@ -841,6 +1009,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{result.status:25} {display_path(target, result.target)}{suffix}")
 
     results: list[InstallResult] = []
+    generated_targets: list[Path] = []
+    if not args.local_only:
+        results.append(
+            install_trellis_gitignore(
+                target,
+                dry_run=args.dry_run,
+            )
+        )
+        generated_targets.append(TRELLIS_GITIGNORE_TARGET)
+
     for file in selected:
         if file.kind == MANAGED_BLOCK_KIND:
             result = install_managed_block(
@@ -863,6 +1041,7 @@ def main(argv: list[str] | None = None) -> int:
             selected,
             target,
             dry_run=args.dry_run,
+            extra_targets=generated_targets,
         )
     )
     if args.local_only:

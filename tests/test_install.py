@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import io
 import json
 import os
@@ -176,7 +177,10 @@ class InstallTests(unittest.TestCase):
         self.assertTrue(snapshot.is_file(), snapshot)
         self.assertEqual(
             snapshot.read_text(encoding="utf-8"),
-            install.installed_targets_content(selected),
+            install.installed_targets_content(
+                selected,
+                extra_targets=[install.TRELLIS_GITIGNORE_TARGET],
+            ),
         )
 
     def assert_shell_syntax_valid(self, script: Path) -> None:
@@ -268,6 +272,10 @@ class InstallTests(unittest.TestCase):
                 {"low", "medium", "high"},
                 f"{rules_path}: severity for {category!r} is invalid",
             )
+        self.assertTrue(
+            set(focus).issubset(severity_overrides),
+            f"{rules_path}: every focus category must have a severity override",
+        )
 
         required = rules["required"]
         self.assertIsInstance(
@@ -403,6 +411,18 @@ class InstallTests(unittest.TestCase):
                 self.assertIn(
                     target, content, f"Copilot guidance must mention copied script {target}"
                 )
+
+    def assert_trellis_gitignore_block(self, content: str) -> None:
+        self.assertIn(install.TRELLIS_GITIGNORE_START, content)
+        self.assertIn(install.TRELLIS_GITIGNORE_END, content)
+        for expected in install.TRELLIS_GITIGNORE_PATTERNS:
+            self.assertIn(expected, content)
+        for expected in install.PLATFORM_LOCAL_GITIGNORE_PATTERNS:
+            self.assertIn(expected, content)
+        self.assertNotIn(".trellis/", content.splitlines())
+        self.assertNotIn(".trellis", content.splitlines())
+        for platform_dir in (".claude/", ".codex/", ".gemini/", ".opencode/"):
+            self.assertNotIn(platform_dir, content.splitlines())
 
     def make_housekeeping_repo(self) -> tuple[Path, Path, Path, str]:
         tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-housekeeping-test-")
@@ -543,6 +563,85 @@ class InstallTests(unittest.TestCase):
         )
         return env
 
+    def test_install_adds_trellis_gitignore_block(self) -> None:
+        root = self.make_repo()
+        gitignore = root / ".gitignore"
+        gitignore.write_text("dist/\n", encoding="utf-8")
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        content = gitignore.read_text(encoding="utf-8")
+        self.assertTrue(content.startswith("dist/\n"))
+        self.assert_trellis_gitignore_block(content)
+        self.assertIn("updated", result.stdout)
+        self.assertIn(".gitignore", result.stdout)
+
+    def test_install_replaces_managed_trellis_gitignore_block(self) -> None:
+        root = self.make_repo()
+        gitignore = root / ".gitignore"
+        gitignore.write_text(
+            "dist/\n\n"
+            f"{install.TRELLIS_GITIGNORE_START}\n"
+            "stale trellis ignore rule\n"
+            f"{install.TRELLIS_GITIGNORE_END}\n\n"
+            "logs/\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        content = gitignore.read_text(encoding="utf-8")
+        self.assertIn("dist/\n", content)
+        self.assertIn("logs/\n", content)
+        self.assertNotIn("stale trellis ignore rule", content)
+        self.assertEqual(content.count(install.TRELLIS_GITIGNORE_START), 1)
+        self.assertEqual(content.count(install.TRELLIS_GITIGNORE_END), 1)
+        self.assert_trellis_gitignore_block(content)
+
+    def test_install_replaces_blanket_trellis_gitignore_entry(self) -> None:
+        root = self.make_repo()
+        gitignore = root / ".gitignore"
+        gitignore.write_text("dist/\n.trellis/\nlogs/\n", encoding="utf-8")
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        content = gitignore.read_text(encoding="utf-8")
+        self.assertIn("dist/\n", content)
+        self.assertIn("logs/\n", content)
+        self.assert_trellis_gitignore_block(content)
+
+    def test_trellis_gitignore_dry_run_does_not_write_file(self) -> None:
+        root = self.make_repo()
+
+        result = self.run_install(root, "--dry-run")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("created", result.stdout)
+        self.assertIn(".gitignore", result.stdout)
+        self.assertFalse((root / ".gitignore").exists())
+
+    def test_trellis_gitignore_rejects_incomplete_marker_block(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "incomplete"):
+            install.merge_trellis_gitignore_block(
+                f"{install.TRELLIS_GITIGNORE_START}\nold\n"
+            )
+
+    def test_trellis_gitignore_inserts_after_no_newline_prefix(self) -> None:
+        merged = install.merge_trellis_gitignore_block("dist/")
+
+        self.assertTrue(merged.startswith("dist/\n\n"))
+        self.assert_trellis_gitignore_block(merged)
+
+    def test_trellis_gitignore_rejects_existing_directory_target(self) -> None:
+        root = self.make_repo()
+        (root / ".gitignore").mkdir()
+
+        with self.assertRaisesRegex(SystemExit, "target exists and is not a file"):
+            install.install_trellis_gitignore(root, dry_run=False)
+
     def test_installs_shared_skill_and_existing_platform_adapters(self) -> None:
         root = self.make_repo(".cursor", ".gemini", ".github")
 
@@ -557,6 +656,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".agents/skills/sd-finish-work/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-learnings/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-local/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-review-local-all/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-update-spec/SKILL.md").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-housekeeping.sh").is_file())
@@ -569,12 +669,16 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / "scripts/sd-ai-command-pack-update-spec-kb.py").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
         self.assertTrue((root / "docs/SD_AI_COMMAND_PACK.md").is_file())
+        self.assert_trellis_gitignore_block(
+            (root / ".gitignore").read_text(encoding="utf-8")
+        )
         self.assert_installed_targets_snapshot_matches_selection(root)
         self.assertTrue((root / ".gemini/commands/sd/continue.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/start.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/review-local-all.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-learnings.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/full-check.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/housekeeping.toml").is_file())
@@ -584,6 +688,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".github/prompts/sd-finish-work.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-local.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-review-local-all.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-learnings.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-full-check.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-housekeeping.prompt.md").is_file())
@@ -598,6 +703,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".cursor/commands/sd-finish-work.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-pr.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-local.md").is_file())
+        self.assertTrue((root / ".cursor/commands/sd-review-local-all.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-learnings.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-full-check.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-housekeeping.md").is_file())
@@ -607,6 +713,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".claude/commands/sd/finish-work.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-pr.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-local.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/review-local-all.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-learnings.md").exists())
         self.assertFalse((root / ".claude/commands/sd/full-check.md").exists())
         self.assertFalse((root / ".claude/commands/sd/housekeeping.md").exists())
@@ -616,6 +723,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".opencode/commands/sd-finish-work.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-local.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-review-local-all.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-learnings.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-full-check.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-housekeeping.md").exists())
@@ -678,6 +786,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".agents/skills/sd-start/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-local/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-review-local-all/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-learnings/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-full-check/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-housekeeping/SKILL.md").is_file())
@@ -700,6 +809,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/review-local-all.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-learnings.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/full-check.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/housekeeping.toml").is_file())
@@ -709,6 +819,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".claude/commands/sd/finish-work.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-pr.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-local.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/review-local-all.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-learnings.md").exists())
         self.assertFalse((root / ".claude/commands/sd/full-check.md").exists())
         self.assertFalse((root / ".claude/commands/sd/housekeeping.md").exists())
@@ -718,6 +829,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".cursor/commands/sd-finish-work.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-review-pr.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-review-local.md").exists())
+        self.assertFalse((root / ".cursor/commands/sd-review-local-all.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-review-learnings.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-full-check.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-housekeeping.md").exists())
@@ -727,6 +839,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".github/prompts/sd-finish-work.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-review-pr.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-review-local.prompt.md").exists())
+        self.assertFalse((root / ".github/prompts/sd-review-local-all.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-review-learnings.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-full-check.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-housekeeping.prompt.md").exists())
@@ -737,6 +850,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".opencode/commands/sd-finish-work.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-local.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-review-local-all.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-learnings.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-full-check.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-housekeeping.md").exists())
@@ -751,6 +865,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".agents/skills/sd-start/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-local/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-review-local-all/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-learnings/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-full-check/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-housekeeping/SKILL.md").is_file())
@@ -773,6 +888,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".claude/commands/sd/finish-work.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/review-pr.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/review-local.md").is_file())
+        self.assertTrue((root / ".claude/commands/sd/review-local-all.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/review-learnings.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/full-check.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/housekeeping.md").is_file())
@@ -782,6 +898,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".cursor/commands/sd-finish-work.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-pr.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-local.md").is_file())
+        self.assertTrue((root / ".cursor/commands/sd-review-local-all.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-learnings.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-full-check.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-housekeeping.md").is_file())
@@ -791,6 +908,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/review-local-all.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-learnings.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/full-check.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/housekeeping.toml").is_file())
@@ -800,6 +918,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".github/prompts/sd-finish-work.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-local.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-review-local-all.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-learnings.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-full-check.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-housekeeping.prompt.md").is_file())
@@ -814,6 +933,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".opencode/commands/sd-finish-work.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-review-pr.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-review-local.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd-review-local-all.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-review-learnings.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-full-check.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-housekeeping.md").is_file())
@@ -902,6 +1022,17 @@ class InstallTests(unittest.TestCase):
             content = adapter.read_text(encoding="utf-8")
             self.assertIn(".agents/skills/sd-review-local/SKILL.md", content)
             self.assertIn("scripts/sd-ai-command-pack-review-local.sh", content)
+        for adapter in [
+            root / ".claude/commands/sd/review-local-all.md",
+            root / ".cursor/commands/sd-review-local-all.md",
+            root / ".gemini/commands/sd/review-local-all.toml",
+            root / ".github/prompts/sd-review-local-all.prompt.md",
+            root / ".opencode/commands/sd-review-local-all.md",
+        ]:
+            self.assertTrue(adapter.is_file(), adapter)
+            content = adapter.read_text(encoding="utf-8")
+            self.assertIn(".agents/skills/sd-review-local-all/SKILL.md", content)
+            self.assertIn("scripts/sd-ai-command-pack-review-local.sh --all", content)
         for adapter in [
             root / ".claude/commands/sd/review-learnings.md",
             root / ".cursor/commands/sd-review-learnings.md",
@@ -1138,6 +1269,14 @@ class InstallTests(unittest.TestCase):
         self.assert_trellis_prerequisite_documented(readme)
         self.assertIn("This pack only works", readme)
         self.assertIn("Prerequisite: install Trellis", readme)
+        self.assertIn("Quick links:", readme)
+        self.assertIn("[Install](#install)", readme)
+        self.assertIn("sd-ai-command-pack trellis-gitignore start", readme)
+        self.assertIn("SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START", readme)
+        self.assertIn("quick smoke test", readme)
+        self.assertIn("scripts/sd-ai-command-pack-install-audit.py", readme)
+        self.assertIn("scripts/sd-ai-command-pack-update-spec-kb.py --dry-run", readme)
+        self.assertIn("Base-ref precedence", readme)
         for expected in (
             "python3 install.py /path/to/trellis/repo",
             "python3 install.py /path/to/repo --dry-run",
@@ -1398,6 +1537,22 @@ class InstallTests(unittest.TestCase):
         )
         self.assert_trellis_prerequisite_documented(template)
         self.assert_trellis_prerequisite_documented(installed)
+        for expected in (
+            "Quick links:",
+            "sd-ai-command-pack trellis-gitignore start",
+            "SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START",
+            "quick smoke test",
+            "SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF",
+            "discovered branch-diff",
+            "branch: <default>",
+            "tracked deletions are present",
+            "ClientError: 429",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS",
+        ):
+            self.assertIn(expected, installed)
         self.assertEqual(installed, template)
 
     def test_installed_targets_snapshot_lists_scope_scripts_and_guide(self) -> None:
@@ -1410,6 +1565,7 @@ class InstallTests(unittest.TestCase):
             encoding="utf-8"
         )
         for expected in (
+            ".gitignore",
             "scripts/sd-ai-command-pack-review-scope.sh",
             "scripts/sd-ai-command-pack-review-preflight.mjs",
             "scripts/sd-ai-command-pack-review-learnings.py",
@@ -1626,6 +1782,11 @@ class InstallTests(unittest.TestCase):
 
     def test_local_only_bootstraps_trellis_and_excludes_generated_files(self) -> None:
         root = self.make_git_repo_without_trellis()
+        (root / ".gitignore").write_text("dist/\n", encoding="utf-8")
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", ".gitignore")
+        self.run_git(root, "commit", "-m", "baseline")
         tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-tools-")
         self.addCleanup(tools_tempdir.cleanup)
         bin_dir = Path(tools_tempdir.name) / "bin"
@@ -1674,6 +1835,7 @@ class InstallTests(unittest.TestCase):
             install.LOCAL_ONLY_EXCLUDE_END,
         ):
             self.assertIn(expected, exclude_text)
+        self.assertEqual((root / ".gitignore").read_text(encoding="utf-8"), "dist/\n")
         self.assertTrue((root / install.LOCAL_ONLY_MARKER_FILE).is_file())
         self.assertEqual(self.git_output(root, "status", "--short"), "")
 
@@ -1783,7 +1945,11 @@ class InstallTests(unittest.TestCase):
         result = self.run_install(target, "--local-only")
 
         self.assertNotEqual(result.returncode, 0, result.stdout)
-        self.assertIn("--local-only requires the target to be a Git repo", result.stdout)
+        self.assertIn(
+            "failed to verify --local-only target Git repository",
+            result.stdout,
+        )
+        self.assertIn("not a git repository", result.stdout)
 
     def test_local_only_skip_trellis_init_requires_existing_trellis(self) -> None:
         root = self.make_git_repo_without_trellis()
@@ -1835,7 +2001,27 @@ class InstallTests(unittest.TestCase):
 
         with mock.patch.object(subprocess, "run", side_effect=FileNotFoundError):
             self.assertIsNone(install.git_output(root, "status"))
-            self.assertEqual(install.tracked_paths(root, ["anything"]), [])
+            with self.assertRaisesRegex(SystemExit, "git is required"):
+                install.git_output(
+                    root,
+                    "status",
+                    required=True,
+                    context="check status",
+                )
+            with self.assertRaisesRegex(SystemExit, "git is required"):
+                install.tracked_paths(root, ["anything"])
+
+        failed_git = subprocess.CompletedProcess(
+            ["git", "status"],
+            1,
+            stdout="fatal: nope\n",
+        )
+        with mock.patch.object(subprocess, "run", return_value=failed_git):
+            self.assertIsNone(install.git_output(root, "status"))
+
+        with mock.patch.object(install, "git_output", return_value=None):
+            with self.assertRaisesRegex(SystemExit, "requires the target to be a Git repo"):
+                install.require_git_repo_for_local_only(root)
 
         with mock.patch.object(install, "git_output", return_value=str(root)):
             with mock.patch.object(Path, "resolve", side_effect=OSError("boom")):
@@ -2196,6 +2382,9 @@ class InstallTests(unittest.TestCase):
             elif "full-check" in file.target.name:
                 self.assertIn(".agents/skills/sd-full-check/SKILL.md", content)
                 self.assertIn("scripts/sd-ai-command-pack-full-check.sh", content)
+            elif "review-local-all" in file.target.name:
+                self.assertIn(".agents/skills/sd-review-local-all/SKILL.md", content)
+                self.assertIn("scripts/sd-ai-command-pack-review-local.sh --all", content)
             elif "review-local" in file.target.name:
                 self.assertIn(".agents/skills/sd-review-local/SKILL.md", content)
                 self.assertIn("scripts/sd-ai-command-pack-review-local.sh", content)
@@ -2247,6 +2436,26 @@ class InstallTests(unittest.TestCase):
         self.assertIn("bash scripts/sd-ai-command-pack-review-local.sh", review_local)
         self.assertIn("SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS", review_local)
         self.assertIn("asks the user which findings to fix", review_local)
+        self.assertIn("Do not substitute `sd-full-check`", review_local)
+
+        review_local_all = (
+            install.ROOT / "templates/.agents/skills/sd-review-local-all/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("name: sd-review-local-all", review_local_all)
+        self.assertIn("# SD Full-Codebase Local Review Loop", review_local_all)
+        self.assertIn(
+            "bash scripts/sd-ai-command-pack-review-local.sh --all",
+            review_local_all,
+        )
+        self.assertIn("prism review codebase", review_local_all)
+        self.assertIn("empty chunk response", review_local_all)
+        self.assertIn("gito review --all --path <repo-root>", review_local_all)
+        self.assertIn("tracked deletions", review_local_all)
+        self.assertIn("UV_CACHE_DIR", review_local_all)
+        self.assertIn(
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND",
+            review_local_all,
+        )
 
         review_learnings = (
             install.ROOT / "templates/.agents/skills/sd-review-learnings/SKILL.md"
@@ -2262,6 +2471,8 @@ class InstallTests(unittest.TestCase):
         self.assertIn("# SD Full Check", full_check)
         self.assertIn("bash scripts/sd-ai-command-pack-full-check.sh", full_check)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO", full_check)
+        self.assertIn("REVIEW_PREFLIGHT_PR_BODY", full_check)
+        self.assertIn("deprecated fallback", full_check)
 
         housekeeping = (
             install.ROOT / "templates/.agents/skills/sd-housekeeping/SKILL.md"
@@ -2270,6 +2481,14 @@ class InstallTests(unittest.TestCase):
         self.assertIn("# SD Housekeeping", housekeeping)
         self.assertIn("bash scripts/sd-ai-command-pack-housekeeping.sh", housekeeping)
         self.assertIn("Expected clean state", housekeeping)
+        self.assertIn("general\nrepo maintenance", housekeeping)
+        self.assertIn("branch: <default>", housekeeping)
+
+        update_spec = (
+            install.ROOT / "templates/.agents/skills/sd-update-spec/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("do not rebuild `.obsidian-kb/` manually", update_spec)
+        self.assertNotIn("perform the remaining bullets manually", update_spec)
 
         update_spec = (
             install.ROOT / "templates/.agents/skills/sd-update-spec/SKILL.md"
@@ -2289,6 +2508,7 @@ class InstallTests(unittest.TestCase):
             "finish-work",
             "review-pr",
             "review-local",
+            "review-local-all",
             "review-learnings",
             "full-check",
             "housekeeping",
@@ -2320,6 +2540,7 @@ class InstallTests(unittest.TestCase):
             "finish-work": "Run the Trellis finish-work workflow.",
             "review-pr": "Run the SD PR review loop.",
             "review-local": "Run the SD local review loop.",
+            "review-local-all": "Run the SD full-codebase local review loop.",
             "review-learnings": "Detect and update repo review learnings.",
             "full-check": "Run the SD full-check gate.",
             "housekeeping": "Run SD end-of-stream housekeeping.",
@@ -2459,7 +2680,66 @@ class InstallTests(unittest.TestCase):
 
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR", script)
         self.assertIn(".build/review/gito", script)
-        self.assertIn('gito review --vs "$base_ref" --out "$out_dir"', script)
+        self.assertIn('gito review --vs "$base_ref" --filter "$filters" --out "$out_dir"', script)
+
+    def test_review_provider_scan_excludes_are_managed_in_scripts(self) -> None:
+        script_paths = [
+            install.ROOT / "scripts/sd-ai-command-pack-full-check.sh",
+            install.ROOT / "scripts/sd-ai-command-pack-review-local.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-local.sh",
+        ]
+        expected_dirs = (
+            ".github",
+            ".claude",
+            ".codex",
+            ".gemini",
+            ".opencode",
+            ".agents",
+            ".build",
+            ".git",
+            ".pytest_cache",
+            ".obsidian-kb",
+            ".trellis",
+            ".ruff_cache",
+            ".venv",
+            ".sd-ai-command-pack",
+            "node_modules",
+        )
+
+        for script_path in script_paths:
+            content = script_path.read_text(encoding="utf-8")
+            self.assertIn("# sd-ai-command-pack review-scan-excludes start", content)
+            self.assertIn("# sd-ai-command-pack review-scan-excludes end", content)
+            self.assertIn("--exclude \"$excludes\"", content)
+            self.assertIn("--filter \"$filters\"", content)
+            for dirname in expected_dirs:
+                self.assertIn(f'  "{dirname}"', content, script_path)
+
+    def test_review_scripts_avoid_hardcoded_default_branch_and_regex_scope_paths(
+        self,
+    ) -> None:
+        script_paths = [
+            install.ROOT / "scripts/sd-ai-command-pack-full-check.sh",
+            install.ROOT / "scripts/sd-ai-command-pack-review-local.sh",
+            install.ROOT / "scripts/sd-ai-command-pack-review-scope.sh",
+            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-local.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-scope.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
+        ]
+
+        for script_path in script_paths:
+            content = script_path.read_text(encoding="utf-8")
+            self.assertNotIn("origin/main", content, script_path)
+            self.assertIn("origin/HEAD", content, script_path)
+
+        scope_script = (
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-scope.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("normalize_repo_path()", scope_script)
+        self.assertNotIn("[[ \"$path\" =~", scope_script)
 
     def test_review_local_script_runs_gito_after_prism_findings(self) -> None:
         if self._bash_path is None:
@@ -2507,8 +2787,366 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         log = log_path.read_text(encoding="utf-8")
         self.assertIn("prism review unstaged", log)
-        self.assertIn("gito review --vs HEAD --out .build/review/gito", log)
+        self.assertIn(
+            "gito review --vs HEAD --filter app.txt --out .build/review/gito",
+            log,
+        )
         self.assertTrue((root / ".build/review/gito").is_dir())
+
+    def test_review_local_script_all_scope_runs_codebase_providers(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("codebase\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-review-local-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        for name, exit_code in (("prism", 1), ("gito", 0)):
+            tool = stub_bin / name
+            tool.write_text(
+                "#!/usr/bin/env bash\n"
+                f"printf '{name} %s\\n' \"$*\" >> {str(log_path)!r}\n"
+                f"exit {exit_code}\n",
+                encoding="utf-8",
+            )
+            tool.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "--all"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("Local review scope: full codebase", result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertIn("prism review codebase", log)
+        self.assertIn("--exclude .github,.github/**", log)
+        self.assertIn(
+            f"gito review --all --path {root.resolve()} --filter ",
+            log,
+        )
+        self.assertIn("--out .build/review/gito-all", log)
+        gito_line = next(line for line in log.splitlines() if line.startswith("gito "))
+        gito_filter = gito_line.split(" --filter ", 1)[1].split(" --out ", 1)[0]
+        gito_filter_paths = set(gito_filter.split(","))
+        for excluded in (
+            ".github",
+            ".claude",
+            ".codex",
+            ".gemini",
+            ".opencode",
+            ".agents",
+            ".build",
+            ".git",
+            ".pytest_cache",
+            ".obsidian-kb",
+            ".trellis",
+            ".ruff_cache",
+            ".venv",
+            ".sd-ai-command-pack",
+            "node_modules",
+        ):
+            self.assertNotIn(excluded, gito_filter_paths)
+        self.assertTrue((root / ".build/review/gito-all").is_dir())
+
+    def test_review_local_script_all_scope_omits_gito_all_when_tracked_files_deleted(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("codebase\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        (root / "app.txt").unlink()
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-review-local-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        gito = stub_bin / "gito"
+        gito.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'gito %s\\n' \"$*\" >> {str(log_path)!r}\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        gito.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "--all", "gito"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Tracked deletions are present", result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertIn(f"gito review --path {root.resolve()} --filter ", log)
+        self.assertNotIn(" --all ", log)
+        gito_line = next(line for line in log.splitlines() if line.startswith("gito "))
+        gito_filter = gito_line.split(" --filter ", 1)[1].split(" --out ", 1)[0]
+        self.assertNotIn("app.txt", set(gito_filter.split(",")))
+
+    def test_review_local_script_retries_gito_rate_limit(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("before\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        (root / "app.txt").write_text("after\n", encoding="utf-8")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-review-local-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        state_path = Path(tools_tempdir.name) / "gito-attempts.txt"
+        gito = stub_bin / "gito"
+        gito.write_text(
+            "#!/usr/bin/env bash\n"
+            f"state={str(state_path)!r}\n"
+            "count=\"$(cat \"$state\" 2>/dev/null || printf 0)\"\n"
+            "count=$((count + 1))\n"
+            "printf '%s\\n' \"$count\" > \"$state\"\n"
+            f"printf 'gito attempt %s %s\\n' \"$count\" \"$*\" >> {str(log_path)!r}\n"
+            "if [ \"$count\" -eq 1 ]; then\n"
+            "  printf 'ClientError: 429 Slow down\\n'\n"
+            "  exit 1\n"
+            "fi\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        gito.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "gito"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF": "HEAD",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS": "2",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS": "0",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Gito attempt 1/2", result.stdout)
+        self.assertIn("Gito appears rate-limited", result.stdout)
+        self.assertIn("Gito attempt 2/2", result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertEqual(log.count("gito attempt"), 2, log)
+        self.assertIn("gito attempt 2 review --vs HEAD --filter app.txt", log)
+
+    def test_review_local_script_prism_codebase_empty_chunk_falls_back_to_batches(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("codebase\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-review-local-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        prism = stub_bin / "prism"
+        prism.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'prism %s\\n' \"$*\" >> {str(log_path)!r}\n"
+            "paths_arg=''\n"
+            "while [ \"$#\" -gt 0 ]; do\n"
+            "  if [ \"${1:-}\" = --paths ]; then\n"
+            "    shift\n"
+            "    paths_arg=\"${1:-}\"\n"
+            "    break\n"
+            "  fi\n"
+            "  shift\n"
+            "done\n"
+            "if [ -z \"$paths_arg\" ] || [[ \"$paths_arg\" == *,* ]]; then\n"
+            "  printf 'Error: chunked review: chunk 0: no content in response\\n'\n"
+            "  exit 4\n"
+            "fi\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        prism.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "--all", "prism"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE": "2",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("empty chunk response", result.stdout)
+        self.assertIn("full codebase batch", result.stdout)
+        self.assertIn("retrying each path individually", result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertIn("prism review codebase --fail-on high", log)
+        self.assertIn("prism review codebase --paths", log)
+        for line in log.splitlines():
+            if " --paths " in line:
+                self.assertNotIn("--paths .agents/", line)
+                self.assertNotIn("--paths .github/", line)
+                self.assertNotIn("--paths .trellis/", line)
+
+    def test_review_local_script_prism_empty_chunk_after_split_is_not_auth(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("codebase\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-review-local-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        prism = stub_bin / "prism"
+        prism.write_text(
+            "#!/usr/bin/env bash\n"
+            "printf 'Error: chunked review: chunk 0: no content in response\\n'\n"
+            "exit 4\n",
+            encoding="utf-8",
+        )
+        prism.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "--all", "prism"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE": "1",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("empty chunk response after fallback splitting", result.stdout)
+        self.assertNotIn("authentication or configuration", result.stdout)
+
+    def test_review_local_script_sets_writable_uv_dirs_for_gito(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("codebase\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-review-local-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        gito = stub_bin / "gito"
+        gito.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'UV_CACHE_DIR=%s\\n' \"$UV_CACHE_DIR\" >> {str(log_path)!r}\n"
+            f"printf 'UV_TOOL_DIR=%s\\n' \"$UV_TOOL_DIR\" >> {str(log_path)!r}\n"
+            f"printf 'gito %s\\n' \"$*\" >> {str(log_path)!r}\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        gito.chmod(0o755)
+        temp_root = root / "tmp"
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "--all", "gito"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+                "TMPDIR": str(temp_root),
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertIn(f"UV_CACHE_DIR={temp_root}/sd-ai-command-pack-uv-cache", log)
+        self.assertIn(f"UV_TOOL_DIR={temp_root}/sd-ai-command-pack-uv-tools", log)
+        self.assertTrue((temp_root / "sd-ai-command-pack-uv-cache").is_dir())
+        self.assertTrue((temp_root / "sd-ai-command-pack-uv-tools").is_dir())
+        self.assertIn("gito review --all", log)
+        self.assertIn("--filter ", log)
 
     def test_review_local_script_disabled_provider_smoke(self) -> None:
         if self._bash_path is None:
@@ -2566,6 +3204,41 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("==> Local review: custom", result.stdout)
         self.assertEqual(tool_log.read_text(encoding="utf-8"), "custom-ok\n")
+
+    def test_review_local_all_scope_prefers_configured_all_custom_tool(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        tool_log = root / "custom-tool.log"
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "--all"],
+            cwd=root,
+            env={
+                **os.environ,
+                "CUSTOM_TOOL_LOG": str(tool_log),
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS": "custom",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_CUSTOM_COMMAND": (
+                    "printf 'diff-command\\n' > \"$CUSTOM_TOOL_LOG\""
+                ),
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_CUSTOM_COMMAND": (
+                    "printf 'all-command\\n' > \"$CUSTOM_TOOL_LOG\""
+                ),
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Local review scope: full codebase", result.stdout)
+        self.assertEqual(tool_log.read_text(encoding="utf-8"), "all-command\n")
 
     def test_review_local_script_reports_unknown_tool(self) -> None:
         if self._bash_path is None:
@@ -2657,7 +3330,7 @@ class InstallTests(unittest.TestCase):
         self.assertIn("run_ci_classification_report()", script)
         self.assertIn("scripts/classify-ci-changes.sh", script)
         self.assertIn("scripts/classify_ci_changes.sh", script)
-        self.assertIn("did not accept explicit '-- path...' input", script)
+        self.assertIn("Running legacy $script with a changed-files list", script)
         self.assertIn("CI change classification: current diff", script)
         self.assertIn("sd-ai-command-pack-ci-paths", script)
         self.assertIn("run_review_preflight()", script)
@@ -2732,6 +3405,74 @@ class InstallTests(unittest.TestCase):
             required.stdout,
         )
 
+    def test_full_check_script_retries_gito_rate_limit(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("before\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        (root / "app.txt").write_text("after\n", encoding="utf-8")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-full-check-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        state_path = Path(tools_tempdir.name) / "gito-attempts.txt"
+        gito = stub_bin / "gito"
+        gito.write_text(
+            "#!/usr/bin/env bash\n"
+            f"state={str(state_path)!r}\n"
+            "count=\"$(cat \"$state\" 2>/dev/null || printf 0)\"\n"
+            "count=$((count + 1))\n"
+            "printf '%s\\n' \"$count\" > \"$state\"\n"
+            f"printf 'gito attempt %s %s\\n' \"$count\" \"$*\" >> {str(log_path)!r}\n"
+            "if [ \"$count\" -eq 1 ]; then\n"
+            "  printf 'ClientError: 429 Slow down\\n'\n"
+            "  exit 1\n"
+            "fi\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        gito.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-full-check.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT": "0",
+                "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0",
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
+                "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF": "HEAD",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS": "2",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_DELAY_SECONDS": "0",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Gito attempt 1/2", result.stdout)
+        self.assertIn("Gito appears rate-limited", result.stdout)
+        self.assertIn("Gito attempt 2/2", result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertEqual(log.count("gito attempt"), 2, log)
+        self.assertIn("gito attempt 2 review --vs HEAD --filter app.txt", log)
+
     def test_full_check_script_reports_current_diff_ci_classification_when_available(
         self,
     ) -> None:
@@ -2792,7 +3533,7 @@ class InstallTests(unittest.TestCase):
         self.assertIn("app_required=true", result.stdout)
         self.assertIn("fixture_count=", result.stdout)
 
-    def test_full_check_script_retries_legacy_ci_classifier_with_file_list(
+    def test_full_check_script_routes_legacy_ci_classifier_to_file_list(
         self,
     ) -> None:
         if self._bash_path is None:
@@ -2811,8 +3552,8 @@ class InstallTests(unittest.TestCase):
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
             "if [ \"${1:-}\" = \"--\" ]; then\n"
-            "  printf 'legacy classifier does not support --\\n' >&2\n"
-            "  exit 2\n"
+            "  printf 'legacy classifier should not receive --\\n' >&2\n"
+            "  exit 99\n"
             "fi\n"
             "cat \"$1\" > legacy-classifier-paths.log\n"
             "printf 'legacy_classifier=true\\n'\n",
@@ -2839,7 +3580,8 @@ class InstallTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("Using legacy scripts/classify_ci_changes.sh", result.stdout)
-        self.assertIn("retrying with a changed-files list", result.stdout)
+        self.assertIn("Running legacy scripts/classify_ci_changes.sh", result.stdout)
+        self.assertNotIn("legacy classifier should not receive --", result.stdout)
         self.assertIn("legacy_classifier=true", result.stdout)
         paths = (root / "legacy-classifier-paths.log").read_text(encoding="utf-8")
         self.assertIn("docs/local.md\n", paths)
@@ -3127,7 +3869,10 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         (root / ".agents/skills/sd-review-pr/SKILL.md").unlink()
 
         result = subprocess.run(
-            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
             cwd=root,
             text=True,
             stdout=subprocess.PIPE,
@@ -3140,6 +3885,35 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             "installed target is missing: .agents/skills/sd-review-pr/SKILL.md",
             result.stdout,
         )
+
+    def test_install_audit_rejects_windows_absolute_installed_targets(self) -> None:
+        root = self.make_repo()
+        snapshot = root / install.INSTALLED_TARGETS_FILE
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        snapshot.write_text(
+            "C:\\Users\\sven\\repo\\scripts\\sd-ai-command-pack-full-check.sh\n"
+            "\\\\server\\share\\sd-ai-command-pack-full-check.sh\n"
+            "..\\outside\\sd-ai-command-pack-full-check.sh\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("contains unsafe target", result.stdout)
+        self.assertIn("C:\\\\Users\\\\sven", result.stdout)
+        self.assertIn("\\\\\\\\server\\\\share", result.stdout)
+        self.assertIn("..\\\\outside", result.stdout)
 
     def test_install_audit_warns_about_legacy_pack_names(self) -> None:
         root = self.make_repo()
@@ -3858,6 +4632,41 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.stdout.count("detected CI/review scope paths:"), 1)
         self.assertIn(".github/workflows/test.yml", result.stdout)
         self.assertIn("scripts/local-review-wrapper.py", result.stdout)
+
+    def test_pr_body_scope_merge_rules_dedupes_patterns_in_order(self) -> None:
+        module_path = install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py"
+        module_name = "sd_ai_command_pack_pr_body_scope_test"
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop(module_name, None)
+
+        headings = ("CI/review scope:", "CI scope:")
+        merged = module._merge_rules(
+            (
+                module.ScopeRule(
+                    label="CI/review scope",
+                    headings=headings,
+                    patterns=("scripts/a.sh", "scripts/b.sh"),
+                ),
+                module.ScopeRule(
+                    label="CI/review scope",
+                    headings=headings,
+                    patterns=("scripts/b.sh", "scripts/c.sh"),
+                ),
+            )
+        )
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(
+            merged[0].patterns,
+            ("scripts/a.sh", "scripts/b.sh", "scripts/c.sh"),
+        )
 
     def test_pr_body_scope_script_enforces_configured_runtime_scope(self) -> None:
         root = self.make_repo()

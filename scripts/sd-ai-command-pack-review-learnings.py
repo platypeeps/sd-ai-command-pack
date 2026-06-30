@@ -419,6 +419,56 @@ def _git_diff(base_ref: str, repo_root: Path) -> str:
     return _run_git(["diff", "--no-ext-diff", f"{base_ref}...HEAD"], repo_root)
 
 
+def _run_git_optional(args: list[str], repo_root: Path) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def _git_ref_exists(ref: str, repo_root: Path) -> bool:
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+        cwd=repo_root,
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=60,
+    )
+    return result.returncode == 0
+
+
+def default_base_ref(repo_root: Path) -> str:
+    if _git_ref_exists("origin/HEAD", repo_root):
+        return "origin/HEAD"
+
+    upstream = _run_git_optional(
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+        repo_root,
+    )
+    if upstream:
+        return upstream
+
+    remote_refs = [
+        ref
+        for ref in _run_git_optional(
+            ["for-each-ref", "--format=%(refname:short)", "refs/remotes"],
+            repo_root,
+        ).splitlines()
+        if ref and not ref.endswith("/HEAD")
+    ]
+    return remote_refs[0] if remote_refs else ""
+
+
 def _git_untracked_paths(repo_root: Path) -> list[str]:
     result = subprocess.run(
         ["git", "ls-files", "--others", "--exclude-standard", "-z"],
@@ -453,8 +503,9 @@ def _git_working_tree_diff(repo_root: Path) -> str:
     return "\n".join(chunk for chunk in chunks if chunk)
 
 
-def build_local_diff(repo_root: Path, *, base: str, include_working_tree: bool) -> str:
-    diff_text = _git_diff(base, repo_root)
+def build_local_diff(repo_root: Path, *, base: str | None, include_working_tree: bool) -> str:
+    base_ref = base or default_base_ref(repo_root)
+    diff_text = _git_diff(base_ref, repo_root) if base_ref else ""
     if include_working_tree:
         working = _git_working_tree_diff(repo_root)
         if working:
@@ -664,7 +715,13 @@ def update_target(target: Path, block: str, *, dry_run: bool) -> str:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Detect and update repo-specific review learnings.")
-    parser.add_argument("--base", default="main", help="Base ref for branch diff scans.")
+    parser.add_argument(
+        "--base",
+        help=(
+            "Base ref for branch diff scans. Defaults to the discovered remote "
+            "default ref, then the current upstream, then the first remote ref."
+        ),
+    )
     parser.add_argument("--diff-from", type=Path, help="Read unified diff from this file.")
     parser.add_argument(
         "--include-working-tree",

@@ -9,6 +9,12 @@ Run this project-local skill for `sd-housekeeping` and `/sd:housekeeping` style
 work when the user wants a ready PR wrapped up and merged, or after a PR has
 merged and the repo should return to a clean default-branch state.
 
+This command is intentionally narrow: use it only for the current repository's
+active development stream or its just-merged PR cleanup. It is not a general
+repo maintenance, dependency upgrade, issue triage, or branch-pruning command.
+If the user asks for broader cleanup, stop and clarify the intended scope before
+running the housekeeping script.
+
 The canonical implementation is:
 
 ```bash
@@ -68,11 +74,11 @@ A clean run should condense to:
 
 ```text
 ==> Expected clean state
-- branch: main
+- branch: <default>
 - working tree: clean
-- main matches origin/main
-- local branches: only main
-- remote branches: only origin/HEAD and origin/main
+- <default> matches origin/<default>
+- local branches: only <default>
+- remote branches: only origin/HEAD and origin/<default>
 - open PRs: none
 - open issues: none
 - Trellis active tasks: none

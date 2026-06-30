@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
@@ -99,6 +99,19 @@ def is_pack_source_checkout(root: Path) -> bool:
     return all((root / marker).exists() for marker in SOURCE_REPO_MARKERS)
 
 
+def is_unsafe_installed_target(path_text: str) -> bool:
+    posix_path = PurePosixPath(path_text.replace("\\", "/"))
+    windows_path = PureWindowsPath(path_text)
+    return (
+        posix_path.is_absolute()
+        or windows_path.is_absolute()
+        or bool(windows_path.drive)
+        or bool(windows_path.root)
+        or ".." in posix_path.parts
+        or ".." in windows_path.parts
+    )
+
+
 def load_installed_targets(root: Path) -> tuple[set[str], list[str]]:
     targets_file = root / INSTALLED_TARGETS_FILE
     if not targets_file.exists():
@@ -113,7 +126,7 @@ def load_installed_targets(root: Path) -> tuple[set[str], list[str]]:
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
-        if line.startswith("/") or ".." in Path(line).parts:
+        if is_unsafe_installed_target(line):
             failures.append(
                 f"{INSTALLED_TARGETS_FILE}:{line_number} contains unsafe target {line!r}"
             )

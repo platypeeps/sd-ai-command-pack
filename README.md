@@ -9,8 +9,9 @@
 Install reusable AI workflow helpers into
 [Trellis-managed repositories](https://trytrellis.app/). The current pack is
 focused on Trellis enrichment: start, continue, finish-work, local review, PR
-review, review learnings, full-check, post-merge housekeeping, and update-spec
-wrapper workflows. The repository and `sd` command namespace are intentionally
+review, full-codebase local review, review learnings, full-check, post-merge
+housekeeping, and update-spec wrapper workflows. The repository and `sd`
+command namespace are intentionally
 broader than that initial scope, so future skills, commands, scripts, docs, or
 rules may cover adjacent AI workflow support that is not strictly
 Trellis-specific.
@@ -32,6 +33,7 @@ The current Trellis-focused pack includes:
 - `.agents/skills/sd-update-spec/SKILL.md`
 - `.agents/skills/sd-review-pr/SKILL.md`
 - `.agents/skills/sd-review-local/SKILL.md`
+- `.agents/skills/sd-review-local-all/SKILL.md`
 - `.agents/skills/sd-review-learnings/SKILL.md`
 - `scripts/sd-ai-command-pack-full-check.sh`
 - `scripts/sd-ai-command-pack-housekeeping.sh`
@@ -52,12 +54,14 @@ The current Trellis-focused pack includes:
 - `.claude/commands/sd/update-spec.md`
 - `.claude/commands/sd/review-pr.md`
 - `.claude/commands/sd/review-local.md`
+- `.claude/commands/sd/review-local-all.md`
 - `.claude/commands/sd/review-learnings.md`
 - `.cursor/commands/sd-start.md`
 - `.cursor/commands/sd-continue.md`
 - `.cursor/commands/sd-finish-work.md`
 - `.cursor/commands/sd-review-pr.md`
 - `.cursor/commands/sd-review-local.md`
+- `.cursor/commands/sd-review-local-all.md`
 - `.cursor/commands/sd-review-learnings.md`
 - `.cursor/commands/sd-full-check.md`
 - `.cursor/commands/sd-housekeeping.md`
@@ -67,6 +71,7 @@ The current Trellis-focused pack includes:
 - `.gemini/commands/sd/finish-work.toml`
 - `.gemini/commands/sd/review-pr.toml`
 - `.gemini/commands/sd/review-local.toml`
+- `.gemini/commands/sd/review-local-all.toml`
 - `.gemini/commands/sd/full-check.toml`
 - `.gemini/commands/sd/housekeeping.toml`
 - `.gemini/commands/sd/update-spec.toml`
@@ -76,6 +81,7 @@ The current Trellis-focused pack includes:
 - `.github/prompts/sd-finish-work.prompt.md`
 - `.github/prompts/sd-review-pr.prompt.md`
 - `.github/prompts/sd-review-local.prompt.md`
+- `.github/prompts/sd-review-local-all.prompt.md`
 - `.github/prompts/sd-review-learnings.prompt.md`
 - `.github/prompts/sd-full-check.prompt.md`
 - `.github/prompts/sd-housekeeping.prompt.md`
@@ -87,6 +93,7 @@ The current Trellis-focused pack includes:
 - `.opencode/commands/sd-finish-work.md`
 - `.opencode/commands/sd-review-pr.md`
 - `.opencode/commands/sd-review-local.md`
+- `.opencode/commands/sd-review-local-all.md`
 - `.opencode/commands/sd-review-learnings.md`
 - `.opencode/commands/sd-full-check.md`
 - `.opencode/commands/sd-housekeeping.md`
@@ -96,9 +103,9 @@ The shared skills own the workflows. Platform command and prompt files are thin
 entry points that tell the agent to load the appropriate shared skill.
 Codex exposes pack entry points as enabled skills named `sd-start`, `sd-continue`,
 `sd-finish-work`, `sd-full-check`, `sd-housekeeping`, `sd-review-pr`,
-`sd-review-local`, `sd-review-learnings`, and `sd-update-spec`; type `/sd` in
-Codex command completion or invoke them explicitly with `$sd-review-pr`-style
-skill mentions.
+`sd-review-local`, `sd-review-local-all`, `sd-review-learnings`, and
+`sd-update-spec`; type `/sd` in Codex command completion or invoke them
+explicitly with `$sd-review-pr`-style skill mentions.
 User-facing command adapters live under the `sd` namespace so pack-owned
 wrappers do not collide with Trellis-owned generated `/trellis:*` commands on
 future `trellis update` runs. Cursor command files, GitHub Copilot prompt
@@ -115,6 +122,13 @@ Trellis-provided `trellis-start`, `trellis-continue`, and
 The installed `docs/SD_AI_COMMAND_PACK.md` file gives humans and agents a
 repo-local usage guide for the commands, script, environment variables, local
 review-provider behavior when available, and troubleshooting steps.
+
+Quick links:
+
+- [Install](#install)
+- [Verify](#verify)
+- [Supported Adapters](#supported-adapters)
+- [License](#license)
 
 Claude and Gemini expose the wrappers as namespaced commands such as
 `/sd:review-pr`. Cursor command files, GitHub Copilot prompt files, OpenCode
@@ -136,7 +150,8 @@ It runs deterministic checks, the generic
 checks when a `package.json`, Node.js, and the selected package runner are
 available, and a current-diff CI classification report when a target repo provides
 `scripts/classify-ci-changes.sh`. During migration it also tolerates the legacy
-`scripts/classify_ci_changes.sh` name, but target classifiers should support
+`scripts/classify_ci_changes.sh` name by passing a temporary changed-files list,
+but target classifiers should support
 `bash scripts/classify-ci-changes.sh -- changed-file ...` so paths beginning
 with `-` are handled as data. The command then runs local Prism review when
 `prism` is available and configured. Gito stays
@@ -147,13 +162,42 @@ enabled, Gito writes reports to `.build/review/gito` by default; override with
 
 The review-local command (`/sd:review-local` in Claude/Gemini;
 `sd-review-local` in Cursor, GitHub Copilot, OpenCode, and Codex) runs local
-review providers and enters a user-selected fix loop. By default it runs Prism
-and Gito through `scripts/sd-ai-command-pack-review-local.sh`, presents grouped
-findings, asks which findings to fix, fixes only selected items, and repeats the
-same local review stack until no items are selected or no actionable findings
-remain. Use `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS` or pass tool names to the
-script to run a specific stack, and configure third-party tools with
+review providers against the current diff and enters a user-selected fix loop.
+By default it runs Prism and Gito through
+`scripts/sd-ai-command-pack-review-local.sh`, presents grouped findings, asks
+which findings to fix, fixes only selected items, and repeats the same local
+review stack until no items are selected or no actionable findings remain. Use
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS` or pass tool names to the script to run
+a specific stack, and configure third-party tools with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND`.
+
+The review-local-all command (`/sd:review-local-all` in Claude/Gemini;
+`sd-review-local-all` in Cursor, GitHub Copilot, OpenCode, and Codex) uses the
+same fix-loop behavior but reviews the entire checked-out repository. It runs
+`bash scripts/sd-ai-command-pack-review-local.sh --all`, which calls
+`prism review codebase` for Prism and normally calls
+`gito review --all --path <repo-root>` for Gito. If tracked deletions are
+present, the runner omits `--all` and reviews the explicit existing-file filter
+so deleted paths do not break Gito. Prism and Gito scans use the pack's managed
+standard exclusions for
+top-level AI/tooling/cache directories:
+`.github/`, `.claude/`, `.codex/`, `.gemini/`, `.opencode/`, `.agents/`,
+`.build/`, `.git/`, `.pytest_cache/`, `.obsidian-kb/`, `.trellis/`,
+`.ruff_cache/`, `.venv/`, `.sd-ai-command-pack/`, and `node_modules/`. Gito
+full-codebase reports go to `.build/review/gito-all` by default; override with
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_GITO_OUT_DIR` when needed.
+For `uvx`-based Gito wrappers, the runner sets `UV_CACHE_DIR` and `UV_TOOL_DIR`
+to writable temp directories when they are unset. When Gito reports provider
+rate limiting such as `ClientError: 429` or `Slow down`, the runner retries
+with bounded exponential backoff; tune that with
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`,
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, and
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`. If Prism
+full-codebase review returns an empty chunk response, the runner retries in
+tracked-file batches; set
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK=0` to disable that.
+For third-party tools that need different full-scan arguments, configure
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND`.
 
 The start, continue, and finish-work commands are local namespace aliases for
 the Trellis-provided `trellis-start`, `trellis-continue`, and
@@ -258,10 +302,18 @@ python3 install.py /path/to/trellis/repo
 
 The installer requires `.trellis/config.yaml` in the target repo and will fail
 with the Trellis install link if that marker is missing. It always installs the
-shared `.agents` skills, full-check, housekeeping, review-scope, review-local,
-review-preflight, PR-body scope, and update-spec KB scripts, Prism rules, usage guide, and the
+shared `.agents` skills, full-check, housekeeping, review-scope, review-local
+command assets, review-preflight, PR-body scope, and update-spec KB scripts,
+Prism rules, usage guide, and the
 generated `.sd-ai-command-pack/installed-targets.txt` snapshot used by the scope
-checks.
+checks. For normal shared installs, it also maintains a managed
+`sd-ai-command-pack trellis-gitignore` block in the repo root `.gitignore` that
+ignores Trellis local/runtime files such as `.trellis/.developer`,
+`.trellis/.runtime/`, `.trellis/.cache/`, and `.trellis/.backup-*` without
+blanket-ignoring shareable `.trellis` workflow, spec, task, and script files.
+It also ignores local AI-tool state such as `.claude/settings.local.json`,
+tool caches, logs, sessions, tmp folders, and `.opencode/node_modules/` without
+blanket-ignoring `.claude/`, `.codex/`, `.gemini/`, or `.opencode/`.
 It installs platform adapters only when the target repo has the corresponding
 platform directory and a Trellis-owned marker for that platform, such as a
 Trellis command, hook, skill, or Copilot hook file. A plain `.github` directory
@@ -276,6 +328,15 @@ python3 install.py /path/to/repo --all
 python3 install.py /path/to/repo --platform cursor --platform gemini
 python3 install.py /path/to/repo --force
 python3 install.py /path/to/repo --force --backup
+```
+
+After installing or refreshing a target repo, a quick smoke test is:
+
+```bash
+cd /path/to/repo
+python3 scripts/sd-ai-command-pack-install-audit.py
+bash -n scripts/sd-ai-command-pack-full-check.sh scripts/sd-ai-command-pack-review-local.sh scripts/sd-ai-command-pack-review-scope.sh
+python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run
 ```
 
 Use `--local-only` when you want Trellis and this pack available in one clone
@@ -301,8 +362,9 @@ with `--force` to save a `.bak` copy of every overwritten file next to the
 original before it is changed.
 
 Platform filters always include the shared skills, full-check, housekeeping,
-review-scope, review-preflight, review-local, PR-body scope, and update-spec KB scripts, Prism
-rules, usage guide, and installed-targets snapshot, because the review,
+review-scope, review-preflight, review-local command assets, PR-body scope, and
+update-spec KB scripts, Prism rules, usage guide, and installed-targets
+snapshot, because the review,
 full-check, housekeeping, and update-spec adapters delegate to those shared
 assets.
 `--platform` and `--all`
@@ -325,6 +387,23 @@ to deterministic local checks when they already cover a repeated issue class,
 or request a focused local fixture when a repeated issue needs a stronger
 preflight.
 
+Managed blocks are intentionally replaceable on future pack updates. They look
+like this:
+
+```gitignore
+# sd-ai-command-pack trellis-gitignore start
+# Generated by `python3 install.py`.
+.trellis/.runtime/
+.trellis/.cache/
+# sd-ai-command-pack trellis-gitignore end
+```
+
+```markdown
+<!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START -->
+Pack-owned review guidance lives here.
+<!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:END -->
+```
+
 The full-check script also runs `scripts/sd-ai-command-pack-review-preflight.mjs`.
 It is a generic dependency-free preflight for copied/generated disclosure,
 documentation path hygiene, Trellis journal consistency, npm override drift,
@@ -345,6 +424,12 @@ the GitHub CLI can resolve a current PR, it can also ensure mixed PRs include a
 `Tooling/generated scope:` section in the PR body. In CI or local preflights
 where `gh pr view` should not run, pass the PR body through
 `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`.
+
+Base-ref precedence for branch-diff helpers is explicit env override first,
+then the discovered remote default ref, then the current branch upstream, then
+the first available remote ref. Tool-specific variables such as
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF` take precedence over broader
+full-check variables.
 
 The full-check script also runs `scripts/sd-ai-command-pack-pr-body-scope.py`.
 That pack-provided checker is generic and config-driven: by default it checks
@@ -373,10 +458,9 @@ CI/review scope:
 
 When a target repo provides `scripts/classify-ci-changes.sh`, the full-check
 script prints a current-diff CI classification section before optional
-repo-specific checks run. The canonical classifier accepts a changed-file list
-path or explicit paths after `--`; the pack falls back to legacy
-`scripts/classify_ci_changes.sh` and retries with a temp changed-files list when
-older classifiers reject `--`. That gives agents and reviewers a local
+repo-specific checks run. The canonical classifier accepts explicit paths after
+`--`; when only the legacy `scripts/classify_ci_changes.sh` is present, the pack
+passes a temp changed-files list directly. That gives agents and reviewers a local
 `docs_only`, `app_required`, and `expensive_required` signal before spending
 remote CI budget.
 

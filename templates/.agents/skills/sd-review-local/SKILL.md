@@ -10,6 +10,11 @@ work. It runs local code review tools, asks the user which findings to fix, and
 repeats until the user selects no more findings or the configured tools report
 no actionable items.
 
+By default this command is current-diff scoped: unstaged changes, staged
+changes, and committed branch diff from the configured base. Use
+`sd-review-local-all` when the user asks to review the entire checked-out
+repository.
+
 This is a local-review-only loop. It does not request remote reviewers, does not
 require a pull request, and must not stage, commit, or push unless the user
 separately asks for that.
@@ -78,14 +83,21 @@ Use the requested tool stack. By default, run Prism and Gito:
 bash scripts/sd-ai-command-pack-review-local.sh
 ```
 
-If `scripts/sd-ai-command-pack-review-local.sh` is missing, fall back to the
-full-check script only for the default Prism/Gito stack:
+The runner applies the pack-managed standard review-scan exclusions to Prism
+and Gito, skipping top-level AI/tooling/cache directories such as `.github/`,
+`.claude/`, `.codex/`, `.gemini/`, `.opencode/`, `.agents/`, `.build/`,
+`.git/`, `.pytest_cache/`, `.obsidian-kb/`, `.trellis/`, `.ruff_cache/`,
+`.venv/`, `.sd-ai-command-pack/`, and `node_modules/`.
 
-```bash
-SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=required \
-SD_AI_COMMAND_PACK_FULL_CHECK_GITO=required \
-bash scripts/sd-ai-command-pack-full-check.sh
-```
+When Gito reports a provider rate limit such as `ClientError: 429` or `Slow
+down`, the runner retries with bounded exponential backoff. Tune that with
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`,
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, and
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`.
+
+If `scripts/sd-ai-command-pack-review-local.sh` is missing, stop and report
+that the pack install is incomplete. Do not substitute `sd-full-check`; this
+command's user-selected fix loop depends on the local-review runner.
 
 If a specific custom tool was requested and no command is configured for it,
 stop and tell the user which

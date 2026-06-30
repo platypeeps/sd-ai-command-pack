@@ -42,8 +42,8 @@ AI command pack extensions.
      does not warrant an architecture update, leave it untouched.
    - Rebuild the repo-local Obsidian knowledge-base folder:
      - Run `python3 scripts/sd-ai-command-pack-update-spec-kb.py` from the repo
-       root. If the helper is missing, report that the pack should be
-       reinstalled, then perform the remaining bullets manually.
+       root. If the helper is missing, stop and report that the pack should be
+       reinstalled; do not rebuild `.obsidian-kb/` manually from this wrapper.
      - Ensure `.obsidian-kb/` is listed in the repo root `.gitignore`. Add it if
        missing while preserving existing entries.
      - Create `.obsidian-kb/` in the repo root. Treat it as generated local

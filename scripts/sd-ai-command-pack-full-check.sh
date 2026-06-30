@@ -5,6 +5,26 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
+# sd-ai-command-pack review-scan-excludes start
+REVIEW_SCAN_EXCLUDE_DIRS=(
+  ".github"
+  ".claude"
+  ".codex"
+  ".gemini"
+  ".opencode"
+  ".agents"
+  ".build"
+  ".git"
+  ".pytest_cache"
+  ".obsidian-kb"
+  ".trellis"
+  ".ruff_cache"
+  ".venv"
+  ".sd-ai-command-pack"
+  "node_modules"
+)
+# sd-ai-command-pack review-scan-excludes end
+
 section() {
   printf '\n==> %s\n' "$*"
 }
@@ -37,6 +57,83 @@ run() {
   "$@"
 }
 
+positive_int_or_default() {
+  local value="$1"
+  local fallback="$2"
+  case "$value" in
+    ''|*[!0-9]*|0) printf '%s' "$fallback" ;;
+    *) printf '%s' "$value" ;;
+  esac
+}
+
+gito_output_indicates_rate_limit() {
+  local output_file="$1"
+  grep -Eiq 'clienterror:[[:space:]]*429|(^|[^0-9])429([^0-9]|$)|slow down|too many requests|rate[ -]?limit(ed)?' "$output_file"
+}
+
+gito_max_attempts() {
+  positive_int_or_default "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS:-${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS:-2}}" 2
+}
+
+gito_initial_retry_delay() {
+  positive_int_or_default "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_DELAY_SECONDS:-${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS:-30}}" 30
+}
+
+gito_max_retry_delay() {
+  positive_int_or_default "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_MAX_DELAY_SECONDS:-${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS:-120}}" 120
+}
+
+run_gito_command() {
+  local label="$1"
+  shift
+  local max_attempts
+  max_attempts="$(gito_max_attempts)"
+  local delay
+  delay="$(gito_initial_retry_delay)"
+  local max_delay
+  max_delay="$(gito_max_retry_delay)"
+  if [ "$max_delay" -lt "$delay" ]; then
+    max_delay="$delay"
+  fi
+
+  local attempt=1
+  local output_file
+  while :; do
+    section "$label"
+    if [ "$max_attempts" -gt 1 ]; then
+      printf 'Gito attempt %s/%s\n' "$attempt" "$max_attempts"
+    fi
+
+    output_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-gito.XXXXXX")"
+    set +e
+    "$@" >"$output_file" 2>&1
+    local status=$?
+    set -e
+    cat "$output_file"
+
+    if [ "$status" -eq 0 ]; then
+      rm -f "$output_file"
+      return 0
+    fi
+
+    if [ "$attempt" -ge "$max_attempts" ] || ! gito_output_indicates_rate_limit "$output_file"; then
+      rm -f "$output_file"
+      return "$status"
+    fi
+
+    rm -f "$output_file"
+    warn "Gito appears rate-limited; retrying in ${delay}s after HTTP 429 / slow-down response."
+    if [ "$delay" -gt 0 ]; then
+      sleep "$delay"
+    fi
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+    if [ "$delay" -gt "$max_delay" ]; then
+      delay="$max_delay"
+    fi
+  done
+}
+
 package_has_script() {
   local script_name="$1"
   have node || return 1
@@ -48,9 +145,132 @@ process.exit(pkg.scripts && Object.prototype.hasOwnProperty.call(pkg.scripts, sc
 ' >/dev/null 2>&1
 }
 
+default_review_base_ref() {
+  local ref
+
+  if git rev-parse --verify --quiet "origin/HEAD^{commit}" >/dev/null; then
+    printf 'origin/HEAD'
+    return
+  fi
+
+  ref="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+  if [ -n "$ref" ]; then
+    printf '%s' "$ref"
+    return
+  fi
+
+  ref="$(git for-each-ref --format='%(refname:short)' refs/remotes 2>/dev/null | grep -v '/HEAD$' | head -n 1 || true)"
+  if [ -n "$ref" ]; then
+    printf '%s' "$ref"
+    return
+  fi
+
+  printf 'HEAD'
+}
+
+full_check_base_ref() {
+  if [ -n "${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-}" ]; then
+    printf '%s' "$SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF"
+    return
+  fi
+  default_review_base_ref
+}
+
+full_check_gito_base_ref() {
+  if [ -n "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF:-}" ]; then
+    printf '%s' "$SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF"
+    return
+  fi
+  full_check_base_ref
+}
+
 detect_merge_base() {
-  local base_ref="${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-origin/main}"
+  local base_ref
+  base_ref="$(full_check_base_ref)"
   git merge-base "$base_ref" HEAD 2>/dev/null || true
+}
+
+join_by_comma() {
+  local IFS=,
+  printf '%s' "$*"
+}
+
+path_is_standard_review_scan_excluded() {
+  local path="${1#./}"
+  local dir
+  for dir in "${REVIEW_SCAN_EXCLUDE_DIRS[@]}"; do
+    if [ "$path" = "$dir" ] || [[ "$path" == "$dir/"* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+review_scan_exclude_globs_csv() {
+  local globs=()
+  local dir
+  for dir in "${REVIEW_SCAN_EXCLUDE_DIRS[@]}"; do
+    globs+=("$dir" "$dir/**")
+  done
+  join_by_comma "${globs[@]}"
+}
+
+collect_reviewable_changed_paths() {
+  local base_ref="$1"
+  local paths_file
+  paths_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-review-paths.XXXXXX")"
+  : >"$paths_file"
+
+  if git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null; then
+    git diff --name-only "$base_ref"...HEAD >>"$paths_file"
+  else
+    warn "Could not resolve $base_ref; Gito review filter will use local changes only."
+  fi
+
+  git diff --cached --name-only >>"$paths_file"
+  git diff --name-only >>"$paths_file"
+  git ls-files --others --exclude-standard >>"$paths_file"
+
+  sort -u "$paths_file" | while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    if ! path_is_standard_review_scan_excluded "$path"; then
+      printf '%s\n' "$path"
+    fi
+  done
+
+  rm -f "$paths_file"
+}
+
+review_filter_pattern_for_path() {
+  local path="$1"
+  printf '%s\n' "$path"
+}
+
+review_filter_csv_from_paths() {
+  local patterns_file
+  patterns_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-review-filters.XXXXXX")"
+  : >"$patterns_file"
+
+  local path
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    review_filter_pattern_for_path "$path" >>"$patterns_file"
+  done
+
+  local patterns=()
+  local pattern
+  while IFS= read -r pattern; do
+    [ -n "$pattern" ] || continue
+    patterns+=("$pattern")
+  done < <(sort -u "$patterns_file")
+
+  rm -f "$patterns_file"
+  join_by_comma "${patterns[@]}"
+}
+
+reviewable_changed_filter_csv() {
+  local base_ref="$1"
+  collect_reviewable_changed_paths "$base_ref" | review_filter_csv_from_paths
 }
 
 build_prism_args() {
@@ -77,6 +297,14 @@ build_prism_args() {
   if [ -n "$rules" ] && [ -f "$rules" ]; then
     PRISM_ARGS+=(--rules "$rules")
   fi
+
+  local excludes
+  excludes="$(review_scan_exclude_globs_csv)"
+  local configured_excludes="${SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_EXCLUDE:-}"
+  if [ -n "$configured_excludes" ]; then
+    excludes="$excludes,$configured_excludes"
+  fi
+  PRISM_ARGS+=(--exclude "$excludes")
 }
 
 run_prism_command() {
@@ -145,7 +373,7 @@ run_prism_reviews() {
   local merge_base
   merge_base="$(detect_merge_base)"
   if [ -z "$merge_base" ]; then
-    warn "Could not resolve merge base for ${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-origin/main}; skipping committed branch review."
+    warn "Could not resolve merge base for $(full_check_base_ref); skipping committed branch review."
     return 0
   fi
 
@@ -172,11 +400,18 @@ run_gito_review() {
     return 0
   fi
 
-  local base_ref="${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF:-${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-origin/main}}"
+  local base_ref
+  base_ref="$(full_check_gito_base_ref)"
   local out_dir="${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR:-.build/review/gito}"
+  local filters
+  filters="$(reviewable_changed_filter_csv "$base_ref")"
+  if [ -z "$filters" ]; then
+    warn "No changed files remain after standard review-scan exclusions; skipping Gito review."
+    return 0
+  fi
   mkdir -p "$out_dir"
 
-  run "Gito review" gito review --vs "$base_ref" --out "$out_dir"
+  run_gito_command "Gito review" gito review --vs "$base_ref" --filter "$filters" --out "$out_dir"
 }
 
 run_sd_ai_command_pack_scope_check() {
@@ -253,7 +488,8 @@ collect_current_changed_paths() {
   local output_file="$1"
   : >"$output_file"
 
-  local base_ref="${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-origin/main}"
+  local base_ref
+  base_ref="$(full_check_base_ref)"
   if git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null; then
     git diff --name-only "$base_ref"...HEAD >>"$output_file"
   else
@@ -305,12 +541,14 @@ run_ci_classification_report() {
   section "CI change classification: current diff"
   printf 'changed_paths=%s\n' "${#changed_paths[@]}"
   local status=0
-  bash "$script" -- "${changed_paths[@]}" || status=$?
-  if [ "$status" -eq 2 ]; then
-    warn "$script did not accept explicit '-- path...' input; retrying with a changed-files list. Update the classifier to support '-- path...' before the next pack refresh."
-    status=0
+
+  if [ "$script" = "scripts/classify_ci_changes.sh" ]; then
+    warn "Running legacy $script with a changed-files list. Update to scripts/classify-ci-changes.sh with '-- path...' support before the next pack refresh."
     bash "$script" "$paths_file" || status=$?
+  else
+    bash "$script" -- "${changed_paths[@]}" || status=$?
   fi
+
   rm -f "$paths_file"
   return "$status"
 }

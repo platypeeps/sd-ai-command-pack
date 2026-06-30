@@ -6,6 +6,27 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 OVERALL_STATUS=0
+REVIEW_LOCAL_SCOPE="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_SCOPE:-diff}"
+
+# sd-ai-command-pack review-scan-excludes start
+REVIEW_SCAN_EXCLUDE_DIRS=(
+  ".github"
+  ".claude"
+  ".codex"
+  ".gemini"
+  ".opencode"
+  ".agents"
+  ".build"
+  ".git"
+  ".pytest_cache"
+  ".obsidian-kb"
+  ".trellis"
+  ".ruff_cache"
+  ".venv"
+  ".sd-ai-command-pack"
+  "node_modules"
+)
+# sd-ai-command-pack review-scan-excludes end
 
 section() {
   printf '\n==> %s\n' "$*"
@@ -26,6 +47,123 @@ is_disabled() {
   esac
 }
 
+path_is_standard_review_scan_excluded() {
+  local path="${1#./}"
+  local dir
+  for dir in "${REVIEW_SCAN_EXCLUDE_DIRS[@]}"; do
+    if [ "$path" = "$dir" ] || [[ "$path" == "$dir/"* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+review_scan_exclude_globs_csv() {
+  local globs=()
+  local dir
+  for dir in "${REVIEW_SCAN_EXCLUDE_DIRS[@]}"; do
+    globs+=("$dir" "$dir/**")
+  done
+  join_by_comma "${globs[@]}"
+}
+
+collect_reviewable_tracked_paths() {
+  local path
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    [ -f "$path" ] || continue
+    if ! path_is_standard_review_scan_excluded "$path"; then
+      printf '%s\n' "$path"
+    fi
+  done < <(git ls-files)
+}
+
+collect_reviewable_changed_paths() {
+  local base_ref="$1"
+  local paths_file
+  paths_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-review-paths.XXXXXX")"
+  : >"$paths_file"
+
+  if git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null; then
+    git diff --name-only "$base_ref"...HEAD >>"$paths_file"
+  else
+    warn "Could not resolve $base_ref; Gito review filter will use local changes only."
+  fi
+
+  git diff --cached --name-only >>"$paths_file"
+  git diff --name-only >>"$paths_file"
+  git ls-files --others --exclude-standard >>"$paths_file"
+
+  sort -u "$paths_file" | while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    if ! path_is_standard_review_scan_excluded "$path"; then
+      printf '%s\n' "$path"
+    fi
+  done
+
+  rm -f "$paths_file"
+}
+
+review_filter_pattern_for_path() {
+  local path="$1"
+  printf '%s\n' "$path"
+}
+
+review_filter_csv_from_paths() {
+  local patterns_file
+  patterns_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-review-filters.XXXXXX")"
+  : >"$patterns_file"
+
+  local path
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    review_filter_pattern_for_path "$path" >>"$patterns_file"
+  done
+
+  local patterns=()
+  local pattern
+  while IFS= read -r pattern; do
+    [ -n "$pattern" ] || continue
+    patterns+=("$pattern")
+  done < <(sort -u "$patterns_file")
+
+  rm -f "$patterns_file"
+  join_by_comma "${patterns[@]}"
+}
+
+reviewable_tracked_filter_csv() {
+  collect_reviewable_tracked_paths | review_filter_csv_from_paths
+}
+
+reviewable_changed_filter_csv() {
+  local base_ref="$1"
+  collect_reviewable_changed_paths "$base_ref" | review_filter_csv_from_paths
+}
+
+normalize_review_scope() {
+  case "${1:-diff}" in
+    diff|changed|current) printf 'diff' ;;
+    all|codebase|full) printf 'all' ;;
+    *) return 1 ;;
+  esac
+}
+
+review_command_name() {
+  if [ "${REVIEW_LOCAL_SCOPE:-diff}" = "all" ]; then
+    printf 'sd-review-local-all'
+  else
+    printf 'sd-review-local'
+  fi
+}
+
+review_scope_label() {
+  if [ "${REVIEW_LOCAL_SCOPE:-diff}" = "all" ]; then
+    printf 'full codebase'
+  else
+    printf 'current diff'
+  fi
+}
+
 record_status() {
   local label="$1"
   local status="$2"
@@ -35,6 +173,15 @@ record_status() {
   fi
 }
 
+positive_int_or_default() {
+  local value="$1"
+  local fallback="$2"
+  case "$value" in
+    ''|*[!0-9]*|0) printf '%s' "$fallback" ;;
+    *) printf '%s' "$value" ;;
+  esac
+}
+
 run_command() {
   local label="$1"
   shift
@@ -42,6 +189,28 @@ run_command() {
   "$@"
   local status=$?
   record_status "$label" "$status"
+}
+
+handle_prism_status() {
+  local label="$1"
+  local status="$2"
+
+  case "$status" in
+    0)
+      return 0
+      ;;
+    1)
+      warn "$label reported findings at or above the configured threshold."
+      OVERALL_STATUS=1
+      ;;
+    3|4)
+      warn "$label could not complete because Prism provider authentication or configuration failed with exit code $status."
+      OVERALL_STATUS=1
+      ;;
+    *)
+      record_status "$label" "$status"
+      ;;
+  esac
 }
 
 tool_env_key() {
@@ -54,12 +223,77 @@ configured_command_for_tool() {
   local tool="$1"
   local key
   key="$(tool_env_key "$tool")"
+
+  if [ "${REVIEW_LOCAL_SCOPE:-diff}" = "all" ]; then
+    local scoped_var_name="SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_${key}_COMMAND"
+    if [ -n "${!scoped_var_name:-}" ]; then
+      printf '%s' "${!scoped_var_name}"
+      return
+    fi
+  fi
+
   local var_name="SD_AI_COMMAND_PACK_REVIEW_LOCAL_${key}_COMMAND"
   printf '%s' "${!var_name:-}"
 }
 
+default_review_base_ref() {
+  local ref
+
+  if git rev-parse --verify --quiet "origin/HEAD^{commit}" >/dev/null; then
+    printf 'origin/HEAD'
+    return
+  fi
+
+  ref="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+  if [ -n "$ref" ]; then
+    printf '%s' "$ref"
+    return
+  fi
+
+  ref="$(git for-each-ref --format='%(refname:short)' refs/remotes 2>/dev/null | grep -v '/HEAD$' | head -n 1 || true)"
+  if [ -n "$ref" ]; then
+    printf '%s' "$ref"
+    return
+  fi
+
+  printf 'HEAD'
+}
+
+review_local_base_ref() {
+  if [ -n "${SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF:-}" ]; then
+    printf '%s' "$SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF"
+    return
+  fi
+  if [ -n "${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-}" ]; then
+    printf '%s' "$SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF"
+    return
+  fi
+  default_review_base_ref
+}
+
+review_local_gito_base_ref() {
+  if [ -n "${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF:-}" ]; then
+    printf '%s' "$SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF"
+    return
+  fi
+  if [ -n "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF:-}" ]; then
+    printf '%s' "$SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF"
+    return
+  fi
+  if [ -n "${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-}" ]; then
+    printf '%s' "$SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF"
+    return
+  fi
+  default_review_base_ref
+}
+
+tracked_deletions_present() {
+  [ -n "$(git ls-files --deleted)" ]
+}
+
 detect_merge_base() {
-  local base_ref="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF:-${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-origin/main}}"
+  local base_ref
+  base_ref="$(review_local_base_ref)"
   git merge-base "$base_ref" HEAD 2>/dev/null || true
 }
 
@@ -87,6 +321,14 @@ build_prism_args() {
   if [ -n "$rules" ] && [ -f "$rules" ]; then
     PRISM_ARGS+=(--rules "$rules")
   fi
+
+  local excludes
+  excludes="$(review_scan_exclude_globs_csv)"
+  local configured_excludes="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_EXCLUDE:-${SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_EXCLUDE:-}}"
+  if [ -n "$configured_excludes" ]; then
+    excludes="$excludes,$configured_excludes"
+  fi
+  PRISM_ARGS+=(--exclude "$excludes")
 }
 
 run_prism_command() {
@@ -95,23 +337,184 @@ run_prism_command() {
   section "$label"
   prism "$@" "${PRISM_ARGS[@]}"
   local status=$?
+  handle_prism_status "$label" "$status"
+}
 
-  case "$status" in
-    0)
+join_by_comma() {
+  local IFS=,
+  printf '%s' "$*"
+}
+
+prism_output_indicates_empty_chunk() {
+  local output_file="$1"
+  grep -Eiq 'chunked review|no content in response' "$output_file"
+}
+
+gito_output_indicates_rate_limit() {
+  local output_file="$1"
+  grep -Eiq 'clienterror:[[:space:]]*429|(^|[^0-9])429([^0-9]|$)|slow down|too many requests|rate[ -]?limit(ed)?' "$output_file"
+}
+
+gito_max_attempts() {
+  positive_int_or_default "${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS:-2}" 2
+}
+
+gito_initial_retry_delay() {
+  positive_int_or_default "${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS:-30}" 30
+}
+
+gito_max_retry_delay() {
+  positive_int_or_default "${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS:-120}" 120
+}
+
+run_gito_command() {
+  local label="$1"
+  shift
+  local max_attempts
+  max_attempts="$(gito_max_attempts)"
+  local delay
+  delay="$(gito_initial_retry_delay)"
+  local max_delay
+  max_delay="$(gito_max_retry_delay)"
+  if [ "$max_delay" -lt "$delay" ]; then
+    max_delay="$delay"
+  fi
+
+  local attempt=1
+  local output_file
+  while :; do
+    section "$label"
+    if [ "$max_attempts" -gt 1 ]; then
+      printf 'Gito attempt %s/%s\n' "$attempt" "$max_attempts"
+    fi
+
+    output_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-gito.XXXXXX")"
+    "$@" >"$output_file" 2>&1
+    local status=$?
+    cat "$output_file"
+
+    if [ "$status" -eq 0 ]; then
+      rm -f "$output_file"
       return 0
-      ;;
-    1)
-      warn "$label reported findings at or above the configured threshold."
+    fi
+
+    if [ "$attempt" -ge "$max_attempts" ] || ! gito_output_indicates_rate_limit "$output_file"; then
+      rm -f "$output_file"
+      return "$status"
+    fi
+
+    rm -f "$output_file"
+    warn "Gito appears rate-limited; retrying in ${delay}s after HTTP 429 / slow-down response."
+    if [ "$delay" -gt 0 ]; then
+      sleep "$delay"
+    fi
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+    if [ "$delay" -gt "$max_delay" ]; then
+      delay="$max_delay"
+    fi
+  done
+}
+
+record_prism_empty_chunk_failure() {
+  local label="$1"
+  warn "$label returned an empty chunk response after fallback splitting."
+  OVERALL_STATUS=1
+}
+
+run_prism_codebase_paths() {
+  local label="$1"
+  shift
+  local paths=("$@")
+  local paths_csv
+  paths_csv="$(join_by_comma "${paths[@]}")"
+  local output_file
+  output_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-prism-codebase.XXXXXX")"
+
+  section "$label"
+  prism review codebase --paths "$paths_csv" "${PRISM_ARGS[@]}" >"$output_file" 2>&1
+  local status=$?
+  cat "$output_file"
+
+  if [ "$status" -eq 4 ] && [ "${#paths[@]}" -gt 1 ] && prism_output_indicates_empty_chunk "$output_file"; then
+    rm -f "$output_file"
+    warn "$label returned an empty chunk response; retrying each path individually."
+    local path
+    local path_index=1
+    for path in "${paths[@]}"; do
+      run_prism_codebase_paths "$label path $path_index" "$path"
+      path_index=$((path_index + 1))
+    done
+    return
+  fi
+
+  if [ "$status" -eq 4 ] && prism_output_indicates_empty_chunk "$output_file"; then
+    rm -f "$output_file"
+    record_prism_empty_chunk_failure "$label"
+    return
+  fi
+  rm -f "$output_file"
+  handle_prism_status "$label" "$status"
+}
+
+run_prism_codebase_batches() {
+  local batch_size
+  batch_size="$(positive_int_or_default "${SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE:-25}" 25)"
+  local batch_index=1
+  local path_count=0
+  local batch=()
+  local path
+
+  flush_prism_batch() {
+    if [ "${#batch[@]}" -eq 0 ]; then
+      return
+    fi
+    run_prism_codebase_paths "Prism review: full codebase batch $batch_index" "${batch[@]}"
+    batch=()
+    batch_index=$((batch_index + 1))
+  }
+
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    batch+=("$path")
+    path_count=$((path_count + 1))
+    if [ "${#batch[@]}" -ge "$batch_size" ]; then
+      flush_prism_batch
+    fi
+  done < <(collect_reviewable_tracked_paths)
+
+  flush_prism_batch
+
+  if [ "$path_count" -eq 0 ]; then
+    warn "No tracked files found for Prism full-codebase batch fallback."
+  fi
+}
+
+run_prism_codebase_review() {
+  local label="Prism review: full codebase"
+  local output_file
+  output_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-prism-codebase.XXXXXX")"
+
+  section "$label"
+  prism review codebase "${PRISM_ARGS[@]}" >"$output_file" 2>&1
+  local status=$?
+  cat "$output_file"
+
+  if [ "$status" -eq 4 ] && prism_output_indicates_empty_chunk "$output_file"; then
+    rm -f "$output_file"
+    if is_disabled "${SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK:-1}"; then
+      warn "Prism full-codebase batch fallback is disabled because SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK=${SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK:-}."
+      warn "$label returned an empty chunk response."
       OVERALL_STATUS=1
-      ;;
-    3|4)
-      warn "$label could not complete because Prism provider authentication or configuration failed with exit code $status."
-      OVERALL_STATUS=1
-      ;;
-    *)
-      record_status "$label" "$status"
-      ;;
-  esac
+      return
+    fi
+    warn "Prism full-codebase review returned an empty chunk response; retrying in tracked-file batches."
+    run_prism_codebase_batches
+    return
+  fi
+
+  rm -f "$output_file"
+  handle_prism_status "$label" "$status"
 }
 
 run_prism_reviews() {
@@ -121,12 +524,17 @@ run_prism_reviews() {
     return
   fi
   if ! have prism; then
-    warn "Prism is required for sd-review-local but was not found on PATH."
+    warn "Prism is required for $(review_command_name) but was not found on PATH."
     OVERALL_STATUS=1
     return
   fi
 
   build_prism_args
+
+  if [ "$REVIEW_LOCAL_SCOPE" = "all" ]; then
+    run_prism_codebase_review
+    return
+  fi
 
   local ran=0
   if ! git diff --quiet --; then
@@ -145,7 +553,7 @@ run_prism_reviews() {
     ran=1
     run_prism_command "Prism review: committed branch diff" review range "$merge_base..HEAD"
   elif [ -z "$merge_base" ]; then
-    warn "Could not resolve merge base for ${SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF:-${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-origin/main}}; skipping Prism range review."
+    warn "Could not resolve merge base for $(review_local_base_ref); skipping Prism range review."
   fi
 
   if [ "$ran" -eq 0 ]; then
@@ -160,15 +568,56 @@ run_gito_review() {
     return
   fi
   if ! have gito; then
-    warn "Gito is required for sd-review-local but was not found on PATH."
+    warn "Gito is required for $(review_command_name) but was not found on PATH."
     OVERALL_STATUS=1
     return
   fi
 
-  local base_ref="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF:-${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF:-${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-origin/main}}}"
+  prepare_gito_uv_env
+
+  if [ "$REVIEW_LOCAL_SCOPE" = "all" ]; then
+    local out_dir="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_GITO_OUT_DIR:-${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_OUT_DIR:-${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR:-.build/review/gito-all}}}"
+    local filters
+    filters="$(reviewable_tracked_filter_csv)"
+    if [ -z "$filters" ]; then
+      warn "No tracked files remain after standard review-scan exclusions; skipping Gito full-codebase review."
+      return
+    fi
+    mkdir -p "$out_dir"
+    if tracked_deletions_present; then
+      warn "Tracked deletions are present; running Gito full-codebase review with an explicit existing-file filter instead of --all."
+      run_gito_command "Gito review: full codebase" gito review --path "$REPO_ROOT" --filter "$filters" --out "$out_dir"
+      record_status "Gito review: full codebase" "$?"
+    else
+      run_gito_command "Gito review: full codebase" gito review --all --path "$REPO_ROOT" --filter "$filters" --out "$out_dir"
+      record_status "Gito review: full codebase" "$?"
+    fi
+    return
+  fi
+
+  local base_ref
+  base_ref="$(review_local_gito_base_ref)"
   local out_dir="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_OUT_DIR:-${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR:-.build/review/gito}}"
+  local filters
+  filters="$(reviewable_changed_filter_csv "$base_ref")"
+  if [ -z "$filters" ]; then
+    warn "No changed files remain after standard review-scan exclusions; skipping Gito review."
+    return
+  fi
   mkdir -p "$out_dir"
-  run_command "Gito review" gito review --vs "$base_ref" --out "$out_dir"
+  run_gito_command "Gito review" gito review --vs "$base_ref" --filter "$filters" --out "$out_dir"
+  record_status "Gito review" "$?"
+}
+
+prepare_gito_uv_env() {
+  local default_tmp="${TMPDIR:-/tmp}"
+  if [ -z "${UV_CACHE_DIR:-}" ]; then
+    export UV_CACHE_DIR="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_UV_CACHE_DIR:-${default_tmp%/}/sd-ai-command-pack-uv-cache}"
+  fi
+  if [ -z "${UV_TOOL_DIR:-}" ]; then
+    export UV_TOOL_DIR="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_UV_TOOL_DIR:-${default_tmp%/}/sd-ai-command-pack-uv-tools}"
+  fi
+  mkdir -p "$UV_CACHE_DIR" "$UV_TOOL_DIR"
 }
 
 run_custom_tool() {
@@ -178,9 +627,48 @@ run_custom_tool() {
 }
 
 raw_tools="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS:-prism gito}"
-if [ "$#" -gt 0 ]; then
-  raw_tools="$*"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --all|--codebase|--full)
+      REVIEW_LOCAL_SCOPE="all"
+      shift
+      ;;
+    --diff|--changed)
+      REVIEW_LOCAL_SCOPE="diff"
+      shift
+      ;;
+    --scope=*)
+      REVIEW_LOCAL_SCOPE="${1#--scope=}"
+      shift
+      ;;
+    --scope)
+      if [ "$#" -lt 2 ]; then
+        warn "--scope requires a value: diff or all."
+        exit 2
+      fi
+      REVIEW_LOCAL_SCOPE="$2"
+      shift 2
+      ;;
+    --)
+      shift
+      if [ "$#" -gt 0 ]; then
+        raw_tools="$*"
+      fi
+      break
+      ;;
+    *)
+      raw_tools="$*"
+      break
+      ;;
+  esac
+done
+
+requested_review_scope="$REVIEW_LOCAL_SCOPE"
+if ! REVIEW_LOCAL_SCOPE="$(normalize_review_scope "$requested_review_scope")"; then
+  warn "Unsupported local review scope '$requested_review_scope'. Use 'diff' or 'all'."
+  exit 2
 fi
+
 raw_tools="${raw_tools//,/ }"
 read -r -a REQUESTED_TOOLS <<< "$raw_tools"
 
@@ -221,11 +709,17 @@ for raw_tool in "${REQUESTED_TOOLS[@]}"; do
       ;;
     *)
       key="$(tool_env_key "$tool")"
-      warn "No command configured for local review tool '$tool'. Set SD_AI_COMMAND_PACK_REVIEW_LOCAL_${key}_COMMAND."
+      if [ "$REVIEW_LOCAL_SCOPE" = "all" ]; then
+        warn "No command configured for local review tool '$tool'. Set SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_${key}_COMMAND or SD_AI_COMMAND_PACK_REVIEW_LOCAL_${key}_COMMAND."
+      else
+        warn "No command configured for local review tool '$tool'. Set SD_AI_COMMAND_PACK_REVIEW_LOCAL_${key}_COMMAND."
+      fi
       OVERALL_STATUS=2
       ;;
   esac
 done
+
+section "Local review scope: $(review_scope_label)"
 
 if [ "$NEED_PRISM" -eq 1 ]; then
   run_prism_reviews
@@ -240,9 +734,9 @@ for index in "${!CUSTOM_TOOL_NAMES[@]}"; do
 done
 
 if [ "$OVERALL_STATUS" -eq 0 ]; then
-  printf '\nLocal review providers completed without reported findings.\n'
+  printf '\nLocal review providers completed without reported findings (%s scope).\n' "$(review_scope_label)"
 else
-  printf '\nLocal review providers reported findings, failures, or missing configuration.\n' >&2
+  printf '\nLocal review providers reported findings, failures, or missing configuration (%s scope).\n' "$(review_scope_label)" >&2
 fi
 
 exit "$OVERALL_STATUS"
