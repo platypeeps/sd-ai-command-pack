@@ -2510,6 +2510,83 @@ class InstallTests(unittest.TestCase):
         self.assertIn("gito review --vs HEAD --out .build/review/gito", log)
         self.assertTrue((root / ".build/review/gito").is_dir())
 
+    def test_review_local_script_disabled_provider_smoke(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MODE": "0",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MODE": "0",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Skipping Prism review", result.stdout)
+        self.assertIn("Skipping Gito review", result.stdout)
+        self.assertIn("Local review providers completed", result.stdout)
+
+    def test_review_local_script_runs_configured_custom_tool(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        tool_log = root / "custom-tool.log"
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "CUSTOM_TOOL_LOG": str(tool_log),
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS": "custom",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_CUSTOM_COMMAND": (
+                    "printf 'custom-ok\\n' > \"$CUSTOM_TOOL_LOG\""
+                ),
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("==> Local review: custom", result.stdout)
+        self.assertEqual(tool_log.read_text(encoding="utf-8"), "custom-ok\n")
+
+    def test_review_local_script_reports_unknown_tool(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "unknown"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("No command configured for local review tool 'unknown'", result.stdout)
+
     def test_pack_owned_scripts_use_sd_ai_command_pack_identity(self) -> None:
         raw, files = install.load_manifest()
         script_files = [
@@ -3701,6 +3778,86 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             self.assertIn("command invocation", content, doc_path)
             self.assertIn("SD_AI_COMMAND_PACK_SCOPE_PR_BODY", content, doc_path)
             self.assertIn("REVIEW_PREFLIGHT_PR_BODY", content, doc_path)
+
+    def test_pr_body_scope_script_classifies_review_local_as_ci_review(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        changed_files = root / "changed-files.txt"
+        changed_files.write_text(
+            "scripts/sd-ai-command-pack-review-local.sh\n"
+            "scripts/sd-ai-command-pack-review-learnings.py\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/sd-ai-command-pack-pr-body-scope.py",
+                "--changed-files",
+                str(changed_files),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("detected Tooling/generated scope", result.stdout)
+        self.assertIn("detected CI/review scope", result.stdout)
+        self.assertIn("scripts/sd-ai-command-pack-review-local.sh", result.stdout)
+        self.assertIn("scripts/sd-ai-command-pack-review-learnings.py", result.stdout)
+
+    def test_pr_body_scope_script_merges_matching_configured_scope(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        config = root / ".sd-ai-command-pack/pr-body-scope.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "rules": [
+                        {
+                            "label": "CI/review scope",
+                            "headings": [
+                                "CI/review scope:",
+                                "CI scope:",
+                                "Workflow scope:",
+                            ],
+                            "patterns": ["scripts/local-review-wrapper.py"],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        changed_files = root / "changed-files.txt"
+        changed_files.write_text(
+            ".github/workflows/test.yml\n"
+            "scripts/local-review-wrapper.py\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/sd-ai-command-pack-pr-body-scope.py",
+                "--changed-files",
+                str(changed_files),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(result.stdout.count("detected CI/review scope paths:"), 1)
+        self.assertIn(".github/workflows/test.yml", result.stdout)
+        self.assertIn("scripts/local-review-wrapper.py", result.stdout)
 
     def test_pr_body_scope_script_enforces_configured_runtime_scope(self) -> None:
         root = self.make_repo()

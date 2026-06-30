@@ -117,6 +117,8 @@ DEFAULT_RULES = (
             "scripts/classify_ci_changes.sh",
             "scripts/check-review-preflight.mjs",
             "scripts/sd-ai-command-pack-review-scope.sh",
+            "scripts/sd-ai-command-pack-review-local.sh",
+            "scripts/sd-ai-command-pack-review-learnings.py",
             "scripts/sd-ai-command-pack-install-audit.py",
             "scripts/sd-ai-command-pack-pr-body-scope.py",
             "scripts/sd-ai-command-pack-full-check.sh",
@@ -281,6 +283,24 @@ def _resolve_config_path(root: Path, explicit_config: Path | None) -> tuple[Path
     return root / DEFAULT_CONFIG_PATH, False
 
 
+def _merge_rules(rules: tuple[ScopeRule, ...]) -> tuple[ScopeRule, ...]:
+    merged: dict[tuple[str, tuple[str, ...]], list[str]] = {}
+    order: list[tuple[str, tuple[str, ...]]] = []
+    for rule in rules:
+        key = (rule.label, rule.headings)
+        if key not in merged:
+            merged[key] = []
+            order.append(key)
+        for pattern in rule.patterns:
+            if pattern not in merged[key]:
+                merged[key].append(pattern)
+
+    return tuple(
+        ScopeRule(label=label, headings=headings, patterns=tuple(merged[(label, headings)]))
+        for label, headings in order
+    )
+
+
 def _rules_for_repo(root: Path, explicit_config: Path | None) -> tuple[tuple[ScopeRule, ...], str | None]:
     installed_targets, target_error = _load_installed_target_patterns(root)
     if target_error is not None:
@@ -308,7 +328,7 @@ def _rules_for_repo(root: Path, explicit_config: Path | None) -> tuple[tuple[Sco
     if config_error is not None:
         return (), config_error
 
-    return tuple(default_rules) + config_rules, None
+    return _merge_rules(tuple(default_rules) + config_rules), None
 
 
 def _classify(paths: list[str], rules: tuple[ScopeRule, ...]) -> dict[ScopeRule, list[str]]:
