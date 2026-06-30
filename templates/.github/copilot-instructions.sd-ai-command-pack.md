@@ -19,6 +19,7 @@
   `scripts/sd-ai-command-pack-housekeeping.sh`,
   `scripts/sd-ai-command-pack-review-local.sh`,
   `scripts/sd-ai-command-pack-review-scope.sh`,
+  `scripts/sd-ai-command-pack-review-preflight.mjs`,
   `scripts/sd-ai-command-pack-review-learnings.py`,
   `scripts/sd-ai-command-pack-install-audit.py`,
   `scripts/sd-ai-command-pack-pr-body-scope.py`, and
@@ -47,7 +48,9 @@
 - Group duplicate root causes into one comment, especially when generated,
   copied, or adapter files repeat the same issue.
 - When deterministic local checks already cover a repeated issue class, prefer
-  one concise pointer to the failing check over repeated inline comments.
+  one concise pointer to the failing check over repeated inline comments. If
+  the check is fragile or missing, ask for one focused fixture in the local
+  preflight or guard suite instead of repeating the same finding.
 - Separate current, non-outdated unresolved findings from stale or outdated review threads.
   Treat copied or generated payloads as source/sync-contract review surfaces
   instead of style-review surfaces.

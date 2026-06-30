@@ -36,6 +36,7 @@ The current Trellis-focused pack includes:
 - `scripts/sd-ai-command-pack-full-check.sh`
 - `scripts/sd-ai-command-pack-housekeeping.sh`
 - `scripts/sd-ai-command-pack-review-scope.sh`
+- `scripts/sd-ai-command-pack-review-preflight.mjs`
 - `scripts/sd-ai-command-pack-review-local.sh`
 - `scripts/sd-ai-command-pack-review-learnings.py`
 - `scripts/sd-ai-command-pack-install-audit.py`
@@ -128,11 +129,12 @@ run `/commands list` to confirm the project command files Gemini loaded.
 The full-check command (`/sd:full-check` in Claude/Gemini; `sd-full-check` in
 Cursor, GitHub Copilot, OpenCode, and Codex) is optional but strongly
 recommended before PR readiness.
-It runs deterministic checks, an optional repo-local review preflight when
-`SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND` is configured or
-`scripts/check-review-preflight.mjs` exists, optional package-script checks
-when a `package.json`, Node.js, and the selected package runner are available,
-and a current-diff CI classification report when a target repo provides
+It runs deterministic checks, the generic
+`scripts/sd-ai-command-pack-review-preflight.mjs`, any configured
+`SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND`, the legacy repo-local
+`scripts/check-review-preflight.mjs` when present, optional package-script
+checks when a `package.json`, Node.js, and the selected package runner are
+available, and a current-diff CI classification report when a target repo provides
 `scripts/classify-ci-changes.sh`. During migration it also tolerates the legacy
 `scripts/classify_ci_changes.sh` name, but target classifiers should support
 `bash scripts/classify-ci-changes.sh -- changed-file ...` so paths beginning
@@ -257,7 +259,7 @@ python3 install.py /path/to/trellis/repo
 The installer requires `.trellis/config.yaml` in the target repo and will fail
 with the Trellis install link if that marker is missing. It always installs the
 shared `.agents` skills, full-check, housekeeping, review-scope, review-local,
-PR-body scope, and update-spec KB scripts, Prism rules, usage guide, and the
+review-preflight, PR-body scope, and update-spec KB scripts, Prism rules, usage guide, and the
 generated `.sd-ai-command-pack/installed-targets.txt` snapshot used by the scope
 checks.
 It installs platform adapters only when the target repo has the corresponding
@@ -299,7 +301,7 @@ with `--force` to save a `.bak` copy of every overwritten file next to the
 original before it is changed.
 
 Platform filters always include the shared skills, full-check, housekeeping,
-review-scope, review-local, PR-body scope, and update-spec KB scripts, Prism
+review-scope, review-preflight, review-local, PR-body scope, and update-spec KB scripts, Prism
 rules, usage guide, and installed-targets snapshot, because the review,
 full-check, housekeeping, and update-spec adapters delegate to those shared
 assets.
@@ -319,7 +321,16 @@ unless those files have obvious syntax, secret, or integration-goal issues. It
 also tells Copilot not to leave line comments on wording, spelling, links,
 formatting, examples, or implementation details inside copied Trellis or copied
 SD command-pack files. It asks Copilot to group duplicate root causes and point
-to deterministic local checks when they already cover a repeated issue class.
+to deterministic local checks when they already cover a repeated issue class,
+or request a focused local fixture when a repeated issue needs a stronger
+preflight.
+
+The full-check script also runs `scripts/sd-ai-command-pack-review-preflight.mjs`.
+It is a generic dependency-free preflight for copied/generated disclosure,
+documentation path hygiene, Trellis journal consistency, npm override drift,
+and large diff warnings. Target repos can tune it with
+`.sd-ai-command-pack/review-preflight.json`, including intentional Linux
+service users through `allowedLinuxHomeUsers`.
 
 The full-check script also runs `scripts/sd-ai-command-pack-install-audit.py`.
 That helper checks `.sd-ai-command-pack/installed-targets.txt` for missing

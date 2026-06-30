@@ -92,6 +92,13 @@
     {
       "platform": "shared",
       "kind": "script",
+      "source": "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
+      "target": "scripts/sd-ai-command-pack-review-preflight.mjs",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "script",
       "source": "templates/scripts/sd-ai-command-pack-review-local.sh",
       "target": "scripts/sd-ai-command-pack-review-local.sh",
       "install": "always"

@@ -24,6 +24,9 @@ first; they cover `npm install -g @mindfoldhq/trellis@latest` and
 - `scripts/sd-ai-command-pack-housekeeping.sh`: canonical post-merge housekeeping script.
 - `scripts/sd-ai-command-pack-review-scope.sh`: copied/generated file scope
   preflight for mixed PRs.
+- `scripts/sd-ai-command-pack-review-preflight.mjs`: generic dependency-free
+  review preflight for copied/generated disclosure, documentation path hygiene,
+  Trellis journal consistency, npm override drift, and large diff warnings.
 - `scripts/sd-ai-command-pack-review-local.sh`: local Prism/Gito and configured
   review-tool runner for the review-local loop.
 - `scripts/sd-ai-command-pack-review-learnings.py`: local review feedback
@@ -174,11 +177,11 @@ python3 scripts/sd-ai-command-pack-review-learnings.py --base origin/main --incl
 ```
 
 The full-check script runs `git diff --check`, `git diff --cached --check`,
-repo-local review preflight when
-`SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND` is configured, or through
-`scripts/check-review-preflight.mjs` when that Node.js script exists, the
-post-install audit, the tooling/generated file scope preflight, the PR-body
-scope preflight, current-diff CI classification when
+review preflight through `scripts/sd-ai-command-pack-review-preflight.mjs`, any
+configured `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND`, and the
+legacy repo-local `scripts/check-review-preflight.mjs` when present. It then
+runs the post-install audit, the tooling/generated file scope preflight, the
+PR-body scope preflight, current-diff CI classification when
 `scripts/classify-ci-changes.sh` exists, optional package-script checks when a
 `package.json`, Node.js, and the selected package runner are available, and
 local Prism review when `prism` is available and configured. For target repos
@@ -198,6 +201,18 @@ resolve a current PR, it checks that the PR body includes a
 `Tooling/generated scope:` section before review cycles spend attention on
 copied or generated surfaces. In CI or local preflights where `gh pr view`
 should not run, pass the PR body through `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`.
+
+The review preflight is intentionally generic and safe to run without project
+dependencies. It checks for duplicate npm override sources of truth, changed
+copied Trellis or SD command-pack surfaces without companion repo-owned
+integration context, personal absolute paths in docs/prompts/specs, missing
+repo path references in docs/prompts/specs, completed Trellis journal
+placeholder or journal/index commit drift, and large diffs that are likely to
+skip remote AI review. Target repos can tune roots, path-reference prefixes,
+integration paths, optional paths, copied-template paths, and warning thresholds
+with `.sd-ai-command-pack/review-preflight.json`. Repos that intentionally
+document service-user paths under `/home/<user>/` can add those service users to
+`allowedLinuxHomeUsers` in that config.
 
 The review-local script defaults to Prism plus Gito and is intentionally
 tool-stack aware. Pass tool names as arguments, set
@@ -340,10 +355,13 @@ Common environment variables:
 - `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT=0`: skip
   repo-local review preflight.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT=required`: fail if no configured
-  review preflight command can run and the optional
-  `scripts/check-review-preflight.mjs` fallback is unavailable.
+  review preflight command can run and the shared or legacy review preflight is
+  unavailable.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND`: repo-specific review
   preflight command to run with `bash -lc`.
+- `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_SCRIPT`: custom JavaScript
+  review preflight script to run before the legacy repo-local
+  `scripts/check-review-preflight.mjs` fallback.
 - `SD_AI_COMMAND_PACK_INSTALL_AUDIT=0`: skip the structural post-install audit.
 - `SD_AI_COMMAND_PACK_INSTALL_AUDIT=required`: fail if the full-check cannot run
   the audit script.

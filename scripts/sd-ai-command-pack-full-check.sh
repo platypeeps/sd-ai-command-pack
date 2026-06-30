@@ -318,7 +318,8 @@ run_ci_classification_report() {
 run_review_preflight() {
   local mode="${SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT:-1}"
   local command="${SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND:-}"
-  local script="scripts/check-review-preflight.mjs"
+  local script="${SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_SCRIPT:-scripts/sd-ai-command-pack-review-preflight.mjs}"
+  local legacy_script="scripts/check-review-preflight.mjs"
 
   if is_disabled "$mode"; then
     warn "Skipping review preflight because SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT=$mode."
@@ -330,25 +331,36 @@ run_review_preflight() {
     return 0
   fi
 
-  if [ ! -f "$script" ]; then
-    if [ "$mode" = "required" ]; then
-      printf 'Review preflight is required but no command is configured and %s is missing.\n' "$script" >&2
-      exit 127
-    fi
-    warn "$script not found and SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND is not set; skipping review preflight."
-    return 0
-  fi
-
   if ! have node; then
     if [ "$mode" = "required" ]; then
-      printf 'Review preflight is required but Node.js is not found on PATH for %s.\n' "$script" >&2
+      printf 'Review preflight is required but Node.js is not found on PATH.\n' >&2
       exit 127
     fi
-    warn "Node.js not found on PATH; scripts/check-review-preflight.mjs is unavailable; skipping review preflight."
+    warn "Node.js not found on PATH; JavaScript review preflight is unavailable; skipping review preflight."
     return 0
   fi
 
-  run "Review preflight" node "$script"
+  local ran=0
+  if [ -f "$script" ]; then
+    run "SD AI command pack review preflight" node "$script"
+    ran=1
+  fi
+
+  if [ -f "$legacy_script" ] && [ "$legacy_script" != "$script" ]; then
+    run "Repo-local review preflight" node "$legacy_script"
+    ran=1
+  fi
+
+  if [ "$ran" -eq 1 ]; then
+    return 0
+  fi
+
+  if [ "$mode" = "required" ]; then
+    printf 'Review preflight is required but no command is configured and neither %s nor %s exists.\n' "$script" "$legacy_script" >&2
+    exit 127
+  fi
+
+  warn "$script and $legacy_script not found; skipping review preflight."
 }
 
 main() {

@@ -207,6 +207,20 @@ class InstallTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, f"{script}: {result.stdout}")
 
+    def assert_node_syntax_valid(self, script: Path) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        result = subprocess.run(
+            [node, "--check", str(script)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, f"{script}: {result.stdout}")
+
     def assert_prism_rules_valid(self, rules_path: Path) -> None:
         rules = json.loads(rules_path.read_text(encoding="utf-8"))
 
@@ -354,6 +368,7 @@ class InstallTests(unittest.TestCase):
             "scripts/sd-ai-command-pack-housekeeping.sh",
             "scripts/sd-ai-command-pack-review-local.sh",
             "scripts/sd-ai-command-pack-review-scope.sh",
+            "scripts/sd-ai-command-pack-review-preflight.mjs",
             "scripts/sd-ai-command-pack-review-learnings.py",
             "scripts/sd-ai-command-pack-install-audit.py",
             "scripts/sd-ai-command-pack-pr-body-scope.py",
@@ -546,6 +561,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-housekeeping.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-scope.sh").is_file())
+        self.assertTrue((root / "scripts/sd-ai-command-pack-review-preflight.mjs").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-local.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-learnings.py").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-install-audit.py").is_file())
@@ -668,6 +684,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-housekeeping.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-scope.sh").is_file())
+        self.assertTrue((root / "scripts/sd-ai-command-pack-review-preflight.mjs").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-local.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-learnings.py").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-pr-body-scope.py").is_file())
@@ -740,6 +757,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-housekeeping.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-scope.sh").is_file())
+        self.assertTrue((root / "scripts/sd-ai-command-pack-review-preflight.mjs").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-local.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-learnings.py").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-pr-body-scope.py").is_file())
@@ -1103,6 +1121,8 @@ class InstallTests(unittest.TestCase):
                 self.assert_shell_syntax_valid(installed_script)
             elif installed_script.suffix == ".py":
                 self.assert_python_syntax_valid(installed_script)
+            elif installed_script.suffix == ".mjs":
+                self.assert_node_syntax_valid(installed_script)
             else:
                 self.fail(f"unexpected installed script suffix: {installed_script}")
             self.assert_no_secret_markers(installed_script)
@@ -1391,6 +1411,7 @@ class InstallTests(unittest.TestCase):
         )
         for expected in (
             "scripts/sd-ai-command-pack-review-scope.sh",
+            "scripts/sd-ai-command-pack-review-preflight.mjs",
             "scripts/sd-ai-command-pack-review-learnings.py",
             "scripts/sd-ai-command-pack-pr-body-scope.py",
             "scripts/sd-ai-command-pack-update-spec-kb.py",
@@ -1565,6 +1586,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / "scripts/sd-ai-command-pack-full-check.sh").exists())
         self.assertFalse((root / "scripts/sd-ai-command-pack-housekeeping.sh").exists())
         self.assertFalse((root / "scripts/sd-ai-command-pack-review-scope.sh").exists())
+        self.assertFalse((root / "scripts/sd-ai-command-pack-review-preflight.mjs").exists())
         self.assertFalse((root / "scripts/sd-ai-command-pack-pr-body-scope.py").exists())
         self.assertFalse((root / "scripts/sd-ai-command-pack-update-spec-kb.py").exists())
         self.assertFalse((root / ".prism/rules.json").exists())
@@ -2503,6 +2525,7 @@ class InstallTests(unittest.TestCase):
             "scripts/sd-ai-command-pack-full-check.sh",
             "scripts/sd-ai-command-pack-housekeeping.sh",
             "scripts/sd-ai-command-pack-review-scope.sh",
+            "scripts/sd-ai-command-pack-review-preflight.mjs",
             "scripts/sd-ai-command-pack-review-local.sh",
             "scripts/sd-ai-command-pack-review-learnings.py",
             "scripts/sd-ai-command-pack-install-audit.py",
@@ -2561,10 +2584,15 @@ class InstallTests(unittest.TestCase):
         self.assertIn("CI change classification: current diff", script)
         self.assertIn("sd-ai-command-pack-ci-paths", script)
         self.assertIn("run_review_preflight()", script)
+        self.assertIn("scripts/sd-ai-command-pack-review-preflight.mjs", script)
         self.assertIn("scripts/check-review-preflight.mjs", script)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT", script)
         self.assertIn(
             "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND",
+            script,
+        )
+        self.assertIn(
+            "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_SCRIPT",
             script,
         )
         self.assertIn("run_review_preflight", script)
@@ -2824,6 +2852,7 @@ class InstallTests(unittest.TestCase):
         root = self.make_repo()
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "scripts/sd-ai-command-pack-review-preflight.mjs").unlink()
 
         result = subprocess.run(
             [self._bash_path, "scripts/sd-ai-command-pack-full-check.sh"],
@@ -2843,10 +2872,144 @@ class InstallTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 127, result.stdout)
         self.assertIn(
-            "Review preflight is required but no command is configured and "
-            "scripts/check-review-preflight.mjs is missing",
+            "Review preflight is required but no command is configured and neither "
+            "scripts/sd-ai-command-pack-review-preflight.mjs nor "
+            "scripts/check-review-preflight.mjs exists",
             result.stdout,
         )
+
+    def test_review_preflight_exports_reusable_helpers(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        result = subprocess.run(
+            [
+                node,
+                "--input-type=module",
+                "-e",
+                """
+import assert from 'node:assert/strict';
+import {
+  copiedTemplateKind,
+  extractDocumentationPathReferences,
+  parseJournalSessionsFromText,
+  parseWorkspaceIndexSessionsFromText,
+  validateTrellisJournalSessions,
+} from './scripts/sd-ai-command-pack-review-preflight.mjs';
+
+assert.equal(copiedTemplateKind('.trellis/scripts/get_context.py'), 'trellis');
+assert.equal(copiedTemplateKind('.agents/skills/sd-review-pr/SKILL.md'), 'sd-ai-command-pack');
+assert.deepEqual(
+  extractDocumentationPathReferences('docs/guide.md', 'See `docs/current.md` and [missing](../missing.md).').map((item) => item.target),
+  ['../missing.md', 'docs/current.md'],
+);
+const journal = parseJournalSessionsFromText('.trellis/workspace/dev/journal-1.md', [
+  '## Session 1: Done',
+  '### Status',
+  '- [OK] **Completed**',
+  '### Main Changes',
+  '(Add details)',
+  '### Git Commits',
+  '- abcdef1',
+].join('\\n'));
+const index = parseWorkspaceIndexSessionsFromText('.trellis/workspace/dev/index.md', '| 1 | Done | Completed | 1234567 | note |\\n');
+const validation = validateTrellisJournalSessions({
+  developerRelative: '.trellis/workspace/dev',
+  indexFile: '.trellis/workspace/dev/index.md',
+  indexSessions: index,
+  journalSessions: journal,
+});
+assert.equal(validation.completedSessions, 1);
+assert.ok(validation.failures.some((failure) => failure.includes('(Add details)')));
+assert.ok(validation.failures.some((failure) => failure.includes('commits `1234567` do not match')));
+""",
+            ],
+            cwd=PACK_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_review_preflight_script_detects_trellis_journal_drift(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        workspace = root / ".trellis/workspace/dev"
+        workspace.mkdir(parents=True)
+        (workspace / "journal-1.md").write_text(
+            "\n".join(
+                [
+                    "## Session 1: Guard fixture",
+                    "### Status",
+                    "**Completed**",
+                    "### Main Changes",
+                    "(Add details)",
+                    "### Testing",
+                    "(Add test results)",
+                    "### Git Commits",
+                    "- abcdef1",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (workspace / "index.md").write_text(
+            "| Session | Title | Status | Commits | Notes |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| 1 | Guard fixture | Completed | 1234567 | done |\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("completed Session 1 still contains placeholder (Add details)", result.stdout)
+        self.assertIn("completed Session 1 still contains placeholder (Add test results)", result.stdout)
+        self.assertIn("commits `1234567` do not match", result.stdout)
+
+    def test_review_preflight_allows_configured_linux_service_users(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "docs/service.md").write_text(
+            "Use `/home/service-user/app` for the service account.\n",
+            encoding="utf-8",
+        )
+        config = root / ".sd-ai-command-pack/review-preflight.json"
+        config.write_text(
+            '{"allowedLinuxHomeUsers":["service-user"]}\n',
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("personal absolute paths", result.stdout)
 
     def test_full_check_script_runs_install_audit(self) -> None:
         if self._bash_path is None:
@@ -3000,6 +3163,8 @@ class InstallTests(unittest.TestCase):
                 self.assert_shell_syntax_valid(file.source)
             elif file.source.suffix == ".py":
                 self.assert_python_syntax_valid(file.source)
+            elif file.source.suffix == ".mjs":
+                self.assert_node_syntax_valid(file.source)
             else:
                 self.fail(f"unexpected script template suffix: {file.source}")
             self.assert_no_secret_markers(file.source)
