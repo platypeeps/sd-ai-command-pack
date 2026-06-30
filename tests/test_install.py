@@ -1036,6 +1036,34 @@ class InstallTests(unittest.TestCase):
         self.assertIn(".github/copilot-instructions.md", result.stdout)
         self.assertFalse((root / ".github/copilot-instructions.md").exists())
 
+    def test_tracked_copilot_guidance_matches_template(self) -> None:
+        installed = (install.ROOT / ".github/copilot-instructions.md").read_text(
+            encoding="utf-8"
+        )
+        template = (
+            install.ROOT / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertEqual(installed, template)
+
+    def test_tracked_full_check_skill_matches_template_and_documents_audit(self) -> None:
+        installed = (install.ROOT / ".agents/skills/sd-full-check/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        template = (
+            install.ROOT / "templates/.agents/skills/sd-full-check/SKILL.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertEqual(installed, template)
+        for expected in (
+            "Structural post-install audit",
+            "scripts/sd-ai-command-pack-install-audit.py",
+            "SD_AI_COMMAND_PACK_INSTALL_AUDIT=0",
+            "SD_AI_COMMAND_PACK_INSTALL_AUDIT=required",
+            "post-install audit ran, skipped, or failed",
+        ):
+            self.assertIn(expected, installed)
+
     def test_rejects_copilot_instruction_symlink_resolved_outside_repo(
         self,
     ) -> None:

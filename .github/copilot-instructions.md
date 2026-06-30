@@ -17,10 +17,18 @@
   `.sd-ai-command-pack/installed-targets.txt`, `docs/SD_AI_COMMAND_PACK.md`,
   `scripts/sd-ai-command-pack-full-check.sh`,
   `scripts/sd-ai-command-pack-housekeeping.sh`,
+  `scripts/sd-ai-command-pack-review-local.sh`,
   `scripts/sd-ai-command-pack-review-scope.sh`,
   `scripts/sd-ai-command-pack-review-learnings.py`,
+  `scripts/sd-ai-command-pack-install-audit.py`,
   `scripts/sd-ai-command-pack-pr-body-scope.py`, and
   `scripts/sd-ai-command-pack-update-spec-kb.py`.
+- Do not leave line comments on wording, spelling, links, formatting, examples,
+  or implementation details inside copied Trellis skills/agents/commands or
+  copied SD command-pack skills/prompts/scripts/docs/rules. Only comment when
+  the PR changes local integration around those files, exposes secrets, breaks
+  repository wiring, or makes the copied-file inventory/documentation
+  inconsistent.
 - For mixed PRs, spend review budget on app behavior, data contracts, specs,
   tests, operator docs, and repo-owned scripts. Only comment on copied
   Trellis/SD AI command pack files for obvious syntax breakage, secret leakage,
@@ -40,4 +48,7 @@
   copied, or adapter files repeat the same issue.
 - When deterministic local checks already cover a repeated issue class, prefer
   one concise pointer to the failing check over repeated inline comments.
+- Separate current, non-outdated unresolved findings from stale or outdated review threads.
+  Treat copied or generated payloads as source/sync-contract review surfaces
+  instead of style-review surfaces.
 <!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:END -->

@@ -27,17 +27,20 @@ The script runs:
 4. Copied/generated tooling scope checks for Trellis/SD AI command pack, known
    repository-map files when present, and Trellis workspace journal/index
    changes.
-5. Configurable PR-body scope checks for generated/tooling, automation, and
+5. Structural post-install audit through
+   `scripts/sd-ai-command-pack-install-audit.py`, verifying that copied pack
+   targets match `.sd-ai-command-pack/installed-targets.txt`.
+6. Configurable PR-body scope checks for generated/tooling, automation, and
    CI/review diffs, plus any repo-added categories in
    `.sd-ai-command-pack/pr-body-scope.json`.
-6. Current-diff CI classification reporting through
+7. Current-diff CI classification reporting through
    `scripts/classify-ci-changes.sh` when that script exists.
-7. Optional package-script checks when `package.json`, Node.js, and the
+8. Optional package-script checks when `package.json`, Node.js, and the
    selected package runner are available. The default script-name probe looks
    for common entries: `typecheck`, `lint`, `test:unit`, `test:integration`,
    `build`, and `test:e2e`.
-8. Prism local review when `prism` is on `PATH` and Prism is not disabled.
-9. Gito review only when explicitly enabled.
+9. Prism local review when `prism` is on `PATH` and Prism is not disabled.
+10. Gito review only when explicitly enabled.
 
 ## Safety Rules
 
@@ -65,6 +68,10 @@ The script runs:
   `scripts/check-review-preflight.mjs` fallback is unavailable.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND`: repo-specific review
   preflight command to run with `bash -lc`.
+- `SD_AI_COMMAND_PACK_INSTALL_AUDIT=0`: skip the structural post-install audit.
+- `SD_AI_COMMAND_PACK_INSTALL_AUDIT=required`: fail if the audit helper or
+  `python3` is unavailable. By default those availability problems warn and
+  continue.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS`: space-separated package scripts
   to run when `package.json` and the selected package runner are available.
   The older `SD_AI_COMMAND_PACK_FULL_CHECK_NPM_SCRIPTS` name is still accepted for
@@ -102,6 +109,7 @@ Report:
 
 - Whether deterministic checks passed.
 - Whether repo-local review preflight ran, skipped, or failed.
+- Whether the post-install audit ran, skipped, or failed.
 - Which package-script checks ran or were skipped.
 - Whether Prism ran, skipped, found findings, lacked credentials, or had
   provider/model configuration failures.
