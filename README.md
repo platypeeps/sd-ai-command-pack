@@ -162,7 +162,8 @@ enabled, Gito writes reports to `.build/review/gito` by default; override with
 
 The review-local command (`/sd:review-local` in Claude/Gemini;
 `sd-review-local` in Cursor, GitHub Copilot, OpenCode, and Codex) runs local
-review providers against the current diff and enters a user-selected fix loop.
+review providers against local changed files, or against the current branch
+diff when there are no local changed files, and enters a user-selected fix loop.
 By default it runs Prism and Gito through
 `scripts/sd-ai-command-pack-review-local.sh`, presents grouped findings, asks
 which findings to fix, fixes only selected items, and repeats the same local

@@ -2793,6 +2793,118 @@ class InstallTests(unittest.TestCase):
         )
         self.assertTrue((root / ".build/review/gito").is_dir())
 
+    def test_review_local_script_reviews_branch_when_no_local_changes(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("base\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        (root / "app.txt").write_text("branch\n", encoding="utf-8")
+        self.run_git(root, "add", "app.txt")
+        self.run_git(root, "commit", "-m", "branch change")
+        merge_base = self.git_output(root, "rev-parse", "HEAD~1")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-review-local-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        for name in ("prism", "gito"):
+            tool = stub_bin / name
+            tool.write_text(
+                "#!/usr/bin/env bash\n"
+                f"printf '{name} %s\\n' \"$*\" >> {str(log_path)!r}\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            tool.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF": "HEAD~1",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF": "HEAD~1",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertIn(f"prism review range {merge_base}..HEAD", log)
+        self.assertIn(
+            "gito review --vs HEAD~1 --filter app.txt --out .build/review/gito",
+            log,
+        )
+
+    def test_review_local_script_prefers_local_changes_over_branch_diff(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "branch.txt").write_text("base\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        (root / "branch.txt").write_text("branch\n", encoding="utf-8")
+        self.run_git(root, "add", "branch.txt")
+        self.run_git(root, "commit", "-m", "branch change")
+        (root / "local.txt").write_text("untracked\n", encoding="utf-8")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-review-local-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        for name in ("prism", "gito"):
+            tool = stub_bin / name
+            tool.write_text(
+                "#!/usr/bin/env bash\n"
+                f"printf '{name} %s\\n' \"$*\" >> {str(log_path)!r}\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            tool.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF": "HEAD~1",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF": "HEAD~1",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertIn("prism review codebase --paths local.txt", log)
+        self.assertNotIn("prism review range", log)
+        self.assertIn(
+            "gito review --vs HEAD~1 --filter local.txt --out .build/review/gito",
+            log,
+        )
+        self.assertNotIn("branch.txt", log)
+
     def test_review_local_script_all_scope_runs_codebase_providers(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")

@@ -10,10 +10,10 @@ work. It runs local code review tools, asks the user which findings to fix, and
 repeats until the user selects no more findings or the configured tools report
 no actionable items.
 
-By default this command is current-diff scoped: unstaged changes, staged
-changes, and committed branch diff from the configured base. Use
-`sd-review-local-all` when the user asks to review the entire checked-out
-repository.
+By default this command is current-diff scoped. It reviews unstaged, staged,
+and untracked local files first. If there are no local changed files, it reviews
+the current branch diff from the configured base. Use `sd-review-local-all` when
+the user asks to review the entire checked-out repository.
 
 This is a local-review-only loop. It does not request remote reviewers, does not
 require a pull request, and must not stage, commit, or push unless the user

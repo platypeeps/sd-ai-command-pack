@@ -78,17 +78,10 @@ collect_reviewable_tracked_paths() {
   done < <(git ls-files)
 }
 
-collect_reviewable_changed_paths() {
-  local base_ref="$1"
+collect_reviewable_local_paths() {
   local paths_file
   paths_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-review-paths.XXXXXX")"
   : >"$paths_file"
-
-  if git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null; then
-    git diff --name-only "$base_ref"...HEAD >>"$paths_file"
-  else
-    warn "Could not resolve $base_ref; Gito review filter will use local changes only."
-  fi
 
   git diff --cached --name-only >>"$paths_file"
   git diff --name-only >>"$paths_file"
@@ -102,6 +95,38 @@ collect_reviewable_changed_paths() {
   done
 
   rm -f "$paths_file"
+}
+
+reviewable_local_paths_present() {
+  local path
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    return 0
+  done < <(collect_reviewable_local_paths)
+  return 1
+}
+
+collect_reviewable_branch_paths() {
+  local base_ref="$1"
+  if git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null; then
+    git diff --name-only "$base_ref"...HEAD | while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      if ! path_is_standard_review_scan_excluded "$path"; then
+        printf '%s\n' "$path"
+      fi
+    done
+  else
+    warn "Could not resolve $base_ref; branch review filter is unavailable."
+  fi
+}
+
+collect_reviewable_changed_paths() {
+  local base_ref="$1"
+  if reviewable_local_paths_present; then
+    collect_reviewable_local_paths
+  else
+    collect_reviewable_branch_paths "$base_ref"
+  fi
 }
 
 review_filter_pattern_for_path() {
@@ -537,27 +562,40 @@ run_prism_reviews() {
   fi
 
   local ran=0
-  if ! git diff --quiet --; then
-    ran=1
-    run_prism_command "Prism review: unstaged changes" review unstaged
-  fi
+  if reviewable_local_paths_present; then
+    if ! git diff --quiet --; then
+      ran=1
+      run_prism_command "Prism review: unstaged changes" review unstaged
+    fi
 
-  if ! git diff --cached --quiet --; then
-    ran=1
-    run_prism_command "Prism review: staged changes" review staged
-  fi
+    if ! git diff --cached --quiet --; then
+      ran=1
+      run_prism_command "Prism review: staged changes" review staged
+    fi
 
-  local merge_base
-  merge_base="$(detect_merge_base)"
-  if [ -n "$merge_base" ] && ! git diff --quiet "$merge_base"..HEAD --; then
-    ran=1
-    run_prism_command "Prism review: committed branch diff" review range "$merge_base..HEAD"
-  elif [ -z "$merge_base" ]; then
-    warn "Could not resolve merge base for $(review_local_base_ref); skipping Prism range review."
+    if [ "$ran" -eq 0 ]; then
+      local local_paths=()
+      local path
+      while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        local_paths+=("$path")
+      done < <(collect_reviewable_local_paths)
+      ran=1
+      run_prism_codebase_paths "Prism review: local changed files" "${local_paths[@]}"
+    fi
+  else
+    local merge_base
+    merge_base="$(detect_merge_base)"
+    if [ -n "$merge_base" ] && ! git diff --quiet "$merge_base"..HEAD --; then
+      ran=1
+      run_prism_command "Prism review: current branch diff" review range "$merge_base..HEAD"
+    elif [ -z "$merge_base" ]; then
+      warn "Could not resolve merge base for $(review_local_base_ref); skipping Prism current branch review."
+    fi
   fi
 
   if [ "$ran" -eq 0 ]; then
-    warn "No unstaged, staged, or committed branch diff found for Prism review."
+    warn "No local changed files or current branch diff found for Prism review."
   fi
 }
 

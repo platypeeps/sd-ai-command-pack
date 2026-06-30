@@ -231,8 +231,9 @@ document service-user paths under `/home/<user>/` can add those service users to
 `allowedLinuxHomeUsers` in that config.
 
 The review-local script defaults to Prism plus Gito and is intentionally
-tool-stack aware. Its default scope is the current diff: unstaged changes,
-staged changes, and committed branch diff from the configured base. Pass tool
+tool-stack aware. Its default scope is local-files-first: it reviews unstaged,
+staged, and untracked local files when present; if there are no local changed
+files, it reviews the current branch diff from the configured base. Pass tool
 names as arguments, set
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS`, or configure a third-party tool with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND`. The review-local command uses
