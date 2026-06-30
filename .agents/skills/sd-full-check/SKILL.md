@@ -99,9 +99,8 @@ The script runs:
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`: explicit PR body text for
   configurable PR-body scope checks.
 - `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`: explicit PR body text for tooling/generated
-  scope checks in local or CI contexts where `gh pr view` should not be used.
-- `REVIEW_PREFLIGHT_PR_BODY`: compatibility fallback for the same PR body text
-  when a repo-local preflight already provides it.
+  and PR-body scope checks in local or CI contexts where `gh pr view` should
+  not be used.
 
 ## Expected Report
 

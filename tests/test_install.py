@@ -2643,7 +2643,12 @@ class InstallTests(unittest.TestCase):
         classifier.write_text(
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
-            "if [ \"${1:-}\" = \"--\" ]; then shift; fi\n"
+            "if [ \"${1:-}\" != \"--\" ]; then\n"
+            "  printf 'missing -- classifier delimiter: %s\\n' \"${1:-}\" >&2\n"
+            "  exit 9\n"
+            "fi\n"
+            "shift\n"
+            "printf '%s\\n' \"$@\" > classifier-args.log\n"
             "count=\"$#\"\n"
             "printf 'docs_only=false\\n'\n"
             "printf 'app_required=true\\n'\n"
@@ -2654,6 +2659,7 @@ class InstallTests(unittest.TestCase):
         classifier.chmod(0o755)
         (root / "docs").mkdir(exist_ok=True)
         (root / "docs/local.md").write_text("local change\n", encoding="utf-8")
+        (root / "-leading-dash.md").write_text("dash-prefixed path\n", encoding="utf-8")
 
         result = subprocess.run(
             [self._bash_path, "scripts/sd-ai-command-pack-full-check.sh"],
@@ -2673,6 +2679,9 @@ class InstallTests(unittest.TestCase):
         self.assertIn("CI change classification: current diff", result.stdout)
         self.assertIn("changed_paths=", result.stdout)
         self.assertIn("docs_only=false", result.stdout)
+        classifier_args = (root / "classifier-args.log").read_text(encoding="utf-8")
+        self.assertIn("docs/local.md\n", classifier_args)
+        self.assertIn("-leading-dash.md\n", classifier_args)
         self.assertIn("app_required=true", result.stdout)
         self.assertIn("fixture_count=", result.stdout)
 
@@ -3329,6 +3338,20 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("detected Automation scope", result.stdout)
         self.assertIn("PR body not provided", result.stdout)
+
+    def test_docs_show_mixed_tooling_and_ci_review_pr_body_scope_example(
+        self,
+    ) -> None:
+        for doc_path in [
+            install.ROOT / "README.md",
+            install.ROOT / "docs/SD_AI_COMMAND_PACK.md",
+            install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md",
+        ]:
+            content = doc_path.read_text(encoding="utf-8")
+            self.assertIn("Tooling/generated scope:", content, doc_path)
+            self.assertIn("CI/review scope:", content, doc_path)
+            self.assertIn("command invocation", content, doc_path)
+            self.assertIn("SD_AI_COMMAND_PACK_SCOPE_PR_BODY", content, doc_path)
 
     def test_pr_body_scope_script_enforces_configured_runtime_scope(self) -> None:
         root = self.make_repo()

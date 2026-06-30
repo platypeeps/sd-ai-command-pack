@@ -336,6 +336,21 @@ repos can add runtime, docs, or other categories by committing
 `headings`, and `patterns`. Use `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`,
 or `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` to provide the body without calling `gh`.
 
+For mixed command-pack or generated-map updates that also touch CI/review
+automation, include both sections:
+
+```markdown
+Tooling/generated scope:
+- Copied SD command-pack files or generated repository maps were refreshed.
+- Review focus should be integration wiring, provenance, secrets, and docs
+  accuracy.
+
+CI/review scope:
+- CI, review preflight, or command-pack adapter changes were made intentionally.
+- Review focus should be command invocation, env propagation, and whether local
+  checks still exercise the expected paths.
+```
+
 When a target repo provides `scripts/classify-ci-changes.sh`, the full-check
 script prints a current-diff CI classification section before optional
 repo-specific checks run. That gives agents and reviewers a local `docs_only`,

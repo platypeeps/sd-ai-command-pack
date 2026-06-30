@@ -207,6 +207,21 @@ tooling files for matching `Tooling/generated scope:`, `Automation scope:`, or
 runtime, docs, or other categories by committing
 `.sd-ai-command-pack/pr-body-scope.json`:
 
+For mixed command-pack or generated-map updates that also touch CI/review
+automation, include both sections:
+
+```markdown
+Tooling/generated scope:
+- Copied SD command-pack files or generated repository maps were refreshed.
+- Review focus should be integration wiring, provenance, secrets, and docs
+  accuracy.
+
+CI/review scope:
+- CI, review preflight, or command-pack adapter changes were made intentionally.
+- Review focus should be command invocation, env propagation, and whether local
+  checks still exercise the expected paths.
+```
+
 ```json
 {
   "rules": [
