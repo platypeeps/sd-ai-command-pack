@@ -266,10 +266,23 @@ collect_current_changed_paths() {
   sort -u "$output_file" -o "$output_file"
 }
 
+resolve_ci_classifier_script() {
+  if [ -f "scripts/classify-ci-changes.sh" ]; then
+    printf '%s\n' "scripts/classify-ci-changes.sh"
+    return 0
+  fi
+  if [ -f "scripts/classify_ci_changes.sh" ]; then
+    warn "Using legacy scripts/classify_ci_changes.sh; prefer scripts/classify-ci-changes.sh with '-- path...' support."
+    printf '%s\n' "scripts/classify_ci_changes.sh"
+    return 0
+  fi
+  return 1
+}
+
 run_ci_classification_report() {
-  local script="scripts/classify-ci-changes.sh"
-  if [ ! -f "$script" ]; then
-    warn "$script not found; skipping current-diff CI classification report."
+  local script
+  if ! script="$(resolve_ci_classifier_script)"; then
+    warn "No scripts/classify-ci-changes.sh or scripts/classify_ci_changes.sh found; skipping current-diff CI classification report."
     return 0
   fi
 
@@ -293,6 +306,11 @@ run_ci_classification_report() {
   printf 'changed_paths=%s\n' "${#changed_paths[@]}"
   local status=0
   bash "$script" -- "${changed_paths[@]}" || status=$?
+  if [ "$status" -eq 2 ]; then
+    warn "$script did not accept explicit '-- path...' input; retrying with a changed-files list. Update the classifier to support '-- path...' before the next pack refresh."
+    status=0
+    bash "$script" "$paths_file" || status=$?
+  fi
   rm -f "$paths_file"
   return "$status"
 }

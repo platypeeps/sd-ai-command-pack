@@ -181,9 +181,15 @@ post-install audit, the tooling/generated file scope preflight, the PR-body
 scope preflight, current-diff CI classification when
 `scripts/classify-ci-changes.sh` exists, optional package-script checks when a
 `package.json`, Node.js, and the selected package runner are available, and
-local Prism review when `prism` is available and configured. The install audit
-checks `.sd-ai-command-pack/installed-targets.txt` for missing targets and
-reports pack-like files that are not listed in the installed-targets snapshot.
+local Prism review when `prism` is available and configured. For target repos
+that provide a CI classifier, prefer `scripts/classify-ci-changes.sh` with
+support for `-- changed-file ...`; the full-check script also tolerates legacy
+`scripts/classify_ci_changes.sh` and retries older classifiers with a temp
+changed-files list when they reject `--`. The install audit checks
+`.sd-ai-command-pack/installed-targets.txt` for missing targets, reports
+pack-like files that are not listed in the installed-targets snapshot, and warns
+when legacy pack names such as `trellis-full-check`, `trellis-housekeeping`,
+`trellis-review-pr`, or `sd-refresh-specs` still appear in target files.
 The copied/generated scope preflight reads
 `.sd-ai-command-pack/installed-targets.txt`, reports changed pack/Trellis
 runtime files, known repository-map files when present, and Trellis workspace
@@ -271,7 +277,10 @@ specific source entrypoint is intentionally maintained as repo documentation.
 The helper also creates and refreshes `.obsidian-kb/Dashboard.md`, a generated
 Markdown landing page that groups and links to the current KB symlinks. If a
 user-owned file already exists at that path, the helper leaves it untouched and
-reports a conflict.
+reports a conflict. Run
+`python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run` to preview the
+refresh without writes, `--check` to verify the generated folder and ignore
+entry are current, or `--help` for the safe CLI summary.
 
 To expose the generated knowledge folder inside an Obsidian vault, create a
 symlink from the vault to the repo's `.obsidian-kb` folder.
@@ -378,7 +387,8 @@ Common environment variables:
 - `SD_AI_COMMAND_PACK_SCOPE_BASE_REF`: base ref for tooling/generated scope checks.
   Defaults to `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then `origin/main`.
 - `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`: explicit PR body text for tooling/generated
-  scope checks when `gh pr view` should not be used.
+  scope checks when `gh pr view` should not be used. Deprecated fallback:
+  `REVIEW_PREFLIGHT_PR_BODY`.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK=0`: skip configurable PR-body scope
   checks.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK=required`: fail if the pack-provided
@@ -388,7 +398,8 @@ Common environment variables:
   `.sd-ai-command-pack/pr-body-scope.json` when present.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`: explicit PR body text for
   configurable PR-body scope checks. Falls back to
-  `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`.
+  `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`, then the deprecated
+  `REVIEW_PREFLIGHT_PR_BODY`.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHANGED_FILES`: explicit newline- or
   NUL-delimited changed path list for configurable PR-body scope checks.
 - `SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO`: explicit `owner/repo` slug when the
@@ -463,6 +474,9 @@ replaced during a pack refresh.
   present, then retry the wrapper command.
 - `scripts/sd-ai-command-pack-update-spec-kb.py` is missing: reinstall the pack;
   update-spec uses it to rebuild `.obsidian-kb/`.
+- Install audit warns about legacy `trellis-*` or `sd-refresh-specs` names:
+  migrate those references to the current `sd-*` command names and
+  `sd-ai-command-pack-*` scripts, then rerun the audit.
 - `scripts/sd-ai-command-pack-full-check.sh` is missing: reinstall the pack; every target
   repo should receive the shared script.
 - `scripts/sd-ai-command-pack-housekeeping.sh` is missing: reinstall the pack; every

@@ -4,8 +4,9 @@
 The checker is repo-safe by default: it reports detected categories, but only
 fails when a PR body is supplied through ``--body-file``,
 ``SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY``, or
-``SD_AI_COMMAND_PACK_SCOPE_PR_BODY``. Repos can add project-specific categories
-with a JSON config file rather than editing this copied script.
+``SD_AI_COMMAND_PACK_SCOPE_PR_BODY``, or the deprecated compatibility fallback
+``REVIEW_PREFLIGHT_PR_BODY``. Repos can add project-specific categories with a
+JSON config file rather than editing this copied script.
 
 Config shape:
 
@@ -43,6 +44,7 @@ from typing import Any
 BODY_ENV_VARS = (
     "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY",
     "SD_AI_COMMAND_PACK_SCOPE_PR_BODY",
+    "REVIEW_PREFLIGHT_PR_BODY",
 )
 CHANGED_FILES_ENV_VARS = (
     "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHANGED_FILES",
@@ -112,6 +114,7 @@ DEFAULT_RULES = (
             ".github/workflows/**",
             ".pre-commit-config.yaml",
             "scripts/classify-ci-changes.sh",
+            "scripts/classify_ci_changes.sh",
             "scripts/check-review-preflight.mjs",
             "scripts/sd-ai-command-pack-review-scope.sh",
             "scripts/sd-ai-command-pack-install-audit.py",
@@ -364,7 +367,8 @@ def check(
             *detected,
             "warning: PR body not provided; skipping strict PR-body scope validation. "
             "Set SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY, "
-            "SD_AI_COMMAND_PACK_SCOPE_PR_BODY, or --body-file.",
+            "SD_AI_COMMAND_PACK_SCOPE_PR_BODY, REVIEW_PREFLIGHT_PR_BODY, or "
+            "--body-file.",
         ]
 
     # Any-of coverage: a changed path is covered when the body documents at

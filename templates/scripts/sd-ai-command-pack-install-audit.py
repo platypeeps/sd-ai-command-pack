@@ -37,6 +37,59 @@ LOCAL_ALLOWED_PACK_FILES = {
     ".sd-ai-command-pack/pr-body-scope.json",
 }
 
+LEGACY_PACK_PATHS = {
+    ".agents/skills/sd-refresh-specs": "use .agents/skills/sd-update-spec",
+    ".agents/skills/trellis-full-check": "use .agents/skills/sd-full-check",
+    ".agents/skills/trellis-housekeeping": "use .agents/skills/sd-housekeeping",
+    ".agents/skills/trellis-review-pr": "use .agents/skills/sd-review-pr",
+    ".claude/commands/sd/refresh-specs.md": "use .claude/commands/sd/update-spec.md",
+    ".cursor/commands/sd-refresh-specs.md": "use .cursor/commands/sd-update-spec.md",
+    ".gemini/commands/sd/refresh-specs.toml": "use .gemini/commands/sd/update-spec.toml",
+    ".github/prompts/sd-refresh-specs.prompt.md": "use .github/prompts/sd-update-spec.prompt.md",
+    ".opencode/commands/sd-refresh-specs.md": "use .opencode/commands/sd-update-spec.md",
+    "scripts/trellis-full-check.sh": "use scripts/sd-ai-command-pack-full-check.sh",
+    "scripts/trellis-housekeeping.sh": "use scripts/sd-ai-command-pack-housekeeping.sh",
+}
+
+LEGACY_PACK_REFERENCES = {
+    "scripts/trellis-full-check.sh": "scripts/sd-ai-command-pack-full-check.sh",
+    "scripts/trellis-housekeeping.sh": "scripts/sd-ai-command-pack-housekeeping.sh",
+    "trellis-full-check": "sd-full-check",
+    "trellis-housekeeping": "sd-housekeeping",
+    "trellis-review-pr": "sd-review-pr",
+    "sd-refresh-specs": "sd-update-spec",
+    "TRELLIS_FULL_CHECK": "SD_AI_COMMAND_PACK_FULL_CHECK",
+    "TRELLIS_HOUSEKEEPING": "SD_AI_COMMAND_PACK_HOUSEKEEPING",
+}
+
+REFERENCE_SCAN_BASES = (
+    "AGENTS.md",
+    "CLAUDE.md",
+    "README.md",
+    ".agents",
+    ".claude",
+    ".cursor",
+    ".gemini",
+    ".github",
+    ".opencode",
+    ".trellis/spec",
+    "docs",
+    "scripts",
+    "tests",
+    "tools",
+)
+
+REFERENCE_SCAN_EXCLUDED_PARTS = {
+    ".git",
+    ".obsidian-kb",
+    ".trellis/workspace",
+    "__pycache__",
+    "node_modules",
+}
+
+MAX_REFERENCE_SCAN_BYTES = 1_000_000
+
+
 def is_disabled(value: str | None) -> bool:
     return (value or "").lower() in {"0", "false", "no", "skip", "none"}
 
@@ -127,6 +180,73 @@ def audit_structural_state(root: Path, targets: set[str]) -> list[str]:
     return failures
 
 
+def _is_excluded_scan_path(relative_path: Path) -> bool:
+    path_text = relative_path.as_posix()
+    return any(
+        path_text == excluded or path_text.startswith(f"{excluded}/")
+        for excluded in REFERENCE_SCAN_EXCLUDED_PARTS
+    )
+
+
+def _iter_reference_scan_files(root: Path, skipped_paths: set[str]) -> list[Path]:
+    files: list[Path] = []
+    for base in REFERENCE_SCAN_BASES:
+        base_path = root / base
+        if not base_path.exists() or base_path.is_symlink():
+            continue
+        if base_path.is_file():
+            relative_path = base_path.relative_to(root)
+            relative_text = relative_path.as_posix()
+            if (
+                relative_text not in skipped_paths
+                and not matches_pack_file(relative_text)
+                and not _is_excluded_scan_path(relative_path)
+            ):
+                files.append(relative_path)
+            continue
+        for path in base_path.rglob("*"):
+            if path.is_symlink() or not path.is_file():
+                continue
+            relative_path = path.relative_to(root)
+            relative_text = relative_path.as_posix()
+            if (
+                relative_text in skipped_paths
+                or matches_pack_file(relative_text)
+                or _is_excluded_scan_path(relative_path)
+            ):
+                continue
+            files.append(relative_path)
+    return sorted(set(files), key=lambda path: path.as_posix())
+
+
+def audit_migration_advisories(root: Path, targets: set[str]) -> list[str]:
+    warnings: list[str] = []
+
+    for relative_path, replacement in LEGACY_PACK_PATHS.items():
+        if path_exists(root, Path(relative_path)):
+            warnings.append(
+                f"legacy pack target remains: {relative_path}; {replacement}"
+            )
+
+    for relative_path in _iter_reference_scan_files(root, targets):
+        path = root / relative_path
+        try:
+            if path.stat().st_size > MAX_REFERENCE_SCAN_BYTES:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for needle, replacement in LEGACY_PACK_REFERENCES.items():
+            if needle in text:
+                warnings.append(
+                    "legacy pack reference remains: "
+                    f"{relative_path.as_posix()} contains {needle!r}; "
+                    f"prefer {replacement}"
+                )
+
+    return sorted(set(warnings))
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Audit the installed sd-ai-command-pack footprint."
@@ -157,11 +277,15 @@ def main() -> int:
     targets, failures = load_installed_targets(root)
     if targets:
         failures.extend(audit_structural_state(root, targets))
+    warnings = audit_migration_advisories(root, targets)
 
     if failures:
         for failure in failures:
             print(f"error: {failure}")
         return 1
+
+    for warning in warnings:
+        print(f"warning: {warning}")
 
     print(f"SD AI command pack install audit passed: {len(targets)} targets checked.")
     return 0

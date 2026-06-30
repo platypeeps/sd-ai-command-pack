@@ -132,7 +132,12 @@ It runs deterministic checks, an optional repo-local review preflight when
 `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND` is configured or
 `scripts/check-review-preflight.mjs` exists, optional package-script checks
 when a `package.json`, Node.js, and the selected package runner are available,
-then local Prism review when `prism` is available and configured. Gito stays
+and a current-diff CI classification report when a target repo provides
+`scripts/classify-ci-changes.sh`. During migration it also tolerates the legacy
+`scripts/classify_ci_changes.sh` name, but target classifiers should support
+`bash scripts/classify-ci-changes.sh -- changed-file ...` so paths beginning
+with `-` are handled as data. The command then runs local Prism review when
+`prism` is available and configured. Gito stays
 opt-in through `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=1` because it may invoke `uvx`,
 local cache access, network access, and configured LLM credentials. When
 enabled, Gito writes reports to `.build/review/gito` by default; override with
@@ -216,7 +221,10 @@ specific source entrypoint is intentionally maintained as repo documentation.
 The helper also creates and refreshes `.obsidian-kb/Dashboard.md`, a generated
 Markdown landing page that groups and links to the current KB symlinks. If a
 user-owned file already exists at that path, the helper leaves it untouched and
-reports a conflict.
+reports a conflict. Use
+`python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run` to preview the
+refresh, `--check` to verify the folder is current without writing files, and
+`--help` for the safe CLI summary.
 
 To expose that generated folder inside an Obsidian vault, create a symlink from
 the vault to the repo's `.obsidian-kb` folder. For macOS/Linux:
@@ -334,7 +342,8 @@ tooling files for matching PR-body sections when a PR body is provided. Target
 repos can add runtime, docs, or other categories by committing
 `.sd-ai-command-pack/pr-body-scope.json` with a `rules` list of `label`,
 `headings`, and `patterns`. Use `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`,
-or `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` to provide the body without calling `gh`.
+`SD_AI_COMMAND_PACK_SCOPE_PR_BODY`, or deprecated `REVIEW_PREFLIGHT_PR_BODY` to
+provide the body without calling `gh`.
 
 For mixed command-pack or generated-map updates that also touch CI/review
 automation, include both sections:
@@ -353,8 +362,12 @@ CI/review scope:
 
 When a target repo provides `scripts/classify-ci-changes.sh`, the full-check
 script prints a current-diff CI classification section before optional
-repo-specific checks run. That gives agents and reviewers a local `docs_only`,
-`app_required`, and `expensive_required` signal before spending remote CI budget.
+repo-specific checks run. The canonical classifier accepts a changed-file list
+path or explicit paths after `--`; the pack falls back to legacy
+`scripts/classify_ci_changes.sh` and retries with a temp changed-files list when
+older classifiers reject `--`. That gives agents and reviewers a local
+`docs_only`, `app_required`, and `expensive_required` signal before spending
+remote CI budget.
 
 ## Verify
 

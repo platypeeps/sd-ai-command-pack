@@ -2556,6 +2556,8 @@ class InstallTests(unittest.TestCase):
         self.assertIn("run_sd_ai_command_pack_pr_body_scope_check", script)
         self.assertIn("run_ci_classification_report()", script)
         self.assertIn("scripts/classify-ci-changes.sh", script)
+        self.assertIn("scripts/classify_ci_changes.sh", script)
+        self.assertIn("did not accept explicit '-- path...' input", script)
         self.assertIn("CI change classification: current diff", script)
         self.assertIn("sd-ai-command-pack-ci-paths", script)
         self.assertIn("run_review_preflight()", script)
@@ -2684,6 +2686,58 @@ class InstallTests(unittest.TestCase):
         self.assertIn("-leading-dash.md\n", classifier_args)
         self.assertIn("app_required=true", result.stdout)
         self.assertIn("fixture_count=", result.stdout)
+
+    def test_full_check_script_retries_legacy_ci_classifier_with_file_list(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "install command pack")
+
+        legacy_classifier = root / "scripts/classify_ci_changes.sh"
+        legacy_classifier.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "if [ \"${1:-}\" = \"--\" ]; then\n"
+            "  printf 'legacy classifier does not support --\\n' >&2\n"
+            "  exit 2\n"
+            "fi\n"
+            "cat \"$1\" > legacy-classifier-paths.log\n"
+            "printf 'legacy_classifier=true\\n'\n",
+            encoding="utf-8",
+        )
+        legacy_classifier.chmod(0o755)
+        (root / "docs").mkdir(exist_ok=True)
+        (root / "docs/local.md").write_text("local change\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-full-check.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Using legacy scripts/classify_ci_changes.sh", result.stdout)
+        self.assertIn("retrying with a changed-files list", result.stdout)
+        self.assertIn("legacy_classifier=true", result.stdout)
+        paths = (root / "legacy-classifier-paths.log").read_text(encoding="utf-8")
+        self.assertIn("docs/local.md\n", paths)
 
     def test_full_check_script_runs_repo_local_review_preflight_when_available(
         self,
@@ -2822,6 +2876,8 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("SD AI command pack install audit", result.stdout)
         self.assertIn("install audit passed", result.stdout)
+        self.assertNotIn("legacy pack reference remains", result.stdout)
+        self.assertNotIn("legacy pack target remains", result.stdout)
 
     def test_install_audit_detects_missing_current_targets(self) -> None:
         root = self.make_repo()
@@ -2844,6 +2900,34 @@ class InstallTests(unittest.TestCase):
             "installed target is missing: .agents/skills/sd-review-pr/SKILL.md",
             result.stdout,
         )
+
+    def test_install_audit_warns_about_legacy_pack_names(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        legacy_skill = root / ".agents/skills/trellis-review-pr/SKILL.md"
+        legacy_skill.parent.mkdir(parents=True, exist_ok=True)
+        legacy_skill.write_text("# Legacy review skill\n", encoding="utf-8")
+        (root / "README.md").write_text(
+            "Run scripts/trellis-full-check.sh before review.\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("legacy pack target remains", result.stdout)
+        self.assertIn(".agents/skills/trellis-review-pr", result.stdout)
+        self.assertIn("legacy pack reference remains", result.stdout)
+        self.assertIn("scripts/trellis-full-check.sh", result.stdout)
+        self.assertIn("install audit passed", result.stdout)
 
     def run_source_audit(self, root: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -3203,6 +3287,105 @@ class InstallTests(unittest.TestCase):
             1,
         )
 
+    def test_update_spec_kb_help_is_read_only(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/sd-ai-command-pack-update-spec-kb.py",
+                "--help",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("usage:", result.stdout)
+        self.assertIn("--dry-run", result.stdout)
+        self.assertIn("--check", result.stdout)
+        self.assertFalse((root / ".obsidian-kb").exists())
+
+    def test_update_spec_kb_dry_run_does_not_write_files(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        (root / ".gitignore").write_text("dist/\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/sd-ai-command-pack-update-spec-kb.py",
+                "--dry-run",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("mode: dry-run", result.stdout)
+        self.assertIn("planned symlinks:", result.stdout)
+        self.assertFalse((root / ".obsidian-kb").exists())
+        self.assertEqual((root / ".gitignore").read_text(encoding="utf-8"), "dist/\n")
+
+    def test_update_spec_kb_check_detects_and_accepts_current_state(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+
+        stale = subprocess.run(
+            [
+                sys.executable,
+                "scripts/sd-ai-command-pack-update-spec-kb.py",
+                "--check",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(stale.returncode, 1, stale.stdout)
+        self.assertIn("mode: check", stale.stdout)
+        self.assertIn("README.md is missing", stale.stdout)
+
+        refresh = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(refresh.returncode, 0, refresh.stdout)
+
+        current = subprocess.run(
+            [
+                sys.executable,
+                "scripts/sd-ai-command-pack-update-spec-kb.py",
+                "--check",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(current.returncode, 0, current.stdout)
+        self.assertIn("conflicts: none", current.stdout)
+
     def test_update_spec_kb_does_not_overwrite_custom_dashboard(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
@@ -3352,6 +3535,7 @@ class InstallTests(unittest.TestCase):
             self.assertIn("CI/review scope:", content, doc_path)
             self.assertIn("command invocation", content, doc_path)
             self.assertIn("SD_AI_COMMAND_PACK_SCOPE_PR_BODY", content, doc_path)
+            self.assertIn("REVIEW_PREFLIGHT_PR_BODY", content, doc_path)
 
     def test_pr_body_scope_script_enforces_configured_runtime_scope(self) -> None:
         root = self.make_repo()
@@ -3421,6 +3605,39 @@ class InstallTests(unittest.TestCase):
 
         self.assertEqual(covered.returncode, 0, covered.stdout)
         self.assertIn("PR body scope sections cover", covered.stdout)
+
+    def test_pr_body_scope_script_accepts_legacy_body_env_and_classifier_name(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        changed_files = root / "changed-files.txt"
+        changed_files.write_text("scripts/classify_ci_changes.sh\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/sd-ai-command-pack-pr-body-scope.py",
+                "--changed-files",
+                str(changed_files),
+            ],
+            cwd=root,
+            env={
+                **os.environ,
+                "REVIEW_PREFLIGHT_PR_BODY": (
+                    "CI/review scope: migrate classifier compatibility."
+                ),
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("detected CI/review scope", result.stdout)
+        self.assertIn("PR body scope sections cover", result.stdout)
 
     def test_pr_body_scope_script_reports_malformed_config_without_traceback(
         self,
@@ -3562,6 +3779,44 @@ class InstallTests(unittest.TestCase):
         self.assertIn("docs/repomix-map.md", result.stdout)
         self.assertIn(".trellis/workspace/sdelmas/journal-1.md", result.stdout)
         self.assertIn(".sd-ai-command-pack/installed-targets.txt", result.stdout)
+
+    def test_review_scope_script_accepts_legacy_pr_body_env(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo(".github")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "install command pack")
+
+        command_pack_doc = root / "docs/SD_AI_COMMAND_PACK.md"
+        command_pack_doc.write_text(
+            command_pack_doc.read_text(encoding="utf-8")
+            + "\nLocal integration note.\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-scope.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "REVIEW_PREFLIGHT_PR_BODY": (
+                    "Tooling/generated scope: refreshed copied pack docs."
+                ),
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("REVIEW_PREFLIGHT_PR_BODY is deprecated", result.stdout)
+        self.assertIn("Tooling/generated review-scope files changed", result.stdout)
 
     def test_review_scope_script_requires_pr_body_scope_when_configured(
         self,
