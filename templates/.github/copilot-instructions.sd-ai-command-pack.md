@@ -3,16 +3,16 @@
 
 - Ignore copied-in Trellis runtime/platform files unless the PR explicitly
   changes Trellis integration or the copied file is the primary subject. This
-  includes `.trellis/scripts/**`, `.trellis/agents/**`, `.agents/skills/trellis-*`,
-  `.github/agents/trellis-*`, `.github/copilot/**`, `.github/hooks/trellis.json`,
+  includes `.trellis/scripts/**/*`, `.trellis/agents/**/*`, `.agents/skills/trellis-*/**/*`,
+  `.github/agents/trellis-*`, `.github/copilot/**/*`, `.github/hooks/trellis.json`,
   `.github/prompts/continue.prompt.md`, `.github/prompts/finish-work.prompt.md`,
-  `.github/skills/trellis-*`, and the matching Trellis files under `.claude/`,
+  `.github/skills/trellis-*/**/*`, and the matching Trellis files under `.claude/`,
   `.codex/`, `.cursor/`, `.gemini/`, and `.opencode/`.
 - Ignore files copied in from `sd-ai-command-pack` unless the PR explicitly
-  changes the SD AI command pack integration. This includes `.agents/skills/sd-*`,
+  changes the SD AI command pack integration. This includes `.agents/skills/sd-*/**/*`,
   `.agents/skills/sd-full-check/`, `.agents/skills/sd-housekeeping/`,
-  `.github/prompts/sd-*`, `.claude/commands/sd/**`,
-  `.cursor/commands/sd-*`, `.gemini/commands/sd/**`,
+  `.github/prompts/sd-*`, `.claude/commands/sd/**/*`,
+  Cursor SD command files when Cursor support is installed, `.gemini/commands/sd/**/*`,
   `.opencode/commands/sd-*`, `.prism/rules.json`,
   `.sd-ai-command-pack/installed-targets.txt`, `docs/SD_AI_COMMAND_PACK.md`,
   `scripts/sd-ai-command-pack-full-check.sh`,
