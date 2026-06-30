@@ -352,6 +352,7 @@ class InstallTests(unittest.TestCase):
             "docs/SD_AI_COMMAND_PACK.md",
             "scripts/sd-ai-command-pack-full-check.sh",
             "scripts/sd-ai-command-pack-housekeeping.sh",
+            "scripts/sd-ai-command-pack-review-local.sh",
             "scripts/sd-ai-command-pack-review-scope.sh",
             "scripts/sd-ai-command-pack-review-learnings.py",
             "scripts/sd-ai-command-pack-install-audit.py",
@@ -378,6 +379,15 @@ class InstallTests(unittest.TestCase):
             "copied or generated",
         ):
             self.assertIn(expected, content)
+
+        for file in self._manifest_files:
+            target = file.target.as_posix()
+            if file.kind == "script" and target.startswith(
+                "scripts/sd-ai-command-pack-"
+            ):
+                self.assertIn(
+                    target, content, f"Copilot guidance must mention copied script {target}"
+                )
 
     def make_housekeeping_repo(self) -> tuple[Path, Path, Path, str]:
         tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-housekeeping-test-")
