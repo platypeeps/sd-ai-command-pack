@@ -245,6 +245,8 @@ class InstallTests(unittest.TestCase):
                 f"{rules_path}: focus[{index}] must be a string",
             )
             self.assertTrue(item, f"{rules_path}: focus[{index}] must not be empty")
+        for expected in ("bug", "performance"):
+            self.assertIn(expected, focus, f"{rules_path}: focus must include {expected}")
 
         severity_overrides = rules["severityOverrides"]
         self.assertIsInstance(
@@ -276,6 +278,8 @@ class InstallTests(unittest.TestCase):
             set(focus).issubset(severity_overrides),
             f"{rules_path}: every focus category must have a severity override",
         )
+        self.assertEqual(severity_overrides.get("bug"), "high")
+        self.assertEqual(severity_overrides.get("performance"), "medium")
 
         required = rules["required"]
         self.assertIsInstance(
@@ -415,6 +419,10 @@ class InstallTests(unittest.TestCase):
     def assert_trellis_gitignore_block(self, content: str) -> None:
         self.assertIn(install.TRELLIS_GITIGNORE_START, content)
         self.assertIn(install.TRELLIS_GITIGNORE_END, content)
+        self.assertIn("DO NOT EDIT MANUALLY", content)
+        self.assertIn("# Common local secrets and environment files.", content)
+        for expected in install.LOCAL_ENV_GITIGNORE_PATTERNS:
+            self.assertIn(expected, content)
         for expected in install.TRELLIS_GITIGNORE_PATTERNS:
             self.assertIn(expected, content)
         for expected in install.PLATFORM_LOCAL_GITIGNORE_PATTERNS:
@@ -1276,6 +1284,8 @@ class InstallTests(unittest.TestCase):
         self.assertIn("quick smoke test", readme)
         self.assertIn("scripts/sd-ai-command-pack-install-audit.py", readme)
         self.assertIn("scripts/sd-ai-command-pack-update-spec-kb.py --dry-run", readme)
+        self.assertIn("Normal shared installs should commit that snapshot", readme)
+        self.assertIn("keeps `.sd-ai-command-pack/installed-targets.txt`", readme)
         self.assertIn("Base-ref precedence", readme)
         for expected in (
             "python3 install.py /path/to/trellis/repo",
@@ -1547,6 +1557,8 @@ class InstallTests(unittest.TestCase):
             "branch: <default>",
             "tracked deletions are present",
             "ClientError: 429",
+            "installs should commit this file",
+            "clone-local exclude list instead",
             "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS",
             "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS",
             "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS",
@@ -2672,6 +2684,8 @@ class InstallTests(unittest.TestCase):
 
         gitignore = (install.ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn(".obsidian-kb/", gitignore)
+        self.assertIn(".sd-ai-command-pack/installed-targets.txt", gitignore)
+        self.assertIn(".sd-ai-command-pack/local-only.txt", gitignore)
 
     def test_full_check_script_writes_gito_reports_to_artifact_dir(self) -> None:
         script = (
@@ -3023,13 +3037,71 @@ class InstallTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("Tracked deletions are present", result.stdout)
+        self.assertIn("Tracked or branch-diff deletions are present", result.stdout)
         log = log_path.read_text(encoding="utf-8")
         self.assertIn(f"gito review --path {root.resolve()} --filter ", log)
         self.assertNotIn(" --all ", log)
         gito_line = next(line for line in log.splitlines() if line.startswith("gito "))
         gito_filter = gito_line.split(" --filter ", 1)[1].split(" --out ", 1)[0]
         self.assertNotIn("app.txt", set(gito_filter.split(",")))
+
+    def test_review_local_script_all_scope_omits_gito_all_when_branch_diff_deletes_files(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "keep.txt").write_text("keep\n", encoding="utf-8")
+        (root / "removed.txt").write_text("remove\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        (root / "removed.txt").unlink()
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "delete removed file")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-review-local-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        gito = stub_bin / "gito"
+        gito.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'gito %s\\n' \"$*\" >> {str(log_path)!r}\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        gito.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "--all", "gito"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF": "HEAD~1",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Tracked or branch-diff deletions are present", result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertIn(f"gito review --path {root.resolve()} --filter ", log)
+        self.assertNotIn(" --all ", log)
+        gito_line = next(line for line in log.splitlines() if line.startswith("gito "))
+        gito_filter = gito_line.split(" --filter ", 1)[1].split(" --out ", 1)[0]
+        gito_filter_paths = set(gito_filter.split(","))
+        self.assertIn("keep.txt", gito_filter_paths)
+        self.assertNotIn("removed.txt", gito_filter_paths)
 
     def test_review_local_script_retries_gito_rate_limit(self) -> None:
         if self._bash_path is None:
@@ -3091,6 +3163,61 @@ class InstallTests(unittest.TestCase):
         log = log_path.read_text(encoding="utf-8")
         self.assertEqual(log.count("gito attempt"), 2, log)
         self.assertIn("gito attempt 2 review --vs HEAD --filter app.txt", log)
+
+    def test_review_local_script_does_not_retry_gito_non_rate_limit_trace(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("before\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        (root / "app.txt").write_text("after\n", encoding="utf-8")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-review-local-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        gito = stub_bin / "gito"
+        gito.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'gito attempt %s\\n' \"$*\" >> {str(log_path)!r}\n"
+            "printf 'A traceback mentioned provider rate limiting docs.\\n'\n"
+            "printf 'ClientError: 404 Not Found\\n'\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        gito.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "gito"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF": "HEAD",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS": "2",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS": "0",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("Gito attempt 1/2", result.stdout)
+        self.assertNotIn("Gito appears rate-limited", result.stdout)
+        self.assertNotIn("Gito attempt 2/2", result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertEqual(log.count("gito attempt"), 1, log)
 
     def test_review_local_script_prism_codebase_empty_chunk_falls_back_to_batches(
         self,
@@ -3584,6 +3711,66 @@ class InstallTests(unittest.TestCase):
         log = log_path.read_text(encoding="utf-8")
         self.assertEqual(log.count("gito attempt"), 2, log)
         self.assertIn("gito attempt 2 review --vs HEAD --filter app.txt", log)
+
+    def test_full_check_script_does_not_retry_gito_non_rate_limit_trace(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("before\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        (root / "app.txt").write_text("after\n", encoding="utf-8")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-full-check-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        gito = stub_bin / "gito"
+        gito.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'gito attempt %s\\n' \"$*\" >> {str(log_path)!r}\n"
+            "printf 'A traceback mentioned provider rate limiting docs.\\n'\n"
+            "printf 'ClientError: 404 Not Found\\n'\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        gito.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-full-check.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT": "0",
+                "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0",
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
+                "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF": "HEAD",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS": "2",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_DELAY_SECONDS": "0",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("Gito attempt 1/2", result.stdout)
+        self.assertNotIn("Gito appears rate-limited", result.stdout)
+        self.assertNotIn("Gito attempt 2/2", result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertEqual(log.count("gito attempt"), 1, log)
 
     def test_full_check_script_reports_current_diff_ci_classification_when_available(
         self,

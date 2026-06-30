@@ -316,6 +316,19 @@ tracked_deletions_present() {
   [ -n "$(git ls-files --deleted)" ]
 }
 
+branch_deletions_present() {
+  local base_ref
+  base_ref="$(review_local_gito_base_ref)"
+  if ! git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null; then
+    return 1
+  fi
+  [ -n "$(git diff --name-only --diff-filter=D "$base_ref"...HEAD)" ]
+}
+
+gito_full_codebase_needs_existing_file_filter() {
+  tracked_deletions_present || branch_deletions_present
+}
+
 detect_merge_base() {
   local base_ref
   base_ref="$(review_local_base_ref)"
@@ -377,7 +390,7 @@ prism_output_indicates_empty_chunk() {
 
 gito_output_indicates_rate_limit() {
   local output_file="$1"
-  grep -Eiq 'clienterror:[[:space:]]*429|(^|[^0-9])429([^0-9]|$)|slow down|too many requests|rate[ -]?limit(ed)?' "$output_file"
+  grep -Eiq '(^|[^[:alnum:]])(clienterror|apierror|httperror|http status|status code|status|error|exception):?[[:space:]]*429([^0-9]|$)|(^|[^[:alnum:]])429[[:space:]]+(too many requests|resource exhausted|rate[ -]?limit(ed)?|slow down)([^[:alnum:]]|$)' "$output_file"
 }
 
 gito_max_attempts() {
@@ -622,8 +635,8 @@ run_gito_review() {
       return
     fi
     mkdir -p "$out_dir"
-    if tracked_deletions_present; then
-      warn "Tracked deletions are present; running Gito full-codebase review with an explicit existing-file filter instead of --all."
+    if gito_full_codebase_needs_existing_file_filter; then
+      warn "Tracked or branch-diff deletions are present; running Gito full-codebase review with an explicit existing-file filter instead of --all."
       run_gito_command "Gito review: full codebase" gito review --path "$REPO_ROOT" --filter "$filters" --out "$out_dir"
       record_status "Gito review: full codebase" "$?"
     else

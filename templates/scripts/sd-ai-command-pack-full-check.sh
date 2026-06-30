@@ -68,7 +68,7 @@ positive_int_or_default() {
 
 gito_output_indicates_rate_limit() {
   local output_file="$1"
-  grep -Eiq 'clienterror:[[:space:]]*429|(^|[^0-9])429([^0-9]|$)|slow down|too many requests|rate[ -]?limit(ed)?' "$output_file"
+  grep -Eiq '(^|[^[:alnum:]])(clienterror|apierror|httperror|http status|status code|status|error|exception):?[[:space:]]*429([^0-9]|$)|(^|[^[:alnum:]])429[[:space:]]+(too many requests|resource exhausted|rate[ -]?limit(ed)?|slow down)([^[:alnum:]]|$)' "$output_file"
 }
 
 gito_max_attempts() {

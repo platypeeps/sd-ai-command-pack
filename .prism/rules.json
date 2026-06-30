@@ -4,14 +4,18 @@
     "security",
     "testing",
     "maintainability",
-    "docs"
+    "docs",
+    "bug",
+    "performance"
   ],
   "severityOverrides": {
     "security": "high",
     "correctness": "high",
+    "bug": "high",
     "testing": "medium",
     "maintainability": "medium",
     "docs": "medium",
+    "performance": "medium",
     "style": "low"
   },
   "required": [
