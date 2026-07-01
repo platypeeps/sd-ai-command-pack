@@ -4776,6 +4776,8 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         snapshot.parent.mkdir(parents=True, exist_ok=True)
         snapshot.write_text(
             "C:\\Users\\sven\\repo\\scripts\\sd-ai-command-pack-full-check.sh\n"
+            "C:relative\\sd-ai-command-pack-full-check.sh\n"
+            "\\rooted\\sd-ai-command-pack-full-check.sh\n"
             "\\\\server\\share\\sd-ai-command-pack-full-check.sh\n"
             "..\\outside\\sd-ai-command-pack-full-check.sh\n",
             encoding="utf-8",
@@ -4796,6 +4798,8 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("contains unsafe target", result.stdout)
         self.assertIn("C:\\\\Users\\\\sven", result.stdout)
+        self.assertIn("C:relative", result.stdout)
+        self.assertIn("\\\\rooted", result.stdout)
         self.assertIn("\\\\\\\\server\\\\share", result.stdout)
         self.assertIn("..\\\\outside", result.stdout)
 
@@ -5137,6 +5141,38 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             module._as_dict(None)
         with self.assertRaisesRegex(TypeError, "expected list"):
             module._as_list({})
+
+    def test_review_learnings_main_reports_malformed_payload_without_traceback(
+        self,
+    ) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_main_test",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-test-")
+        self.addCleanup(tempdir.cleanup)
+
+        with mock.patch.object(module, "build_local_diff", return_value=""):
+            with mock.patch.object(module, "extract_findings", return_value=[]):
+                with mock.patch.object(
+                    module,
+                    "fetch_recent_copilot_comments",
+                    side_effect=TypeError("expected list in review learnings payload"),
+                ):
+                    stderr = io.StringIO()
+                    with contextlib.redirect_stderr(stderr):
+                        result = module.main(
+                            [
+                                "--repo-root",
+                                tempdir.name,
+                                "--github-days",
+                                "1",
+                            ]
+                        )
+
+        self.assertEqual(result, 2)
+        self.assertIn("[sd-review-learnings:github]", stderr.getvalue())
+        self.assertIn("expected list in review learnings payload", stderr.getvalue())
 
     def test_review_learnings_script_rejects_invalid_managed_marker_order(
         self,

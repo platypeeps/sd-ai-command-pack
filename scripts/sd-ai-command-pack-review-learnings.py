@@ -823,6 +823,11 @@ def main(argv: list[str] | None = None) -> int:
                 include_working_tree=args.include_working_tree,
             )
         findings = extract_findings(diff_text, repo_root, env_prefixes=env_prefixes)
+    except (OSError, RuntimeError, json.JSONDecodeError) as exc:
+        print(f"[sd-review-learnings:findings] {exc}", file=sys.stderr)
+        return 2
+
+    try:
         comments = (
             fetch_recent_copilot_comments(
                 repo_root,
@@ -833,8 +838,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.github_days
             else []
         )
-    except (OSError, RuntimeError, json.JSONDecodeError) as exc:
-        print(f"[sd-review-learnings:setup] {exc}", file=sys.stderr)
+    except (OSError, RuntimeError, TypeError, json.JSONDecodeError) as exc:
+        print(f"[sd-review-learnings:github] {exc}", file=sys.stderr)
         return 2
 
     for finding in findings:

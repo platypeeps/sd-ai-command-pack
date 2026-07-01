@@ -282,8 +282,8 @@ node_modules/
 For `uvx`-based Gito wrappers, the
 runner sets `UV_CACHE_DIR` and `UV_TOOL_DIR` to writable temp directories when
 they are unset. When Gito reports provider rate limiting through an explicit
-HTTP 429 status such as `ClientError: 429`, the runner retries with bounded
-exponential backoff. Tune attempts and delays with
+HTTP 429 status such as `ClientError: 429` or a 429 slow-down response, the
+runner retries with bounded exponential backoff. Tune attempts and delays with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`,
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, and
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`. If Prism

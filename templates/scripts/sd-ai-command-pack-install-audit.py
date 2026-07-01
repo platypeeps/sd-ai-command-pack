@@ -115,7 +115,8 @@ def is_unsafe_installed_target(path_text: str) -> bool:
     windows_path = PureWindowsPath(path_text)
     return (
         posix_path.is_absolute()
-        or windows_path.is_absolute()
+        or bool(windows_path.drive)
+        or bool(windows_path.root)
         or ".." in posix_path.parts
         or ".." in windows_path.parts
     )

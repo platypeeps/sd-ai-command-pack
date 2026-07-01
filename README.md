@@ -147,7 +147,8 @@ to writable temp directories when they are unset. The installed
 `.gito/sd-ai-command-pack.env` file sets `MAX_CONCURRENT_TASKS=4` for pack
 review runners when the caller has not already provided a value. When Gito
 reports provider rate limiting through an explicit HTTP 429 status such as
-`ClientError: 429`, the runner retries with bounded exponential backoff; tune that with
+`ClientError: 429` or a 429 slow-down response, the runner retries with bounded
+exponential backoff; tune that with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`,
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, and
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`. If Prism
