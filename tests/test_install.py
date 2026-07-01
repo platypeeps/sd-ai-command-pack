@@ -5589,6 +5589,62 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             overview.read_text(encoding="utf-8"),
         )
 
+    def test_update_spec_kb_preserves_user_notes_outside_managed_categories(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+
+        initial = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(initial.returncode, 0, initial.stdout)
+
+        custom_note = root / ".obsidian-kb/My Notes.md"
+        custom_note.write_text("keep me\n", encoding="utf-8")
+        custom_asset = root / ".obsidian-kb/Attachments/diagram.txt"
+        custom_asset.parent.mkdir(parents=True)
+        custom_asset.write_text("asset\n", encoding="utf-8")
+        custom_legacy_name = root / ".obsidian-kb/Dashboard.md"
+        custom_legacy_name.write_text("custom dashboard note\n", encoding="utf-8")
+
+        check_result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/sd-ai-command-pack-update-spec-kb.py",
+                "--check",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(check_result.returncode, 0, check_result.stdout)
+        self.assertIn("conflicts: none", check_result.stdout)
+        self.assertNotIn("stale generated entries would be removed", check_result.stdout)
+
+        refresh = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(refresh.returncode, 0, refresh.stdout)
+        self.assertEqual(custom_note.read_text(encoding="utf-8"), "keep me\n")
+        self.assertEqual(custom_asset.read_text(encoding="utf-8"), "asset\n")
+        self.assertEqual(
+            custom_legacy_name.read_text(encoding="utf-8"),
+            "custom dashboard note\n",
+        )
+
     def test_update_spec_kb_quotes_vault_copy_example(self) -> None:
         module = self.load_module_from_path(
             install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py",
