@@ -409,7 +409,7 @@ runs when the repository knowledge changes.
 macOS/Linux:
 
 ```bash
-cp -R "$(pwd)/.obsidian-kb" "/path/to/your/vault/Repo-KB"
+cp -R "$(pwd)/.obsidian-kb/." "/path/to/your/vault/Repo-KB"
 ```
 
 Windows PowerShell:

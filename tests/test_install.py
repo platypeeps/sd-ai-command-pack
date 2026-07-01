@@ -2875,7 +2875,7 @@ class InstallTests(unittest.TestCase):
             self.assertIn("folder names do not start with `.`", content)
             self.assertIn("older symlink-based helper", content)
             self.assertIn("scripts/sd-ai-command-pack-update-spec-kb.py", content)
-            self.assertIn('cp -R "$(pwd)/.obsidian-kb"', content)
+            self.assertIn('cp -R "$(pwd)/.obsidian-kb/."', content)
             self.assertIn("Copy-Item -Recurse -Force", content)
             self.assertNotIn("New-Item -ItemType SymbolicLink", content)
             self.assertNotIn("PowerShell running as Administrator", content)
@@ -5608,7 +5608,36 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
                 conflicts=[],
             )
 
-        self.assertIn("cp -R '/tmp/repo with spaces/.obsidian-kb'", output.getvalue())
+        self.assertIn("cp -R '/tmp/repo with spaces/.obsidian-kb/.'", output.getvalue())
+
+    def test_update_spec_kb_escapes_repo_name_in_overview_link_label(self) -> None:
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-test-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name) / "repo[docs]"
+        root.mkdir()
+        (root / ".trellis").mkdir()
+        (root / ".trellis/config.yaml").write_text("# test\n", encoding="utf-8")
+        self.run_git(root, "init")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        dashboard = root / ".obsidian-kb/Dashboard - repo[docs].md"
+        self.assertTrue(dashboard.is_file())
+        self.assertIn(
+            "[LLM-KB - repo\\[docs\\].md](LLM-KB%20-%20repo%5Bdocs%5D.md)",
+            dashboard.read_text(encoding="utf-8"),
+        )
 
     def test_update_spec_kb_replaces_legacy_generated_symlink_with_copy(self) -> None:
         root = self.make_repo()

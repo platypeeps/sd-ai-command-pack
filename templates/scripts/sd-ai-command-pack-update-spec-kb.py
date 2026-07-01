@@ -862,7 +862,10 @@ def dashboard_content(root: Path, sources: list[Path]) -> str:
             if github_url
             else "GitHub: not detected from `origin`"
         ),
-        f"LLM KB overview: [{overview.name}]({markdown_link_target(overview)})",
+        (
+            f"LLM KB overview: [{markdown_link_text(overview)}]"
+            f"({markdown_link_target(overview)})"
+        ),
         "",
         "This folder is a self-contained copy of selected repository knowledge "
         "files for Obsidian and LLM indexing.",
@@ -1147,7 +1150,7 @@ def report_kb_state(
             print(f"  - {conflict}")
     else:
         print("conflicts: none")
-    source = shlex.quote(str(root / KB_DIR))
+    source = shlex.quote(str(root / KB_DIR) + "/.")
     target = shlex.quote(f"/absolute/path/to/vault/{root.name}-KB")
     print("vault copy example: " f"cp -R {source} {target}")
 

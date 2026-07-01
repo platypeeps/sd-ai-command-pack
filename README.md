@@ -259,7 +259,7 @@ To use that generated folder inside an Obsidian vault, copy the repo's
 runs when the repository knowledge changes. For macOS/Linux:
 
 ```bash
-cp -R "$(pwd)/.obsidian-kb" "/path/to/your/vault/Repo-KB"
+cp -R "$(pwd)/.obsidian-kb/." "/path/to/your/vault/Repo-KB"
 ```
 
 For Windows PowerShell:

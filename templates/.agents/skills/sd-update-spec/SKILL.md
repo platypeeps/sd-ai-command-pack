@@ -84,5 +84,5 @@ portable Obsidian knowledge-base workflows.
      `.obsidian-kb` folder into a vault. State that `/path/to/your/vault` is a
      placeholder the user must replace, and derive the final link name from the
      repository name when possible, such as
-     `cp -R "$(pwd)/.obsidian-kb" "/path/to/your/vault/Repo-KB"`
+     `cp -R "$(pwd)/.obsidian-kb/." "/path/to/your/vault/Repo-KB"`
    - `Validation`: checks run, or why checks were not run
