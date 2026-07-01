@@ -372,10 +372,10 @@ existing Trellis or pack-generated files from Git tracking first, or use the
 normal tracked install when the repository should share one setup.
 
 By default, existing files with different content are reported as conflicts and
-left untouched. Use `--force` to overwrite them. The exception is an existing
-`.prism/rules.json` and `.gito/config.toml`: once either differs from the pack
-template, it is reported as `preserved` and is never overwritten or reported as
-a conflict. Add `--backup` with `--force` to save a `.bak` copy of every
+left untouched. Use `--force` to overwrite them. The exceptions are an existing
+`.prism/rules.json`, `.gito/config.toml`, and `.github/PULL_REQUEST_TEMPLATE.md`:
+once one differs from the pack template, it is reported as `preserved` and is
+never overwritten or reported as a conflict. Add `--backup` with `--force` to save a `.bak` copy of every
 overwritten file next to the original before it is changed. The pack-owned
 `.gito/sd-ai-command-pack.env` file is updateable like scripts and docs so the
 standard Gito concurrency cap can be refreshed.
@@ -392,7 +392,11 @@ are explicit overrides for repairing or bootstrapping adapters when the active
 Trellis platform markers are missing. The update-spec adapter delegates to
 the Trellis-provided `trellis-update-spec` skill in the target repo.
 
-When the GitHub platform is installed, the installer also creates or updates a
+When the GitHub platform is installed, the installer also seeds
+`.github/PULL_REQUEST_TEMPLATE.md` with Summary/Test plan/Pre-PR checklist
+sections that prompt for the explicit scope sections the PR-body checks look
+for; an existing customized template is always preserved. The installer also
+creates or updates a
 managed `sd-ai-command-pack` block in `.github/copilot-instructions.md`. It
 preserves existing repo-specific Copilot instructions, replaces only the marked
 pack block on future installs, and adopts any earlier unmarked pack guidance

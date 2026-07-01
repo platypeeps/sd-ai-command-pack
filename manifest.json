@@ -392,6 +392,13 @@
     },
     {
       "platform": "github",
+      "kind": "doc",
+      "source": "templates/.github/PULL_REQUEST_TEMPLATE.md",
+      "target": ".github/PULL_REQUEST_TEMPLATE.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
       "kind": "prompt",
       "source": "templates/.github/prompts/sd-start.prompt.md",
       "target": ".github/prompts/sd-start.prompt.md",

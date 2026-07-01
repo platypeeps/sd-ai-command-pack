@@ -374,56 +374,41 @@ class InstallTests(unittest.TestCase):
         self.assertIn(install.COPILOT_GUIDANCE_END, content)
         for expected in (
             "Trellis And SD AI Command Pack Review Guidance",
-            "Ignore copied-in Trellis runtime/platform files",
-            ".trellis/scripts/**/*",
-            ".trellis/agents/**/*",
-            ".agents/skills/trellis-*/**/*",
-            ".github/agents/trellis-*",
-            ".github/copilot/**/*",
-            ".github/hooks/trellis.json",
-            ".github/prompts/continue.prompt.md",
-            ".github/prompts/finish-work.prompt.md",
-            ".github/skills/trellis-*/**/*",
-            ".claude/commands/trellis/**/*",
-            ".codex/skills/trellis-*/**/*",
-            ".cursor/commands/trellis-*.md",
-            ".cursor/skills/trellis-*/**/*",
-            ".gemini/commands/trellis/**/*",
-            ".gemini/skills/trellis-*/**/*",
-            ".opencode/commands/trellis/**/*",
-            ".opencode/skills/trellis-*/**/*",
-            "Ignore files copied in from `sd-ai-command-pack`",
-            ".agents/skills/sd-*/**/*",
-            ".github/prompts/sd-*",
-            ".claude/commands/sd/**/*",
-            ".cursor/commands/sd-*.md",
-            ".gemini/commands/sd/**/*",
-            ".opencode/commands/sd-*",
-            ".gito/config.toml",
-            ".gito/sd-ai-command-pack.env",
-            ".prism/rules.json",
-            ".prism/rules.schema.json",
-            ".sd-ai-command-pack/installed-targets.txt",
-            "docs/SD_AI_COMMAND_PACK.md",
-            "scripts/sd-ai-command-pack-*",
             "Trellis is the repository workflow foundation",
             "Software Delivery command wrappers",
-            "Do not leave line comments on wording",
-            "copied SD command-pack skills/prompts/scripts/docs/rules",
+            # Vendored-payload guidance with collapsed glob families.
+            "payloads as vendored files",
+            ".trellis/scripts/**",
+            ".trellis/agents/**",
+            "**/skills/trellis-*/**",
+            "**/skills/sd-*/**",
+            "`.github/prompts/` (including `continue.prompt.md` and",
+            ".github/copilot/**",
+            ".github/hooks/trellis.json",
+            ".github/agents/trellis-*",
+            "scripts/sd-ai-command-pack-*",
+            "legacy `scripts/trellis-*.sh`",
+            "scripts/update_repomix*",
+            ".gito/**",
+            ".prism/**",
+            ".sd-ai-command-pack/**",
+            "docs/SD_AI_COMMAND_PACK.md",
+            "legacy `docs/TRELLIS_REVIEW_PR_PACK.md`",
+            # Review-budget and escalation guidance.
             "app behavior",
             "data contracts",
             "repo-owned scripts",
             "data/access/security boundaries",
             "fail-closed behavior",
-            "obvious syntax breakage",
-            "secret leakage",
-            "direct mismatch",
+            "leaks a secret",
             "Tooling/generated scope",
             "Automation scope",
             "CI/review scope",
             ".sd-ai-command-pack/pr-body-scope.json",
             "Group duplicate root causes into one comment",
             "deterministic local checks",
+            # Phrases the review-learnings scanner requires
+            # (RECOMMENDED_COPILOT_PHRASES).
             "current, non-outdated unresolved",
             "stale or outdated review threads",
             "copied or generated",
@@ -1242,6 +1227,9 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".github/copilot-instructions.md").exists())
 
     def test_tracked_copilot_guidance_matches_template(self) -> None:
+        # The tracked file may carry a repo-specific section outside the
+        # managed markers (for example the templates-mirror review guidance),
+        # but the managed block itself must match the shipped template exactly.
         installed = (install.ROOT / ".github/copilot-instructions.md").read_text(
             encoding="utf-8"
         )
@@ -1249,7 +1237,26 @@ class InstallTests(unittest.TestCase):
             install.ROOT / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
         ).read_text(encoding="utf-8")
 
-        self.assertEqual(installed, template)
+        self.assertEqual(installed.count(install.COPILOT_GUIDANCE_START), 1)
+        self.assertEqual(installed.count(install.COPILOT_GUIDANCE_END), 1)
+        self.assertIn(template.strip("\n"), installed)
+        self.assertIn("byte-verified mirrors of `templates/**`", installed)
+        self.assertIn("do not repeat the same finding on both copies", installed)
+
+    def test_copilot_block_keeps_scanner_phrases_contiguous(self) -> None:
+        # The review-learnings scanner and the guidance-block assertions match
+        # these phrases as contiguous substrings; a line-wrap inside one silently
+        # breaks both, so pin that they survive as single-line substrings.
+        template = (
+            install.ROOT / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
+        ).read_text(encoding="utf-8")
+        for phrase in (
+            "current, non-outdated unresolved",
+            "stale or outdated review threads",
+            "copied or generated",
+            "data/access/security boundaries",
+        ):
+            self.assertIn(phrase, template, f"phrase wrapped or missing: {phrase!r}")
 
     def test_tracked_full_check_skill_matches_template_and_documents_audit(self) -> None:
         installed = (install.ROOT / ".agents/skills/sd-full-check/SKILL.md").read_text(
@@ -1529,6 +1536,51 @@ class InstallTests(unittest.TestCase):
 
         self.assertEqual(result.status, "preserved")
         self.assertEqual(destination.read_text(encoding="utf-8"), "{}\n")
+
+    def test_install_file_preserves_existing_pull_request_template(self) -> None:
+        root = self.make_repo(".github")
+        file = install.PackFile(
+            platform="github",
+            kind="doc",
+            source=install.ROOT / "templates/.github/PULL_REQUEST_TEMPLATE.md",
+            target=Path(".github/PULL_REQUEST_TEMPLATE.md"),
+            anchor=Path(".github"),
+            install="if-anchor-exists",
+        )
+        destination = root / ".github/PULL_REQUEST_TEMPLATE.md"
+        destination.write_text("## My custom template\n", encoding="utf-8")
+
+        result = install.install_file(
+            file, root, force=True, dry_run=False, backup=False
+        )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertEqual(
+            destination.read_text(encoding="utf-8"), "## My custom template\n"
+        )
+
+    def test_pull_request_template_prompts_for_scope_sections(self) -> None:
+        template = (
+            install.ROOT / "templates/.github/PULL_REQUEST_TEMPLATE.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("## Summary", template)
+        self.assertIn("## Test plan", template)
+        self.assertIn("## Pre-PR checklist", template)
+        self.assertIn("Tooling/generated scope:", template)
+        self.assertIn("Automation scope:", template)
+        self.assertIn("CI/review scope:", template)
+        self.assertIn("sd-ai-command-pack-full-check.sh", template)
+        self.assertIn("no mutate-before-success", template)
+        self.assertIn("push once", template)
+        # Scope headings must only appear inside HTML comments so a template
+        # body cannot satisfy the pr-body scope check by itself.
+        for line in template.splitlines():
+            if "scope:" in line:
+                self.assertFalse(
+                    line.lstrip().startswith(("Tooling", "Automation", "CI/")),
+                    f"scope heading must not start a line: {line!r}",
+                )
 
     def test_install_file_preserves_gito_config(self) -> None:
         root = self.make_repo()

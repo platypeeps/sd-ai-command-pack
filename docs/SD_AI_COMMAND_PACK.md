@@ -183,6 +183,11 @@ Codex skills:
 In Codex, you can also invoke the enabled skills explicitly with
 `$sd-review-pr`-style skill mentions.
 
+For GitHub installs, the pack also seeds `.github/PULL_REQUEST_TEMPLATE.md`
+with Summary, Test plan, and Pre-PR checklist sections that prompt for the
+explicit scope sections the PR-body scope checks look for. A repo's existing
+customized template is always preserved, never overwritten.
+
 For GitHub Copilot, the installer also creates or updates a managed
 `sd-ai-command-pack` block in `.github/copilot-instructions.md`. Existing
 repo-specific Copilot instructions are preserved; only the marked pack block is
