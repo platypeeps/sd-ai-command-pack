@@ -6511,6 +6511,23 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             self.assertIn("sd-review-local", doc)
             self.assertIn("sd-review-local-all", doc)
 
+    def test_tracked_review_command_wrappers_match_templates(self) -> None:
+        wrapper_paths = [
+            ".claude/commands/sd/review-pr.md",
+            ".claude/commands/sd/review-local-all.md",
+            ".gemini/commands/sd/review-pr.toml",
+            ".gemini/commands/sd/review-local-all.toml",
+            ".opencode/commands/sd-review-pr.md",
+            ".opencode/commands/sd-review-local-all.md",
+        ]
+
+        for wrapper_path in wrapper_paths:
+            installed = (install.ROOT / wrapper_path).read_text(encoding="utf-8")
+            template = (
+                install.ROOT / "templates" / wrapper_path
+            ).read_text(encoding="utf-8")
+            self.assertEqual(installed, template, wrapper_path)
+
     def test_review_pr_skill_auto_dispatches_housekeeping_after_merge(self) -> None:
         skill = (
             install.ROOT
