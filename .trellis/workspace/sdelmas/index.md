@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 14
+- **Total Sessions**: 15
 - **Last Active**: 2026-07-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~574 | Active |
+| `journal-1.md` | ~612 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 15 | 2026-07-01 | Preserve custom Obsidian KB notes | `f65e97f` | `codex/obsidian-kb-copies` |
 | 14 | 2026-07-01 | Refine Obsidian KB copies | `8dd8f88`, `dbd96c6` | `codex/obsidian-kb-copies` |
 | 13 | 2026-07-01 | Resolve review wrapper parity feedback | `1da7874` | `sd-ai-command-pack-rename-and-hardening` |
 | 12 | 2026-07-01 | Remove implicit local review from sd-review-pr | `c7cacd9` | `sd-ai-command-pack-rename-and-hardening` |

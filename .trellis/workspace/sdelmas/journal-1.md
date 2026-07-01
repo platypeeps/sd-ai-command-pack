@@ -577,3 +577,42 @@ Converted Obsidian KB generation to portable category-based copies, added repo-s
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: Preserve custom Obsidian KB notes
+
+**Date**: 2026-07-01
+**Task**: Preserve custom Obsidian KB notes
+**Branch**: `codex/obsidian-kb-copies`
+
+### Summary
+
+Addressed final Copilot review feedback by limiting Obsidian KB stale detection and pruning to pack-managed generated entries while preserving user-created notes outside managed categories.
+
+### Main Changes
+
+- Added a shared ownership predicate for Obsidian KB stale-entry detection and pruning.
+- Preserved user-created top-level notes, assets, and custom legacy-name files inside `.obsidian-kb`.
+- Kept stale pruning for pack-managed category folders and marker-identified legacy generated files.
+- Preserved legacy generated symlink migration for current repository knowledge sources.
+- Added regression coverage for custom notes/assets surviving both `--check` and refresh.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f65e97f` | (see git log) |
+
+### Testing
+
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`
+- [OK] `/opt/homebrew/bin/python3.13 -m unittest discover -s tests`
+- [OK] `python3 scripts/sd-ai-command-pack-update-spec-kb.py --check`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
