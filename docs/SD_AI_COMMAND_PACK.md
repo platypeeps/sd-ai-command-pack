@@ -56,6 +56,8 @@ Quick links:
   installs should commit this file with the other pack-owned files; `--local-only`
   installs keep it in the clone-local exclude list instead.
 - `.prism/rules.json`: default Prism review rules for repo-specific checks.
+- `.prism/rules.schema.json`: JSON Schema for the Prism rules file, for editor
+  validation and tooling.
 - `.gito/config.toml`: default Gito project configuration for direct or
   pack-run local reviews. Provider credentials and model selection stay in
   `~/.gito/.env` or process environment variables.
@@ -484,6 +486,10 @@ Common environment variables:
   review preflight script to run before the legacy repo-local
   `scripts/check-review-preflight.mjs` fallback.
 - `SD_AI_COMMAND_PACK_INSTALL_AUDIT=0`: skip the structural post-install audit.
+- `SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT=0`: skip the pack source drift
+  gates (template twin parity and env-var documentation coverage). These gates
+  only run inside the sd-ai-command-pack source repository itself and are
+  skipped automatically in target repos.
 - `SD_AI_COMMAND_PACK_INSTALL_AUDIT=required`: fail if the full-check cannot run
   the audit script.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS`: space-separated package scripts
@@ -501,6 +507,8 @@ Common environment variables:
   review (passed to `prism --fail-on`). Defaults to `high`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_MAX_FINDINGS`: cap on reported Prism
   findings (passed to `prism --max-findings`). Unset by default (no cap).
+- `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_EXCLUDE`: comma-separated extra Prism
+  `--exclude` globs appended to the pack's built-in review-scan exclusions.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=1`: opt into Gito review.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF`: base ref for Gito review. Defaults to
   `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then the discovered branch-diff
@@ -526,6 +534,9 @@ Common environment variables:
   against the full checked-out repository. Defaults to current-diff scope. The
   `sd-review-local-all` command passes this by invoking the runner with
   `--full-codebase`.
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF`: base ref for the current-diff
+  local review scope. Defaults to `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`,
+  then the discovered branch-diff sequence above.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MODE=0`: disable Prism in the local
   review runner. By default, if Prism is selected as an active local review
   tool, it must run successfully.
@@ -534,6 +545,19 @@ Common environment variables:
   empty chunk response.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE`: tracked file
   batch size for that fallback before adaptive splitting. Defaults to `25`.
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_FAIL_ON`: severity that fails the
+  local Prism review. Defaults to
+  `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_FAIL_ON`, then `high`.
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MAX_FINDINGS`: cap on reported local
+  Prism findings. Defaults to
+  `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_MAX_FINDINGS`, then unset (no cap).
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_RULES`: explicit Prism rules file for
+  the local review runner. Defaults to
+  `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_RULES`, then `.prism/rules.json` when
+  present.
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_EXCLUDE`: comma-separated extra Prism
+  `--exclude` globs for the local review runner. Defaults to
+  `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_EXCLUDE`.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MODE=0`: disable Gito in the local
   review runner. By default, if Gito is selected as an active local review tool,
   it must run successfully.
@@ -572,6 +596,8 @@ Common environment variables:
 ### Scope And PR Body Checks
 
 - `SD_AI_COMMAND_PACK_SCOPE_CHECK=0`: skip tooling/generated file scope checks.
+- `SD_AI_COMMAND_PACK_TARGETS_FILE`: explicit installed-targets file for the
+  review-scope check. Defaults to `.sd-ai-command-pack/installed-targets.txt`.
 - `SD_AI_COMMAND_PACK_SCOPE_CHECK_GH=required`: fail when `gh` cannot resolve the
   current PR for the tooling/generated scope body check. Defaults to optional.
 - `SD_AI_COMMAND_PACK_SCOPE_BASE_REF`: base ref for tooling/generated scope checks.
@@ -593,6 +619,8 @@ Common environment variables:
   `REVIEW_PREFLIGHT_PR_BODY`.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHANGED_FILES`: explicit newline- or
   NUL-delimited changed path list for configurable PR-body scope checks.
+- `SD_AI_COMMAND_PACK_CHANGED_FILES`: fallback changed-path list for the
+  PR-body scope check when the `PR_BODY_SCOPE` variant above is unset.
 - `SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO`: explicit `owner/repo` slug when the
   selected remote URL cannot be parsed as a GitHub repository.
 - `SD_AI_COMMAND_PACK_HOUSEKEEPING_MERGE_STRATEGY`: auto-merge strategy: `merge`,

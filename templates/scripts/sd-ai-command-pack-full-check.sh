@@ -538,6 +538,85 @@ run_sd_ai_command_pack_install_audit() {
   run "SD AI command pack install audit" python3 "$script"
 }
 
+run_pack_source_drift_gates() {
+  # Deterministic pre-PR gates that only apply inside the sd-ai-command-pack
+  # source repository itself: every tracked manifest target must match its
+  # templates/ twin, and every pack env var read by shipped scripts must be
+  # documented in the installed usage guide.
+  local mode="${SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT:-auto}"
+
+  if is_disabled "$mode"; then
+    warn "Skipping pack source drift gates because SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT=$mode."
+    return 0
+  fi
+  if [ ! -f "install.py" ] || [ ! -f "manifest.json" ] || [ ! -d "templates" ]; then
+    return 0
+  fi
+  if ! have python3; then
+    warn "python3 not found on PATH; skipping pack source drift gates."
+    return 0
+  fi
+
+  section "Pack source drift gates: template twins and env-var docs"
+  python3 - <<'PACK_SOURCE_DRIFT_GATES'
+import json
+import re
+import sys
+from pathlib import Path
+
+errors = []
+
+manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
+compared = 0
+for item in manifest.get("files", []):
+    if item.get("kind") == "managed-block":
+        continue
+    source = Path(str(item["source"]))
+    target = Path(str(item["target"]))
+    if not target.exists():
+        continue
+    compared += 1
+    if source.read_bytes() != target.read_bytes():
+        errors.append(f"template drift: {target} differs from {source}")
+print(f"template twin pairs compared: {compared}")
+
+var_re = re.compile(r"SD_AI_COMMAND_PACK_[A-Z0-9_]+")
+exempt = {
+    # Internal test hook, intentionally undocumented.
+    "SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE",
+    # Legacy rename hint prefixes emitted by the install audit, not env vars.
+    "SD_AI_COMMAND_PACK_FULL_CHECK",
+    "SD_AI_COMMAND_PACK_HOUSEKEEPING",
+}
+script_vars = set()
+for path in Path("scripts").iterdir():
+    if path.suffix in {".sh", ".py", ".mjs"}:
+        script_vars |= set(var_re.findall(path.read_text(encoding="utf-8")))
+skill_vars = set()
+for path in Path("templates/.agents/skills").glob("*/SKILL.md"):
+    skill_vars |= set(var_re.findall(path.read_text(encoding="utf-8")))
+documented = set(
+    var_re.findall(Path("docs/SD_AI_COMMAND_PACK.md").read_text(encoding="utf-8"))
+)
+for name in sorted(script_vars - documented - exempt):
+    errors.append(
+        f"undocumented env var: {name} is read by scripts/ but missing "
+        "from docs/SD_AI_COMMAND_PACK.md"
+    )
+for name in sorted(documented - script_vars - skill_vars):
+    errors.append(
+        f"stale documented env var: {name} is documented but no shipped "
+        "script or skill consumes it"
+    )
+print(f"env vars checked: {len(script_vars)} in scripts, {len(documented)} documented")
+
+if errors:
+    for error in errors:
+        print(f"error: {error}", file=sys.stderr)
+    sys.exit(1)
+PACK_SOURCE_DRIFT_GATES
+}
+
 run_sd_ai_command_pack_pr_body_scope_check() {
   local mode="${SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK:-auto}"
   local script="scripts/sd-ai-command-pack-pr-body-scope.py"
@@ -693,6 +772,7 @@ main() {
   run "Whitespace check: staged diff" git diff --cached --check
   run_review_preflight
   run_sd_ai_command_pack_install_audit
+  run_pack_source_drift_gates
   run_sd_ai_command_pack_scope_check
   run_sd_ai_command_pack_pr_body_scope_check
   run_ci_classification_report

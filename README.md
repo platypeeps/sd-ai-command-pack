@@ -294,10 +294,8 @@ Copy-Item -Recurse -Force -Path "C:\path\to\repo\.obsidian-kb\*" -Destination "C
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND` | Custom command for requesting a remote review. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote review request/fix rounds before asking whether to continue. | `5` |
 
-Deprecated fallbacks such as `REVIEW_PREFLIGHT_PR_BODY`,
-`SD_AI_COMMAND_PACK_FULL_CHECK_NPM_SCRIPTS`, and
-`SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_NPM` remain documented in the installed
-guide for older target repos.
+The deprecated `REVIEW_PREFLIGHT_PR_BODY` fallback remains honored and is
+documented in the installed guide for older target repos.
 
 ## Install
 
@@ -314,7 +312,8 @@ python3 install.py /path/to/trellis/repo
 The installer requires `.trellis/config.yaml` in the target repo and will fail
 with the Trellis install link if that marker is missing. It always installs the
 shared `.agents` skills, full-check, housekeeping, review-scope, review-local
-command assets, review-preflight, PR-body scope, and update-spec KB scripts,
+command assets, review-preflight, install-audit, review-learnings, PR-body
+scope, and update-spec KB scripts,
 Prism/Gito defaults, usage guide, and the
 generated `.sd-ai-command-pack/installed-targets.txt` snapshot used by the scope
 checks. Normal shared installs should commit that snapshot with the other
@@ -382,7 +381,8 @@ overwritten file next to the original before it is changed. The pack-owned
 standard Gito concurrency cap can be refreshed.
 
 Platform filters always include the shared skills, full-check, housekeeping,
-review-scope, review-preflight, review-local command assets, PR-body scope, and
+review-scope, review-preflight, review-local command assets, install-audit,
+review-learnings, PR-body scope, and
 update-spec KB scripts, Prism/Gito defaults, usage guide, and installed-targets
 snapshot, because the review,
 full-check, housekeeping, and update-spec adapters delegate to those shared

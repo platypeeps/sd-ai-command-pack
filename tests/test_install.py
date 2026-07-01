@@ -6869,22 +6869,75 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             self.assertIn("sd-review-local", doc)
             self.assertIn("sd-review-local-all", doc)
 
-    def test_tracked_review_command_wrappers_match_templates(self) -> None:
-        wrapper_paths = [
-            ".claude/commands/sd/review-pr.md",
-            ".claude/commands/sd/review-local-all.md",
-            ".gemini/commands/sd/review-pr.toml",
-            ".gemini/commands/sd/review-local-all.toml",
-            ".opencode/commands/sd-review-pr.md",
-            ".opencode/commands/sd-review-local-all.md",
-        ]
+    def test_tracked_pack_targets_match_templates(self) -> None:
+        # Every tracked installed twin must match its manifest source so this
+        # repo's own footprint can never drift from the shipped templates.
+        # (The managed copilot block has its own dedicated full-file test.)
+        _, files = install.load_manifest()
+        compared = 0
+        drifted: list[str] = []
+        for file in files:
+            if file.kind == install.MANAGED_BLOCK_KIND:
+                continue
+            installed = install.ROOT / file.target
+            if not installed.exists():
+                continue
+            compared += 1
+            if installed.read_bytes() != file.source.read_bytes():
+                drifted.append(file.target.as_posix())
+        self.assertGreaterEqual(compared, 50)
+        self.assertEqual(drifted, [])
 
-        for wrapper_path in wrapper_paths:
-            installed = (install.ROOT / wrapper_path).read_text(encoding="utf-8")
-            template = (
-                install.ROOT / "templates" / wrapper_path
-            ).read_text(encoding="utf-8")
-            self.assertEqual(installed, template, wrapper_path)
+    ENV_VAR_DOC_EXEMPT = frozenset(
+        {
+            # Internal test hook, intentionally undocumented.
+            "SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE",
+            # Legacy rename hint prefixes emitted by the install audit.
+            "SD_AI_COMMAND_PACK_FULL_CHECK",
+            "SD_AI_COMMAND_PACK_HOUSEKEEPING",
+        }
+    )
+
+    def test_shipped_env_vars_are_documented(self) -> None:
+        var_re = re.compile(r"SD_AI_COMMAND_PACK_[A-Z0-9_]+")
+        script_vars: set[str] = set()
+        for path in (install.ROOT / "scripts").iterdir():
+            if path.suffix in {".sh", ".py", ".mjs"}:
+                script_vars |= set(var_re.findall(path.read_text(encoding="utf-8")))
+        skill_vars: set[str] = set()
+        for path in (install.ROOT / "templates/.agents/skills").glob("*/SKILL.md"):
+            skill_vars |= set(var_re.findall(path.read_text(encoding="utf-8")))
+        documented = set(
+            var_re.findall(
+                (install.ROOT / "docs/SD_AI_COMMAND_PACK.md").read_text(
+                    encoding="utf-8"
+                )
+            )
+        )
+
+        undocumented = sorted(script_vars - documented - self.ENV_VAR_DOC_EXEMPT)
+        self.assertEqual(
+            undocumented,
+            [],
+            "env vars read by shipped scripts but missing from the installed guide",
+        )
+        stale = sorted(documented - script_vars - skill_vars)
+        self.assertEqual(
+            stale,
+            [],
+            "env vars documented in the installed guide but consumed by no "
+            "shipped script or skill",
+        )
+
+    def test_full_check_script_runs_pack_source_drift_gates(self) -> None:
+        script = (
+            install.ROOT / "scripts/sd-ai-command-pack-full-check.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("run_pack_source_drift_gates", script)
+        self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT", script)
+        self.assertIn("template twin pairs compared", script)
+        self.assertIn("undocumented env var", script)
 
     def test_review_pr_skill_auto_dispatches_housekeeping_after_merge(self) -> None:
         skill = (

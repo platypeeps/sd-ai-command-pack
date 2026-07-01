@@ -16,11 +16,13 @@ const URI_SCHEME_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 
 export function runReviewPreflight(options = {}) {
   rootDir = resolve(options.rootDir || defaultRootDir);
-  config = loadConfig(rootDir, options.configPath);
   failures = [];
   warnings = [];
   passes = [];
   installedTargetsCache = undefined;
+  // Load config only after the result buffers are reset so a malformed config
+  // file's fail() entry is reported instead of being wiped by the reset.
+  config = loadConfig(rootDir, options.configPath);
 
   runCheck('package override sources of truth', checkPackageOverrides);
   runCheck('copied template diff disclosure', checkCopiedTemplateDiffDisclosure);
