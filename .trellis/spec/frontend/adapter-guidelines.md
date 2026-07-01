@@ -12,16 +12,21 @@ load the shared skill and summarize the required behavior.
 Reference files:
 
 - `templates/.agents/skills/sd-review-pr/SKILL.md`
+- `templates/.agents/skills/sd-review-local/SKILL.md`
+- `templates/.agents/skills/sd-review-local-all/SKILL.md`
 - `templates/.agents/skills/sd-full-check/SKILL.md`
 - `templates/.agents/skills/sd-housekeeping/SKILL.md`
 - `templates/.agents/skills/sd-continue/SKILL.md`
 - `templates/.agents/skills/sd-finish-work/SKILL.md`
-- `templates/.agents/skills/sd-full-check/SKILL.md`
-- `templates/.agents/skills/sd-housekeeping/SKILL.md`
 - `templates/.agents/skills/sd-update-spec/SKILL.md`
+- `templates/scripts/sd-ai-command-pack-review-local.sh`
 - `templates/.claude/commands/sd/continue.md`
 - `templates/.claude/commands/sd/finish-work.md`
 - `templates/.claude/commands/sd/review-pr.md`
+- `templates/.claude/commands/sd/review-local.md`
+- `templates/.claude/commands/sd/review-local-all.md`
+- `templates/.cursor/commands/sd-review-local.md`
+- `templates/.cursor/commands/sd-review-local-all.md`
 - `templates/.cursor/commands/sd-review-pr.md`
 - `templates/.gemini/commands/sd/review-pr.toml`
 - `templates/.github/prompts/sd-review-pr.prompt.md`
@@ -55,6 +60,33 @@ The `sd-review-pr` shared skill should continue to define:
 The `sd-full-check` shared skill should continue to define the canonical
 local verification script, deterministic checks, optional local review-provider
 behavior, skipped-check reporting, and no-edit safety rules.
+
+The `sd-review-local` and `sd-review-local-all` shared skills should continue
+to define the interactive local review/fix loop while delegating provider
+execution to `scripts/sd-ai-command-pack-review-local.sh`. Keep their behavior
+parallel except for review scope:
+
+- `sd-review-local` reviews local changes first; when no local changes exist,
+  it reviews the current branch diff against the configured base ref.
+- `sd-review-local-all` reviews the full checked-out repository and should not
+  infer scope from dirty-state or branch diffs.
+- Both commands should default to the configured local providers, currently
+  Prism and Gito, and remain open to repo-local custom providers named through
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS`.
+- Custom provider commands are shell snippets supplied by the target repo or
+  user configuration; run them with `bash -c` from the repo root so profile
+  startup files do not unexpectedly change review behavior.
+- Standard review exclusions must stay aligned across providers. Prism receives
+  exclusions from the runner through `--exclude`; Gito receives distributed
+  defaults through `.gito/config.toml`, with the runner also filtering full
+  codebase path lists to tracked, existing files outside excluded top-level
+  directories.
+- Gito HTTP 429 handling should retry only when recent output contains an
+  explicit error-like 429 or slow-down response. Do not retry because prose,
+  docs, or source examples mention `429`.
+- The runner must register temporary files as they are created and remove them
+  through its cleanup trap, including paths created by Prism chunking, Gito
+  output capture, and review path/filter generation.
 
 The `sd-housekeeping` shared skill should continue to define the
 post-merge task list, the expected clean-state report, anomaly reporting, and

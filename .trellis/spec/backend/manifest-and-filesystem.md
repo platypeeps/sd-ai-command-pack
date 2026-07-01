@@ -106,12 +106,16 @@ Use `install_file()` for copy behavior:
 - Return `conflict` and leave the target untouched when content differs and
   `--force` is absent.
 - Return `preserved` and leave the target untouched when content differs and
-  the target is `.prism/rules.json`, regardless of `--force`; repo-local Prism
-  rules are intentionally protected during pack refreshes and must not be
-  reported as conflicts.
+  the target is `.prism/rules.json` or `.gito/config.toml`, regardless of
+  `--force`; repo-local review-tool policy is intentionally protected during
+  pack refreshes and must not be reported as a conflict.
+- Keep `.gito/sd-ai-command-pack.env` updateable like scripts and docs. That
+  file carries pack-owned runtime defaults, while credentials, model choices,
+  and user-specific Gito settings belong in `~/.gito/.env` or the process
+  environment.
 - With `--force --backup`, copy the previous target file next to the original
   with a `.bak` suffix before overwriting it. Do not create backups for
-  preserved `.prism/rules.json` files because they are not overwritten.
+  preserved review-tool policy files because they are not overwritten.
 - Backup candidates must also resolve inside the target repo, and an existing
   symlinked `.bak` path counts as occupied even when the symlink is broken.
 - Copy with `shutil.copyfile()` only after creating the target parent
@@ -141,6 +145,46 @@ When adding the block, migrate exact unmarked `.trellis`, `.trellis/`,
 tasks, workflow, scripts, and shared runtime files remain trackable. Keep
 `--local-only` installs on `.git/info/exclude`; local-only mode must not modify
 tracked `.gitignore`.
+
+### Review Tool Config And Ignore Hygiene
+
+1. Scope and trigger: use this contract whenever adding or changing
+   distributed review-tool config, review runner temp files, generated review
+   reports, or AI-tool local-state ignore rules.
+2. Entry points and data: `manifest.json` owns `.prism/rules.json`,
+   `.gito/config.toml`, `.gito/sd-ai-command-pack.env`, and review scripts.
+   `install.py` owns `FORCE_PRESERVED_TARGETS`,
+   `REVIEW_ARTIFACT_GITIGNORE_PATTERNS`,
+   `PLATFORM_LOCAL_GITIGNORE_PATTERNS`, and `trellis_gitignore_block()`.
+3. Contracts: preserve existing `.prism/rules.json` and `.gito/config.toml`
+   files even with `--force`; install or update `.gito/sd-ai-command-pack.env`
+   from the pack. Never ignore the whole `.gito/`, `.prism/`, `.claude/`,
+   `.codex/`, `.gemini/`, or `.opencode/` directories because pack-owned
+   adapters and config must remain trackable.
+4. Ignore matrix: the managed `trellis-gitignore` block must ignore
+   `.build/`, root `code-review-report.json` and `code-review-report.md`, pack
+   temp files such as `sd-ai-command-pack-gito.*`,
+   `sd-ai-command-pack-review-paths.*`,
+   `sd-ai-command-pack-review-filters.*`,
+   `sd-ai-command-pack-prism-codebase.*`, `sd-ai-command-pack-ci-paths.*`,
+   `sd-ai-command-pack-uv-cache/`, `sd-ai-command-pack-uv-tools/`, and
+   Gito-local state patterns such as `.gito/**/.cache/`, `.gito/**/cache/`,
+   `.gito/**/logs/`, `.gito/**/tmp/`, `.gito/**/*.local.*`, and
+   `.gito/**/*.log`.
+5. Good, base, and bad cases: a fresh install adds the managed block and
+   trackable review config; an update replaces the marker block without
+   duplicating entries; local-only writes equivalent ignores to
+   `.git/info/exclude`; a repo-custom `.gito/config.toml` is reported
+   `preserved`; a blanket `.gito/` or `.prism/` ignore is wrong.
+6. Tests required: cover fresh block creation, marker-block replacement,
+   migration away from blanket Trellis ignores, local-only exclude behavior,
+   negative `git check-ignore` expectations for `.gito/config.toml` and
+   `.prism/rules.json`, and positive `git check-ignore` expectations for
+   generated review reports, temp files, and Gito cache/log/tmp files.
+7. Common failure mode: treating review config and review output as the same
+   class of file. Correct behavior is to track distributed defaults and
+   adapters, preserve user-tuned policy files, and ignore generated reports,
+   caches, logs, temp files, secrets, and local state.
 
 ## Legacy Adapter Cleanup
 
