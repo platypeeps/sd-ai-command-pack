@@ -1644,7 +1644,7 @@ class InstallTests(unittest.TestCase):
         sitecustomize = PACK_ROOT / "tests/coverage_sitecustomize/sitecustomize.py"
         self.assertTrue(sitecustomize.is_file())
         self.assertIn(
-            "coverage.process_startup()",
+            'getattr(coverage, "process_startup", None)',
             sitecustomize.read_text(encoding="utf-8"),
         )
         coveragerc = (PACK_ROOT / ".coveragerc").read_text(encoding="utf-8")
@@ -5201,6 +5201,43 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
 
         with self.assertRaisesRegex(ValueError, "invalid order"):
             module.update_target(target, "<!-- sd-review-learnings:start -->\nnew\n<!-- sd-review-learnings:end -->\n", dry_run=False)
+
+    def test_review_learnings_main_reports_invalid_managed_marker_order(
+        self,
+    ) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_marker_main_test",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-test-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        target = root / "review-learnings.md"
+        target.write_text(
+            "# Review Learnings\n\n"
+            "<!-- sd-review-learnings:end -->\n"
+            "old\n"
+            "<!-- sd-review-learnings:start -->\n",
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(module, "build_local_diff", return_value=""):
+            with mock.patch.object(module, "extract_findings", return_value=[]):
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    result = module.main(
+                        [
+                            "--repo-root",
+                            str(root),
+                            "--target",
+                            str(target),
+                            "--update",
+                        ]
+                    )
+
+        self.assertEqual(result, 2)
+        self.assertIn("[sd-review-learnings:update]", stderr.getvalue())
+        self.assertIn("invalid order", stderr.getvalue())
 
     def test_review_learnings_script_preserves_text_after_managed_block(
         self,

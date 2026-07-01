@@ -7,12 +7,23 @@ subprocesses so coverage can collect data from installed scripts.
 """
 import sys
 
+COVERAGE_UNAVAILABLE_MESSAGE = (
+    "sitecustomize: coverage.py not found or is too old, subprocess coverage will not be collected."
+)
+
 try:
     import coverage
-
-    coverage.process_startup()
-except (ImportError, AttributeError):
+except ImportError:
     print(
-        "sitecustomize: coverage.py not found or is too old, subprocess coverage will not be collected.",
+        COVERAGE_UNAVAILABLE_MESSAGE,
         file=sys.stderr,
     )
+else:
+    process_startup = getattr(coverage, "process_startup", None)
+    if callable(process_startup):
+        process_startup()
+    else:
+        print(
+            COVERAGE_UNAVAILABLE_MESSAGE,
+            file=sys.stderr,
+        )

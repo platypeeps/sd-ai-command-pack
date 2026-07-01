@@ -850,7 +850,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.update or args.dry_run:
         block = render_managed_block(findings, comments)
         target = args.target if args.target.is_absolute() else repo_root / args.target
-        updated = update_target(target, block, dry_run=args.dry_run)
+        try:
+            updated = update_target(target, block, dry_run=args.dry_run)
+        except (OSError, ValueError) as exc:
+            print(f"[sd-review-learnings:update] {exc}", file=sys.stderr)
+            return 2
         if args.dry_run:
             print(updated, end="" if updated.endswith("\n") else "\n")
         else:
