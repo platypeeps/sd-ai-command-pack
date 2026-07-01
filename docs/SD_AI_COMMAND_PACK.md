@@ -55,6 +55,12 @@ Quick links:
   installs should commit this file with the other pack-owned files; `--local-only`
   installs keep it in the clone-local exclude list instead.
 - `.prism/rules.json`: default Prism review rules for repo-specific checks.
+- `.gito/config.toml`: default Gito project configuration for direct or
+  pack-run local reviews. Provider credentials and model selection stay in
+  `~/.gito/.env` or process environment variables.
+- `.gito/sd-ai-command-pack.env`: pack-owned Gito environment defaults consumed
+  by the local review runners. It sets `MAX_CONCURRENT_TASKS=4` unless the
+  caller already provided a value.
 - Platform adapters are installed only for detected active Trellis platforms:
   the corresponding platform folder must contain Trellis command, hook, skill,
   agent, or platform-library markers. A plain `.github` directory for Actions
@@ -520,6 +526,9 @@ Common environment variables:
   delay for rate limits. Defaults to `30`.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`: maximum Gito
   retry delay after exponential backoff. Defaults to `120`.
+- `MAX_CONCURRENT_TASKS`: Gito LLM concurrency cap. The pack runners load the
+  installed `.gito/sd-ai-command-pack.env` default of `4` when this variable is
+  unset.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_UV_CACHE_DIR`: fallback `UV_CACHE_DIR` for
   Gito when `UV_CACHE_DIR` is unset. Defaults to a temp
   `sd-ai-command-pack-uv-cache` directory.
@@ -579,9 +588,13 @@ unless `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=required` is set.
 Gito is opt-in because it can require `uvx`, cache access outside the repo,
 network access, and configured LLM credentials. When enabled, Gito writes
 reports to `.build/review/gito` by default so generated review artifacts do not
-land at the repository root. If Gito reports provider rate limiting through an
-explicit HTTP 429 status such as `ClientError: 429`, full-check retries with
-the same bounded backoff behavior as review-local.
+land at the repository root. The pack installs `.gito/config.toml` for
+repo-local Gito defaults and `.gito/sd-ai-command-pack.env` with
+`MAX_CONCURRENT_TASKS=4`; the full-check and review-local runners parse that
+env file before invoking Gito, without sourcing arbitrary shell. If Gito reports
+provider rate limiting through an explicit HTTP 429 status such as
+`ClientError: 429`, full-check retries with the same bounded backoff behavior
+as review-local.
 
 ## CI cadence
 
@@ -700,10 +713,12 @@ Git, the installer stops because clone-local excludes cannot hide tracked files.
 
 Use `--dry-run` first when you want to inspect which files would change.
 Use `--backup` with `--force` if the target repo may have local edits that need
-to be preserved next to the overwritten files. An existing `.prism/rules.json`
-that differs from the pack template is reported as `preserved` and is never
-overwritten or reported as a conflict, so repo-specific Prism rules are not
-replaced during a pack refresh.
+to be preserved next to the overwritten files. Existing `.prism/rules.json` and
+`.gito/config.toml` files that differ from the pack templates are reported as
+`preserved` and are never overwritten or reported as conflicts, so repo-specific
+review rules are not replaced during a pack refresh. The pack-owned
+`.gito/sd-ai-command-pack.env` file is updateable like scripts and docs so the
+standard Gito concurrency cap can be refreshed.
 
 After installing or refreshing a target repo, a quick smoke test is:
 

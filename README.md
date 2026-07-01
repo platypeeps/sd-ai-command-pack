@@ -29,6 +29,7 @@ The current Trellis-focused pack installs:
 - helper scripts under `scripts/`
 - the installed usage guide at `docs/SD_AI_COMMAND_PACK.md`
 - Prism defaults under `.prism/`
+- Gito defaults under `.gito/`
 - platform command or prompt adapters for Claude, Cursor, Gemini, GitHub
   Copilot, and OpenCode when the matching active Trellis platform is present
 - a managed `sd-ai-command-pack` guidance block in
@@ -142,9 +143,11 @@ Gito
 full-codebase reports go to `.build/review/gito-all` by default; override with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_GITO_OUT_DIR` when needed.
 For `uvx`-based Gito wrappers, the runner sets `UV_CACHE_DIR` and `UV_TOOL_DIR`
-to writable temp directories when they are unset. When Gito reports provider
-rate limiting through an explicit HTTP 429 status such as `ClientError: 429`,
-the runner retries with bounded exponential backoff; tune that with
+to writable temp directories when they are unset. The installed
+`.gito/sd-ai-command-pack.env` file sets `MAX_CONCURRENT_TASKS=4` for pack
+review runners when the caller has not already provided a value. When Gito
+reports provider rate limiting through an explicit HTTP 429 status such as
+`ClientError: 429`, the runner retries with bounded exponential backoff; tune that with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`,
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, and
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`. If Prism
@@ -265,6 +268,7 @@ Developer Mode enabled.
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS` | Max Gito attempts for HTTP 429 provider rate limits. | `2` |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS` | Initial Gito retry delay. | `30` |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS` | Maximum Gito retry delay after backoff. | `120` |
+| `MAX_CONCURRENT_TASKS` | Gito LLM concurrency cap. Loaded from `.gito/sd-ai-command-pack.env` by pack runners when unset. | `4` |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK` | Enables Prism full-codebase batch/path fallback after empty chunk responses. | `1` |
 | `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` | General PR body override for review-scope and fallback PR-body scope checks. | unset |
 | `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY` | PR body override consumed specifically by `sd-ai-command-pack-pr-body-scope.py`. | `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` |
@@ -293,7 +297,7 @@ The installer requires `.trellis/config.yaml` in the target repo and will fail
 with the Trellis install link if that marker is missing. It always installs the
 shared `.agents` skills, full-check, housekeeping, review-scope, review-local
 command assets, review-preflight, PR-body scope, and update-spec KB scripts,
-Prism rules, usage guide, and the
+Prism/Gito defaults, usage guide, and the
 generated `.sd-ai-command-pack/installed-targets.txt` snapshot used by the scope
 checks. Normal shared installs should commit that snapshot with the other
 pack-owned files so audit and review-scope helpers can compare the intended
@@ -350,14 +354,16 @@ normal tracked install when the repository should share one setup.
 
 By default, existing files with different content are reported as conflicts and
 left untouched. Use `--force` to overwrite them. The exception is an existing
-`.prism/rules.json`: once it differs from the pack template, it is reported as
-`preserved` and is never overwritten or reported as a conflict. Add `--backup`
-with `--force` to save a `.bak` copy of every overwritten file next to the
-original before it is changed.
+`.prism/rules.json` and `.gito/config.toml`: once either differs from the pack
+template, it is reported as `preserved` and is never overwritten or reported as
+a conflict. Add `--backup` with `--force` to save a `.bak` copy of every
+overwritten file next to the original before it is changed. The pack-owned
+`.gito/sd-ai-command-pack.env` file is updateable like scripts and docs so the
+standard Gito concurrency cap can be refreshed.
 
 Platform filters always include the shared skills, full-check, housekeeping,
 review-scope, review-preflight, review-local command assets, PR-body scope, and
-update-spec KB scripts, Prism rules, usage guide, and installed-targets
+update-spec KB scripts, Prism/Gito defaults, usage guide, and installed-targets
 snapshot, because the review,
 full-check, housekeeping, and update-spec adapters delegate to those shared
 assets.
@@ -498,7 +504,7 @@ this coverage number.
 
 | Platform | Installed When |
 | --- | --- |
-| Shared skills, scripts, Prism rules, usage guide | Always |
+| Shared skills, scripts, Prism/Gito defaults, usage guide | Always |
 | Codex skill completion | `.agents/skills/sd-*` installed as shared skills |
 | Claude Code | `.claude/` exists with Trellis command, hook, or skill markers; or `--all` / `--platform claude` |
 | Cursor | `.cursor/` exists with Trellis command, hook, or skill markers; or `--all` / `--platform cursor` |

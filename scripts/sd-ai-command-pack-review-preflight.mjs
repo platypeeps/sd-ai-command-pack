@@ -61,6 +61,7 @@ function defaultConfig() {
       '.codex/',
       '.cursor/',
       '.gemini/',
+      '.gito/',
       '.github/',
       '.opencode/',
       '.prism/',
@@ -467,6 +468,8 @@ function isSdCommandPackCopiedPath(path) {
     path === 'scripts/sd-command-pack-review-scope.sh' ||
     path === 'scripts/trellis-full-check.sh' ||
     path === 'scripts/trellis-housekeeping.sh' ||
+    path === '.gito/config.toml' ||
+    path === '.gito/sd-ai-command-pack.env' ||
     path === '.prism/rules.json' ||
     path === 'docs/SD_AI_COMMAND_PACK.md' ||
     path === 'docs/TRELLIS_REVIEW_PR_PACK.md'

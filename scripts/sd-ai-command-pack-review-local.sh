@@ -246,6 +246,39 @@ positive_int_or_default() {
   esac
 }
 
+load_gito_pack_env() {
+  local env_file="$REPO_ROOT/.gito/sd-ai-command-pack.env"
+  [ -f "$env_file" ] || return 0
+
+  local line value
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ''|'#'*)
+        continue
+        ;;
+      export\ *)
+        line="${line#export }"
+        ;;
+    esac
+
+    case "$line" in
+      MAX_CONCURRENT_TASKS=*)
+        value="${line#MAX_CONCURRENT_TASKS=}"
+        case "$value" in
+          ''|*[!0-9]*|0)
+            warn "Ignoring invalid MAX_CONCURRENT_TASKS in $env_file."
+            ;;
+          *)
+            if [ -z "${MAX_CONCURRENT_TASKS:-}" ]; then
+              export MAX_CONCURRENT_TASKS="$value"
+            fi
+            ;;
+        esac
+        ;;
+    esac
+  done <"$env_file"
+}
+
 run_command() {
   local label="$1"
   shift
@@ -691,6 +724,7 @@ run_gito_review() {
     return
   fi
 
+  load_gito_pack_env
   prepare_gito_uv_env
 
   if [ "$REVIEW_LOCAL_SCOPE" = "all" ]; then

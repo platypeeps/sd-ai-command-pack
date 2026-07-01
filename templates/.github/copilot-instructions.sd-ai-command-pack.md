@@ -20,9 +20,10 @@
   changes the SD AI command pack integration. This includes `.agents/skills/sd-*/**/*`,
   `.github/prompts/sd-*`, `.claude/commands/sd/**/*`,
   `.cursor/commands/sd-*.md`, `.gemini/commands/sd/**/*`,
-  `.opencode/commands/sd-*`, `.prism/rules.json`, `.prism/rules.schema.json`,
-  `.sd-ai-command-pack/installed-targets.txt`, `docs/SD_AI_COMMAND_PACK.md`,
-  and `scripts/sd-ai-command-pack-*`.
+  `.opencode/commands/sd-*`, `.gito/config.toml`,
+  `.gito/sd-ai-command-pack.env`, `.prism/rules.json`,
+  `.prism/rules.schema.json`, `.sd-ai-command-pack/installed-targets.txt`,
+  `docs/SD_AI_COMMAND_PACK.md`, and `scripts/sd-ai-command-pack-*`.
 - Do not leave line comments on wording, spelling, links, formatting, examples,
   or implementation details inside copied Trellis skills/agents/commands or
   copied SD command-pack skills/prompts/scripts/docs/rules. Only comment when

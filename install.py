@@ -48,7 +48,9 @@ ACTIVE_TRELLIS_PLATFORM_MARKERS = {
     ),
 }
 TRELLIS_INSTALL_DOCS_URL = "https://docs.trytrellis.app/start/install-and-first-task"
-FORCE_PRESERVED_TARGETS = frozenset({Path(".prism/rules.json")})
+FORCE_PRESERVED_TARGETS = frozenset(
+    {Path(".prism/rules.json"), Path(".gito/config.toml")}
+)
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
 LOCAL_ONLY_MARKER_FILE = Path(".sd-ai-command-pack/local-only.txt")
 LOCAL_ONLY_EXCLUDE_START = "# sd-ai-command-pack local-only start"
@@ -375,7 +377,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Install only this platform adapter, even if no active Trellis "
             "marker is detected. Repeat to select several. "
-            "Shared skills, scripts, Prism rules, and docs are always installed."
+            "Shared skills, scripts, Prism/Gito defaults, and docs are always installed."
         ),
     )
     parser.add_argument(
@@ -391,8 +393,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help=(
             "Overwrite existing files that differ from the pack templates "
-            "(except .prism/rules.json). Add --backup to save .bak copies "
-            "before overwriting."
+            "(except .prism/rules.json and .gito/config.toml). Add --backup "
+            "to save .bak copies before overwriting."
         ),
     )
     parser.add_argument(

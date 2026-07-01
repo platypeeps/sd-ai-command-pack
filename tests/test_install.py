@@ -394,6 +394,8 @@ class InstallTests(unittest.TestCase):
             ".cursor/commands/sd-*.md",
             ".gemini/commands/sd/**/*",
             ".opencode/commands/sd-*",
+            ".gito/config.toml",
+            ".gito/sd-ai-command-pack.env",
             ".prism/rules.json",
             ".prism/rules.schema.json",
             ".sd-ai-command-pack/installed-targets.txt",
@@ -702,6 +704,13 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / "scripts/sd-ai-command-pack-pr-body-scope.py").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-update-spec-kb.py").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
+        self.assertTrue((root / ".prism/rules.schema.json").is_file())
+        self.assertTrue((root / ".gito/config.toml").is_file())
+        self.assertTrue((root / ".gito/sd-ai-command-pack.env").is_file())
+        self.assertIn(
+            "MAX_CONCURRENT_TASKS=4",
+            (root / ".gito/sd-ai-command-pack.env").read_text(encoding="utf-8"),
+        )
         self.assertTrue((root / "docs/SD_AI_COMMAND_PACK.md").is_file())
         self.assert_trellis_gitignore_block(
             (root / ".gitignore").read_text(encoding="utf-8")
@@ -1510,6 +1519,27 @@ class InstallTests(unittest.TestCase):
 
         self.assertEqual(result.status, "preserved")
         self.assertEqual(destination.read_text(encoding="utf-8"), "{}\n")
+
+    def test_install_file_preserves_gito_config(self) -> None:
+        root = self.make_repo()
+        file = install.PackFile(
+            platform="shared",
+            kind="config",
+            source=install.ROOT / "templates/.gito/config.toml",
+            target=Path(".gito/config.toml"),
+            anchor=None,
+            install="always",
+        )
+        destination = root / ".gito/config.toml"
+        destination.parent.mkdir(parents=True)
+        destination.write_text("retries = 1\n", encoding="utf-8")
+
+        result = install.install_file(
+            file, root, force=True, dry_run=False, backup=False
+        )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertEqual(destination.read_text(encoding="utf-8"), "retries = 1\n")
 
     def test_install_file_preserves_if_not_exists_targets(self) -> None:
         root = self.make_repo()
@@ -3535,6 +3565,93 @@ class InstallTests(unittest.TestCase):
         self.assertIn("gito review --all", log)
         self.assertIn("--filter ", log)
 
+    def test_review_local_script_loads_gito_concurrency_env(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("base\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-review-local-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        gito = stub_bin / "gito"
+        gito.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'MAX_CONCURRENT_TASKS=%s\\n' \"${{MAX_CONCURRENT_TASKS:-}}\" >> {str(log_path)!r}\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        gito.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "--all", "gito"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("MAX_CONCURRENT_TASKS=4", log_path.read_text(encoding="utf-8"))
+
+    def test_review_local_script_preserves_explicit_gito_concurrency_env(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("base\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-review-local-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        gito = stub_bin / "gito"
+        gito.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'MAX_CONCURRENT_TASKS=%s\\n' \"${{MAX_CONCURRENT_TASKS:-}}\" >> {str(log_path)!r}\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        gito.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "--all", "gito"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "MAX_CONCURRENT_TASKS": "2",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("MAX_CONCURRENT_TASKS=2", log_path.read_text(encoding="utf-8"))
+
     def test_review_local_script_disabled_provider_smoke(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
@@ -3966,6 +4083,58 @@ class InstallTests(unittest.TestCase):
         log = log_path.read_text(encoding="utf-8")
         self.assertEqual(log.count("gito attempt"), 2, log)
         self.assertIn("gito attempt 2 review --vs HEAD --filter app.txt", log)
+
+    def test_full_check_script_loads_gito_concurrency_env(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("before\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        (root / "app.txt").write_text("after\n", encoding="utf-8")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-full-check-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        gito = stub_bin / "gito"
+        gito.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'MAX_CONCURRENT_TASKS=%s\\n' \"${{MAX_CONCURRENT_TASKS:-}}\" >> {str(log_path)!r}\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        gito.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-full-check.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT": "0",
+                "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0",
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
+                "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF": "HEAD",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("MAX_CONCURRENT_TASKS=4", log_path.read_text(encoding="utf-8"))
 
     def test_full_check_script_ignores_invalid_configured_base_ref(self) -> None:
         if self._bash_path is None:
@@ -5912,6 +6081,32 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         schema = json.loads(schema_files[0].source.read_text(encoding="utf-8"))
         self.assertIn("$schema", schema)
         self.assertIn("severityOverrides", schema["properties"])
+
+    def test_gito_config_templates_are_installed(self) -> None:
+        config_files = [
+            file
+            for file in self.shared_manifest_files("config")
+            if file.target == Path(".gito/config.toml")
+        ]
+        env_files = [
+            file
+            for file in self.shared_manifest_files("config")
+            if file.target == Path(".gito/sd-ai-command-pack.env")
+        ]
+
+        self.assertEqual(len(config_files), 1)
+        self.assertEqual(config_files[0].install, install.IF_NOT_EXISTS)
+        config_text = config_files[0].source.read_text(encoding="utf-8")
+        self.assertIn("exclude_files = [", config_text)
+        self.assertIn('".trellis/**"', config_text)
+        self.assertIn("[prompt_vars]", config_text)
+        self.assert_no_secret_markers(config_files[0].source)
+
+        self.assertEqual(len(env_files), 1)
+        self.assertEqual(env_files[0].install, install.ALWAYS_INSTALL)
+        env_text = env_files[0].source.read_text(encoding="utf-8")
+        self.assertIn("MAX_CONCURRENT_TASKS=4", env_text)
+        self.assert_no_secret_markers(env_files[0].source)
 
     def test_review_pr_skill_allows_reply_and_resolve_for_addressed_threads(self) -> None:
         skill = (
