@@ -134,6 +134,11 @@ class InstallTests(unittest.TestCase):
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text("# active Trellis platform marker\n", encoding="utf-8")
 
+    def write_gito_pack_env(self, root: Path, text: str = "MAX_CONCURRENT_TASKS=4\r\n") -> None:
+        env_path = root / ".gito/sd-ai-command-pack.env"
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        env_path.write_bytes(text.encode("utf-8"))
+
     def _run_git_process(self, root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["git", *args],
@@ -3643,6 +3648,7 @@ class InstallTests(unittest.TestCase):
         root = self.make_repo()
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
+        self.write_gito_pack_env(root)
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "app.txt").write_text("base\n", encoding="utf-8")
@@ -4123,6 +4129,7 @@ class InstallTests(unittest.TestCase):
         root = self.make_repo()
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
+        self.write_gito_pack_env(root)
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "app.txt").write_text("before\n", encoding="utf-8")
@@ -5750,15 +5757,17 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertFalse(module._matches_pattern("other/src/file.py", "src/**"))
         self.assertEqual(module._normalize_path("./src\\file.py"), "src/file.py")
 
-    def test_pr_body_scope_split_changed_files_preserves_path_spaces(self) -> None:
+    def test_pr_body_scope_split_changed_files_strips_path_whitespace(self) -> None:
         module = self.load_module_from_path(
             install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
             "sd_ai_command_pack_pr_body_scope_split_test",
         )
 
         self.assertEqual(
-            module._split_changed_files("  leading.py\ntrailing.py  \n\n./src\\file.py\n"),
-            ["  leading.py", "trailing.py  ", "src/file.py"],
+            module._split_changed_files(
+                "  leading.py\ntrailing.py  \n\n./src\\file.py\na path/file name.py\n"
+            ),
+            ["leading.py", "trailing.py", "src/file.py", "a path/file name.py"],
         )
 
     def test_pr_body_scope_config_rejects_empty_headings(self) -> None:

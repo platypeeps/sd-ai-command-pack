@@ -141,9 +141,10 @@ def _split_changed_files(text: str) -> list[str]:
     paths: list[str] = []
     seen: set[str] = set()
     for raw_path in text.replace("\0", "\n").splitlines():
-        if not raw_path.strip():
+        stripped_path = raw_path.strip()
+        if not stripped_path:
             continue
-        path = _normalize_path(raw_path)
+        path = _normalize_path(stripped_path)
         if path and path not in seen:
             paths.append(path)
             seen.add(path)

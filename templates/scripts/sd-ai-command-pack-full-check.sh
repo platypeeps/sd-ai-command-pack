@@ -72,6 +72,7 @@ load_gito_pack_env() {
 
   local line value
   while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
     case "$line" in
       ''|'#'*)
         continue
