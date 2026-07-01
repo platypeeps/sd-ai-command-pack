@@ -10,6 +10,9 @@ let config = defaultConfig();
 let failures = [];
 let warnings = [];
 let passes = [];
+let installedTargetsCache;
+
+const URI_SCHEME_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 
 export function runReviewPreflight(options = {}) {
   rootDir = resolve(options.rootDir || defaultRootDir);
@@ -17,6 +20,7 @@ export function runReviewPreflight(options = {}) {
   failures = [];
   warnings = [];
   passes = [];
+  installedTargetsCache = undefined;
 
   runCheck('package override sources of truth', checkPackageOverrides);
   runCheck('copied template diff disclosure', checkCopiedTemplateDiffDisclosure);
@@ -57,6 +61,7 @@ function defaultConfig() {
       '.codex/',
       '.cursor/',
       '.gemini/',
+      '.gito/',
       '.github/',
       '.opencode/',
       '.prism/',
@@ -84,10 +89,20 @@ function defaultConfig() {
       'node_modules/',
     ],
     optionalReferencePaths: [
+      '.sd-ai-command-pack/installed-targets.txt',
+      '.sd-ai-command-pack/local-only.txt',
+      '.sd-ai-command-pack/pr-body-scope.json',
+      '.sd-ai-command-pack/review-preflight.json',
+      '.trellis/.developer',
+      '.trellis/.template-hashes.json',
       'ARCHITECTURE.md',
       'ARCHITECTURE_OVERVIEW.md',
       'docs/ARCHITECTURE.md',
       'docs/ARCHITECTURE_OVERVIEW.md',
+      'docs/TRELLIS_REVIEW_PR_PACK.md',
+      'docs/repomix-map.md',
+      'docs/review-learnings.md',
+      'package.json',
       'scripts/check-review-preflight.mjs',
       'scripts/classify-ci-changes.sh',
       'scripts/classify_ci_changes.sh',
@@ -220,6 +235,11 @@ function checkPackageOverrides() {
 function checkCopiedTemplateDiffDisclosure() {
   const diff = currentChangedPaths();
 
+  if (diff === null) {
+    warn('could not inspect current diff for copied Trellis/SD command-pack surfaces.');
+    return;
+  }
+
   if (diff.paths.length === 0) {
     pass('no current diff to inspect for copied Trellis/SD command-pack surfaces.');
     return;
@@ -276,6 +296,7 @@ function checkDocumentationPathReferences() {
 }
 
 function checkDocumentationPathHygiene() {
+  const failureStart = failures.length;
   const files = documentationGuardFiles();
   const personalPathPatterns = [
     { pattern: /\/Users\/([A-Za-z0-9._-]+)\//g, platform: 'macOS' },
@@ -300,7 +321,7 @@ function checkDocumentationPathHygiene() {
     }
   }
 
-  if (failures.some((message) => message.includes('personal') && message.includes('absolute path'))) {
+  if (failures.length > failureStart) {
     return;
   }
 
@@ -460,9 +481,11 @@ function isSdCommandPackCopiedPath(path) {
     path.startsWith('.gemini/commands/sd/') ||
     /^\.opencode\/commands\/sd-[^/]+\.md$/.test(path) ||
     path.startsWith('scripts/sd-ai-command-pack-') ||
-    path === 'scripts/sd-command-pack-review-scope.sh' ||
+    path === 'scripts/sd-ai-command-pack-review-scope.sh' ||
     path === 'scripts/trellis-full-check.sh' ||
     path === 'scripts/trellis-housekeeping.sh' ||
+    path === '.gito/config.toml' ||
+    path === '.gito/sd-ai-command-pack.env' ||
     path === '.prism/rules.json' ||
     path === 'docs/SD_AI_COMMAND_PACK.md' ||
     path === 'docs/TRELLIS_REVIEW_PR_PACK.md'
@@ -470,18 +493,24 @@ function isSdCommandPackCopiedPath(path) {
 }
 
 function packInstalledTargets() {
+  if (installedTargetsCache !== undefined) {
+    return installedTargetsCache;
+  }
+
   const file = '.sd-ai-command-pack/installed-targets.txt';
 
   if (!exists(file)) {
-    return new Set();
+    installedTargetsCache = new Set();
+    return installedTargetsCache;
   }
 
-  return new Set(
+  installedTargetsCache = new Set(
     readText(file)
       .split('\n')
       .map((line) => normalizePathSeparators(line.trim()))
       .filter(Boolean),
   );
+  return installedTargetsCache;
 }
 
 function isRepoOwnedCopiedTemplateIntegrationPath(path, integrationPaths = config.integrationPaths) {
@@ -567,10 +596,9 @@ export function shouldCheckDocumentationPathReference(target, kind = 'code-span'
     target.startsWith('@') ||
     target.endsWith('/') ||
     target.includes('://') ||
-    /^(?:mailto|tel|obsidian|app):/i.test(target) ||
+    URI_SCHEME_PATTERN.test(target) ||
     /[<>{}\[\]*]/.test(target) ||
-    /[\s|]/.test(target) ||
-    target.includes(':')
+    /[\s|]/.test(target)
   ) {
     return false;
   }
@@ -665,52 +693,69 @@ function gitStdout(args) {
 }
 
 function gitRefExists(ref) {
+  if (!ref || ref.startsWith('-')) {
+    return false;
+  }
   return spawnSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
     cwd: rootDir,
     encoding: 'utf8',
   }).status === 0;
 }
 
+function configuredReviewBaseRef(name) {
+  const ref = process.env[name];
+  if (!ref) {
+    return '';
+  }
+  if (gitRefExists(ref)) {
+    return ref;
+  }
+  warn(`${name}=${ref} does not resolve to a commit; falling back to discovered default branch.`);
+  return '';
+}
+
 function defaultReviewBaseRef() {
-  const configured = process.env.SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF
-    || process.env.SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF;
+  const configured = configuredReviewBaseRef('SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF')
+    || configuredReviewBaseRef('SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF');
   if (configured) {
     return configured;
   }
 
-  if (gitRefExists('origin/HEAD')) {
-    return 'origin/HEAD';
+  const originHead = gitStdout(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
+  if (gitRefExists(originHead)) {
+    return originHead;
   }
 
   const upstream = gitStdout(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
-  if (upstream) {
+  if (gitRefExists(upstream)) {
     return upstream;
   }
 
   const remoteRefs = gitStdout(['for-each-ref', '--format=%(refname:short)', 'refs/remotes'])
     .split('\n')
     .map((ref) => ref.trim())
-    .filter((ref) => ref && !ref.endsWith('/HEAD'));
+    .filter((ref) => ref && !ref.endsWith('/HEAD') && gitRefExists(ref))
+    .sort();
 
   return remoteRefs[0] || '';
 }
 
-function currentDiffSources(kind) {
+function currentDiffSources(...kindArgs) {
   const baseRef = defaultReviewBaseRef();
   const sources = [
-    { args: ['diff', kind, '--cached'], label: 'staged diff' },
+    { args: ['diff', ...kindArgs, '--cached'], label: 'staged diff' },
   ];
 
   if (baseRef) {
-    sources.push({ args: ['diff', kind, `${baseRef}...HEAD`], label: 'branch diff' });
+    sources.push({ args: ['diff', ...kindArgs, `${baseRef}...HEAD`], label: 'branch diff' });
   }
 
-  sources.push({ args: ['diff', kind], label: 'working tree diff' });
+  sources.push({ args: ['diff', ...kindArgs], label: 'working tree diff' });
   return sources;
 }
 
 function currentDiffStats() {
-  const sources = currentDiffSources('--numstat');
+  const sources = currentDiffSources('--numstat', '-z');
 
   for (const source of sources) {
     const result = spawnSync('git', source.args, {
@@ -756,10 +801,14 @@ function currentChangedPaths() {
     }
   }
 
-  return { args: [], label: 'current diff', paths: [] };
+  return null;
 }
 
-function parseNumstat(output) {
+export function parseNumstat(output) {
+  if (output.includes('\0')) {
+    return parseNumstatZ(output);
+  }
+
   return output
     .trim()
     .split('\n')
@@ -773,6 +822,33 @@ function parseNumstat(output) {
         path: pathParts.join('\t'),
       };
     });
+}
+
+function parseNumstatZ(output) {
+  const tokens = output.split('\0').filter((token) => token !== '');
+  const files = [];
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const fields = tokens[index].split('\t');
+    const addedRaw = fields[0];
+    const deletedRaw = fields[1];
+    let path = fields.slice(2).join('\t');
+
+    if (!path && index + 1 < tokens.length) {
+      const oldPath = tokens[index + 1];
+      const newPath = tokens[index + 2] || oldPath;
+      path = newPath;
+      index += tokens[index + 2] ? 2 : 1;
+    }
+
+    files.push({
+      added: Number.isFinite(Number(addedRaw)) ? Number(addedRaw) : 0,
+      deleted: Number.isFinite(Number(deletedRaw)) ? Number(deletedRaw) : 0,
+      path,
+    });
+  }
+
+  return files;
 }
 
 export function validateTrellisJournalSessions({
@@ -918,7 +994,7 @@ function findStringIndexes(text, value) {
 
   while (index !== -1) {
     indexes.push(index);
-    index = text.indexOf(value, index + value.length);
+    index = text.indexOf(value, index + 1);
   }
 
   return indexes;

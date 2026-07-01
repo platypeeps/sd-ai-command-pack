@@ -55,8 +55,8 @@ The script runs:
 - Gito is opt-in because it may invoke `uvx`, use a cache outside the repo, and
   require LLM credentials or network access. Set `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=1` to
   run it. Reports are written to `.build/review/gito` by default. When Gito
-  reports a provider rate limit such as `ClientError: 429` or `Slow down`, the
-  script retries with bounded exponential backoff.
+  reports a provider rate limit through an explicit HTTP 429 status such as
+  `ClientError: 429`, the script retries with bounded exponential backoff.
 - Prism and Gito review scans use the pack-managed standard exclusions for
   top-level AI/tooling/cache directories such as `.github/`, `.claude/`,
   `.codex/`, `.gemini/`, `.opencode/`, `.agents/`, `.build/`, `.git/`,
@@ -82,13 +82,15 @@ The script runs:
   continue.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS`: space-separated package scripts
   to run when `package.json` and the selected package runner are available.
+  Defaults to `typecheck lint test:unit test:integration build test:e2e`.
   The older `SD_AI_COMMAND_PACK_FULL_CHECK_NPM_SCRIPTS` name is still accepted for
   compatibility.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_RUNNER`: package runner. Defaults to `npm`
   when package-script checks apply.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS=1`: skip package-script
-  checks. The older `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_NPM=1` name is still
-  accepted for compatibility.
+- `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS=1`: boolean flag to skip
+  all package-script checks. It does not accept a list of scripts. The older
+  `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_NPM=1` name is still accepted for
+  compatibility.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0`: skip Prism.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=required`: fail if Prism is missing,
   unauthenticated, or has provider/model configuration failures.
@@ -101,22 +103,27 @@ The script runs:
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR`: Gito report output directory. Defaults to
   `.build/review/gito`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS`: max Gito attempts for
-  provider rate limits. Defaults to the review-local Gito value, then `2`.
+  provider rate limits. Defaults to
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`, then `2`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_DELAY_SECONDS`: initial Gito retry
-  delay for rate limits. Defaults to the review-local Gito value, then `30`.
+  delay for rate limits. Defaults to
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, then `30`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_MAX_DELAY_SECONDS`: maximum Gito
-  retry delay after exponential backoff. Defaults to the review-local Gito
-  value, then `120`.
+  retry delay after exponential backoff. Defaults to
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`, then `120`.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK=0`: skip configurable PR-body scope
   checks.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CONFIG`: explicit JSON config path for
   additional PR-body scope rules. Defaults to
   `.sd-ai-command-pack/pr-body-scope.json` when present.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`: explicit PR body text for
-  configurable PR-body scope checks.
+  configurable PR-body scope checks. This value takes precedence for
+  `scripts/sd-ai-command-pack-pr-body-scope.py`.
 - `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`: explicit PR body text for tooling/generated
   and PR-body scope checks in local or CI contexts where `gh pr view` should
-  not be used.
+  not be used. Use this as the general override consumed by
+  `scripts/sd-ai-command-pack-review-scope.sh` and as the fallback for the
+  configurable PR-body scope script.
 - `REVIEW_PREFLIGHT_PR_BODY`: deprecated fallback for older target repos. Prefer
   `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` or
   `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`.

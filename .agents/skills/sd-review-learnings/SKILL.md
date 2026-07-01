@@ -13,6 +13,10 @@ block.
 
 ## Workflow
 
+Run these commands from the repository root. The script path shown below is the
+stable command-pack install path; if a repo wraps it with its own command, use
+the repo wrapper.
+
 1. Run a local scan first:
 
    ```bash
@@ -36,7 +40,8 @@ block.
    `--target PATH`. Otherwise the default is `docs/review-learnings.md`.
 
 5. If the branch diff should be compared against a specific ref, pass
-   `--base REF` explicitly. Otherwise use the script's repo-default behavior.
+   `--base REF` explicitly. Otherwise the script uses the discovered remote
+   default ref, then the current upstream, then the first available remote ref.
 
 6. Treat the managed block as a starting point. Convert durable lessons into the
    repo's real source of truth: Copilot instructions, PR checklist, preflight
@@ -48,6 +53,10 @@ block.
 - The script detects common shell/workflow review-cycle patterns, PR-template
   scope prompt drift, Trellis journal placeholders, and Copilot-instruction
   guidance gaps.
-- `--github-days` uses `gh`; authenticate first with `gh auth status`.
+- `--github-days` uses `gh`; authenticate first with `gh auth status`. For
+  private repositories, the token needs permission to read pull requests and
+  review comments, such as the classic `repo` scope.
 - `--update` replaces only the managed `sd-review-learnings` block in the
   target file and preserves surrounding human-written content.
+- The default repository learning file is `docs/review-learnings.md`; use
+  `--target PATH` when a repo owns that knowledge somewhere else.

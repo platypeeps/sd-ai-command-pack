@@ -18,7 +18,10 @@ Initialized Trellis project scaffolding, wrote project-specific installer and pr
 
 ### Main Changes
 
-(Add details)
+- Initialized Trellis project scaffolding for the command-pack repository.
+- Added project-specific installer, manifest, and adapter guidance under
+  `.trellis/spec/`.
+- Pushed the bootstrap branch and opened draft PR #1.
 
 ### Git Commits
 
@@ -28,7 +31,7 @@ Initialized Trellis project scaffolding, wrote project-specific installer and pr
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] Ran the project test and whitespace checks for the bootstrap branch.
 
 ### Status
 
@@ -51,7 +54,11 @@ Hardened the Trellis review PR pack installer, expanded tests and specs, opened 
 
 ### Main Changes
 
-(Add details)
+- Hardened installer file writes, conflict handling, backups, and manifest path
+  validation.
+- Expanded installer tests and Trellis specs for symlink escapes, Windows path
+  anchors, source containment, non-file targets, and scoped diff checks.
+- Addressed live PR review feedback and pushed the review-response commits.
 
 ### Git Commits
 
@@ -66,7 +73,8 @@ Hardened the Trellis review PR pack installer, expanded tests and specs, opened 
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] Ran the installer test suite and targeted PR review checks for the
+  hardening changes.
 
 ### Status
 
@@ -89,7 +97,10 @@ Documented standing permission to reply to and resolve addressed PR review threa
 
 ### Main Changes
 
-(Add details)
+- Documented standing permission to reply to and resolve addressed PR review
+  threads.
+- Fixed package-script Node detection warning behavior from PR review.
+- Verified CI and resolved the remaining addressed review threads.
 
 ### Git Commits
 
@@ -100,7 +111,7 @@ Documented standing permission to reply to and resolve addressed PR review threa
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] Ran the relevant full-check/package-script validation and confirmed CI.
 
 ### Status
 
@@ -123,7 +134,10 @@ Added the post-merge housekeeping command and automatic review-loop housekeeping
 
 ### Main Changes
 
-(Add details)
+- Added the post-merge housekeeping command and review-loop handoff.
+- Hardened branch deletion safety, dry-run previews, scoped GitHub checks,
+  default-branch ref handling, and remote-head verification.
+- Addressed PR review feedback across the housekeeping flow.
 
 ### Git Commits
 
@@ -141,7 +155,7 @@ Added the post-merge housekeeping command and automatic review-loop housekeeping
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] Ran housekeeping-focused unit/shell checks and confirmed PR CI.
 
 ### Status
 
@@ -164,7 +178,10 @@ Added the auto-finalize housekeeping flow, then addressed PR review feedback for
 
 ### Main Changes
 
-(Add details)
+- Added the auto-finalize housekeeping flow.
+- Addressed PR review feedback for paginated review-thread inspection, help
+  text, skip-CI test robustness, env validation, and finalize-command docs.
+- Pushed review-response commits for the auto-finalize branch.
 
 ### Git Commits
 
@@ -177,7 +194,7 @@ Added the auto-finalize housekeeping flow, then addressed PR review feedback for
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] Ran targeted review-loop and housekeeping checks, then confirmed CI.
 
 ### Status
 
@@ -200,7 +217,9 @@ Added sd-namespaced command wrappers, refresh-specs architecture/repospec guidan
 
 ### Main Changes
 
-(Add details)
+- Added `sd`-namespaced command wrappers across supported platforms.
+- Added refresh-spec architecture and repospec guidance.
+- Hardened review-driven adapter behavior and legacy symlink cleanup.
 
 ### Git Commits
 
@@ -216,7 +235,8 @@ Added sd-namespaced command wrappers, refresh-specs architecture/repospec guidan
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] Ran installer/unit validation and wrapper/script checks for the command
+  wrapper refresh.
 
 ### Status
 
@@ -295,6 +315,221 @@ Addressed Copilot review comments on the Trellis journal by replacing Session 7 
 - [OK] `git diff --check` - passed.
 - [OK] `TRELLIS_FULL_CHECK_PRISM=skip bash scripts/trellis-full-check.sh` - deterministic full-check path completed; Prism skipped due to the repeated provider invalid-JSON failure seen earlier.
 - [OK] GitHub Actions `unittest (3.10)` and `unittest (3.13)` - passed on PR #10 for commit `98d20a2` before this journal entry.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 9: Review PR #12
+
+**Date**: 2026-07-01
+**Task**: Review PR #12
+**Branch**: `sd-ai-command-pack-rename-and-hardening`
+
+### Summary
+
+Ran sd-review-pr for PR #12, fixed local preflight issues and Copilot review findings, resolved review threads, and verified local checks plus CI.
+
+### Main Changes
+
+- Extended review preflight optional path handling for generated/local pack
+  paths and repaired historical journal placeholders.
+- Fixed Copilot review findings for Windows installed-target path validation and
+  review-learnings malformed GitHub payload handling.
+- Replied to and resolved the three Copilot review threads on PR #12.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1f0c8b4` | (see git log) |
+| `a65db28` | (see git log) |
+
+### Testing
+
+- [OK] Ran `bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Ran `/opt/homebrew/bin/python3.13 -m unittest discover -s tests`.
+- [OK] Confirmed GitHub Actions passed `unittest (3.10)` and
+  `unittest (3.13)`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 10: Review PR #12 Copilot follow-up
+
+**Date**: 2026-07-01
+**Task**: Review PR #12 Copilot follow-up
+**Branch**: `sd-ai-command-pack-rename-and-hardening`
+
+### Summary
+
+Addressed Copilot parser edge-case feedback, verified local checks, resolved review threads, and requested a fresh Copilot review round.
+
+### Main Changes
+
+- Fixed Copilot feedback on changed-file parsing by trimming list entries
+  before path normalization while preserving internal spaces.
+- Hardened Gito pack env loading against CRLF line endings in full-check and
+  review-local runners.
+- Replied to and resolved the two new Copilot review threads, then requested
+  another Copilot review round.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7833a0b` | (see git log) |
+
+### Testing
+
+- [OK] Ran targeted parser and Gito env-loader tests.
+- [OK] Ran `/opt/homebrew/bin/python3.13 -m unittest discover -s tests`.
+- [OK] Ran `bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Confirmed GitHub Actions passed `unittest (3.10)` and
+  `unittest (3.13)` after commit `7833a0b`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 11: Review PR #12 final Copilot follow-up
+
+**Date**: 2026-07-01
+**Task**: Review PR #12 final Copilot follow-up
+**Branch**: `sd-ai-command-pack-rename-and-hardening`
+
+### Summary
+
+Addressed the second Copilot review round, verified full-check and CI, resolved review threads, and requested a final Copilot review round with no new actionable feedback.
+
+### Main Changes
+
+- Fixed Copilot's managed-marker update-path finding by catching `ValueError`
+  and `OSError` around `update_target()` with the script's tagged exit-code
+  behavior.
+- Fixed the subprocess coverage bootstrap finding by catching only
+  `ImportError` and probing `coverage.process_startup` with `getattr()` and
+  `callable()`.
+- Replied to and resolved both second-round Copilot review threads, then
+  requested one final Copilot round that produced no new actionable feedback.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3312812` | fix copilot review follow-up cases |
+
+### Testing
+
+- [OK] Ran targeted review-learnings and coverage bootstrap tests.
+- [OK] Ran `/opt/homebrew/bin/python3.13 -m unittest discover -s tests`.
+- [OK] Ran `bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Confirmed GitHub Actions `unittest (3.10)` and `unittest (3.13)` passed
+  on PR #12 head `3312812`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 12: Remove implicit local review from sd-review-pr
+
+**Date**: 2026-07-01
+**Task**: Remove implicit local review from sd-review-pr
+**Branch**: `sd-ai-command-pack-rename-and-hardening`
+
+### Summary
+
+Updated the sd-review-pr workflow so its PR cycle runs the deterministic full-check gate with Prism and Gito disabled, leaving Prism/Gito available only through explicit full-check or local-review commands.
+
+### Main Changes
+
+- Updated the `sd-review-pr` shared skill and distributed template so the PR
+  cycle runs full-check with `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0` and
+  `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0`.
+- Aligned Claude, Gemini, GitHub Copilot, OpenCode, and Cursor adapter wording
+  to describe a deterministic local PR gate instead of implicit local review
+  providers.
+- Updated README, installed docs, template docs, frontend adapter guidance, and
+  installer regression tests so Prism/Gito remain explicit-only through
+  `sd-full-check`, `sd-review-local`, or `sd-review-local-all`.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c7cacd9` | fix sd-review-pr deterministic local gate |
+
+### Testing
+
+- [OK] Ran focused `tests.test_install` coverage for shared skill wrappers,
+  remote reviewer configuration, and review-pr housekeeping dispatch.
+- [OK] Ran `/opt/homebrew/bin/python3.13 -m unittest discover -s tests`.
+- [OK] Ran deterministic full-check with Prism/Gito disabled:
+  `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Ran `git diff --check`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 13: Resolve review wrapper parity feedback
+
+**Date**: 2026-07-01
+**Task**: Resolve review wrapper parity feedback
+**Branch**: `sd-ai-command-pack-rename-and-hardening`
+
+### Summary
+
+Aligned the installed Claude, Gemini, and OpenCode sd-review-pr/sd-review-local-all wrappers with their hardened distributed templates, added regression coverage for wrapper/template parity, resolved the related Copilot threads, reran the deterministic PR gate, and confirmed CI remained green.
+
+### Main Changes
+
+- Updated the checked-in Claude, Gemini, and OpenCode `sd-review-pr` and
+  `sd-review-local-all` command wrappers so they match their hardened
+  distributed templates.
+- Added `test_tracked_review_command_wrappers_match_templates` to catch future
+  source/template drift for those installed review wrappers.
+- Replied to and resolved the six Copilot wrapper parity threads after pushing
+  the fix commit.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1da7874` | fix: align installed review wrappers with templates |
+
+### Testing
+
+- [OK] `env PYTHONPYCACHEPREFIX=/private/tmp/sd-ai-command-pack-pycache /opt/homebrew/bin/python3.13 -m unittest tests.test_install.InstallTests.test_review_pr_remote_reviewer_is_configurable tests.test_install.InstallTests.test_tracked_review_command_wrappers_match_templates`
+- [OK] `env PYTHONPYCACHEPREFIX=/private/tmp/sd-ai-command-pack-pycache /opt/homebrew/bin/python3.13 -m unittest discover -s tests`
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`
+- [OK] GitHub Actions `unittest (3.10)` and `unittest (3.13)` passed on PR #12 head `1da7874`.
 
 ### Status
 

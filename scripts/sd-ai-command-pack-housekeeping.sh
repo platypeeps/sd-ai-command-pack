@@ -9,6 +9,7 @@ MERGE_STRATEGY="${SD_AI_COMMAND_PACK_HOUSEKEEPING_MERGE_STRATEGY:-merge}"
 
 ACTIONS=()
 EXPECTED=()
+INVENTORY=()
 ANOMALIES=()
 DEFAULT_BRANCH=""
 START_BRANCH=""
@@ -49,6 +50,10 @@ add_action() {
 
 add_expected() {
   EXPECTED+=("$*")
+}
+
+add_inventory() {
+  INVENTORY+=("$*")
 }
 
 add_anomaly() {
@@ -329,7 +334,7 @@ fast_forward_default_branch() {
   if [ "$(current_branch)" != "$DEFAULT_BRANCH" ]; then
     if [ "$DRY_RUN" -eq 1 ]; then
       if git show-ref --verify --quiet "refs/remotes/$REMOTE/$DEFAULT_BRANCH"; then
-        add_action "would run: git pull --ff-only $REMOTE $DEFAULT_BRANCH"
+        add_action "would fast-forward $DEFAULT_BRANCH from $REMOTE/$DEFAULT_BRANCH"
       else
         add_anomaly "remote default ref $REMOTE/$DEFAULT_BRANCH does not exist"
       fi
@@ -560,11 +565,11 @@ maybe_merge_ready_open_pr() {
     add_anomaly "PR #$pr_number merge state is $pr_merge_state, not CLEAN; skipped auto-merge"
     return 0
   fi
-  if [ -z "$total_check_count" ] || [ "$total_check_count" -eq 0 ]; then
-    add_anomaly "PR #$pr_number has no reported checks; skipped auto-merge"
+  if ! [[ "$total_check_count" =~ ^[0-9]+$ ]] || [ "$total_check_count" -eq 0 ]; then
+    add_anomaly "PR #$pr_number has no or undeterminable reported checks; skipped auto-merge"
     return 0
   fi
-  if [ -n "$failed_check_count" ] && { ! [[ "$failed_check_count" =~ ^[0-9]+$ ]] || [ "$failed_check_count" -ne 0 ]; }; then
+  if ! [[ "$failed_check_count" =~ ^[0-9]+$ ]] || [ "$failed_check_count" -ne 0 ]; then
     add_anomaly "PR #$pr_number has non-green or undeterminable checks; skipped auto-merge"
     return 0
   fi
@@ -699,20 +704,20 @@ check_open_prs() {
   local open_prs
   local count
   if ! have gh; then
-    add_anomaly "gh not found; skipped open PR check"
+    add_inventory "open PRs: skipped because gh was not found"
     return 0
   fi
 
   if ! open_prs="$(gh_pr_list --state open --limit 100 --json number,title,headRefName --jq '.[] | "#\(.number) \(.headRefName): \(.title)"' 2>/dev/null)"; then
-    add_anomaly "failed to list open PRs"
+    add_inventory "open PRs: unavailable because gh failed to list open PRs"
     return 0
   fi
 
   if [ -z "$open_prs" ]; then
-    add_expected "open PRs: none"
+    add_inventory "open PRs: none"
   else
     count="$(printf '%s\n' "$open_prs" | sed '/^$/d' | wc -l | tr -d ' ')"
-    add_anomaly "open PRs remain ($count): $(printf '%s' "$open_prs" | paste -sd ';' -)"
+    add_inventory "open PRs outside this cleanup scope ($count): $(printf '%s' "$open_prs" | paste -sd ';' -)"
   fi
 }
 
@@ -720,43 +725,43 @@ check_open_issues() {
   local open_issues
   local count
   if ! have gh; then
-    add_anomaly "gh not found; skipped open issue check"
+    add_inventory "open issues: skipped because gh was not found"
     return 0
   fi
 
   if ! open_issues="$(gh_issue_list --state open --limit 100 --json number,title --jq '.[] | "#\(.number): \(.title)"' 2>/dev/null)"; then
-    add_anomaly "failed to list open issues"
+    add_inventory "open issues: unavailable because gh failed to list open issues"
     return 0
   fi
 
   if [ -z "$open_issues" ]; then
-    add_expected "open issues: none"
+    add_inventory "open issues: none"
   else
     count="$(printf '%s\n' "$open_issues" | sed '/^$/d' | wc -l | tr -d ' ')"
-    add_anomaly "open issues remain ($count): $(printf '%s' "$open_issues" | paste -sd ';' -)"
+    add_inventory "open issues outside this cleanup scope ($count): $(printf '%s' "$open_issues" | paste -sd ';' -)"
   fi
 }
 
 check_trellis_tasks() {
   local context
   if [ ! -f ".trellis/scripts/get_context.py" ]; then
-    add_anomaly ".trellis/scripts/get_context.py not found; skipped Trellis active-task check"
+    add_inventory "Trellis active tasks: skipped because .trellis/scripts/get_context.py was not found"
     return 0
   fi
   if ! have python3; then
-    add_anomaly "python3 not found; skipped Trellis active-task check"
+    add_inventory "Trellis active tasks: skipped because python3 was not found"
     return 0
   fi
 
   if ! context="$(python3 ./.trellis/scripts/get_context.py --mode record 2>&1)"; then
-    add_anomaly "Trellis record mode failed; run python3 ./.trellis/scripts/get_context.py --mode record"
+    add_inventory "Trellis active tasks: unavailable; run python3 ./.trellis/scripts/get_context.py --mode record"
     return 0
   fi
 
   if printf '%s\n' "$context" | grep -q "(no active tasks assigned to you)"; then
-    add_expected "Trellis active tasks: none"
+    add_inventory "Trellis active tasks: none assigned to current developer"
   else
-    add_anomaly "Trellis active tasks may remain; run python3 ./.trellis/scripts/get_context.py --mode record"
+    add_inventory "Trellis active tasks: active tasks may remain outside this cleanup scope"
   fi
 }
 
@@ -765,8 +770,6 @@ check_final_git_state() {
   local local_head
   local remote_head
   local extra_local
-  local extra_remote
-  local kept_remote_branch
 
   final_branch="$(current_branch)"
   if [ -n "$DEFAULT_BRANCH" ] && [ "$final_branch" = "$DEFAULT_BRANCH" ]; then
@@ -807,30 +810,18 @@ check_final_git_state() {
     add_anomaly "extra local branches remain: $(printf '%s' "$extra_local" | paste -sd ',' -)"
   fi
 
-  kept_remote_branch=""
-  if [ "$DELETE_REMOTE_BRANCH" -eq 0 ] && [ -n "$START_BRANCH" ] && [ "$START_BRANCH" != "$DEFAULT_BRANCH" ]; then
-    kept_remote_branch="$REMOTE/$START_BRANCH"
-  fi
-
-  extra_remote="$(
-    git for-each-ref --format='%(refname:short)' "refs/remotes/$REMOTE" |
-      grep -F -x -v "$REMOTE" |
-      grep -F -x -v "$REMOTE/HEAD" |
-      grep -F -x -v "$REMOTE/$DEFAULT_BRANCH" ||
-      true
-  )"
-  if [ -n "$kept_remote_branch" ]; then
-    extra_remote="$(printf '%s\n' "$extra_remote" | grep -F -x -v "$kept_remote_branch" || true)"
-  fi
-
-  if [ -z "$extra_remote" ]; then
-    if [ -n "$kept_remote_branch" ] && git show-ref --verify --quiet "refs/remotes/$REMOTE/$START_BRANCH"; then
-      add_expected "remote branches: only $REMOTE/HEAD, $REMOTE/$DEFAULT_BRANCH, and kept $kept_remote_branch"
+  if [ -n "$START_BRANCH" ] && [ "$START_BRANCH" != "$DEFAULT_BRANCH" ]; then
+    if [ "$DELETE_REMOTE_BRANCH" -eq 0 ]; then
+      if git show-ref --verify --quiet "refs/remotes/$REMOTE/$START_BRANCH"; then
+        add_expected "remote source branch kept: $REMOTE/$START_BRANCH"
+      else
+        add_anomaly "remote source branch $REMOTE/$START_BRANCH is absent despite --keep-remote-branch"
+      fi
+    elif git show-ref --verify --quiet "refs/remotes/$REMOTE/$START_BRANCH"; then
+      add_anomaly "remote source branch still tracked: $REMOTE/$START_BRANCH"
     else
-      add_expected "remote branches: only $REMOTE/HEAD and $REMOTE/$DEFAULT_BRANCH"
+      add_expected "remote source branch absent: $REMOTE/$START_BRANCH"
     fi
-  else
-    add_anomaly "extra remote-tracking branches remain: $(printf '%s' "$extra_remote" | paste -sd ',' -)"
   fi
 }
 
@@ -849,6 +840,9 @@ print_report() {
 
   section "Expected clean state"
   print_list "${EXPECTED[@]}"
+
+  section "Inventory"
+  print_list "${INVENTORY[@]}"
 
   section "Anomalies"
   if [ "${#ANOMALIES[@]}" -eq 0 ]; then

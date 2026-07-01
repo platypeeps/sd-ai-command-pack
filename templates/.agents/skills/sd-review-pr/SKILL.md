@@ -1,18 +1,16 @@
 ---
 name: sd-review-pr
-description: Use when the user asks to ready a pull request, run the local-review-first cycle, optionally request the configured remote reviewer when available, address review comments or CI failures, and repeat until no actionable comments remain.
+description: Use when the user asks to ready a pull request, run the deterministic local PR gate, optionally request the configured remote reviewer when available, address review comments or CI failures, and repeat until no actionable comments remain.
 ---
 
 # SD PR Review Loop
 
-Use this project-local skill for `sd-review-pr` and `/sd:review-pr` style work.
-It turns a draft or in-progress PR into a reviewed PR by running the local
-full-check and any available local review providers first, inspecting existing
-comments and CI, and requesting the configured remote reviewer only when that
-remote review option is available and the user explicitly asks for a
-remote/final pass or when local review is clean and a remote review is
-intentionally warranted. GitHub Copilot is the default remote reviewer unless a
-repo overrides it.
+Use this project-local Software Delivery skill for `sd-review-pr` and
+`/sd:review-pr` style work. It turns a draft or in-progress PR into a reviewed
+PR by running the deterministic local full-check gate first, inspecting
+existing comments and CI, and requesting the configured remote reviewer after a
+clean local pass and after every pushed review-fix commit made during the loop.
+GitHub Copilot is the default remote reviewer unless a repo overrides it.
 
 ## Safety Rules
 
@@ -23,8 +21,16 @@ repo overrides it.
 - Do not stage unrelated work. If the working tree is dirty before the first
   review loop, classify the paths. Commit/push only changes that clearly belong
   to this PR; ask before touching anything ambiguous.
-- Run the local full-check before requesting a paid/remote review. Use:
-  `bash scripts/sd-ai-command-pack-full-check.sh`.
+- Run the deterministic local full-check before requesting a paid/remote
+  review. Disable Prism and Gito for this command-owned gate; those local
+  review tools run only when the user explicitly invokes `sd-full-check`,
+  `sd-review-local`, or `sd-review-local-all`.
+- Treat `sd-review-pr` as a bounded remote-review convergence loop by default.
+  Unless the user explicitly asks for local-only review, request the configured
+  remote reviewer after the local gate passes and again after each pushed
+  review-fix commit made during this command run. Do not ask for permission
+  before each configured remote-review request; stop only when the loop is clean
+  or the configured round limit is reached.
 - Count one remote loop as: trigger the configured remote reviewer, wait for
   completion, inspect review/CI state, address findings, and push any resulting
   commit. After the configured remote round limit, default five, stop before
@@ -57,13 +63,25 @@ git status -sb
 REPO_FULL=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 OWNER=${REPO_FULL%/*}
 REPO=${REPO_FULL#*/}
-PR_NUMBER=$(gh pr view --json number --jq .number)
-PR_URL=$(gh pr view --json url --jq .url)
-HEAD_BRANCH=$(gh pr view --json headRefName --jq .headRefName)
-HEAD_SHA=$(gh pr view --json headRefOid --jq .headRefOid)
-BASE_BRANCH=$(gh pr view --json baseRefName --jq .baseRefName)
+PR_SELECTOR="${SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR:-}"
+PR_VIEW_ARGS=()
+if [ -n "$PR_SELECTOR" ]; then
+  PR_VIEW_ARGS=("$PR_SELECTOR")
+fi
+gh_pr_view_checked() {
+  gh pr view "${PR_VIEW_ARGS[@]}" "$@" || {
+    printf '%s\n' "Unable to resolve the pull request. Check out a PR branch or set SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR to a PR number or URL." >&2
+    exit 1
+  }
+}
+PR_NUMBER=$(gh_pr_view_checked --json number --jq .number)
+PR_URL=$(gh_pr_view_checked --json url --jq .url)
+HEAD_BRANCH=$(gh_pr_view_checked --json headRefName --jq .headRefName)
+HEAD_SHA=$(gh_pr_view_checked --json headRefOid --jq .headRefOid)
+BASE_BRANCH=$(gh_pr_view_checked --json baseRefName --jq .baseRefName)
 LOCAL_HEAD=$(git rev-parse HEAD)
-gh pr view --json number,url,isDraft,headRefName,headRefOid,baseRefName,state,reviewRequests,latestReviews,statusCheckRollup
+test -n "$PR_NUMBER" && test "$PR_NUMBER" != "null"
+gh_pr_view_checked --json number,url,isDraft,headRefName,headRefOid,baseRefName,state,reviewRequests,latestReviews,statusCheckRollup
 ```
 
 Capture:
@@ -88,19 +106,20 @@ commits have not been pushed, the wrong branch is checked out, or the remote PR
 branch changed. Push the intended local commits or check out the PR head before
 continuing; do not request remote review on stale remote code.
 
-If the PR is draft, do not mark it ready until the local full-check has passed
-unless the user explicitly asked to mark it ready immediately. This keeps
-`ready_for_review` workflows from starting before local review is clean.
+If the PR is draft, do not mark it ready until the deterministic local
+full-check has passed unless the user explicitly asked to mark it ready. This
+keeps `ready_for_review` workflows from starting before local review is clean.
 
-## Step 1.5: Post-Merge Auto-Dispatch
+## Step 1.5: Post-Merge Handoff
 
 If the PR is already merged, do not continue the review loop. Run housekeeping
-inside the active session:
+inside the current command run:
 
 ```bash
 PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq .state)
 if [ "$PR_STATE" = "MERGED" ]; then
   bash scripts/sd-ai-command-pack-housekeeping.sh
+  exit 0
 fi
 ```
 
@@ -108,16 +127,20 @@ If `scripts/sd-ai-command-pack-housekeeping.sh` is missing, read
 `.agents/skills/sd-housekeeping/SKILL.md` if present and report that the
 pack should be reinstalled because the canonical script is absent.
 
-This auto-dispatch is session-local. It works when the active agent observes
-the merge through `gh`, including a user merging the PR while the session is
-still running. It is not a background GitHub webhook and cannot wake a closed
-or idle tool session by itself.
+This handoff is command-local. It works when the running agent observes the
+merge through `gh`, including a user merging the PR while the command is still
+running. It is not a background GitHub webhook and cannot wake a closed or idle
+tool session by itself.
 
 ## Step 2: Run Local Full Check
 
-Run the local full-check gate before requesting a remote review:
+Run the deterministic local full-check gate before requesting a remote review.
+This PR-review cycle must not run Prism or Gito implicitly, even if the
+environment would normally enable them for `sd-full-check`:
 
 ```bash
+SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 \
+SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 \
 bash scripts/sd-ai-command-pack-full-check.sh
 ```
 
@@ -149,7 +172,11 @@ slug and comment/review author differ. If the provider is not triggered by a
 standard GitHub reviewer request, set `REMOTE_REVIEW_REQUEST_COMMAND` in the
 target repo's documented environment and run that command instead.
 
-After local full-check passes:
+If both `REMOTE_REVIEWER` and `REMOTE_REVIEW_REQUEST_COMMAND` are empty, skip
+remote-review requests, report that no remote reviewer is configured, and
+continue to Step 5 to inspect existing comments and CI.
+
+After deterministic local full-check passes:
 
 - If the PR is draft and the user asked to ready it, mark it ready:
 
@@ -159,29 +186,40 @@ After local full-check passes:
 
 - If the user asked for local review only, skip remote review and continue to
   Step 5 to inspect existing comments and CI.
-- If the user asked for a final remote review, or if project policy says to run
-  one before merge, trigger the configured remote reviewer.
+- Otherwise, trigger the configured remote reviewer when no remote review has
+  been requested for the current PR head during this command run.
+- Also trigger the configured remote reviewer after every pushed commit created
+  by Step 6 to address review comments, CI failures, or deterministic local
+  gate findings.
+  This includes fixes for review comments that existed before this command was
+  invoked; after those fixes are pushed and the deterministic local full-check
+  passes, request a fresh remote review.
+- If the current PR head already has a completed remote review and this command
+  has not pushed any fixes, inspect existing comments and CI before deciding
+  whether another remote request is needed.
 
 Record a remote review round only when the configured remote reviewer is
 actually requested.
 
-Record a UTC trigger timestamp and the current head SHA before requesting a
-review:
+Record a UTC trigger timestamp before requesting a review. Use the `HEAD_SHA`
+captured in Step 1 for the review round; if that value may be stale, return to
+Step 1 before requesting review.
 
 ```bash
 date -u +"%Y-%m-%dT%H:%M:%SZ"
-gh pr view "$PR_NUMBER" --json headRefOid
 ```
 
 Primary request path:
 
 ```bash
 if [ -n "$REMOTE_REVIEW_REQUEST_COMMAND" ]; then
-  bash -lc "$REMOTE_REVIEW_REQUEST_COMMAND"
-else
+  bash -c "$REMOTE_REVIEW_REQUEST_COMMAND"
+elif [ -n "$REMOTE_REVIEWER" ]; then
   gh api -X POST \
     "repos/$OWNER/$REPO/pulls/$PR_NUMBER/requested_reviewers" \
     -f reviewers[]="$REMOTE_REVIEWER"
+else
+  printf '%s\n' "No remote reviewer configured; skipping remote review request."
 fi
 ```
 
@@ -260,7 +298,11 @@ query($owner:String!, $repo:String!, $number:Int!, $endCursor:String) {
           isOutdated
           path
           line
-          comments(first:50) {
+          comments(first:100) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
             nodes {
               id
               databaseId
@@ -282,6 +324,11 @@ as `$endCursor` while `pageInfo.hasNextPage` is true. If not using
 `--paginate`, repeat the query with `-F endCursor="<endCursor>"` until
 `hasNextPage` is false before deciding the PR is clean.
 
+Nested review-thread comments also paginate. If any thread's
+`comments.pageInfo.hasNextPage` is true, fetch the remaining comments for that
+thread with a follow-up GraphQL query using the thread id and comment
+`endCursor` before deciding the thread has no additional actionable feedback.
+
 Fetch top-level PR conversation comments through the issues comments API because
 pull requests are issues for regular conversation comments:
 
@@ -292,8 +339,7 @@ gh api "repos/$OWNER/$REPO/issues/$PR_NUMBER/comments" --paginate
 Also check CI:
 
 ```bash
-gh pr checks "$PR_NUMBER" --watch --fail-fast
-gh pr checks "$PR_NUMBER" --json name,workflow,state,bucket,link,completedAt
+gh pr checks "$PR_NUMBER" --json name,workflow,status,conclusion,bucket,link,completedAt
 ```
 
 If checks fail, inspect failed logs with `gh run view --log-failed` or the
@@ -324,7 +370,7 @@ comment:
 COMMENT_DATABASE_ID="<review comment database id>"
 
 gh api -X POST \
-  "repos/$OWNER/$REPO/pulls/comments/$COMMENT_DATABASE_ID/replies" \
+  "repos/$OWNER/$REPO/pulls/$PR_NUMBER/comments/$COMMENT_DATABASE_ID/replies" \
   -f body="..."
 ```
 
@@ -354,32 +400,43 @@ When files change:
 3. Commit with a review-round message, for example:
    `address local review feedback`,
    `address remote review feedback`, or
-   `address review feedback round N`.
+   `fix: address review feedback round N`.
 4. Push the current branch.
+5. Return to Step 1 before making another review, CI, or remote-trigger
+   decision so `HEAD_SHA`, review requests, latest reviews, and PR state are
+   fresh.
+6. Treat the pushed commit as requiring another configured remote-review
+   request after Step 2 passes, unless the user asked for local-only review or
+   no remote reviewer is configured.
 
 ```bash
 git status -sb
 git add <intended paths>
-git commit -m "address review feedback"
+git commit -m "fix: address review feedback round N"
 git push
 ```
 
-If no files changed because every finding was rebutted/resolved, skip the
-commit but still continue to the next review-trigger decision.
+If no files changed because every finding was rebutted, resolved, or confirmed
+already addressed, skip the commit and push. Refresh PR state if remote review
+or CI status could have changed; otherwise stop when the Step 7 conditions are
+already satisfied.
 
 ## Step 7: Repeat Or Stop
 
-Run local full-check again after every round that produced a code/docs change.
-Trigger another remote review only when the prior remote review produced
-actionable feedback that has now been fixed or rebutted and the user still
-wants a remote loop. Compare the new thread ids and timestamps with the prior
-snapshot.
+After every round that produced a code/docs change, return to Step 1 to refresh
+all PR state, then run deterministic local full-check again. If deterministic
+local full-check passes and remote review is configured, trigger another remote
+review before considering the loop clean. Compare the new thread ids and
+timestamps with the refreshed snapshot, and do not request duplicate remote
+reviews for the same PR head when no review-fix commit has been pushed since
+the latest requested remote review.
 
 Stop when:
 
-- local full-check passes;
+- deterministic local full-check passes;
 - the latest requested remote review produces no new actionable
   comments;
+- no review-fix commit has been pushed since the latest requested remote review;
 - all prior review threads are resolved or intentionally left with a documented
   user decision;
 - CI is passing or any non-passing check is documented as unrelated/flaky with
@@ -395,14 +452,14 @@ Do not continue until the user approves.
 
 ## Step 8: Finish Work And Post-Merge Housekeeping Automatically
 
-After the loop stops because local full-check passes and no requested remote
-review produced new actionable comments, run the Trellis finish-work flow
-automatically before the final report. Do not ask whether to run it; a clean
-review loop is the trigger.
+After the loop stops because deterministic local full-check passes and no
+requested remote review produced new actionable comments, run the Trellis
+finish-work flow automatically before the final report. Do not ask whether to
+run it; a clean review loop is the trigger.
 
 1. Read `.agents/skills/trellis-finish-work/SKILL.md`.
-2. Follow that skill exactly to archive completed task state and record the
-   session journal.
+2. Use that skill as the primary instructions to archive completed task state
+   and record the session journal.
 3. If finish-work creates archive or journal commits, push the current branch
    after those commits are created:
 
@@ -437,14 +494,14 @@ handoff.
 Report:
 
 - PR number and URL.
-- Whether local full-check passed and whether optional local review providers
-  such as Prism/Gito ran or were skipped.
+- Whether deterministic local full-check passed with Prism/Gito disabled for
+  the `sd-review-pr` cycle.
 - Number of remote review rounds completed and reviewer label/slug used.
 - Comments fixed, rebutted, or left for user decision.
 - Commits pushed during the loop.
 - Finish-work actions and any archive/journal commits pushed.
-- Housekeeping actions if the PR was already merged or became merged during the
-  active session.
+- Housekeeping actions if the PR was already merged or became merged while the
+  command was running.
 - CI status.
 - Final working-tree state.
 - Recommended internal documentation, spec, prompt, or pre-commit changes that

@@ -60,6 +60,7 @@ class ScopeRule:
     label: str
     headings: tuple[str, ...]
     patterns: tuple[str, ...]
+    include_installed_targets: bool = False
 
 
 DEFAULT_RULES = (
@@ -93,6 +94,7 @@ DEFAULT_RULES = (
             "scripts/sd-ai-command-pack-full-check.sh",
             "scripts/sd-ai-command-pack-housekeeping.sh",
         ),
+        include_installed_targets=True,
     ),
     ScopeRule(
         label="Automation scope",
@@ -128,14 +130,21 @@ DEFAULT_RULES = (
 
 
 def _normalize_path(path: str) -> str:
-    return path.strip().replace("\\", "/").removeprefix("./")
+    return _remove_dot_slash(path.replace("\\", "/"))
+
+
+def _remove_dot_slash(path: str) -> str:
+    return path[2:] if path.startswith("./") else path
 
 
 def _split_changed_files(text: str) -> list[str]:
     paths: list[str] = []
     seen: set[str] = set()
     for raw_path in text.replace("\0", "\n").splitlines():
-        path = _normalize_path(raw_path)
+        stripped_path = raw_path.strip()
+        if not stripped_path:
+            continue
+        path = _normalize_path(stripped_path)
         if path and path not in seen:
             paths.append(path)
             seen.add(path)
@@ -208,15 +217,15 @@ def _load_body(body_file: Path | None) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _matches_pattern(path: str, pattern: str) -> bool:
-    normalized_pattern = pattern.replace("\\", "/").removeprefix("./")
+def _matches_pattern(normalized_path: str, pattern: str) -> bool:
+    """Match a normalized repository path against a PR-body scope glob."""
+    normalized_pattern = _remove_dot_slash(pattern.replace("\\", "/"))
     if normalized_pattern.endswith("/**"):
-        base_pattern = normalized_pattern[:-3]
-        return (
-            fnmatch.fnmatchcase(path, base_pattern)
-            or fnmatch.fnmatchcase(path, f"{base_pattern}/*")
+        base_pattern = normalized_pattern[:-3].rstrip("/")
+        return normalized_path == base_pattern or normalized_path.startswith(
+            f"{base_pattern}/"
         )
-    return fnmatch.fnmatchcase(path, normalized_pattern)
+    return fnmatch.fnmatchcase(normalized_path, normalized_pattern)
 
 
 def _load_installed_target_patterns(root: Path) -> tuple[tuple[str, ...], str | None]:
@@ -257,17 +266,29 @@ def _load_config_rules(config_path: Path | None) -> tuple[tuple[ScopeRule, ...],
         label = item.get("label")
         headings = item.get("headings")
         patterns = item.get("patterns")
+        include_installed_targets = item.get("include_installed_targets", False)
         if not isinstance(label, str) or not label.strip():
             return (), f"{config_path}: rule {index} needs a non-empty label"
-        if not isinstance(headings, list) or not all(isinstance(value, str) and value.strip() for value in headings):
-            return (), f"{config_path}: rule {index} needs non-empty string headings"
+        if (
+            not isinstance(headings, list)
+            or not headings
+            or not all(isinstance(value, str) and value.strip() for value in headings)
+        ):
+            return (
+                (),
+                f"{config_path}: rule {index} needs a non-empty list of "
+                "non-empty string headings",
+            )
         if not isinstance(patterns, list) or not all(isinstance(value, str) and value.strip() for value in patterns):
             return (), f"{config_path}: rule {index} needs non-empty string patterns"
+        if not isinstance(include_installed_targets, bool):
+            return (), f"{config_path}: rule {index} include_installed_targets must be boolean"
         rules.append(
             ScopeRule(
                 label=label.strip(),
                 headings=tuple(value.strip() for value in headings),
                 patterns=tuple(value.strip() for value in patterns),
+                include_installed_targets=include_installed_targets,
             )
         )
     return tuple(rules), None
@@ -284,45 +305,63 @@ def _resolve_config_path(root: Path, explicit_config: Path | None) -> tuple[Path
 
 
 def _merge_rules(rules: tuple[ScopeRule, ...]) -> tuple[ScopeRule, ...]:
+    """Merge rules with identical labels/headings while preserving first order."""
     merged: dict[tuple[str, tuple[str, ...]], list[str]] = {}
     seen_patterns: dict[tuple[str, tuple[str, ...]], set[str]] = {}
+    include_installed_targets: dict[tuple[str, tuple[str, ...]], bool] = {}
     order: list[tuple[str, tuple[str, ...]]] = []
     for rule in rules:
         key = (rule.label, rule.headings)
         if key not in merged:
             merged[key] = []
             seen_patterns[key] = set()
+            include_installed_targets[key] = False
             order.append(key)
+        include_installed_targets[key] = (
+            include_installed_targets[key] or rule.include_installed_targets
+        )
         for pattern in rule.patterns:
             if pattern not in seen_patterns[key]:
                 seen_patterns[key].add(pattern)
                 merged[key].append(pattern)
 
     return tuple(
-        ScopeRule(label=label, headings=headings, patterns=tuple(merged[(label, headings)]))
+        ScopeRule(
+            label=label,
+            headings=headings,
+            patterns=tuple(merged[(label, headings)]),
+            include_installed_targets=include_installed_targets[(label, headings)],
+        )
         for label, headings in order
     )
 
 
+def _include_installed_targets(
+    rules: tuple[ScopeRule, ...],
+    installed_targets: tuple[str, ...],
+) -> tuple[ScopeRule, ...]:
+    if not installed_targets:
+        return rules
+    return tuple(
+        ScopeRule(
+            label=rule.label,
+            headings=rule.headings,
+            patterns=rule.patterns + installed_targets,
+            include_installed_targets=rule.include_installed_targets,
+        )
+        if rule.include_installed_targets
+        else rule
+        for rule in rules
+    )
+
+
 def _rules_for_repo(root: Path, explicit_config: Path | None) -> tuple[tuple[ScopeRule, ...], str | None]:
+    """Load default and optional repo-specific rules for the target repository."""
     installed_targets, target_error = _load_installed_target_patterns(root)
     if target_error is not None:
         return (), target_error
 
-    default_rules = list(DEFAULT_RULES)
-    if installed_targets:
-        default_rules = [
-            (
-                ScopeRule(
-                    label=rule.label,
-                    headings=rule.headings,
-                    patterns=rule.patterns + installed_targets,
-                )
-                if rule.label == "Tooling/generated scope"
-                else rule
-            )
-            for rule in default_rules
-        ]
+    default_rules = _include_installed_targets(DEFAULT_RULES, installed_targets)
 
     config_path, config_explicit = _resolve_config_path(root, explicit_config)
     if config_explicit and not config_path.is_file():
@@ -331,10 +370,13 @@ def _rules_for_repo(root: Path, explicit_config: Path | None) -> tuple[tuple[Sco
     if config_error is not None:
         return (), config_error
 
-    return _merge_rules(tuple(default_rules) + config_rules), None
+    config_rules = _include_installed_targets(config_rules, installed_targets)
+
+    return _merge_rules(default_rules + config_rules), None
 
 
 def _classify(paths: list[str], rules: tuple[ScopeRule, ...]) -> dict[ScopeRule, list[str]]:
+    """Group changed normalized paths by every scope rule they match."""
     matches: dict[ScopeRule, list[str]] = {}
     for path in paths:
         for rule in rules:
@@ -364,6 +406,7 @@ def check(
     changed_files_path: Path | None = None,
     config_path: Path | None = None,
 ) -> tuple[int, list[str]]:
+    """Run the PR body scope check and return an exit code plus messages."""
     changed_files, changed_error = _load_changed_files(root, changed_files_path)
     if changed_error is not None:
         return 2, [changed_error]

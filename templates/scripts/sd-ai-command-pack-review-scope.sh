@@ -36,25 +36,44 @@ have() {
 }
 
 has_ref() {
-  git rev-parse --verify --quiet "$1^{commit}" >/dev/null
+  local ref="${1:-}"
+  if [ -z "$ref" ]; then
+    return 1
+  fi
+  case "$ref" in
+    -*) return 1 ;;
+  esac
+  git rev-parse --verify --quiet "$ref^{commit}" >/dev/null
 }
 
 default_review_base_ref() {
   local ref
 
-  if has_ref "origin/HEAD"; then
-    printf 'origin/HEAD'
-    return
-  fi
-
-  ref="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
-  if [ -n "$ref" ]; then
+  ref="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  if has_ref "$ref"; then
     printf '%s' "$ref"
     return
   fi
 
-  ref="$(git for-each-ref --format='%(refname:short)' refs/remotes 2>/dev/null | grep -v '/HEAD$' | head -n 1 || true)"
-  if [ -n "$ref" ]; then
+  ref="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+  if has_ref "$ref"; then
+    printf '%s' "$ref"
+    return
+  fi
+
+  ref="$(
+    git for-each-ref --format='%(refname:short)' refs/remotes 2>/dev/null \
+      | grep -v '/HEAD$' \
+      | LC_ALL=C sort \
+      | while IFS= read -r candidate; do
+          if has_ref "$candidate"; then
+            printf '%s\n' "$candidate"
+            break
+          fi
+        done \
+      || true
+  )"
+  if has_ref "$ref"; then
     printf '%s' "$ref"
     return
   fi
@@ -62,13 +81,25 @@ default_review_base_ref() {
   printf 'HEAD'
 }
 
+configured_review_base_ref() {
+  local var_name="$1"
+  local ref="${!var_name:-}"
+  if [ -z "$ref" ]; then
+    return 1
+  fi
+  if has_ref "$ref"; then
+    printf '%s' "$ref"
+    return 0
+  fi
+  warn "$var_name=$ref does not resolve to a commit; falling back to discovered default branch."
+  return 1
+}
+
 scope_base_ref() {
-  if [ -n "${SD_AI_COMMAND_PACK_SCOPE_BASE_REF:-}" ]; then
-    printf '%s' "$SD_AI_COMMAND_PACK_SCOPE_BASE_REF"
+  if configured_review_base_ref SD_AI_COMMAND_PACK_SCOPE_BASE_REF; then
     return
   fi
-  if [ -n "${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-}" ]; then
-    printf '%s' "$SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF"
+  if configured_review_base_ref SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF; then
     return
   fi
   default_review_base_ref
@@ -178,7 +209,7 @@ check_pr_body_scope() {
 
   if [ "${SD_AI_COMMAND_PACK_SCOPE_PR_BODY+x}" ]; then
     if ! github_pr_body_mentions_scope "$SD_AI_COMMAND_PACK_SCOPE_PR_BODY"; then
-      fail "tooling/generated files changed, but the provided PR body does not include a Tooling/generated scope: section"
+      fail "tooling/generated files changed, but the provided PR body does not include a recognized tooling/generated scope section"
     fi
     return 0
   fi
@@ -186,7 +217,7 @@ check_pr_body_scope() {
   if [ "${REVIEW_PREFLIGHT_PR_BODY+x}" ]; then
     warn "REVIEW_PREFLIGHT_PR_BODY is deprecated; prefer SD_AI_COMMAND_PACK_SCOPE_PR_BODY."
     if ! github_pr_body_mentions_scope "$REVIEW_PREFLIGHT_PR_BODY"; then
-      fail "tooling/generated files changed, but the provided PR body does not include a Tooling/generated scope: section"
+      fail "tooling/generated files changed, but the provided PR body does not include a recognized tooling/generated scope section"
     fi
     return 0
   fi
@@ -225,7 +256,7 @@ check_pr_body_scope() {
   fi
 
   if ! github_pr_body_mentions_scope "$pr_body"; then
-    fail "tooling/generated files changed, but the PR body does not include a Tooling/generated scope: section"
+    fail "tooling/generated files changed, but the PR body does not include a recognized tooling/generated scope section"
   fi
 }
 
@@ -252,27 +283,26 @@ main() {
 
   cd "$REPO_ROOT"
 
-  local changed_file scoped_file scoped_count=0
+  local changed_file scoped_file
   local scoped_changes=()
   scope_categories=()
   while IFS= read -r changed_file; do
     [[ -n "$changed_file" ]] || continue
+    local category=""
     if is_copied_review_scope_path "$changed_file"; then
-      scoped_changes+=("$changed_file")
-      scoped_count=$((scoped_count + 1))
-      add_category "copied/generated Trellis or sd-ai-command-pack files"
+      category="copied/generated Trellis or sd-ai-command-pack files"
     elif is_repository_map_scope_path "$changed_file"; then
-      scoped_changes+=("$changed_file")
-      scoped_count=$((scoped_count + 1))
-      add_category "known repository-map files"
+      category="known repository-map files"
     elif is_trellis_journal_scope_path "$changed_file"; then
+      category="Trellis workspace journal/index files"
+    fi
+    if [[ -n "$category" ]]; then
       scoped_changes+=("$changed_file")
-      scoped_count=$((scoped_count + 1))
-      add_category "Trellis workspace journal/index files"
+      add_category "$category"
     fi
   done < <(collect_changed_files | sed '/^$/d' | sort -u)
 
-  if [[ "$scoped_count" -eq 0 ]]; then
+  if [[ "${#scoped_changes[@]}" -eq 0 ]]; then
     return 0
   fi
 
@@ -287,7 +317,7 @@ main() {
     printf '  - %s\n' "$scoped_file"
   done
 
-  check_pr_body_scope "$scoped_count"
+  check_pr_body_scope "${#scoped_changes[@]}"
 }
 
 main "$@"

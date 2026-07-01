@@ -66,9 +66,56 @@ positive_int_or_default() {
   esac
 }
 
+load_gito_pack_env() {
+  local env_file="$REPO_ROOT/.gito/sd-ai-command-pack.env"
+  [ -f "$env_file" ] || return 0
+
+  local line value
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in
+      ''|'#'*)
+        continue
+        ;;
+      export\ *)
+        line="${line#export }"
+        ;;
+    esac
+
+    case "$line" in
+      MAX_CONCURRENT_TASKS=*)
+        value="${line#MAX_CONCURRENT_TASKS=}"
+        case "$value" in
+          ''|*[!0-9]*|0)
+            warn "Ignoring invalid MAX_CONCURRENT_TASKS in $env_file."
+            ;;
+          *)
+            if [ -z "${MAX_CONCURRENT_TASKS:-}" ]; then
+              export MAX_CONCURRENT_TASKS="$value"
+            fi
+            ;;
+        esac
+        ;;
+    esac
+  done <"$env_file"
+}
+
 gito_output_indicates_rate_limit() {
   local output_file="$1"
-  grep -Eiq '(^|[^[:alnum:]])(clienterror|apierror|httperror|http status|status code|status|error|exception):?[[:space:]]*429([^0-9]|$)|(^|[^[:alnum:]])429[[:space:]]+(too many requests|resource exhausted|rate[ -]?limit(ed)?|slow down)([^[:alnum:]]|$)' "$output_file"
+  local recent_output
+  recent_output="$(tail -n 200 "$output_file")"
+  local status_lines
+  status_lines="$(
+    printf '%s\n' "$recent_output" \
+      | grep -Ei '(^|[^[:alnum:]])(clienterror|apierror|httperror|http status|status code|status|error|exception):?[[:space:]]*[0-9]{3}([^0-9]|$)|(^|[^[:alnum:]])[0-9]{3}[[:space:]]+(too many requests|resource exhausted|rate[ -]?limit(ed)?|slow down)([^[:alnum:]]|$)' \
+      || true
+  )"
+  if [ -z "$status_lines" ]; then
+    return 1
+  fi
+  printf '%s\n' "$status_lines" \
+    | tail -n 1 \
+    | grep -Eiq '(^|[^[:alnum:]])(clienterror|apierror|httperror|http status|status code|status|error|exception):?[[:space:]]*429([^0-9]|$)|(^|[^[:alnum:]])429[[:space:]]+(too many requests|resource exhausted|rate[ -]?limit(ed)?|slow down)([^[:alnum:]]|$)'
 }
 
 gito_max_attempts() {
@@ -145,22 +192,45 @@ process.exit(pkg.scripts && Object.prototype.hasOwnProperty.call(pkg.scripts, sc
 ' >/dev/null 2>&1
 }
 
+has_ref() {
+  local ref="${1:-}"
+  if [ -z "$ref" ]; then
+    return 1
+  fi
+  case "$ref" in
+    -*) return 1 ;;
+  esac
+  git rev-parse --verify --quiet "$ref^{commit}" >/dev/null
+}
+
 default_review_base_ref() {
   local ref
 
-  if git rev-parse --verify --quiet "origin/HEAD^{commit}" >/dev/null; then
-    printf 'origin/HEAD'
-    return
-  fi
-
-  ref="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
-  if [ -n "$ref" ]; then
+  ref="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  if has_ref "$ref"; then
     printf '%s' "$ref"
     return
   fi
 
-  ref="$(git for-each-ref --format='%(refname:short)' refs/remotes 2>/dev/null | grep -v '/HEAD$' | head -n 1 || true)"
-  if [ -n "$ref" ]; then
+  ref="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+  if has_ref "$ref"; then
+    printf '%s' "$ref"
+    return
+  fi
+
+  ref="$(
+    git for-each-ref --format='%(refname:short)' refs/remotes 2>/dev/null \
+      | grep -v '/HEAD$' \
+      | LC_ALL=C sort \
+      | while IFS= read -r candidate; do
+          if has_ref "$candidate"; then
+            printf '%s\n' "$candidate"
+            break
+          fi
+        done \
+      || true
+  )"
+  if has_ref "$ref"; then
     printf '%s' "$ref"
     return
   fi
@@ -168,17 +238,29 @@ default_review_base_ref() {
   printf 'HEAD'
 }
 
+configured_review_base_ref() {
+  local var_name="$1"
+  local ref="${!var_name:-}"
+  if [ -z "$ref" ]; then
+    return 1
+  fi
+  if has_ref "$ref"; then
+    printf '%s' "$ref"
+    return 0
+  fi
+  warn "$var_name=$ref does not resolve to a commit; falling back to discovered default branch."
+  return 1
+}
+
 full_check_base_ref() {
-  if [ -n "${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-}" ]; then
-    printf '%s' "$SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF"
+  if configured_review_base_ref SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF; then
     return
   fi
   default_review_base_ref
 }
 
 full_check_gito_base_ref() {
-  if [ -n "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF:-}" ]; then
-    printf '%s' "$SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF"
+  if configured_review_base_ref SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF; then
     return
   fi
   full_check_base_ref
@@ -399,6 +481,8 @@ run_gito_review() {
     warn "Gito not found on PATH; skipping Gito review."
     return 0
   fi
+
+  load_gito_pack_env
 
   local base_ref
   base_ref="$(full_check_gito_base_ref)"

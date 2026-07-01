@@ -1,29 +1,29 @@
 <!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START -->
 ## Trellis And SD AI Command Pack Review Guidance
 
+- Trellis is the repository workflow foundation. The SD AI Command Pack adds
+  Software Delivery command wrappers, local review tooling, post-merge
+  housekeeping, and update-spec knowledge refreshes on top of Trellis. Useful
+  repo-local entry points include `.trellis/workflow.md`,
+  `.agents/skills/sd-*/SKILL.md`, and `docs/SD_AI_COMMAND_PACK.md`.
 - Ignore copied-in Trellis runtime/platform files unless the PR explicitly
   changes Trellis integration or the copied file is the primary subject. This
-  includes `.trellis/scripts/**`, `.trellis/agents/**`, `.agents/skills/trellis-*`,
-  `.github/agents/trellis-*`, `.github/copilot/**`, `.github/hooks/trellis.json`,
+  includes `.trellis/scripts/**/*`, `.trellis/agents/**/*`, `.agents/skills/trellis-*/**/*`,
+  `.github/agents/trellis-*`, `.github/agents/trellis-*/**/*`, `.github/copilot/**/*`, `.github/hooks/trellis.json`,
   `.github/prompts/continue.prompt.md`, `.github/prompts/finish-work.prompt.md`,
-  `.github/skills/trellis-*`, and the matching Trellis files under `.claude/`,
-  `.codex/`, `.cursor/`, `.gemini/`, and `.opencode/`.
+  `.github/skills/trellis-*/**/*`, `.claude/commands/trellis/**/*`,
+  `.codex/skills/trellis-*/**/*`, `.cursor/commands/trellis-*.md`,
+  `.cursor/skills/trellis-*/**/*`, `.gemini/commands/trellis/**/*`,
+  `.gemini/skills/trellis-*/**/*`, `.opencode/commands/trellis/**/*`, and
+  `.opencode/skills/trellis-*/**/*`.
 - Ignore files copied in from `sd-ai-command-pack` unless the PR explicitly
-  changes the SD AI command pack integration. This includes `.agents/skills/sd-*`,
-  `.agents/skills/sd-full-check/`, `.agents/skills/sd-housekeeping/`,
-  `.github/prompts/sd-*`, `.claude/commands/sd/**`,
-  `.cursor/commands/sd-*`, `.gemini/commands/sd/**`,
-  `.opencode/commands/sd-*`, `.prism/rules.json`,
-  `.sd-ai-command-pack/installed-targets.txt`, `docs/SD_AI_COMMAND_PACK.md`,
-  `scripts/sd-ai-command-pack-full-check.sh`,
-  `scripts/sd-ai-command-pack-housekeeping.sh`,
-  `scripts/sd-ai-command-pack-review-local.sh`,
-  `scripts/sd-ai-command-pack-review-scope.sh`,
-  `scripts/sd-ai-command-pack-review-preflight.mjs`,
-  `scripts/sd-ai-command-pack-review-learnings.py`,
-  `scripts/sd-ai-command-pack-install-audit.py`,
-  `scripts/sd-ai-command-pack-pr-body-scope.py`, and
-  `scripts/sd-ai-command-pack-update-spec-kb.py`.
+  changes the SD AI command pack integration. This includes `.agents/skills/sd-*/**/*`,
+  `.github/prompts/sd-*`, `.claude/commands/sd/**/*`,
+  `.cursor/commands/sd-*.md`, `.gemini/commands/sd/**/*`,
+  `.opencode/commands/sd-*`, `.gito/config.toml`,
+  `.gito/sd-ai-command-pack.env`, `.prism/rules.json`,
+  `.prism/rules.schema.json`, `.sd-ai-command-pack/installed-targets.txt`,
+  `docs/SD_AI_COMMAND_PACK.md`, and `scripts/sd-ai-command-pack-*`.
 - Do not leave line comments on wording, spelling, links, formatting, examples,
   or implementation details inside copied Trellis skills/agents/commands or
   copied SD command-pack skills/prompts/scripts/docs/rules. Only comment when

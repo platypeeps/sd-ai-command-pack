@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
@@ -17,6 +19,7 @@ ROOT = Path(__file__).resolve().parent
 MANIFEST_PATH = ROOT / "manifest.json"
 PLATFORMS = ("claude", "cursor", "gemini", "github", "opencode", "shared")
 ALWAYS_INSTALL = "always"
+IF_NOT_EXISTS = "if-not-exists"
 ACTIVE_TRELLIS_PLATFORM_MARKERS = {
     "claude": (
         Path(".claude/commands/trellis/continue.md"),
@@ -45,7 +48,9 @@ ACTIVE_TRELLIS_PLATFORM_MARKERS = {
     ),
 }
 TRELLIS_INSTALL_DOCS_URL = "https://docs.trytrellis.app/start/install-and-first-task"
-FORCE_PRESERVED_TARGETS = frozenset({Path(".prism/rules.json")})
+FORCE_PRESERVED_TARGETS = frozenset(
+    {Path(".prism/rules.json"), Path(".gito/config.toml")}
+)
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
 LOCAL_ONLY_MARKER_FILE = Path(".sd-ai-command-pack/local-only.txt")
 LOCAL_ONLY_EXCLUDE_START = "# sd-ai-command-pack local-only start"
@@ -57,6 +62,8 @@ LOCAL_ENV_GITIGNORE_PATTERNS = (
     ".env",
     ".env.*",
     "!.env.example",
+    "!.env.ci",
+    "!.env.test",
 )
 TRELLIS_GITIGNORE_PATTERNS = (
     ".trellis/.developer",
@@ -65,6 +72,18 @@ TRELLIS_GITIGNORE_PATTERNS = (
     ".trellis/.template-hashes.json",
     ".trellis/.runtime/",
     ".trellis/.cache/",
+)
+REVIEW_ARTIFACT_GITIGNORE_PATTERNS = (
+    ".build/",
+    "code-review-report.json",
+    "code-review-report.md",
+    "sd-ai-command-pack-gito.*",
+    "sd-ai-command-pack-review-paths.*",
+    "sd-ai-command-pack-review-filters.*",
+    "sd-ai-command-pack-prism-codebase.*",
+    "sd-ai-command-pack-ci-paths.*",
+    "sd-ai-command-pack-uv-cache/",
+    "sd-ai-command-pack-uv-tools/",
 )
 PLATFORM_LOCAL_GITIGNORE_PATTERNS = (
     ".claude/settings.local.json",
@@ -87,6 +106,12 @@ PLATFORM_LOCAL_GITIGNORE_PATTERNS = (
     ".gemini/**/logs/",
     ".gemini/**/tmp/",
     ".gemini/**/*.log",
+    ".gito/**/*.local.*",
+    ".gito/**/.cache/",
+    ".gito/**/cache/",
+    ".gito/**/logs/",
+    ".gito/**/tmp/",
+    ".gito/**/*.log",
     ".opencode/**/*.local.*",
     ".opencode/**/.cache/",
     ".opencode/**/cache/",
@@ -96,6 +121,7 @@ PLATFORM_LOCAL_GITIGNORE_PATTERNS = (
     ".opencode/**/sessions/",
     ".opencode/node_modules/",
     ".opencode/**/*.log",
+    "node_modules/",
 )
 TRELLIS_BLANKET_GITIGNORE_ENTRIES = frozenset(
     {
@@ -196,7 +222,7 @@ class LocalOnlyResult:
 
 
 def load_manifest() -> tuple[dict, list[PackFile]]:
-    raw = json.loads(MANIFEST_PATH.read_text(encoding="utf-8", errors="surrogateescape"))
+    raw = json.loads(read_text_strict(MANIFEST_PATH, "manifest"))
     files: list[PackFile] = []
     for item in raw.get("files", []):
         files.append(
@@ -238,6 +264,80 @@ def validate_relative_manifest_path(field: str, path: Path) -> None:
         or ".." in windows_path.parts
     ):
         raise SystemExit(f"error: unsafe {field} path in manifest: {path}")
+
+
+def read_text_strict(path: Path, label: str) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise SystemExit(f"error: {label} not found: {path}") from None
+    except UnicodeDecodeError as error:
+        raise SystemExit(f"error: {label} is not valid UTF-8: {path} ({error})") from None
+    except OSError as error:
+        raise SystemExit(f"error: cannot read {label}: {path} ({error})") from None
+
+
+def read_text_if_exists(path: Path, label: str) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ""
+    except UnicodeDecodeError as error:
+        raise SystemExit(f"error: {label} is not valid UTF-8: {path} ({error})") from None
+    except OSError as error:
+        raise SystemExit(f"error: cannot read {label}: {path} ({error})") from None
+
+
+def atomic_write_bytes(destination: Path, content: bytes) -> None:
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary.write(content)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+            temporary_path = Path(temporary.name)
+        os.replace(temporary_path, destination)
+        temporary_path = None
+    except OSError as error:
+        raise SystemExit(f"error: cannot write {destination}: {error}") from None
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def atomic_write_text(destination: Path, content: str) -> None:
+    atomic_write_bytes(destination, content.encode("utf-8"))
+
+
+def atomic_write_text_preserving_invalid_utf8(destination: Path, content: str) -> None:
+    atomic_write_bytes(destination, content.encode("utf-8", errors="surrogateescape"))
+
+
+def marker_pair_indexes(
+    current: str,
+    start_marker: str,
+    end_marker: str,
+    label: str,
+) -> tuple[int, int]:
+    start_index = current.find(start_marker)
+    end_index = current.find(end_marker)
+    has_start = start_index != -1
+    has_end = end_index != -1
+    if has_start != has_end or (has_start and end_index < start_index):
+        raise SystemExit(f"error: {label} has incomplete sd-ai-command-pack markers")
+    if has_start and current.find(start_marker, start_index + len(start_marker)) != -1:
+        raise SystemExit(f"error: {label} has duplicate sd-ai-command-pack start markers")
+    if has_end and current.find(end_marker, end_index + len(end_marker)) != -1:
+        raise SystemExit(f"error: {label} has duplicate sd-ai-command-pack end markers")
+    return start_index, end_index
 
 
 def validate_pack_source(source: Path) -> None:
@@ -295,7 +395,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Install only this platform adapter, even if no active Trellis "
             "marker is detected. Repeat to select several. "
-            "Shared skills, scripts, Prism rules, and docs are always installed."
+            "Shared skills, scripts, Prism/Gito defaults, and docs are always installed."
         ),
     )
     parser.add_argument(
@@ -311,8 +411,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help=(
             "Overwrite existing files that differ from the pack templates "
-            "(except .prism/rules.json). Add --backup to save .bak copies "
-            "before overwriting."
+            "(except .prism/rules.json and .gito/config.toml). Add --backup "
+            "to save .bak copies before overwriting."
         ),
     )
     parser.add_argument(
@@ -522,7 +622,7 @@ def selected_files(
     platform_filter = set(platforms or [])
 
     for file in files:
-        if file.install == ALWAYS_INSTALL:
+        if file.install in {ALWAYS_INSTALL, IF_NOT_EXISTS}:
             selected.append(file)
             continue
         if platform_filter and file.platform not in platform_filter:
@@ -583,7 +683,7 @@ def install_file(
         current = destination.read_bytes()
         if current == new_content:
             return InstallResult(file, "unchanged")
-        if file.target in FORCE_PRESERVED_TARGETS:
+        if file.install == IF_NOT_EXISTS or file.target in FORCE_PRESERVED_TARGETS:
             return InstallResult(file, "preserved")
         if not force:
             return InstallResult(file, "conflict")
@@ -594,17 +694,20 @@ def install_file(
             destination.parent.mkdir(parents=True, exist_ok=True)
             if backup_path:
                 shutil.copyfile(destination, backup_path)
-            shutil.copyfile(source, destination)
+            atomic_write_bytes(destination, new_content)
         return InstallResult(file, "overwritten", backup_path)
 
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, destination)
+        atomic_write_bytes(destination, new_content)
     return InstallResult(file, "created")
 
 
 def normalize_managed_block_template(file: PackFile) -> str:
-    block = file.source.read_text(encoding="utf-8", errors="surrogateescape").strip("\n") + "\n"
+    block = read_text_strict(
+        file.source,
+        f"managed block template {file.source}",
+    ).strip("\n") + "\n"
     if COPILOT_GUIDANCE_START not in block or COPILOT_GUIDANCE_END not in block:
         raise SystemExit(
             f"error: managed block template missing markers: {file.source}"
@@ -613,15 +716,13 @@ def normalize_managed_block_template(file: PackFile) -> str:
 
 
 def merge_managed_block(current: str, block: str) -> str:
-    start_index = current.find(COPILOT_GUIDANCE_START)
-    end_index = current.find(COPILOT_GUIDANCE_END)
+    start_index, end_index = marker_pair_indexes(
+        current,
+        COPILOT_GUIDANCE_START,
+        COPILOT_GUIDANCE_END,
+        ".github/copilot-instructions.md",
+    )
     has_start = start_index != -1
-    has_end = end_index != -1
-    if has_start != has_end or (has_start and end_index < start_index):
-        raise SystemExit(
-            "error: .github/copilot-instructions.md has incomplete "
-            "sd-ai-command-pack managed block markers"
-        )
     if has_start:
         replace_end = end_index + len(COPILOT_GUIDANCE_END)
         if replace_end < len(current) and current[replace_end] == "\n":
@@ -648,39 +749,38 @@ def trellis_gitignore_block() -> str:
         "# Trellis local/runtime state.",
         *TRELLIS_GITIGNORE_PATTERNS,
         "",
+        "# Review/build artifacts.",
+        *REVIEW_ARTIFACT_GITIGNORE_PATTERNS,
+        "",
         "# AI-tool local state; keep shared platform adapters tracked.",
         *PLATFORM_LOCAL_GITIGNORE_PATTERNS,
+        "",
+        "# Project-local personal ignores can be added below this managed block.",
         TRELLIS_GITIGNORE_END,
     ]
     return "\n".join(lines) + "\n"
 
 
 def remove_unmanaged_trellis_blanket_entries(current: str) -> tuple[str, bool]:
-    lines = current.splitlines()
     kept: list[str] = []
     removed = False
-    for line in lines:
+    for line in current.splitlines(keepends=True):
         if line.strip() in TRELLIS_BLANKET_GITIGNORE_ENTRIES:
             removed = True
             continue
         kept.append(line)
-    merged = "\n".join(kept)
-    if merged and current.endswith("\n"):
-        merged += "\n"
-    return merged, removed
+    return "".join(kept), removed
 
 
 def merge_trellis_gitignore_block(current: str) -> str:
     block = trellis_gitignore_block()
-    start_index = current.find(TRELLIS_GITIGNORE_START)
-    end_index = current.find(TRELLIS_GITIGNORE_END)
+    start_index, end_index = marker_pair_indexes(
+        current,
+        TRELLIS_GITIGNORE_START,
+        TRELLIS_GITIGNORE_END,
+        ".gitignore",
+    )
     has_start = start_index != -1
-    has_end = end_index != -1
-    if has_start != has_end or (has_start and end_index < start_index):
-        raise SystemExit(
-            "error: .gitignore has incomplete sd-ai-command-pack "
-            "trellis-gitignore markers"
-        )
     if has_start:
         replace_end = end_index + len(TRELLIS_GITIGNORE_END)
         if replace_end < len(current) and current[replace_end] == "\n":
@@ -710,17 +810,13 @@ def install_trellis_gitignore(target: Path, *, dry_run: bool) -> InstallResult:
     if path_is_occupied(destination) and not destination.is_file():
         raise SystemExit(f"error: target exists and is not a file: {file.target}")
 
-    current = (
-        destination.read_text(encoding="utf-8", errors="surrogateescape")
-        if destination.exists()
-        else ""
-    )
+    current = read_text_if_exists(destination, str(file.target))
     merged = merge_trellis_gitignore_block(current)
     if merged == current:
         return InstallResult(file, "unchanged")
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(merged, encoding="utf-8", errors="surrogateescape")
+        atomic_write_text(destination, merged)
     return InstallResult(file, "updated" if destination.exists() else "created")
 
 
@@ -739,17 +835,20 @@ def install_managed_block(
 
     block = normalize_managed_block_template(file)
     if destination.exists():
-        current = destination.read_text(encoding="utf-8", errors="surrogateescape")
+        current = destination.read_bytes().decode(
+            "utf-8",
+            errors="surrogateescape",
+        )
         merged = merge_managed_block(current, block)
         if merged == current:
             return InstallResult(file, "unchanged")
         if not dry_run:
-            destination.write_text(merged, encoding="utf-8", errors="surrogateescape")
+            atomic_write_text_preserving_invalid_utf8(destination, merged)
         return InstallResult(file, "updated")
 
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(block, encoding="utf-8", errors="surrogateescape")
+        atomic_write_text(destination, block)
     return InstallResult(file, "created")
 
 
@@ -843,15 +942,13 @@ def local_only_exclude_block(patterns: Iterable[str]) -> str:
 
 
 def merge_local_only_exclude_block(current: str, block: str) -> str:
-    start_index = current.find(LOCAL_ONLY_EXCLUDE_START)
-    end_index = current.find(LOCAL_ONLY_EXCLUDE_END)
+    start_index, end_index = marker_pair_indexes(
+        current,
+        LOCAL_ONLY_EXCLUDE_START,
+        LOCAL_ONLY_EXCLUDE_END,
+        ".git/info/exclude",
+    )
     has_start = start_index != -1
-    has_end = end_index != -1
-    if has_start != has_end or (has_start and end_index < start_index):
-        raise SystemExit(
-            "error: .git/info/exclude has incomplete sd-ai-command-pack "
-            "local-only markers"
-        )
     if has_start:
         replace_end = end_index + len(LOCAL_ONLY_EXCLUDE_END)
         if replace_end < len(current) and current[replace_end] == "\n":
@@ -875,7 +972,7 @@ def ensure_local_only_exclude(
 ) -> LocalOnlyResult:
     exclude_path = git_info_exclude_path(target)
     validate_resolved_target_path(exclude_path.parent.parent, exclude_path, "git exclude path")
-    current = exclude_path.read_text(encoding="utf-8", errors="surrogateescape") if exclude_path.exists() else ""
+    current = read_text_if_exists(exclude_path, ".git/info/exclude")
     block = local_only_exclude_block(local_only_exclude_patterns(selected))
     merged = merge_local_only_exclude_block(current, block)
     if merged == current:
@@ -883,7 +980,7 @@ def ensure_local_only_exclude(
     if dry_run:
         return LocalOnlyResult("would-update-local-exclude", exclude_path)
     exclude_path.parent.mkdir(parents=True, exist_ok=True)
-    exclude_path.write_text(merged, encoding="utf-8", errors="surrogateescape")
+    atomic_write_text(exclude_path, merged)
     status = "local-exclude-updated" if current else "local-exclude-created"
     return LocalOnlyResult(status, exclude_path)
 
@@ -895,12 +992,12 @@ def write_local_only_marker(target: Path, *, dry_run: bool) -> LocalOnlyResult:
         "Generated Trellis and SD AI command pack files are ignored through "
         ".git/info/exclude for this local clone.\n"
     )
-    if marker.exists() and marker.read_text(encoding="utf-8", errors="surrogateescape") == content:
+    if marker.exists() and read_text_strict(marker, str(LOCAL_ONLY_MARKER_FILE)) == content:
         return LocalOnlyResult("local-only-marker-unchanged", LOCAL_ONLY_MARKER_FILE)
     if dry_run:
         return LocalOnlyResult("would-write-local-only-marker", LOCAL_ONLY_MARKER_FILE)
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(content, encoding="utf-8", errors="surrogateescape")
+    atomic_write_text(marker, content)
     return LocalOnlyResult("local-only-marker-written", LOCAL_ONLY_MARKER_FILE)
 
 
@@ -923,16 +1020,16 @@ def install_installed_targets_file(
 
     content = installed_targets_content(selected, extra_targets=extra_targets)
     if destination.exists():
-        current = destination.read_text(encoding="utf-8", errors="surrogateescape")
+        current = read_text_strict(destination, str(file.target))
         if current == content:
             return InstallResult(file, "unchanged")
         if not dry_run:
-            destination.write_text(content, encoding="utf-8", errors="surrogateescape")
+            atomic_write_text(destination, content)
         return InstallResult(file, "updated")
 
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(content, encoding="utf-8", errors="surrogateescape")
+        atomic_write_text(destination, content)
     return InstallResult(file, "created")
 
 
@@ -1012,9 +1109,10 @@ def main(argv: list[str] | None = None) -> int:
         print("mode: dry-run")
     if args.local_only:
         print("mode: local-only")
+    local_only_results_printed = len(local_only_results)
     for result in local_only_results:
         suffix = f" ({result.detail})" if result.detail else ""
-        print(f"{result.status:25} {display_path(target, result.target)}{suffix}")
+        print(f"{result.status:29} {display_path(target, result.target)}{suffix}")
 
     results: list[InstallResult] = []
     generated_targets: list[Path] = []
@@ -1061,9 +1159,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{result.status:11} {result.file.target}")
         if result.backup:
             print(f"{'backup':11} {result.backup.relative_to(target)}")
-    for result in local_only_results[2:]:
+    for result in local_only_results[local_only_results_printed:]:
         suffix = f" ({result.detail})" if result.detail else ""
-        print(f"{result.status:25} {display_path(target, result.target)}{suffix}")
+        print(f"{result.status:29} {display_path(target, result.target)}{suffix}")
     for file, reason in skipped:
         print(f"skipped     {file.target} ({reason})")
 

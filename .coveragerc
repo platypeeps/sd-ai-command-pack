@@ -1,6 +1,9 @@
 [run]
-include =
-    install.py
+# Keep the 100% line gate focused on the installer. Helper scripts are covered
+# by focused unit/subprocess tests and syntax checks, but many branches
+# intentionally depend on optional local CLIs such as Prism, Gito, GitHub, and
+# Trellis and are not part of this strict installer coverage metric.
+include = install.py
 parallel = True
 
 [report]
