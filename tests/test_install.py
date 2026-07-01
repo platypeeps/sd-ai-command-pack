@@ -6991,6 +6991,82 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("template twin pairs compared", script)
         self.assertIn("undocumented env var", script)
 
+    def test_review_learnings_reports_subprocess_timeout_as_setup_failure(
+        self,
+    ) -> None:
+        # Regression: a hung git/gh call must surface the [sd-review-learnings:*]
+        # exit-2 contract, not a raw subprocess.TimeoutExpired traceback.
+        module = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_timeout_regression",
+        )
+        root = self.make_repo()
+
+        with mock.patch.object(
+            module,
+            "build_local_diff",
+            side_effect=module.subprocess.TimeoutExpired("git", 120),
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code = module.main(["--repo-root", str(root)])
+        self.assertEqual(code, 2)
+        self.assertIn("[sd-review-learnings:findings]", stderr.getvalue())
+
+        diff_file = root / "empty.diff"
+        diff_file.write_text("", encoding="utf-8")
+        with mock.patch.object(
+            module,
+            "fetch_recent_copilot_comments",
+            side_effect=module.subprocess.TimeoutExpired("gh", 60),
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code = module.main(
+                    [
+                        "--repo-root",
+                        str(root),
+                        "--diff-from",
+                        str(diff_file),
+                        "--github-days",
+                        "7",
+                    ]
+                )
+        self.assertEqual(code, 2)
+        self.assertIn("[sd-review-learnings:github]", stderr.getvalue())
+
+    def test_review_preflight_reports_malformed_config_as_failure(self) -> None:
+        # Regression: a malformed review-preflight.json must FAIL, not be wiped
+        # by the failure-buffer reset and pass on defaults.
+        if shutil.which("node") is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_repo()
+        # The script resolves its repo root to its own parent dir, so it must be
+        # run from inside the target repo's scripts/ as it is when installed.
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(
+            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
+        )
+        config_dir = root / ".sd-ai-command-pack"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "review-preflight.json").write_text(
+            "{ not valid json", encoding="utf-8"
+        )
+
+        result = subprocess.run(
+            ["node", "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("could not be parsed as JSON", result.stdout)
+
     def test_review_pr_skill_auto_dispatches_housekeeping_after_merge(self) -> None:
         skill = (
             install.ROOT
