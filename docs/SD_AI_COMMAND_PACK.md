@@ -108,8 +108,9 @@ loaded project command files.
 7. Use the review-pr command for the PR loop. It should run the local
    full-check path, including any configured local review providers, before
    requesting remote review.
-8. Request the configured remote reviewer, defaulting to GitHub Copilot, only
-   when explicitly wanted or as a final remote pass.
+8. Request the configured remote reviewer, defaulting to GitHub Copilot, after
+   a clean local pass and again after every pushed review-fix commit made
+   during the loop, unless the user explicitly asked for local-only review.
 9. Let the review-pr command reply to and resolve review threads as part of the
    normal loop once findings are fixed, rebutted with evidence, or confirmed
    already addressed.
@@ -136,7 +137,9 @@ The default remote reviewer for review-pr is GitHub Copilot's
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER_LABEL`,
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_AUTHOR_MATCH`,
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND`, and
-`SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`.
+`SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`. The round limit defaults to
+five configured remote-review requests before the command asks whether to keep
+going.
 
 ## Commands
 

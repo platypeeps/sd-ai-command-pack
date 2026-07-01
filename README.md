@@ -176,9 +176,11 @@ with a condensed "expected clean state" plus anomalies report.
 
 The review-pr command is local-review-first. It runs the full-check path and
 any available local review providers before requesting the configured remote
-reviewer, and treats remote review as an explicit final pass rather than the
-default convergence mechanism. The default remote reviewer is GitHub Copilot's
-`copilot-pull-request-reviewer`; target repos can override it with
+reviewer. Unless the user explicitly asks for local-only review, it requests
+remote review after a clean local pass and re-requests it after every pushed
+review-fix commit made during the loop, up to the configured round limit. The
+default remote reviewer is GitHub Copilot's `copilot-pull-request-reviewer`;
+target repos can override it with
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER`,
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER_LABEL`,
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_AUTHOR_MATCH`,

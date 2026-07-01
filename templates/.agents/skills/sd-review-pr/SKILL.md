@@ -9,10 +9,9 @@ Use this project-local Software Delivery skill for `sd-review-pr` and
 `/sd:review-pr` style work. It turns a draft or in-progress PR into a reviewed
 PR by running the local full-check and any available local review providers
 first, inspecting existing comments and CI, and requesting the configured remote
-reviewer only when that remote review option is available and the user
-explicitly asks for a remote/final pass or when local review is clean and a
-remote review is intentionally warranted. GitHub Copilot is the default remote
-reviewer unless a repo overrides it.
+reviewer after a clean local pass and after every pushed review-fix commit made
+during the loop. GitHub Copilot is the default remote reviewer unless a repo
+overrides it.
 
 ## Safety Rules
 
@@ -25,6 +24,12 @@ reviewer unless a repo overrides it.
   to this PR; ask before touching anything ambiguous.
 - Run the local full-check before requesting a paid/remote review. Use:
   `bash scripts/sd-ai-command-pack-full-check.sh`.
+- Treat `sd-review-pr` as a bounded remote-review convergence loop by default.
+  Unless the user explicitly asks for local-only review, request the configured
+  remote reviewer after the local gate passes and again after each pushed
+  review-fix commit made during this command run. Do not ask for permission
+  before each configured remote-review request; stop only when the loop is clean
+  or the configured round limit is reached.
 - Count one remote loop as: trigger the configured remote reviewer, wait for
   completion, inspect review/CI state, address findings, and push any resulting
   commit. After the configured remote round limit, default five, stop before
@@ -176,8 +181,16 @@ After local full-check passes:
 
 - If the user asked for local review only, skip remote review and continue to
   Step 5 to inspect existing comments and CI.
-- If the user asked for a final remote review, or if project policy says to run
-  one before merge, trigger the configured remote reviewer.
+- Otherwise, trigger the configured remote reviewer when no remote review has
+  been requested for the current PR head during this command run.
+- Also trigger the configured remote reviewer after every pushed commit created
+  by Step 6 to address review comments, CI failures, or local review findings.
+  This includes fixes for review comments that existed before this command was
+  invoked; after those fixes are pushed and the local full-check passes, request
+  a fresh remote review.
+- If the current PR head already has a completed remote review and this command
+  has not pushed any fixes, inspect existing comments and CI before deciding
+  whether another remote request is needed.
 
 Record a remote review round only when the configured remote reviewer is
 actually requested.
@@ -386,6 +399,9 @@ When files change:
 5. Return to Step 1 before making another review, CI, or remote-trigger
    decision so `HEAD_SHA`, review requests, latest reviews, and PR state are
    fresh.
+6. Treat the pushed commit as requiring another configured remote-review
+   request after Step 2 passes, unless the user asked for local-only review or
+   no remote reviewer is configured.
 
 ```bash
 git status -sb
@@ -402,16 +418,18 @@ already satisfied.
 ## Step 7: Repeat Or Stop
 
 After every round that produced a code/docs change, return to Step 1 to refresh
-all PR state, then run local full-check again. Trigger another remote review
-only when the prior remote review produced actionable feedback that has now
-been fixed or rebutted and the user still wants a remote loop. Compare the new
-thread ids and timestamps with the refreshed snapshot.
+all PR state, then run local full-check again. If local full-check passes and
+remote review is configured, trigger another remote review before considering
+the loop clean. Compare the new thread ids and timestamps with the refreshed
+snapshot, and do not request duplicate remote reviews for the same PR head when
+no review-fix commit has been pushed since the latest requested remote review.
 
 Stop when:
 
 - local full-check passes;
 - the latest requested remote review produces no new actionable
   comments;
+- no review-fix commit has been pushed since the latest requested remote review;
 - all prior review threads are resolved or intentionally left with a documented
   user decision;
 - CI is passing or any non-passing check is documented as unrelated/flaky with

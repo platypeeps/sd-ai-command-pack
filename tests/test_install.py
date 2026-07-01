@@ -6414,6 +6414,15 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_AUTHOR_MATCH", skill)
             self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND", skill)
             self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT", skill)
+            self.assertIn("after every pushed review-fix commit", skill)
+            self.assertIn(
+                "before each configured remote-review request",
+                skill,
+            )
+            self.assertIn(
+                "fixes for review comments that existed before this command was",
+                skill,
+            )
             self.assertIn('-f reviewers[]="$REMOTE_REVIEWER"', skill)
             self.assertIn(
                 'gh pr edit "$PR_NUMBER" --add-reviewer "$REMOTE_REVIEWER"',
@@ -6428,12 +6437,14 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         for adapter_path in adapter_paths:
             adapter = adapter_path.read_text(encoding="utf-8")
             self.assertIn("configured remote reviewer", adapter)
+            self.assertIn("automatic re-review after pushed fixes", adapter)
             self.assertIn("configured remote review round limit", adapter)
 
         for doc_path in doc_paths:
             doc = doc_path.read_text(encoding="utf-8")
-            self.assertIn("The default remote reviewer", doc)
+            self.assertRegex(doc, r"(?i)the\s+default remote reviewer")
             self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER", doc)
+            self.assertIn("review-fix commit made", doc)
 
     def test_review_pr_skill_auto_dispatches_housekeeping_after_merge(self) -> None:
         skill = (
