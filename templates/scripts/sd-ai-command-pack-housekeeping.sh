@@ -9,6 +9,7 @@ MERGE_STRATEGY="${SD_AI_COMMAND_PACK_HOUSEKEEPING_MERGE_STRATEGY:-merge}"
 
 ACTIONS=()
 EXPECTED=()
+INVENTORY=()
 ANOMALIES=()
 DEFAULT_BRANCH=""
 START_BRANCH=""
@@ -49,6 +50,10 @@ add_action() {
 
 add_expected() {
   EXPECTED+=("$*")
+}
+
+add_inventory() {
+  INVENTORY+=("$*")
 }
 
 add_anomaly() {
@@ -699,20 +704,20 @@ check_open_prs() {
   local open_prs
   local count
   if ! have gh; then
-    add_anomaly "gh not found; skipped open PR check"
+    add_inventory "open PRs: skipped because gh was not found"
     return 0
   fi
 
   if ! open_prs="$(gh_pr_list --state open --limit 100 --json number,title,headRefName --jq '.[] | "#\(.number) \(.headRefName): \(.title)"' 2>/dev/null)"; then
-    add_anomaly "failed to list open PRs"
+    add_inventory "open PRs: unavailable because gh failed to list open PRs"
     return 0
   fi
 
   if [ -z "$open_prs" ]; then
-    add_expected "open PRs: none"
+    add_inventory "open PRs: none"
   else
     count="$(printf '%s\n' "$open_prs" | sed '/^$/d' | wc -l | tr -d ' ')"
-    add_anomaly "open PRs remain ($count): $(printf '%s' "$open_prs" | paste -sd ';' -)"
+    add_inventory "open PRs outside this cleanup scope ($count): $(printf '%s' "$open_prs" | paste -sd ';' -)"
   fi
 }
 
@@ -720,43 +725,43 @@ check_open_issues() {
   local open_issues
   local count
   if ! have gh; then
-    add_anomaly "gh not found; skipped open issue check"
+    add_inventory "open issues: skipped because gh was not found"
     return 0
   fi
 
   if ! open_issues="$(gh_issue_list --state open --limit 100 --json number,title --jq '.[] | "#\(.number): \(.title)"' 2>/dev/null)"; then
-    add_anomaly "failed to list open issues"
+    add_inventory "open issues: unavailable because gh failed to list open issues"
     return 0
   fi
 
   if [ -z "$open_issues" ]; then
-    add_expected "open issues: none"
+    add_inventory "open issues: none"
   else
     count="$(printf '%s\n' "$open_issues" | sed '/^$/d' | wc -l | tr -d ' ')"
-    add_anomaly "open issues remain ($count): $(printf '%s' "$open_issues" | paste -sd ';' -)"
+    add_inventory "open issues outside this cleanup scope ($count): $(printf '%s' "$open_issues" | paste -sd ';' -)"
   fi
 }
 
 check_trellis_tasks() {
   local context
   if [ ! -f ".trellis/scripts/get_context.py" ]; then
-    add_anomaly ".trellis/scripts/get_context.py not found; skipped Trellis active-task check"
+    add_inventory "Trellis active tasks: skipped because .trellis/scripts/get_context.py was not found"
     return 0
   fi
   if ! have python3; then
-    add_anomaly "python3 not found; skipped Trellis active-task check"
+    add_inventory "Trellis active tasks: skipped because python3 was not found"
     return 0
   fi
 
   if ! context="$(python3 ./.trellis/scripts/get_context.py --mode record 2>&1)"; then
-    add_anomaly "Trellis record mode failed; run python3 ./.trellis/scripts/get_context.py --mode record"
+    add_inventory "Trellis active tasks: unavailable; run python3 ./.trellis/scripts/get_context.py --mode record"
     return 0
   fi
 
   if printf '%s\n' "$context" | grep -q "(no active tasks assigned to you)"; then
-    add_expected "Trellis active tasks: none"
+    add_inventory "Trellis active tasks: none assigned to current developer"
   else
-    add_anomaly "Trellis active tasks may remain; run python3 ./.trellis/scripts/get_context.py --mode record"
+    add_inventory "Trellis active tasks: active tasks may remain outside this cleanup scope"
   fi
 }
 
@@ -849,6 +854,9 @@ print_report() {
 
   section "Expected clean state"
   print_list "${EXPECTED[@]}"
+
+  section "Inventory"
+  print_list "${INVENTORY[@]}"
 
   section "Anomalies"
   if [ "${#ANOMALIES[@]}" -eq 0 ]; then

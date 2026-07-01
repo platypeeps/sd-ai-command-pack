@@ -246,18 +246,17 @@ Use `bash scripts/sd-ai-command-pack-review-local.sh --all` or the
 review-local-all command when you want a full checked-out repository review.
 In that mode, Prism runs `prism review codebase`; Gito normally runs
 `gito review --all --path <repo-root>` and writes to `.build/review/gito-all`
-by default. If tracked deletions are present in the working tree or deleted
-files exist in the current branch diff, the runner omits `--all` and reviews
-the explicit existing-file filter so deleted paths do not break Gito.
-Prism and Gito scans use the pack's managed standard exclusions for
+by default with an include filter built from existing tracked files, so
+branch-diff deletions are not reviewed as deleted diff paths. Prism and Gito
+scans use the pack's managed standard exclusions for
 top-level AI/tooling/cache directories: `.github/`, `.claude/`, `.codex/`,
 `.gemini/`, `.opencode/`, `.agents/`, `.build/`, `.git/`, `.pytest_cache/`,
 `.obsidian-kb/`, `.trellis/`, `.ruff_cache/`, `.venv/`,
 `.sd-ai-command-pack/`, and `node_modules/`. For `uvx`-based Gito wrappers, the
 runner sets `UV_CACHE_DIR` and `UV_TOOL_DIR` to writable temp directories when
-they are unset. When Gito reports provider rate limiting such as
-`ClientError: 429` or `Slow down`, the runner retries with bounded exponential
-backoff. Tune attempts and delays with
+they are unset. When Gito reports provider rate limiting through an explicit
+HTTP 429 status such as `ClientError: 429`, the runner retries with bounded
+exponential backoff. Tune attempts and delays with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`,
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, and
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`. If Prism
@@ -373,9 +372,11 @@ not satisfied, it behaves as a post-merge cleanup command: fetch/prune
 `origin`, confirm the current feature branch's PR is merged and the local branch
 head matches that PR before deleting it, switch to the default branch,
 fast-forward from `origin`, delete the merged local and remote branch, and then
-report the expected clean state plus anomalies.
+report the current-stream clean state plus anomalies. Repo-wide open PRs, open
+issues, and active Trellis tasks are reported in a separate inventory section
+rather than blockers for this cleanup.
 
-A clean housekeeping run should end with:
+A clean current-stream housekeeping run should end with:
 
 ```text
 ==> Expected clean state
@@ -384,9 +385,11 @@ A clean housekeeping run should end with:
 - <default> matches origin/<default>
 - local branches: only <default>
 - remote branches: only origin/HEAD and origin/<default>
-- open PRs: none
-- open issues: none
-- Trellis active tasks: none
+
+==> Inventory
+- open PRs: <summary>
+- open issues: <summary>
+- Trellis active tasks: <summary>
 
 ==> Anomalies
 none
@@ -439,12 +442,14 @@ Common environment variables:
   to `.build/review/gito`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS`: max Gito attempts when the
   provider reports HTTP 429 or slow-down rate limiting. Defaults to the
-  review-local Gito value, then `2`.
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS` value, then `2`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_DELAY_SECONDS`: initial Gito retry
-  delay for rate limits. Defaults to the review-local Gito value, then `30`.
+  delay for rate limits. Defaults to the
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS` value, then `30`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_MAX_DELAY_SECONDS`: maximum Gito
-  retry delay after exponential backoff. Defaults to the review-local Gito
-  value, then `120`.
+  retry delay after exponential backoff. Defaults to the
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS` value, then
+  `120`.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS`: local review tool list for
   `sd-review-local`. Defaults to `prism gito`; accepts spaces or commas.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_SCOPE=all`: run the local review runner
@@ -521,9 +526,9 @@ unless `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=required` is set.
 Gito is opt-in because it can require `uvx`, cache access outside the repo,
 network access, and configured LLM credentials. When enabled, Gito writes
 reports to `.build/review/gito` by default so generated review artifacts do not
-land at the repository root. If Gito reports provider rate limiting such as
-`ClientError: 429` or `Slow down`, full-check retries with the same bounded
-backoff behavior as review-local.
+land at the repository root. If Gito reports provider rate limiting through an
+explicit HTTP 429 status such as `ClientError: 429`, full-check retries with
+the same bounded backoff behavior as review-local.
 
 ## CI cadence
 
@@ -550,7 +555,8 @@ python3 /path/to/sd-ai-command-pack/install.py /path/to/target/repo --force
 Normal shared installs maintain a managed `sd-ai-command-pack
 trellis-gitignore` block in the repo root `.gitignore`. The block ignores
 Trellis local/runtime files such as `.trellis/.developer`,
-`.trellis/.runtime/`, `.trellis/.cache/`, and `.trellis/.backup-*` without
+`.trellis/.runtime/`, `.trellis/.cache/`, `.trellis/.backup-*`,
+`.trellis/worktrees/`, and `.trellis/.template-hashes.json` without
 blanket-ignoring shareable `.trellis` workflow, spec, task, and script files.
 It also ignores local AI-tool state such as `.claude/settings.local.json`,
 tool caches, logs, sessions, tmp folders, and `.opencode/node_modules/` without
@@ -571,8 +577,43 @@ like this:
 !.env.example
 
 # Trellis local/runtime state.
+.trellis/.developer
+.trellis/.backup-*
+.trellis/worktrees/
+.trellis/.template-hashes.json
 .trellis/.runtime/
 .trellis/.cache/
+
+# AI-tool local state; keep shared platform adapters tracked.
+.claude/settings.local.json
+.claude/**/*.local.*
+.claude/**/.cache/
+.claude/**/cache/
+.claude/**/logs/
+.claude/**/*.log
+.codex/**/*.local.*
+.codex/**/.cache/
+.codex/**/cache/
+.codex/**/logs/
+.codex/**/sessions/
+.codex/**/tmp/
+.codex/**/*.log
+.gemini/settings.local.json
+.gemini/**/*.local.*
+.gemini/**/.cache/
+.gemini/**/cache/
+.gemini/**/logs/
+.gemini/**/tmp/
+.gemini/**/*.log
+.opencode/**/*.local.*
+.opencode/**/.cache/
+.opencode/**/cache/
+.opencode/**/logs/
+.opencode/**/tmp/
+.opencode/**/state/
+.opencode/**/sessions/
+.opencode/node_modules/
+.opencode/**/*.log
 # sd-ai-command-pack trellis-gitignore end
 ```
 

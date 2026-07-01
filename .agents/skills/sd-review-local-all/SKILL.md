@@ -98,15 +98,15 @@ Default provider behavior:
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE`, or set
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK=0` to disable the
   fallback.
-- Gito normally runs `gito review --all --path <repo-root>` with an include
-  filter after applying the same standard exclusions. When tracked deletions
-  are present, the runner omits `--all` and uses the explicit existing-file
-  filter so deleted paths do not break the provider. Reports are written to
-  `.build/review/gito-all` by default. The runner sets `UV_CACHE_DIR` and
-  `UV_TOOL_DIR` to writable temp directories when they are unset so `uvx`-based
-  Gito wrappers do not need to write under a restricted home directory. When
-  Gito reports a provider rate limit such as `ClientError: 429` or `Slow down`,
-  the runner retries with bounded exponential backoff. Tune that with
+- Gito runs `gito review --all --path <repo-root>` with an include filter after
+  applying the same standard exclusions. The include filter is built from
+  existing tracked files, so branch-diff deletions are not reviewed as deleted
+  diff paths. Reports are written to `.build/review/gito-all` by default. The
+  runner sets `UV_CACHE_DIR` and `UV_TOOL_DIR` to writable temp directories
+  when they are unset so `uvx`-based Gito wrappers do not need to write under a
+  restricted home directory. When Gito reports a provider rate limit through an
+  explicit HTTP 429 status such as `ClientError: 429`, the runner retries with
+  bounded exponential backoff. Tune that with
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`,
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, and
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`.
@@ -146,6 +146,10 @@ For each selected finding:
 
 If a selected finding turns out to be wrong, explain the evidence and ask
 whether to skip it or address a different underlying issue.
+
+If a check fails after a selected fix, stop the loop, report the command and
+failure output, and leave the working tree available for inspection. Do not
+continue stacking fixes until the failed check is understood.
 
 ## Step 5: Repeat
 

@@ -89,8 +89,9 @@ and Gito, skipping top-level AI/tooling/cache directories such as `.github/`,
 `.git/`, `.pytest_cache/`, `.obsidian-kb/`, `.trellis/`, `.ruff_cache/`,
 `.venv/`, `.sd-ai-command-pack/`, and `node_modules/`.
 
-When Gito reports a provider rate limit such as `ClientError: 429` or `Slow
-down`, the runner retries with bounded exponential backoff. Tune that with
+When Gito reports a provider rate limit through an explicit HTTP 429 status
+such as `ClientError: 429`, the runner retries with bounded exponential
+backoff. Tune that with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`,
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, and
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`.

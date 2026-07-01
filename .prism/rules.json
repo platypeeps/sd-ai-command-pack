@@ -6,7 +6,8 @@
     "maintainability",
     "docs",
     "bug",
-    "performance"
+    "performance",
+    "style"
   ],
   "severityOverrides": {
     "security": "high",

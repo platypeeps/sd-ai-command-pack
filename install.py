@@ -656,18 +656,14 @@ def trellis_gitignore_block() -> str:
 
 
 def remove_unmanaged_trellis_blanket_entries(current: str) -> tuple[str, bool]:
-    lines = current.splitlines()
     kept: list[str] = []
     removed = False
-    for line in lines:
+    for line in current.splitlines(keepends=True):
         if line.strip() in TRELLIS_BLANKET_GITIGNORE_ENTRIES:
             removed = True
             continue
         kept.append(line)
-    merged = "\n".join(kept)
-    if merged and current.endswith("\n"):
-        merged += "\n"
-    return merged, removed
+    return "".join(kept), removed
 
 
 def merge_trellis_gitignore_block(current: str) -> str:

@@ -643,6 +643,16 @@ class InstallTests(unittest.TestCase):
         self.assertTrue(merged.startswith("dist/\n\n"))
         self.assert_trellis_gitignore_block(merged)
 
+    def test_trellis_gitignore_blanket_removal_preserves_blank_only_content(self) -> None:
+        self.assertEqual(
+            install.remove_unmanaged_trellis_blanket_entries("\n\n"),
+            ("\n\n", False),
+        )
+        self.assertEqual(
+            install.remove_unmanaged_trellis_blanket_entries("dist/\n\n.trellis/\n\nlogs/\n"),
+            ("dist/\n\n\nlogs/\n", True),
+        )
+
     def test_trellis_gitignore_rejects_existing_directory_target(self) -> None:
         root = self.make_repo()
         (root / ".gitignore").mkdir()
@@ -1555,7 +1565,7 @@ class InstallTests(unittest.TestCase):
             "SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF",
             "discovered branch-diff",
             "branch: <default>",
-            "tracked deletions are present",
+            "branch-diff deletions are not reviewed as deleted diff paths",
             "ClientError: 429",
             "installs should commit this file",
             "clone-local exclude list instead",
@@ -2462,7 +2472,8 @@ class InstallTests(unittest.TestCase):
         self.assertIn("prism review codebase", review_local_all)
         self.assertIn("empty chunk response", review_local_all)
         self.assertIn("gito review --all --path <repo-root>", review_local_all)
-        self.assertIn("tracked deletions", review_local_all)
+        self.assertIn("branch-diff deletions", review_local_all)
+        self.assertIn("continue stacking fixes", review_local_all)
         self.assertIn("UV_CACHE_DIR", review_local_all)
         self.assertIn(
             "SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND",
@@ -2993,7 +3004,7 @@ class InstallTests(unittest.TestCase):
             self.assertNotIn(excluded, gito_filter_paths)
         self.assertTrue((root / ".build/review/gito-all").is_dir())
 
-    def test_review_local_script_all_scope_omits_gito_all_when_tracked_files_deleted(
+    def test_review_local_script_all_scope_keeps_gito_all_when_tracked_files_deleted(
         self,
     ) -> None:
         if self._bash_path is None:
@@ -3037,15 +3048,14 @@ class InstallTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("Tracked or branch-diff deletions are present", result.stdout)
+        self.assertNotIn("Tracked or branch-diff deletions are present", result.stdout)
         log = log_path.read_text(encoding="utf-8")
-        self.assertIn(f"gito review --path {root.resolve()} --filter ", log)
-        self.assertNotIn(" --all ", log)
+        self.assertIn(f"gito review --all --path {root.resolve()} --filter ", log)
         gito_line = next(line for line in log.splitlines() if line.startswith("gito "))
         gito_filter = gito_line.split(" --filter ", 1)[1].split(" --out ", 1)[0]
         self.assertNotIn("app.txt", set(gito_filter.split(",")))
 
-    def test_review_local_script_all_scope_omits_gito_all_when_branch_diff_deletes_files(
+    def test_review_local_script_all_scope_keeps_gito_all_when_branch_diff_deletes_files(
         self,
     ) -> None:
         if self._bash_path is None:
@@ -3093,10 +3103,9 @@ class InstallTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("Tracked or branch-diff deletions are present", result.stdout)
+        self.assertNotIn("Tracked or branch-diff deletions are present", result.stdout)
         log = log_path.read_text(encoding="utf-8")
-        self.assertIn(f"gito review --path {root.resolve()} --filter ", log)
-        self.assertNotIn(" --all ", log)
+        self.assertIn(f"gito review --all --path {root.resolve()} --filter ", log)
         gito_line = next(line for line in log.splitlines() if line.startswith("gito "))
         gito_filter = gito_line.split(" --filter ", 1)[1].split(" --out ", 1)[0]
         gito_filter_paths = set(gito_filter.split(","))
@@ -3190,6 +3199,7 @@ class InstallTests(unittest.TestCase):
             "#!/usr/bin/env bash\n"
             f"printf 'gito attempt %s\\n' \"$*\" >> {str(log_path)!r}\n"
             "printf 'A traceback mentioned provider rate limiting docs.\\n'\n"
+            "printf 'Docs mention `ClientError: 429` or `Slow down`.\\n'\n"
             "printf 'ClientError: 404 Not Found\\n'\n"
             "exit 1\n",
             encoding="utf-8",
@@ -3712,6 +3722,44 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(log.count("gito attempt"), 2, log)
         self.assertIn("gito attempt 2 review --vs HEAD --filter app.txt", log)
 
+    def test_full_check_script_ignores_invalid_configured_base_ref(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("before\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        result = subprocess.run(
+            [
+                self._bash_path,
+                "-c",
+                "source scripts/sd-ai-command-pack-full-check.sh; full_check_base_ref; printf '\\n'",
+            ],
+            cwd=root,
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF": "--not-a-ref",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF=--not-a-ref does not resolve",
+            result.stdout,
+        )
+        self.assertEqual(result.stdout.strip().splitlines()[-1], "HEAD")
+
     def test_full_check_script_does_not_retry_gito_non_rate_limit_trace(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
@@ -3736,6 +3784,7 @@ class InstallTests(unittest.TestCase):
             "#!/usr/bin/env bash\n"
             f"printf 'gito attempt %s\\n' \"$*\" >> {str(log_path)!r}\n"
             "printf 'A traceback mentioned provider rate limiting docs.\\n'\n"
+            "printf 'Docs mention `ClientError: 429` or `Slow down`.\\n'\n"
             "printf 'ClientError: 404 Not Found\\n'\n"
             "exit 1\n",
             encoding="utf-8",
@@ -4013,6 +4062,7 @@ import {
   extractDocumentationPathReferences,
   parseJournalSessionsFromText,
   parseWorkspaceIndexSessionsFromText,
+  shouldCheckDocumentationPathReference,
   validateTrellisJournalSessions,
 } from './scripts/sd-ai-command-pack-review-preflight.mjs';
 
@@ -4022,6 +4072,9 @@ assert.deepEqual(
   extractDocumentationPathReferences('docs/guide.md', 'See `docs/current.md` and [missing](../missing.md).').map((item) => item.target),
   ['../missing.md', 'docs/current.md'],
 );
+assert.equal(shouldCheckDocumentationPathReference('docs/guide:section.md'), true);
+assert.equal(shouldCheckDocumentationPathReference('https://example.com/docs.md'), false);
+assert.equal(shouldCheckDocumentationPathReference('obsidian://open?vault=Repo'), false);
 const journal = parseJournalSessionsFromText('.trellis/workspace/dev/journal-1.md', [
   '## Session 1: Done',
   '### Status',
@@ -5582,8 +5635,9 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             "Expected clean state",
             "Anomalies",
             "default branch checked out",
-            "no open PRs",
-            "no active Trellis tasks",
+            "repo-wide open PRs",
+            "inventory, not as blockers",
+            "current stream cleanup",
             "SD finish-work flow",
             ".agents/skills/sd-finish-work/SKILL.md",
             "--no-auto-merge",
@@ -5591,9 +5645,11 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             self.assertIn(text, skill)
         for text in [
             "Expected clean state",
+            "Inventory",
             "Anomalies",
             "open PRs: none",
-            "Trellis active tasks: none",
+            "open issues: none",
+            "Trellis active tasks: none assigned",
             "--no-auto-merge",
             "--merge-strategy",
             "view_open_pr_readiness_for_branch()",

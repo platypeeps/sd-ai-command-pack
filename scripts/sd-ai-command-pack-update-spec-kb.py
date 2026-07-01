@@ -673,7 +673,6 @@ def refresh(root: Path) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     root = repo_root()
-    os.chdir(root)
 
     try:
         if args.dry_run:

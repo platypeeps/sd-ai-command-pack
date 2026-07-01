@@ -264,19 +264,31 @@ configured_command_for_tool() {
 default_review_base_ref() {
   local ref
 
-  if git rev-parse --verify --quiet "origin/HEAD^{commit}" >/dev/null; then
-    printf 'origin/HEAD'
-    return
-  fi
-
-  ref="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
-  if [ -n "$ref" ]; then
+  ref="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  if has_ref "$ref"; then
     printf '%s' "$ref"
     return
   fi
 
-  ref="$(git for-each-ref --format='%(refname:short)' refs/remotes 2>/dev/null | grep -v '/HEAD$' | head -n 1 || true)"
-  if [ -n "$ref" ]; then
+  ref="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+  if has_ref "$ref"; then
+    printf '%s' "$ref"
+    return
+  fi
+
+  ref="$(
+    git for-each-ref --format='%(refname:short)' refs/remotes 2>/dev/null \
+      | grep -v '/HEAD$' \
+      | LC_ALL=C sort \
+      | while IFS= read -r candidate; do
+          if has_ref "$candidate"; then
+            printf '%s\n' "$candidate"
+            break
+          fi
+        done \
+      || true
+  )"
+  if has_ref "$ref"; then
     printf '%s' "$ref"
     return
   fi
@@ -284,49 +296,41 @@ default_review_base_ref() {
   printf 'HEAD'
 }
 
+configured_review_base_ref() {
+  local var_name="$1"
+  local ref="${!var_name:-}"
+  if [ -z "$ref" ]; then
+    return 1
+  fi
+  if has_ref "$ref"; then
+    printf '%s' "$ref"
+    return 0
+  fi
+  warn "$var_name=$ref does not resolve to a commit; falling back to discovered default branch."
+  return 1
+}
+
 review_local_base_ref() {
-  if [ -n "${SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF:-}" ]; then
-    printf '%s' "$SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF"
+  if configured_review_base_ref SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF; then
     return
   fi
-  if [ -n "${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-}" ]; then
-    printf '%s' "$SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF"
+  if configured_review_base_ref SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF; then
     return
   fi
   default_review_base_ref
 }
 
 review_local_gito_base_ref() {
-  if [ -n "${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF:-}" ]; then
-    printf '%s' "$SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF"
+  if configured_review_base_ref SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF; then
     return
   fi
-  if [ -n "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF:-}" ]; then
-    printf '%s' "$SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF"
+  if configured_review_base_ref SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF; then
     return
   fi
-  if [ -n "${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-}" ]; then
-    printf '%s' "$SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF"
+  if configured_review_base_ref SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF; then
     return
   fi
   default_review_base_ref
-}
-
-tracked_deletions_present() {
-  [ -n "$(git ls-files --deleted)" ]
-}
-
-branch_deletions_present() {
-  local base_ref
-  base_ref="$(review_local_gito_base_ref)"
-  if ! git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null; then
-    return 1
-  fi
-  [ -n "$(git diff --name-only --diff-filter=D "$base_ref"...HEAD)" ]
-}
-
-gito_full_codebase_needs_existing_file_filter() {
-  tracked_deletions_present || branch_deletions_present
 }
 
 detect_merge_base() {
@@ -383,6 +387,17 @@ join_by_comma() {
   printf '%s' "$*"
 }
 
+has_ref() {
+  local ref="${1:-}"
+  if [ -z "$ref" ]; then
+    return 1
+  fi
+  case "$ref" in
+    -*) return 1 ;;
+  esac
+  git rev-parse --verify --quiet "$ref^{commit}" >/dev/null
+}
+
 prism_output_indicates_empty_chunk() {
   local output_file="$1"
   grep -Eiq 'chunked review|no content in response' "$output_file"
@@ -390,7 +405,20 @@ prism_output_indicates_empty_chunk() {
 
 gito_output_indicates_rate_limit() {
   local output_file="$1"
-  grep -Eiq '(^|[^[:alnum:]])(clienterror|apierror|httperror|http status|status code|status|error|exception):?[[:space:]]*429([^0-9]|$)|(^|[^[:alnum:]])429[[:space:]]+(too many requests|resource exhausted|rate[ -]?limit(ed)?|slow down)([^[:alnum:]]|$)' "$output_file"
+  local recent_output
+  recent_output="$(tail -n 200 "$output_file")"
+  local status_lines
+  status_lines="$(
+    printf '%s\n' "$recent_output" \
+      | grep -Ei '(^|[^[:alnum:]])(clienterror|apierror|httperror|http status|status code|status|error|exception):?[[:space:]]*[0-9]{3}([^0-9]|$)|(^|[^[:alnum:]])[0-9]{3}[[:space:]]+(too many requests|resource exhausted|rate[ -]?limit(ed)?|slow down)([^[:alnum:]]|$)' \
+      || true
+  )"
+  if [ -z "$status_lines" ]; then
+    return 1
+  fi
+  printf '%s\n' "$status_lines" \
+    | tail -n 1 \
+    | grep -Eiq '(^|[^[:alnum:]])(clienterror|apierror|httperror|http status|status code|status|error|exception):?[[:space:]]*429([^0-9]|$)|(^|[^[:alnum:]])429[[:space:]]+(too many requests|resource exhausted|rate[ -]?limit(ed)?|slow down)([^[:alnum:]]|$)'
 }
 
 gito_max_attempts() {
@@ -635,14 +663,8 @@ run_gito_review() {
       return
     fi
     mkdir -p "$out_dir"
-    if gito_full_codebase_needs_existing_file_filter; then
-      warn "Tracked or branch-diff deletions are present; running Gito full-codebase review with an explicit existing-file filter instead of --all."
-      run_gito_command "Gito review: full codebase" gito review --path "$REPO_ROOT" --filter "$filters" --out "$out_dir"
-      record_status "Gito review: full codebase" "$?"
-    else
-      run_gito_command "Gito review: full codebase" gito review --all --path "$REPO_ROOT" --filter "$filters" --out "$out_dir"
-      record_status "Gito review: full codebase" "$?"
-    fi
+    run_gito_command "Gito review: full codebase" gito review --all --path "$REPO_ROOT" --filter "$filters" --out "$out_dir"
+    record_status "Gito review: full codebase" "$?"
     return
   fi
 

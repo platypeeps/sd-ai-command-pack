@@ -55,8 +55,8 @@ The script runs:
 - Gito is opt-in because it may invoke `uvx`, use a cache outside the repo, and
   require LLM credentials or network access. Set `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=1` to
   run it. Reports are written to `.build/review/gito` by default. When Gito
-  reports a provider rate limit such as `ClientError: 429` or `Slow down`, the
-  script retries with bounded exponential backoff.
+  reports a provider rate limit through an explicit HTTP 429 status such as
+  `ClientError: 429`, the script retries with bounded exponential backoff.
 - Prism and Gito review scans use the pack-managed standard exclusions for
   top-level AI/tooling/cache directories such as `.github/`, `.claude/`,
   `.codex/`, `.gemini/`, `.opencode/`, `.agents/`, `.build/`, `.git/`,
@@ -101,12 +101,14 @@ The script runs:
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR`: Gito report output directory. Defaults to
   `.build/review/gito`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS`: max Gito attempts for
-  provider rate limits. Defaults to the review-local Gito value, then `2`.
+  provider rate limits. Defaults to
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`, then `2`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_DELAY_SECONDS`: initial Gito retry
-  delay for rate limits. Defaults to the review-local Gito value, then `30`.
+  delay for rate limits. Defaults to
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, then `30`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_MAX_DELAY_SECONDS`: maximum Gito
-  retry delay after exponential backoff. Defaults to the review-local Gito
-  value, then `120`.
+  retry delay after exponential backoff. Defaults to
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`, then `120`.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK=0`: skip configurable PR-body scope
   checks.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CONFIG`: explicit JSON config path for

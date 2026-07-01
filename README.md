@@ -177,11 +177,10 @@ The review-local-all command (`/sd:review-local-all` in Claude/Gemini;
 same fix-loop behavior but reviews the entire checked-out repository. It runs
 `bash scripts/sd-ai-command-pack-review-local.sh --all`, which calls
 `prism review codebase` for Prism and normally calls
-`gito review --all --path <repo-root>` for Gito. If tracked deletions are
-present in the working tree or deleted files exist in the current branch diff,
-the runner omits `--all` and reviews the explicit existing-file filter so
-deleted paths do not break Gito. Prism and Gito scans use the pack's managed
-standard exclusions for
+`gito review --all --path <repo-root>` for Gito with an include filter built
+from existing tracked files, so branch-diff deletions are not reviewed as
+deleted diff paths. Prism and Gito scans use the pack's managed standard
+exclusions for
 top-level AI/tooling/cache directories:
 `.github/`, `.claude/`, `.codex/`, `.gemini/`, `.opencode/`, `.agents/`,
 `.build/`, `.git/`, `.pytest_cache/`, `.obsidian-kb/`, `.trellis/`,
@@ -190,8 +189,8 @@ full-codebase reports go to `.build/review/gito-all` by default; override with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_GITO_OUT_DIR` when needed.
 For `uvx`-based Gito wrappers, the runner sets `UV_CACHE_DIR` and `UV_TOOL_DIR`
 to writable temp directories when they are unset. When Gito reports provider
-rate limiting such as `ClientError: 429` or `Slow down`, the runner retries
-with bounded exponential backoff; tune that with
+rate limiting through an explicit HTTP 429 status such as `ClientError: 429`,
+the runner retries with bounded exponential backoff; tune that with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`,
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, and
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`. If Prism
@@ -313,7 +312,8 @@ pack-owned files so audit and review-scope helpers can compare the intended
 installed footprint. For normal shared installs, it also maintains a managed
 `sd-ai-command-pack trellis-gitignore` block in the repo root `.gitignore` that
 ignores Trellis local/runtime files such as `.trellis/.developer`,
-`.trellis/.runtime/`, `.trellis/.cache/`, and `.trellis/.backup-*` without
+`.trellis/.runtime/`, `.trellis/.cache/`, `.trellis/.backup-*`,
+`.trellis/worktrees/`, and `.trellis/.template-hashes.json` without
 blanket-ignoring shareable `.trellis` workflow, spec, task, and script files.
 It also ignores local AI-tool state such as `.claude/settings.local.json`,
 tool caches, logs, sessions, tmp folders, and `.opencode/node_modules/` without

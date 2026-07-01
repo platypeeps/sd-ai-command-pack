@@ -10,6 +10,9 @@ let config = defaultConfig();
 let failures = [];
 let warnings = [];
 let passes = [];
+let installedTargetsCache;
+
+const URI_SCHEME_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 
 export function runReviewPreflight(options = {}) {
   rootDir = resolve(options.rootDir || defaultRootDir);
@@ -17,6 +20,7 @@ export function runReviewPreflight(options = {}) {
   failures = [];
   warnings = [];
   passes = [];
+  installedTargetsCache = undefined;
 
   runCheck('package override sources of truth', checkPackageOverrides);
   runCheck('copied template diff disclosure', checkCopiedTemplateDiffDisclosure);
@@ -470,18 +474,24 @@ function isSdCommandPackCopiedPath(path) {
 }
 
 function packInstalledTargets() {
+  if (installedTargetsCache !== undefined) {
+    return installedTargetsCache;
+  }
+
   const file = '.sd-ai-command-pack/installed-targets.txt';
 
   if (!exists(file)) {
-    return new Set();
+    installedTargetsCache = new Set();
+    return installedTargetsCache;
   }
 
-  return new Set(
+  installedTargetsCache = new Set(
     readText(file)
       .split('\n')
       .map((line) => normalizePathSeparators(line.trim()))
       .filter(Boolean),
   );
+  return installedTargetsCache;
 }
 
 function isRepoOwnedCopiedTemplateIntegrationPath(path, integrationPaths = config.integrationPaths) {
@@ -567,10 +577,9 @@ export function shouldCheckDocumentationPathReference(target, kind = 'code-span'
     target.startsWith('@') ||
     target.endsWith('/') ||
     target.includes('://') ||
-    /^(?:mailto|tel|obsidian|app):/i.test(target) ||
+    URI_SCHEME_PATTERN.test(target) ||
     /[<>{}\[\]*]/.test(target) ||
-    /[\s|]/.test(target) ||
-    target.includes(':')
+    /[\s|]/.test(target)
   ) {
     return false;
   }
@@ -665,32 +674,49 @@ function gitStdout(args) {
 }
 
 function gitRefExists(ref) {
+  if (!ref || ref.startsWith('-')) {
+    return false;
+  }
   return spawnSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
     cwd: rootDir,
     encoding: 'utf8',
   }).status === 0;
 }
 
+function configuredReviewBaseRef(name) {
+  const ref = process.env[name];
+  if (!ref) {
+    return '';
+  }
+  if (gitRefExists(ref)) {
+    return ref;
+  }
+  warn(`${name}=${ref} does not resolve to a commit; falling back to discovered default branch.`);
+  return '';
+}
+
 function defaultReviewBaseRef() {
-  const configured = process.env.SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF
-    || process.env.SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF;
+  const configured = configuredReviewBaseRef('SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF')
+    || configuredReviewBaseRef('SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF');
   if (configured) {
     return configured;
   }
 
-  if (gitRefExists('origin/HEAD')) {
-    return 'origin/HEAD';
+  const originHead = gitStdout(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
+  if (gitRefExists(originHead)) {
+    return originHead;
   }
 
   const upstream = gitStdout(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
-  if (upstream) {
+  if (gitRefExists(upstream)) {
     return upstream;
   }
 
   const remoteRefs = gitStdout(['for-each-ref', '--format=%(refname:short)', 'refs/remotes'])
     .split('\n')
     .map((ref) => ref.trim())
-    .filter((ref) => ref && !ref.endsWith('/HEAD'));
+    .filter((ref) => ref && !ref.endsWith('/HEAD') && gitRefExists(ref))
+    .sort();
 
   return remoteRefs[0] || '';
 }

@@ -36,25 +36,44 @@ have() {
 }
 
 has_ref() {
-  git rev-parse --verify --quiet "$1^{commit}" >/dev/null
+  local ref="${1:-}"
+  if [ -z "$ref" ]; then
+    return 1
+  fi
+  case "$ref" in
+    -*) return 1 ;;
+  esac
+  git rev-parse --verify --quiet "$ref^{commit}" >/dev/null
 }
 
 default_review_base_ref() {
   local ref
 
-  if has_ref "origin/HEAD"; then
-    printf 'origin/HEAD'
-    return
-  fi
-
-  ref="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
-  if [ -n "$ref" ]; then
+  ref="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  if has_ref "$ref"; then
     printf '%s' "$ref"
     return
   fi
 
-  ref="$(git for-each-ref --format='%(refname:short)' refs/remotes 2>/dev/null | grep -v '/HEAD$' | head -n 1 || true)"
-  if [ -n "$ref" ]; then
+  ref="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+  if has_ref "$ref"; then
+    printf '%s' "$ref"
+    return
+  fi
+
+  ref="$(
+    git for-each-ref --format='%(refname:short)' refs/remotes 2>/dev/null \
+      | grep -v '/HEAD$' \
+      | LC_ALL=C sort \
+      | while IFS= read -r candidate; do
+          if has_ref "$candidate"; then
+            printf '%s\n' "$candidate"
+            break
+          fi
+        done \
+      || true
+  )"
+  if has_ref "$ref"; then
     printf '%s' "$ref"
     return
   fi
@@ -62,13 +81,25 @@ default_review_base_ref() {
   printf 'HEAD'
 }
 
+configured_review_base_ref() {
+  local var_name="$1"
+  local ref="${!var_name:-}"
+  if [ -z "$ref" ]; then
+    return 1
+  fi
+  if has_ref "$ref"; then
+    printf '%s' "$ref"
+    return 0
+  fi
+  warn "$var_name=$ref does not resolve to a commit; falling back to discovered default branch."
+  return 1
+}
+
 scope_base_ref() {
-  if [ -n "${SD_AI_COMMAND_PACK_SCOPE_BASE_REF:-}" ]; then
-    printf '%s' "$SD_AI_COMMAND_PACK_SCOPE_BASE_REF"
+  if configured_review_base_ref SD_AI_COMMAND_PACK_SCOPE_BASE_REF; then
     return
   fi
-  if [ -n "${SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF:-}" ]; then
-    printf '%s' "$SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF"
+  if configured_review_base_ref SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF; then
     return
   fi
   default_review_base_ref

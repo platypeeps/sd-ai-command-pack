@@ -64,13 +64,12 @@ This command performs this end-of-stream flow:
    - no extra local branches
    - no extra remote-tracking branches besides `origin/HEAD` and
      `origin/default`
-   - no open PRs
-   - no open issues
-   - no active Trellis tasks assigned to the current developer
+13. Report repo-wide open PRs, open issues, and active Trellis tasks as
+    inventory, not as blockers for the current stream cleanup.
 
 ## Expected Output
 
-A clean run should condense to:
+A clean current-stream cleanup should condense to:
 
 ```text
 ==> Expected clean state
@@ -79,18 +78,21 @@ A clean run should condense to:
 - <default> matches origin/<default>
 - local branches: only <default>
 - remote branches: only origin/HEAD and origin/<default>
-- open PRs: none
-- open issues: none
-- Trellis active tasks: none
+
+==> Inventory
+- open PRs: <summary>
+- open issues: <summary>
+- Trellis active tasks: <summary>
 
 ==> Anomalies
 none
 ```
 
-If anything differs from that expected state, the script prints the clean items
-that still hold and then lists anomalies. Treat the anomaly list as the handoff:
-it should be short enough to read quickly and specific enough to decide the next
-manual action.
+If current-stream cleanup differs from that expected state, the script prints
+the clean items that still hold and then lists anomalies. Treat the anomaly
+list as the handoff: it should be short enough to read quickly and specific
+enough to decide the next manual action. Repo-wide inventory lines are context
+for the operator; they do not by themselves mean this housekeeping run failed.
 
 ## Safety Rules
 
