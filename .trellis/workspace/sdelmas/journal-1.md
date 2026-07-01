@@ -538,3 +538,42 @@ Aligned the installed Claude, Gemini, and OpenCode sd-review-pr/sd-review-local-
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: Refine Obsidian KB copies
+
+**Date**: 2026-07-01
+**Task**: Refine Obsidian KB copies
+**Branch**: `codex/obsidian-kb-copies`
+
+### Summary
+
+Converted Obsidian KB generation to portable category-based copies, added repo-specific generated filenames, handled legacy symlink migration, and addressed Copilot review feedback.
+
+### Main Changes
+
+- Rebuilt `.obsidian-kb` generation around portable category-based file copies instead of symlinks.
+- Added repo-specific dashboard and LLM KB filenames plus cleanup for legacy generated names.
+- Added in-place migration for older symlink-based KB folders.
+- Addressed Copilot review feedback for escaped Markdown labels and repeat-safe vault copy commands.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8dd8f88` | (see git log) |
+| `dbd96c6` | (see git log) |
+
+### Testing
+
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`
+- [OK] `/opt/homebrew/bin/python3.13 -m unittest discover -s tests`
+- [OK] `python3 scripts/sd-ai-command-pack-update-spec-kb.py --check`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 13
+- **Total Sessions**: 14
 - **Last Active**: 2026-07-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~531 | Active |
+| `journal-1.md` | ~574 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 14 | 2026-07-01 | Refine Obsidian KB copies | `8dd8f88`, `dbd96c6` | `codex/obsidian-kb-copies` |
 | 13 | 2026-07-01 | Resolve review wrapper parity feedback | `1da7874` | `sd-ai-command-pack-rename-and-hardening` |
 | 12 | 2026-07-01 | Remove implicit local review from sd-review-pr | `c7cacd9` | `sd-ai-command-pack-rename-and-hardening` |
 | 11 | 2026-07-01 | Review PR #12 final Copilot follow-up | `3312812` | `sd-ai-command-pack-rename-and-hardening` |
