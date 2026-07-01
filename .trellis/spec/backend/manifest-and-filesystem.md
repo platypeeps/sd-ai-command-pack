@@ -186,6 +186,69 @@ tracked `.gitignore`.
    adapters, preserve user-tuned policy files, and ignore generated reports,
    caches, logs, temp files, secrets, and local state.
 
+### Obsidian KB Copy Folder Contract
+
+1. Scope and trigger: use this contract whenever changing
+   `scripts/sd-ai-command-pack-update-spec-kb.py`, the matching template script,
+   or documentation for `.obsidian-kb/` generation.
+2. Signatures: `python3 scripts/sd-ai-command-pack-update-spec-kb.py`,
+   `--dry-run`, and `--check` are the stable entry points. The normal command
+   writes `.obsidian-kb/`, the managed ignore block,
+   `.obsidian-kb/Dashboard - <repo>.md`, and
+   `.obsidian-kb/LLM-KB - <repo>.md`; `--dry-run` prints the planned copy count
+   without writing; `--check` exits nonzero when copies, dashboard, LLM
+   overview, stale generated entries, or ignore state are not current.
+3. Contracts: generated KB entries are real file copies, not symlinks. The
+   helper copies selected repository knowledge files into visible semantic
+   category paths under `.obsidian-kb/` instead of mirroring hidden source
+   folders, writes dashboard and LLM overview links to those copied paths,
+   includes one-line document descriptions in the dashboard, includes a GitHub
+   repository link when `origin` is a GitHub remote, groups generated index
+   links by semantic category rather than source folder name, avoids generated
+   KB file/folder names that start with `.` or use Trellis-specific naming, and
+   keeps `.obsidian-kb/` ignored through the managed
+   `obsidian-kb` block in `.gitignore` or `.git/info/exclude` for local-only
+   installs.
+4. Validation and error matrix: user-owned symlinks that point outside the repo
+   are conflicts and must not be overwritten; legacy tool-created relative
+   symlinks that resolve inside the repo are replaced by copies; occupied
+   non-file paths are conflicts; stale generated files and legacy generated
+   symlinks not in the current source set are pruned; user-owned dashboard or
+   LLM overview files without the matching marker are conflicts. Existing
+   `.obsidian-kb/` folders from the older symlink helper are migrated in place:
+   pack-owned relative symlinks are replaced by category-layout copies, old
+   mirrored generated paths and the legacy generated `LLM-KB.md` filename are
+   removed, and the report includes the count of legacy symlinks converted or
+   waiting to be converted.
+5. Good, base, and bad cases: a fresh run creates copies plus a generated
+   dashboard and LLM overview; a second run reports the copies as present; a
+   modified source doc updates the copied file and generated indexes; deleting
+   a selected source removes the stale generated copy and its index entry;
+   renaming the dashboard leaves the legacy generated `Dashboard.md` stale and
+   removable; leaving symlinks as the durable KB format is wrong because copying
+   `.obsidian-kb/` into an Obsidian vault would break those links.
+6. Tests required: cover fresh copy generation, dry-run no writes, check mode
+   stale detection and acceptance after refresh, local-only exclude behavior,
+   custom dashboard conflicts, unmarked gitignore entry migration, invalid
+   gitignore byte preservation, and replacement of legacy generated symlinks
+   with real file copies, including nested existing symlink trees from the old
+   mirrored layout. Also cover the generated `LLM-KB - <repo>.md` overview,
+   legacy generated `LLM-KB.md` pruning, and GitHub remote parsing/linking in
+   the dashboard. Assert category headings
+   such as repository overview, agent guidance, specs, repository maps,
+   project manifests, and package documentation instead of folder-name
+   headings such as `docs` or `.trellis/spec/backend`; assert dashboard
+   one-line descriptions, the repo-specific dashboard filename, and generated
+   KB paths with no leading-dot components or Trellis-specific names.
+7. Wrong vs correct:
+
+   ```text
+   Wrong: .obsidian-kb/README.md -> ../README.md
+   Wrong: .obsidian-kb/.trellis/spec/backend/index.md mirrors the hidden source path
+   Correct: .obsidian-kb/Repository Overview/README.md contains the copied README bytes
+   Correct: .obsidian-kb/Backend Specs/index.md contains the copied backend spec bytes
+   ```
+
 ## Legacy Adapter Cleanup
 
 When installing `sd` adapter files, remove old pack-generated `/trellis:*`

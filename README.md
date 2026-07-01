@@ -53,7 +53,7 @@ slash-command completion lists can surface them when you type `/sd`.
 The update-spec workflow runs the Trellis-provided `trellis-update-spec` skill
 as-is, refreshes repo-owned repospec artifacts through existing maintenance
 infrastructure when available, then adds an explicit architectural-overview
-check and rebuilds a repo-local `.obsidian-kb` folder of symlinks to
+check and rebuilds a repo-local `.obsidian-kb` folder of copied
 repository-knowledge files.
 The start, continue, and finish-work wrappers similarly delegate to
 Trellis-provided `trellis-start`, `trellis-continue`, and
@@ -225,37 +225,49 @@ The command also runs `scripts/sd-ai-command-pack-update-spec-kb.py` to maintain
 `.obsidian-kb/` in the repo root and ensure that folder is listed in
 `.gitignore` inside a managed `sd-ai-command-pack obsidian-kb` marker block.
 For local-only installs, the same managed block is written to `.git/info/exclude`
-instead. The folder contains symlinks to repo files that are useful as
+instead. The folder contains copies of repo files that are useful as portable
 knowledge-base context, such as README files, agent instructions, architecture
 and decision docs, `.trellis/spec/**/*.md`, `.trellis/workflow.md`,
 `.trellis/config.yaml`, repo-owned repospec or Repomix outputs such as
 `docs/repomix-map.md`, and project manifests that explain the repository shape
-when present. It should avoid secrets, caches, build output, dependency/vendor
-directories, `.git/`, `.trellis/workspace/`, and broad source trees unless a
-specific source entrypoint is intentionally maintained as repo documentation.
-The helper also creates and refreshes `.obsidian-kb/Dashboard.md`, a generated
-Markdown landing page that groups and links to the current KB symlinks. If a
-user-owned file already exists at that path, the helper leaves it untouched and
-reports a conflict. Use
+when present. The helper writes those copies into visible semantic category
+folders rather than mirroring hidden source paths, so generated KB file and
+folder names do not start with `.` or use Trellis-specific naming. It should
+avoid secrets, caches, build output, dependency/vendor directories, `.git/`,
+`.trellis/workspace/`, and broad source trees unless a specific source
+entrypoint is intentionally maintained as repo documentation. If an existing
+`.obsidian-kb` folder was created by an older symlink-based helper, the refresh
+replaces pack-owned relative symlinks with real copies in the category layout
+and prunes the old mirrored generated paths.
+The helper also creates and refreshes `.obsidian-kb/Dashboard - <repo>.md`,
+a generated Markdown landing page that groups and links to the current KB
+copies, adds a brief one-line description for each linked document, points to
+`.obsidian-kb/LLM-KB - <repo>.md`, and includes a GitHub repository link when
+`origin` is a GitHub remote. Dashboard and overview links are grouped by
+semantic categories such as repository overview, agent guidance, specs, repo
+maps, and project manifests rather than by source folder name.
+`LLM-KB - <repo>.md` is a generated, self-contained overview for LLM and
+Obsidian indexing. If a
+user-owned file already exists at either generated path, the helper leaves it
+untouched and reports a conflict. Use
 `python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run` to preview the
 refresh, `--check` to verify the folder is current without writing files, and
 `--help` for the safe CLI summary.
 
-To expose that generated folder inside an Obsidian vault, create a symlink from
-the vault to the repo's `.obsidian-kb` folder. For macOS/Linux:
+To use that generated folder inside an Obsidian vault, copy the repo's
+`.obsidian-kb` folder into the vault. Recopy it after future `sd-update-spec`
+runs when the repository knowledge changes. For macOS/Linux:
 
 ```bash
-ln -s "$(pwd)/.obsidian-kb" "/path/to/your/vault/Repo-KB"
+cp -R "$(pwd)/.obsidian-kb/." "/path/to/your/vault/Repo-KB"
 ```
 
 For Windows PowerShell:
 
 ```powershell
-New-Item -ItemType SymbolicLink -Path "C:\path\to\vault\Repo-KB" -Target "C:\path\to\repo\.obsidian-kb"
+New-Item -ItemType Directory -Force -Path "C:\path\to\vault\Repo-KB" | Out-Null
+Copy-Item -Recurse -Force -Path "C:\path\to\repo\.obsidian-kb\*" -Destination "C:\path\to\vault\Repo-KB"
 ```
-
-Windows symlink creation may require PowerShell running as Administrator or
-Developer Mode enabled.
 
 ## Configuration Quick Reference
 

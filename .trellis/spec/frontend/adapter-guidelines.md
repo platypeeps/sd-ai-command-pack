@@ -148,15 +148,30 @@ architectural-overview gate, and rebuild the repo-local `.obsidian-kb` folder:
 - Do not create a new overview unless the user asks.
 - Ensure `.obsidian-kb/` is listed in the repo root `.gitignore`.
 - Run `python3 scripts/sd-ai-command-pack-update-spec-kb.py` to create or
-  refresh `.obsidian-kb/` with symlinks to repository-knowledge files such as
-  README files, agent instructions, architecture and decision docs,
+  refresh `.obsidian-kb/` with real copies of repository-knowledge files such
+  as README files, agent instructions, architecture and decision docs,
   `.trellis/spec/**/*.md`, `.trellis/workflow.md`, `.trellis/config.yaml`, and
   repo-owned repospec or Repomix outputs such as `docs/repomix-map.md`.
-- Do not link secrets, caches, build output, dependency/vendor directories,
+- The helper should place copies under visible semantic category folders rather
+  than raw hidden source paths, and generated KB file/folder names should not
+  start with `.` or use Trellis-specific naming.
+- If an existing `.obsidian-kb/` folder came from the older symlink helper, the
+  refresh should replace pack-owned relative symlinks with category-layout
+  copies and report how many legacy symlinks were converted.
+- The generated dashboard should link to the GitHub repository when `origin`
+  resolves to GitHub, and `.obsidian-kb/LLM-KB - <repo>.md` should provide an
+  indexable, self-contained overview for LLM and Obsidian use.
+- Generated dashboard and overview sections should group links by semantic
+  categories, not raw source folder names.
+- The dashboard filename should be `Dashboard - <repo>.md`, and dashboard link
+  entries should include brief one-line document descriptions.
+- The overview filename should be `LLM-KB - <repo>.md`; old generated
+  `LLM-KB.md` files with the pack marker should be pruned during refresh.
+- Do not copy secrets, caches, build output, dependency/vendor directories,
   `.git/`, `.trellis/workspace/`, or broad source trees unless a specific source
   entrypoint is intentionally maintained as repo documentation.
 - Report `Update-spec skill`, `Spec updates`, `Repospec`,
-  `Architectural overview`, `Obsidian KB`, `Obsidian vault link`, and
+  `Architectural overview`, `Obsidian KB`, `Obsidian vault copy`, and
   `Validation` in the final response.
 
 ## Platform Adapter Pattern

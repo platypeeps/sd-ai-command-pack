@@ -2676,8 +2676,8 @@ class InstallTests(unittest.TestCase):
         self.assertIn("Architectural overview", update_spec)
         self.assertIn(".obsidian-kb", update_spec)
         self.assertIn("scripts/sd-ai-command-pack-update-spec-kb.py", update_spec)
-        self.assertIn(".obsidian-kb/Dashboard.md", update_spec)
-        self.assertIn("Obsidian vault link", update_spec)
+        self.assertIn(".obsidian-kb/Dashboard - <repo>.md", update_spec)
+        self.assertIn("Obsidian vault copy", update_spec)
 
     def test_flat_markdown_entries_are_completion_visible(self) -> None:
         commands = [
@@ -2808,15 +2808,17 @@ class InstallTests(unittest.TestCase):
             "scripts/sd-ai-command-pack-update-spec-kb.py",
             "exits nonzero",
             "repo root `.gitignore`",
-            "symlinks",
+            "copies",
+            "visible semantic",
+            "file/folder names that start with `.`",
             ".trellis/workflow.md",
             ".trellis/config.yaml",
             ".trellis/spec/**/*.md",
             ".trellis/workspace/",
-            ".obsidian-kb/Dashboard.md",
+            ".obsidian-kb/Dashboard - <repo>.md",
             "landing page",
             "Obsidian KB",
-            "Obsidian vault link",
+            "Obsidian vault copy",
         ):
             self.assertIn(expected, shared_skill)
 
@@ -2855,7 +2857,7 @@ class InstallTests(unittest.TestCase):
         self.assertIn("Question: check this when you reach the next turn.", workers)
         self.assertIn("interrupt_requested` / `interrupted", command_reference)
 
-    def test_update_spec_docs_explain_obsidian_kb_vault_linking(self) -> None:
+    def test_update_spec_docs_explain_obsidian_kb_vault_copying(self) -> None:
         doc_paths = [
             install.ROOT / "README.md",
             install.ROOT / "docs/SD_AI_COMMAND_PACK.md",
@@ -2865,13 +2867,19 @@ class InstallTests(unittest.TestCase):
         for doc_path in doc_paths:
             content = doc_path.read_text(encoding="utf-8")
             self.assertIn(".obsidian-kb/", content)
-            self.assertIn(".obsidian-kb/Dashboard.md", content)
+            self.assertIn(".obsidian-kb/Dashboard - <repo>.md", content)
+            self.assertIn(".obsidian-kb/LLM-KB - <repo>.md", content)
             self.assertIn("Markdown landing page", content)
+            self.assertIn("GitHub repository link", content)
+            self.assertIn("visible semantic category", content)
+            self.assertIn("folder names do not start with `.`", content)
+            self.assertIn("older symlink-based helper", content)
             self.assertIn("scripts/sd-ai-command-pack-update-spec-kb.py", content)
-            self.assertIn('ln -s "$(pwd)/.obsidian-kb"', content)
-            self.assertIn("New-Item -ItemType SymbolicLink", content)
-            self.assertIn("PowerShell running as Administrator", content)
-            self.assertIn("Developer Mode enabled", content)
+            self.assertIn('cp -R "$(pwd)/.obsidian-kb/."', content)
+            self.assertIn("Copy-Item -Recurse -Force", content)
+            self.assertNotIn("New-Item -ItemType SymbolicLink", content)
+            self.assertNotIn("PowerShell running as Administrator", content)
+            self.assertNotIn("Developer Mode enabled", content)
 
         gitignore = (install.ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn(".obsidian-kb/", gitignore)
@@ -5303,14 +5311,16 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertNotIn("answerbook", script)
         self.assertNotIn("mezmo_benchmark", script)
 
-    def test_update_spec_kb_script_builds_gitignored_symlink_folder(self) -> None:
+    def test_update_spec_kb_script_builds_gitignored_copy_folder(self) -> None:
         root = self.make_repo()
+        self.run_git(root, "remote", "add", "origin", "git@github.com:example/project.git")
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
 
         files = {
             "README.md": "# Project\n",
             "AGENTS.md": "# Agent Notes\n",
+            "docs/SD_AI_COMMAND_PACK.md": "# SD Pack\n",
             "docs/repomix-map.md": "# Repo Map\n",
             "docs/architecture.md": "# Architecture\n",
             ".trellis/workflow.md": "# Workflow\n",
@@ -5340,38 +5350,118 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("Obsidian KB: .obsidian-kb", result.stdout)
         self.assertIn("gitignore: added", result.stdout)
+        self.assertIn("copies:", result.stdout)
         self.assertIn("dashboard: created", result.stdout)
-        self.assertIn("vault link example:", result.stdout)
+        self.assertIn("llm overview: created", result.stdout)
+        self.assertIn("vault copy example:", result.stdout)
 
         gitignore = (root / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("dist/\n", gitignore)
         self.assertIn("# sd-ai-command-pack obsidian-kb start", gitignore)
         self.assertIn("# sd-ai-command-pack obsidian-kb end", gitignore)
         self.assertEqual(gitignore.count(".obsidian-kb/"), 1)
-        for relative_path in (
-            "README.md",
-            "AGENTS.md",
-            "docs/repomix-map.md",
-            "docs/architecture.md",
-            ".trellis/workflow.md",
-            ".trellis/config.yaml",
-            ".trellis/spec/backend/index.md",
-            "package.json",
-            "packages/api/README.md",
-        ):
-            link = root / ".obsidian-kb" / relative_path
-            self.assertTrue(link.is_symlink(), link)
-            self.assertEqual(link.resolve(), (root / relative_path).resolve())
+        expected_copies = {
+            "README.md": "Repository Overview/README.md",
+            "AGENTS.md": "Agent and Platform Guidance/AGENTS.md",
+            "docs/repomix-map.md": "Repository Maps/repomix-map.md",
+            "docs/architecture.md": "Architecture and Decisions/architecture.md",
+            ".trellis/workflow.md": "Workflow and Configuration/workflow.md",
+            ".trellis/config.yaml": "Workflow and Configuration/config.yaml",
+            ".trellis/spec/backend/index.md": "Backend Specs/index.md",
+            "package.json": "Project Manifests/package.json",
+            "packages/api/README.md": "Package Documentation/packages-api-README.md",
+        }
+        for relative_path, kb_relative_path in expected_copies.items():
+            copied = root / ".obsidian-kb" / kb_relative_path
+            self.assertTrue(copied.is_file(), copied)
+            self.assertFalse(copied.is_symlink(), copied)
+            self.assertEqual(
+                copied.read_bytes(),
+                (root / relative_path).read_bytes(),
+            )
+        for copied_path in (root / ".obsidian-kb").rglob("*"):
+            relative = copied_path.relative_to(root / ".obsidian-kb")
+            self.assertFalse(
+                any(part.startswith(".") for part in relative.parts),
+                relative.as_posix(),
+            )
+            self.assertNotIn("trellis", relative.as_posix().lower())
 
-        dashboard = root / ".obsidian-kb/Dashboard.md"
+        dashboard = root / ".obsidian-kb" / f"Dashboard - {root.name}.md"
         self.assertTrue(dashboard.is_file())
         dashboard_text = dashboard.read_text(encoding="utf-8")
-        self.assertIn("# Obsidian KB Dashboard", dashboard_text)
-        self.assertIn("## Repository root", dashboard_text)
-        self.assertIn("## docs", dashboard_text)
-        self.assertIn("[README.md](README.md)", dashboard_text)
-        self.assertIn("[repomix-map.md](docs/repomix-map.md)", dashboard_text)
-        self.assertIn("[index.md](.trellis/spec/backend/index.md)", dashboard_text)
+        self.assertIn(f"# Dashboard - {root.name}", dashboard_text)
+        self.assertIn(
+            "GitHub: [example/project](https://github.com/example/project)",
+            dashboard_text,
+        )
+        self.assertIn(
+            f"[LLM-KB - {root.name}.md](LLM-KB%20-%20{root.name}.md)",
+            dashboard_text,
+        )
+        self.assertIn("self-contained copy", dashboard_text)
+        self.assertIn(
+            "[README.md](Repository%20Overview/README.md) - Repository "
+            "overview and primary entrypoint.",
+            dashboard_text,
+        )
+        self.assertIn(
+            "[AGENTS.md](Agent%20and%20Platform%20Guidance/AGENTS.md) - "
+            "Project instructions for AI coding agents.",
+            dashboard_text,
+        )
+        self.assertIn("## Repository Overview", dashboard_text)
+        self.assertIn("## Agent and Platform Guidance", dashboard_text)
+        self.assertIn("## Pack Documentation", dashboard_text)
+        self.assertIn("## Architecture and Decisions", dashboard_text)
+        self.assertIn("## Workflow and Configuration", dashboard_text)
+        self.assertIn("## Backend Specs", dashboard_text)
+        self.assertIn("## Repository Maps", dashboard_text)
+        self.assertIn("## Project Manifests", dashboard_text)
+        self.assertIn("## Package Documentation", dashboard_text)
+        self.assertNotIn("## Repository root", dashboard_text)
+        self.assertNotIn("## docs", dashboard_text)
+        self.assertNotIn("## .trellis/spec/backend", dashboard_text)
+        self.assertNotIn("## Trellis", dashboard_text)
+        self.assertNotIn(".trellis", dashboard_text)
+        self.assertIn("[README.md](Repository%20Overview/README.md)", dashboard_text)
+        self.assertIn(
+            "[repomix-map.md](Repository%20Maps/repomix-map.md)",
+            dashboard_text,
+        )
+        self.assertIn(
+            "[index.md](Backend%20Specs/index.md)",
+            dashboard_text,
+        )
+        self.assertFalse((root / ".obsidian-kb/Dashboard.md").exists())
+        self.assertFalse((root / ".obsidian-kb/LLM-KB.md").exists())
+
+        overview = root / ".obsidian-kb" / f"LLM-KB - {root.name}.md"
+        self.assertTrue(overview.is_file())
+        overview_text = overview.read_text(encoding="utf-8")
+        self.assertIn("# LLM Knowledge Base", overview_text)
+        self.assertIn(
+            "GitHub: [example/project](https://github.com/example/project)",
+            overview_text,
+        )
+        self.assertIn("Copied knowledge files:", overview_text)
+        self.assertIn("[README.md](Repository%20Overview/README.md)", overview_text)
+        self.assertIn(
+            "[SD_AI_COMMAND_PACK.md](Pack%20Documentation/SD_AI_COMMAND_PACK.md)",
+            overview_text,
+        )
+        self.assertIn(
+            "[workflow.md](Workflow%20and%20Configuration/workflow.md)",
+            overview_text,
+        )
+        self.assertIn("### Repository Overview", overview_text)
+        self.assertIn("### Agent and Platform Guidance", overview_text)
+        self.assertIn("### Pack Documentation", overview_text)
+        self.assertIn("### Backend Specs", overview_text)
+        self.assertNotIn("### Repository root", overview_text)
+        self.assertNotIn("### docs", overview_text)
+        self.assertNotIn("### Trellis", overview_text)
+        self.assertNotIn("](.trellis", overview_text)
 
         self.assertFalse((root / ".obsidian-kb/src/main.py").exists())
         self.assertFalse(
@@ -5391,19 +5481,171 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("gitignore: present", result.stdout)
-        self.assertIn("stale symlinks removed: 1", result.stdout)
+        self.assertIn("stale generated entries removed: 1", result.stdout)
         self.assertIn("dashboard: updated", result.stdout)
-        self.assertFalse((root / ".obsidian-kb/docs/repomix-map.md").exists())
+        self.assertIn("llm overview: updated", result.stdout)
+        self.assertFalse(
+            (root / ".obsidian-kb/Repository Maps/repomix-map.md").exists()
+        )
         self.assertNotIn(
             "repomix-map.md",
             dashboard.read_text(encoding="utf-8"),
+        )
+        self.assertNotIn(
+            "repomix-map.md",
+            overview.read_text(encoding="utf-8"),
         )
         self.assertEqual(
             (root / ".gitignore").read_text(encoding="utf-8").count(".obsidian-kb/"),
             1,
         )
 
-    def test_update_spec_kb_quotes_vault_link_example(self) -> None:
+    def test_update_spec_kb_derives_github_repo_url_from_remote(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py",
+            "sd_ai_command_pack_update_spec_kb_remote_test",
+        )
+
+        cases = {
+            "git@github.com:owner/repo.git": "https://github.com/owner/repo",
+            "ssh://git@github.com/owner/repo.git": "https://github.com/owner/repo",
+            "https://github.com/owner/repo.git": "https://github.com/owner/repo",
+            "http://github.com/owner/repo": "https://github.com/owner/repo",
+        }
+        for remote, expected in cases.items():
+            with self.subTest(remote=remote):
+                self.assertEqual(
+                    module.github_repository_url_from_remote(remote),
+                    expected,
+                )
+
+        self.assertIsNone(module.github_repository_url_from_remote(None))
+        self.assertIsNone(module.github_repository_url_from_remote(""))
+        self.assertIsNone(
+            module.github_repository_url_from_remote("git@example.com:owner/repo.git")
+        )
+
+    def test_update_spec_kb_replaces_legacy_generated_dashboard_name(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        legacy_dashboard = root / ".obsidian-kb/Dashboard.md"
+        legacy_dashboard.parent.mkdir(parents=True, exist_ok=True)
+        legacy_dashboard.write_text(
+            "<!-- SD-AI-COMMAND-PACK:OBSIDIAN-KB-DASHBOARD -->\n"
+            "# Obsidian KB Dashboard\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("stale generated entries removed: 1", result.stdout)
+        self.assertFalse(legacy_dashboard.exists())
+        dashboard = root / ".obsidian-kb" / f"Dashboard - {root.name}.md"
+        self.assertTrue(dashboard.is_file())
+        self.assertIn(
+            f"# Dashboard - {root.name}",
+            dashboard.read_text(encoding="utf-8"),
+        )
+
+    def test_update_spec_kb_replaces_legacy_generated_overview_name(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        legacy_overview = root / ".obsidian-kb/LLM-KB.md"
+        legacy_overview.parent.mkdir(parents=True, exist_ok=True)
+        legacy_overview.write_text(
+            "<!-- SD-AI-COMMAND-PACK:LLM-KB-OVERVIEW -->\n"
+            "# LLM Knowledge Base\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("stale generated entries removed: 1", result.stdout)
+        self.assertFalse(legacy_overview.exists())
+        overview = root / ".obsidian-kb" / f"LLM-KB - {root.name}.md"
+        self.assertTrue(overview.is_file())
+        self.assertIn(
+            "# LLM Knowledge Base",
+            overview.read_text(encoding="utf-8"),
+        )
+
+    def test_update_spec_kb_preserves_user_notes_outside_managed_categories(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+
+        initial = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(initial.returncode, 0, initial.stdout)
+
+        custom_note = root / ".obsidian-kb/My Notes.md"
+        custom_note.write_text("keep me\n", encoding="utf-8")
+        custom_asset = root / ".obsidian-kb/Attachments/diagram.txt"
+        custom_asset.parent.mkdir(parents=True)
+        custom_asset.write_text("asset\n", encoding="utf-8")
+        custom_legacy_name = root / ".obsidian-kb/Dashboard.md"
+        custom_legacy_name.write_text("custom dashboard note\n", encoding="utf-8")
+
+        check_result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/sd-ai-command-pack-update-spec-kb.py",
+                "--check",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(check_result.returncode, 0, check_result.stdout)
+        self.assertIn("conflicts: none", check_result.stdout)
+        self.assertNotIn("stale generated entries would be removed", check_result.stdout)
+
+        refresh = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(refresh.returncode, 0, refresh.stdout)
+        self.assertEqual(custom_note.read_text(encoding="utf-8"), "keep me\n")
+        self.assertEqual(custom_asset.read_text(encoding="utf-8"), "asset\n")
+        self.assertEqual(
+            custom_legacy_name.read_text(encoding="utf-8"),
+            "custom dashboard note\n",
+        )
+
+    def test_update_spec_kb_quotes_vault_copy_example(self) -> None:
         module = self.load_module_from_path(
             install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py",
             "sd_ai_command_pack_update_spec_kb_quote_test",
@@ -5416,13 +5658,125 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
                 root=root,
                 mode=None,
                 gitignore_state="present",
-                symlinks=0,
+                copies=0,
                 stale=0,
                 dashboard_state="present",
                 conflicts=[],
             )
 
-        self.assertIn("ln -s '/tmp/repo with spaces/.obsidian-kb'", output.getvalue())
+        self.assertIn("cp -R '/tmp/repo with spaces/.obsidian-kb/.'", output.getvalue())
+
+    def test_update_spec_kb_escapes_repo_name_in_overview_link_label(self) -> None:
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-test-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name) / "repo[docs]"
+        root.mkdir()
+        (root / ".trellis").mkdir()
+        (root / ".trellis/config.yaml").write_text("# test\n", encoding="utf-8")
+        self.run_git(root, "init")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        dashboard = root / ".obsidian-kb/Dashboard - repo[docs].md"
+        self.assertTrue(dashboard.is_file())
+        self.assertIn(
+            "[LLM-KB - repo\\[docs\\].md](LLM-KB%20-%20repo%5Bdocs%5D.md)",
+            dashboard.read_text(encoding="utf-8"),
+        )
+
+    def test_update_spec_kb_replaces_legacy_generated_symlink_with_copy(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        legacy_link = root / ".obsidian-kb/README.md"
+        legacy_link.parent.mkdir(parents=True)
+        legacy_link.symlink_to("../README.md")
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("copies:", result.stdout)
+        self.assertIn("conflicts: none", result.stdout)
+        self.assertFalse(legacy_link.exists())
+        copy = root / ".obsidian-kb/Repository Overview/README.md"
+        self.assertTrue(copy.is_file())
+        self.assertFalse(copy.is_symlink())
+        self.assertEqual(copy.read_text(encoding="utf-8"), "# Project\n")
+
+    def test_update_spec_kb_converts_existing_symlink_tree_to_category_copies(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        files = {
+            "README.md": "# Project\n",
+            "AGENTS.md": "# Agent Notes\n",
+            ".trellis/spec/backend/index.md": "# Backend Spec\n",
+        }
+        for relative_path, content in files.items():
+            path = root / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+
+        legacy_root = root / ".obsidian-kb"
+        legacy_root.mkdir()
+        (legacy_root / "README.md").symlink_to("../README.md")
+        (legacy_root / "AGENTS.md").symlink_to("../AGENTS.md")
+        legacy_spec = legacy_root / ".trellis/spec/backend/index.md"
+        legacy_spec.parent.mkdir(parents=True)
+        legacy_spec.symlink_to("../../../../.trellis/spec/backend/index.md")
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("legacy symlinks converted: 3", result.stdout)
+        self.assertIn("conflicts: none", result.stdout)
+        self.assertFalse((legacy_root / "README.md").exists())
+        self.assertFalse((legacy_root / "AGENTS.md").exists())
+        self.assertFalse((legacy_root / ".trellis").exists())
+        expected_copies = {
+            "Repository Overview/README.md": "# Project\n",
+            "Agent and Platform Guidance/AGENTS.md": "# Agent Notes\n",
+            "Backend Specs/index.md": "# Backend Spec\n",
+        }
+        for relative_path, content in expected_copies.items():
+            copy = legacy_root / relative_path
+            self.assertTrue(copy.is_file(), copy)
+            self.assertFalse(copy.is_symlink(), copy)
+            self.assertEqual(copy.read_text(encoding="utf-8"), content)
+        self.assertEqual(
+            [
+                path
+                for path in legacy_root.rglob("*")
+                if path.is_symlink()
+            ],
+            [],
+        )
 
     def test_update_spec_kb_help_is_read_only(self) -> None:
         root = self.make_repo()
@@ -5470,7 +5824,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("mode: dry-run", result.stdout)
-        self.assertIn("planned symlinks:", result.stdout)
+        self.assertIn("planned copies:", result.stdout)
         self.assertFalse((root / ".obsidian-kb").exists())
         self.assertEqual((root / ".gitignore").read_text(encoding="utf-8"), "dist/\n")
 
@@ -5495,7 +5849,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
 
         self.assertEqual(stale.returncode, 1, stale.stdout)
         self.assertIn("mode: check", stale.stdout)
-        self.assertIn("README.md is missing", stale.stdout)
+        self.assertIn("Repository Overview/README.md is missing", stale.stdout)
 
         refresh = subprocess.run(
             [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
@@ -5528,7 +5882,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
         (root / "README.md").write_text("# Project\n", encoding="utf-8")
-        dashboard = root / ".obsidian-kb/Dashboard.md"
+        dashboard = root / ".obsidian-kb" / f"Dashboard - {root.name}.md"
         dashboard.parent.mkdir(parents=True)
         dashboard.write_text("custom dashboard\n", encoding="utf-8")
 
@@ -5544,11 +5898,13 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("dashboard: conflict", result.stdout)
         self.assertIn(
-            "Dashboard.md exists and is not generated by this tool",
+            f"Dashboard - {root.name}.md exists and is not generated by this tool",
             result.stdout,
         )
         self.assertEqual(dashboard.read_text(encoding="utf-8"), "custom dashboard\n")
-        self.assertTrue((root / ".obsidian-kb/README.md").is_symlink())
+        copy = root / ".obsidian-kb/Repository Overview/README.md"
+        self.assertTrue(copy.is_file())
+        self.assertFalse(copy.is_symlink())
 
     def test_update_spec_kb_uses_local_exclude_for_local_only_install(self) -> None:
         root = self.make_repo()
@@ -5579,7 +5935,9 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("# sd-ai-command-pack obsidian-kb start", exclude_text)
         self.assertIn("# sd-ai-command-pack obsidian-kb end", exclude_text)
         self.assertIn(".obsidian-kb/", exclude_text)
-        self.assertTrue((root / ".obsidian-kb/README.md").is_symlink())
+        copy = root / ".obsidian-kb/Repository Overview/README.md"
+        self.assertTrue(copy.is_file())
+        self.assertFalse(copy.is_symlink())
 
     def test_update_spec_kb_upgrades_unmarked_gitignore_entry(self) -> None:
         root = self.make_repo()

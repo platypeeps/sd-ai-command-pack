@@ -8,8 +8,8 @@ description: Use when the user wants the Software Delivery update-spec command t
 Run the Trellis update-spec workflow for the current repository, then run the SD
 AI command pack extensions. These extensions preserve repository knowledge that
 the base Trellis skill does not own directly: repospec/Repomix refreshes,
-architecture overview touch-ups when warranted, and `.obsidian-kb` links for
-Obsidian knowledge-base workflows.
+architecture overview touch-ups when warranted, and `.obsidian-kb` copies for
+portable Obsidian knowledge-base workflows.
 
 1. Resolve the `trellis-update-spec` skill by name using the agent's trusted
    skill discovery mechanism for installed skills.
@@ -59,15 +59,18 @@ Obsidian knowledge-base workflows.
        `.obsidian-kb/` manually from this wrapper.
      - Treat the helper as the source of truth for `.obsidian-kb/`: it owns the
        managed entry in the repo root `.gitignore`, creates or refreshes the
-       generated folder, maintains relative symlinks to repo-knowledge files,
-       writes `.obsidian-kb/Dashboard.md` as a landing page, skips
-       secrets/caches/build output and `.trellis/workspace/`, and reports
-       conflicts. Helper-selected knowledge files include repository docs and
-       Trellis context such as `.trellis/workflow.md`, `.trellis/config.yaml`,
+       generated folder, copies repo-knowledge files into visible semantic
+       category folders, writes `.obsidian-kb/Dashboard - <repo>.md` as a
+       landing page, `.obsidian-kb/LLM-KB - <repo>.md` as a self-contained LLM
+       overview, skips secrets/caches/build output and `.trellis/workspace/`,
+       avoids generated file/folder names that start with `.` or use
+       Trellis-specific naming, and reports conflicts. Helper-selected
+       knowledge files include repository docs and workflow/spec context such
+       as `.trellis/workflow.md`, `.trellis/config.yaml`,
        `.trellis/spec/**/*.md`, and repo-owned repospec or Repomix outputs such
-       as `docs/repomix-map.md` when present. Do not manually edit
-       `.gitignore`, create KB links, remove stale links, or overwrite dashboard
-       conflicts from this wrapper.
+       as `docs/repomix-map.md` when present. Do not
+       manually edit `.gitignore`, create KB copies, remove stale generated
+       entries, or overwrite dashboard conflicts from this wrapper.
      - Use `python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run` when
        the user wants a preview before changing generated KB state.
 5. Final report:
@@ -75,11 +78,11 @@ Obsidian knowledge-base workflows.
    - `Spec updates`: paths changed, or `none`
    - `Repospec`: refreshed path/tool, `not present`, or `no infrastructure`
    - `Architectural overview`: updated path, `not present`, or `not warranted`
-   - `Obsidian KB`: `.obsidian-kb` created/refreshed, symlink count, dashboard
+   - `Obsidian KB`: `.obsidian-kb` created/refreshed, copy count, dashboard
      state, gitignore state, and any conflicts
-   - `Obsidian vault link`: example command for linking this repo's
+   - `Obsidian vault copy`: example command for copying this repo's
      `.obsidian-kb` folder into a vault. State that `/path/to/your/vault` is a
      placeholder the user must replace, and derive the final link name from the
      repository name when possible, such as
-     `ln -s "$(pwd)/.obsidian-kb" "/path/to/your/vault/Repo-KB"`
+     `cp -R "$(pwd)/.obsidian-kb/." "/path/to/your/vault/Repo-KB"`
    - `Validation`: checks run, or why checks were not run
