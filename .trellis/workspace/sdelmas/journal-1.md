@@ -364,3 +364,45 @@ Ran sd-review-pr for PR #12, fixed local preflight issues and Copilot review fin
 ### Next Steps
 
 - None - task complete
+
+
+## Session 10: Review PR #12 Copilot follow-up
+
+**Date**: 2026-07-01
+**Task**: Review PR #12 Copilot follow-up
+**Branch**: `sd-ai-command-pack-rename-and-hardening`
+
+### Summary
+
+Addressed Copilot parser edge-case feedback, verified local checks, resolved review threads, and requested a fresh Copilot review round.
+
+### Main Changes
+
+- Fixed Copilot feedback on changed-file parsing by trimming list entries
+  before path normalization while preserving internal spaces.
+- Hardened Gito pack env loading against CRLF line endings in full-check and
+  review-local runners.
+- Replied to and resolved the two new Copilot review threads, then requested
+  another Copilot review round.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7833a0b` | (see git log) |
+
+### Testing
+
+- [OK] Ran targeted parser and Gito env-loader tests.
+- [OK] Ran `/opt/homebrew/bin/python3.13 -m unittest discover -s tests`.
+- [OK] Ran `bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Confirmed GitHub Actions passed `unittest (3.10)` and
+  `unittest (3.13)` after commit `7833a0b`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
