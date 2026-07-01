@@ -450,3 +450,49 @@ Addressed the second Copilot review round, verified full-check and CI, resolved 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: Remove implicit local review from sd-review-pr
+
+**Date**: 2026-07-01
+**Task**: Remove implicit local review from sd-review-pr
+**Branch**: `sd-ai-command-pack-rename-and-hardening`
+
+### Summary
+
+Updated the sd-review-pr workflow so its PR cycle runs the deterministic full-check gate with Prism and Gito disabled, leaving Prism/Gito available only through explicit full-check or local-review commands.
+
+### Main Changes
+
+- Updated the `sd-review-pr` shared skill and distributed template so the PR
+  cycle runs full-check with `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0` and
+  `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0`.
+- Aligned Claude, Gemini, GitHub Copilot, OpenCode, and Cursor adapter wording
+  to describe a deterministic local PR gate instead of implicit local review
+  providers.
+- Updated README, installed docs, template docs, frontend adapter guidance, and
+  installer regression tests so Prism/Gito remain explicit-only through
+  `sd-full-check`, `sd-review-local`, or `sd-review-local-all`.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c7cacd9` | fix sd-review-pr deterministic local gate |
+
+### Testing
+
+- [OK] Ran focused `tests.test_install` coverage for shared skill wrappers,
+  remote reviewer configuration, and review-pr housekeeping dispatch.
+- [OK] Ran `/opt/homebrew/bin/python3.13 -m unittest discover -s tests`.
+- [OK] Ran deterministic full-check with Prism/Gito disabled:
+  `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Ran `git diff --check`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

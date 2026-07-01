@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
+- **Total Sessions**: 12
 - **Last Active**: 2026-07-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~441 | Active |
+| `journal-1.md` | ~485 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-07-01 | Remove implicit local review from sd-review-pr | `c7cacd9` | `sd-ai-command-pack-rename-and-hardening` |
 | 11 | 2026-07-01 | Review PR #12 final Copilot follow-up | `3312812` | `sd-ai-command-pack-rename-and-hardening` |
 | 10 | 2026-07-01 | Review PR #12 Copilot follow-up | `7833a0b` | `sd-ai-command-pack-rename-and-hardening` |
 | 9 | 2026-07-01 | Review PR #12 | `1f0c8b4`, `a65db28` | `sd-ai-command-pack-rename-and-hardening` |
