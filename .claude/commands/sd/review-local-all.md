@@ -4,7 +4,7 @@ Run the SD full-codebase local review loop for the checked-out repository.
 
 1. Read `.agents/skills/sd-review-local-all/SKILL.md`.
 2. Follow that skill exactly: run the requested local review tools through
-   `scripts/sd-ai-command-pack-review-local.sh --all`, defaulting to Prism plus
+   `scripts/sd-ai-command-pack-review-local.sh --full-codebase`, defaulting to Prism plus
    Gito in full-codebase mode, and support a specific configured review tool
    when the user names one.
 3. Present grouped findings and ask which items to fix before editing.

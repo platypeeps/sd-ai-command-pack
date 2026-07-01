@@ -32,8 +32,8 @@ never by interpolating them into a shell command. Run only that tool set:
 
 ```bash
 bash scripts/sd-ai-command-pack-review-local.sh --list-tools
-bash scripts/sd-ai-command-pack-review-local.sh --all prism
-bash scripts/sd-ai-command-pack-review-local.sh --all gito
+bash scripts/sd-ai-command-pack-review-local.sh --full-codebase prism
+bash scripts/sd-ai-command-pack-review-local.sh --full-codebase gito
 bash scripts/sd-ai-command-pack-review-local.sh --full-codebase prism gito
 SD_AI_COMMAND_PACK_REVIEW_LOCAL_SCOPE=all \
 SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS="prism gito" \
@@ -46,7 +46,7 @@ tool needs different arguments for a full repository scan:
 ```bash
 SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS="semgrep" \
 SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_SEMGREP_COMMAND="semgrep scan --config auto" \
-bash scripts/sd-ai-command-pack-review-local.sh --all
+bash scripts/sd-ai-command-pack-review-local.sh --full-codebase
 ```
 
 The script accepts `--full-codebase`, `--all`, `--codebase`, and `--scope all`

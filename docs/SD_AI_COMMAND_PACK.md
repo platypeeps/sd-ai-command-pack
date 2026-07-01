@@ -288,7 +288,7 @@ exponential backoff. Tune attempts and delays with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, and
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`. If Prism
 full-codebase review returns an empty chunk response, the runner retries in
-tracked-file batches and splits a failed batch down to individual paths when
+tracked-file batches and splits a failed batch into individual paths when
 needed. Configure third-party full-codebase scans with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND`; if that is not set, the
 runner falls back to `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND`.
@@ -536,7 +536,7 @@ Common environment variables:
   Gito when `UV_TOOL_DIR` is unset. Defaults to a temp
   `sd-ai-command-pack-uv-tools` directory.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND`: command for a repo-specific
-  or third-party local review tool, run with `bash -lc`.
+  or third-party local review tool, run with `bash -c`.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND`: full-codebase command
   for a repo-specific or third-party local review tool. Takes precedence over
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND` when scope is `all`.
@@ -625,9 +625,9 @@ Trellis local/runtime files such as `.trellis/.developer`,
 `.trellis/worktrees/`, and `.trellis/.template-hashes.json` without
 blanket-ignoring shareable `.trellis` workflow, spec, task, and script files.
 It also ignores local AI-tool state such as `.claude/settings.local.json`,
-tool caches, logs, sessions, tmp folders, `.opencode/node_modules/`, and root
-`node_modules/` without blanket-ignoring `.claude/`, `.codex/`, `.gemini/`, or
-`.opencode/`.
+tool caches, logs, sessions, tmp folders, Gito report/temp artifacts,
+`.opencode/node_modules/`, and root `node_modules/` without blanket-ignoring
+`.claude/`, `.codex/`, `.gemini/`, `.gito/`, or `.opencode/`.
 The installer replaces exact unmarked `.trellis/` ignore entries with that
 specific-pattern block.
 
@@ -653,6 +653,18 @@ like this:
 .trellis/.runtime/
 .trellis/.cache/
 
+# Review/build artifacts.
+.build/
+code-review-report.json
+code-review-report.md
+sd-ai-command-pack-gito.*
+sd-ai-command-pack-review-paths.*
+sd-ai-command-pack-review-filters.*
+sd-ai-command-pack-prism-codebase.*
+sd-ai-command-pack-ci-paths.*
+sd-ai-command-pack-uv-cache/
+sd-ai-command-pack-uv-tools/
+
 # AI-tool local state; keep shared platform adapters tracked.
 .claude/settings.local.json
 .claude/**/*.local.*
@@ -674,6 +686,12 @@ like this:
 .gemini/**/logs/
 .gemini/**/tmp/
 .gemini/**/*.log
+.gito/**/*.local.*
+.gito/**/.cache/
+.gito/**/cache/
+.gito/**/logs/
+.gito/**/tmp/
+.gito/**/*.log
 .opencode/**/*.local.*
 .opencode/**/.cache/
 .opencode/**/cache/
@@ -725,7 +743,9 @@ After installing or refreshing a target repo, a quick smoke test is:
 ```bash
 cd /path/to/repo
 python3 scripts/sd-ai-command-pack-install-audit.py
-bash -n scripts/sd-ai-command-pack-full-check.sh scripts/sd-ai-command-pack-review-local.sh scripts/sd-ai-command-pack-review-scope.sh
+bash -n scripts/sd-ai-command-pack-full-check.sh
+bash -n scripts/sd-ai-command-pack-review-local.sh
+bash -n scripts/sd-ai-command-pack-review-scope.sh
 python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run
 ```
 
@@ -759,10 +779,11 @@ python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run
   backoff. If the failure is network or credential related, run from an
   environment with the needed access. For `sd-full-check`, leave
   `SD_AI_COMMAND_PACK_FULL_CHECK_GITO` unset unless Gito is configured locally.
-- Root-level `code-review-report.*` files appear after manual Gito runs: move
-  or delete them, then rerun through `sd-review-local`, `sd-review-local-all`,
-  or `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=1 bash
-  scripts/sd-ai-command-pack-full-check.sh` so reports go under the pack-managed
-  `.build/review/gito*` directories.
+- Root-level `code-review-report.*` files appear after manual Gito runs: the
+  managed gitignore block ignores them, but prefer running through
+  `sd-review-local`, `sd-review-local-all`, or
+  `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=1 bash
+  scripts/sd-ai-command-pack-full-check.sh` so reports go under the
+  pack-managed `.build/review/gito*` directories.
 - Stale generated cache causes type or build failures: clear the repo-specific
   generated cache and rerun the deterministic check that failed.

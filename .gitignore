@@ -38,6 +38,18 @@ dist/
 .trellis/.runtime/
 .trellis/.cache/
 
+# Review/build artifacts.
+.build/
+code-review-report.json
+code-review-report.md
+sd-ai-command-pack-gito.*
+sd-ai-command-pack-review-paths.*
+sd-ai-command-pack-review-filters.*
+sd-ai-command-pack-prism-codebase.*
+sd-ai-command-pack-ci-paths.*
+sd-ai-command-pack-uv-cache/
+sd-ai-command-pack-uv-tools/
+
 # AI-tool local state; keep shared platform adapters tracked.
 .claude/settings.local.json
 .claude/**/*.local.*
@@ -59,6 +71,12 @@ dist/
 .gemini/**/logs/
 .gemini/**/tmp/
 .gemini/**/*.log
+.gito/**/*.local.*
+.gito/**/.cache/
+.gito/**/cache/
+.gito/**/logs/
+.gito/**/tmp/
+.gito/**/*.log
 .opencode/**/*.local.*
 .opencode/**/.cache/
 .opencode/**/cache/

@@ -225,6 +225,11 @@ function checkPackageOverrides() {
 function checkCopiedTemplateDiffDisclosure() {
   const diff = currentChangedPaths();
 
+  if (diff === null) {
+    warn('could not inspect current diff for copied Trellis/SD command-pack surfaces.');
+    return;
+  }
+
   if (diff.paths.length === 0) {
     pass('no current diff to inspect for copied Trellis/SD command-pack surfaces.');
     return;
@@ -281,6 +286,7 @@ function checkDocumentationPathReferences() {
 }
 
 function checkDocumentationPathHygiene() {
+  const failureStart = failures.length;
   const files = documentationGuardFiles();
   const personalPathPatterns = [
     { pattern: /\/Users\/([A-Za-z0-9._-]+)\//g, platform: 'macOS' },
@@ -305,7 +311,7 @@ function checkDocumentationPathHygiene() {
     }
   }
 
-  if (failures.some((message) => message.includes('personal') && message.includes('absolute path'))) {
+  if (failures.length > failureStart) {
     return;
   }
 
@@ -465,7 +471,7 @@ function isSdCommandPackCopiedPath(path) {
     path.startsWith('.gemini/commands/sd/') ||
     /^\.opencode\/commands\/sd-[^/]+\.md$/.test(path) ||
     path.startsWith('scripts/sd-ai-command-pack-') ||
-    path === 'scripts/sd-command-pack-review-scope.sh' ||
+    path === 'scripts/sd-ai-command-pack-review-scope.sh' ||
     path === 'scripts/trellis-full-check.sh' ||
     path === 'scripts/trellis-housekeeping.sh' ||
     path === '.gito/config.toml' ||
@@ -785,7 +791,7 @@ function currentChangedPaths() {
     }
   }
 
-  return { args: [], label: 'current diff', paths: [] };
+  return null;
 }
 
 export function parseNumstat(output) {

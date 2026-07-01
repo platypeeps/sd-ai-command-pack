@@ -130,13 +130,19 @@ DEFAULT_RULES = (
 
 
 def _normalize_path(path: str) -> str:
-    return path.strip().replace("\\", "/").removeprefix("./")
+    return _remove_dot_slash(path.replace("\\", "/"))
+
+
+def _remove_dot_slash(path: str) -> str:
+    return path[2:] if path.startswith("./") else path
 
 
 def _split_changed_files(text: str) -> list[str]:
     paths: list[str] = []
     seen: set[str] = set()
     for raw_path in text.replace("\0", "\n").splitlines():
+        if not raw_path.strip():
+            continue
         path = _normalize_path(raw_path)
         if path and path not in seen:
             paths.append(path)
@@ -212,7 +218,7 @@ def _load_body(body_file: Path | None) -> tuple[str | None, str | None]:
 
 def _matches_pattern(normalized_path: str, pattern: str) -> bool:
     """Match a normalized repository path against a PR-body scope glob."""
-    normalized_pattern = pattern.replace("\\", "/").removeprefix("./")
+    normalized_pattern = _remove_dot_slash(pattern.replace("\\", "/"))
     if normalized_pattern.endswith("/**"):
         base_pattern = normalized_pattern[:-3].rstrip("/")
         return normalized_path == base_pattern or normalized_path.startswith(
@@ -262,8 +268,16 @@ def _load_config_rules(config_path: Path | None) -> tuple[tuple[ScopeRule, ...],
         include_installed_targets = item.get("include_installed_targets", False)
         if not isinstance(label, str) or not label.strip():
             return (), f"{config_path}: rule {index} needs a non-empty label"
-        if not isinstance(headings, list) or not all(isinstance(value, str) and value.strip() for value in headings):
-            return (), f"{config_path}: rule {index} needs non-empty string headings"
+        if (
+            not isinstance(headings, list)
+            or not headings
+            or not all(isinstance(value, str) and value.strip() for value in headings)
+        ):
+            return (
+                (),
+                f"{config_path}: rule {index} needs a non-empty list of "
+                "non-empty string headings",
+            )
         if not isinstance(patterns, list) or not all(isinstance(value, str) and value.strip() for value in patterns):
             return (), f"{config_path}: rule {index} needs non-empty string patterns"
         if not isinstance(include_installed_targets, bool):
@@ -321,27 +335,32 @@ def _merge_rules(rules: tuple[ScopeRule, ...]) -> tuple[ScopeRule, ...]:
     )
 
 
+def _include_installed_targets(
+    rules: tuple[ScopeRule, ...],
+    installed_targets: tuple[str, ...],
+) -> tuple[ScopeRule, ...]:
+    if not installed_targets:
+        return rules
+    return tuple(
+        ScopeRule(
+            label=rule.label,
+            headings=rule.headings,
+            patterns=rule.patterns + installed_targets,
+            include_installed_targets=rule.include_installed_targets,
+        )
+        if rule.include_installed_targets
+        else rule
+        for rule in rules
+    )
+
+
 def _rules_for_repo(root: Path, explicit_config: Path | None) -> tuple[tuple[ScopeRule, ...], str | None]:
     """Load default and optional repo-specific rules for the target repository."""
     installed_targets, target_error = _load_installed_target_patterns(root)
     if target_error is not None:
         return (), target_error
 
-    rules_with_targets = list(DEFAULT_RULES)
-    if installed_targets:
-        rules_with_targets = [
-            (
-                ScopeRule(
-                    label=rule.label,
-                    headings=rule.headings,
-                    patterns=rule.patterns + installed_targets,
-                    include_installed_targets=rule.include_installed_targets,
-                )
-                if rule.include_installed_targets
-                else rule
-            )
-            for rule in rules_with_targets
-        ]
+    default_rules = _include_installed_targets(DEFAULT_RULES, installed_targets)
 
     config_path, config_explicit = _resolve_config_path(root, explicit_config)
     if config_explicit and not config_path.is_file():
@@ -350,20 +369,9 @@ def _rules_for_repo(root: Path, explicit_config: Path | None) -> tuple[tuple[Sco
     if config_error is not None:
         return (), config_error
 
-    if installed_targets:
-        config_rules = tuple(
-            ScopeRule(
-                label=rule.label,
-                headings=rule.headings,
-                patterns=rule.patterns + installed_targets,
-                include_installed_targets=rule.include_installed_targets,
-            )
-            if rule.include_installed_targets
-            else rule
-            for rule in config_rules
-        )
+    config_rules = _include_installed_targets(config_rules, installed_targets)
 
-    return _merge_rules(tuple(rules_with_targets) + config_rules), None
+    return _merge_rules(default_rules + config_rules), None
 
 
 def _classify(paths: list[str], rules: tuple[ScopeRule, ...]) -> dict[ScopeRule, list[str]]:

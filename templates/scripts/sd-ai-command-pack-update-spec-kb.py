@@ -97,7 +97,7 @@ def repo_root() -> Path:
         ["git", "rev-parse", "--show-toplevel"],
         text=True,
         encoding="utf-8",
-        errors="replace",
+        errors="surrogateescape",
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -297,7 +297,7 @@ def git_info_exclude_path(root: Path) -> Path | None:
         cwd=root,
         text=True,
         encoding="utf-8",
-        errors="replace",
+        errors="surrogateescape",
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -407,8 +407,11 @@ def prune_stale_symlinks(kb_root: Path, wanted: set[Path], root: Path) -> int:
                 continue
             candidate.unlink()
             removed += 1
-        elif candidate.is_dir() and not any(candidate.iterdir()):
-            candidate.rmdir()
+        elif candidate.is_dir():
+            try:
+                candidate.rmdir()
+            except OSError:
+                pass
     return removed
 
 

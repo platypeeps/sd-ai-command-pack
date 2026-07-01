@@ -108,7 +108,7 @@ for the operator; they do not by themselves mean this housekeeping run failed.
 - Never force a merge. If branch protection blocks the merge, report the
   blocked merge as an anomaly.
 - Never switch branches or delete branches when the working tree is dirty.
-- If the current branch has an open PR, no PR, or inaccessible PR metadata,
+- If the current branch has a closed PR, no PR, or inaccessible PR metadata,
   leave it alone and report an anomaly.
 - Do not stage, commit, or push unrelated work as part of housekeeping.
 - Use `--dry-run` when the user wants a preview before any mutating git

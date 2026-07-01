@@ -1,2 +1,2 @@
-# The test suite uses stdlib unittest plus coverage.py for the installer gate.
+# The test suite uses stdlib unittest; coverage.py enforces the installer gate.
 coverage==7.6.0

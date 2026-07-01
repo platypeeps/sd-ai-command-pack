@@ -209,7 +209,7 @@ check_pr_body_scope() {
 
   if [ "${SD_AI_COMMAND_PACK_SCOPE_PR_BODY+x}" ]; then
     if ! github_pr_body_mentions_scope "$SD_AI_COMMAND_PACK_SCOPE_PR_BODY"; then
-      fail "tooling/generated files changed, but the provided PR body does not include a Tooling/generated scope: section"
+      fail "tooling/generated files changed, but the provided PR body does not include a recognized tooling/generated scope section"
     fi
     return 0
   fi
@@ -217,7 +217,7 @@ check_pr_body_scope() {
   if [ "${REVIEW_PREFLIGHT_PR_BODY+x}" ]; then
     warn "REVIEW_PREFLIGHT_PR_BODY is deprecated; prefer SD_AI_COMMAND_PACK_SCOPE_PR_BODY."
     if ! github_pr_body_mentions_scope "$REVIEW_PREFLIGHT_PR_BODY"; then
-      fail "tooling/generated files changed, but the provided PR body does not include a Tooling/generated scope: section"
+      fail "tooling/generated files changed, but the provided PR body does not include a recognized tooling/generated scope section"
     fi
     return 0
   fi
@@ -256,7 +256,7 @@ check_pr_body_scope() {
   fi
 
   if ! github_pr_body_mentions_scope "$pr_body"; then
-    fail "tooling/generated files changed, but the PR body does not include a Tooling/generated scope: section"
+    fail "tooling/generated files changed, but the PR body does not include a recognized tooling/generated scope section"
   fi
 }
 
@@ -283,27 +283,26 @@ main() {
 
   cd "$REPO_ROOT"
 
-  local changed_file scoped_file scoped_count=0
+  local changed_file scoped_file
   local scoped_changes=()
   scope_categories=()
   while IFS= read -r changed_file; do
     [[ -n "$changed_file" ]] || continue
+    local category=""
     if is_copied_review_scope_path "$changed_file"; then
-      scoped_changes+=("$changed_file")
-      scoped_count=$((scoped_count + 1))
-      add_category "copied/generated Trellis or sd-ai-command-pack files"
+      category="copied/generated Trellis or sd-ai-command-pack files"
     elif is_repository_map_scope_path "$changed_file"; then
-      scoped_changes+=("$changed_file")
-      scoped_count=$((scoped_count + 1))
-      add_category "known repository-map files"
+      category="known repository-map files"
     elif is_trellis_journal_scope_path "$changed_file"; then
+      category="Trellis workspace journal/index files"
+    fi
+    if [[ -n "$category" ]]; then
       scoped_changes+=("$changed_file")
-      scoped_count=$((scoped_count + 1))
-      add_category "Trellis workspace journal/index files"
+      add_category "$category"
     fi
   done < <(collect_changed_files | sed '/^$/d' | sort -u)
 
-  if [[ "$scoped_count" -eq 0 ]]; then
+  if [[ "${#scoped_changes[@]}" -eq 0 ]]; then
     return 0
   fi
 
@@ -318,7 +317,7 @@ main() {
     printf '  - %s\n' "$scoped_file"
   done
 
-  check_pr_body_scope "$scoped_count"
+  check_pr_body_scope "${#scoped_changes[@]}"
 }
 
 main "$@"

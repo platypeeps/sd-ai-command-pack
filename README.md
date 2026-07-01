@@ -261,17 +261,17 @@ Developer Mode enabled.
 | `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM` | Prism mode for full-check; use `0` to skip or `required` to fail when unavailable. | `auto` |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_GITO` | Enables Gito during full-check. | `0` |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR` | Gito report directory for full-check. | `.build/review/gito` |
-| `SD_AI_COMMAND_PACK_INSTALL_AUDIT` | Controls structural post-install audit; use `0` to skip or `required` to fail when unavailable. | warn and continue |
-| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS` | Local review tool set for `sd-review-local` or `sd-review-local-all`. | runner default |
+| `SD_AI_COMMAND_PACK_INSTALL_AUDIT` | Controls structural post-install audit; unset warns and continues, `0` skips, and `required` fails when unavailable. | unset |
+| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS` | Local review tool set for `sd-review-local` or `sd-review-local-all`; unset uses the runner default. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND` | Custom command for a named local review provider. | unset |
-| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND` | Full-codebase custom command for a named provider. | falls back to non-`ALL` command |
+| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND` | Full-codebase custom command for a named provider; unset falls back to the non-`ALL` command. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS` | Max Gito attempts for HTTP 429 provider rate limits. | `2` |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS` | Initial Gito retry delay. | `30` |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS` | Maximum Gito retry delay after backoff. | `120` |
 | `MAX_CONCURRENT_TASKS` | Gito LLM concurrency cap. Loaded from `.gito/sd-ai-command-pack.env` by pack runners when unset. | `4` |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK` | Enables Prism full-codebase batch/path fallback after empty chunk responses. | `1` |
 | `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` | General PR body override for review-scope and fallback PR-body scope checks. | unset |
-| `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY` | PR body override consumed specifically by `sd-ai-command-pack-pr-body-scope.py`. | `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` |
+| `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY` | PR body override consumed specifically by `sd-ai-command-pack-pr-body-scope.py`; unset falls back to `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER` | Remote reviewer login/slug for `sd-review-pr`. | `copilot-pull-request-reviewer` |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND` | Custom command for requesting a remote review. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote review request/fix rounds before asking whether to continue. | `5` |
@@ -308,9 +308,9 @@ ignores Trellis local/runtime files such as `.trellis/.developer`,
 `.trellis/worktrees/`, and `.trellis/.template-hashes.json` without
 blanket-ignoring shareable `.trellis` workflow, spec, task, and script files.
 It also ignores local AI-tool state such as `.claude/settings.local.json`,
-tool caches, logs, sessions, tmp folders, `.opencode/node_modules/`, and
-root `node_modules/` without blanket-ignoring `.claude/`, `.codex/`,
-`.gemini/`, or `.opencode/`.
+tool caches, logs, sessions, tmp folders, Gito report/temp artifacts,
+`.opencode/node_modules/`, and root `node_modules/` without blanket-ignoring
+`.claude/`, `.codex/`, `.gemini/`, `.gito/`, or `.opencode/`.
 It installs platform adapters only when the target repo has the corresponding
 platform directory and a Trellis-owned marker for that platform, such as a
 Trellis command, hook, skill, or Copilot hook file. A plain `.github` directory
@@ -332,7 +332,9 @@ After installing or refreshing a target repo, a quick smoke test is:
 ```bash
 cd /path/to/repo
 python3 scripts/sd-ai-command-pack-install-audit.py
-bash -n scripts/sd-ai-command-pack-full-check.sh scripts/sd-ai-command-pack-review-local.sh scripts/sd-ai-command-pack-review-scope.sh
+bash -n scripts/sd-ai-command-pack-full-check.sh
+bash -n scripts/sd-ai-command-pack-review-local.sh
+bash -n scripts/sd-ai-command-pack-review-scope.sh
 python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run
 ```
 
@@ -405,7 +407,25 @@ like this:
 .trellis/.runtime/
 .trellis/.cache/
 
+# Review/build artifacts.
+.build/
+code-review-report.json
+code-review-report.md
+sd-ai-command-pack-gito.*
+sd-ai-command-pack-review-paths.*
+sd-ai-command-pack-review-filters.*
+sd-ai-command-pack-prism-codebase.*
+sd-ai-command-pack-ci-paths.*
+sd-ai-command-pack-uv-cache/
+sd-ai-command-pack-uv-tools/
+
 # AI-tool local state; keep shared platform adapters tracked.
+.gito/**/*.local.*
+.gito/**/.cache/
+.gito/**/cache/
+.gito/**/logs/
+.gito/**/tmp/
+.gito/**/*.log
 node_modules/
 
 # Project-local personal ignores can be added below this managed block.

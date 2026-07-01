@@ -334,7 +334,7 @@ fast_forward_default_branch() {
   if [ "$(current_branch)" != "$DEFAULT_BRANCH" ]; then
     if [ "$DRY_RUN" -eq 1 ]; then
       if git show-ref --verify --quiet "refs/remotes/$REMOTE/$DEFAULT_BRANCH"; then
-        add_action "would run: git pull --ff-only $REMOTE $DEFAULT_BRANCH"
+        add_action "would fast-forward $DEFAULT_BRANCH from $REMOTE/$DEFAULT_BRANCH"
       else
         add_anomaly "remote default ref $REMOTE/$DEFAULT_BRANCH does not exist"
       fi
@@ -565,11 +565,11 @@ maybe_merge_ready_open_pr() {
     add_anomaly "PR #$pr_number merge state is $pr_merge_state, not CLEAN; skipped auto-merge"
     return 0
   fi
-  if [ -z "$total_check_count" ] || [ "$total_check_count" -eq 0 ]; then
-    add_anomaly "PR #$pr_number has no reported checks; skipped auto-merge"
+  if ! [[ "$total_check_count" =~ ^[0-9]+$ ]] || [ "$total_check_count" -eq 0 ]; then
+    add_anomaly "PR #$pr_number has no or undeterminable reported checks; skipped auto-merge"
     return 0
   fi
-  if [ -n "$failed_check_count" ] && { ! [[ "$failed_check_count" =~ ^[0-9]+$ ]] || [ "$failed_check_count" -ne 0 ]; }; then
+  if ! [[ "$failed_check_count" =~ ^[0-9]+$ ]] || [ "$failed_check_count" -ne 0 ]; then
     add_anomaly "PR #$pr_number has non-green or undeterminable checks; skipped auto-merge"
     return 0
   fi

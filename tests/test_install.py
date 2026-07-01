@@ -443,6 +443,8 @@ class InstallTests(unittest.TestCase):
             self.assertIn(expected, content)
         for expected in install.TRELLIS_GITIGNORE_PATTERNS:
             self.assertIn(expected, content)
+        for expected in install.REVIEW_ARTIFACT_GITIGNORE_PATTERNS:
+            self.assertIn(expected, content)
         for expected in install.PLATFORM_LOCAL_GITIGNORE_PATTERNS:
             self.assertIn(expected, content)
         self.assertNotIn(".trellis/", content.splitlines())
@@ -512,6 +514,8 @@ class InstallTests(unittest.TestCase):
         stub_bin: Path,
         marker: Path,
         graphql_body: str = "  printf '0\\tfalse\\t\\n'\n",
+        failed_check_count: str = "0",
+        total_check_count: str = "2",
     ) -> None:
         (stub_bin / "gh").write_text(
             "#!/usr/bin/env bash\n"
@@ -529,7 +533,8 @@ class InstallTests(unittest.TestCase):
             "  head=\"$(head_oid)\"\n"
             "  args=\" $* \"\n"
             "  if [[ \"$args\" == *isDraft* ]]; then\n"
-            "    printf '6\\t%s\\tfalse\\thttps://example.test/pr/6\\tfeature/cleanup\\t%s\\tmain\\tCLEAN\\t0\\t2\\n' \"$state\" \"$head\"\n"
+            "    printf '6\\t%s\\tfalse\\thttps://example.test/pr/6\\tfeature/cleanup\\t%s\\tmain\\tCLEAN\\t%s\\t%s\\n' "
+            f"\"$state\" \"$head\" {failed_check_count!r} {total_check_count!r}\n"
             "  else\n"
             "    merged_at=''\n"
             "    if [ \"$state\" = MERGED ]; then merged_at='2026-06-27T18:00:00Z'; fi\n"
@@ -2986,6 +2991,55 @@ class InstallTests(unittest.TestCase):
         )
         self.assertTrue((root / ".build/review/gito").is_dir())
 
+    def test_review_local_script_preserves_configuration_error_exit_code(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("before\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        (root / "app.txt").write_text("after\n", encoding="utf-8")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-review-local-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        prism = stub_bin / "prism"
+        prism.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'prism %s\\n' \"$*\" >> {str(log_path)!r}\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        prism.chmod(0o755)
+
+        result = subprocess.run(
+            [
+                self._bash_path,
+                "scripts/sd-ai-command-pack-review-local.sh",
+                "not-configured",
+                "prism",
+            ],
+            cwd=root,
+            env={**os.environ, "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("No command configured for local review tool 'not-configured'", result.stdout)
+        self.assertIn("prism review unstaged", log_path.read_text(encoding="utf-8"))
+
     def test_review_local_script_reviews_branch_when_no_local_changes(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
@@ -3310,6 +3364,7 @@ class InstallTests(unittest.TestCase):
             f"printf 'gito attempt %s %s\\n' \"$count\" \"$*\" >> {str(log_path)!r}\n"
             "if [ \"$count\" -eq 1 ]; then\n"
             "  printf 'ClientError: 429 Slow down\\n'\n"
+            "  printf 'Exception: provider summary 500\\n'\n"
             "  exit 1\n"
             "fi\n"
             "exit 0\n",
@@ -3565,6 +3620,22 @@ class InstallTests(unittest.TestCase):
         self.assertIn("gito review --all", log)
         self.assertIn("--filter ", log)
 
+    def test_review_local_scripts_register_temp_file_cleanup(self) -> None:
+        script_paths = [
+            install.ROOT / "scripts/sd-ai-command-pack-review-local.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-local.sh",
+        ]
+
+        for script_path in script_paths:
+            content = script_path.read_text(encoding="utf-8")
+            self.assertIn("cleanup_review_local_temp_files()", content, script_path)
+            self.assertIn("trap cleanup_review_local_temp_files EXIT", content, script_path)
+            self.assertEqual(
+                content.count("$(mktemp "),
+                content.count('REVIEW_LOCAL_TEMP_FILES+=("$'),
+                script_path,
+            )
+
     def test_review_local_script_loads_gito_concurrency_env(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
@@ -3708,6 +3779,35 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("==> Local review: custom", result.stdout)
         self.assertEqual(tool_log.read_text(encoding="utf-8"), "custom-ok\n")
+
+    def test_review_local_script_runs_custom_tool_without_login_shell(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        tool_log = root / "custom-tool.log"
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "CUSTOM_TOOL_LOG": str(tool_log),
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS": "custom",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_CUSTOM_COMMAND": (
+                    "case \"$-\" in *l*) printf 'login\\n' ;; *) printf 'non-login\\n' ;; esac > \"$CUSTOM_TOOL_LOG\""
+                ),
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(tool_log.read_text(encoding="utf-8"), "non-login\n")
 
     def test_review_local_all_scope_prefers_configured_all_custom_tool(
         self,
@@ -4483,6 +4583,7 @@ import {
 
 assert.equal(copiedTemplateKind('.trellis/scripts/get_context.py'), 'trellis');
 assert.equal(copiedTemplateKind('.agents/skills/sd-review-pr/SKILL.md'), 'sd-ai-command-pack');
+assert.equal(copiedTemplateKind('scripts/sd-ai-command-pack-review-scope.sh'), 'sd-ai-command-pack');
 assert.deepEqual(parseNumstat('1\\t2\\tsrc/file\\tname.js\\0'), [
   { added: 1, deleted: 2, path: 'src/file\\tname.js' },
 ]);
@@ -4951,6 +5052,36 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("no local review-cycle findings detected", result.stdout)
 
+    def test_review_learnings_script_negative_offset_regex_is_specific(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_regex_test",
+        )
+
+        self.assertIsNotNone(module._NEGATIVE_ARRAY_OFFSET_RE.search("${@: -1}"))
+        self.assertIsNotNone(
+            module._NEGATIVE_ARRAY_OFFSET_RE.search("${items[@]: -1}")
+        )
+        self.assertIsNotNone(
+            module._NEGATIVE_ARRAY_OFFSET_RE.search("${items[-1]}")
+        )
+        self.assertIsNone(module._NEGATIVE_ARRAY_OFFSET_RE.search("${VALUE:-1}"))
+        self.assertIsNone(module._NEGATIVE_ARRAY_OFFSET_RE.search("${value: -1}"))
+
+    def test_review_learnings_script_extracts_explicit_env_refs_only(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_env_regex_test",
+        )
+
+        self.assertEqual(
+            module._extract_env_refs(
+                'echo "$SD_FOO" "${GH_BAR}" "${SD_DEFAULT:-0}" SD_BARE',
+                ("SD", "GH"),
+            ),
+            {"SD_FOO", "GH_BAR"},
+        )
+
     def test_review_learnings_script_updates_managed_block(self) -> None:
         tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-test-")
         self.addCleanup(tempdir.cleanup)
@@ -5017,6 +5148,36 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
 
         with self.assertRaisesRegex(ValueError, "invalid order"):
             module.update_target(target, "<!-- sd-review-learnings:start -->\nnew\n<!-- sd-review-learnings:end -->\n", dry_run=False)
+
+    def test_review_learnings_script_preserves_text_after_managed_block(
+        self,
+    ) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_layout_test",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-test-")
+        self.addCleanup(tempdir.cleanup)
+        target = Path(tempdir.name) / "review-learnings.md"
+        target.write_text(
+            "# Review Learnings\n\n"
+            "<!-- sd-review-learnings:start -->\n"
+            "old\n"
+            "<!-- sd-review-learnings:end -->\n"
+            "Human notes stay.\n",
+            encoding="utf-8",
+        )
+
+        module.update_target(
+            target,
+            "<!-- sd-review-learnings:start -->\n"
+            "new\n"
+            "<!-- sd-review-learnings:end -->\n",
+            dry_run=False,
+        )
+
+        content = target.read_text(encoding="utf-8")
+        self.assertIn("<!-- sd-review-learnings:end -->\nHuman notes stay.", content)
 
     def test_review_learnings_script_skips_incomplete_github_payloads(self) -> None:
         module = self.load_module_from_path(
@@ -5539,7 +5700,49 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertTrue(module._matches_pattern("src", "src/**"))
         self.assertTrue(module._matches_pattern("src/file.py", "src/**"))
         self.assertTrue(module._matches_pattern("src/nested/file.py", "src/**"))
+        self.assertTrue(module._matches_pattern("src/file.py", "./src/**"))
         self.assertFalse(module._matches_pattern("other/src/file.py", "src/**"))
+        self.assertEqual(module._normalize_path("./src\\file.py"), "src/file.py")
+
+    def test_pr_body_scope_split_changed_files_preserves_path_spaces(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            "sd_ai_command_pack_pr_body_scope_split_test",
+        )
+
+        self.assertEqual(
+            module._split_changed_files("  leading.py\ntrailing.py  \n\n./src\\file.py\n"),
+            ["  leading.py", "trailing.py  ", "src/file.py"],
+        )
+
+    def test_pr_body_scope_config_rejects_empty_headings(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            "sd_ai_command_pack_pr_body_scope_config_shape_test",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-pr-body-scope-test-")
+        self.addCleanup(tempdir.cleanup)
+        config = Path(tempdir.name) / "scope.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "rules": [
+                        {
+                            "label": "Runtime/server scope",
+                            "headings": [],
+                            "patterns": ["src/**"],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        rules, error = module._load_config_rules(config)
+
+        self.assertEqual(rules, ())
+        self.assertIsNotNone(error)
+        self.assertIn("non-empty list of non-empty string headings", error)
 
     def test_pr_body_scope_config_can_include_installed_targets(self) -> None:
         module = self.load_module_from_path(
@@ -5913,7 +6116,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
 
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
-            "does not include a Tooling/generated scope: section",
+            "does not include a recognized tooling/generated scope section",
             result.stdout,
         )
 
@@ -6050,7 +6253,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
 
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
-            "provided PR body does not include a Tooling/generated scope: section",
+            "provided PR body does not include a recognized tooling/generated scope section",
             result.stdout,
         )
 
@@ -6121,7 +6324,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("Do not resolve valid unaddressed or ambiguous threads", skill)
         self.assertIn('COMMENT_DATABASE_ID="<review comment database id>"', skill)
         self.assertIn(
-            '"repos/$OWNER/$REPO/pulls/comments/$COMMENT_DATABASE_ID/replies"',
+            '"repos/$OWNER/$REPO/pulls/$PR_NUMBER/comments/$COMMENT_DATABASE_ID/replies"',
             skill,
         )
         self.assertIn('THREAD_NODE_ID="<review thread node id>"', skill)
@@ -6287,7 +6490,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             "remote source branch still tracked: $REMOTE/$START_BRANCH",
             "failed to check whether remote branch $REMOTE/$branch exists",
             "dry-run preview: skipped final git-state verification",
-            "would run: git pull --ff-only $REMOTE $DEFAULT_BRANCH",
+            "would fast-forward $DEFAULT_BRANCH from $REMOTE/$DEFAULT_BRANCH",
         ]:
             self.assertIn(text, script)
 
@@ -6315,7 +6518,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("would run: git fetch --prune origin", result.stdout)
         self.assertIn("confirmed PR #6 merged", result.stdout)
         self.assertIn("would switch to main", result.stdout)
-        self.assertIn("would run: git pull --ff-only origin main", result.stdout)
+        self.assertIn("would fast-forward main from origin/main", result.stdout)
         self.assertIn("would delete local branch feature/cleanup", result.stdout)
         self.assertIn("would delete remote branch origin/feature/cleanup", result.stdout)
         self.assertIn("dry-run preview: skipped final git-state verification", result.stdout)
@@ -6409,6 +6612,38 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             check=False,
         )
         self.assertEqual(remote_branch.returncode, 2, remote_branch.stdout)
+
+    def test_housekeeping_rejects_undeterminable_check_counts_before_auto_merge(
+        self,
+    ) -> None:
+        repo, _, stub_bin, _ = self.make_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_merge_gh_stub(
+            stub_bin,
+            marker,
+            failed_check_count="unknown",
+        )
+
+        result = subprocess.run(
+            ["bash", str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "PR #6 has non-green or undeterminable checks; skipped auto-merge",
+            result.stdout,
+        )
+        self.assertFalse(marker.exists())
 
     def test_housekeeping_no_auto_merge_leaves_open_pr_untouched(
         self,

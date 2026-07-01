@@ -7,6 +7,22 @@ cd "$REPO_ROOT"
 
 OVERALL_STATUS=0
 REVIEW_LOCAL_SCOPE="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_SCOPE:-diff}"
+REVIEW_LOCAL_TEMP_FILES=()
+
+cleanup_review_local_temp_files() {
+  set +u
+  local file
+  for file in "${REVIEW_LOCAL_TEMP_FILES[@]}"; do
+    [ -n "$file" ] || continue
+    rm -f "$file"
+  done
+  set -u
+}
+
+trap cleanup_review_local_temp_files EXIT
+trap 'cleanup_review_local_temp_files; exit 129' HUP
+trap 'cleanup_review_local_temp_files; exit 130' INT
+trap 'cleanup_review_local_temp_files; exit 143' TERM
 
 # sd-ai-command-pack review-scan-excludes start
 REVIEW_SCAN_EXCLUDE_DIRS=(
@@ -81,6 +97,7 @@ collect_reviewable_tracked_paths() {
 collect_reviewable_local_paths() {
   local paths_file
   paths_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-review-paths.XXXXXX")"
+  REVIEW_LOCAL_TEMP_FILES+=("$paths_file")
   : >"$paths_file"
 
   git diff --cached --name-only >>"$paths_file"
@@ -137,6 +154,7 @@ review_filter_pattern_for_path() {
 review_filter_csv_from_paths() {
   local patterns_file
   patterns_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-review-filters.XXXXXX")"
+  REVIEW_LOCAL_TEMP_FILES+=("$patterns_file")
   : >"$patterns_file"
 
   local path
@@ -233,6 +251,12 @@ record_status() {
   local status="$2"
   if [ "$status" -ne 0 ]; then
     warn "$label exited with status $status."
+    mark_overall_failure
+  fi
+}
+
+mark_overall_failure() {
+  if [ "$OVERALL_STATUS" -ne 2 ]; then
     OVERALL_STATUS=1
   fi
 }
@@ -298,11 +322,11 @@ handle_prism_status() {
       ;;
     1)
       warn "$label reported findings at or above the configured threshold."
-      OVERALL_STATUS=1
+      mark_overall_failure
       ;;
     3|4)
       warn "$label could not complete because Prism provider authentication or configuration failed with exit code $status."
-      OVERALL_STATUS=1
+      mark_overall_failure
       ;;
     *)
       record_status "$label" "$status"
@@ -477,20 +501,7 @@ prism_output_indicates_empty_chunk() {
 
 gito_output_indicates_rate_limit() {
   local output_file="$1"
-  local recent_output
-  recent_output="$(tail -n 200 "$output_file")"
-  local status_lines
-  status_lines="$(
-    printf '%s\n' "$recent_output" \
-      | grep -Ei '(^|[^[:alnum:]])(clienterror|apierror|httperror|http status|status code|status|error|exception):?[[:space:]]*[0-9]{3}([^0-9]|$)|(^|[^[:alnum:]])[0-9]{3}[[:space:]]+(too many requests|resource exhausted|rate[ -]?limit(ed)?|slow down)([^[:alnum:]]|$)' \
-      || true
-  )"
-  if [ -z "$status_lines" ]; then
-    return 1
-  fi
-  printf '%s\n' "$status_lines" \
-    | tail -n 1 \
-    | grep -Eiq '(^|[^[:alnum:]])(clienterror|apierror|httperror|http status|status code|status|error|exception):?[[:space:]]*429([^0-9]|$)|(^|[^[:alnum:]])429[[:space:]]+(too many requests|resource exhausted|rate[ -]?limit(ed)?|slow down)([^[:alnum:]]|$)'
+  tail -n 200 "$output_file" | grep -Eiq '^[[:space:]]*([[:alnum:]_.-]+[[:space:]]+)?(clienterror|apierror|httperror|ratelimiterror|exception|error|http status|status code|status):?[[:space:]]*.*(^|[^0-9])429([^0-9]|$)|^[[:space:]]*429[[:space:]]+(too many requests|resource exhausted|rate[ -]?limit(ed)?|slow down)([^[:alnum:]]|$)'
 }
 
 gito_max_attempts() {
@@ -527,6 +538,7 @@ run_gito_command() {
     fi
 
     output_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-gito.XXXXXX")"
+    REVIEW_LOCAL_TEMP_FILES+=("$output_file")
     "$@" >"$output_file" 2>&1
     local status=$?
     cat "$output_file"
@@ -557,7 +569,7 @@ run_gito_command() {
 record_prism_empty_chunk_failure() {
   local label="$1"
   warn "$label returned an empty chunk response after fallback splitting."
-  OVERALL_STATUS=1
+  mark_overall_failure
 }
 
 run_prism_codebase_paths() {
@@ -568,6 +580,7 @@ run_prism_codebase_paths() {
   paths_csv="$(join_by_comma "${paths[@]}")"
   local output_file
   output_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-prism-codebase.XXXXXX")"
+  REVIEW_LOCAL_TEMP_FILES+=("$output_file")
 
   section "$label"
   prism review codebase --paths "$paths_csv" "${PRISM_ARGS[@]}" >"$output_file" 2>&1
@@ -632,6 +645,7 @@ run_prism_codebase_review() {
   local label="Prism review: full codebase"
   local output_file
   output_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-prism-codebase.XXXXXX")"
+  REVIEW_LOCAL_TEMP_FILES+=("$output_file")
 
   section "$label"
   prism review codebase "${PRISM_ARGS[@]}" >"$output_file" 2>&1
@@ -643,7 +657,7 @@ run_prism_codebase_review() {
     if is_disabled "${SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK:-1}"; then
       warn "Prism full-codebase batch fallback is disabled because SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK=${SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK:-}."
       warn "$label returned an empty chunk response."
-      OVERALL_STATUS=1
+      mark_overall_failure
       return
     fi
     warn "Prism full-codebase review returned an empty chunk response; retrying in tracked-file batches."
@@ -663,7 +677,7 @@ run_prism_reviews() {
   fi
   if ! have prism; then
     warn "Prism is required for $(review_command_name) but was not found on PATH."
-    OVERALL_STATUS=1
+    mark_overall_failure
     return
   fi
 
@@ -720,7 +734,7 @@ run_gito_review() {
   fi
   if ! have gito; then
     warn "Gito is required for $(review_command_name) but was not found on PATH."
-    OVERALL_STATUS=1
+    mark_overall_failure
     return
   fi
 
@@ -744,6 +758,12 @@ run_gito_review() {
   local base_ref
   base_ref="$(review_local_gito_base_ref)"
   local out_dir="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_OUT_DIR:-${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR:-.build/review/gito}}"
+  local label
+  if reviewable_local_paths_present; then
+    label="Gito review: local changed files"
+  else
+    label="Gito review: current branch diff"
+  fi
   local filters
   filters="$(reviewable_changed_filter_csv "$base_ref")"
   if [ -z "$filters" ]; then
@@ -751,8 +771,8 @@ run_gito_review() {
     return
   fi
   mkdir -p "$out_dir"
-  run_gito_command "Gito review" gito review --vs "$base_ref" --filter "$filters" --out "$out_dir"
-  record_status "Gito review" "$?"
+  run_gito_command "$label" gito review --vs "$base_ref" --filter "$filters" --out "$out_dir"
+  record_status "$label" "$?"
 }
 
 prepare_gito_uv_env() {
@@ -769,7 +789,7 @@ prepare_gito_uv_env() {
 run_custom_tool() {
   local tool="$1"
   local command="$2"
-  run_command "Local review: $tool" bash -lc "$command"
+  run_command "Local review: $tool" bash -c "$command"
 }
 
 raw_tools="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS:-prism gito}"

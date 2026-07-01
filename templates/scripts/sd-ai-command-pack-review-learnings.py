@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import datetime as dt
+import functools
 import json
 import os
 import re
@@ -51,7 +52,7 @@ TRELLIS_JOURNAL_PLACEHOLDERS = (
 _FILE_HEADER_RE = re.compile(r"^\+\+\+ b/(.+)$")
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 _NEGATIVE_ARRAY_OFFSET_RE = re.compile(
-    r"\$\{[^}\n]*(?:\[\s*-\d+\]|\[(?:@|\*)\]\s*:\s*-\d+|(?:@|\*)\s*:\s*-\d+)"
+    r"\$\{(?:[^}\n\[]+\[[^\]\n]*\]\s*:\s*-\d+|[^}\n\[]+\[\s*-\d+\]|[@*]\s*:\s*-\d+)"
 )
 _GREP_EXPECTED_EMPTY_RE = re.compile(r"\bgrep\b[^#\n]*\s-[A-Za-z]*v[A-Za-z]*\b")
 _CLASSIFY_WITH_FILES_RE = re.compile(r"classify-ci-changes\.sh\b.*\$\{files\[@\]\}")
@@ -175,19 +176,22 @@ def _mktemp_is_portable(line: str) -> bool:
     return "XXXX" in line or re.search(r"\bmktemp\b[^#\n]*\s-t\s+\S+", line) is not None
 
 
+@functools.lru_cache(maxsize=4)
 def _env_ref_re(env_prefixes: tuple[str, ...]) -> re.Pattern[str] | None:
     prefixes = tuple(sorted({prefix.strip() for prefix in env_prefixes if prefix.strip()}))
     if not prefixes:
         return None
     prefix_pattern = "|".join(re.escape(prefix) for prefix in prefixes)
-    return re.compile(rf"(?:\$\{{?|\b)((?:{prefix_pattern})_[A-Z0-9_]+)\b")
+    return re.compile(
+        rf"\$(?:\{{((?:{prefix_pattern})_[A-Z0-9_]+)\}}|((?:{prefix_pattern})_[A-Z0-9_]+)(?![A-Za-z0-9_]))"
+    )
 
 
 def _extract_env_refs(line: str, env_prefixes: tuple[str, ...]) -> set[str]:
     env_re = _env_ref_re(env_prefixes)
     if env_re is None:
         return set()
-    return {match.group(1) for match in env_re.finditer(line)}
+    return {match.group(1) or match.group(2) for match in env_re.finditer(line)}
 
 
 def _scan_shell_and_workflow_lines(
@@ -459,14 +463,14 @@ def default_base_ref(repo_root: Path) -> str:
     if upstream:
         return upstream
 
-    remote_refs = [
+    remote_refs = sorted(
         ref
         for ref in _run_git_optional(
             ["for-each-ref", "--format=%(refname:short)", "refs/remotes"],
             repo_root,
         ).splitlines()
         if ref and not ref.endswith("/HEAD")
-    ]
+    )
     return remote_refs[0] if remote_refs else ""
 
 
@@ -732,7 +736,10 @@ def update_target(target: Path, block: str, *, dry_run: bool) -> str:
                 f"{target} contains managed review-learnings markers in invalid order"
             )
         end = end_marker + len(MANAGED_END)
-        updated = existing[:start] + block.rstrip() + existing[end:]
+        tail = existing[end:]
+        if tail.startswith("\n"):
+            tail = tail[1:]
+        updated = existing[:start] + block + tail
         if not updated.endswith("\n"):
             updated += "\n"
     elif existing.strip():

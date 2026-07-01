@@ -351,7 +351,7 @@ comment:
 COMMENT_DATABASE_ID="<review comment database id>"
 
 gh api -X POST \
-  "repos/$OWNER/$REPO/pulls/comments/$COMMENT_DATABASE_ID/replies" \
+  "repos/$OWNER/$REPO/pulls/$PR_NUMBER/comments/$COMMENT_DATABASE_ID/replies" \
   -f body="..."
 ```
 

@@ -11,8 +11,8 @@ try:
     import coverage
 
     coverage.process_startup()
-except ImportError:
+except (ImportError, AttributeError):
     print(
-        "sitecustomize: coverage.py not found, subprocess coverage will not be collected.",
+        "sitecustomize: coverage.py not found or is too old, subprocess coverage will not be collected.",
         file=sys.stderr,
     )

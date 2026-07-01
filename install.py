@@ -73,6 +73,18 @@ TRELLIS_GITIGNORE_PATTERNS = (
     ".trellis/.runtime/",
     ".trellis/.cache/",
 )
+REVIEW_ARTIFACT_GITIGNORE_PATTERNS = (
+    ".build/",
+    "code-review-report.json",
+    "code-review-report.md",
+    "sd-ai-command-pack-gito.*",
+    "sd-ai-command-pack-review-paths.*",
+    "sd-ai-command-pack-review-filters.*",
+    "sd-ai-command-pack-prism-codebase.*",
+    "sd-ai-command-pack-ci-paths.*",
+    "sd-ai-command-pack-uv-cache/",
+    "sd-ai-command-pack-uv-tools/",
+)
 PLATFORM_LOCAL_GITIGNORE_PATTERNS = (
     ".claude/settings.local.json",
     ".claude/**/*.local.*",
@@ -94,6 +106,12 @@ PLATFORM_LOCAL_GITIGNORE_PATTERNS = (
     ".gemini/**/logs/",
     ".gemini/**/tmp/",
     ".gemini/**/*.log",
+    ".gito/**/*.local.*",
+    ".gito/**/.cache/",
+    ".gito/**/cache/",
+    ".gito/**/logs/",
+    ".gito/**/tmp/",
+    ".gito/**/*.log",
     ".opencode/**/*.local.*",
     ".opencode/**/.cache/",
     ".opencode/**/cache/",
@@ -731,6 +749,9 @@ def trellis_gitignore_block() -> str:
         "# Trellis local/runtime state.",
         *TRELLIS_GITIGNORE_PATTERNS,
         "",
+        "# Review/build artifacts.",
+        *REVIEW_ARTIFACT_GITIGNORE_PATTERNS,
+        "",
         "# AI-tool local state; keep shared platform adapters tracked.",
         *PLATFORM_LOCAL_GITIGNORE_PATTERNS,
         "",
@@ -1088,9 +1109,10 @@ def main(argv: list[str] | None = None) -> int:
         print("mode: dry-run")
     if args.local_only:
         print("mode: local-only")
+    local_only_results_printed = len(local_only_results)
     for result in local_only_results:
         suffix = f" ({result.detail})" if result.detail else ""
-        print(f"{result.status:25} {display_path(target, result.target)}{suffix}")
+        print(f"{result.status:29} {display_path(target, result.target)}{suffix}")
 
     results: list[InstallResult] = []
     generated_targets: list[Path] = []
@@ -1137,9 +1159,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{result.status:11} {result.file.target}")
         if result.backup:
             print(f"{'backup':11} {result.backup.relative_to(target)}")
-    for result in local_only_results[2:]:
+    for result in local_only_results[local_only_results_printed:]:
         suffix = f" ({result.detail})" if result.detail else ""
-        print(f"{result.status:25} {display_path(target, result.target)}{suffix}")
+        print(f"{result.status:29} {display_path(target, result.target)}{suffix}")
     for file, reason in skipped:
         print(f"skipped     {file.target} ({reason})")
 
