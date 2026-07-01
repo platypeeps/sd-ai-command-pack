@@ -18,7 +18,10 @@ Initialized Trellis project scaffolding, wrote project-specific installer and pr
 
 ### Main Changes
 
-(Add details)
+- Initialized Trellis project scaffolding for the command-pack repository.
+- Added project-specific installer, manifest, and adapter guidance under
+  `.trellis/spec/`.
+- Pushed the bootstrap branch and opened draft PR #1.
 
 ### Git Commits
 
@@ -28,7 +31,7 @@ Initialized Trellis project scaffolding, wrote project-specific installer and pr
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] Ran the project test and whitespace checks for the bootstrap branch.
 
 ### Status
 
@@ -51,7 +54,11 @@ Hardened the Trellis review PR pack installer, expanded tests and specs, opened 
 
 ### Main Changes
 
-(Add details)
+- Hardened installer file writes, conflict handling, backups, and manifest path
+  validation.
+- Expanded installer tests and Trellis specs for symlink escapes, Windows path
+  anchors, source containment, non-file targets, and scoped diff checks.
+- Addressed live PR review feedback and pushed the review-response commits.
 
 ### Git Commits
 
@@ -66,7 +73,8 @@ Hardened the Trellis review PR pack installer, expanded tests and specs, opened 
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] Ran the installer test suite and targeted PR review checks for the
+  hardening changes.
 
 ### Status
 
@@ -89,7 +97,10 @@ Documented standing permission to reply to and resolve addressed PR review threa
 
 ### Main Changes
 
-(Add details)
+- Documented standing permission to reply to and resolve addressed PR review
+  threads.
+- Fixed package-script Node detection warning behavior from PR review.
+- Verified CI and resolved the remaining addressed review threads.
 
 ### Git Commits
 
@@ -100,7 +111,7 @@ Documented standing permission to reply to and resolve addressed PR review threa
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] Ran the relevant full-check/package-script validation and confirmed CI.
 
 ### Status
 
@@ -123,7 +134,10 @@ Added the post-merge housekeeping command and automatic review-loop housekeeping
 
 ### Main Changes
 
-(Add details)
+- Added the post-merge housekeeping command and review-loop handoff.
+- Hardened branch deletion safety, dry-run previews, scoped GitHub checks,
+  default-branch ref handling, and remote-head verification.
+- Addressed PR review feedback across the housekeeping flow.
 
 ### Git Commits
 
@@ -141,7 +155,7 @@ Added the post-merge housekeeping command and automatic review-loop housekeeping
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] Ran housekeeping-focused unit/shell checks and confirmed PR CI.
 
 ### Status
 
@@ -164,7 +178,10 @@ Added the auto-finalize housekeeping flow, then addressed PR review feedback for
 
 ### Main Changes
 
-(Add details)
+- Added the auto-finalize housekeeping flow.
+- Addressed PR review feedback for paginated review-thread inspection, help
+  text, skip-CI test robustness, env validation, and finalize-command docs.
+- Pushed review-response commits for the auto-finalize branch.
 
 ### Git Commits
 
@@ -177,7 +194,7 @@ Added the auto-finalize housekeeping flow, then addressed PR review feedback for
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] Ran targeted review-loop and housekeeping checks, then confirmed CI.
 
 ### Status
 
@@ -200,7 +217,9 @@ Added sd-namespaced command wrappers, refresh-specs architecture/repospec guidan
 
 ### Main Changes
 
-(Add details)
+- Added `sd`-namespaced command wrappers across supported platforms.
+- Added refresh-spec architecture and repospec guidance.
+- Hardened review-driven adapter behavior and legacy symlink cleanup.
 
 ### Git Commits
 
@@ -216,7 +235,8 @@ Added sd-namespaced command wrappers, refresh-specs architecture/repospec guidan
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] Ran installer/unit validation and wrapper/script checks for the command
+  wrapper refresh.
 
 ### Status
 

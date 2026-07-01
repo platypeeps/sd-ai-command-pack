@@ -4595,6 +4595,16 @@ assert.deepEqual(
   ['../missing.md', 'docs/current.md'],
 );
 assert.equal(shouldCheckDocumentationPathReference('docs/guide:section.md'), true);
+assert.equal(shouldCheckDocumentationPathReference('.sd-ai-command-pack/installed-targets.txt'), false);
+assert.equal(shouldCheckDocumentationPathReference('.sd-ai-command-pack/local-only.txt'), false);
+assert.equal(shouldCheckDocumentationPathReference('.sd-ai-command-pack/pr-body-scope.json'), false);
+assert.equal(shouldCheckDocumentationPathReference('.sd-ai-command-pack/review-preflight.json'), false);
+assert.equal(shouldCheckDocumentationPathReference('.trellis/.developer'), false);
+assert.equal(shouldCheckDocumentationPathReference('.trellis/.template-hashes.json'), false);
+assert.equal(shouldCheckDocumentationPathReference('docs/TRELLIS_REVIEW_PR_PACK.md'), false);
+assert.equal(shouldCheckDocumentationPathReference('docs/repomix-map.md'), false);
+assert.equal(shouldCheckDocumentationPathReference('docs/review-learnings.md'), false);
+assert.equal(shouldCheckDocumentationPathReference('package.json'), false);
 assert.equal(shouldCheckDocumentationPathReference('https://example.com/docs.md'), false);
 assert.equal(shouldCheckDocumentationPathReference('obsidian://open?vault=Repo'), false);
 const journal = parseJournalSessionsFromText('.trellis/workspace/dev/journal-1.md', [
