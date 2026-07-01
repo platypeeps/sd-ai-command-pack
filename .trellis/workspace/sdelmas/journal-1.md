@@ -496,3 +496,45 @@ Updated the sd-review-pr workflow so its PR cycle runs the deterministic full-ch
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: Resolve review wrapper parity feedback
+
+**Date**: 2026-07-01
+**Task**: Resolve review wrapper parity feedback
+**Branch**: `sd-ai-command-pack-rename-and-hardening`
+
+### Summary
+
+Aligned the installed Claude, Gemini, and OpenCode sd-review-pr/sd-review-local-all wrappers with their hardened distributed templates, added regression coverage for wrapper/template parity, resolved the related Copilot threads, reran the deterministic PR gate, and confirmed CI remained green.
+
+### Main Changes
+
+- Updated the checked-in Claude, Gemini, and OpenCode `sd-review-pr` and
+  `sd-review-local-all` command wrappers so they match their hardened
+  distributed templates.
+- Added `test_tracked_review_command_wrappers_match_templates` to catch future
+  source/template drift for those installed review wrappers.
+- Replied to and resolved the six Copilot wrapper parity threads after pushing
+  the fix commit.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1da7874` | fix: align installed review wrappers with templates |
+
+### Testing
+
+- [OK] `env PYTHONPYCACHEPREFIX=/private/tmp/sd-ai-command-pack-pycache /opt/homebrew/bin/python3.13 -m unittest tests.test_install.InstallTests.test_review_pr_remote_reviewer_is_configurable tests.test_install.InstallTests.test_tracked_review_command_wrappers_match_templates`
+- [OK] `env PYTHONPYCACHEPREFIX=/private/tmp/sd-ai-command-pack-pycache /opt/homebrew/bin/python3.13 -m unittest discover -s tests`
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`
+- [OK] GitHub Actions `unittest (3.10)` and `unittest (3.13)` passed on PR #12 head `1da7874`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
