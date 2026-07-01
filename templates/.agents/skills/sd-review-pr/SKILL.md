@@ -1,17 +1,16 @@
 ---
 name: sd-review-pr
-description: Use when the user asks to ready a pull request, run the local-review-first cycle, optionally request the configured remote reviewer when available, address review comments or CI failures, and repeat until no actionable comments remain.
+description: Use when the user asks to ready a pull request, run the deterministic local PR gate, optionally request the configured remote reviewer when available, address review comments or CI failures, and repeat until no actionable comments remain.
 ---
 
 # SD PR Review Loop
 
 Use this project-local Software Delivery skill for `sd-review-pr` and
 `/sd:review-pr` style work. It turns a draft or in-progress PR into a reviewed
-PR by running the local full-check and any available local review providers
-first, inspecting existing comments and CI, and requesting the configured remote
-reviewer after a clean local pass and after every pushed review-fix commit made
-during the loop. GitHub Copilot is the default remote reviewer unless a repo
-overrides it.
+PR by running the deterministic local full-check gate first, inspecting
+existing comments and CI, and requesting the configured remote reviewer after a
+clean local pass and after every pushed review-fix commit made during the loop.
+GitHub Copilot is the default remote reviewer unless a repo overrides it.
 
 ## Safety Rules
 
@@ -22,8 +21,10 @@ overrides it.
 - Do not stage unrelated work. If the working tree is dirty before the first
   review loop, classify the paths. Commit/push only changes that clearly belong
   to this PR; ask before touching anything ambiguous.
-- Run the local full-check before requesting a paid/remote review. Use:
-  `bash scripts/sd-ai-command-pack-full-check.sh`.
+- Run the deterministic local full-check before requesting a paid/remote
+  review. Disable Prism and Gito for this command-owned gate; those local
+  review tools run only when the user explicitly invokes `sd-full-check`,
+  `sd-review-local`, or `sd-review-local-all`.
 - Treat `sd-review-pr` as a bounded remote-review convergence loop by default.
   Unless the user explicitly asks for local-only review, request the configured
   remote reviewer after the local gate passes and again after each pushed
@@ -105,9 +106,9 @@ commits have not been pushed, the wrong branch is checked out, or the remote PR
 branch changed. Push the intended local commits or check out the PR head before
 continuing; do not request remote review on stale remote code.
 
-If the PR is draft, do not mark it ready until the local full-check has passed
-unless the user explicitly asked to mark it ready immediately. This keeps
-`ready_for_review` workflows from starting before local review is clean.
+If the PR is draft, do not mark it ready until the deterministic local
+full-check has passed unless the user explicitly asked to mark it ready. This
+keeps `ready_for_review` workflows from starting before local review is clean.
 
 ## Step 1.5: Post-Merge Handoff
 
@@ -133,9 +134,13 @@ tool session by itself.
 
 ## Step 2: Run Local Full Check
 
-Run the local full-check gate before requesting a remote review:
+Run the deterministic local full-check gate before requesting a remote review.
+This PR-review cycle must not run Prism or Gito implicitly, even if the
+environment would normally enable them for `sd-full-check`:
 
 ```bash
+SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 \
+SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 \
 bash scripts/sd-ai-command-pack-full-check.sh
 ```
 
@@ -171,7 +176,7 @@ If both `REMOTE_REVIEWER` and `REMOTE_REVIEW_REQUEST_COMMAND` are empty, skip
 remote-review requests, report that no remote reviewer is configured, and
 continue to Step 5 to inspect existing comments and CI.
 
-After local full-check passes:
+After deterministic local full-check passes:
 
 - If the PR is draft and the user asked to ready it, mark it ready:
 
@@ -184,10 +189,11 @@ After local full-check passes:
 - Otherwise, trigger the configured remote reviewer when no remote review has
   been requested for the current PR head during this command run.
 - Also trigger the configured remote reviewer after every pushed commit created
-  by Step 6 to address review comments, CI failures, or local review findings.
+  by Step 6 to address review comments, CI failures, or deterministic local
+  gate findings.
   This includes fixes for review comments that existed before this command was
-  invoked; after those fixes are pushed and the local full-check passes, request
-  a fresh remote review.
+  invoked; after those fixes are pushed and the deterministic local full-check
+  passes, request a fresh remote review.
 - If the current PR head already has a completed remote review and this command
   has not pushed any fixes, inspect existing comments and CI before deciding
   whether another remote request is needed.
@@ -418,15 +424,16 @@ already satisfied.
 ## Step 7: Repeat Or Stop
 
 After every round that produced a code/docs change, return to Step 1 to refresh
-all PR state, then run local full-check again. If local full-check passes and
-remote review is configured, trigger another remote review before considering
-the loop clean. Compare the new thread ids and timestamps with the refreshed
-snapshot, and do not request duplicate remote reviews for the same PR head when
-no review-fix commit has been pushed since the latest requested remote review.
+all PR state, then run deterministic local full-check again. If deterministic
+local full-check passes and remote review is configured, trigger another remote
+review before considering the loop clean. Compare the new thread ids and
+timestamps with the refreshed snapshot, and do not request duplicate remote
+reviews for the same PR head when no review-fix commit has been pushed since
+the latest requested remote review.
 
 Stop when:
 
-- local full-check passes;
+- deterministic local full-check passes;
 - the latest requested remote review produces no new actionable
   comments;
 - no review-fix commit has been pushed since the latest requested remote review;
@@ -445,10 +452,10 @@ Do not continue until the user approves.
 
 ## Step 8: Finish Work And Post-Merge Housekeeping Automatically
 
-After the loop stops because local full-check passes and no requested remote
-review produced new actionable comments, run the Trellis finish-work flow
-automatically before the final report. Do not ask whether to run it; a clean
-review loop is the trigger.
+After the loop stops because deterministic local full-check passes and no
+requested remote review produced new actionable comments, run the Trellis
+finish-work flow automatically before the final report. Do not ask whether to
+run it; a clean review loop is the trigger.
 
 1. Read `.agents/skills/trellis-finish-work/SKILL.md`.
 2. Use that skill as the primary instructions to archive completed task state
@@ -487,8 +494,8 @@ handoff.
 Report:
 
 - PR number and URL.
-- Whether local full-check passed and whether optional local review providers
-  such as Prism/Gito ran or were skipped.
+- Whether deterministic local full-check passed with Prism/Gito disabled for
+  the `sd-review-pr` cycle.
 - Number of remote review rounds completed and reviewer label/slug used.
 - Comments fixed, rebutted, or left for user decision.
 - Commits pushed during the loop.

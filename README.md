@@ -174,13 +174,16 @@ branch head matches that PR before deleting anything, switch to the default
 branch, fast-forward it, remove the merged local and remote branch, and finish
 with a condensed "expected clean state" plus anomalies report.
 
-The review-pr command is local-review-first. It runs the full-check path and
-any available local review providers before requesting the configured remote
-reviewer. Unless the user explicitly asks for local-only review, it requests
-remote review after a clean local pass and re-requests it after every pushed
-review-fix commit made during the loop, up to the configured round limit. The
-default remote reviewer is GitHub Copilot's `copilot-pull-request-reviewer`;
-target repos can override it with
+The review-pr command runs a deterministic local PR gate before requesting the
+configured remote reviewer. Its command-owned full-check invocation disables
+Prism and Gito with `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0` and
+`SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0`; run `sd-full-check`,
+`sd-review-local`, or `sd-review-local-all` explicitly when you want those
+local review tools. Unless the user explicitly asks for local-only review, it
+requests remote review after a clean local pass and re-requests it after every
+pushed review-fix commit made during the loop, up to the configured round
+limit. The default remote reviewer is GitHub Copilot's
+`copilot-pull-request-reviewer`; target repos can override it with
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER`,
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER_LABEL`,
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_AUTHOR_MATCH`,

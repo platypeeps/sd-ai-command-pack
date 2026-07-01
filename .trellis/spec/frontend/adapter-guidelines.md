@@ -41,6 +41,10 @@ The `sd-review-pr` shared skill should continue to define:
 
 - required local checks before starting, including `gh --version`,
   `gh auth status`, and PR resolution from the current branch
+- a deterministic local full-check gate that disables Prism and Gito for the
+  command-owned PR cycle; those local review tools should run only through an
+  explicit `sd-full-check`, `sd-review-local`, or `sd-review-local-all`
+  invocation
 - a local `HEAD` versus PR `headRefOid` check before marking a PR ready or
   requesting review, so the remote reviewer sees the pushed code the user
   intends

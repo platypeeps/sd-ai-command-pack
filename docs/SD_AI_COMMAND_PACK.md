@@ -23,7 +23,8 @@ Quick links:
 - `.agents/skills/sd-start/SKILL.md`: Codex-visible Trellis start wrapper.
 - `.agents/skills/sd-continue/SKILL.md`: Codex-visible Trellis continue wrapper.
 - `.agents/skills/sd-finish-work/SKILL.md`: Codex-visible Trellis finish-work wrapper.
-- `.agents/skills/sd-review-pr/SKILL.md`: local-review-first PR workflow.
+- `.agents/skills/sd-review-pr/SKILL.md`: deterministic local gate plus remote
+  PR review workflow.
 - `.agents/skills/sd-review-local/SKILL.md`: local review provider fix loop.
 - `.agents/skills/sd-review-local-all/SKILL.md`: full-codebase local review
   provider fix loop.
@@ -105,9 +106,10 @@ loaded project command files.
    which findings to fix and repeats until no items are selected.
 6. Use the review-local-all command when you want the same local fix loop run
    against the entire checked-out repository rather than just recent diffs.
-7. Use the review-pr command for the PR loop. It should run the local
-   full-check path, including any configured local review providers, before
-   requesting remote review.
+7. Use the review-pr command for the PR loop. It should run the deterministic
+   local full-check path with Prism/Gito disabled before requesting remote
+   review. Run `sd-full-check`, `sd-review-local`, or `sd-review-local-all`
+   explicitly when you want Prism/Gito.
 8. Request the configured remote reviewer, defaulting to GitHub Copilot, after
    a clean local pass and again after every pushed review-fix commit made
    during the loop, unless the user explicitly asked for local-only review.
@@ -584,20 +586,23 @@ Common environment variables:
 - `SD_AI_COMMAND_PACK_HOUSEKEEPING_MERGE_STRATEGY`: auto-merge strategy: `merge`,
   `squash`, or `rebase`. Defaults to `merge`.
 
-Prism is enabled by default when the executable is present. If Prism is missing
-or credentials/config are unavailable, the script reports the skip and continues
-unless `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=required` is set.
+Prism is enabled by default when the full-check command is invoked explicitly
+and the executable is present. The `sd-review-pr` cycle disables Prism for its
+command-owned full-check gate. If Prism is missing or credentials/config are
+unavailable, the full-check script reports the skip and continues unless
+`SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=required` is set.
 
 Gito is opt-in because it can require `uvx`, cache access outside the repo,
-network access, and configured LLM credentials. When enabled, Gito writes
-reports to `.build/review/gito` by default so generated review artifacts do not
-land at the repository root. The pack installs `.gito/config.toml` for
-repo-local Gito defaults and `.gito/sd-ai-command-pack.env` with
-`MAX_CONCURRENT_TASKS=4`; the full-check and review-local runners parse that
-env file before invoking Gito, without sourcing arbitrary shell. If Gito reports
-provider rate limiting through an explicit HTTP 429 status such as
-`ClientError: 429`, full-check retries with the same bounded backoff behavior
-as review-local.
+network access, and configured LLM credentials. The `sd-review-pr` cycle
+disables Gito for its command-owned full-check gate. When enabled explicitly,
+Gito writes reports to `.build/review/gito` by default so generated review
+artifacts do not land at the repository root. The pack installs
+`.gito/config.toml` for repo-local Gito defaults and
+`.gito/sd-ai-command-pack.env` with `MAX_CONCURRENT_TASKS=4`; the full-check
+and review-local runners parse that env file before invoking Gito, without
+sourcing arbitrary shell. If Gito reports provider rate limiting through an
+explicit HTTP 429 status such as `ClientError: 429`, full-check retries with
+the same bounded backoff behavior as review-local.
 
 ## CI cadence
 

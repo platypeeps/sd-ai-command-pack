@@ -2597,6 +2597,8 @@ class InstallTests(unittest.TestCase):
         self.assertIn("# SD PR Review Loop", review_pr)
         self.assertIn("standing permission to reply", review_pr)
         self.assertIn("bash scripts/sd-ai-command-pack-full-check.sh", review_pr)
+        self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0", review_pr)
+        self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0", review_pr)
 
         review_local = (
             install.ROOT / "templates/.agents/skills/sd-review-local/SKILL.md"
@@ -6449,6 +6451,13 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         for skill_path in skill_paths:
             skill = skill_path.read_text(encoding="utf-8")
             self.assertIn("configured remote reviewer", skill)
+            self.assertIn("deterministic local full-check gate", skill)
+            self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0", skill)
+            self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0", skill)
+            self.assertIn("sd-review-local", skill)
+            self.assertIn("sd-review-local-all", skill)
+            self.assertNotIn("any available local review providers", skill)
+            self.assertNotIn("optional local review providers", skill)
             self.assertIn(
                 'REMOTE_REVIEWER="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER:-copilot-pull-request-reviewer}"',
                 skill,
@@ -6483,14 +6492,24 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         for adapter_path in adapter_paths:
             adapter = adapter_path.read_text(encoding="utf-8")
             self.assertIn("configured remote reviewer", adapter)
+            self.assertIn("deterministic local full-check gate", adapter)
+            self.assertIn("Prism/Gito disabled", adapter)
             self.assertIn("automatic re-review after pushed fixes", adapter)
             self.assertIn("configured remote review round limit", adapter)
+            self.assertNotIn("any available local review providers", adapter)
+            self.assertNotIn("optional local review providers", adapter)
 
         for doc_path in doc_paths:
             doc = doc_path.read_text(encoding="utf-8")
             self.assertRegex(doc, r"(?i)the\s+default remote reviewer")
             self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER", doc)
             self.assertIn("review-fix commit made", doc)
+            self.assertRegex(
+                doc,
+                r"disables\s+Prism(?:\s+and\s+Gito|[\s\S]*disables\s+Gito)",
+            )
+            self.assertIn("sd-review-local", doc)
+            self.assertIn("sd-review-local-all", doc)
 
     def test_review_pr_skill_auto_dispatches_housekeeping_after_merge(self) -> None:
         skill = (
