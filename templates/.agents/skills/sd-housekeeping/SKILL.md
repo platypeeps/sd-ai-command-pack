@@ -15,6 +15,10 @@ repo maintenance, dependency upgrade, issue triage, or branch-pruning command.
 If the user asks for broader cleanup, stop and clarify the intended scope before
 running the housekeeping script.
 
+Run from the feature branch when the command may merge a ready open PR. If the
+PR is already merged and cleanup starts from the default branch, the script only
+performs post-merge/default-branch cleanup and inventory reporting.
+
 The canonical implementation is:
 
 ```bash
@@ -28,18 +32,17 @@ This command performs this end-of-stream flow:
 1. Verify the current repository, branch, and working-tree status.
 2. If the current branch is a feature branch with an open PR that is not yet
    merged, run the SD finish-work flow before actual housekeeping:
-   - read `.agents/skills/sd-finish-work/SKILL.md`
-   - follow that wrapper exactly, including its read of
-     `.agents/skills/trellis-finish-work/SKILL.md`
+   - execute the `sd-finish-work` flow, which prepares task records,
+     validation notes, and handoff state for this work stream
    - if finish-work creates archive or journal commits, push the current
-     branch before continuing
+     branch before continuing, then refresh PR/check state for the new HEAD and
+     continue only after required checks are complete and green
    - if finish-work reports uncommitted PR work or ambiguous dirty files, stop
      and report that blocker instead of running cleanup
-3. Run `bash scripts/sd-ai-command-pack-housekeeping.sh`.
-4. The script fetches and prunes `origin` so local remote-tracking refs reflect
+3. The script fetches and prunes `origin` so local remote-tracking refs reflect
    GitHub.
-5. The script detects the remote default branch, usually `main`.
-6. If the current branch is a feature branch with an open PR, the script merges
+4. The script detects the remote default branch, usually `main`.
+5. If the current branch is a feature branch with an open PR, the script merges
    only when all of these are true:
    - the working tree is clean
    - the local branch head, remote branch head, and PR head are identical
@@ -47,24 +50,24 @@ This command performs this end-of-stream flow:
      merge state
    - the PR has at least one reported check and every reported check is green
    - GitHub review threads have no unresolved comments
-7. The script merges the PR with `gh pr merge --match-head-commit`. If GitHub
+6. The script merges the PR with `gh pr merge --match-head-commit`. If GitHub
    refuses the merge, report an anomaly instead of forcing the merge.
-8. If the current branch is a feature branch, use `gh pr view` to confirm the
+7. If the current branch is a feature branch, use `gh pr view` to confirm the
    branch's PR is `MERGED` and the local branch head matches the merged PR head
    before deleting anything.
-9. When the current feature branch is confirmed merged and the working tree is
+8. When the current feature branch is confirmed merged and the working tree is
    clean, switch to the default branch and fast-forward it from `origin`.
-10. Delete the merged local feature branch.
-11. Delete the merged remote feature branch unless
+9. Delete the merged local feature branch.
+10. Delete the merged remote feature branch unless
    `--keep-remote-branch` is passed.
-12. Verify the expected final state:
+11. Verify the expected final state:
    - default branch checked out
    - working tree clean
    - default branch matches `origin/default`
    - no extra local branches
-   - no extra remote-tracking branches besides `origin/HEAD` and
-     `origin/default`
-13. Report repo-wide open PRs, open issues, and active Trellis tasks as
+   - the just-merged feature branch's remote-tracking ref is absent, or is
+     explicitly kept because `--keep-remote-branch` was used
+12. Report repo-wide open PRs, open issues, and active Trellis tasks as
     inventory, not as blockers for the current stream cleanup.
 
 ## Expected Output
@@ -77,7 +80,7 @@ A clean current-stream cleanup should condense to:
 - working tree: clean
 - <default> matches origin/<default>
 - local branches: only <default>
-- remote branches: only origin/HEAD and origin/<default>
+- remote source branch absent: origin/<feature>
 
 ==> Inventory
 - open PRs: <summary>

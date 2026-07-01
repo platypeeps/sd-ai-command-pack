@@ -1,13 +1,14 @@
 ---
-description: Run the SD update-spec workflow.
+description: Run the Software Delivery (SD) update-spec workflow for repository knowledge artifacts.
 ---
 
-# Update Spec
+# SD Update Spec
 
-Run the SD update-spec wrapper for the current repository.
+In this pack, SD means Software Delivery. A skill is a project-installed Markdown instruction bundle resolved by the agent's trusted installed-skill resolver.
 
-1. Read `.agents/skills/sd-update-spec/SKILL.md`.
-2. Follow that skill exactly: run Trellis update-spec first, then run the pack
-   extensions for repospec artifacts, architecture overview, and `.obsidian-kb`.
-3. Report the update-spec skill used, spec changes, repospec/architecture/
-   Obsidian KB results, vault-link guidance, and validation.
+Run the Software Delivery (SD) update-spec wrapper for the current repository.
+
+1. Resolve the `sd-update-spec` skill by name using the agent's trusted skill discovery mechanism for installed skills.
+2. If that skill is missing, unreadable, empty, resolves to more than one candidate, fails validation, defines contradictory steps that violate this command's safety rules, or requires unavailable tools, stop and report the exact blocker.
+3. Use the skill as the primary instructions. It is the source of truth for Trellis update-spec delegation and pack-specific repository knowledge extensions.
+4. Report the actions taken, files changed or generated, artifacts produced, validation run, and any skipped or failed step.

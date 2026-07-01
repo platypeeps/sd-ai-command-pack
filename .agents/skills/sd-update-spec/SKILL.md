@@ -1,74 +1,75 @@
 ---
 name: sd-update-spec
-description: Use when the user wants the SD/Codex-visible update-spec command to run Trellis update-spec and the pack's extended spec-refresh features.
+description: Use when the user wants the Software Delivery update-spec command to run Trellis update-spec and the pack's extended spec-refresh features.
 ---
 
 # SD Update Spec
 
 Run the Trellis update-spec workflow for the current repository, then run the SD
-AI command pack extensions.
+AI command pack extensions. These extensions preserve repository knowledge that
+the base Trellis skill does not own directly: repospec/Repomix refreshes,
+architecture overview touch-ups when warranted, and `.obsidian-kb` links for
+Obsidian knowledge-base workflows.
 
-1. Read `.agents/skills/trellis-update-spec/SKILL.md` first.
-2. If that file is missing or unreadable, read the first existing Trellis
-   update-spec instruction file in this fallback order:
-   - `.claude/skills/trellis-update-spec/SKILL.md`
-   - `.cursor/skills/trellis-update-spec/SKILL.md`
-   - `.github/skills/trellis-update-spec/SKILL.md`
-   - `.opencode/skills/trellis-update-spec/SKILL.md`
-   Stop and report the missing skill if none of these files exists.
-3. Follow the Trellis update-spec skill exactly. Do not modify, replace, fork,
-   or reinterpret it. It is responsible for deciding what `.trellis/spec/`
-   content should change.
+1. Resolve the `trellis-update-spec` skill by name using the agent's trusted
+   skill discovery mechanism for installed skills.
+2. If the Trellis update-spec skill is missing, unreadable, empty, resolves to
+   more than one candidate, fails validation, defines contradictory steps that
+   violate this command's safety rules, or requires unavailable tools, stop and
+   report the exact blocker.
+3. Use the Trellis update-spec skill as the primary instructions. Do not
+   modify, replace, fork, or reinterpret it. It is responsible for deciding
+   what `.trellis/spec/` content should change.
 4. After the Trellis update-spec pass, run the SD AI command pack extensions:
    - Check whether the repo has infrastructure for maintaining a repospec
-     artifact. Look for existing repo docs, scripts, package tasks, make
-     targets, or other checked-in commands that describe how the repospec is
-     generated or refreshed. If that infrastructure exists, use it to refresh
-     the repospec artifact instead of hand-editing generated output. Do not
-     create new repospec infrastructure or a new repospec artifact unless the
-     user asks. When the repospec refresh uses Repomix or another
-     repository-map tool, follow the target repo's documented output path. If no
-     path is documented, prefer `docs/repomix-map.md` and report the chosen
-     path.
+     artifact in this order: a `Makefile` target named `repospec`,
+     `update-repospec`, `refresh-repospec`, `repomix`, `update-repomix`, or
+     `refresh-repomix`; a `package.json` script with one of those exact names;
+     an executable script under `scripts/` named `repospec`, `update-repospec`,
+     `refresh-repospec`, `repomix`, `update-repomix`, `refresh-repomix`,
+     `repo-map`, `update-repo-map`, or `refresh-repo-map` with an optional
+     `.sh`, `.py`, `.js`, `.mjs`, or `.ts` extension; then a documented command
+     under a heading named `Repospec`, `Repomix`, or `Repository map` in
+     `AGENTS.md` or `README.md`. Do not infer commands from incidental prose.
+     If that infrastructure exists, use it to refresh the repospec artifact
+     instead of hand-editing generated output. Do not create new repospec
+     infrastructure or a new repospec artifact unless the user asks. When the
+     repospec refresh uses Repomix or another repository-map tool, follow the
+     target repo's documented output path. If no path is documented, prefer
+     `docs/repomix-map.md` and report the chosen path.
    - Check whether the repo already has an architectural overview. Search
      existing files, especially `ARCHITECTURE.md`, `ARCHITECTURE_OVERVIEW.md`,
      `docs/ARCHITECTURE.md`, `docs/ARCHITECTURE_OVERVIEW.md`, and
      `.trellis/spec/**/architecture*.md`. Do not create a new overview unless
      the user asks for one.
-   - If an overview exists and the completed work changes high-level
-     architecture such as packages, services, command surfaces, data flow,
-     persistence, external integrations, config/env, or runtime/deployment
-     topology, update the overview too. If no overview exists, or if the change
-     does not warrant an architecture update, leave it untouched.
-   - Rebuild the repo-local Obsidian knowledge-base folder:
+   - If an overview exists, update it only when the preserved work changed one
+     of these architecture signals: package/module boundaries, service or
+     command surfaces, cross-component data flow, persistence/storage schemas,
+     external integrations, config/env contracts, or runtime/deployment
+     topology. Use concrete evidence from changed files, Trellis specs, or
+     task notes. If no overview exists, or if none of those signals changed,
+     leave it untouched. If the scope of the completed work is unclear, report
+     that and leave the overview unchanged unless the user confirms the
+     intended scope.
+   - Refresh the repo-local Obsidian knowledge-base folder through the pack
+     helper:
      - Run `python3 scripts/sd-ai-command-pack-update-spec-kb.py` from the repo
-       root. If the helper is missing, stop and report that the pack should be
-       reinstalled; do not rebuild `.obsidian-kb/` manually from this wrapper.
-     - Ensure `.obsidian-kb/` is listed in the repo root `.gitignore`. Add it if
-       missing while preserving existing entries.
-     - Create `.obsidian-kb/` in the repo root. Treat it as generated local
-       state; do not commit it.
-     - Link every relevant existing repo-knowledge file into `.obsidian-kb/`
-       with symlinks, preserving relative folder names when practical. Include
-       files that explain how the repo works, such as README, AGENTS,
-       contributing, development, architecture, roadmap, decision, handoff,
-       `.trellis/workflow.md`, `.trellis/config.yaml`, `.trellis/spec/**/*.md`,
-       repo-owned repospec or Repomix outputs such as `docs/repomix-map.md`, and
-       project manifests that explain package structure when present.
-     - Treat that list as a floor, not a ceiling: search repo docs for other
-       source-of-truth files that provide repository insight and link them too.
-     - Refresh existing KB symlinks when their targets changed, and remove stale
-       symlinks that point to files no longer relevant. Do not delete or
-       overwrite non-symlink files in `.obsidian-kb/`; report them as conflicts.
-     - Create and maintain `.obsidian-kb/Dashboard.md` as a generated Markdown
-       landing page that groups and links to the current KB symlinks. If a
-       user-owned file already exists at that path, do not overwrite it; report a
-       conflict.
-     - Do not link dependency/vendor directories, build output, caches, logs,
-       secrets, `.git/`, `.trellis/workspace/`, or broad source trees unless a
-       specific source entrypoint is intentionally maintained as repo
-       documentation.
-     - Prefer relative symlinks when possible so the repo can move.
+       root. If the helper is missing or exits nonzero, stop and report the
+       command, exit status, and complete stdout/stderr output; do not rebuild
+       `.obsidian-kb/` manually from this wrapper.
+     - Treat the helper as the source of truth for `.obsidian-kb/`: it owns the
+       managed entry in the repo root `.gitignore`, creates or refreshes the
+       generated folder, maintains relative symlinks to repo-knowledge files,
+       writes `.obsidian-kb/Dashboard.md` as a landing page, skips
+       secrets/caches/build output and `.trellis/workspace/`, and reports
+       conflicts. Helper-selected knowledge files include repository docs and
+       Trellis context such as `.trellis/workflow.md`, `.trellis/config.yaml`,
+       `.trellis/spec/**/*.md`, and repo-owned repospec or Repomix outputs such
+       as `docs/repomix-map.md` when present. Do not manually edit
+       `.gitignore`, create KB links, remove stale links, or overwrite dashboard
+       conflicts from this wrapper.
+     - Use `python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run` when
+       the user wants a preview before changing generated KB state.
 5. Final report:
    - `Update-spec skill`: path read
    - `Spec updates`: paths changed, or `none`
@@ -77,6 +78,8 @@ AI command pack extensions.
    - `Obsidian KB`: `.obsidian-kb` created/refreshed, symlink count, dashboard
      state, gitignore state, and any conflicts
    - `Obsidian vault link`: example command for linking this repo's
-     `.obsidian-kb` folder into a vault, such as
-     `ln -s /absolute/path/to/repo/.obsidian-kb /absolute/path/to/vault/Repo-KB`
+     `.obsidian-kb` folder into a vault. State that `/path/to/your/vault` is a
+     placeholder the user must replace, and derive the final link name from the
+     repository name when possible, such as
+     `ln -s "$(pwd)/.obsidian-kb" "/path/to/your/vault/Repo-KB"`
    - `Validation`: checks run, or why checks were not run

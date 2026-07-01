@@ -82,13 +82,15 @@ The script runs:
   continue.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS`: space-separated package scripts
   to run when `package.json` and the selected package runner are available.
+  Defaults to `typecheck lint test:unit test:integration build test:e2e`.
   The older `SD_AI_COMMAND_PACK_FULL_CHECK_NPM_SCRIPTS` name is still accepted for
   compatibility.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_RUNNER`: package runner. Defaults to `npm`
   when package-script checks apply.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS=1`: skip package-script
-  checks. The older `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_NPM=1` name is still
-  accepted for compatibility.
+- `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS=1`: boolean flag to skip
+  all package-script checks. It does not accept a list of scripts. The older
+  `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_NPM=1` name is still accepted for
+  compatibility.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0`: skip Prism.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=required`: fail if Prism is missing,
   unauthenticated, or has provider/model configuration failures.
@@ -115,10 +117,13 @@ The script runs:
   additional PR-body scope rules. Defaults to
   `.sd-ai-command-pack/pr-body-scope.json` when present.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`: explicit PR body text for
-  configurable PR-body scope checks.
+  configurable PR-body scope checks. This value takes precedence for
+  `scripts/sd-ai-command-pack-pr-body-scope.py`.
 - `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`: explicit PR body text for tooling/generated
   and PR-body scope checks in local or CI contexts where `gh pr view` should
-  not be used.
+  not be used. Use this as the general override consumed by
+  `scripts/sd-ai-command-pack-review-scope.sh` and as the fallback for the
+  configurable PR-body scope script.
 - `REVIEW_PREFLIGHT_PR_BODY`: deprecated fallback for older target repos. Prefer
   `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` or
   `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`.

@@ -12,6 +12,7 @@ import argparse
 import dataclasses
 import datetime as dt
 import json
+import os
 import re
 import subprocess
 import sys
@@ -495,7 +496,7 @@ def _git_working_tree_diff(repo_root: Path) -> str:
             continue
         chunks.append(
             _run_git(
-                ["diff", "--no-ext-diff", "--no-index", "--", "/dev/null", path],
+                ["diff", "--no-ext-diff", "--no-index", "--", os.devnull, path],
                 repo_root,
                 accept_one=True,
             )
@@ -514,11 +515,15 @@ def build_local_diff(repo_root: Path, *, base: str | None, include_working_tree:
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        raise TypeError(f"expected object in review learnings payload, got {type(value).__name__}")
+    return value
 
 
 def _as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
+    if not isinstance(value, list):
+        raise TypeError(f"expected list in review learnings payload, got {type(value).__name__}")
+    return value
 
 
 def _one_line(text: str, *, limit: int = 220) -> str:
@@ -631,14 +636,33 @@ query($owner:String!, $name:String!, $number:Int!) {
             ],
             repo_root,
         )
-        repository = _as_dict(_as_dict(payload.get("data")).get("repository"))
-        pull_request = _as_dict(repository.get("pullRequest"))
-        threads = _as_dict(pull_request.get("reviewThreads"))
-        for thread in _as_list(threads.get("nodes")):
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            continue
+        repository = data.get("repository")
+        if not isinstance(repository, dict):
+            continue
+        pull_request = repository.get("pullRequest")
+        if not isinstance(pull_request, dict):
+            continue
+        threads = pull_request.get("reviewThreads")
+        if not isinstance(threads, dict):
+            continue
+        thread_nodes = threads.get("nodes")
+        if not isinstance(thread_nodes, list):
+            continue
+        for thread in thread_nodes:
             thread_obj = _as_dict(thread)
-            for comment in _as_list(_as_dict(thread_obj.get("comments")).get("nodes")):
+            comments_payload = thread_obj.get("comments")
+            if not isinstance(comments_payload, dict):
+                continue
+            comment_nodes = comments_payload.get("nodes")
+            if not isinstance(comment_nodes, list):
+                continue
+            for comment in comment_nodes:
                 comment_obj = _as_dict(comment)
-                if _as_dict(comment_obj.get("author")).get("login") != COPILOT_LOGIN:
+                author = comment_obj.get("author")
+                if not isinstance(author, dict) or author.get("login") != COPILOT_LOGIN:
                     continue
                 path = thread_obj.get("path")
                 body = comment_obj.get("body")
@@ -695,9 +719,19 @@ def update_target(target: Path, block: str, *, dry_run: bool) -> str:
     existing = ""
     if target.is_file():
         existing = target.read_text(encoding="utf-8", errors="replace")
-    if MANAGED_START in existing and MANAGED_END in existing:
-        start = existing.index(MANAGED_START)
-        end = existing.index(MANAGED_END, start) + len(MANAGED_END)
+    start = existing.find(MANAGED_START)
+    first_end = existing.find(MANAGED_END)
+    if start >= 0 or first_end >= 0:
+        end_marker = (
+            existing.find(MANAGED_END, start + len(MANAGED_START))
+            if start >= 0
+            else -1
+        )
+        if start < 0 or end_marker < 0:
+            raise ValueError(
+                f"{target} contains managed review-learnings markers in invalid order"
+            )
+        end = end_marker + len(MANAGED_END)
         updated = existing[:start] + block.rstrip() + existing[end:]
         if not updated.endswith("\n"):
             updated += "\n"

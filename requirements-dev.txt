@@ -1,1 +1,2 @@
-coverage>=7.6,<8
+# The test suite uses stdlib unittest plus coverage.py for the installer gate.
+coverage==7.6.0

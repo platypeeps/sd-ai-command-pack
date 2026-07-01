@@ -189,6 +189,45 @@ review_scope_label() {
   fi
 }
 
+usage() {
+  cat <<'EOF'
+Usage: bash scripts/sd-ai-command-pack-review-local.sh [--diff|--changed|--full-codebase|--all|--scope <diff|all>] [--list-tools] [tool ...]
+
+Runs local review providers for the current diff or the full checked-out codebase.
+
+Tools:
+  prism      Built-in Prism review provider.
+  gito       Built-in Gito review provider.
+  all        Alias for: prism gito.
+  default    Alias for: prism gito.
+
+Custom tools are supported by setting:
+  SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND
+  SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND
+
+Tool names must use only letters, numbers, dots, underscores, or hyphens.
+Use --help to print this message.
+EOF
+}
+
+list_tools() {
+  printf 'prism\n'
+  printf 'gito\n'
+  printf 'all\n'
+  printf 'default\n'
+}
+
+valid_tool_name() {
+  case "$1" in
+    ""|*/*|*\\*|*[!\._[:alnum:]-]*)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 record_status() {
   local label="$1"
   local status="$2"
@@ -702,9 +741,17 @@ run_custom_tool() {
 raw_tools="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS:-prism gito}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --all|--codebase|--full)
+    --all|--codebase|--full|--full-codebase)
       REVIEW_LOCAL_SCOPE="all"
       shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --list-tools)
+      list_tools
+      exit 0
       ;;
     --diff|--changed)
       REVIEW_LOCAL_SCOPE="diff"
@@ -757,6 +804,11 @@ CUSTOM_TOOL_COMMANDS=()
 
 for raw_tool in "${REQUESTED_TOOLS[@]}"; do
   [ -n "$raw_tool" ] || continue
+  if ! valid_tool_name "$raw_tool"; then
+    warn "Unsupported local review tool name '$raw_tool'. Tool names may only contain letters, numbers, dots, underscores, or hyphens."
+    OVERALL_STATUS=2
+    continue
+  fi
   tool="$(printf '%s' "$raw_tool" | tr '[:upper:]' '[:lower:]')"
   case "$tool" in
     all|default)

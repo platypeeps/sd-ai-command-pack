@@ -1,40 +1,42 @@
 {
+  "$schema": "rules.schema.json",
+  "description": "Configuration for the Prism code review tool, defining issue categories, severities, and required checks. The project-local schema file is distributed next to this file as rules.schema.json. The Prism config format keeps focus and severityOverrides separate; keep their category names in sync.",
   "focus": [
-    "correctness",
-    "security",
-    "testing",
-    "maintainability",
-    "docs",
     "bug",
+    "correctness",
+    "docs",
+    "maintainability",
     "performance",
-    "style"
+    "security",
+    "style",
+    "testing"
   ],
   "severityOverrides": {
-    "security": "high",
-    "correctness": "high",
     "bug": "high",
-    "testing": "medium",
-    "maintainability": "medium",
+    "correctness": "high",
     "docs": "medium",
+    "maintainability": "medium",
     "performance": "medium",
-    "style": "low"
+    "security": "high",
+    "style": "low",
+    "testing": "medium"
   },
   "required": [
     {
-      "id": "trellis-task-scope",
-      "text": "Check that changes are limited to the active Trellis task and do not silently alter unrelated workflow, task, or platform files."
+      "id": "installer-safety",
+      "text": "For installers or generated files, verify path validation, conflict handling, rollback behavior, and explicit user consent before overwriting local files."
     },
     {
       "id": "review-recurrence-prevention",
       "text": "Look for issues that would create repeated review loops: stale docs, missing tests, weak assertions, inconsistent command wrappers, and drift between shared skills and platform adapters."
     },
     {
-      "id": "installer-safety",
-      "text": "For installers or generated files, verify path validation, conflict handling, rollback behavior, and explicit user consent before overwriting local files."
-    },
-    {
       "id": "secret-hygiene",
       "text": "Confirm no credentials, API keys, provider tokens, local cache paths, or machine-specific secret locations are committed or logged."
+    },
+    {
+      "id": "trellis-task-scope",
+      "text": "Check that changes are limited to the active Trellis task and do not silently alter unrelated workflow, task, or platform files."
     }
   ]
 }

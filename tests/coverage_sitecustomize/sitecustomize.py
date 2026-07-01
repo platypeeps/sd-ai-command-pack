@@ -1,11 +1,18 @@
-"""Start coverage in installer subprocesses when the test runner requests it."""
+"""
+Start coverage in installer subprocesses when the test runner requests it.
 
-from __future__ import annotations
+Python imports this special ``sitecustomize`` module automatically when this
+directory is on ``sys.path``. The test harness adds it to ``PYTHONPATH`` for
+subprocesses so coverage can collect data from installed scripts.
+"""
+import sys
 
 try:
     import coverage
-except ImportError:
-    coverage = None
 
-if coverage is not None:
     coverage.process_startup()
+except ImportError:
+    print(
+        "sitecustomize: coverage.py not found, subprocess coverage will not be collected.",
+        file=sys.stderr,
+    )

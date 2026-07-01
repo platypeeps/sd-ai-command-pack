@@ -10,7 +10,7 @@ Install reusable AI workflow helpers into
 [Trellis-managed repositories](https://trytrellis.app/). The current pack is
 focused on Trellis enrichment: start, continue, finish-work, local review, PR
 review, full-codebase local review, review learnings, full-check, post-merge
-housekeeping, and update-spec wrapper workflows. The repository and `sd`
+housekeeping, and update-spec workflows. The repository and `sd`
 command namespace are intentionally
 broader than that initial scope, so future skills, commands, scripts, docs, or
 rules may cover adjacent AI workflow support that is not strictly
@@ -23,81 +23,19 @@ first; they cover installing the CLI with
 `npm install -g @mindfoldhq/trellis@latest` and running `trellis init` so the
 target repo has `.trellis/config.yaml`.
 
-The current Trellis-focused pack includes:
+The current Trellis-focused pack installs:
 
-- `.agents/skills/sd-start/SKILL.md`
-- `.agents/skills/sd-continue/SKILL.md`
-- `.agents/skills/sd-finish-work/SKILL.md`
-- `.agents/skills/sd-full-check/SKILL.md`
-- `.agents/skills/sd-housekeeping/SKILL.md`
-- `.agents/skills/sd-update-spec/SKILL.md`
-- `.agents/skills/sd-review-pr/SKILL.md`
-- `.agents/skills/sd-review-local/SKILL.md`
-- `.agents/skills/sd-review-local-all/SKILL.md`
-- `.agents/skills/sd-review-learnings/SKILL.md`
-- `scripts/sd-ai-command-pack-full-check.sh`
-- `scripts/sd-ai-command-pack-housekeeping.sh`
-- `scripts/sd-ai-command-pack-review-scope.sh`
-- `scripts/sd-ai-command-pack-review-preflight.mjs`
-- `scripts/sd-ai-command-pack-review-local.sh`
-- `scripts/sd-ai-command-pack-review-learnings.py`
-- `scripts/sd-ai-command-pack-install-audit.py`
-- `scripts/sd-ai-command-pack-pr-body-scope.py`
-- `scripts/sd-ai-command-pack-update-spec-kb.py`
-- `.prism/rules.json`
-- `docs/SD_AI_COMMAND_PACK.md`
-- `.claude/commands/sd/start.md`
-- `.claude/commands/sd/continue.md`
-- `.claude/commands/sd/finish-work.md`
-- `.claude/commands/sd/full-check.md`
-- `.claude/commands/sd/housekeeping.md`
-- `.claude/commands/sd/update-spec.md`
-- `.claude/commands/sd/review-pr.md`
-- `.claude/commands/sd/review-local.md`
-- `.claude/commands/sd/review-local-all.md`
-- `.claude/commands/sd/review-learnings.md`
-- `.cursor/commands/sd-start.md`
-- `.cursor/commands/sd-continue.md`
-- `.cursor/commands/sd-finish-work.md`
-- `.cursor/commands/sd-review-pr.md`
-- `.cursor/commands/sd-review-local.md`
-- `.cursor/commands/sd-review-local-all.md`
-- `.cursor/commands/sd-review-learnings.md`
-- `.cursor/commands/sd-full-check.md`
-- `.cursor/commands/sd-housekeeping.md`
-- `.cursor/commands/sd-update-spec.md`
-- `.gemini/commands/sd/start.toml`
-- `.gemini/commands/sd/continue.toml`
-- `.gemini/commands/sd/finish-work.toml`
-- `.gemini/commands/sd/review-pr.toml`
-- `.gemini/commands/sd/review-local.toml`
-- `.gemini/commands/sd/review-local-all.toml`
-- `.gemini/commands/sd/full-check.toml`
-- `.gemini/commands/sd/housekeeping.toml`
-- `.gemini/commands/sd/update-spec.toml`
-- `.gemini/commands/sd/review-learnings.toml`
-- `.github/prompts/sd-start.prompt.md`
-- `.github/prompts/sd-continue.prompt.md`
-- `.github/prompts/sd-finish-work.prompt.md`
-- `.github/prompts/sd-review-pr.prompt.md`
-- `.github/prompts/sd-review-local.prompt.md`
-- `.github/prompts/sd-review-local-all.prompt.md`
-- `.github/prompts/sd-review-learnings.prompt.md`
-- `.github/prompts/sd-full-check.prompt.md`
-- `.github/prompts/sd-housekeeping.prompt.md`
-- `.github/prompts/sd-update-spec.prompt.md`
+- shared `sd-*` skills under `.agents/skills/`
+- helper scripts under `scripts/`
+- the installed usage guide at `docs/SD_AI_COMMAND_PACK.md`
+- Prism defaults under `.prism/`
+- platform command or prompt adapters for Claude, Cursor, Gemini, GitHub
+  Copilot, and OpenCode when the matching active Trellis platform is present
 - a managed `sd-ai-command-pack` guidance block in
-  `.github/copilot-instructions.md`
-- `.opencode/commands/sd-start.md`
-- `.opencode/commands/sd-continue.md`
-- `.opencode/commands/sd-finish-work.md`
-- `.opencode/commands/sd-review-pr.md`
-- `.opencode/commands/sd-review-local.md`
-- `.opencode/commands/sd-review-local-all.md`
-- `.opencode/commands/sd-review-learnings.md`
-- `.opencode/commands/sd-full-check.md`
-- `.opencode/commands/sd-housekeeping.md`
-- `.opencode/commands/sd-update-spec.md`
+  `.github/copilot-instructions.md` for GitHub Copilot installs
+
+The exact installed file set is defined by `manifest.json` and validated in
+target repos by `scripts/sd-ai-command-pack-install-audit.py`.
 
 The shared skills own the workflows. Platform command and prompt files are thin
 entry points that tell the agent to load the appropriate shared skill.
@@ -111,7 +49,7 @@ wrappers do not collide with Trellis-owned generated `/trellis:*` commands on
 future `trellis update` runs. Cursor command files, GitHub Copilot prompt
 files, and OpenCode command files use flat `sd-<command>` filenames so their
 slash-command completion lists can surface them when you type `/sd`.
-The update-spec wrapper runs the Trellis-provided `trellis-update-spec` skill
+The update-spec workflow runs the Trellis-provided `trellis-update-spec` skill
 as-is, refreshes repo-owned repospec artifacts through existing maintenance
 infrastructure when available, then adds an explicit architectural-overview
 check and rebuilds a repo-local `.obsidian-kb` folder of symlinks to
@@ -175,16 +113,32 @@ a specific stack, and configure third-party tools with
 The review-local-all command (`/sd:review-local-all` in Claude/Gemini;
 `sd-review-local-all` in Cursor, GitHub Copilot, OpenCode, and Codex) uses the
 same fix-loop behavior but reviews the entire checked-out repository. It runs
-`bash scripts/sd-ai-command-pack-review-local.sh --all`, which calls
+`bash scripts/sd-ai-command-pack-review-local.sh --full-codebase`, which calls
 `prism review codebase` for Prism and normally calls
-`gito review --all --path <repo-root>` for Gito with an include filter built
-from existing tracked files, so branch-diff deletions are not reviewed as
+`gito review --all --path <absolute-repo-root>` for Gito with an include filter
+built from existing tracked files, so branch-diff deletions are not reviewed as
 deleted diff paths. Prism and Gito scans use the pack's managed standard
-exclusions for
-top-level AI/tooling/cache directories:
-`.github/`, `.claude/`, `.codex/`, `.gemini/`, `.opencode/`, `.agents/`,
-`.build/`, `.git/`, `.pytest_cache/`, `.obsidian-kb/`, `.trellis/`,
-`.ruff_cache/`, `.venv/`, `.sd-ai-command-pack/`, and `node_modules/`. Gito
+exclusions for top-level AI/tooling/cache directories:
+
+```text
+.github/
+.claude/
+.codex/
+.gemini/
+.opencode/
+.agents/
+.build/
+.git/
+.pytest_cache/
+.obsidian-kb/
+.trellis/
+.ruff_cache/
+.venv/
+.sd-ai-command-pack/
+node_modules/
+```
+
+Gito
 full-codebase reports go to `.build/review/gito-all` by default; override with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_GITO_OUT_DIR` when needed.
 For `uvx`-based Gito wrappers, the runner sets `UV_CACHE_DIR` and `UV_TOOL_DIR`
@@ -226,8 +180,8 @@ default convergence mechanism. The default remote reviewer is GitHub Copilot's
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_AUTHOR_MATCH`,
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND`, and
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`.
-If an active review-pr session observes that the PR is `MERGED`, it stops the
-review loop and runs the housekeeping command automatically. This is session
+If a running review-pr command observes that the PR is `MERGED`, it stops the
+review loop and runs the post-merge housekeeping command. This is command-time
 automation, not a background webhook; it cannot wake an inactive tool session.
 
 The review-learnings command scans local diffs for repeat mechanical
@@ -240,14 +194,19 @@ pack.
 
 The update-spec command runs the existing Trellis `trellis-update-spec` skill
 without modifying or replacing it. After the update-spec pass, it checks whether
-the repo has checked-in infrastructure for maintaining a repospec artifact, such
-as repo docs, scripts, package tasks, or make targets. When that infrastructure
-exists, the command uses it to refresh the repospec artifact instead of
-hand-editing generated output. If that refresh uses Repomix or another
-repository-map tool, follow the target repo's documented output path; if no
-path is documented, prefer `docs/repomix-map.md` and report the chosen path. It
-then checks whether the repo already has an
-architectural overview such as
+the repo has checked-in infrastructure for maintaining a repospec artifact. It
+looks for exact Makefile targets or package scripts named `repospec`,
+`update-repospec`, `refresh-repospec`, `repomix`, `update-repomix`, or
+`refresh-repomix`; executable `scripts/` entries with those names or
+`repo-map`, `update-repo-map`, or `refresh-repo-map` and an optional `.sh`,
+`.py`, `.js`, `.mjs`, or `.ts` extension; then a documented command under a
+`Repospec`, `Repomix`, or `Repository map` heading in `AGENTS.md` or
+`README.md`. It does not infer commands from incidental prose. When that
+infrastructure exists, the command uses it to refresh the repospec artifact
+instead of hand-editing generated output. If that refresh uses Repomix or
+another repository-map tool, follow the target repo's documented output path;
+if no path is documented, prefer `docs/repomix-map.md` and report the chosen
+path. It then checks whether the repo already has an architectural overview such as
 `ARCHITECTURE.md`, `docs/ARCHITECTURE.md`, or a
 `.trellis/spec/**/architecture*.md` document. It updates that overview only
 when the completed work changes high-level architecture; otherwise it reports
@@ -277,7 +236,7 @@ To expose that generated folder inside an Obsidian vault, create a symlink from
 the vault to the repo's `.obsidian-kb` folder. For macOS/Linux:
 
 ```bash
-ln -s /absolute/path/to/repo/.obsidian-kb /absolute/path/to/vault/Repo-KB
+ln -s "$(pwd)/.obsidian-kb" "/path/to/your/vault/Repo-KB"
 ```
 
 For Windows PowerShell:
@@ -288,6 +247,35 @@ New-Item -ItemType SymbolicLink -Path "C:\path\to\vault\Repo-KB" -Target "C:\pat
 
 Windows symlink creation may require PowerShell running as Administrator or
 Developer Mode enabled.
+
+## Configuration Quick Reference
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND` | Extra repo-local preflight command for full-check. | unset |
+| `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS` | Package scripts to run when a compatible package runner is available. | `typecheck lint test:unit test:integration build test:e2e` |
+| `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS` | Boolean flag to skip all package-script checks. | unset |
+| `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM` | Prism mode for full-check; use `0` to skip or `required` to fail when unavailable. | `auto` |
+| `SD_AI_COMMAND_PACK_FULL_CHECK_GITO` | Enables Gito during full-check. | `0` |
+| `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR` | Gito report directory for full-check. | `.build/review/gito` |
+| `SD_AI_COMMAND_PACK_INSTALL_AUDIT` | Controls structural post-install audit; use `0` to skip or `required` to fail when unavailable. | warn and continue |
+| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS` | Local review tool set for `sd-review-local` or `sd-review-local-all`. | runner default |
+| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND` | Custom command for a named local review provider. | unset |
+| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND` | Full-codebase custom command for a named provider. | falls back to non-`ALL` command |
+| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS` | Max Gito attempts for HTTP 429 provider rate limits. | `2` |
+| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS` | Initial Gito retry delay. | `30` |
+| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS` | Maximum Gito retry delay after backoff. | `120` |
+| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK` | Enables Prism full-codebase batch/path fallback after empty chunk responses. | `1` |
+| `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` | General PR body override for review-scope and fallback PR-body scope checks. | unset |
+| `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY` | PR body override consumed specifically by `sd-ai-command-pack-pr-body-scope.py`. | `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` |
+| `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER` | Remote reviewer login/slug for `sd-review-pr`. | `copilot-pull-request-reviewer` |
+| `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND` | Custom command for requesting a remote review. | unset |
+| `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote review request/fix rounds before asking whether to continue. | `5` |
+
+Deprecated fallbacks such as `REVIEW_PREFLIGHT_PR_BODY`,
+`SD_AI_COMMAND_PACK_FULL_CHECK_NPM_SCRIPTS`, and
+`SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_NPM` remain documented in the installed
+guide for older target repos.
 
 ## Install
 
@@ -316,8 +304,9 @@ ignores Trellis local/runtime files such as `.trellis/.developer`,
 `.trellis/worktrees/`, and `.trellis/.template-hashes.json` without
 blanket-ignoring shareable `.trellis` workflow, spec, task, and script files.
 It also ignores local AI-tool state such as `.claude/settings.local.json`,
-tool caches, logs, sessions, tmp folders, and `.opencode/node_modules/` without
-blanket-ignoring `.claude/`, `.codex/`, `.gemini/`, or `.opencode/`.
+tool caches, logs, sessions, tmp folders, `.opencode/node_modules/`, and
+root `node_modules/` without blanket-ignoring `.claude/`, `.codex/`,
+`.gemini/`, or `.opencode/`.
 It installs platform adapters only when the target repo has the corresponding
 platform directory and a Trellis-owned marker for that platform, such as a
 Trellis command, hook, skill, or Copilot hook file. A plain `.github` directory
@@ -403,10 +392,17 @@ like this:
 .env
 .env.*
 !.env.example
+!.env.ci
+!.env.test
 
 # Trellis local/runtime state.
 .trellis/.runtime/
 .trellis/.cache/
+
+# AI-tool local state; keep shared platform adapters tracked.
+node_modules/
+
+# Project-local personal ignores can be added below this managed block.
 # sd-ai-command-pack trellis-gitignore end
 ```
 
@@ -449,7 +445,9 @@ pack/Trellis generated files, housekeeping automation files, and CI/review
 tooling files for matching PR-body sections when a PR body is provided. Target
 repos can add runtime, docs, or other categories by committing
 `.sd-ai-command-pack/pr-body-scope.json` with a `rules` list of `label`,
-`headings`, and `patterns`. Use `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`,
+`headings`, and `patterns`. Set `include_installed_targets: true` on a rule
+when the generated `.sd-ai-command-pack/installed-targets.txt` paths should be
+classified under that rule. Use `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`,
 `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`, or deprecated `REVIEW_PREFLIGHT_PR_BODY` to
 provide the body without calling `gh`.
 

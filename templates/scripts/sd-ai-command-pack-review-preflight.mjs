@@ -721,22 +721,22 @@ function defaultReviewBaseRef() {
   return remoteRefs[0] || '';
 }
 
-function currentDiffSources(kind) {
+function currentDiffSources(...kindArgs) {
   const baseRef = defaultReviewBaseRef();
   const sources = [
-    { args: ['diff', kind, '--cached'], label: 'staged diff' },
+    { args: ['diff', ...kindArgs, '--cached'], label: 'staged diff' },
   ];
 
   if (baseRef) {
-    sources.push({ args: ['diff', kind, `${baseRef}...HEAD`], label: 'branch diff' });
+    sources.push({ args: ['diff', ...kindArgs, `${baseRef}...HEAD`], label: 'branch diff' });
   }
 
-  sources.push({ args: ['diff', kind], label: 'working tree diff' });
+  sources.push({ args: ['diff', ...kindArgs], label: 'working tree diff' });
   return sources;
 }
 
 function currentDiffStats() {
-  const sources = currentDiffSources('--numstat');
+  const sources = currentDiffSources('--numstat', '-z');
 
   for (const source of sources) {
     const result = spawnSync('git', source.args, {
@@ -785,7 +785,11 @@ function currentChangedPaths() {
   return { args: [], label: 'current diff', paths: [] };
 }
 
-function parseNumstat(output) {
+export function parseNumstat(output) {
+  if (output.includes('\0')) {
+    return parseNumstatZ(output);
+  }
+
   return output
     .trim()
     .split('\n')
@@ -799,6 +803,33 @@ function parseNumstat(output) {
         path: pathParts.join('\t'),
       };
     });
+}
+
+function parseNumstatZ(output) {
+  const tokens = output.split('\0').filter((token) => token !== '');
+  const files = [];
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const fields = tokens[index].split('\t');
+    const addedRaw = fields[0];
+    const deletedRaw = fields[1];
+    let path = fields.slice(2).join('\t');
+
+    if (!path && index + 1 < tokens.length) {
+      const oldPath = tokens[index + 1];
+      const newPath = tokens[index + 2] || oldPath;
+      path = newPath;
+      index += tokens[index + 2] ? 2 : 1;
+    }
+
+    files.push({
+      added: Number.isFinite(Number(addedRaw)) ? Number(addedRaw) : 0,
+      deleted: Number.isFinite(Number(deletedRaw)) ? Number(deletedRaw) : 0,
+      path,
+    });
+  }
+
+  return files;
 }
 
 export function validateTrellisJournalSessions({
@@ -944,7 +975,7 @@ function findStringIndexes(text, value) {
 
   while (index !== -1) {
     indexes.push(index);
-    index = text.indexOf(value, index + value.length);
+    index = text.indexOf(value, index + 1);
   }
 
   return indexes;

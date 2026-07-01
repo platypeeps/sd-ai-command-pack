@@ -770,8 +770,6 @@ check_final_git_state() {
   local local_head
   local remote_head
   local extra_local
-  local extra_remote
-  local kept_remote_branch
 
   final_branch="$(current_branch)"
   if [ -n "$DEFAULT_BRANCH" ] && [ "$final_branch" = "$DEFAULT_BRANCH" ]; then
@@ -812,30 +810,18 @@ check_final_git_state() {
     add_anomaly "extra local branches remain: $(printf '%s' "$extra_local" | paste -sd ',' -)"
   fi
 
-  kept_remote_branch=""
-  if [ "$DELETE_REMOTE_BRANCH" -eq 0 ] && [ -n "$START_BRANCH" ] && [ "$START_BRANCH" != "$DEFAULT_BRANCH" ]; then
-    kept_remote_branch="$REMOTE/$START_BRANCH"
-  fi
-
-  extra_remote="$(
-    git for-each-ref --format='%(refname:short)' "refs/remotes/$REMOTE" |
-      grep -F -x -v "$REMOTE" |
-      grep -F -x -v "$REMOTE/HEAD" |
-      grep -F -x -v "$REMOTE/$DEFAULT_BRANCH" ||
-      true
-  )"
-  if [ -n "$kept_remote_branch" ]; then
-    extra_remote="$(printf '%s\n' "$extra_remote" | grep -F -x -v "$kept_remote_branch" || true)"
-  fi
-
-  if [ -z "$extra_remote" ]; then
-    if [ -n "$kept_remote_branch" ] && git show-ref --verify --quiet "refs/remotes/$REMOTE/$START_BRANCH"; then
-      add_expected "remote branches: only $REMOTE/HEAD, $REMOTE/$DEFAULT_BRANCH, and kept $kept_remote_branch"
+  if [ -n "$START_BRANCH" ] && [ "$START_BRANCH" != "$DEFAULT_BRANCH" ]; then
+    if [ "$DELETE_REMOTE_BRANCH" -eq 0 ]; then
+      if git show-ref --verify --quiet "refs/remotes/$REMOTE/$START_BRANCH"; then
+        add_expected "remote source branch kept: $REMOTE/$START_BRANCH"
+      else
+        add_anomaly "remote source branch $REMOTE/$START_BRANCH is absent despite --keep-remote-branch"
+      fi
+    elif git show-ref --verify --quiet "refs/remotes/$REMOTE/$START_BRANCH"; then
+      add_anomaly "remote source branch still tracked: $REMOTE/$START_BRANCH"
     else
-      add_expected "remote branches: only $REMOTE/HEAD and $REMOTE/$DEFAULT_BRANCH"
+      add_expected "remote source branch absent: $REMOTE/$START_BRANCH"
     fi
-  else
-    add_anomaly "extra remote-tracking branches remain: $(printf '%s' "$extra_remote" | paste -sd ',' -)"
   fi
 }
 

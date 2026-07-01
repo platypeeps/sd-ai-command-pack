@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -18,14 +19,14 @@ import install
 
 PACK_ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = PACK_ROOT / "install.py"
-SECRET_MARKERS = (
-    "AKIA",
-    "BEGIN PRIVATE KEY",
-    "xoxb-",
-    "ghp_",
-    "gho_",
-    "/Users/",
-    "\\Users\\",
+SECRET_MARKER_PATTERNS = (
+    re.compile(re.escape("AKIA")),
+    re.compile(re.escape("BEGIN PRIVATE KEY")),
+    re.compile(re.escape("xoxb-")),
+    re.compile(re.escape("ghp_")),
+    re.compile(re.escape("gho_")),
+    re.compile(r"(?m)(^|[\s'\"=(:])/(?:Users|home)/[^/\s]+/"),
+    re.compile(r"(?i)(^|[\s'\"=(:])[A-Z]:\\Users\\[^\\\s]+\\"),
 )
 
 
@@ -133,8 +134,8 @@ class InstallTests(unittest.TestCase):
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text("# active Trellis platform marker\n", encoding="utf-8")
 
-    def run_git(self, root: Path, *args: str) -> None:
-        result = subprocess.run(
+    def _run_git_process(self, root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
             ["git", *args],
             cwd=root,
             text=True,
@@ -142,19 +143,27 @@ class InstallTests(unittest.TestCase):
             stderr=subprocess.STDOUT,
             check=False,
         )
+
+    def run_git(self, root: Path, *args: str) -> None:
+        result = self._run_git_process(root, *args)
         self.assertEqual(result.returncode, 0, result.stdout)
 
     def git_output(self, root: Path, *args: str) -> str:
-        result = subprocess.run(
-            ["git", *args],
-            cwd=root,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
+        result = self._run_git_process(root, *args)
         self.assertEqual(result.returncode, 0, result.stdout)
         return result.stdout.strip()
+
+    def load_module_from_path(self, module_path: Path, module_name: str):
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop(module_name, None)
+        return module
 
     def shared_manifest_files(self, kind: str) -> list[install.PackFile]:
         return [
@@ -229,11 +238,23 @@ class InstallTests(unittest.TestCase):
         rules = json.loads(rules_path.read_text(encoding="utf-8"))
 
         self.assertIsInstance(rules, dict, f"{rules_path}: root must be an object")
+        required_rule_keys = {"focus", "severityOverrides", "required"}
+        optional_rule_keys = {"$schema", "description"}
         self.assertEqual(
-            set(rules),
-            {"focus", "severityOverrides", "required"},
+            set(rules) - required_rule_keys - optional_rule_keys,
+            set(),
             f"{rules_path}: unexpected Prism rules keys",
         )
+        self.assertTrue(
+            required_rule_keys.issubset(rules),
+            f"{rules_path}: missing required Prism rules keys",
+        )
+        if "$schema" in rules:
+            self.assertIsInstance(rules["$schema"], str)
+            self.assertTrue(rules["$schema"])
+        if "description" in rules:
+            self.assertIsInstance(rules["description"], str)
+            self.assertTrue(rules["description"])
 
         focus = rules["focus"]
         self.assertIsInstance(focus, list, f"{rules_path}: focus must be a list")
@@ -327,11 +348,10 @@ class InstallTests(unittest.TestCase):
 
     def assert_no_secret_markers(self, file_path: Path) -> None:
         content = file_path.read_text(encoding="utf-8")
-        for marker in SECRET_MARKERS:
-            self.assertNotIn(
-                marker,
-                content,
-                f"{file_path}: contains blocked secret marker {marker!r}",
+        for pattern in SECRET_MARKER_PATTERNS:
+            self.assertIsNone(
+                pattern.search(content),
+                f"{file_path}: contains blocked secret marker pattern {pattern.pattern!r}",
             )
 
     def assert_trellis_prerequisite_documented(self, content: str) -> None:
@@ -359,32 +379,28 @@ class InstallTests(unittest.TestCase):
             ".github/prompts/continue.prompt.md",
             ".github/prompts/finish-work.prompt.md",
             ".github/skills/trellis-*/**/*",
-            ".claude/",
-            ".codex/",
-            ".cursor/",
-            ".gemini/",
-            ".opencode/",
+            ".claude/commands/trellis/**/*",
+            ".codex/skills/trellis-*/**/*",
+            ".cursor/commands/trellis-*.md",
+            ".cursor/skills/trellis-*/**/*",
+            ".gemini/commands/trellis/**/*",
+            ".gemini/skills/trellis-*/**/*",
+            ".opencode/commands/trellis/**/*",
+            ".opencode/skills/trellis-*/**/*",
             "Ignore files copied in from `sd-ai-command-pack`",
             ".agents/skills/sd-*/**/*",
-            ".agents/skills/sd-full-check/",
-            ".agents/skills/sd-housekeeping/",
             ".github/prompts/sd-*",
             ".claude/commands/sd/**/*",
-            "Cursor SD command files when Cursor support is installed",
+            ".cursor/commands/sd-*.md",
             ".gemini/commands/sd/**/*",
             ".opencode/commands/sd-*",
             ".prism/rules.json",
+            ".prism/rules.schema.json",
             ".sd-ai-command-pack/installed-targets.txt",
             "docs/SD_AI_COMMAND_PACK.md",
-            "scripts/sd-ai-command-pack-full-check.sh",
-            "scripts/sd-ai-command-pack-housekeeping.sh",
-            "scripts/sd-ai-command-pack-review-local.sh",
-            "scripts/sd-ai-command-pack-review-scope.sh",
-            "scripts/sd-ai-command-pack-review-preflight.mjs",
-            "scripts/sd-ai-command-pack-review-learnings.py",
-            "scripts/sd-ai-command-pack-install-audit.py",
-            "scripts/sd-ai-command-pack-pr-body-scope.py",
-            "scripts/sd-ai-command-pack-update-spec-kb.py",
+            "scripts/sd-ai-command-pack-*",
+            "Trellis is the repository workflow foundation",
+            "Software Delivery command wrappers",
             "Do not leave line comments on wording",
             "copied SD command-pack skills/prompts/scripts/docs/rules",
             "app behavior",
@@ -407,14 +423,14 @@ class InstallTests(unittest.TestCase):
         ):
             self.assertIn(expected, content)
 
-        for file in self._manifest_files:
-            target = file.target.as_posix()
-            if file.kind == "script" and target.startswith(
-                "scripts/sd-ai-command-pack-"
-            ):
-                self.assertIn(
-                    target, content, f"Copilot guidance must mention copied script {target}"
-                )
+        copied_scripts = [
+            file.target.as_posix()
+            for file in self._manifest_files
+            if file.kind == "script"
+            and file.target.as_posix().startswith("scripts/sd-ai-command-pack-")
+        ]
+        self.assertGreater(len(copied_scripts), 0)
+        self.assertIn("scripts/sd-ai-command-pack-*", content)
 
     def assert_trellis_gitignore_block(self, content: str) -> None:
         self.assertIn(install.TRELLIS_GITIGNORE_START, content)
@@ -990,7 +1006,7 @@ class InstallTests(unittest.TestCase):
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             self.assertIn(
-                ".agents/skills/trellis-start/SKILL.md",
+                "Resolve the `trellis-start` skill by name",
                 adapter.read_text(encoding="utf-8"),
             )
         for adapter in [
@@ -1002,7 +1018,7 @@ class InstallTests(unittest.TestCase):
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             self.assertIn(
-                ".agents/skills/trellis-continue/SKILL.md",
+                "Resolve the `trellis-continue` skill by name",
                 adapter.read_text(encoding="utf-8"),
             )
         for adapter in [
@@ -1014,7 +1030,7 @@ class InstallTests(unittest.TestCase):
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             self.assertIn(
-                ".agents/skills/trellis-finish-work/SKILL.md",
+                "Resolve the `trellis-finish-work` skill by name",
                 adapter.read_text(encoding="utf-8"),
             )
         for adapter in [
@@ -1026,7 +1042,7 @@ class InstallTests(unittest.TestCase):
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             self.assertIn(
-                ".agents/skills/sd-review-pr/SKILL.md",
+                "Resolve the `sd-review-pr` skill by name",
                 adapter.read_text(encoding="utf-8"),
             )
         for adapter in [
@@ -1038,7 +1054,7 @@ class InstallTests(unittest.TestCase):
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             content = adapter.read_text(encoding="utf-8")
-            self.assertIn(".agents/skills/sd-review-local/SKILL.md", content)
+            self.assertIn("Resolve the `sd-review-local` skill by name", content)
             self.assertIn("scripts/sd-ai-command-pack-review-local.sh", content)
         for adapter in [
             root / ".claude/commands/sd/review-local-all.md",
@@ -1049,8 +1065,11 @@ class InstallTests(unittest.TestCase):
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             content = adapter.read_text(encoding="utf-8")
-            self.assertIn(".agents/skills/sd-review-local-all/SKILL.md", content)
-            self.assertIn("scripts/sd-ai-command-pack-review-local.sh --all", content)
+            self.assertIn("Resolve the `sd-review-local-all` skill by name", content)
+            self.assertIn(
+                "scripts/sd-ai-command-pack-review-local.sh --full-codebase",
+                content,
+            )
         for adapter in [
             root / ".claude/commands/sd/review-learnings.md",
             root / ".cursor/commands/sd-review-learnings.md",
@@ -1060,7 +1079,7 @@ class InstallTests(unittest.TestCase):
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             content = adapter.read_text(encoding="utf-8")
-            self.assertIn(".agents/skills/sd-review-learnings/SKILL.md", content)
+            self.assertIn("Resolve the `sd-review-learnings` skill by name", content)
             self.assertIn("scripts/sd-ai-command-pack-review-learnings.py", content)
         for adapter in [
             root / ".claude/commands/sd/full-check.md",
@@ -1071,8 +1090,8 @@ class InstallTests(unittest.TestCase):
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             content = adapter.read_text(encoding="utf-8")
-            self.assertIn(".agents/skills/sd-full-check/SKILL.md", content)
-            self.assertIn("scripts/sd-ai-command-pack-full-check.sh", content)
+            self.assertIn("Resolve the `sd-full-check` skill by name", content)
+            self.assertIn("source of truth for the exact checks", content)
         for adapter in [
             root / ".claude/commands/sd/housekeeping.md",
             root / ".cursor/commands/sd-housekeeping.md",
@@ -1082,7 +1101,7 @@ class InstallTests(unittest.TestCase):
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             content = adapter.read_text(encoding="utf-8")
-            self.assertIn(".agents/skills/sd-housekeeping/SKILL.md", content)
+            self.assertIn("Resolve the `sd-housekeeping` skill by name", content)
             self.assertIn("scripts/sd-ai-command-pack-housekeeping.sh", content)
         for adapter in [
             root / ".claude/commands/sd/update-spec.md",
@@ -1093,9 +1112,9 @@ class InstallTests(unittest.TestCase):
         ]:
             self.assertTrue(adapter.is_file(), adapter)
             content = adapter.read_text(encoding="utf-8")
-            self.assertIn(".agents/skills/sd-update-spec/SKILL.md", content)
-            self.assertIn("Trellis update-spec first", content)
-            self.assertIn(".obsidian-kb", content)
+            self.assertIn("Resolve the `sd-update-spec` skill by name", content)
+            self.assertIn("source of truth for Trellis update-spec delegation", content)
+            self.assertNotIn("Trellis " + "update-spec first", content)
 
     def test_housekeeping_adapters_run_finish_work_before_housekeeping_script(
         self,
@@ -1111,7 +1130,7 @@ class InstallTests(unittest.TestCase):
         for adapter in adapters:
             content = adapter.read_text(encoding="utf-8")
             finish_index = content.index("finish-work")
-            script_index = content.index("bash scripts/sd-ai-command-pack-housekeeping.sh")
+            script_index = content.index("scripts/sd-ai-command-pack-housekeeping.sh")
             self.assertLess(
                 finish_index,
                 script_index,
@@ -1491,6 +1510,93 @@ class InstallTests(unittest.TestCase):
 
         self.assertEqual(result.status, "preserved")
         self.assertEqual(destination.read_text(encoding="utf-8"), "{}\n")
+
+    def test_install_file_preserves_if_not_exists_targets(self) -> None:
+        root = self.make_repo()
+        source = root / "source.json"
+        source.write_text('{"pack": true}\n', encoding="utf-8")
+        file = self.valid_pack_file(
+            source=source,
+            target=Path(".custom/config.json"),
+        )
+        file = install.PackFile(
+            platform=file.platform,
+            kind=file.kind,
+            source=file.source,
+            target=file.target,
+            anchor=file.anchor,
+            install=install.IF_NOT_EXISTS,
+        )
+        destination = root / ".custom/config.json"
+        destination.parent.mkdir(parents=True)
+        destination.write_text('{"local": true}\n', encoding="utf-8")
+
+        result = install.install_file(
+            file, root, force=True, dry_run=False, backup=True
+        )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertIsNone(result.backup)
+        self.assertEqual(destination.read_text(encoding="utf-8"), '{"local": true}\n')
+
+    def test_load_manifest_reports_missing_manifest_cleanly(self) -> None:
+        with mock.patch.object(install, "MANIFEST_PATH", PACK_ROOT / "missing-manifest.json"):
+            with self.assertRaisesRegex(SystemExit, "manifest not found"):
+                install.load_manifest()
+
+    def test_install_gitignore_rejects_invalid_utf8(self) -> None:
+        root = self.make_repo()
+        (root / ".gitignore").write_bytes(b"dist-\xff/\n")
+
+        with self.assertRaisesRegex(SystemExit, "not valid UTF-8"):
+            install.install_trellis_gitignore(root, dry_run=False)
+
+    def test_read_text_helpers_report_decode_and_os_errors(self) -> None:
+        root = self.make_repo()
+        invalid = root / "invalid.txt"
+        invalid.write_bytes(b"not utf-8: \xff\n")
+
+        with self.assertRaisesRegex(SystemExit, "strict label is not valid UTF-8"):
+            install.read_text_strict(invalid, "strict label")
+        with mock.patch.object(Path, "read_text", side_effect=OSError("blocked")):
+            with self.assertRaisesRegex(SystemExit, "cannot read strict label"):
+                install.read_text_strict(root / "blocked.txt", "strict label")
+            with self.assertRaisesRegex(SystemExit, "cannot read optional label"):
+                install.read_text_if_exists(root / "blocked.txt", "optional label")
+
+    def test_atomic_write_failure_reports_and_cleans_temp_file(self) -> None:
+        root = self.make_repo()
+        destination = root / "out.txt"
+
+        with mock.patch.object(install.os, "replace", side_effect=OSError("blocked")):
+            with mock.patch.object(Path, "unlink", side_effect=FileNotFoundError):
+                with self.assertRaisesRegex(SystemExit, "cannot write"):
+                    install.atomic_write_bytes(destination, b"content\n")
+
+    def test_managed_block_rejects_duplicate_markers(self) -> None:
+        block = (
+            f"{install.COPILOT_GUIDANCE_START}\n"
+            "pack block\n"
+            f"{install.COPILOT_GUIDANCE_END}\n"
+        )
+        current = (
+            f"{install.COPILOT_GUIDANCE_START}\nold\n"
+            f"{install.COPILOT_GUIDANCE_END}\n"
+            f"{install.COPILOT_GUIDANCE_START}\nolder\n"
+            f"{install.COPILOT_GUIDANCE_END}\n"
+        )
+
+        with self.assertRaisesRegex(SystemExit, "duplicate"):
+            install.merge_managed_block(current, block)
+
+        duplicate_end = (
+            f"{install.COPILOT_GUIDANCE_START}\nold\n"
+            f"{install.COPILOT_GUIDANCE_END}\n"
+            f"{install.COPILOT_GUIDANCE_END}\n"
+        )
+
+        with self.assertRaisesRegex(SystemExit, "duplicate sd-ai-command-pack end"):
+            install.merge_managed_block(duplicate_end, block)
 
     def test_subprocess_coverage_bootstrap_is_wired(self) -> None:
         # The 100% coverage gate depends on this bootstrap being present and on
@@ -2393,45 +2499,47 @@ class InstallTests(unittest.TestCase):
         for file in adapter_files:
             content = file.source.read_text(encoding="utf-8")
             if "start" in file.target.name:
-                self.assertIn(".agents/skills/trellis-start/SKILL.md", content)
-                self.assertIn("Follow that skill exactly", content)
+                self.assertIn("Resolve the `trellis-start` skill by name", content)
+                self.assertIn("Use that skill as the primary instructions", content)
             elif "continue" in file.target.name:
-                self.assertIn(".agents/skills/trellis-continue/SKILL.md", content)
-                self.assertIn("Follow that skill exactly", content)
+                self.assertIn("Resolve the `trellis-continue` skill by name", content)
+                self.assertIn("Use that skill as the primary instructions", content)
             elif "finish-work" in file.target.name:
-                self.assertIn(".agents/skills/trellis-finish-work/SKILL.md", content)
-                self.assertIn("Follow that skill exactly", content)
+                self.assertIn("Resolve the `trellis-finish-work` skill by name", content)
+                self.assertIn("Use that skill as the primary instructions", content)
             elif "full-check" in file.target.name:
-                self.assertIn(".agents/skills/sd-full-check/SKILL.md", content)
-                self.assertIn("scripts/sd-ai-command-pack-full-check.sh", content)
+                self.assertIn("Resolve the `sd-full-check` skill by name", content)
+                self.assertIn("source of truth for the exact checks", content)
             elif "review-local-all" in file.target.name:
-                self.assertIn(".agents/skills/sd-review-local-all/SKILL.md", content)
-                self.assertIn("scripts/sd-ai-command-pack-review-local.sh --all", content)
+                self.assertIn("Resolve the `sd-review-local-all` skill by name", content)
+                self.assertIn(
+                    "scripts/sd-ai-command-pack-review-local.sh --full-codebase",
+                    content,
+                )
             elif "review-local" in file.target.name:
-                self.assertIn(".agents/skills/sd-review-local/SKILL.md", content)
+                self.assertIn("Resolve the `sd-review-local` skill by name", content)
                 self.assertIn("scripts/sd-ai-command-pack-review-local.sh", content)
             elif "housekeeping" in file.target.name:
                 self.assertIn(
-                    ".agents/skills/sd-housekeeping/SKILL.md",
+                    "Resolve the `sd-housekeeping` skill by name",
                     content,
                 )
                 self.assertIn("scripts/sd-ai-command-pack-housekeeping.sh", content)
             elif "update-spec" in file.target.name:
-                self.assertIn(".agents/skills/sd-update-spec/SKILL.md", content)
-                self.assertIn("Trellis update-spec first", content)
-                self.assertIn(".obsidian-kb", content)
+                self.assertIn("Resolve the `sd-update-spec` skill by name", content)
+                self.assertIn("source of truth for Trellis update-spec delegation", content)
             elif "review-learnings" in file.target.name:
-                self.assertIn(".agents/skills/sd-review-learnings/SKILL.md", content)
+                self.assertIn("Resolve the `sd-review-learnings` skill by name", content)
                 self.assertIn("scripts/sd-ai-command-pack-review-learnings.py", content)
             else:
-                self.assertIn(".agents/skills/sd-review-pr/SKILL.md", content)
+                self.assertIn("Resolve the `sd-review-pr` skill by name", content)
 
     def test_codex_visible_sd_skill_wrappers_reference_workflows(self) -> None:
         expected = {
-            "sd-start": ".agents/skills/trellis-start/SKILL.md",
-            "sd-continue": ".agents/skills/trellis-continue/SKILL.md",
-            "sd-finish-work": ".agents/skills/trellis-finish-work/SKILL.md",
-            "sd-update-spec": "trellis-update-spec/SKILL.md",
+            "sd-start": "Resolve the `trellis-start` skill by name",
+            "sd-continue": "Resolve the `trellis-continue` skill by name",
+            "sd-finish-work": "Resolve the `trellis-finish-work` skill by name",
+            "sd-update-spec": "Resolve the `trellis-update-spec` skill by name",
         }
 
         for skill_name, target in expected.items():
@@ -2466,12 +2574,13 @@ class InstallTests(unittest.TestCase):
         self.assertIn("name: sd-review-local-all", review_local_all)
         self.assertIn("# SD Full-Codebase Local Review Loop", review_local_all)
         self.assertIn(
-            "bash scripts/sd-ai-command-pack-review-local.sh --all",
+            "bash scripts/sd-ai-command-pack-review-local.sh --full-codebase",
             review_local_all,
         )
         self.assertIn("prism review codebase", review_local_all)
         self.assertIn("empty chunk response", review_local_all)
         self.assertIn("gito review --all --path <repo-root>", review_local_all)
+        self.assertIn("replacing `<repo-root>` with the absolute repository root", review_local_all)
         self.assertIn("branch-diff deletions", review_local_all)
         self.assertIn("continue stacking fixes", review_local_all)
         self.assertIn("UV_CACHE_DIR", review_local_all)
@@ -2510,7 +2619,11 @@ class InstallTests(unittest.TestCase):
         update_spec = (
             install.ROOT / "templates/.agents/skills/sd-update-spec/SKILL.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("do not rebuild `.obsidian-kb/` manually", update_spec)
+        self.assertIn("do not rebuild", update_spec)
+        self.assertIn("`.obsidian-kb/` manually", update_spec)
+        self.assertIn("helper as the source of truth for `.obsidian-kb/`", update_spec)
+        self.assertNotIn("Ensure `.obsidian-kb/`", update_spec)
+        self.assertNotIn("Link every relevant existing repo-knowledge file", update_spec)
         self.assertNotIn("perform the remaining bullets manually", update_spec)
 
         update_spec = (
@@ -2558,16 +2671,16 @@ class InstallTests(unittest.TestCase):
 
     def test_gemini_entries_use_namespaced_toml_completion_shape(self) -> None:
         expected_descriptions = {
-            "start": "Run the Trellis start workflow.",
-            "continue": "Run the Trellis continue workflow.",
-            "finish-work": "Run the Trellis finish-work workflow.",
-            "review-pr": "Run the SD PR review loop.",
-            "review-local": "Run the SD local review loop.",
-            "review-local-all": "Run the SD full-codebase local review loop.",
-            "review-learnings": "Detect and update repo review learnings.",
-            "full-check": "Run the SD full-check gate.",
-            "housekeeping": "Run SD end-of-stream housekeeping.",
-            "update-spec": "Run the SD update-spec workflow.",
+            "start": "Initialize or resume a task using the Trellis start workflow.",
+            "continue": "Resume the current Trellis task or workflow state.",
+            "finish-work": "Wrap up the current Trellis coding session.",
+            "review-pr": "Run the Software Delivery (SD) pull-request review loop.",
+            "review-local": "Run the Software Delivery (SD) local review loop.",
+            "review-local-all": "Run the Software Delivery (SD) full-codebase local review loop.",
+            "review-learnings": "Detect or update repository review learnings.",
+            "full-check": "Run the Software Delivery (SD) full-check gate for deterministic checks, local review, and readiness reporting.",
+            "housekeeping": "Run Software Delivery (SD) end-of-stream housekeeping for a completed work stream.",
+            "update-spec": "Run the Software Delivery (SD) update-spec workflow for repository knowledge artifacts.",
         }
         _, files = install.load_manifest()
         gemini_commands = [
@@ -2631,11 +2744,13 @@ class InstallTests(unittest.TestCase):
             install.ROOT / "templates/.agents/skills/sd-update-spec/SKILL.md"
         ).read_text(encoding="utf-8")
         for expected in (
-            "trellis-update-spec/SKILL.md",
-            ".cursor/skills/trellis-update-spec/SKILL.md",
-            "Follow the Trellis update-spec skill exactly",
+            "Resolve the `trellis-update-spec` skill by name",
+            "skill discovery mechanism",
+            "Use the Trellis update-spec skill as the primary instructions",
             "repospec artifact",
-            "instead of hand-editing generated output",
+            "Makefile",
+            "package.json",
+            "instead of hand-editing generated",
             "Repomix",
             "docs/repomix-map.md",
             "no infrastructure",
@@ -2643,11 +2758,13 @@ class InstallTests(unittest.TestCase):
             "docs/ARCHITECTURE.md",
             ".trellis/spec/**/architecture*.md",
             "Do not create a new overview unless",
-            "changes high-level",
+            "architecture signals",
+            "package/module boundaries",
             "not present",
             "not warranted",
             ".obsidian-kb",
             "scripts/sd-ai-command-pack-update-spec-kb.py",
+            "exits nonzero",
             "repo root `.gitignore`",
             "symlinks",
             ".trellis/workflow.md",
@@ -2670,10 +2787,31 @@ class InstallTests(unittest.TestCase):
         ]
         for adapter_path in adapter_paths:
             content = adapter_path.read_text(encoding="utf-8")
-            self.assertIn(".agents/skills/sd-update-spec/SKILL.md", content)
-            self.assertIn("Trellis update-spec first", content)
-            self.assertIn("repospec artifact", content)
-            self.assertIn(".obsidian-kb", content)
+            self.assertIn("Resolve the `sd-update-spec` skill by name", content)
+            self.assertIn("source of truth for Trellis update-spec delegation", content)
+            self.assertNotIn("Trellis " + "update-spec first", content)
+            self.assertNotIn("repospec artifact", content)
+
+    def test_trellis_channel_reference_docs_do_not_use_unsupported_tag_flags(self) -> None:
+        progress_debugging = (
+            install.ROOT
+            / ".agents/skills/trellis-channel/references/progress-debugging.md"
+        ).read_text(encoding="utf-8")
+        workers = (
+            install.ROOT
+            / ".agents/skills/trellis-channel/references/workers.md"
+        ).read_text(encoding="utf-8")
+        command_reference = (
+            install.ROOT
+            / ".agents/skills/trellis-channel/references/command-reference.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("--tag", progress_debugging)
+        self.assertNotIn("--tag", workers)
+        self.assertIn("--kind interrupt_requested,interrupted", progress_debugging)
+        self.assertIn("--kind interrupt_requested,interrupted", workers)
+        self.assertIn("Question: check this when you reach the next turn.", workers)
+        self.assertIn("interrupt_requested` / `interrupted", command_reference)
 
     def test_update_spec_docs_explain_obsidian_kb_vault_linking(self) -> None:
         doc_paths = [
@@ -2688,7 +2826,7 @@ class InstallTests(unittest.TestCase):
             self.assertIn(".obsidian-kb/Dashboard.md", content)
             self.assertIn("Markdown landing page", content)
             self.assertIn("scripts/sd-ai-command-pack-update-spec-kb.py", content)
-            self.assertIn("ln -s /absolute/path/to/repo/.obsidian-kb", content)
+            self.assertIn('ln -s "$(pwd)/.obsidian-kb"', content)
             self.assertIn("New-Item -ItemType SymbolicLink", content)
             self.assertIn("PowerShell running as Administrator", content)
             self.assertIn("Developer Mode enabled", content)
@@ -2800,7 +2938,7 @@ class InstallTests(unittest.TestCase):
             cwd=root,
             env={
                 **os.environ,
-                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
                 "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF": "HEAD",
             },
             text=True,
@@ -2855,7 +2993,7 @@ class InstallTests(unittest.TestCase):
             cwd=root,
             env={
                 **os.environ,
-                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
                 "SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF": "HEAD~1",
                 "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF": "HEAD~1",
             },
@@ -2910,7 +3048,7 @@ class InstallTests(unittest.TestCase):
             cwd=root,
             env={
                 **os.environ,
-                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
                 "SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF": "HEAD~1",
                 "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF": "HEAD~1",
             },
@@ -2963,7 +3101,7 @@ class InstallTests(unittest.TestCase):
             cwd=root,
             env={
                 **os.environ,
-                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
             },
             text=True,
             stdout=subprocess.PIPE,
@@ -3039,7 +3177,7 @@ class InstallTests(unittest.TestCase):
             cwd=root,
             env={
                 **os.environ,
-                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
             },
             text=True,
             stdout=subprocess.PIPE,
@@ -3093,7 +3231,7 @@ class InstallTests(unittest.TestCase):
             cwd=root,
             env={
                 **os.environ,
-                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
                 "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF": "HEAD~1",
             },
             text=True,
@@ -3276,7 +3414,7 @@ class InstallTests(unittest.TestCase):
             cwd=root,
             env={
                 **os.environ,
-                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
                 "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE": "2",
             },
             text=True,
@@ -3331,7 +3469,7 @@ class InstallTests(unittest.TestCase):
             cwd=root,
             env={
                 **os.environ,
-                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
                 "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE": "1",
             },
             text=True,
@@ -3379,7 +3517,7 @@ class InstallTests(unittest.TestCase):
             cwd=root,
             env={
                 **os.environ,
-                "PATH": f"{stub_bin}{os.pathsep}{os.defpath}",
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
                 "TMPDIR": str(temp_root),
             },
             text=True,
@@ -3489,6 +3627,89 @@ class InstallTests(unittest.TestCase):
         self.assertIn("Local review scope: full codebase", result.stdout)
         self.assertEqual(tool_log.read_text(encoding="utf-8"), "all-command\n")
 
+    def test_review_local_full_codebase_alias_uses_all_custom_tool(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        tool_log = root / "custom-tool.log"
+
+        result = subprocess.run(
+            [
+                self._bash_path,
+                "scripts/sd-ai-command-pack-review-local.sh",
+                "--full-codebase",
+            ],
+            cwd=root,
+            env={
+                **os.environ,
+                "CUSTOM_TOOL_LOG": str(tool_log),
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS": "custom",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_CUSTOM_COMMAND": (
+                    "printf 'diff-command\\n' > \"$CUSTOM_TOOL_LOG\""
+                ),
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_CUSTOM_COMMAND": (
+                    "printf 'full-command\\n' > \"$CUSTOM_TOOL_LOG\""
+                ),
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Local review scope: full codebase", result.stdout)
+        self.assertEqual(tool_log.read_text(encoding="utf-8"), "full-command\n")
+
+    def test_review_local_script_lists_supported_tools(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        result = subprocess.run(
+            [
+                self._bash_path,
+                "scripts/sd-ai-command-pack-review-local.sh",
+                "--list-tools",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(result.stdout.splitlines(), ["prism", "gito", "all", "default"])
+
+    def test_review_local_script_help_describes_full_codebase_alias(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "--help"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("--full-codebase", result.stdout)
+        self.assertIn("--list-tools", result.stdout)
+        self.assertIn("Tool names must use only", result.stdout)
+
     def test_review_local_script_reports_unknown_tool(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
@@ -3508,6 +3729,30 @@ class InstallTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 2, result.stdout)
         self.assertIn("No command configured for local review tool 'unknown'", result.stdout)
+
+    def test_review_local_script_rejects_unsafe_tool_name(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        result = subprocess.run(
+            [
+                self._bash_path,
+                "scripts/sd-ai-command-pack-review-local.sh",
+                "../unknown",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("Unsupported local review tool name '../unknown'", result.stdout)
 
     def test_pack_owned_scripts_use_sd_ai_command_pack_identity(self) -> None:
         raw, files = install.load_manifest()
@@ -4060,6 +4305,7 @@ import assert from 'node:assert/strict';
 import {
   copiedTemplateKind,
   extractDocumentationPathReferences,
+  parseNumstat,
   parseJournalSessionsFromText,
   parseWorkspaceIndexSessionsFromText,
   shouldCheckDocumentationPathReference,
@@ -4068,6 +4314,12 @@ import {
 
 assert.equal(copiedTemplateKind('.trellis/scripts/get_context.py'), 'trellis');
 assert.equal(copiedTemplateKind('.agents/skills/sd-review-pr/SKILL.md'), 'sd-ai-command-pack');
+assert.deepEqual(parseNumstat('1\\t2\\tsrc/file\\tname.js\\0'), [
+  { added: 1, deleted: 2, path: 'src/file\\tname.js' },
+]);
+assert.deepEqual(parseNumstat('3\\t4\\t\\0old\\tname.js\\0new\\tname.js\\0'), [
+  { added: 3, deleted: 4, path: 'new\\tname.js' },
+]);
 assert.deepEqual(
   extractDocumentationPathReferences('docs/guide.md', 'See `docs/current.md` and [missing](../missing.md).').map((item) => item.target),
   ['../missing.md', 'docs/current.md'],
@@ -4294,6 +4546,27 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("legacy pack reference remains", result.stdout)
         self.assertIn("scripts/trellis-full-check.sh", result.stdout)
         self.assertIn("install audit passed", result.stdout)
+
+    def test_install_audit_legacy_reference_scan_uses_boundaries(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text(
+            "The my-trellis-review-pr-project name is not a command.\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("legacy pack reference remains", result.stdout)
 
     def run_source_audit(self, root: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -4544,6 +4817,59 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("<!-- sd-review-learnings:start -->", content)
         self.assertIn("No local review-cycle findings detected", content)
 
+    def test_review_learnings_script_rejects_malformed_payload_helpers(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_test",
+        )
+
+        with self.assertRaisesRegex(TypeError, "expected object"):
+            module._as_dict(None)
+        with self.assertRaisesRegex(TypeError, "expected list"):
+            module._as_list({})
+
+    def test_review_learnings_script_rejects_invalid_managed_marker_order(
+        self,
+    ) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_marker_test",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-test-")
+        self.addCleanup(tempdir.cleanup)
+        target = Path(tempdir.name) / "review-learnings.md"
+        target.write_text(
+            "# Review Learnings\n\n"
+            "<!-- sd-review-learnings:end -->\n"
+            "old\n"
+            "<!-- sd-review-learnings:start -->\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(ValueError, "invalid order"):
+            module.update_target(target, "<!-- sd-review-learnings:start -->\nnew\n<!-- sd-review-learnings:end -->\n", dry_run=False)
+
+    def test_review_learnings_script_skips_incomplete_github_payloads(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_github_payload_test",
+        )
+
+        def fake_run_gh_json(args: list[str], repo_root: Path):
+            if args[:2] == ["pr", "list"]:
+                return [{"number": 1, "title": "PR", "url": "https://example.test/pr/1"}]
+            return {"errors": [{"message": "rate limited"}]}
+
+        with mock.patch.object(module, "github_repo_slug", return_value=("owner", "repo")):
+            with mock.patch.object(module, "_run_gh_json", fake_run_gh_json):
+                comments = module.fetch_recent_copilot_comments(
+                    Path("."),
+                    days=1,
+                    limit=1,
+                )
+
+        self.assertEqual(comments, [])
+
     def test_review_learnings_script_resolves_github_repo_generically(self) -> None:
         script = (
             install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py"
@@ -4654,6 +4980,27 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             (root / ".gitignore").read_text(encoding="utf-8").count(".obsidian-kb/"),
             1,
         )
+
+    def test_update_spec_kb_quotes_vault_link_example(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py",
+            "sd_ai_command_pack_update_spec_kb_quote_test",
+        )
+        root = Path("/tmp/repo with spaces")
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            module.report_kb_state(
+                root=root,
+                mode=None,
+                gitignore_state="present",
+                symlinks=0,
+                stale=0,
+                dashboard_state="present",
+                conflicts=[],
+            )
+
+        self.assertIn("ln -s '/tmp/repo with spaces/.obsidian-kb'", output.getvalue())
 
     def test_update_spec_kb_help_is_read_only(self) -> None:
         root = self.make_repo()
@@ -4987,16 +5334,10 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
 
     def test_pr_body_scope_merge_rules_dedupes_patterns_in_order(self) -> None:
         module_path = install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py"
-        module_name = "sd_ai_command_pack_pr_body_scope_test"
-        spec = importlib.util.spec_from_file_location(module_name, module_path)
-        self.assertIsNotNone(spec)
-        self.assertIsNotNone(spec.loader)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        try:
-            spec.loader.exec_module(module)
-        finally:
-            sys.modules.pop(module_name, None)
+        module = self.load_module_from_path(
+            module_path,
+            "sd_ai_command_pack_pr_body_scope_test",
+        )
 
         headings = ("CI/review scope:", "CI scope:")
         merged = module._merge_rules(
@@ -5019,6 +5360,55 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             merged[0].patterns,
             ("scripts/a.sh", "scripts/b.sh", "scripts/c.sh"),
         )
+
+    def test_pr_body_scope_double_star_patterns_match_nested_paths(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            "sd_ai_command_pack_pr_body_scope_match_test",
+        )
+
+        self.assertTrue(module._matches_pattern("src", "src/**"))
+        self.assertTrue(module._matches_pattern("src/file.py", "src/**"))
+        self.assertTrue(module._matches_pattern("src/nested/file.py", "src/**"))
+        self.assertFalse(module._matches_pattern("other/src/file.py", "src/**"))
+
+    def test_pr_body_scope_config_can_include_installed_targets(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            "sd_ai_command_pack_pr_body_scope_installed_targets_test",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-pr-body-scope-test-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        (root / ".sd-ai-command-pack").mkdir()
+        (root / ".sd-ai-command-pack/installed-targets.txt").write_text(
+            "custom/generated.md\n",
+            encoding="utf-8",
+        )
+        config = root / "scope.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "rules": [
+                        {
+                            "label": "Custom generated scope",
+                            "headings": ["Custom generated scope:"],
+                            "patterns": ["docs/custom.md"],
+                            "include_installed_targets": True,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        rules, error = module._rules_for_repo(root, config)
+
+        self.assertIsNone(error)
+        custom_rule = next(
+            rule for rule in rules if rule.label == "Custom generated scope"
+        )
+        self.assertIn("custom/generated.md", custom_rule.patterns)
 
     def test_pr_body_scope_script_enforces_configured_runtime_scope(self) -> None:
         root = self.make_repo()
@@ -5438,7 +5828,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             cwd=root,
             env={
                 **os.environ,
-                "PATH": os.defpath,
+                "PATH": os.environ["PATH"],
                 "SD_AI_COMMAND_PACK_SCOPE_CHECK_GH": "required",
                 "SD_AI_COMMAND_PACK_SCOPE_PR_BODY": (
                     "Tooling/generated scope: command-pack refresh."
@@ -5479,7 +5869,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             cwd=root,
             env={
                 **os.environ,
-                "PATH": os.defpath,
+                "PATH": os.environ["PATH"],
                 "SD_AI_COMMAND_PACK_SCOPE_CHECK_GH": "required",
                 "SD_AI_COMMAND_PACK_SCOPE_PR_BODY": "Updates behavior.",
             },
@@ -5509,6 +5899,19 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         )
         self.assert_prism_rules_valid(prism_rules_files[0].source)
         self.assert_no_secret_markers(prism_rules_files[0].source)
+        self.assertEqual(prism_rules_files[0].install, install.IF_NOT_EXISTS)
+
+    def test_prism_rules_schema_template_is_installed(self) -> None:
+        schema_files = [
+            file
+            for file in self.shared_manifest_files("config")
+            if file.target == Path(".prism/rules.schema.json")
+        ]
+
+        self.assertEqual(len(schema_files), 1)
+        schema = json.loads(schema_files[0].source.read_text(encoding="utf-8"))
+        self.assertIn("$schema", schema)
+        self.assertIn("severityOverrides", schema["properties"])
 
     def test_review_pr_skill_allows_reply_and_resolve_for_addressed_threads(self) -> None:
         skill = (
@@ -5601,14 +6004,14 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             install.ROOT / "templates/.opencode/commands/sd-review-pr.md",
         ]
 
-        self.assertIn("Post-Merge Auto-Dispatch", skill)
+        self.assertIn("Post-Merge Handoff", skill)
         self.assertIn('PR_STATE" = "MERGED"', skill)
         self.assertIn("bash scripts/sd-ai-command-pack-housekeeping.sh", skill)
         self.assertIn("not a background GitHub webhook", skill)
         for adapter_path in adapter_paths:
             content = adapter_path.read_text(encoding="utf-8")
-            self.assertIn("becomes merged during the active session", content)
-            self.assertIn("housekeeping auto-dispatch", content)
+            self.assertIn("If the PR is merged while this command is running", content)
+            self.assertIn("post-merge cleanup workflow", content)
 
     def test_housekeeping_skill_and_script_describe_expected_clean_state(self) -> None:
         skill = (
@@ -5639,7 +6042,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             "inventory, not as blockers",
             "current stream cleanup",
             "SD finish-work flow",
-            ".agents/skills/sd-finish-work/SKILL.md",
+            "execute the `sd-finish-work` flow",
             "--no-auto-merge",
         ]:
             self.assertIn(text, skill)
@@ -5669,7 +6072,6 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             "pruned $REMOTE after remote branch deletion",
             "default branch is unknown; skipped branch inventory checks",
             'grep -F -x -v "$DEFAULT_BRANCH"',
-            'grep -F -x -v "$REMOTE/$DEFAULT_BRANCH"',
             'git remote get-url "$REMOTE"',
             'gh repo view "$GITHUB_REPO_SLUG"',
             "github_repo_from_remote_url()",
@@ -5685,9 +6087,9 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             "left the remote branch untouched",
             'git rev-parse --verify "refs/heads/$DEFAULT_BRANCH^{commit}"',
             'git rev-parse --verify "refs/remotes/$REMOTE/$DEFAULT_BRANCH^{commit}"',
-            'kept_remote_branch="$REMOTE/$START_BRANCH"',
-            'grep -F -x -v "$kept_remote_branch"',
-            "and kept $kept_remote_branch",
+            "remote source branch kept: $REMOTE/$START_BRANCH",
+            "remote source branch absent: $REMOTE/$START_BRANCH",
+            "remote source branch still tracked: $REMOTE/$START_BRANCH",
             "failed to check whether remote branch $REMOTE/$branch exists",
             "dry-run preview: skipped final git-state verification",
             "would run: git pull --ff-only $REMOTE $DEFAULT_BRANCH",

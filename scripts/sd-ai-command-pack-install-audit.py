@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import os
+import re
+from collections.abc import Iterable
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
@@ -62,6 +64,13 @@ LEGACY_PACK_REFERENCES = {
     "TRELLIS_FULL_CHECK": "SD_AI_COMMAND_PACK_FULL_CHECK",
     "TRELLIS_HOUSEKEEPING": "SD_AI_COMMAND_PACK_HOUSEKEEPING",
 }
+LEGACY_REFERENCE_BOUNDARY = r"[A-Za-z0-9_.-]"
+LEGACY_PACK_REFERENCE_PATTERNS = {
+    needle: re.compile(
+        rf"(?<!{LEGACY_REFERENCE_BOUNDARY}){re.escape(needle)}(?!{LEGACY_REFERENCE_BOUNDARY})"
+    )
+    for needle in LEGACY_PACK_REFERENCES
+}
 
 REFERENCE_SCAN_BASES = (
     "AGENTS.md",
@@ -105,8 +114,6 @@ def is_unsafe_installed_target(path_text: str) -> bool:
     return (
         posix_path.is_absolute()
         or windows_path.is_absolute()
-        or bool(windows_path.drive)
-        or bool(windows_path.root)
         or ".." in posix_path.parts
         or ".." in windows_path.parts
     )
@@ -149,6 +156,7 @@ def matches_pack_file(relative_path: str) -> bool:
 
 
 def collect_pack_like_files(root: Path) -> list[str]:
+    """Return installed-pack-shaped files that exist under known pack locations."""
     bases = [
         ".agents/skills",
         ".claude/commands",
@@ -202,38 +210,38 @@ def _is_excluded_scan_path(relative_path: Path) -> bool:
     )
 
 
-def _iter_reference_scan_files(root: Path, skipped_paths: set[str]) -> list[Path]:
-    files: list[Path] = []
+def _iter_reference_scan_candidates(root: Path) -> Iterable[Path]:
+    """Yield files from configured reference-scan roots before filtering."""
     for base in REFERENCE_SCAN_BASES:
         base_path = root / base
         if not base_path.exists() or base_path.is_symlink():
             continue
         if base_path.is_file():
-            relative_path = base_path.relative_to(root)
-            relative_text = relative_path.as_posix()
-            if (
-                relative_text not in skipped_paths
-                and not matches_pack_file(relative_text)
-                and not _is_excluded_scan_path(relative_path)
-            ):
-                files.append(relative_path)
+            yield base_path.relative_to(root)
             continue
         for path in base_path.rglob("*"):
             if path.is_symlink() or not path.is_file():
                 continue
-            relative_path = path.relative_to(root)
-            relative_text = relative_path.as_posix()
-            if (
-                relative_text in skipped_paths
-                or matches_pack_file(relative_text)
-                or _is_excluded_scan_path(relative_path)
-            ):
-                continue
-            files.append(relative_path)
+            yield path.relative_to(root)
+
+
+def _iter_reference_scan_files(root: Path, skipped_paths: set[str]) -> list[Path]:
+    """Return non-pack, non-skipped text candidates for legacy-reference scans."""
+    files: list[Path] = []
+    for relative_path in _iter_reference_scan_candidates(root):
+        relative_text = relative_path.as_posix()
+        if (
+            relative_text in skipped_paths
+            or matches_pack_file(relative_text)
+            or _is_excluded_scan_path(relative_path)
+        ):
+            continue
+        files.append(relative_path)
     return sorted(set(files), key=lambda path: path.as_posix())
 
 
 def audit_migration_advisories(root: Path, targets: set[str]) -> list[str]:
+    """Report legacy pack paths and whole-token references that remain."""
     warnings: list[str] = []
 
     for relative_path, replacement in LEGACY_PACK_PATHS.items():
@@ -251,7 +259,7 @@ def audit_migration_advisories(root: Path, targets: set[str]) -> list[str]:
         except OSError:
             continue
         for needle, replacement in LEGACY_PACK_REFERENCES.items():
-            if needle in text:
+            if LEGACY_PACK_REFERENCE_PATTERNS[needle].search(text):
                 warnings.append(
                     "legacy pack reference remains: "
                     f"{relative_path.as_posix()} contains {needle!r}; "
