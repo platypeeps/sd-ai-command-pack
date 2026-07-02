@@ -7499,6 +7499,73 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         )
         self.assertFalse(marker.exists())
 
+    def test_housekeeping_self_test_passes_hermetically(self) -> None:
+        # The self-test must pass from a non-git directory with no gh on PATH,
+        # exercising only the vendored gate logic.
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-selftest-")
+        self.addCleanup(tempdir.cleanup)
+
+        result = subprocess.run(
+            [
+                self._bash_path,
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--self-test",
+            ],
+            cwd=tempdir.name,
+            env={"PATH": tempdir.name, "HOME": tempdir.name},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("self-test: all scenarios passed", result.stdout)
+        for scenario in (
+            "green executed checks merge",
+            "skipped lanes do not block",
+            "blocking checks refuse",
+            "zero successful checks refuse",
+            "undeterminable counts refuse",
+            "non-clean merge state refuses",
+            "draft PR refuses",
+            "unresolved review threads refuse",
+        ):
+            self.assertIn(f"self-test: {scenario}: ok", result.stdout)
+
+    def test_housekeeping_self_test_detects_a_neutered_gate(self) -> None:
+        # Meta-regression: a sabotaged blocking-check gate must fail the
+        # self-test, proving it verifies behavior rather than always passing.
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-sabotage-")
+        self.addCleanup(tempdir.cleanup)
+        script = (
+            install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"
+        ).read_text(encoding="utf-8")
+        needle = '[ "$blocking_check_count" -ne 0 ]'
+        self.assertIn(needle, script)
+        sabotaged = Path(tempdir.name) / "sabotaged.sh"
+        sabotaged.write_text(
+            script.replace(needle, '[ "$blocking_check_count" -lt 0 ]'),
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [self._bash_path, str(sabotaged), "--self-test"],
+            cwd=tempdir.name,
+            env={"PATH": tempdir.name, "HOME": tempdir.name},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("self-test: blocking checks refuse: FAIL", result.stdout)
+
     def test_housekeeping_no_auto_merge_leaves_open_pr_untouched(
         self,
     ) -> None:
