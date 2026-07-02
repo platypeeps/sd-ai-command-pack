@@ -7514,7 +7514,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
                 "--self-test",
             ],
             cwd=tempdir.name,
-            env={"PATH": "/usr/bin:/bin", "HOME": tempdir.name},
+            env={"PATH": tempdir.name, "HOME": tempdir.name},
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -7556,7 +7556,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         result = subprocess.run(
             [self._bash_path, str(sabotaged), "--self-test"],
             cwd=tempdir.name,
-            env={"PATH": "/usr/bin:/bin", "HOME": tempdir.name},
+            env={"PATH": tempdir.name, "HOME": tempdir.name},
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

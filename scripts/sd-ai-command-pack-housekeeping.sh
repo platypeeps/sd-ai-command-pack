@@ -881,6 +881,10 @@ self_test_scenario() {
   local output merged=0
 
   output="$(
+    # Guarantee hermeticity rather than assume it: with an empty PATH every
+    # unstubbed external command fails loudly, and gh is stubbed to fail so
+    # future gate logic cannot silently reach GitHub even if PATH leaks.
+    PATH=''
     DEFAULT_BRANCH=main
     AUTO_MERGE=1
     MERGE_STRATEGY=merge
@@ -888,6 +892,10 @@ self_test_scenario() {
     ANOMALIES=()
     working_tree_is_clean() { return 0; }
     have() { return 0; }
+    gh() {
+      printf 'self-test: unexpected gh call: %s\n' "$*" >&2
+      return 1
+    }
     view_open_pr_readiness_for_branch() {
       printf '153\tOPEN\t%s\thttps://example.test/pr/153\tfeature\theadoid\tmain\t%s\t%s\t%s\n' \
         "$is_draft" "$merge_state" "$blocking" "$successful"
