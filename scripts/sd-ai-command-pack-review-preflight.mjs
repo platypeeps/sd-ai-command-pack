@@ -641,7 +641,9 @@ function normalizeDocumentationReference(raw) {
     return '';
   }
 
-  return trimmed.split('#')[0];
+  const withoutAnchor = trimmed.split('#')[0];
+  const pytestNodeIdMatch = /^(.+\.(?:py|pyi))::[^/\s]+/.exec(withoutAnchor);
+  return pytestNodeIdMatch ? pytestNodeIdMatch[1] : withoutAnchor;
 }
 
 function resolveDocumentationReference(file, target, kind, options = {}) {

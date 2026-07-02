@@ -378,6 +378,7 @@ class InstallTests(unittest.TestCase):
             "Software Delivery command wrappers",
             # Vendored-payload guidance with collapsed glob families.
             "payloads as vendored files",
+            "narrow-globs: skip - cross-platform generated payload families",
             ".trellis/scripts/**",
             ".trellis/agents/**",
             "**/skills/trellis-*/**",
@@ -4674,6 +4675,10 @@ assert.deepEqual(
   extractDocumentationPathReferences('docs/guide.md', 'See `docs/current.md` and [missing](../missing.md).').map((item) => item.target),
   ['../missing.md', 'docs/current.md'],
 );
+assert.deepEqual(
+  extractDocumentationPathReferences('docs/guide.md', 'Pinned by `tests/test_docs_drift.py::test_docs_match`.').map((item) => item.target),
+  ['tests/test_docs_drift.py'],
+);
 assert.equal(shouldCheckDocumentationPathReference('docs/guide:section.md'), true);
 assert.equal(shouldCheckDocumentationPathReference('.sd-ai-command-pack/installed-targets.txt'), false);
 assert.equal(shouldCheckDocumentationPathReference('.sd-ai-command-pack/local-only.txt'), false);
@@ -4932,6 +4937,29 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertNotIn("legacy pack reference remains", result.stdout)
 
+    def test_install_audit_ignores_excluded_directories_below_scan_roots(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        cache_dir = root / "scripts/__pycache__"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / "tool.pyc").write_text(
+            "scripts/trellis-full-check.sh\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("legacy pack reference remains", result.stdout)
+
     def run_source_audit(self, root: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
@@ -5173,7 +5201,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
                 'echo "$SD_FOO" "${GH_BAR}" "${SD_DEFAULT:-0}" SD_BARE',
                 ("SD", "GH"),
             ),
-            {"SD_FOO", "GH_BAR"},
+            {"SD_FOO", "GH_BAR", "SD_DEFAULT"},
         )
 
     def test_review_learnings_script_updates_managed_block(self) -> None:
