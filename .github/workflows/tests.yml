@@ -76,3 +76,25 @@ jobs:
 
       - name: Zizmor (workflow security)
         run: zizmor --offline .github/workflows/
+
+  # Single aggregate context for branch protection, matching the fleet
+  # convention: protection requires only "CI Result" so matrix or lane
+  # changes never strand a PR waiting on a renamed context.
+  ci-result:
+    name: CI Result
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [unittest, security]
+    if: always()
+
+    steps:
+      - name: Evaluate required lanes
+        env:
+          UNITTEST_RESULT: ${{ needs.unittest.result }}
+          SECURITY_RESULT: ${{ needs.security.result }}
+        run: |
+          echo "unittest=$UNITTEST_RESULT security=$SECURITY_RESULT"
+          if [ "$UNITTEST_RESULT" != "success" ] || [ "$SECURITY_RESULT" != "success" ]; then
+            echo "A required lane did not succeed."
+            exit 1
+          fi
