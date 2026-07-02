@@ -505,9 +505,34 @@ class InstallTests(unittest.TestCase):
         stub_bin: Path,
         marker: Path,
         graphql_body: str = "  printf '0\\tfalse\\t\\n'\n",
-        failed_check_count: str = "0",
-        total_check_count: str = "2",
+        blocking_check_count: str = "0",
+        successful_check_count: str = "2",
+        rollup_json: str | None = None,
     ) -> None:
+        if rollup_json is None:
+            readiness_branch = (
+                "    printf '6\\t%s\\tfalse\\thttps://example.test/pr/6\\tfeature/cleanup\\t%s\\tmain\\tCLEAN\\t%s\\t%s\\n' "
+                f"\"$state\" \"$head\" {blocking_check_count!r} {successful_check_count!r}\n"
+            )
+        else:
+            # Evaluate the script's real --jq program with real jq against a
+            # fixture PR payload so the check-classification logic itself is
+            # exercised instead of canned TSV counts.
+            readiness_branch = (
+                "    prog=''\n"
+                "    prev=''\n"
+                "    for a in \"$@\"; do\n"
+                "      if [ \"$prev\" = '--jq' ]; then prog=\"$a\"; fi\n"
+                "      prev=\"$a\"\n"
+                "    done\n"
+                "    jq -r \"$prog\" <<FIXTURE\n"
+                "{\"number\": 6, \"state\": \"$state\", \"isDraft\": false,"
+                " \"url\": \"https://example.test/pr/6\","
+                " \"headRefName\": \"feature/cleanup\", \"headRefOid\": \"$head\","
+                " \"baseRefName\": \"main\", \"mergeStateStatus\": \"CLEAN\","
+                f" \"statusCheckRollup\": {rollup_json}}}\n"
+                "FIXTURE\n"
+            )
         (stub_bin / "gh").write_text(
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
@@ -524,8 +549,7 @@ class InstallTests(unittest.TestCase):
             "  head=\"$(head_oid)\"\n"
             "  args=\" $* \"\n"
             "  if [[ \"$args\" == *isDraft* ]]; then\n"
-            "    printf '6\\t%s\\tfalse\\thttps://example.test/pr/6\\tfeature/cleanup\\t%s\\tmain\\tCLEAN\\t%s\\t%s\\n' "
-            f"\"$state\" \"$head\" {failed_check_count!r} {total_check_count!r}\n"
+            + readiness_branch +
             "  else\n"
             "    merged_at=''\n"
             "    if [ \"$state\" = MERGED ]; then merged_at='2026-06-27T18:00:00Z'; fi\n"
@@ -7377,7 +7401,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.write_auto_merge_gh_stub(
             stub_bin,
             marker,
-            failed_check_count="unknown",
+            blocking_check_count="unknown",
         )
 
         result = subprocess.run(
@@ -7396,7 +7420,81 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
 
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
-            "PR #6 has non-green or undeterminable checks; skipped auto-merge",
+            "PR #6 has undeterminable check counts; skipped auto-merge",
+            result.stdout,
+        )
+        self.assertFalse(marker.exists())
+
+    def run_housekeeping_with_rollup(
+        self, rollup_json: str
+    ) -> tuple[subprocess.CompletedProcess[str], Path]:
+        if shutil.which("jq") is None:
+            self.skipTest("jq is not available on PATH")
+        repo, _, stub_bin, _ = self.make_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_merge_gh_stub(stub_bin, marker, rollup_json=rollup_json)
+        result = subprocess.run(
+            ["bash", str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        return result, marker
+
+    def test_housekeeping_auto_merges_with_skipped_and_neutral_checks(self) -> None:
+        # Regression: classifier-skipped lanes (SKIPPED/NEUTRAL conclusions)
+        # must not block the merge gate when executed checks are green.
+        result, marker = self.run_housekeeping_with_rollup(
+            '[{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"},'
+            ' {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SKIPPED"},'
+            ' {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "NEUTRAL"},'
+            ' {"__typename": "StatusContext", "state": "SUCCESS"}]'
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("merged PR #6 with merge strategy", result.stdout)
+        self.assertTrue(marker.exists())
+
+    def test_housekeeping_skips_auto_merge_when_all_checks_skipped(self) -> None:
+        # An all-skipped run executed nothing, so it must not merge.
+        result, marker = self.run_housekeeping_with_rollup(
+            '[{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SKIPPED"},'
+            ' {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SKIPPED"}]'
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "PR #6 has no successful executed checks; skipped auto-merge",
+            result.stdout,
+        )
+        self.assertFalse(marker.exists())
+
+    def test_housekeeping_skips_auto_merge_with_pending_or_failed_checks(self) -> None:
+        result, marker = self.run_housekeeping_with_rollup(
+            '[{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"},'
+            ' {"__typename": "CheckRun", "status": "IN_PROGRESS", "conclusion": null}]'
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "PR #6 has non-green checks; skipped auto-merge",
+            result.stdout,
+        )
+        self.assertFalse(marker.exists())
+
+        result, marker = self.run_housekeeping_with_rollup(
+            '[{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"},'
+            ' {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "FAILURE"}]'
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "PR #6 has non-green checks; skipped auto-merge",
             result.stdout,
         )
         self.assertFalse(marker.exists())
