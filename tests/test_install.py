@@ -7078,6 +7078,49 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("could not be parsed as JSON", result.stdout)
 
+    def test_review_preflight_resolves_pytest_node_ids_to_files(self) -> None:
+        # Regression: docs referencing pytest node ids (tests/x.py::test_y) must
+        # resolve the file part only — present file passes, missing file fails.
+        if shutil.which("node") is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_repo()
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(
+            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
+        )
+        (root / "tests").mkdir()
+        (root / "tests/test_real.py").write_text("def test_ok():\n    pass\n", encoding="utf-8")
+        docs = root / "docs"
+        docs.mkdir()
+        (docs / "guide.md").write_text(
+            "Run `tests/test_real.py::test_ok` before merging.\n",
+            encoding="utf-8",
+        )
+
+        def run_preflight() -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ["node", "scripts/sd-ai-command-pack-review-preflight.mjs"],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        result = run_preflight()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("test_real.py", result.stdout.replace("PASS", ""))
+
+        (docs / "guide.md").write_text(
+            "Run `tests/test_missing.py::test_gone` before merging.\n",
+            encoding="utf-8",
+        )
+        result = run_preflight()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("tests/test_missing.py", result.stdout)
+
     def test_review_pr_skill_auto_dispatches_housekeeping_after_merge(self) -> None:
         skill = (
             install.ROOT
