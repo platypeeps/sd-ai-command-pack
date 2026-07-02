@@ -7525,7 +7525,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("self-test: all scenarios passed", result.stdout)
         for scenario in (
             "green executed checks merge",
-            "skipped lanes do not block",
+            "single executed success suffices",
             "blocking checks refuse",
             "zero successful checks refuse",
             "undeterminable counts refuse",
