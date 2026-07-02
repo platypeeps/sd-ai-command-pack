@@ -2,13 +2,20 @@ name: Tests
 
 on:
   pull_request:
+    paths-ignore:
+      - ".trellis/workspace/**"
   push:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   unittest:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       matrix:
         python-version:
