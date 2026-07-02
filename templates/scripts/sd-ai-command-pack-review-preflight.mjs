@@ -641,9 +641,9 @@ function normalizeDocumentationReference(raw) {
     return '';
   }
 
-  const withoutAnchor = trimmed.split('#')[0];
-  const pytestNodeIdMatch = /^(.+\.(?:py|pyi))::[^/\s]+/.exec(withoutAnchor);
-  return pytestNodeIdMatch ? pytestNodeIdMatch[1] : withoutAnchor;
+  // Strip URL fragments and pytest-style node-id selectors
+  // (tests/test_x.py::test_case) so only the file part is resolved.
+  return trimmed.split('#')[0].split('::')[0];
 }
 
 function resolveDocumentationReference(file, target, kind, options = {}) {
