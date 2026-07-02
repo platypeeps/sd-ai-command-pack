@@ -1573,14 +1573,23 @@ class InstallTests(unittest.TestCase):
         self.assertIn("sd-ai-command-pack-full-check.sh", template)
         self.assertIn("no mutate-before-success", template)
         self.assertIn("push once", template)
-        # Scope headings must only appear inside HTML comments so a template
-        # body cannot satisfy the pr-body scope check by itself.
-        for line in template.splitlines():
-            if "scope:" in line:
-                self.assertFalse(
-                    line.lstrip().startswith(("Tooling", "Automation", "CI/")),
-                    f"scope heading must not start a line: {line!r}",
-                )
+        # An unedited template body must NOT satisfy the pr-body scope check, or
+        # every PR would auto-pass. Assert against the real matcher rather than a
+        # hand-rolled line check, so this cannot drift from _body_has_heading()
+        # (which also matches headings behind Markdown markers like "- "/"> ").
+        scope_check = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            "sd_pr_body_scope_template_guard",
+        )
+        for heading in (
+            "Tooling/generated scope:",
+            "Automation scope:",
+            "CI/review scope:",
+        ):
+            self.assertFalse(
+                scope_check._body_has_heading(template, (heading,)),
+                f"template body must not satisfy the scope check for {heading!r}",
+            )
 
     def test_install_file_preserves_gito_config(self) -> None:
         root = self.make_repo()
