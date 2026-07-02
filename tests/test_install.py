@@ -7420,7 +7420,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
 
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
-            "PR #6 has non-green or undeterminable checks; skipped auto-merge",
+            "PR #6 has undeterminable check counts; skipped auto-merge",
             result.stdout,
         )
         self.assertFalse(marker.exists())
@@ -7483,7 +7483,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         )
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
-            "PR #6 has non-green or undeterminable checks; skipped auto-merge",
+            "PR #6 has non-green checks; skipped auto-merge",
             result.stdout,
         )
         self.assertFalse(marker.exists())
@@ -7494,7 +7494,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         )
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
-            "PR #6 has non-green or undeterminable checks; skipped auto-merge",
+            "PR #6 has non-green checks; skipped auto-merge",
             result.stdout,
         )
         self.assertFalse(marker.exists())

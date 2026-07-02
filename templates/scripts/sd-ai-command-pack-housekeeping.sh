@@ -566,15 +566,21 @@ maybe_merge_ready_open_pr() {
     return 0
   fi
   # SKIPPED and NEUTRAL check conclusions are intentional lane skips (change
-  # classifiers), so they neither block the merge nor count as green. Require
-  # at least one executed successful check and zero blocking (pending or
-  # failed) checks.
-  if ! [[ "$successful_check_count" =~ ^[0-9]+$ ]] || [ "$successful_check_count" -eq 0 ]; then
+  # classifiers), so they neither block the merge nor count as green. Blocking
+  # means a run that has not completed or any conclusion other than SUCCESS,
+  # SKIPPED, or NEUTRAL (for example FAILURE, CANCELLED, TIMED_OUT, or
+  # ACTION_REQUIRED). Require at least one executed successful check and zero
+  # blocking checks.
+  if ! [[ "$successful_check_count" =~ ^[0-9]+$ ]] || ! [[ "$blocking_check_count" =~ ^[0-9]+$ ]]; then
+    add_anomaly "PR #$pr_number has undeterminable check counts; skipped auto-merge"
+    return 0
+  fi
+  if [ "$successful_check_count" -eq 0 ]; then
     add_anomaly "PR #$pr_number has no successful executed checks; skipped auto-merge"
     return 0
   fi
-  if ! [[ "$blocking_check_count" =~ ^[0-9]+$ ]] || [ "$blocking_check_count" -ne 0 ]; then
-    add_anomaly "PR #$pr_number has non-green or undeterminable checks; skipped auto-merge"
+  if [ "$blocking_check_count" -ne 0 ]; then
+    add_anomaly "PR #$pr_number has non-green checks; skipped auto-merge"
     return 0
   fi
 
