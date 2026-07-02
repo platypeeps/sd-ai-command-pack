@@ -630,7 +630,12 @@ Cross-repo review of the pack + 5 consumer repos surfaced template/installed twi
 
 ### Main Changes
 
-(Add details)
+- Added pack source drift gates for manifest-driven source/template/install parity.
+- Tightened review-tooling behavior around preflight failure buffering and review-learning timeouts.
+- Collapsed Copilot guidance into glob families and added predecessor-name coverage.
+- Added preserved PR-template scope sections for generated/tooling changes.
+- Trimmed repeated prompt/spec content and bumped the pack version to 0.5.0.
+- Addressed Copilot review feedback on the PR-template scope guard.
 
 ### Git Commits
 
@@ -644,7 +649,9 @@ Cross-repo review of the pack + 5 consumer repos surfaced template/installed twi
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] `python3 -m unittest discover -s tests`
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`
+- [OK] GitHub CI `unittest (3.10)` and `unittest (3.13)`
 
 ### Status
 
