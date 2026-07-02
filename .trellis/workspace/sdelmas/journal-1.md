@@ -616,3 +616,40 @@ Addressed final Copilot review feedback by limiting Obsidian KB stale detection 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: Pack source drift gates, review-tooling fixes, and token slimming
+
+**Date**: 2026-07-01
+**Task**: Pack source drift gates, review-tooling fixes, and token slimming
+**Branch**: `pack-drift-gates-and-fixes`
+
+### Summary
+
+Cross-repo review of the pack + 5 consumer repos surfaced template/installed twin drift (24 wrappers), missing .prism/rules.schema.json, two review-tooling bugs, and Copilot-cycle churn patterns. Added a source-checkout full-check gate (run_pack_source_drift_gates) enforcing manifest twin parity + env-var doc coverage, with a manifest-driven parity test replacing the 6-file one. Fixed review-preflight failure-buffer reset order and review-learnings uncaught TimeoutExpired (+ regression tests). Collapsed the Copilot guidance block to glob families (-28%) + added predecessor-name families; shipped a preserved PR template seeding scope sections. Token-slimming: de-duplicated cross-layer-thinking-guide, trimmed sd-full-check env table. Bumped to 0.5.0. Opened PR #14 (218 tests, 100% coverage, CLEAN); babysat Copilot review: 1 comment (test guard) fixed + resolved, CI green on 3.10/3.13.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6f1d3a5` | (see git log) |
+| `9735c29` | (see git log) |
+| `7493994` | (see git log) |
+| `b9e0552` | (see git log) |
+| `cb5f0e9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

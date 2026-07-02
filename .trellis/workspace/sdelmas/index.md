@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 15
+- **Total Sessions**: 16
 - **Last Active**: 2026-07-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~612 | Active |
+| `journal-1.md` | ~655 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 16 | 2026-07-01 | Pack source drift gates, review-tooling fixes, and token slimming | `6f1d3a5`, `9735c29`, `7493994`, `b9e0552`, `cb5f0e9` | `pack-drift-gates-and-fixes` |
 | 15 | 2026-07-01 | Preserve custom Obsidian KB notes | `f65e97f` | `codex/obsidian-kb-copies` |
 | 14 | 2026-07-01 | Refine Obsidian KB copies | `8dd8f88`, `dbd96c6` | `codex/obsidian-kb-copies` |
 | 13 | 2026-07-01 | Resolve review wrapper parity feedback | `1da7874` | `sd-ai-command-pack-rename-and-hardening` |
