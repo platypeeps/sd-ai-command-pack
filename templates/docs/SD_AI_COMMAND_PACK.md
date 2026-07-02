@@ -436,7 +436,8 @@ housekeeping script, which checks a strict auto-merge gate:
 - the PR is open and not draft
 - the base is the default branch
 - merge state is clean
-- reported checks are green
+- at least one executed check succeeded and none are pending or failed
+  (classifier-skipped checks do not block)
 - there are no unresolved review threads
 
 When that is true, it merges the PR and then performs normal cleanup. If that gate is
