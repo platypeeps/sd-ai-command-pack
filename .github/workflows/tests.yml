@@ -14,6 +14,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 jobs:
   unittest:
     runs-on: ubuntu-latest
@@ -27,6 +30,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -44,3 +49,30 @@ jobs:
 
       - name: Report coverage
         run: python3 -m coverage report --fail-under=100
+
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install security scanners
+        run: python3 -m pip install -r requirements-security.txt
+
+      # Scans pack-owned shipped Python only. Trellis-vendored hook adapters
+      # and the unshipped test suite are out of scope; the gate blocks on
+      # medium+ severity so subprocess-to-git/gh Low findings stay advisory.
+      - name: Bandit (shipped Python)
+        run: bandit -q -r --severity-level medium install.py scripts templates/scripts
+
+      - name: Zizmor (workflow security)
+        run: zizmor --offline .github/workflows/

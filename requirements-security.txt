@@ -1,0 +1,3 @@
+# Security-scan lane dependencies (see the security job in tests.yml).
+bandit==1.8.6
+zizmor==1.16.3
