@@ -505,14 +505,14 @@ class InstallTests(unittest.TestCase):
         stub_bin: Path,
         marker: Path,
         graphql_body: str = "  printf '0\\tfalse\\t\\n'\n",
-        failed_check_count: str = "0",
-        total_check_count: str = "2",
+        blocking_check_count: str = "0",
+        successful_check_count: str = "2",
         rollup_json: str | None = None,
     ) -> None:
         if rollup_json is None:
             readiness_branch = (
                 "    printf '6\\t%s\\tfalse\\thttps://example.test/pr/6\\tfeature/cleanup\\t%s\\tmain\\tCLEAN\\t%s\\t%s\\n' "
-                f"\"$state\" \"$head\" {failed_check_count!r} {total_check_count!r}\n"
+                f"\"$state\" \"$head\" {blocking_check_count!r} {successful_check_count!r}\n"
             )
         else:
             # Evaluate the script's real --jq program with real jq against a
@@ -7401,7 +7401,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.write_auto_merge_gh_stub(
             stub_bin,
             marker,
-            failed_check_count="unknown",
+            blocking_check_count="unknown",
         )
 
         result = subprocess.run(
