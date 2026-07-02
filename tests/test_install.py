@@ -7566,6 +7566,39 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("self-test: blocking checks refuse: FAIL", result.stdout)
 
+    def test_housekeeping_self_test_reports_named_failures_on_stub_errors(
+        self,
+    ) -> None:
+        # A scenario whose collaborators error (unexpected git call) must
+        # produce named FAIL lines and a failure summary, never a silent exit.
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-stuberr-")
+        self.addCleanup(tempdir.cleanup)
+        script = (
+            install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"
+        ).read_text(encoding="utf-8")
+        needle = '("rev-parse --verify refs/heads/feature^{commit}")'
+        self.assertIn(needle, script)
+        sabotaged = Path(tempdir.name) / "sabotaged.sh"
+        sabotaged.write_text(
+            script.replace(needle, '("never-matches")'), encoding="utf-8"
+        )
+
+        result = subprocess.run(
+            [self._bash_path, str(sabotaged), "--self-test"],
+            cwd=tempdir.name,
+            env={"PATH": tempdir.name, "HOME": tempdir.name},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("self-test: green executed checks merge: FAIL", result.stdout)
+        self.assertIn("scenario(s) FAILED", result.stdout)
+
     def test_housekeeping_no_auto_merge_leaves_open_pr_untouched(
         self,
     ) -> None:
