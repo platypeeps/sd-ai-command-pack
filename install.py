@@ -49,7 +49,11 @@ ACTIVE_TRELLIS_PLATFORM_MARKERS = {
 }
 TRELLIS_INSTALL_DOCS_URL = "https://docs.trytrellis.app/start/install-and-first-task"
 FORCE_PRESERVED_TARGETS = frozenset(
-    {Path(".prism/rules.json"), Path(".gito/config.toml")}
+    {
+        Path(".prism/rules.json"),
+        Path(".gito/config.toml"),
+        Path(".github/PULL_REQUEST_TEMPLATE.md"),
+    }
 )
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
 LOCAL_ONLY_MARKER_FILE = Path(".sd-ai-command-pack/local-only.txt")

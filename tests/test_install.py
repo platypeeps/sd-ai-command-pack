@@ -374,56 +374,41 @@ class InstallTests(unittest.TestCase):
         self.assertIn(install.COPILOT_GUIDANCE_END, content)
         for expected in (
             "Trellis And SD AI Command Pack Review Guidance",
-            "Ignore copied-in Trellis runtime/platform files",
-            ".trellis/scripts/**/*",
-            ".trellis/agents/**/*",
-            ".agents/skills/trellis-*/**/*",
-            ".github/agents/trellis-*",
-            ".github/copilot/**/*",
-            ".github/hooks/trellis.json",
-            ".github/prompts/continue.prompt.md",
-            ".github/prompts/finish-work.prompt.md",
-            ".github/skills/trellis-*/**/*",
-            ".claude/commands/trellis/**/*",
-            ".codex/skills/trellis-*/**/*",
-            ".cursor/commands/trellis-*.md",
-            ".cursor/skills/trellis-*/**/*",
-            ".gemini/commands/trellis/**/*",
-            ".gemini/skills/trellis-*/**/*",
-            ".opencode/commands/trellis/**/*",
-            ".opencode/skills/trellis-*/**/*",
-            "Ignore files copied in from `sd-ai-command-pack`",
-            ".agents/skills/sd-*/**/*",
-            ".github/prompts/sd-*",
-            ".claude/commands/sd/**/*",
-            ".cursor/commands/sd-*.md",
-            ".gemini/commands/sd/**/*",
-            ".opencode/commands/sd-*",
-            ".gito/config.toml",
-            ".gito/sd-ai-command-pack.env",
-            ".prism/rules.json",
-            ".prism/rules.schema.json",
-            ".sd-ai-command-pack/installed-targets.txt",
-            "docs/SD_AI_COMMAND_PACK.md",
-            "scripts/sd-ai-command-pack-*",
             "Trellis is the repository workflow foundation",
             "Software Delivery command wrappers",
-            "Do not leave line comments on wording",
-            "copied SD command-pack skills/prompts/scripts/docs/rules",
+            # Vendored-payload guidance with collapsed glob families.
+            "payloads as vendored files",
+            ".trellis/scripts/**",
+            ".trellis/agents/**",
+            "**/skills/trellis-*/**",
+            "**/skills/sd-*/**",
+            "`.github/prompts/` (including `continue.prompt.md` and",
+            ".github/copilot/**",
+            ".github/hooks/trellis.json",
+            ".github/agents/trellis-*",
+            "scripts/sd-ai-command-pack-*",
+            "legacy `scripts/trellis-*.sh`",
+            "scripts/update_repomix*",
+            ".gito/**",
+            ".prism/**",
+            ".sd-ai-command-pack/**",
+            "docs/SD_AI_COMMAND_PACK.md",
+            "legacy `docs/TRELLIS_REVIEW_PR_PACK.md`",
+            # Review-budget and escalation guidance.
             "app behavior",
             "data contracts",
             "repo-owned scripts",
             "data/access/security boundaries",
             "fail-closed behavior",
-            "obvious syntax breakage",
-            "secret leakage",
-            "direct mismatch",
+            "leaks a secret",
             "Tooling/generated scope",
             "Automation scope",
             "CI/review scope",
             ".sd-ai-command-pack/pr-body-scope.json",
             "Group duplicate root causes into one comment",
             "deterministic local checks",
+            # Phrases the review-learnings scanner requires
+            # (RECOMMENDED_COPILOT_PHRASES).
             "current, non-outdated unresolved",
             "stale or outdated review threads",
             "copied or generated",
@@ -1242,6 +1227,9 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".github/copilot-instructions.md").exists())
 
     def test_tracked_copilot_guidance_matches_template(self) -> None:
+        # The tracked file may carry a repo-specific section outside the
+        # managed markers (for example the templates-mirror review guidance),
+        # but the managed block itself must match the shipped template exactly.
         installed = (install.ROOT / ".github/copilot-instructions.md").read_text(
             encoding="utf-8"
         )
@@ -1249,7 +1237,26 @@ class InstallTests(unittest.TestCase):
             install.ROOT / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
         ).read_text(encoding="utf-8")
 
-        self.assertEqual(installed, template)
+        self.assertEqual(installed.count(install.COPILOT_GUIDANCE_START), 1)
+        self.assertEqual(installed.count(install.COPILOT_GUIDANCE_END), 1)
+        self.assertIn(template.strip("\n"), installed)
+        self.assertIn("byte-verified mirrors of `templates/**`", installed)
+        self.assertIn("do not repeat the same finding on both copies", installed)
+
+    def test_copilot_block_keeps_scanner_phrases_contiguous(self) -> None:
+        # The review-learnings scanner and the guidance-block assertions match
+        # these phrases as contiguous substrings; a line-wrap inside one silently
+        # breaks both, so pin that they survive as single-line substrings.
+        template = (
+            install.ROOT / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
+        ).read_text(encoding="utf-8")
+        for phrase in (
+            "current, non-outdated unresolved",
+            "stale or outdated review threads",
+            "copied or generated",
+            "data/access/security boundaries",
+        ):
+            self.assertIn(phrase, template, f"phrase wrapped or missing: {phrase!r}")
 
     def test_tracked_full_check_skill_matches_template_and_documents_audit(self) -> None:
         installed = (install.ROOT / ".agents/skills/sd-full-check/SKILL.md").read_text(
@@ -1529,6 +1536,60 @@ class InstallTests(unittest.TestCase):
 
         self.assertEqual(result.status, "preserved")
         self.assertEqual(destination.read_text(encoding="utf-8"), "{}\n")
+
+    def test_install_file_preserves_existing_pull_request_template(self) -> None:
+        root = self.make_repo(".github")
+        file = install.PackFile(
+            platform="github",
+            kind="doc",
+            source=install.ROOT / "templates/.github/PULL_REQUEST_TEMPLATE.md",
+            target=Path(".github/PULL_REQUEST_TEMPLATE.md"),
+            anchor=Path(".github"),
+            install="if-anchor-exists",
+        )
+        destination = root / ".github/PULL_REQUEST_TEMPLATE.md"
+        destination.write_text("## My custom template\n", encoding="utf-8")
+
+        result = install.install_file(
+            file, root, force=True, dry_run=False, backup=False
+        )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertEqual(
+            destination.read_text(encoding="utf-8"), "## My custom template\n"
+        )
+
+    def test_pull_request_template_prompts_for_scope_sections(self) -> None:
+        template = (
+            install.ROOT / "templates/.github/PULL_REQUEST_TEMPLATE.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("## Summary", template)
+        self.assertIn("## Test plan", template)
+        self.assertIn("## Pre-PR checklist", template)
+        self.assertIn("Tooling/generated scope:", template)
+        self.assertIn("Automation scope:", template)
+        self.assertIn("CI/review scope:", template)
+        self.assertIn("sd-ai-command-pack-full-check.sh", template)
+        self.assertIn("no mutate-before-success", template)
+        self.assertIn("push once", template)
+        # An unedited template body must NOT satisfy the pr-body scope check, or
+        # every PR would auto-pass. Assert against the real matcher rather than a
+        # hand-rolled line check, so this cannot drift from _body_has_heading()
+        # (which also matches headings behind Markdown markers like "- "/"> ").
+        scope_check = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            "sd_pr_body_scope_template_guard",
+        )
+        for heading in (
+            "Tooling/generated scope:",
+            "Automation scope:",
+            "CI/review scope:",
+        ):
+            self.assertFalse(
+                scope_check._body_has_heading(template, (heading,)),
+                f"template body must not satisfy the scope check for {heading!r}",
+            )
 
     def test_install_file_preserves_gito_config(self) -> None:
         root = self.make_repo()
@@ -2645,8 +2706,10 @@ class InstallTests(unittest.TestCase):
         self.assertIn("# SD Full Check", full_check)
         self.assertIn("bash scripts/sd-ai-command-pack-full-check.sh", full_check)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO", full_check)
-        self.assertIn("REVIEW_PREFLIGHT_PR_BODY", full_check)
-        self.assertIn("deprecated fallback", full_check)
+        # The skill lists common toggles and points at the canonical docs for
+        # the full env-var set (deprecated fallbacks included).
+        self.assertIn("docs/SD_AI_COMMAND_PACK.md", full_check)
+        self.assertIn("Configuration", full_check)
 
         housekeeping = (
             install.ROOT / "templates/.agents/skills/sd-housekeeping/SKILL.md"
@@ -6869,22 +6932,151 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             self.assertIn("sd-review-local", doc)
             self.assertIn("sd-review-local-all", doc)
 
-    def test_tracked_review_command_wrappers_match_templates(self) -> None:
-        wrapper_paths = [
-            ".claude/commands/sd/review-pr.md",
-            ".claude/commands/sd/review-local-all.md",
-            ".gemini/commands/sd/review-pr.toml",
-            ".gemini/commands/sd/review-local-all.toml",
-            ".opencode/commands/sd-review-pr.md",
-            ".opencode/commands/sd-review-local-all.md",
-        ]
+    def test_tracked_pack_targets_match_templates(self) -> None:
+        # Every tracked installed twin must match its manifest source so this
+        # repo's own footprint can never drift from the shipped templates.
+        # (The managed copilot block has its own dedicated full-file test.)
+        _, files = install.load_manifest()
+        compared = 0
+        drifted: list[str] = []
+        for file in files:
+            if file.kind == install.MANAGED_BLOCK_KIND:
+                continue
+            installed = install.ROOT / file.target
+            if not installed.exists():
+                continue
+            compared += 1
+            if installed.read_bytes() != file.source.read_bytes():
+                drifted.append(file.target.as_posix())
+        self.assertGreaterEqual(compared, 50)
+        self.assertEqual(drifted, [])
 
-        for wrapper_path in wrapper_paths:
-            installed = (install.ROOT / wrapper_path).read_text(encoding="utf-8")
-            template = (
-                install.ROOT / "templates" / wrapper_path
-            ).read_text(encoding="utf-8")
-            self.assertEqual(installed, template, wrapper_path)
+    ENV_VAR_DOC_EXEMPT = frozenset(
+        {
+            # Internal test hook, intentionally undocumented.
+            "SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE",
+            # Legacy rename hint prefixes emitted by the install audit.
+            "SD_AI_COMMAND_PACK_FULL_CHECK",
+            "SD_AI_COMMAND_PACK_HOUSEKEEPING",
+        }
+    )
+
+    def test_shipped_env_vars_are_documented(self) -> None:
+        var_re = re.compile(r"SD_AI_COMMAND_PACK_[A-Z0-9_]+")
+        script_vars: set[str] = set()
+        for path in (install.ROOT / "scripts").iterdir():
+            if path.suffix in {".sh", ".py", ".mjs"}:
+                script_vars |= set(var_re.findall(path.read_text(encoding="utf-8")))
+        skill_vars: set[str] = set()
+        for path in (install.ROOT / "templates/.agents/skills").glob("*/SKILL.md"):
+            skill_vars |= set(var_re.findall(path.read_text(encoding="utf-8")))
+        documented = set(
+            var_re.findall(
+                (install.ROOT / "docs/SD_AI_COMMAND_PACK.md").read_text(
+                    encoding="utf-8"
+                )
+            )
+        )
+
+        undocumented = sorted(script_vars - documented - self.ENV_VAR_DOC_EXEMPT)
+        self.assertEqual(
+            undocumented,
+            [],
+            "env vars read by shipped scripts but missing from the installed guide",
+        )
+        stale = sorted(documented - script_vars - skill_vars)
+        self.assertEqual(
+            stale,
+            [],
+            "env vars documented in the installed guide but consumed by no "
+            "shipped script or skill",
+        )
+
+    def test_full_check_script_runs_pack_source_drift_gates(self) -> None:
+        script = (
+            install.ROOT / "scripts/sd-ai-command-pack-full-check.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("run_pack_source_drift_gates", script)
+        self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT", script)
+        self.assertIn("template twin pairs compared", script)
+        self.assertIn("undocumented env var", script)
+
+    def test_review_learnings_reports_subprocess_timeout_as_setup_failure(
+        self,
+    ) -> None:
+        # Regression: a hung git/gh call must surface the [sd-review-learnings:*]
+        # exit-2 contract, not a raw subprocess.TimeoutExpired traceback.
+        module = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_timeout_regression",
+        )
+        root = self.make_repo()
+
+        with mock.patch.object(
+            module,
+            "build_local_diff",
+            side_effect=module.subprocess.TimeoutExpired("git", 120),
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code = module.main(["--repo-root", str(root)])
+        self.assertEqual(code, 2)
+        self.assertIn("[sd-review-learnings:findings]", stderr.getvalue())
+
+        diff_file = root / "empty.diff"
+        diff_file.write_text("", encoding="utf-8")
+        with mock.patch.object(
+            module,
+            "fetch_recent_copilot_comments",
+            side_effect=module.subprocess.TimeoutExpired("gh", 60),
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code = module.main(
+                    [
+                        "--repo-root",
+                        str(root),
+                        "--diff-from",
+                        str(diff_file),
+                        "--github-days",
+                        "7",
+                    ]
+                )
+        self.assertEqual(code, 2)
+        self.assertIn("[sd-review-learnings:github]", stderr.getvalue())
+
+    def test_review_preflight_reports_malformed_config_as_failure(self) -> None:
+        # Regression: a malformed review-preflight.json must FAIL, not be wiped
+        # by the failure-buffer reset and pass on defaults.
+        if shutil.which("node") is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_repo()
+        # The script resolves its repo root to its own parent dir, so it must be
+        # run from inside the target repo's scripts/ as it is when installed.
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(
+            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
+        )
+        config_dir = root / ".sd-ai-command-pack"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "review-preflight.json").write_text(
+            "{ not valid json", encoding="utf-8"
+        )
+
+        result = subprocess.run(
+            ["node", "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("could not be parsed as JSON", result.stdout)
 
     def test_review_pr_skill_auto_dispatches_housekeeping_after_merge(self) -> None:
         skill = (

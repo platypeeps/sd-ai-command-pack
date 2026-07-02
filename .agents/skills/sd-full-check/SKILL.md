@@ -66,67 +66,28 @@ The script runs:
 
 ## Useful Environment Variables
 
+Common toggles are below. See `docs/SD_AI_COMMAND_PACK.md` → Configuration for
+the full set: base-ref discovery, package runner and script list, Prism rules
+and threshold, Gito output directory and rate-limit retry tuning, PR-body config
+paths, and deprecated fallbacks.
+
 - `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`: explicit base ref for branch review.
-  When unset, the script uses the discovered remote default ref, then the
-  current branch upstream, then the first available remote ref.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT=0`: skip
-  repo-local review preflight.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT=required`: fail if no configured
-  review preflight command can run and the optional
-  `scripts/check-review-preflight.mjs` fallback is unavailable.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND`: repo-specific review
-  preflight command to run with `bash -lc`.
+  When unset, the script discovers the remote default ref, then the branch
+  upstream, then the first available remote ref.
+- `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT=0` / `=required`: skip the
+  repo-local review preflight, or fail when no preflight command can run.
 - `SD_AI_COMMAND_PACK_INSTALL_AUDIT=0`: skip the structural post-install audit.
 - `SD_AI_COMMAND_PACK_INSTALL_AUDIT=required`: fail if the audit helper or
   `python3` is unavailable. By default those availability problems warn and
   continue.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS`: space-separated package scripts
-  to run when `package.json` and the selected package runner are available.
-  Defaults to `typecheck lint test:unit test:integration build test:e2e`.
-  The older `SD_AI_COMMAND_PACK_FULL_CHECK_NPM_SCRIPTS` name is still accepted for
-  compatibility.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_RUNNER`: package runner. Defaults to `npm`
-  when package-script checks apply.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS=1`: boolean flag to skip
-  all package-script checks. It does not accept a list of scripts. The older
-  `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_NPM=1` name is still accepted for
-  compatibility.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0`: skip Prism.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=required`: fail if Prism is missing,
-  unauthenticated, or has provider/model configuration failures.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_RULES`: explicit Prism rules file.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_FAIL_ON`: Prism fail threshold. Defaults to `high`.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=1`: run Gito review after Prism.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF`: base ref for Gito review.
-  Defaults to `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then the same discovered
-  default branch sequence used by branch review.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR`: Gito report output directory. Defaults to
-  `.build/review/gito`.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS`: max Gito attempts for
-  provider rate limits. Defaults to
-  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`, then `2`.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_DELAY_SECONDS`: initial Gito retry
-  delay for rate limits. Defaults to
-  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, then `30`.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_MAX_DELAY_SECONDS`: maximum Gito
-  retry delay after exponential backoff. Defaults to
-  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`, then `120`.
-- `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK=0`: skip configurable PR-body scope
+- `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS=1`: skip all package-script
   checks.
-- `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CONFIG`: explicit JSON config path for
-  additional PR-body scope rules. Defaults to
-  `.sd-ai-command-pack/pr-body-scope.json` when present.
-- `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`: explicit PR body text for
-  configurable PR-body scope checks. This value takes precedence for
-  `scripts/sd-ai-command-pack-pr-body-scope.py`.
+- `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0` / `=required`: skip Prism, or fail when
+  Prism is missing, unauthenticated, or misconfigured.
+- `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=1`: run Gito review after Prism.
 - `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`: explicit PR body text for tooling/generated
-  and PR-body scope checks in local or CI contexts where `gh pr view` should
-  not be used. Use this as the general override consumed by
-  `scripts/sd-ai-command-pack-review-scope.sh` and as the fallback for the
-  configurable PR-body scope script.
-- `REVIEW_PREFLIGHT_PR_BODY`: deprecated fallback for older target repos. Prefer
-  `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` or
-  `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`.
+  and PR-body scope checks in local or CI contexts where `gh pr view` should not
+  be used.
 
 ## Expected Report
 

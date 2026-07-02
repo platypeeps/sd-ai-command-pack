@@ -1,6 +1,6 @@
 {
   "name": "sd-ai-command-pack",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "license": "MIT",
   "description": "Install project-local SD AI command workflows, Prism/Gito defaults, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
@@ -388,6 +388,13 @@
       "kind": "managed-block",
       "source": "templates/.github/copilot-instructions.sd-ai-command-pack.md",
       "target": ".github/copilot-instructions.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "doc",
+      "source": "templates/.github/PULL_REQUEST_TEMPLATE.md",
+      "target": ".github/PULL_REQUEST_TEMPLATE.md",
       "anchor": ".github"
     },
     {
