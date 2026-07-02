@@ -2697,8 +2697,10 @@ class InstallTests(unittest.TestCase):
         self.assertIn("# SD Full Check", full_check)
         self.assertIn("bash scripts/sd-ai-command-pack-full-check.sh", full_check)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO", full_check)
-        self.assertIn("REVIEW_PREFLIGHT_PR_BODY", full_check)
-        self.assertIn("deprecated fallback", full_check)
+        # The skill lists common toggles and points at the canonical docs for
+        # the full env-var set (deprecated fallbacks included).
+        self.assertIn("docs/SD_AI_COMMAND_PACK.md", full_check)
+        self.assertIn("Configuration", full_check)
 
         housekeeping = (
             install.ROOT / "templates/.agents/skills/sd-housekeeping/SKILL.md"
