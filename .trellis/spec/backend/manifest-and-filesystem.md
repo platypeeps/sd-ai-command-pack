@@ -90,6 +90,40 @@ Reference files:
 - `install.py`, `selected_files()`
 - `tests/test_install.py`, `test_installs_shared_skill_and_existing_platform_adapters`
 
+## Receipt Stability Across Checkouts
+
+The installed-targets receipt is declared installed state and can be
+git-tracked while some recorded targets (and the markers/anchors that select
+them) are gitignored — the claude adapter's markers all live under
+`.claude/`. A refresh run from a checkout where a platform is merely not
+visible must not erase what another checkout legitimately installed:
+
+- Keep existing receipt entries for manifest files skipped by marker
+  detection or by a `--platform` filter, and report each kept entry as
+  `kept-in-receipt`.
+- Keep entries for anchor-skipped files only when `git check-ignore`
+  confirms the file path is ignored in the target; check the file path, not
+  the anchor directory, because trailing-slash directory ignore patterns do
+  not match a bare nonexistent directory path. A tracked-but-removed anchor
+  is an intentional platform removal and still drops its entries.
+- Fail closed: when git is missing or the target is not a repository,
+  preservation does not apply.
+- Intentional platform removal is a manual receipt edit; the installer does
+  not guess.
+
+The install audit mirrors this: a receipt target that is missing but
+gitignored in the current checkout is a warning with a reinstall hint, not a
+failure. This does not contradict the "no mutable installer state" rule —
+the receipt is the explicit, reviewable state file, and preservation only
+refuses to destroy entries the current checkout cannot verify.
+
+Reference files:
+
+- `install.py`, `preserved_receipt_targets()`, `is_gitignored_path()`
+- `templates/scripts/sd-ai-command-pack-install-audit.py`, `is_gitignored()`
+- `tests/test_install.py`, `test_install_keeps_receipt_entries_for_gitignored_absent_anchor`
+- `tests/test_install.py`, `test_install_audit_downgrades_gitignored_missing_targets`
+
 ## File Writes
 
 Use `install_file()` for copy behavior:

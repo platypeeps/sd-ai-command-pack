@@ -868,6 +868,65 @@ def installed_targets_content(
     return "\n".join(targets) + "\n"
 
 
+def read_existing_installed_targets(target: Path) -> set[str]:
+    receipt = target_destination(target, INSTALLED_TARGETS_FILE)
+    if not receipt.is_file():
+        return set()
+    entries: set[str] = set()
+    for raw_line in receipt.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.strip()
+        if line and not line.startswith("#"):
+            entries.add(line)
+    return entries
+
+
+def is_gitignored_path(target: Path, relative_path: str) -> bool:
+    """True when git confirms the path is ignored in the target repo.
+
+    Missing git, a non-repo target, and git errors all return False, so
+    callers keep the fail-closed drop behavior for those cases.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(target), "check-ignore", "-q", "--", relative_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0
+
+
+def preserved_receipt_targets(
+    target: Path,
+    existing: set[str],
+    skipped: list[tuple[PackFile, str]],
+) -> list[tuple[Path, str]]:
+    """Receipt entries to keep for platforms skipped in this checkout only.
+
+    Platform markers and anchors can live on gitignored paths (the claude
+    adapter's all do), so a refresh from a fresh checkout must not drop
+    entries another checkout legitimately installed. Detection and
+    --platform filter skips always preserve; anchor skips preserve only
+    when the anchor is gitignored here (a tracked-but-removed anchor reads
+    as an intentional platform removal).
+    """
+    preserved: list[tuple[Path, str]] = []
+    for file, reason in skipped:
+        if file.target.as_posix() not in existing:
+            continue
+        keep = reason == "platform not selected" or reason.startswith("active Trellis")
+        if not keep and reason.startswith("anchor "):
+            # Check the target path, not the anchor: directory ignore
+            # patterns like `.claude/` match a file below the directory but
+            # not the bare, nonexistent directory path itself.
+            keep = is_gitignored_path(target, file.target.as_posix())
+        if keep:
+            preserved.append((file.target, file.platform))
+    return preserved
+
+
 def local_only_pack_excludes(selected: list[PackFile]) -> tuple[str, ...]:
     paths = {file.target.as_posix() for file in selected}
     paths.add(INSTALLED_TARGETS_FILE.as_posix())
@@ -1146,12 +1205,18 @@ def main(argv: list[str] | None = None) -> int:
             )
         results.append(result)
 
+    kept_receipt_targets = preserved_receipt_targets(
+        target, read_existing_installed_targets(target), skipped
+    )
     results.append(
         install_installed_targets_file(
             selected,
             target,
             dry_run=args.dry_run,
-            extra_targets=generated_targets,
+            extra_targets=[
+                *generated_targets,
+                *(kept_target for kept_target, _ in kept_receipt_targets),
+            ],
         )
     )
     if args.local_only:
@@ -1168,6 +1233,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{result.status:29} {display_path(target, result.target)}{suffix}")
     for file, reason in skipped:
         print(f"skipped     {file.target} ({reason})")
+    for kept_target, kept_platform in kept_receipt_targets:
+        print(
+            f"kept-in-receipt {kept_target} "
+            f"({kept_platform} adapter not selected in this checkout; "
+            "file may be local-only)"
+        )
 
     conflicts = [result.file for result in results if result.status == "conflict"]
     if conflicts:

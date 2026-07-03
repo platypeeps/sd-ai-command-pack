@@ -1026,8 +1026,12 @@ class InstallTests(unittest.TestCase):
         self.assertTrue(review_learnings_script.is_file())
         self.assertTrue(full_check_script.is_file())
         self.assertTrue(housekeeping_script.is_file())
+        claude_start = root / ".claude/commands/sd/start.md"
+        self.assertTrue(claude_start.is_file(), claude_start)
+        claude_start_content = claude_start.read_text(encoding="utf-8")
+        self.assertIn("installs no `trellis-start` skill", claude_start_content)
+        self.assertIn("./.trellis/scripts/get_context.py", claude_start_content)
         for adapter in [
-            root / ".claude/commands/sd/start.md",
             root / ".cursor/commands/sd-start.md",
             root / ".gemini/commands/sd/start.toml",
             root / ".github/prompts/sd-start.prompt.md",
@@ -2625,8 +2629,12 @@ class InstallTests(unittest.TestCase):
         for file in adapter_files:
             content = file.source.read_text(encoding="utf-8")
             if "start" in file.target.name:
-                self.assertIn("Resolve the `trellis-start` skill by name", content)
-                self.assertIn("Use that skill as the primary instructions", content)
+                if file.platform == "claude":
+                    self.assertIn("installs no `trellis-start` skill", content)
+                    self.assertIn("./.trellis/scripts/get_context.py", content)
+                else:
+                    self.assertIn("Resolve the `trellis-start` skill by name", content)
+                    self.assertIn("Use that skill as the primary instructions", content)
             elif "continue" in file.target.name:
                 self.assertIn("Resolve the `trellis-continue` skill by name", content)
                 self.assertIn("Use that skill as the primary instructions", content)
@@ -4872,6 +4880,160 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
             "installed target is missing: .agents/skills/sd-review-pr/SKILL.md",
+            result.stdout,
+        )
+
+    def test_install_preserves_receipt_entries_for_undetected_platform(self) -> None:
+        root = self.make_repo(".claude")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        receipt = root / install.INSTALLED_TARGETS_FILE
+        self.assertIn(".claude/commands/sd/start.md", receipt.read_text(encoding="utf-8"))
+
+        # A checkout where the gitignored Trellis claude markers are absent:
+        # the platform is undetected, but the tracked receipt must keep the
+        # entries another checkout legitimately installed.
+        shutil.rmtree(root / ".claude")
+        (root / ".claude").mkdir()
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(".claude/commands/sd/start.md", receipt.read_text(encoding="utf-8"))
+        self.assertIn("kept-in-receipt .claude/commands/sd/start.md", result.stdout)
+        self.assertIn("claude adapter not selected in this checkout", result.stdout)
+
+    def test_install_platform_filter_preserves_other_receipt_entries(self) -> None:
+        root = self.make_repo(".claude", ".gemini")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        result = self.run_install(root, "--platform", "gemini")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        receipt_text = (root / install.INSTALLED_TARGETS_FILE).read_text(encoding="utf-8")
+        self.assertIn(".claude/commands/sd/start.md", receipt_text)
+        self.assertIn("kept-in-receipt .claude/commands/sd/start.md", result.stdout)
+
+    def test_install_drops_receipt_entries_for_removed_tracked_anchor(self) -> None:
+        root = self.make_repo(".claude")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        # Anchor removed and not gitignored: reads as intentional platform
+        # removal, so the receipt entries drop as before.
+        shutil.rmtree(root / ".claude")
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        receipt_text = (root / install.INSTALLED_TARGETS_FILE).read_text(encoding="utf-8")
+        self.assertNotIn(".claude/commands/sd/start.md", receipt_text)
+        self.assertNotIn("kept-in-receipt", result.stdout)
+
+    def test_install_keeps_receipt_entries_for_gitignored_absent_anchor(self) -> None:
+        root = self.make_repo(".claude")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        # A fresh checkout of a repo that gitignores .claude/ entirely: the
+        # anchor itself is local-only, so its receipt entries must survive.
+        shutil.rmtree(root / ".claude")
+        gitignore = root / ".gitignore"
+        gitignore.write_text(
+            gitignore.read_text(encoding="utf-8") + ".claude/\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        receipt_text = (root / install.INSTALLED_TARGETS_FILE).read_text(encoding="utf-8")
+        self.assertIn(".claude/commands/sd/start.md", receipt_text)
+        self.assertIn("kept-in-receipt .claude/commands/sd/start.md", result.stdout)
+
+    def test_install_drops_gitignored_anchor_entries_without_git(self) -> None:
+        root = self.make_repo(".claude")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        shutil.rmtree(root / ".claude")
+        gitignore = root / ".gitignore"
+        gitignore.write_text(
+            gitignore.read_text(encoding="utf-8") + ".claude/\n",
+            encoding="utf-8",
+        )
+
+        # Without git the ignore status cannot be confirmed, so preservation
+        # fails closed and the entries drop.
+        result = self.run_install(root, extra_env={"PATH": ""})
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        receipt_text = (root / install.INSTALLED_TARGETS_FILE).read_text(encoding="utf-8")
+        self.assertNotIn(".claude/commands/sd/start.md", receipt_text)
+        self.assertNotIn("kept-in-receipt", result.stdout)
+
+    def test_install_audit_downgrades_gitignored_missing_targets(self) -> None:
+        root = self.make_repo(".claude")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        shutil.rmtree(root / ".claude")
+        gitignore = root / ".gitignore"
+        gitignore.write_text(
+            gitignore.read_text(encoding="utf-8") + ".claude/\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "installed target is gitignored and absent in this checkout: "
+            ".claude/commands/sd/start.md",
+            result.stdout,
+        )
+        self.assertIn("re-run the pack installer here", result.stdout)
+        self.assertIn("install audit passed", result.stdout)
+
+    def test_install_audit_keeps_error_for_missing_targets_without_git(self) -> None:
+        root = self.make_repo(".claude")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        shutil.rmtree(root / ".claude")
+        gitignore = root / ".gitignore"
+        gitignore.write_text(
+            gitignore.read_text(encoding="utf-8") + ".claude/\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            env={**os.environ, "PATH": ""},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "installed target is missing: .claude/commands/sd/start.md",
             result.stdout,
         )
 
