@@ -58,6 +58,11 @@ repository-knowledge files.
 The start, continue, and finish-work wrappers similarly delegate to
 Trellis-provided `trellis-start`, `trellis-continue`, and
 `trellis-finish-work` skills without changing their behavior.
+On Claude Code — where Trellis ships a SessionStart hook instead of a
+`trellis-start` skill — the start wrapper derives the same session context
+from `.trellis/scripts/get_context.py` directly, and the continue and
+finish-work wrappers accept the installed `trellis:continue` and
+`trellis:finish-work` command names as valid resolutions.
 The installed `docs/SD_AI_COMMAND_PACK.md` file gives humans and agents a
 repo-local usage guide for the commands, script, environment variables, local
 review-provider behavior when available, and troubleshooting steps.
@@ -162,6 +167,11 @@ The start, continue, and finish-work commands are local namespace aliases for
 the Trellis-provided `trellis-start`, `trellis-continue`, and
 `trellis-finish-work` skills. They exist so day-to-day Trellis entry points can
 be invoked through the same `sd` command namespace as the pack workflows.
+The Claude Code adapters differ only where Claude's Trellis layout does:
+start derives its context from `.trellis/scripts/get_context.py` (no
+`trellis-start` skill exists there), and continue/finish-work treat the
+installed `trellis:continue`/`trellis:finish-work` commands as the resolved
+skills.
 
 The housekeeping command is for ending a single active development stream. If
 the current feature branch has an open PR, the command runs `sd-finish-work`
@@ -470,7 +480,14 @@ service users through `allowedLinuxHomeUsers`.
 The full-check script also runs `scripts/sd-ai-command-pack-install-audit.py`.
 That helper checks `.sd-ai-command-pack/installed-targets.txt` for missing
 installed targets and reports pack-like files that are not listed in the
-installed-targets snapshot. Set `SD_AI_COMMAND_PACK_INSTALL_AUDIT=0` to skip it.
+installed-targets snapshot. Missing targets that are gitignored in the
+current checkout are reported as warnings (re-run the installer there to
+materialize local-only adapters) rather than failures. The installer
+likewise keeps receipt entries for platforms it skipped only because their
+markers or anchors are gitignored in the current checkout, reporting each as
+`kept-in-receipt`; remove a platform intentionally by deleting its files and
+its lines from `.sd-ai-command-pack/installed-targets.txt`.
+Set `SD_AI_COMMAND_PACK_INSTALL_AUDIT=0` to skip it.
 
 The full-check script also runs `scripts/sd-ai-command-pack-review-scope.sh`.
 That helper reads `.sd-ai-command-pack/installed-targets.txt`, reports changed
