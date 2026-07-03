@@ -660,3 +660,36 @@ Cross-repo review of the pack + 5 consumer repos surfaced template/installed twi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: Claude adapter drift: stable receipts, gitignore-aware audit, working /sd wrappers (0.5.9)
+
+**Date**: 2026-07-02
+**Task**: Claude adapter drift: stable receipts, gitignore-aware audit, working /sd wrappers (0.5.9)
+**Branch**: `main`
+
+### Summary
+
+Fixed the two-sided receipt corruption that hit consumer repos gitignoring .claude/ (rwbp-website 07-01, anomaly-metric-creator 07-02): install.py now preserves receipt entries for platforms skipped by detection, --platform filters, or gitignored anchors (kept-in-receipt reporting, fail-closed without git), and the install audit downgrades missing-but-gitignored targets to warnings with a reinstall hint. Rewrote the Claude sd:start adapter to derive session context from get_context.py (Claude ships a SessionStart hook, no trellis-start skill), and continue/finish-work now accept the trellis:continue/trellis:finish-work command form. Seven new tests; 233 total green at 100% install.py coverage; full-check clean. Shipped as PR #25, merged to main as 0.5.9 with Copilot review clean (21 files, zero comments) and CI green on py3.10/3.13. Also this session: installed missing claude adapters into rwbp-website and anomaly-metric-creator checkouts, and landed the AMC CI cadence fix (anomaly-metric-creator PR #179): auto-merge-armed PRs now gate on the full matrix and main merge bursts keep their backstop runs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `81e7a05` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
