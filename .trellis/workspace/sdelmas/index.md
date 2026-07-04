@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 27
+- **Total Sessions**: 28
 - **Last Active**: 2026-07-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1112 | Active |
+| `journal-1.md` | ~1146 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 28 | 2026-07-04 | Recorder git-add output surfacing (0.5.19) | `7471683` | `main` |
 | 27 | 2026-07-04 | Recorder empty-subject fix (0.5.18) | `5a63aac` | `main` |
 | 26 | 2026-07-04 | Recorder hardening for fleet Trellis variants (0.5.17) | `a452f03` | `main` |
 | 25 | 2026-07-04 | One-shot journal recorder (0.5.16) | `68063c5` | `main` |

@@ -1110,3 +1110,37 @@ Fixed the rwbp-website review finding: commit_subject() conflated a valid empty-
 ### Next Steps
 
 - fold 0.5.18 into the six fleet refresh PRs and run the gated merges
+
+
+## Session 28: Recorder git-add output surfacing (0.5.19)
+
+**Date**: 2026-07-04
+**Task**: Recorder git-add output surfacing (0.5.19)
+**Branch**: `main`
+
+### Summary
+
+Fixed the anomaly-metric-creator review finding: a failing git add now prints its captured stdout/stderr before the error line, matching the commit and add_session failure paths. Shipped as PR #36.
+
+### Main Changes
+
+- git add failure path prints captured stdout/stderr before error: git add failed
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7471683` | chore(task): archive 07-04-recorder-add-output |
+
+### Testing
+
+- [OK] 261 tests green with 100% coverage; full-check and shellcheck clean; PR #36 merged 4/4 checks
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- fold 0.5.19 into the six fleet refresh PRs and run the gated merges
