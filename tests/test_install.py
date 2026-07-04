@@ -5104,10 +5104,12 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             commit_hash,
             "--change",
             "added the feature file",
+            "--change",
+            "- kept the docs current",
             "--test",
             "unit suite green",
             "--test",
-            "[WARN] flaky case quarantined",
+            "  [WARN] flaky case quarantined",
         )
 
         self.assertEqual(result.returncode, 0, result.stdout)
@@ -5115,8 +5117,10 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertNotIn("Demo session", decoy.read_text(encoding="utf-8"))
         self.assertIn("feat: add feature file", entry)
         self.assertIn("- added the feature file", entry)
+        self.assertIn("- kept the docs current", entry)
         self.assertIn("- [OK] unit suite green", entry)
         self.assertIn("- [WARN] flaky case quarantined", entry)
+        self.assertNotIn("-  [WARN]", entry)
         self.assertNotIn("[OK] [WARN]", entry)
         self.assertNotIn("(Add details)", entry)
         self.assertNotIn("(Add test results)", entry)

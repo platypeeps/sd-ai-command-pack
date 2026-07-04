@@ -174,17 +174,18 @@ def main(argv: list[str]) -> int:
         subjects[commit_hash] = subject
 
     def as_bullet(line: str) -> str:
-        return line if line.lstrip().startswith("-") else f"- {line}"
+        stripped = line.strip()
+        return line if stripped.startswith("- ") else f"- {stripped}"
 
     def as_test_line(line: str) -> str:
-        stripped = line.lstrip()
-        if stripped.startswith("-"):
+        stripped = line.strip()
+        if stripped.startswith("- "):
             return line
         if stripped.startswith("["):
             # Already carries a status marker ([WARN], [SKIP], ...);
             # do not stamp [OK] over it.
-            return f"- {line}"
-        return f"- [OK] {line}"
+            return f"- {stripped}"
+        return f"- [OK] {stripped}"
 
     changes = [as_bullet(c) for c in args.change]
     tests = [as_test_line(t) for t in args.tests]
