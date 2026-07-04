@@ -799,3 +799,47 @@ Hardened the 0.5.10 provenance feature against the tamper vectors Copilot found 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 20: 0.5.12: audit traversal hardening (symlinked parents, per-target lstat)
+
+**Date**: 2026-07-03
+**Task**: 0.5.12: audit traversal hardening (symlinked parents, per-target lstat)
+**Branch**: `main`
+
+### Summary
+
+Closed the round-2 consumer-PR findings upstream: vouched-path verification fails closed when the real path escapes the repository root (commonpath-based, so filesystem-root repos and mixed-drive comparisons behave; symlinked parent directories can no longer route hashing outside the repo), per-target inspection mirrors the provenance-file os.lstat gate (missing vs symlink vs non-regular vs cannot-be-inspected, with exception text), lstat classification runs before the escape check to keep the error taxonomy stable, and structural path_exists is lstat-based so unreadable parents degrade to missing-target reports instead of crashing older Pythons. Three Copilot rounds on PR #28 (4 -> 1 -> clean); 254 tests at 100% install.py coverage; merged via gated housekeeping as 0.5.12.
+
+### Main Changes
+
+- `templates/scripts/sd-ai-command-pack-install-audit.py` + twin:
+  commonpath-based repo-root escape check for vouched paths (fail-closed
+  on ValueError), per-target `os.lstat` classification ordered before the
+  escape check, lstat-based structural `path_exists`
+- `tests/test_install.py`: escape and uninspectable-target regression
+  tests (`target_is_directory=True` for Windows correctness)
+- Spec provenance paragraph updated; task PRD/jsonl manifests filled;
+  manifest 0.5.12
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ead7827` | Fail closed on escaping and uninspectable vouched paths (0.5.12) |
+| `300affe` | Use commonpath for the escape check; fix test symlink flag and jsonl seeds |
+| `7b47390` | Classify symlink targets before the escape check (Copilot round 3) |
+
+### Testing
+
+- [OK] 254 unittest cases green (2 new), install.py at 100% coverage
+- [OK] full-check clean; twins in sync
+- [OK] PR #28: three Copilot rounds (4 → 1 → clean); CI green py3.10/3.13
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
