@@ -4146,7 +4146,7 @@ class InstallTests(unittest.TestCase):
 
         self.assertIn('${BASH_SOURCE[0]}', script)
         self.assertIn('REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"', script)
-        self.assertIn('cd "$REPO_ROOT"', script)
+        self.assertIn('! cd -- "$REPO_ROOT"', script)
         self.assertIn("run_sd_ai_command_pack_scope_check()", script)
         self.assertIn("scripts/sd-ai-command-pack-review-scope.sh", script)
         self.assertIn("run_sd_ai_command_pack_scope_check", script)
