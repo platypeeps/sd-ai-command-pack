@@ -5255,6 +5255,34 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             result.stdout,
         )
 
+    def test_install_audit_flags_non_regular_file_at_vouched_path(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        script = root / "scripts/sd-ai-command-pack-full-check.sh"
+        script.unlink()
+        script.mkdir()
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "vouched target is not a regular file: "
+            "scripts/sd-ai-command-pack-full-check.sh",
+            result.stdout,
+        )
+
     def test_install_recovers_from_malformed_provenance(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
@@ -5378,6 +5406,8 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         (root / "docs/cite.md").write_text(
             "See [the gate](../scripts/sd-ai-command-pack-full-check.sh:12) and\n"
             "`scripts/sd-ai-command-pack-housekeeping.sh:34-56` for details.\n"
+            "Also `scripts/sd-ai-command-pack-install-audit.py:7:3` and\n"
+            "`scripts/sd-ai-command-pack-review-local.sh:10-20:4`.\n"
             "Broken: `docs/definitely-missing.md:5`.\n",
             encoding="utf-8",
         )
@@ -5398,6 +5428,8 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         )
         self.assertNotIn("full-check.sh:12", result.stdout)
         self.assertNotIn("housekeeping.sh:34-56", result.stdout)
+        self.assertNotIn("install-audit.py:7:3", result.stdout)
+        self.assertNotIn("review-local.sh:10-20:4", result.stdout)
 
     def test_install_audit_rejects_windows_absolute_installed_targets(self) -> None:
         root = self.make_repo()

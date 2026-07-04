@@ -552,10 +552,10 @@ export function findMissingDocumentationPathReferences(file, text, existsPath, o
 
 function resolvesToLineSuffixedPath(resolved, existsPath) {
   // Documentation commonly cites line anchors — `path.md:42`, `path:12-34`,
-  // `path:12:5` — so a target with a trailing line suffix resolves against
-  // its base path. Files literally named with `:digits` were already matched
-  // by the direct existence check above.
-  const base = resolved.replace(/:\d+(?:[:-]\d+)?$/, '');
+  // `path:12:5`, `path:12-34:5` — so a target with trailing line/column
+  // suffixes resolves against its base path. Files literally named with
+  // `:digits` were already matched by the direct existence check above.
+  const base = resolved.replace(/(?::\d+(?:-\d+)?)+$/, '');
   return base !== resolved && existsPath(base);
 }
 

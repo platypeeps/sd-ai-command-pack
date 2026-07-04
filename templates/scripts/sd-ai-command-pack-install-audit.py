@@ -279,9 +279,14 @@ def audit_provenance(root: Path) -> list[str]:
             failures.append(f"{PROVENANCE_FILE} contains unsafe target {raw_target!r}")
             continue
         path = root / target
-        if not path.is_file():
+        if not path.exists() and not path.is_symlink():
             # The structural audit already classifies missing/gitignored
             # targets; provenance only judges content that is present.
+            continue
+        if not path.is_file():
+            # Provenance vouches plain files; a directory or dangling
+            # symlink at a vouched path is tampering, not absence.
+            failures.append(f"vouched target is not a regular file: {target}")
             continue
         try:
             content = path.read_bytes()
