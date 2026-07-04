@@ -889,3 +889,40 @@ Implemented the branch-protection decision (option A) and the parked shell-lint 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 22: Provenance: vouch force-overwritten targets
+
+**Date**: 2026-07-03
+**Task**: Provenance: vouch force-overwritten targets
+**Branch**: `main`
+
+### Summary
+
+Fixed the provenance gap the 0.5.13 fleet refresh exposed: install_file returns 'overwritten' for --force overwrites, which provenance_content did not vouch — single-pass refreshes merged stale hashes forward (audit drift failures in the AMC/website refresh worktrees) and overwritten files were silently unvouched since 0.5.11; two-pass claude refreshes self-healed via pass-2 'unchanged', masking it in four of six repos. 'overwritten' now joins the vouchable statuses; regression test drives the tamper-then-force-refresh path; 256 tests at 100% coverage; PR #30 merged first-round clean via gated housekeeping; no version bump (install.py is not consumer-shipped). The affected 0.5.13 refresh branches get repaired provenance before merge.
+
+### Main Changes
+
+- `install.py` `provenance_content()`: `overwritten` joins the vouchable
+  statuses (every status ending byte-equal to the template is hashed);
+  `preserved` and `conflict` stay excluded
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8ba6062` | Vouch force-overwritten targets in provenance |
+
+### Testing
+
+- [OK] 256 unittest cases green (new tamper-then-force-refresh regression
+  test), install.py at 100% coverage; full-check clean
+- [OK] PR #30: Copilot clean first round; CI green py3.10/3.13
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
