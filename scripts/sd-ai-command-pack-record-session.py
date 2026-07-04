@@ -69,7 +69,10 @@ def patch_last_session(
     next_steps: list[str],
 ) -> str | None:
     """Patch the freshly appended session in place; return an error or None."""
-    text = journal.read_text(encoding="utf-8", errors="strict")
+    try:
+        text = journal.read_text(encoding="utf-8", errors="strict")
+    except (OSError, UnicodeError) as exc:
+        return f"cannot read {journal}: {exc}"
     marker = f": {title}\n"
     heading_at = text.rfind(marker)
     if heading_at == -1:
@@ -100,7 +103,10 @@ def patch_last_session(
     if remaining:
         return f"placeholders remain after patching {journal}: {', '.join(remaining)}"
 
-    journal.write_text(text[:block_start] + block, encoding="utf-8")
+    try:
+        journal.write_text(text[:block_start] + block, encoding="utf-8")
+    except OSError as exc:
+        return f"cannot write {journal}: {exc}"
     return None
 
 
@@ -122,7 +128,10 @@ def main(argv: list[str]) -> int:
         dest="tests",
         action="append",
         required=True,
-        help="Testing line (repeatable); '- [OK] ' is added when missing a marker",
+        help=(
+            "Testing line (repeatable): '- '-prefixed lines pass through, "
+            "'[...]'-marked lines are bulleted, bare lines get '- [OK] '"
+        ),
     )
     parser.add_argument(
         "--next-step",
@@ -146,7 +155,11 @@ def main(argv: list[str]) -> int:
         print(f"error: {ADD_SESSION} not found; is Trellis initialized?", file=sys.stderr)
         return 2
 
-    hashes = [h.strip() for h in args.commit.split(",") if h.strip()]
+    commit_arg = args.commit.strip()
+    if commit_arg == "-":
+        # add_session.py's explicit no-commits sentinel.
+        commit_arg = ""
+    hashes = [h.strip() for h in commit_arg.split(",") if h.strip()]
     subjects: dict[str, str] = {}
     for commit_hash in hashes:
         subject = commit_subject(commit_hash)
@@ -221,11 +234,13 @@ def main(argv: list[str]) -> int:
         # A journal dirtied before the run makes the before/after set
         # ambiguous; the entry we just wrote is the one carrying the title.
         marker = f": {args.title}\n"
-        titled = [
-            j
-            for j in journals
-            if marker in j.read_text(encoding="utf-8", errors="strict")
-        ]
+        titled = []
+        for j in journals:
+            try:
+                if marker in j.read_text(encoding="utf-8", errors="strict"):
+                    titled.append(j)
+            except (OSError, UnicodeError):
+                continue
         if len(titled) == 1:
             journals = titled
     if len(journals) != 1:
