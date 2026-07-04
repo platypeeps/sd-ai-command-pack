@@ -1038,3 +1038,40 @@ Shipped scripts/sd-ai-command-pack-record-session.py through PR #33: a wrapper a
 ### Next Steps
 
 - fold 0.5.16 into the six consumer repos via the worktree refresh cycle
+
+
+## Session 26: Recorder hardening for fleet Trellis variants (0.5.17)
+
+**Date**: 2026-07-04
+**Task**: Recorder hardening for fleet Trellis variants (0.5.17)
+**Branch**: `main`
+
+### Summary
+
+Fixed the four recorder defects the 0.5.16 fleet reviews surfaced: mezmo gate-8 encoding pins, duplicate/option-like --commit rejection, --end-of-options subject lookup, and variant-tolerant patching for Trellis versions that pre-resolve subjects (loadsmith). Shipped as PR #34.
+
+### Main Changes
+
+- pinned encoding=utf-8 plus explicit errors= on every recorder subprocess call, journal write, and content tempfile
+- hash validation exits 2 on duplicates and option-like values; patcher anchors on hash-keyed rows and section headings instead of placeholder strings
+- two new tests: bad-commit-argument rejection and an add_session variant emulating loadsmith's pre-filled defaults
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a452f03` | Harden the session recorder for fleet Trellis variants (0.5.17) (#34) |
+
+### Testing
+
+- [OK] 260 unit tests green with 100% coverage on install.py, incl. a CI-parity run with the global git config masked
+- [OK] mezmo check-defect-patterns.py passes against the branch; full-check and shellcheck clean; PR #34 merged 4/4 checks
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- fold 0.5.17 into the six open fleet refresh PRs and run the gated merges
