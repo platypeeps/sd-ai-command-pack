@@ -309,23 +309,11 @@ def audit_provenance(root: Path) -> list[str]:
             failures.append(f"{PROVENANCE_FILE} contains unsafe target {raw_target!r}")
             continue
         path = root / target
-        # Symlinked parent directories could route the hash check outside
-        # the repository; fail closed when the real path escapes root.
-        # commonpath handles filesystem-root repos and raises on
-        # mixed-drive comparisons, which also fail closed.
-        real = os.path.realpath(path)
-        try:
-            inside = os.path.commonpath([root_real, real]) == root_real
-        except ValueError:
-            inside = False
-        if not inside:
-            failures.append(
-                f"vouched target escapes the repository root: {target}"
-            )
-            continue
         # Per-target lstat mirrors the provenance-file gate: missing,
         # symlink, non-regular, and cannot-be-inspected are distinguished
-        # without exists()/is_file() OSError ambiguity.
+        # without exists()/is_file() OSError ambiguity. It runs before the
+        # escape check so a symlink target keeps its "not a regular file"
+        # classification wherever it points.
         try:
             target_mode = os.lstat(path).st_mode
         except FileNotFoundError:
@@ -345,6 +333,20 @@ def audit_provenance(root: Path) -> list[str]:
             # matching file), directory, or other node at a vouched path is
             # tampering, not absence.
             failures.append(f"vouched target is not a regular file: {target}")
+            continue
+        # Symlinked parent directories could route the hash check outside
+        # the repository; fail closed when the real path escapes root.
+        # commonpath handles filesystem-root repos and raises on
+        # mixed-drive comparisons, which also fail closed.
+        real = os.path.realpath(path)
+        try:
+            inside = os.path.commonpath([root_real, real]) == root_real
+        except ValueError:
+            inside = False
+        if not inside:
+            failures.append(
+                f"vouched target escapes the repository root: {target}"
+            )
             continue
         try:
             content = path.read_bytes()
