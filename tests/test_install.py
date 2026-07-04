@@ -5080,13 +5080,16 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         run("git", "commit", "-q", "-m", "feat: add feature file")
         commit_hash = run("git", "rev-parse", "--short", "HEAD").stdout.strip()
 
-        # Dirty the bootstrap journal beforehand: detection must still pick
-        # the journal via the new entry's title.
+        # Dirty the bootstrap journal AND plant a second modified journal:
+        # the before/after delta is then empty and two candidates remain,
+        # so detection must disambiguate via the new entry's title.
         pre_journal = next((root / ".trellis/workspace").glob("*/journal-*.md"))
         pre_journal.write_text(
             pre_journal.read_text(encoding="utf-8") + "\n",
             encoding="utf-8",
         )
+        decoy = pre_journal.parent / "journal-9.md"
+        decoy.write_text("# Journal - tester (Part 9)\n", encoding="utf-8")
 
         result = run(
             sys.executable,
@@ -5106,9 +5109,8 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         )
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        journals = list((root / ".trellis/workspace").glob("*/journal-*.md"))
-        self.assertEqual(len(journals), 1, journals)
-        entry = journals[0].read_text(encoding="utf-8")
+        entry = pre_journal.read_text(encoding="utf-8")
+        self.assertNotIn("Demo session", decoy.read_text(encoding="utf-8"))
         self.assertIn("feat: add feature file", entry)
         self.assertIn("- added the feature file", entry)
         self.assertIn("- [OK] unit suite green", entry)
