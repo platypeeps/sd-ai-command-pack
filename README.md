@@ -321,9 +321,9 @@ python3 install.py /path/to/trellis/repo
 
 The installer requires `.trellis/config.yaml` in the target repo and will fail
 with the Trellis install link if that marker is missing. It always installs the
-shared `.agents` skills, full-check, housekeeping, review-scope, review-local
-command assets, review-preflight, install-audit, review-learnings, PR-body
-scope, and update-spec KB scripts,
+shared `.agents` skills, full-check, housekeeping, record-session,
+review-scope, review-local command assets, review-preflight, install-audit,
+review-learnings, PR-body scope, and update-spec KB scripts,
 Prism/Gito defaults, usage guide, and the
 generated `.sd-ai-command-pack/installed-targets.txt` snapshot used by the scope
 checks. Normal shared installs should commit that snapshot with the other

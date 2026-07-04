@@ -5041,6 +5041,133 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             result.stdout,
         )
 
+    def _seed_trellis_session_tooling(self, root: Path) -> None:
+        shutil.copytree(
+            PACK_ROOT / ".trellis/scripts",
+            root / ".trellis/scripts",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+        result = subprocess.run(
+            [sys.executable, ".trellis/scripts/init_developer.py", "tester"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_record_session_wrapper_writes_complete_entry(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self._seed_trellis_session_tooling(root)
+
+        def run(*args: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                args,
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        run("git", "config", "user.email", "test@example.com")
+        run("git", "config", "user.name", "Test User")
+        (root / "feature.txt").write_text("hi\n", encoding="utf-8")
+        run("git", "add", "-A")
+        run("git", "commit", "-q", "-m", "feat: add feature file")
+        commit_hash = run("git", "rev-parse", "--short", "HEAD").stdout.strip()
+
+        # Dirty the bootstrap journal AND plant a second modified journal:
+        # the before/after delta is then empty and two candidates remain,
+        # so detection must disambiguate via the new entry's title.
+        pre_journal = next((root / ".trellis/workspace").glob("*/journal-*.md"))
+        pre_journal.write_text(
+            pre_journal.read_text(encoding="utf-8") + "\n",
+            encoding="utf-8",
+        )
+        # journal-0 sorts below the active part, so Trellis keeps writing
+        # to journal-1 while the wrapper sees two modified candidates.
+        decoy = pre_journal.parent / "journal-0.md"
+        decoy.write_text("# Journal - tester (Part 0)\n", encoding="utf-8")
+
+        result = run(
+            sys.executable,
+            "scripts/sd-ai-command-pack-record-session.py",
+            "--title",
+            "Demo session",
+            "--summary",
+            "Did the demo work.",
+            "--commit",
+            commit_hash,
+            "--change",
+            "added the feature file",
+            "--change",
+            "- kept the docs current",
+            "--test",
+            "unit suite green",
+            "--test",
+            "  [WARN] flaky case quarantined",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        entry = pre_journal.read_text(encoding="utf-8")
+        self.assertNotIn("Demo session", decoy.read_text(encoding="utf-8"))
+        self.assertIn("feat: add feature file", entry)
+        self.assertIn("- added the feature file", entry)
+        self.assertIn("- kept the docs current", entry)
+        self.assertIn("- [OK] unit suite green", entry)
+        self.assertIn("- [WARN] flaky case quarantined", entry)
+        self.assertNotIn("-  [WARN]", entry)
+        self.assertNotIn("[OK] [WARN]", entry)
+        self.assertNotIn("(Add details)", entry)
+        self.assertNotIn("(Add test results)", entry)
+        self.assertNotIn("(see git log)", entry)
+        last_message = run("git", "log", "-1", "--format=%s").stdout.strip()
+        self.assertEqual(last_message, "chore: record journal")
+        committed = run("git", "show", "--name-only", "--format=", "HEAD").stdout
+        self.assertIn("journal-1.md", committed)
+        self.assertNotIn("journal-0.md", committed)
+
+    def test_record_session_wrapper_fails_fast_on_unknown_hash(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self._seed_trellis_session_tooling(root)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/sd-ai-command-pack-record-session.py",
+                "--title",
+                "Demo",
+                "--summary",
+                "S",
+                "--commit",
+                "deadbeef",
+                "--change",
+                "c",
+                "--test",
+                "t",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("unknown commit hash: deadbeef", result.stdout)
+        # Fail-fast means add_session never ran: the bootstrap journal
+        # skeleton exists but carries no session entry.
+        for journal in (root / ".trellis/workspace").glob("*/journal-*.md"):
+            self.assertNotIn(
+                "## Session", journal.read_text(encoding="utf-8")
+            )
+
     def test_chore_scope_pre_push_hook_gates_direct_main_pushes(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
