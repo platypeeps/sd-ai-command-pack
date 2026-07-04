@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 24
+- **Total Sessions**: 25
 - **Last Active**: 2026-07-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1000 | Active |
+| `journal-1.md` | ~1039 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 25 | 2026-07-04 | One-shot journal recorder (0.5.16) | `68063c5` | `main` |
 | 24 | 2026-07-04 | 0.5.15: cd -- option terminator in root guards | `40cb2e0` | `main` |
 | 23 | 2026-07-03 | 0.5.14: guard empty repo-root before cd in shipped scripts | `82025ff`, `adfbd09` | `main` |
 | 22 | 2026-07-03 | Provenance: vouch force-overwritten targets | `8ba6062` | `main` |

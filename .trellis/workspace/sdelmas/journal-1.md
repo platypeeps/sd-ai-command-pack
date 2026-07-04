@@ -1002,3 +1002,39 @@ Loadsmith's refresh-PR review caught that the 0.5.14 root guards dropped the -- 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 25: One-shot journal recorder (0.5.16)
+
+**Date**: 2026-07-04
+**Task**: One-shot journal recorder (0.5.16)
+**Branch**: `main`
+
+### Summary
+
+Shipped scripts/sd-ai-command-pack-record-session.py through PR #33: a wrapper around Trellis add_session.py that resolves commit subjects from git, patches the Testing section and commit table in one shot, verifies no placeholders remain, and commits only the journal it wrote.
+
+### Main Changes
+
+- added templates/scripts/sd-ai-command-pack-record-session.py plus installed twin, wired into manifest 0.5.16, docs, and the sd-finish-work skill
+- hardened through seven Copilot rounds: '- '-prefix-only bullet normalization, --commit - sentinel, journal read/write error handling, git-toplevel chdir, title-based journal disambiguation, precise journal+index staging
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `68063c5` | Add one-shot session journal recorder (0.5.16) (#33) |
+
+### Testing
+
+- [OK] 258 unit tests green with 100% coverage on install.py
+- [OK] full-check and shellcheck clean; PR #33 merged with 4/4 checks and 0 unresolved threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- fold 0.5.16 into the six consumer repos via the worktree refresh cycle
