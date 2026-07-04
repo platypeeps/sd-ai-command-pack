@@ -1075,3 +1075,38 @@ Fixed the four recorder defects the 0.5.16 fleet reviews surfaced: mezmo gate-8 
 ### Next Steps
 
 - fold 0.5.17 into the six open fleet refresh PRs and run the gated merges
+
+
+## Session 27: Recorder empty-subject fix (0.5.18)
+
+**Date**: 2026-07-04
+**Task**: Recorder empty-subject fix (0.5.18)
+**Branch**: `main`
+
+### Summary
+
+Fixed the rwbp-website review finding: commit_subject() conflated a valid empty-message commit with an unknown hash; a zero-exit lookup with empty output now renders (empty subject) instead of exiting 2. Shipped as PR #35.
+
+### Main Changes
+
+- commit_subject() returns (empty subject) for zero-exit empty output; only failed lookups mean unknown hash
+- new end-to-end test records a session for an --allow-empty-message commit
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5a63aac` | chore(task): archive 07-04-recorder-empty-subject |
+
+### Testing
+
+- [OK] 261 tests green with 100% coverage; full-check and shellcheck clean; PR #35 merged 4/4 checks
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- fold 0.5.18 into the six fleet refresh PRs and run the gated merges
