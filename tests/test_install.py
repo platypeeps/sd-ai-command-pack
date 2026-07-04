@@ -5212,6 +5212,55 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 2, result.stdout)
         self.assertIn(f"duplicate commit hash: {head}", result.stdout)
 
+    def test_record_session_wrapper_accepts_empty_commit_subject(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self._seed_trellis_session_tooling(root)
+
+        def run(*args: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                args,
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        run("git", "config", "user.email", "test@example.com")
+        run("git", "config", "user.name", "Test User")
+        run("git", "add", "-A")
+        run("git", "commit", "-q", "-m", "chore: seed trellis tooling")
+        run(
+            "git", "commit", "-q", "--allow-empty",
+            "--allow-empty-message", "-m", "",
+        )
+        commit_hash = run("git", "rev-parse", "--short", "HEAD").stdout.strip()
+
+        result = run(
+            sys.executable,
+            "scripts/sd-ai-command-pack-record-session.py",
+            "--title",
+            "Empty subject session",
+            "--summary",
+            "S",
+            "--commit",
+            commit_hash,
+            "--change",
+            "c",
+            "--test",
+            "t",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        journals = sorted(
+            (root / ".trellis/workspace").glob("*/journal-*.md")
+        )
+        self.assertEqual(len(journals), 1)
+        entry = journals[0].read_text(encoding="utf-8")
+        self.assertIn(f"| `{commit_hash}` | (empty subject) |", entry)
+
     def test_record_session_wrapper_tolerates_prefilled_trellis_variant(
         self,
     ) -> None:

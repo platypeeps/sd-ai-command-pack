@@ -1,0 +1,1 @@
+{"file": ".trellis/tasks/07-04-recorder-empty-subject/prd.md", "reason": "R1/R2: separate git-failure (unknown hash) from empty-subject success in commit_subject(), with the (empty subject) cell fallback."}
