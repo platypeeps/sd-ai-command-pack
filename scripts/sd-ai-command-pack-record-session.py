@@ -155,15 +155,22 @@ def main(argv: list[str]) -> int:
             return 2
         subjects[commit_hash] = subject
 
-    changes = [
-        c if c.lstrip().startswith("-") else f"- {c}" for c in args.change
-    ]
-    tests = [
-        t if t.lstrip().startswith("-") else f"- [OK] {t}" for t in args.tests
-    ]
-    next_steps = [
-        n if n.lstrip().startswith("-") else f"- {n}" for n in args.next_steps
-    ]
+    def as_bullet(line: str) -> str:
+        return line if line.lstrip().startswith("-") else f"- {line}"
+
+    def as_test_line(line: str) -> str:
+        stripped = line.lstrip()
+        if stripped.startswith("-"):
+            return line
+        if stripped.startswith("["):
+            # Already carries a status marker ([WARN], [SKIP], ...);
+            # do not stamp [OK] over it.
+            return f"- {line}"
+        return f"- [OK] {line}"
+
+    changes = [as_bullet(c) for c in args.change]
+    tests = [as_test_line(t) for t in args.tests]
+    next_steps = [as_bullet(n) for n in args.next_steps]
 
     before = set(modified_workspace_journals())
     with tempfile.NamedTemporaryFile(
@@ -187,8 +194,18 @@ def main(argv: list[str]) -> int:
             command.extend(["--commit", ",".join(hashes)])
         if args.branch:
             command.extend(["--branch", args.branch])
-        result = subprocess.run(command, check=False)
+        result = subprocess.run(
+            command,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
         if result.returncode != 0:
+            # Operator-facing tool: surface the Trellis script's own output
+            # (missing developer init, index marker issues, ...).
+            if result.stdout:
+                print(result.stdout, file=sys.stderr)
             print(
                 f"error: add_session.py exited {result.returncode}",
                 file=sys.stderr,
@@ -200,6 +217,17 @@ def main(argv: list[str]) -> int:
     journals = [j for j in modified_workspace_journals() if j not in before] or (
         modified_workspace_journals()
     )
+    if len(journals) != 1:
+        # A journal dirtied before the run makes the before/after set
+        # ambiguous; the entry we just wrote is the one carrying the title.
+        marker = f": {args.title}\n"
+        titled = [
+            j
+            for j in journals
+            if marker in j.read_text(encoding="utf-8", errors="strict")
+        ]
+        if len(titled) == 1:
+            journals = titled
     if len(journals) != 1:
         print(
             "error: expected exactly one modified journal file, found: "

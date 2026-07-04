@@ -5080,6 +5080,14 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         run("git", "commit", "-q", "-m", "feat: add feature file")
         commit_hash = run("git", "rev-parse", "--short", "HEAD").stdout.strip()
 
+        # Dirty the bootstrap journal beforehand: detection must still pick
+        # the journal via the new entry's title.
+        pre_journal = next((root / ".trellis/workspace").glob("*/journal-*.md"))
+        pre_journal.write_text(
+            pre_journal.read_text(encoding="utf-8") + "\n",
+            encoding="utf-8",
+        )
+
         result = run(
             sys.executable,
             "scripts/sd-ai-command-pack-record-session.py",
@@ -5093,6 +5101,8 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             "added the feature file",
             "--test",
             "unit suite green",
+            "--test",
+            "[WARN] flaky case quarantined",
         )
 
         self.assertEqual(result.returncode, 0, result.stdout)
@@ -5102,6 +5112,8 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("feat: add feature file", entry)
         self.assertIn("- added the feature file", entry)
         self.assertIn("- [OK] unit suite green", entry)
+        self.assertIn("- [WARN] flaky case quarantined", entry)
+        self.assertNotIn("[OK] [WARN]", entry)
         self.assertNotIn("(Add details)", entry)
         self.assertNotIn("(Add test results)", entry)
         self.assertNotIn("(see git log)", entry)
