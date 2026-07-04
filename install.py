@@ -942,7 +942,12 @@ def provenance_content(
         file = result.file
         if file.kind in PROVENANCE_EXCLUDED_KINDS:
             continue
-        if result.status not in {"created", "updated", "unchanged"}:
+        # Every status that ends with the target byte-equal to the template
+        # is vouchable — including "overwritten" (--force over drifted
+        # content), which single-pass refreshes produce for every changed
+        # file. Excluded: "preserved" (user content) and "conflict" (target
+        # left untouched).
+        if result.status not in {"created", "updated", "unchanged", "overwritten"}:
             continue
         if file.target.as_posix() in never_vouched:
             continue
