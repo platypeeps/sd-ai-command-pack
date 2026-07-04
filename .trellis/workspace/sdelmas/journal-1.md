@@ -767,18 +767,30 @@ Hardened the 0.5.10 provenance feature against the tamper vectors Copilot found 
 
 ### Main Changes
 
-(Add details)
+- `templates/scripts/sd-ai-command-pack-install-audit.py` + twin: symlink
+  rejection at vouched paths, vouched-but-missing failures (non-gitignored,
+  receipt-independent), `os.lstat` + `S_ISREG` provenance-file gate with
+  fail-closed lstat errors, unreadable-receipt reporting in
+  `load_installed_targets`, explicit `errors=` policies
+- `install.py`: `read_existing_provenance_files` ignores symlinked
+  provenance; atomic rewrite replaces the symlink with a regular file
+- README, usage guide + twin, manifest-and-filesystem spec updated to the
+  strengthened contract; task PRD filled with R1–R6; manifest 0.5.11
 
 ### Git Commits
 
 | Hash | Message |
 |------|---------|
-| `48117b0` | (see git log) |
-| `745682b` | (see git log) |
+| `cddf3eb` | Harden provenance against symlink, removal, and decode tampering (0.5.11) |
+| `edc960d` | Document provenance-file regularity in README; fill task jsonl seeds |
+| `ce15523` | Ignore symlinked provenance in the installer merge (Copilot round 3) |
+| `625afca` | Fail closed when receipt or provenance cannot be inspected (Copilot round 3) |
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] 252 unittest cases green (6 new tamper-vector tests), install.py at 100% coverage
+- [OK] full-check clean; twins in sync
+- [OK] PR #27: four Copilot rounds, final round clean; CI green py3.10/3.13
 
 ### Status
 
