@@ -843,3 +843,49 @@ Closed the round-2 consumer-PR findings upstream: vouched-path verification fail
 ### Next Steps
 
 - None - task complete
+
+
+## Session 21: 0.5.13: chore-scope pre-push guard and shellcheck gate
+
+**Date**: 2026-07-03
+**Task**: 0.5.13: chore-scope pre-push guard and shellcheck gate
+**Branch**: `main`
+
+### Summary
+
+Implemented the branch-protection decision (option A) and the parked shell-lint backlog task as one release. A tracked .githooks/pre-push hook keeps the maintainer bypass honest: direct pushes to main may only touch .trellis/tasks/** and .trellis/workspace/**, everything else is rejected with the offending paths and a documented one-shot bypass env; Copilot's review round made the edge cases fail closed (creating remote main, git diff failures, grep errors). CI's security lane now runs shellcheck -S warning over all tracked shell plus the hook — the 6k-line baseline had exactly two findings (real cd||exit fix in review-local.sh, annotated hermetic PATH='' in the housekeeping self-test) — so consumers' reviewed-upstream exemption for vendored shell is backed by upstream lint rigor. README documents the chore-commit convention and hook install; 255 tests at 100% coverage; merged via gated housekeeping as PR #29 / 0.5.13. This journal push is the hook's first live exercise.
+
+### Main Changes
+
+- `.githooks/pre-push`: chore-scope guard for direct main pushes
+  (fail-closed on main creation, diff failures, and filter errors;
+  documented `SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS=1` escape hatch);
+  installed via `core.hooksPath`; README section documents the convention
+- `.github/workflows/tests.yml`: security lane shellchecks every tracked
+  shell script plus the hook at severity warning
+- `templates/scripts/sd-ai-command-pack-review-local.sh` + twin:
+  `cd || exit 1` fix (script runs without errexit);
+  `templates/scripts/sd-ai-command-pack-housekeeping.sh` + twin: annotated
+  intentional `PATH=''` in the hermetic self-test; manifest 0.5.13
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `464c89e` | Add chore-scope pre-push guard and shellcheck gate (0.5.13) |
+| `20b0a76` | Fail closed in the chore-scope hook edge cases (Copilot review) |
+
+### Testing
+
+- [OK] 255 unittest cases green (hook regression test incl. fail-closed
+  creation, blocked code push, bypass), install.py at 100% coverage
+- [OK] shellcheck -S warning clean over 8 scripts + hook (system 0.11.0)
+- [OK] full-check clean; PR #29: two Copilot rounds (1 → clean); CI green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
