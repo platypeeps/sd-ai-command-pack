@@ -880,7 +880,10 @@ PROVENANCE_EXCLUDED_KINDS = {
 
 def read_existing_provenance_files(target: Path) -> dict[str, str]:
     provenance = target_destination(target, PROVENANCE_FILE)
-    if not provenance.is_file():
+    # A symlinked provenance is never trusted (mirrors the audit contract);
+    # ignoring it here means the atomic rewrite below replaces the symlink
+    # with a regular file instead of following it.
+    if provenance.is_symlink() or not provenance.is_file():
         return {}
     try:
         payload = json.loads(provenance.read_text(encoding="utf-8", errors="strict"))

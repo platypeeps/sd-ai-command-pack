@@ -5392,6 +5392,31 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             result.stdout,
         )
 
+    def test_install_ignores_symlinked_provenance(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        provenance = root / install.PROVENANCE_FILE
+        real = json.loads(provenance.read_text(encoding="utf-8"))
+        target_key = "scripts/sd-ai-command-pack-full-check.sh"
+        real_hash = real["files"][target_key]
+
+        bogus = root / ".sd-ai-command-pack/bogus.json"
+        bogus.write_text(
+            json.dumps({"files": {target_key: "sha256:" + "0" * 64}}) + "\n",
+            encoding="utf-8",
+        )
+        provenance.unlink()
+        provenance.symlink_to(bogus.name)
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(provenance.is_symlink())
+        rebuilt = json.loads(provenance.read_text(encoding="utf-8"))
+        self.assertEqual(rebuilt["files"][target_key], real_hash)
+
     def test_install_recovers_from_malformed_provenance(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
