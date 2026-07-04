@@ -5200,6 +5200,61 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn(".claude/commands/sd/start.md", after)
         self.assertIn(".gemini/commands/sd/start.toml", after)
 
+    def test_install_drops_hand_vouched_generated_entries(self) -> None:
+        root = self.make_repo(".github")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        provenance_path = root / install.PROVENANCE_FILE
+        payload = json.loads(provenance_path.read_text(encoding="utf-8"))
+        fake = "sha256:" + "0" * 64
+        payload["files"][".sd-ai-command-pack/installed-targets.txt"] = fake
+        payload["files"][".sd-ai-command-pack/provenance.json"] = fake
+        payload["files"][".gitignore"] = fake
+        payload["files"][".github/copilot-instructions.md"] = fake
+        provenance_path.write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        rebuilt = json.loads(provenance_path.read_text(encoding="utf-8"))["files"]
+        self.assertNotIn(".sd-ai-command-pack/installed-targets.txt", rebuilt)
+        self.assertNotIn(".sd-ai-command-pack/provenance.json", rebuilt)
+        self.assertNotIn(".gitignore", rebuilt)
+        self.assertNotIn(".github/copilot-instructions.md", rebuilt)
+
+    def test_install_audit_reports_unreadable_vouched_target(self) -> None:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("root reads unreadable files")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        script = root / "scripts/sd-ai-command-pack-full-check.sh"
+        script.chmod(0o000)
+        self.addCleanup(script.chmod, 0o644)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "vouched target is unreadable: scripts/sd-ai-command-pack-full-check.sh",
+            result.stdout,
+        )
+
     def test_install_recovers_from_malformed_provenance(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)

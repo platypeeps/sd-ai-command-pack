@@ -896,23 +896,44 @@ def read_existing_provenance_files(target: Path) -> dict[str, str]:
     }
 
 
+def never_vouched_targets(files: list[PackFile]) -> set[str]:
+    """Targets provenance must never vouch, whatever a prior file claims.
+
+    Force-preserved targets are user-tunable, managed blocks are shared
+    ownership, and generated files describe the install itself; a
+    hand-edited provenance entry for any of them would turn legitimate
+    local content into a false drift failure.
+    """
+    return {
+        *(path.as_posix() for path in FORCE_PRESERVED_TARGETS),
+        *(
+            file.target.as_posix()
+            for file in files
+            if file.kind == MANAGED_BLOCK_KIND
+        ),
+        INSTALLED_TARGETS_FILE.as_posix(),
+        PROVENANCE_FILE.as_posix(),
+        TRELLIS_GITIGNORE_TARGET.as_posix(),
+    }
+
+
 def provenance_content(
     manifest: dict,
     results: list[InstallResult],
     *,
     existing_files: dict[str, str],
     receipt_targets: set[str],
+    never_vouched: set[str],
 ) -> str:
     # Entries survive for targets still recorded in the receipt so a
     # filtered or partially-skipped run does not shrink coverage; this
-    # run's vouched installs overwrite their entries. Force-preserved
-    # targets are user-tunable and never vouched, even on the first
-    # install that creates them.
-    unvouched = {path.as_posix() for path in FORCE_PRESERVED_TARGETS}
+    # run's vouched installs overwrite their entries. Never-vouched
+    # targets are dropped from prior content too, so a hand-edited
+    # provenance file cannot vouch them in through the merge.
     files = {
         key: value
         for key, value in existing_files.items()
-        if key in receipt_targets and key not in unvouched
+        if key in receipt_targets and key not in never_vouched
     }
     for result in results:
         file = result.file
@@ -920,7 +941,7 @@ def provenance_content(
             continue
         if result.status not in {"created", "updated", "unchanged"}:
             continue
-        if file.target.as_posix() in unvouched:
+        if file.target.as_posix() in never_vouched:
             continue
         digest = hashlib.sha256(file.source.read_bytes()).hexdigest()
         files[file.target.as_posix()] = f"sha256:{digest}"
@@ -938,6 +959,7 @@ def install_provenance_file(
     target: Path,
     *,
     receipt_targets: set[str],
+    never_vouched: set[str],
     dry_run: bool,
 ) -> InstallResult:
     file = PackFile(
@@ -955,6 +977,7 @@ def install_provenance_file(
         results,
         existing_files=read_existing_provenance_files(target),
         receipt_targets=receipt_targets,
+        never_vouched=never_vouched,
     )
     if destination.exists():
         current = read_text_strict(destination, str(file.target))
@@ -1326,6 +1349,7 @@ def main(argv: list[str] | None = None) -> int:
             results,
             target,
             receipt_targets=receipt_target_set,
+            never_vouched=never_vouched_targets(files),
             dry_run=args.dry_run,
         )
     )

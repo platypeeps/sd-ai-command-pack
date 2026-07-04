@@ -283,7 +283,12 @@ def audit_provenance(root: Path) -> list[str]:
             # The structural audit already classifies missing/gitignored
             # targets; provenance only judges content that is present.
             continue
-        digest = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        try:
+            content = path.read_bytes()
+        except OSError as exc:
+            failures.append(f"vouched target is unreadable: {target}: {exc}")
+            continue
+        digest = "sha256:" + hashlib.sha256(content).hexdigest()
         if digest != expected:
             failures.append(
                 f"installed target drifted from pack {version} content: "
