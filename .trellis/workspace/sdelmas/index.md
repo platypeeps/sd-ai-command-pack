@@ -29,7 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 19 | 2026-07-03 | 0.5.11: provenance hardening from consumer-PR review round | `48117b0`, `745682b` | `main` |
+| 19 | 2026-07-03 | 0.5.11: provenance hardening from consumer-PR review round | `cddf3eb`, `edc960d`, `ce15523`, `625afca` | `main` |
 | 18 | 2026-07-03 | 0.5.10: receipt provenance, receipt-policy tolerance, path:line doc references | `48bd81c`, `5fbac80`, `745682b` | `main` |
 | 17 | 2026-07-02 | Claude adapter drift: stable receipts, gitignore-aware audit, working /sd wrappers (0.5.9) | `81e7a05` | `main` |
 | 16 | 2026-07-01 | Pack source drift gates, review-tooling fixes, and token slimming | `6f1d3a5`, `9735c29`, `7493994`, `b9e0552`, `cb5f0e9` | `pack-drift-gates-and-fixes` |
