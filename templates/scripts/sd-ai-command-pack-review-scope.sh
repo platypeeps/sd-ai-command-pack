@@ -284,8 +284,7 @@ main() {
   # bash's `cd ""` is a silent success, so an empty root (failed
   # resolution) must be rejected explicitly.
   if [ -z "$REPO_ROOT" ] || ! cd "$REPO_ROOT"; then
-    echo "sd-ai-command-pack-review-scope: cannot resolve repository root" >&2
-    exit 1
+    fail "cannot resolve repository root"
   fi
 
   local changed_file scoped_file
