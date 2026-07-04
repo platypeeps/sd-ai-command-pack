@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -128,13 +129,20 @@ def is_unsafe_installed_target(path_text: str) -> bool:
 
 def load_installed_targets(root: Path) -> tuple[set[str], list[str]]:
     targets_file = root / INSTALLED_TARGETS_FILE
-    if not targets_file.exists():
+    try:
+        raw_text = targets_file.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
         return set(), [f"{INSTALLED_TARGETS_FILE} is missing"]
+    except OSError as exc:
+        # Path.exists() would swallow (or on some Python versions raise)
+        # permission errors; report them instead of crashing or misreading
+        # an unreadable receipt as absent.
+        return set(), [f"{INSTALLED_TARGETS_FILE} cannot be read: {exc}"]
 
     targets: set[str] = set()
     failures: list[str] = []
     for line_number, raw_line in enumerate(
-        targets_file.read_text(encoding="utf-8", errors="replace").splitlines(),
+        raw_text.splitlines(),
         start=1,
     ):
         line = raw_line.strip()
@@ -256,14 +264,19 @@ def audit_structural_state(root: Path, targets: set[str]) -> tuple[list[str], li
 def audit_provenance(root: Path) -> list[str]:
     """Verify recorded pack content hashes when provenance is present."""
     provenance_path = root / PROVENANCE_FILE
-    if provenance_path.is_symlink() or (
-        provenance_path.exists() and not provenance_path.is_file()
-    ):
-        # A symlinked or non-regular provenance file would let tampering
-        # redirect or disable verification; only a regular file counts.
-        return [f"{PROVENANCE_FILE} must be a regular file"]
-    if not provenance_path.exists():
+    try:
+        mode = os.lstat(provenance_path).st_mode
+    except FileNotFoundError:
         return []
+    except OSError as exc:
+        # exists()/is_file() swallow OSErrors as False, which would let a
+        # permission game silently disable verification; fail instead.
+        return [f"{PROVENANCE_FILE} cannot be inspected: {exc}"]
+    if not stat.S_ISREG(mode):
+        # A symlinked or non-regular provenance file would let tampering
+        # redirect or disable verification; only a regular file counts
+        # (lstat does not follow symlinks).
+        return [f"{PROVENANCE_FILE} must be a regular file"]
 
     try:
         payload = json.loads(

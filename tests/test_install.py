@@ -5392,6 +5392,34 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             result.stdout,
         )
 
+    def test_install_audit_fails_when_provenance_cannot_be_inspected(self) -> None:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("root bypasses directory permissions")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        pack_dir = root / ".sd-ai-command-pack"
+        pack_dir.chmod(0o000)
+        self.addCleanup(pack_dir.chmod, 0o755)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("cannot be read", result.stdout)
+        self.assertIn("cannot be inspected", result.stdout)
+
     def test_install_ignores_symlinked_provenance(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
