@@ -705,3 +705,38 @@ Fixed the two-sided receipt corruption that hit consumer repos gitignoring .clau
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: 0.5.10: receipt provenance, receipt-policy tolerance, path:line doc references
+
+**Date**: 2026-07-03
+**Task**: 0.5.10: receipt provenance, receipt-policy tolerance, path:line doc references
+**Branch**: `main`
+
+### Summary
+
+Shipped the three P2 backlog tasks as one release. install.py now writes .sd-ai-command-pack/provenance.json (pack version + sha256 of vouched installed files, template-source hashed; force-preserved/managed-block/generated targets never vouched, incl. against hand-edited provenance via never_vouched_targets) and the install audit verifies present vouched files, failing on content drift, unreadable files, and non-regular-file tampering — the consumers' reviewed-upstream exemption is now checkable (loadsmith supply-chain ask). The audit also tolerates the exclude-and-warn receipt policy (unlisted-but-gitignored pack files warn, fixing rwbp-website's need to disable the audit) and normalizes Windows separators in receipts (mezmo #313 promise). The review preflight resolves path:line/range/column doc citations against the base path, ending the false gate failures seen in AMC, this repo, and rwbp-website. Copilot review ran three rounds: two real hardening findings fixed (provenance merge deny-set, unreadable-file fail-closed) plus regex chain coverage; one Copilot claim empirically half-wrong (path:12:5 worked via leftmost match, path:12-34:5 was the broken form) — verified with node and documented in the reply. 247 tests at 100% install.py coverage, full-check clean, merged as PR #26 via gated housekeeping. 0.5.10.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `48bd81c` | (see git log) |
+| `5fbac80` | (see git log) |
+| `745682b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
