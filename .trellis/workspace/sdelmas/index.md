@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 22
+- **Total Sessions**: 23
 - **Last Active**: 2026-07-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~924 | Active |
+| `journal-1.md` | ~962 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 23 | 2026-07-03 | 0.5.14: guard empty repo-root before cd in shipped scripts | `82025ff`, `adfbd09` | `main` |
 | 22 | 2026-07-03 | Provenance: vouch force-overwritten targets | `8ba6062` | `main` |
 | 21 | 2026-07-03 | 0.5.13: chore-scope pre-push guard and shellcheck gate | `464c89e`, `20b0a76` | `main` |
 | 20 | 2026-07-03 | 0.5.12: audit traversal hardening (symlinked parents, per-target lstat) | `ead7827`, `300affe`, `7b47390` | `main` |

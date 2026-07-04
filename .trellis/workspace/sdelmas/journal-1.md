@@ -926,3 +926,42 @@ Fixed the provenance gap the 0.5.13 fleet refresh exposed: install_file returns 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 23: 0.5.14: guard empty repo-root before cd in shipped scripts
+
+**Date**: 2026-07-03
+**Task**: 0.5.14: guard empty repo-root before cd in shipped scripts
+**Branch**: `main`
+
+### Summary
+
+Closed the Copilot finding from the 0.5.13 refresh PRs: bash's cd "" is a silent rc-0 no-op (verified empirically), so cd "$REPO_ROOT" || exit 1 never fires on an empty root and errexit cannot help. All three shipped scripts sharing the pattern (review-local, full-check, review-scope) now reject empty roots and failed cds explicitly, using each script's own error conventions (fail() helper / printf). Shellcheck-clean, 256 tests at 100% coverage, PR #31 merged via gated housekeeping as 0.5.14 after Copilot's style round; the re-review never arrived (CI green, CLEAN, threads answered+resolved) so the merge proceeded on the completed substantive round.
+
+### Main Changes
+
+- `templates/scripts/sd-ai-command-pack-{review-local,full-check,review-scope}.sh`
+  + twins: explicit `[ -z "$REPO_ROOT" ] || ! cd` guards with each script's
+  own error conventions (`fail()` helper / `printf` to stderr);
+  manifest 0.5.14
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `82025ff` | Guard empty repo-root before cd in shipped scripts (0.5.14) |
+| `adfbd09` | Match script error-reporting conventions in the root guards (Copilot review) |
+
+### Testing
+
+- [OK] shellcheck -S warning clean; 256 unittest cases at 100% coverage;
+  full-check clean (exercises the guarded full-check script itself)
+- [OK] PR #31: substantive Copilot round fixed (3 style comments); CI green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
