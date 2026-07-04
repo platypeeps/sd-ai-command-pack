@@ -674,17 +674,29 @@ Fixed the two-sided receipt corruption that hit consumer repos gitignoring .clau
 
 ### Main Changes
 
-(Add details)
+- `install.py`: receipt preservation for platforms skipped by detection,
+  `--platform` filters, or gitignored anchors (`kept-in-receipt` reporting;
+  fail-closed when git is unavailable)
+- `templates/scripts/sd-ai-command-pack-install-audit.py` + twin:
+  missing-but-gitignored receipt targets downgrade to warnings with a
+  reinstall hint
+- `templates/.claude/commands/sd/{start,continue,finish-work}.md` + twins:
+  start derives context from `get_context.py`; continue/finish-work accept
+  `trellis:` command-form resolutions
+- README, usage guide + twin, and the manifest-and-filesystem spec updated;
+  manifest bumped to 0.5.9
 
 ### Git Commits
 
 | Hash | Message |
 |------|---------|
-| `81e7a05` | (see git log) |
+| `81e7a05` | Fix claude adapter drift: stable receipts, gitignore-aware audit, working /sd wrappers |
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] 233 unittest cases green (7 new), install.py at 100% coverage via the CI gate
+- [OK] full-check clean incl. template-twin and env-var doc gates
+- [OK] PR #25 Copilot review clean (21 files, zero comments); CI green on py3.10/3.13
 
 ### Status
 

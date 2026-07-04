@@ -3,7 +3,7 @@
   "name": "receipt-provenance",
   "title": "Record pack version and content hashes in the install receipt",
   "description": "From loadsmith 07-02-supply-chain-pinning: consumer repos exempt vendored pack files from line review ('reviewed upstream') but nothing in-repo makes that claim checkable. Record the pack version plus per-file content hashes in .sd-ai-command-pack/ at install time and provide a verification entry point (install audit or a dedicated check) so tampered refresh PRs hiding command overrides in reviewer-exempted files are detectable.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
