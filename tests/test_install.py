@@ -5168,6 +5168,119 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
                 "## Session", journal.read_text(encoding="utf-8")
             )
 
+    def test_record_session_wrapper_rejects_bad_commit_arguments(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self._seed_trellis_session_tooling(root)
+
+        def record(commit_arg: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                [
+                    sys.executable,
+                    "scripts/sd-ai-command-pack-record-session.py",
+                    "--title",
+                    "Demo",
+                    "--summary",
+                    "S",
+                    f"--commit={commit_arg}",
+                    "--change",
+                    "c",
+                    "--test",
+                    "t",
+                ],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        result = record("--all")
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("invalid commit hash: --all", result.stdout)
+
+        head = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        ).stdout.strip()
+        result = record(f"{head},{head}")
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn(f"duplicate commit hash: {head}", result.stdout)
+
+    def test_record_session_wrapper_tolerates_prefilled_trellis_variant(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self._seed_trellis_session_tooling(root)
+
+        # Emulate the Trellis variant that resolves commit subjects itself
+        # and seeds a different Testing default (loadsmith's add_session).
+        variant = root / ".trellis/scripts/add_session.py"
+        source = variant.read_text(encoding="utf-8")
+        self.assertIn("(see git log)", source)
+        self.assertIn("- [OK] (Add test results)", source)
+        source = source.replace("(see git log)", "prefilled subject")
+        source = source.replace(
+            "- [OK] (Add test results)",
+            "- Validation not recorded for this session.",
+        )
+        variant.write_text(source, encoding="utf-8")
+
+        def run(*args: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                args,
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        # Track the seeded workspace so the wrapper's status scan sees the
+        # journal add_session modifies rather than one untracked directory.
+        run("git", "add", "-A")
+        run("git", "commit", "-q", "-m", "chore: seed trellis tooling")
+
+        (root / "feature.txt").write_text("feature\n", encoding="utf-8")
+        run("git", "add", "feature.txt")
+        run("git", "commit", "-q", "-m", "feat: add feature file")
+        commit_hash = run("git", "rev-parse", "--short", "HEAD").stdout.strip()
+
+        result = run(
+            sys.executable,
+            "scripts/sd-ai-command-pack-record-session.py",
+            "--title",
+            "Variant session",
+            "--summary",
+            "Recorded against a subject-resolving Trellis.",
+            "--commit",
+            commit_hash,
+            "--change",
+            "added the feature file",
+            "--test",
+            "unit suite green",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        journals = sorted(
+            (root / ".trellis/workspace").glob("*/journal-*.md")
+        )
+        self.assertEqual(len(journals), 1)
+        entry = journals[0].read_text(encoding="utf-8")
+        self.assertIn("feat: add feature file", entry)
+        self.assertNotIn("prefilled subject", entry)
+        self.assertIn("- [OK] unit suite green", entry)
+        self.assertNotIn("Validation not recorded", entry)
+        last_message = run("git", "log", "-1", "--format=%s").stdout.strip()
+        self.assertEqual(last_message, "chore: record journal")
+
     def test_chore_scope_pre_push_hook_gates_direct_main_pushes(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")

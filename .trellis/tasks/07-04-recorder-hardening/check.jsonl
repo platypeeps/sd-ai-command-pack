@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/07-04-recorder-hardening/prd.md", "reason": "Acceptance criteria: encoding/errors on all recorder text I/O, exit-2 argument validation, variant-tolerant patching, full battery green."}
+{"file": "docs/SD_AI_COMMAND_PACK.md", "reason": "Check the template twin drift gate and version bump conventions the full-check enforces."}
