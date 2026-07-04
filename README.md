@@ -569,7 +569,30 @@ python3 -m coverage report --fail-under=100
 The `--fail-under=100` gate measures `install.py` (the installer logic) only;
 `.coveragerc` scopes coverage to that file. The shipped shell and Python helper
 scripts under `scripts/` are exercised by their own runtime behavior, not by
-this coverage number.
+this coverage number. CI also runs `shellcheck -S warning` over every tracked
+shell script and the git hooks — consumers exempt the vendored pack shell from
+line review ("reviewed upstream"), so upstream lint rigor is the compensating
+control.
+
+## Direct-to-main Chore Commits
+
+Branch protection on `main` requires pull requests with the `CI Result`
+check, with `enforce_admins` left off deliberately: the Trellis wrap-up flow
+(task archive, journal, and task-file commits under `.trellis/tasks/**` and
+`.trellis/workspace/**`) pushes those chore commits directly to `main` under
+the maintainer bypass. Everything else goes through a pull request.
+
+The tracked `.githooks/pre-push` hook keeps that bypass honest by rejecting
+any direct push to `main` that touches paths outside the two chore
+directories. Install it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+For a deliberate one-shot exception, bypass the hook with
+`SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS=1 git push ...` — GitHub's own rules
+still apply on the remote.
 
 ## Supported Adapters
 

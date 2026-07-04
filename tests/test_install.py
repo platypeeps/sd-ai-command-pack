@@ -5040,6 +5040,90 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             result.stdout,
         )
 
+    def test_chore_scope_pre_push_hook_gates_direct_main_pushes(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-pack-hook-test-")
+        self.addCleanup(tempdir.cleanup)
+        base = Path(tempdir.name)
+        origin = base / "origin.git"
+        subprocess.run(
+            ["git", "init", "--bare", "-q", str(origin)],
+            check=True,
+        )
+        clone = base / "clone"
+        subprocess.run(
+            ["git", "clone", "-q", str(origin), str(clone)],
+            check=True,
+            stderr=subprocess.DEVNULL,
+        )
+
+        def run(*args: str, env: dict[str, str] | None = None):
+            return subprocess.run(
+                args,
+                cwd=clone,
+                env={**os.environ, **(env or {})},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        run("git", "config", "user.email", "test@example.com")
+        run("git", "config", "user.name", "Test User")
+        run("git", "checkout", "-q", "-b", "main")
+        hooks_dir = clone / ".githooks"
+        hooks_dir.mkdir()
+        shutil.copy2(PACK_ROOT / ".githooks/pre-push", hooks_dir / "pre-push")
+        run("git", "config", "core.hooksPath", ".githooks")
+
+        chore = clone / ".trellis/tasks/07-01-demo/prd.md"
+        chore.parent.mkdir(parents=True)
+        chore.write_text("# demo\n", encoding="utf-8")
+        run("git", "add", "-A")
+        run("git", "commit", "-q", "-m", "chore(task): demo")
+
+        # Creating remote main directly fails closed (no chore baseline).
+        result = run("git", "push", "-q", "origin", "main")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("creating remote main", result.stdout)
+        result = run(
+            "git",
+            "push",
+            "-q",
+            "origin",
+            "main",
+            env={"SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS": "1"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        # With a baseline, chore-only pushes flow.
+        chore.write_text("# demo v2\n", encoding="utf-8")
+        run("git", "add", "-A")
+        run("git", "commit", "-q", "-m", "chore(task): demo v2")
+        result = run("git", "push", "-q", "origin", "main")
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        (clone / "code.py").write_text("print('hi')\n", encoding="utf-8")
+        run("git", "add", "-A")
+        run("git", "commit", "-q", "-m", "feat: code")
+        result = run("git", "push", "-q", "origin", "main")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("chore-scope only", result.stdout)
+        self.assertIn("code.py", result.stdout)
+
+        result = run(
+            "git",
+            "push",
+            "-q",
+            "origin",
+            "main",
+            env={"SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS": "1"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("bypassed", result.stdout)
+
     def test_install_writes_provenance_with_hashed_targets(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
