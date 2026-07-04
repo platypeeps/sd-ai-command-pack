@@ -883,7 +883,7 @@ def read_existing_provenance_files(target: Path) -> dict[str, str]:
     if not provenance.is_file():
         return {}
     try:
-        payload = json.loads(provenance.read_text(encoding="utf-8"))
+        payload = json.loads(provenance.read_text(encoding="utf-8", errors="strict"))
     except (OSError, UnicodeError, ValueError):
         return {}
     files = payload.get("files") if isinstance(payload, dict) else None

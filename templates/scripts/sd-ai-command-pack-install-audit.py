@@ -256,11 +256,19 @@ def audit_structural_state(root: Path, targets: set[str]) -> tuple[list[str], li
 def audit_provenance(root: Path) -> list[str]:
     """Verify recorded pack content hashes when provenance is present."""
     provenance_path = root / PROVENANCE_FILE
+    if provenance_path.is_symlink() or (
+        provenance_path.exists() and not provenance_path.is_file()
+    ):
+        # A symlinked or non-regular provenance file would let tampering
+        # redirect or disable verification; only a regular file counts.
+        return [f"{PROVENANCE_FILE} must be a regular file"]
     if not provenance_path.exists():
         return []
 
     try:
-        payload = json.loads(provenance_path.read_text(encoding="utf-8"))
+        payload = json.loads(
+            provenance_path.read_text(encoding="utf-8", errors="strict")
+        )
     except (OSError, UnicodeError, ValueError) as exc:
         return [f"{PROVENANCE_FILE} is unreadable or malformed: {exc}"]
 
@@ -280,12 +288,16 @@ def audit_provenance(root: Path) -> list[str]:
             continue
         path = root / target
         if not path.exists() and not path.is_symlink():
-            # The structural audit already classifies missing/gitignored
-            # targets; provenance only judges content that is present.
+            # Local-only adapters may be legitimately absent (gitignored);
+            # anything else vouched-but-gone is tampering even when the
+            # receipt no longer lists it.
+            if not is_gitignored(root, target):
+                failures.append(f"vouched target is missing: {target}")
             continue
-        if not path.is_file():
-            # Provenance vouches plain files; a directory or dangling
-            # symlink at a vouched path is tampering, not absence.
+        if path.is_symlink() or not path.is_file():
+            # Provenance vouches plain regular files; a symlink (even to a
+            # matching file), directory, or other node at a vouched path is
+            # tampering, not absence.
             failures.append(f"vouched target is not a regular file: {target}")
             continue
         try:

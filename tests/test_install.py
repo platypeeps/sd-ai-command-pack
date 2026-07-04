@@ -5255,6 +5255,115 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             result.stdout,
         )
 
+    def test_install_audit_flags_symlink_at_vouched_path(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        script = root / "scripts/sd-ai-command-pack-full-check.sh"
+        copy = root / "scripts/full-check-copy.sh"
+        copy.write_bytes(script.read_bytes())
+        script.unlink()
+        script.symlink_to(copy.name)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "vouched target is not a regular file: "
+            "scripts/sd-ai-command-pack-full-check.sh",
+            result.stdout,
+        )
+
+    def test_install_audit_flags_vouched_target_missing_from_receipt_too(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        # Remove a vouched file AND its receipt line: the structural audit
+        # no longer sees it, so provenance must be the tamper-evidence.
+        (root / "scripts/sd-ai-command-pack-full-check.sh").unlink()
+        receipt = root / install.INSTALLED_TARGETS_FILE
+        receipt.write_text(
+            "".join(
+                line
+                for line in receipt.read_text(encoding="utf-8").splitlines(
+                    keepends=True
+                )
+                if "sd-ai-command-pack-full-check.sh" not in line
+            ),
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "vouched target is missing: scripts/sd-ai-command-pack-full-check.sh",
+            result.stdout,
+        )
+
+    def test_install_audit_requires_regular_provenance_file(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        provenance = root / install.PROVENANCE_FILE
+        aside = root / ".sd-ai-command-pack/provenance-real.json"
+        aside.write_bytes(provenance.read_bytes())
+        provenance.unlink()
+        provenance.symlink_to(aside.name)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("must be a regular file", result.stdout)
+
+        provenance.unlink()
+        provenance.symlink_to("does-not-exist.json")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("must be a regular file", result.stdout)
+
     def test_install_audit_flags_non_regular_file_at_vouched_path(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)

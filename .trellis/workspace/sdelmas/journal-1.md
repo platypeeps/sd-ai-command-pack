@@ -719,19 +719,32 @@ Shipped the three P2 backlog tasks as one release. install.py now writes .sd-ai-
 
 ### Main Changes
 
-(Add details)
+- `install.py`: writes `.sd-ai-command-pack/provenance.json` (pack version
+  + sha256 of vouched installed files); `never_vouched_targets()` deny-set
+  keeps force-preserved/managed-block/generated targets out even against
+  hand-edited provenance; recovery from malformed provenance
+- `templates/scripts/sd-ai-command-pack-install-audit.py` + twin:
+  provenance verification (drift, unreadable, non-regular-file failures),
+  exclude-and-warn receipt-policy tolerance, Windows separator
+  normalization at receipt load
+- `templates/scripts/sd-ai-command-pack-review-preflight.mjs` + twin:
+  `path:line`/range/column citations resolve against the base path;
+  provenance.json joins optional reference paths
+- README, usage guide + twin, manifest-and-filesystem spec; 0.5.10
 
 ### Git Commits
 
 | Hash | Message |
 |------|---------|
-| `48bd81c` | (see git log) |
-| `5fbac80` | (see git log) |
-| `745682b` | (see git log) |
+| `48bd81c` | Add receipt provenance, receipt-policy tolerance, and path:line doc references |
+| `5fbac80` | Harden provenance merge and audit read paths (Copilot review) |
+| `745682b` | Harden line-suffix stripping and vouched-path type checks (Copilot round 2) |
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] 247 unittest cases green (14 new/updated), install.py at 100% coverage
+- [OK] full-check clean incl. twin and env-var gates; node-gated preflight test
+- [OK] PR #26: three Copilot rounds, final round clean; CI green py3.10/3.13
 
 ### Status
 
