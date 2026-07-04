@@ -753,3 +753,37 @@ Shipped the three P2 backlog tasks as one release. install.py now writes .sd-ai-
 ### Next Steps
 
 - None - task complete
+
+
+## Session 19: 0.5.11: provenance hardening from consumer-PR review round
+
+**Date**: 2026-07-03
+**Task**: 0.5.11: provenance hardening from consumer-PR review round
+**Branch**: `main`
+
+### Summary
+
+Hardened the 0.5.10 provenance feature against the tamper vectors Copilot found while reviewing the six consumer refresh PRs (10 comments, deduplicated to four issues) plus three more rounds of pack-PR findings: symlinks at vouched paths fail even with matching content; vouched-but-missing targets fail when not gitignored even if stripped from the receipt; the provenance file itself is gated by os.lstat + S_ISREG (symlinked/dangling/non-regular fail, lstat errors fail instead of silently skipping); the installer ignores symlinked provenance in merge and atomically replaces it; explicit errors= on read_text; and load_installed_targets reports unreadable receipts instead of crashing (Path.exists raised on py3.9 under permission-denied). Four Copilot rounds on PR #27, final clean; 252 tests at 100% install.py coverage; merged via gated housekeeping as 0.5.11.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `48117b0` | (see git log) |
+| `745682b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
