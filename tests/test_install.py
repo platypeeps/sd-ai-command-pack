@@ -5403,7 +5403,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         (outside / "sd-continue").mkdir()
         shutil.copy2(skill_dir / "SKILL.md", outside / "sd-continue/SKILL.md")
         shutil.rmtree(skill_dir)
-        skill_dir.symlink_to(outside / "sd-continue")
+        skill_dir.symlink_to(outside / "sd-continue", target_is_directory=True)
 
         result = subprocess.run(
             [

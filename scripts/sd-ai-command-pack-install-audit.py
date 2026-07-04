@@ -311,8 +311,14 @@ def audit_provenance(root: Path) -> list[str]:
         path = root / target
         # Symlinked parent directories could route the hash check outside
         # the repository; fail closed when the real path escapes root.
+        # commonpath handles filesystem-root repos and raises on
+        # mixed-drive comparisons, which also fail closed.
         real = os.path.realpath(path)
-        if real != root_real and not real.startswith(root_real + os.sep):
+        try:
+            inside = os.path.commonpath([root_real, real]) == root_real
+        except ValueError:
+            inside = False
+        if not inside:
             failures.append(
                 f"vouched target escapes the repository root: {target}"
             )
