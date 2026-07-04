@@ -137,10 +137,14 @@ do not shrink coverage. The audit fails on content drift (naming the
 recorded pack version), on a vouched target that is missing while not
 gitignored (even when the receipt no longer lists it — provenance is the
 tamper-evidence of last resort), on any symlink or non-regular node at a
-vouched path, and on a provenance file that is itself not a regular file
-or is malformed. Gitignored-absent vouched targets skip, consistent with
-the structural policy. Absent provenance (pre-0.5.10 installs) keeps the
-older audit behavior.
+vouched path, on a vouched path whose real path escapes the repository
+root (symlinked parent directories), on inspection failures (per-target
+`os.lstat`, reported with the exception text), and on a provenance file
+that is itself not a regular file or is malformed. Gitignored-absent
+vouched targets skip, consistent with the structural policy; structural
+`path_exists` is lstat-based so unreadable parents degrade to
+missing-target reports instead of crashing. Absent provenance (pre-0.5.10
+installs) keeps the older audit behavior.
 
 Reference files:
 

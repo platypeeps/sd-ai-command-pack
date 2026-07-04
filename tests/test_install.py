@@ -5392,6 +5392,73 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             result.stdout,
         )
 
+    def test_install_audit_flags_vouched_path_escaping_repo_root(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        outside = Path(tempfile.mkdtemp(prefix="sd-pack-outside-"))
+        self.addCleanup(shutil.rmtree, outside, True)
+        skill_dir = root / ".agents/skills/sd-continue"
+        (outside / "sd-continue").mkdir()
+        shutil.copy2(skill_dir / "SKILL.md", outside / "sd-continue/SKILL.md")
+        shutil.rmtree(skill_dir)
+        skill_dir.symlink_to(outside / "sd-continue")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "vouched target escapes the repository root: "
+            ".agents/skills/sd-continue/SKILL.md",
+            result.stdout,
+        )
+
+    def test_install_audit_reports_uninspectable_vouched_target(self) -> None:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("root bypasses directory permissions")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        skill_dir = root / ".agents/skills/sd-continue"
+        skill_dir.chmod(0o000)
+        self.addCleanup(skill_dir.chmod, 0o755)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "vouched target cannot be inspected: "
+            ".agents/skills/sd-continue/SKILL.md",
+            result.stdout,
+        )
+        self.assertIn(
+            "installed target is missing: .agents/skills/sd-continue/SKILL.md",
+            result.stdout,
+        )
+
     def test_install_audit_fails_when_provenance_cannot_be_inspected(self) -> None:
         if hasattr(os, "geteuid") and os.geteuid() == 0:
             self.skipTest("root bypasses directory permissions")
