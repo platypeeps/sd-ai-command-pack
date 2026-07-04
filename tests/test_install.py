@@ -5088,8 +5088,10 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             pre_journal.read_text(encoding="utf-8") + "\n",
             encoding="utf-8",
         )
-        decoy = pre_journal.parent / "journal-9.md"
-        decoy.write_text("# Journal - tester (Part 9)\n", encoding="utf-8")
+        # journal-0 sorts below the active part, so Trellis keeps writing
+        # to journal-1 while the wrapper sees two modified candidates.
+        decoy = pre_journal.parent / "journal-0.md"
+        decoy.write_text("# Journal - tester (Part 0)\n", encoding="utf-8")
 
         result = run(
             sys.executable,
