@@ -77,6 +77,13 @@ jobs:
       - name: Zizmor (workflow security)
         run: zizmor --offline .github/workflows/
 
+      # Consumers vendor ~6k lines of pack shell and exempt it from line
+      # review ("reviewed upstream"), so upstream lint rigor is the
+      # compensating control. Warning severity is the achieved baseline;
+      # keep it there.
+      - name: Shellcheck (pack shell and hooks)
+        run: git ls-files -z '*.sh' | xargs -0 shellcheck -S warning .githooks/pre-push
+
   # Single aggregate context for branch protection, matching the fleet
   # convention: protection requires only "CI Result" so matrix or lane
   # changes never strand a PR waiting on a renamed context.
