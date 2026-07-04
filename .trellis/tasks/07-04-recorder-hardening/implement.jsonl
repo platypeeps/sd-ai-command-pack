@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/07-04-recorder-hardening/prd.md", "reason": "Requirements R1-R4 with the per-consumer evidence (mezmo gate 8 lines 38/108/216/279; loadsmith add_session.py lines 173/183) that fixes must satisfy."}
+{"file": "docs/SD_AI_COMMAND_PACK.md", "reason": "Pack contract: consumer-visible template changes bump the manifest version; templates/** and installed twins must stay byte-identical."}
