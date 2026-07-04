@@ -113,16 +113,41 @@ visible must not erase what another checkout legitimately installed:
 
 The install audit mirrors this: a receipt target that is missing but
 gitignored in the current checkout is a warning with a reinstall hint, not a
-failure. This does not contradict the "no mutable installer state" rule —
-the receipt is the explicit, reviewable state file, and preservation only
-refuses to destroy entries the current checkout cannot verify.
+failure. The reverse policy is equally supported: a pack-like file that
+exists but is not recorded in the receipt warns instead of failing when the
+file is gitignored, so repo-local guards that strip local-only adapters
+from the receipt (rwbp-website's policy) pass the audit alongside the
+installer's record-and-warn default. Tracked-but-unlisted pack-like files
+remain failures. Receipt lines normalize Windows-style separators to `/` at
+load time, after the unsafe-path rejection. This does not contradict the
+"no mutable installer state" rule — the receipt is the explicit, reviewable
+state file, and preservation only refuses to destroy entries the current
+checkout cannot verify.
+
+## Provenance
+
+Every non-dry-run install writes `.sd-ai-command-pack/provenance.json`:
+pack name, version, and a sorted map of vouched targets to `sha256:` hashes
+of the installed content (hashes are computed from the template source, so
+dry-run and real runs agree). Never vouched: `FORCE_PRESERVED_TARGETS`
+(user-tunable), managed-block targets (shared ownership), generated files
+(receipt, gitignore block, provenance itself), and conflict results.
+Entries survive for targets still recorded in the receipt so filtered runs
+do not shrink coverage. The audit verifies present vouched files and fails
+on content drift, naming the recorded pack version; missing files defer to
+the structural checks, and a malformed provenance file is a failure.
+Absent provenance (pre-0.5.10 installs) keeps the older audit behavior.
 
 Reference files:
 
-- `install.py`, `preserved_receipt_targets()`, `is_gitignored_path()`
-- `templates/scripts/sd-ai-command-pack-install-audit.py`, `is_gitignored()`
+- `install.py`, `preserved_receipt_targets()`, `is_gitignored_path()`,
+  `provenance_content()`, `install_provenance_file()`
+- `templates/scripts/sd-ai-command-pack-install-audit.py`, `is_gitignored()`,
+  `audit_provenance()`
 - `tests/test_install.py`, `test_install_keeps_receipt_entries_for_gitignored_absent_anchor`
 - `tests/test_install.py`, `test_install_audit_downgrades_gitignored_missing_targets`
+- `tests/test_install.py`, `test_install_writes_provenance_with_hashed_targets`
+- `tests/test_install.py`, `test_install_audit_warns_for_unlisted_gitignored_pack_files`
 
 ## File Writes
 

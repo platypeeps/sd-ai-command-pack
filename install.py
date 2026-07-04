@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -56,6 +57,7 @@ FORCE_PRESERVED_TARGETS = frozenset(
     }
 )
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
+PROVENANCE_FILE = Path(".sd-ai-command-pack/provenance.json")
 LOCAL_ONLY_MARKER_FILE = Path(".sd-ai-command-pack/local-only.txt")
 LOCAL_ONLY_EXCLUDE_START = "# sd-ai-command-pack local-only start"
 LOCAL_ONLY_EXCLUDE_END = "# sd-ai-command-pack local-only end"
@@ -868,6 +870,129 @@ def installed_targets_content(
     return "\n".join(targets) + "\n"
 
 
+PROVENANCE_EXCLUDED_KINDS = {
+    MANAGED_BLOCK_KIND,
+    "generated-gitignore",
+    "generated-manifest",
+    "generated-provenance",
+}
+
+
+def read_existing_provenance_files(target: Path) -> dict[str, str]:
+    provenance = target_destination(target, PROVENANCE_FILE)
+    if not provenance.is_file():
+        return {}
+    try:
+        payload = json.loads(provenance.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
+        return {}
+    files = payload.get("files") if isinstance(payload, dict) else None
+    if not isinstance(files, dict):
+        return {}
+    return {
+        key: value
+        for key, value in files.items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+
+
+def never_vouched_targets(files: list[PackFile]) -> set[str]:
+    """Targets provenance must never vouch, whatever a prior file claims.
+
+    Force-preserved targets are user-tunable, managed blocks are shared
+    ownership, and generated files describe the install itself; a
+    hand-edited provenance entry for any of them would turn legitimate
+    local content into a false drift failure.
+    """
+    return {
+        *(path.as_posix() for path in FORCE_PRESERVED_TARGETS),
+        *(
+            file.target.as_posix()
+            for file in files
+            if file.kind == MANAGED_BLOCK_KIND
+        ),
+        INSTALLED_TARGETS_FILE.as_posix(),
+        PROVENANCE_FILE.as_posix(),
+        TRELLIS_GITIGNORE_TARGET.as_posix(),
+    }
+
+
+def provenance_content(
+    manifest: dict,
+    results: list[InstallResult],
+    *,
+    existing_files: dict[str, str],
+    receipt_targets: set[str],
+    never_vouched: set[str],
+) -> str:
+    # Entries survive for targets still recorded in the receipt so a
+    # filtered or partially-skipped run does not shrink coverage; this
+    # run's vouched installs overwrite their entries. Never-vouched
+    # targets are dropped from prior content too, so a hand-edited
+    # provenance file cannot vouch them in through the merge.
+    files = {
+        key: value
+        for key, value in existing_files.items()
+        if key in receipt_targets and key not in never_vouched
+    }
+    for result in results:
+        file = result.file
+        if file.kind in PROVENANCE_EXCLUDED_KINDS:
+            continue
+        if result.status not in {"created", "updated", "unchanged"}:
+            continue
+        if file.target.as_posix() in never_vouched:
+            continue
+        digest = hashlib.sha256(file.source.read_bytes()).hexdigest()
+        files[file.target.as_posix()] = f"sha256:{digest}"
+    payload = {
+        "pack": manifest["name"],
+        "version": manifest["version"],
+        "files": dict(sorted(files.items())),
+    }
+    return json.dumps(payload, indent=2) + "\n"
+
+
+def install_provenance_file(
+    manifest: dict,
+    results: list[InstallResult],
+    target: Path,
+    *,
+    receipt_targets: set[str],
+    never_vouched: set[str],
+    dry_run: bool,
+) -> InstallResult:
+    file = PackFile(
+        platform="shared",
+        kind="generated-provenance",
+        source=MANIFEST_PATH,
+        target=PROVENANCE_FILE,
+        anchor=None,
+        install=ALWAYS_INSTALL,
+    )
+    destination = target_destination(target, file.target)
+
+    content = provenance_content(
+        manifest,
+        results,
+        existing_files=read_existing_provenance_files(target),
+        receipt_targets=receipt_targets,
+        never_vouched=never_vouched,
+    )
+    if destination.exists():
+        current = read_text_strict(destination, str(file.target))
+        if current == content:
+            return InstallResult(file, "unchanged")
+        if not dry_run:
+            atomic_write_text(destination, content)
+        return InstallResult(file, "updated")
+
+    if not dry_run:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(destination, content)
+    return InstallResult(file, "created")
+
+
 def read_existing_installed_targets(target: Path) -> set[str]:
     receipt = target_destination(target, INSTALLED_TARGETS_FILE)
     if not receipt.is_file():
@@ -1208,15 +1333,32 @@ def main(argv: list[str] | None = None) -> int:
     kept_receipt_targets = preserved_receipt_targets(
         target, read_existing_installed_targets(target), skipped
     )
+    receipt_extra_targets = [
+        *generated_targets,
+        PROVENANCE_FILE,
+        *(kept_target for kept_target, _ in kept_receipt_targets),
+    ]
+    receipt_target_set = {
+        *(file.target.as_posix() for file in selected),
+        *(path.as_posix() for path in receipt_extra_targets),
+        INSTALLED_TARGETS_FILE.as_posix(),
+    }
+    results.append(
+        install_provenance_file(
+            manifest,
+            results,
+            target,
+            receipt_targets=receipt_target_set,
+            never_vouched=never_vouched_targets(files),
+            dry_run=args.dry_run,
+        )
+    )
     results.append(
         install_installed_targets_file(
             selected,
             target,
             dry_run=args.dry_run,
-            extra_targets=[
-                *generated_targets,
-                *(kept_target for kept_target, _ in kept_receipt_targets),
-            ],
+            extra_targets=receipt_extra_targets,
         )
     )
     if args.local_only:

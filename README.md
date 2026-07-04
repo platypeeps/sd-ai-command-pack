@@ -487,6 +487,15 @@ likewise keeps receipt entries for platforms it skipped only because their
 markers or anchors are gitignored in the current checkout, reporting each as
 `kept-in-receipt`; remove a platform intentionally by deleting its files and
 its lines from `.sd-ai-command-pack/installed-targets.txt`.
+Pack-like files that exist but are not recorded in the receipt warn instead
+of failing when they are gitignored, so repos whose receipt policy excludes
+local-only adapters pass the audit too, and hand-edited receipt entries with
+Windows-style separators are normalized before checking. The installer also
+writes `.sd-ai-command-pack/provenance.json` — the pack version plus
+`sha256` hashes of the installed pack files (user-tunable files such as
+`.prism/rules.json` are never vouched) — and the audit fails when a vouched
+file's content drifts from the recorded pack content, making the
+"reviewed upstream" exemption for vendored pack files a checkable claim.
 Set `SD_AI_COMMAND_PACK_INSTALL_AUDIT=0` to skip it.
 
 The full-check script also runs `scripts/sd-ai-command-pack-review-scope.sh`.

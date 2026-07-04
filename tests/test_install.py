@@ -193,7 +193,10 @@ class InstallTests(unittest.TestCase):
             snapshot.read_text(encoding="utf-8"),
             install.installed_targets_content(
                 selected,
-                extra_targets=[install.TRELLIS_GITIGNORE_TARGET],
+                extra_targets=[
+                    install.TRELLIS_GITIGNORE_TARGET,
+                    install.PROVENANCE_FILE,
+                ],
             ),
         )
 
@@ -5037,6 +5040,397 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             result.stdout,
         )
 
+    def test_install_writes_provenance_with_hashed_targets(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        manifest, _ = install.load_manifest()
+        provenance = json.loads(
+            (root / install.PROVENANCE_FILE).read_text(encoding="utf-8")
+        )
+        self.assertEqual(provenance["pack"], manifest["name"])
+        self.assertEqual(provenance["version"], manifest["version"])
+        files = provenance["files"]
+        self.assertIn("scripts/sd-ai-command-pack-full-check.sh", files)
+        self.assertTrue(
+            files["scripts/sd-ai-command-pack-full-check.sh"].startswith("sha256:")
+        )
+        # User-tunable and generated files are never vouched.
+        self.assertNotIn(".prism/rules.json", files)
+        self.assertNotIn(".gitignore", files)
+        self.assertNotIn(".sd-ai-command-pack/installed-targets.txt", files)
+        self.assertNotIn(".sd-ai-command-pack/provenance.json", files)
+        self.assertIn(
+            ".sd-ai-command-pack/provenance.json",
+            (root / install.INSTALLED_TARGETS_FILE).read_text(encoding="utf-8"),
+        )
+
+    def test_install_audit_flags_drifted_hashed_target(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        script = root / "scripts/sd-ai-command-pack-full-check.sh"
+        script.write_text(
+            script.read_text(encoding="utf-8") + "\n# tampered\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("drifted from pack", result.stdout)
+        self.assertIn("scripts/sd-ai-command-pack-full-check.sh", result.stdout)
+
+    def test_install_audit_ignores_user_tuned_preserved_files(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        (root / ".prism/rules.json").write_text('{"tuned": true}\n', encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("drifted from pack", result.stdout)
+
+    def test_install_audit_fails_on_malformed_provenance(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        provenance = root / install.PROVENANCE_FILE
+        provenance.write_text("not json\n", encoding="utf-8")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("unreadable or malformed", result.stdout)
+
+        provenance.write_text("{}\n", encoding="utf-8")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("has no files map", result.stdout)
+
+    def test_install_audit_passes_without_provenance_file(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        # Old installs have no provenance: remove the file and its receipt
+        # line and the audit behaves as before 0.5.10.
+        (root / install.PROVENANCE_FILE).unlink()
+        receipt = root / install.INSTALLED_TARGETS_FILE
+        receipt.write_text(
+            "".join(
+                line
+                for line in receipt.read_text(encoding="utf-8").splitlines(
+                    keepends=True
+                )
+                if "provenance.json" not in line
+            ),
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_platform_filter_run_keeps_provenance_entries(self) -> None:
+        root = self.make_repo(".claude", ".gemini")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        provenance_path = root / install.PROVENANCE_FILE
+        before = json.loads(provenance_path.read_text(encoding="utf-8"))["files"]
+        self.assertIn(".claude/commands/sd/start.md", before)
+
+        result = self.run_install(root, "--platform", "gemini")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        after = json.loads(provenance_path.read_text(encoding="utf-8"))["files"]
+        self.assertIn(".claude/commands/sd/start.md", after)
+        self.assertIn(".gemini/commands/sd/start.toml", after)
+
+    def test_install_drops_hand_vouched_generated_entries(self) -> None:
+        root = self.make_repo(".github")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        provenance_path = root / install.PROVENANCE_FILE
+        payload = json.loads(provenance_path.read_text(encoding="utf-8"))
+        fake = "sha256:" + "0" * 64
+        payload["files"][".sd-ai-command-pack/installed-targets.txt"] = fake
+        payload["files"][".sd-ai-command-pack/provenance.json"] = fake
+        payload["files"][".gitignore"] = fake
+        payload["files"][".github/copilot-instructions.md"] = fake
+        provenance_path.write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        rebuilt = json.loads(provenance_path.read_text(encoding="utf-8"))["files"]
+        self.assertNotIn(".sd-ai-command-pack/installed-targets.txt", rebuilt)
+        self.assertNotIn(".sd-ai-command-pack/provenance.json", rebuilt)
+        self.assertNotIn(".gitignore", rebuilt)
+        self.assertNotIn(".github/copilot-instructions.md", rebuilt)
+
+    def test_install_audit_reports_unreadable_vouched_target(self) -> None:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("root reads unreadable files")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        script = root / "scripts/sd-ai-command-pack-full-check.sh"
+        script.chmod(0o000)
+        self.addCleanup(script.chmod, 0o644)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "vouched target is unreadable: scripts/sd-ai-command-pack-full-check.sh",
+            result.stdout,
+        )
+
+    def test_install_audit_flags_non_regular_file_at_vouched_path(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        script = root / "scripts/sd-ai-command-pack-full-check.sh"
+        script.unlink()
+        script.mkdir()
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "vouched target is not a regular file: "
+            "scripts/sd-ai-command-pack-full-check.sh",
+            result.stdout,
+        )
+
+    def test_install_recovers_from_malformed_provenance(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        provenance = root / install.PROVENANCE_FILE
+
+        provenance.write_text("not json\n", encoding="utf-8")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        rebuilt = json.loads(provenance.read_text(encoding="utf-8"))
+        self.assertIn("scripts/sd-ai-command-pack-full-check.sh", rebuilt["files"])
+
+        provenance.write_text('{"files": "nope"}\n', encoding="utf-8")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        rebuilt = json.loads(provenance.read_text(encoding="utf-8"))
+        self.assertIn("scripts/sd-ai-command-pack-full-check.sh", rebuilt["files"])
+
+    def test_install_audit_warns_for_unlisted_gitignored_pack_files(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        # A local-only adapter deliberately kept out of the receipt (the
+        # exclude-and-warn receipt policy).
+        extra = root / ".claude/commands/sd/start.md"
+        extra.parent.mkdir(parents=True, exist_ok=True)
+        extra.write_text("# local-only wrapper\n", encoding="utf-8")
+        gitignore = root / ".gitignore"
+        gitignore.write_text(
+            gitignore.read_text(encoding="utf-8") + ".claude/\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "local-only pack-like file is not recorded in installed targets: "
+            ".claude/commands/sd/start.md",
+            result.stdout,
+        )
+        self.assertIn("install audit passed", result.stdout)
+
+    def test_install_audit_fails_for_unlisted_tracked_pack_files(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        extra = root / ".claude/commands/sd/start.md"
+        extra.parent.mkdir(parents=True, exist_ok=True)
+        extra.write_text("# unrecorded wrapper\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "pack-like file is not listed in installed targets: "
+            ".claude/commands/sd/start.md",
+            result.stdout,
+        )
+
+    def test_install_audit_normalizes_windows_separators_in_receipt(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        receipt = root / install.INSTALLED_TARGETS_FILE
+        receipt.write_text(
+            receipt.read_text(encoding="utf-8").replace(
+                "scripts/sd-ai-command-pack-full-check.sh",
+                "scripts\\sd-ai-command-pack-full-check.sh",
+            ),
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("installed target is missing", result.stdout)
+
+    def test_review_preflight_accepts_line_suffixed_doc_references(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        (root / "docs/cite.md").write_text(
+            "See [the gate](../scripts/sd-ai-command-pack-full-check.sh:12) and\n"
+            "`scripts/sd-ai-command-pack-housekeeping.sh:34-56` for details.\n"
+            "Also `scripts/sd-ai-command-pack-install-audit.py:7:3` and\n"
+            "`scripts/sd-ai-command-pack-review-local.sh:10-20:4`.\n"
+            "Broken: `docs/definitely-missing.md:5`.\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "references missing path docs/definitely-missing.md:5",
+            result.stdout,
+        )
+        self.assertNotIn("full-check.sh:12", result.stdout)
+        self.assertNotIn("housekeeping.sh:34-56", result.stdout)
+        self.assertNotIn("install-audit.py:7:3", result.stdout)
+        self.assertNotIn("review-local.sh:10-20:4", result.stdout)
+
     def test_install_audit_rejects_windows_absolute_installed_targets(self) -> None:
         root = self.make_repo()
         snapshot = root / install.INSTALLED_TARGETS_FILE
@@ -6670,6 +7064,11 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
                 "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS": "1",
                 "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
                 "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
+                # The housekeeping edit above is exactly the drift the
+                # provenance audit flags; this test exercises the PR-body
+                # scope stage, so skip the audit (covered by the dedicated
+                # provenance tests).
+                "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0",
             },
             text=True,
             stdout=subprocess.PIPE,
