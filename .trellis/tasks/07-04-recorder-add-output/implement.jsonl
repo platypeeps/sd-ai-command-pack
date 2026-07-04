@@ -1,0 +1,1 @@
+{"file": ".trellis/tasks/07-04-recorder-add-output/prd.md", "reason": "R1: print captured git add stdout/stderr before the error line, consistent with the commit and add_session failure paths."}
