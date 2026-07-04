@@ -5243,6 +5243,8 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
                 check=False,
             )
 
+        run("git", "config", "user.email", "test@example.com")
+        run("git", "config", "user.name", "Test User")
         # Track the seeded workspace so the wrapper's status scan sees the
         # journal add_session modifies rather than one untracked directory.
         run("git", "add", "-A")
