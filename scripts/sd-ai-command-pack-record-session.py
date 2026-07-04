@@ -268,11 +268,16 @@ def main(argv: list[str]) -> int:
         print(f"Recorded session in {journals[0]} (not committed).")
         return 0
 
-    if run_git("add", "--", WORKSPACE).returncode != 0:
+    # Stage only what this run wrote: the journal entry plus the sibling
+    # index.md that add_session.py maintains. A bare `git add` on the
+    # workspace would sweep unrelated dirty files into the commit.
+    stage = [journals[0], journals[0].parent / "index.md"]
+    stage_args = [str(path) for path in stage if path.exists()]
+    if run_git("add", "--", *stage_args).returncode != 0:
         print("error: git add failed", file=sys.stderr)
         return 1
     commit = subprocess.run(
-        ["git", "commit", "-m", "chore: record journal"],
+        ["git", "commit", "-m", "chore: record journal", "--", *stage_args],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -283,7 +288,7 @@ def main(argv: list[str]) -> int:
         print("error: git commit failed", file=sys.stderr)
         return 1
 
-    print(f"Recorded session in {journals[0]} and committed the workspace.")
+    print(f"Recorded session in {journals[0]} and committed the journal entry.")
     return 0
 
 

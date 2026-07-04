@@ -5127,6 +5127,9 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertNotIn("(see git log)", entry)
         last_message = run("git", "log", "-1", "--format=%s").stdout.strip()
         self.assertEqual(last_message, "chore: record journal")
+        committed = run("git", "show", "--name-only", "--format=", "HEAD").stdout
+        self.assertIn("journal-1.md", committed)
+        self.assertNotIn("journal-0.md", committed)
 
     def test_record_session_wrapper_fails_fast_on_unknown_hash(self) -> None:
         root = self.make_repo()
