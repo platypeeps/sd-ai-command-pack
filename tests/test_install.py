@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
@@ -5570,6 +5571,49 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("cannot be read", result.stdout)
         self.assertIn("cannot be inspected", result.stdout)
+
+    def test_force_overwrite_revouches_drifted_target(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        # Drift a vouched script, then force-refresh: the overwrite must be
+        # re-vouched with the template hash (single-pass fleet refreshes
+        # produce exactly this "overwritten" status for changed files).
+        script = root / "scripts/sd-ai-command-pack-review-local.sh"
+        script.write_text(
+            script.read_text(encoding="utf-8") + "\n# drift\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_install(root, "--force")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("overwritten", result.stdout)
+
+        template_digest = "sha256:" + hashlib.sha256(
+            (PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-local.sh").read_bytes()
+        ).hexdigest()
+        provenance = json.loads(
+            (root / install.PROVENANCE_FILE).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            provenance["files"]["scripts/sd-ai-command-pack-review-local.sh"],
+            template_digest,
+        )
+
+        audit = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(audit.returncode, 0, audit.stdout)
+        self.assertNotIn("drifted from pack", audit.stdout)
 
     def test_install_ignores_symlinked_provenance(self) -> None:
         root = self.make_repo()
