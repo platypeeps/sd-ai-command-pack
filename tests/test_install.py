@@ -5083,6 +5083,25 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         chore.write_text("# demo\n", encoding="utf-8")
         run("git", "add", "-A")
         run("git", "commit", "-q", "-m", "chore(task): demo")
+
+        # Creating remote main directly fails closed (no chore baseline).
+        result = run("git", "push", "-q", "origin", "main")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("creating remote main", result.stdout)
+        result = run(
+            "git",
+            "push",
+            "-q",
+            "origin",
+            "main",
+            env={"SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS": "1"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        # With a baseline, chore-only pushes flow.
+        chore.write_text("# demo v2\n", encoding="utf-8")
+        run("git", "add", "-A")
+        run("git", "commit", "-q", "-m", "chore(task): demo v2")
         result = run("git", "push", "-q", "origin", "main")
         self.assertEqual(result.returncode, 0, result.stdout)
 

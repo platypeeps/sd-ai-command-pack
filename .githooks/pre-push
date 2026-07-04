@@ -23,7 +23,10 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
     # Branch deletion is governed by the remote ruleset, not this hook.
     [ "$local_sha" != "$zero" ] || continue
     if [ "$remote_sha" = "$zero" ]; then
-        echo "pre-push: creating remote main; chore-scope check skipped" >&2
+        # Fail closed: creating remote main directly has no chore baseline
+        # to diff against, so it is never chore scope.
+        echo "pre-push: creating remote main directly is outside chore scope; bypass explicitly if intentional" >&2
+        status=1
         continue
     fi
     if ! git rev-parse -q --verify "$remote_sha^{commit}" >/dev/null 2>&1; then
@@ -31,8 +34,20 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
         status=1
         continue
     fi
-    offenders=$(git diff --name-only "$remote_sha" "$local_sha" -- \
-        | grep -Ev '^\.trellis/(tasks|workspace)/' || true)
+    if ! changed=$(git diff --name-only "$remote_sha" "$local_sha" --); then
+        # Fail closed rather than masking a diff error as "no offenders".
+        echo "pre-push: could not diff $remote_sha..$local_sha; failing closed" >&2
+        status=1
+        continue
+    fi
+    [ -n "$changed" ] || continue
+    offenders=$(printf '%s\n' "$changed" | grep -Ev '^\.trellis/(tasks|workspace)/')
+    grep_rc=$?
+    if [ "$grep_rc" -ge 2 ]; then
+        echo "pre-push: chore-scope filter failed (grep exit $grep_rc); failing closed" >&2
+        status=1
+        continue
+    fi
     if [ -n "$offenders" ]; then
         {
             echo "pre-push: direct pushes to main are Trellis chore-scope only"
