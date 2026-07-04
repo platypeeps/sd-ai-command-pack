@@ -965,3 +965,40 @@ Closed the Copilot finding from the 0.5.13 refresh PRs: bash's cd "" is a silent
 ### Next Steps
 
 - None - task complete
+
+
+## Session 24: 0.5.15: cd -- option terminator in root guards
+
+**Date**: 2026-07-04
+**Task**: 0.5.15: cd -- option terminator in root guards
+**Branch**: `main`
+
+### Summary
+
+Loadsmith's refresh-PR review caught that the 0.5.14 root guards dropped the -- option terminator the scripts themselves use when resolving SCRIPT_DIR/REPO_ROOT, so a dash-prefixed root would parse as a cd option. All three guard sites now use cd -- ; content assertion updated; shellcheck clean; 256 tests at 100% coverage; PR #32 merged first-round clean via gated housekeeping as 0.5.15.
+
+### Main Changes
+
+- `templates/scripts/sd-ai-command-pack-{review-local,full-check,review-scope}.sh`
+  + twins: `cd -- "$REPO_ROOT"` in the root guards; content assertion
+  updated; manifest 0.5.15
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `40cb2e0` | Use cd -- in the repo-root guards (0.5.15) |
+
+### Testing
+
+- [OK] shellcheck -S warning clean; 256 unittest cases at 100% coverage;
+  full-check clean
+- [OK] PR #32: Copilot clean first round; CI green py3.10/3.13
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
