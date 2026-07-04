@@ -22,6 +22,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import tempfile
@@ -148,9 +149,13 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv[1:])
 
-    if run_git("rev-parse", "--git-dir").returncode != 0:
+    toplevel = run_git("rev-parse", "--show-toplevel")
+    if toplevel.returncode != 0:
         print("error: not a git repository", file=sys.stderr)
         return 2
+    # Normalize to the repository root so the relative Trellis paths and
+    # git pathspecs resolve when invoked from a subdirectory.
+    os.chdir(toplevel.stdout.strip())
     if not ADD_SESSION.is_file():
         print(f"error: {ADD_SESSION} not found; is Trellis initialized?", file=sys.stderr)
         return 2
