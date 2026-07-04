@@ -494,8 +494,11 @@ Windows-style separators are normalized before checking. The installer also
 writes `.sd-ai-command-pack/provenance.json` — the pack version plus
 `sha256` hashes of the installed pack files (user-tunable files such as
 `.prism/rules.json` are never vouched) — and the audit fails when a vouched
-file's content drifts from the recorded pack content, making the
-"reviewed upstream" exemption for vendored pack files a checkable claim.
+file's content drifts from the recorded pack content, when a vouched file
+is missing while not gitignored, or when a vouched path — or the
+provenance file itself — is a symlink or other non-regular node, making
+the "reviewed upstream" exemption for vendored pack files a checkable
+claim.
 Set `SD_AI_COMMAND_PACK_INSTALL_AUDIT=0` to skip it.
 
 The full-check script also runs `scripts/sd-ai-command-pack-review-scope.sh`.

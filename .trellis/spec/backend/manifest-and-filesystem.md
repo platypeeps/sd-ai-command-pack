@@ -133,10 +133,14 @@ dry-run and real runs agree). Never vouched: `FORCE_PRESERVED_TARGETS`
 (user-tunable), managed-block targets (shared ownership), generated files
 (receipt, gitignore block, provenance itself), and conflict results.
 Entries survive for targets still recorded in the receipt so filtered runs
-do not shrink coverage. The audit verifies present vouched files and fails
-on content drift, naming the recorded pack version; missing files defer to
-the structural checks, and a malformed provenance file is a failure.
-Absent provenance (pre-0.5.10 installs) keeps the older audit behavior.
+do not shrink coverage. The audit fails on content drift (naming the
+recorded pack version), on a vouched target that is missing while not
+gitignored (even when the receipt no longer lists it — provenance is the
+tamper-evidence of last resort), on any symlink or non-regular node at a
+vouched path, and on a provenance file that is itself not a regular file
+or is malformed. Gitignored-absent vouched targets skip, consistent with
+the structural policy. Absent provenance (pre-0.5.10 installs) keeps the
+older audit behavior.
 
 Reference files:
 
