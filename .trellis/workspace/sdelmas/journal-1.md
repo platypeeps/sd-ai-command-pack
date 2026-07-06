@@ -1471,3 +1471,41 @@ Removed an untemplated root docs review-learning note after Copilot review so do
 ### Next Steps
 
 - None - task complete
+
+
+## Session 37: Resolve PR 38 uninstall delete review
+
+**Date**: 2026-07-06
+**Task**: Resolve PR 38 uninstall delete review
+**Branch**: `codex/installer-remove-option`
+
+### Summary
+
+Handled uninstall delete failures cleanly for managed-block and pack-file removal, added regressions, and resolved the final Copilot review threads.
+
+### Main Changes
+
+- Added `unlink_target_file()` so remove-mode deletions report `SystemExit("error: ...")` instead of leaking raw `OSError` tracebacks.
+- Routed both `remove_text_block_file()` and `remove_pack_file()` through the shared helper.
+- Replied to and resolved the two Copilot review threads that identified the missing delete-failure handling.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `84480ad` | (see git log) |
+
+### Testing
+
+- [OK] Ran `python3 -m unittest tests.test_install.InstallTests.test_remove_text_block_file_reports_delete_failures_cleanly tests.test_install.InstallTests.test_remove_pack_file_reports_delete_failures_cleanly`.
+- [OK] Ran `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Confirmed PR #38 checks passed on head `84480ad`: `security`, `unittest (3.10)`, `unittest (3.13)`, and `CI Result`.
+- [OK] Confirmed no unresolved PR review threads or fresh Copilot comments remained after the latest review request.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
