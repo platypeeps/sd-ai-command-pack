@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 31
+- **Total Sessions**: 32
 - **Last Active**: 2026-07-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1253 | Active |
+| `journal-1.md` | ~1305 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 32 | 2026-07-05 | Review PR 38 installer remove follow-up | `5332841`, `629711d`, `d2b988b` | `codex/installer-remove-option` |
 | 31 | 2026-07-05 | Review PR 38 installer remove option | `df40c75`, `6667835`, `f3b0f02` | `codex/installer-remove-option` |
 | 30 | 2026-07-05 | Expand SD command pack workflows | `34ea5d8` | `codex/expand-sd-command-pack-workflows` |
 | 29 | 2026-07-05 | Expand SD command pack workflows | `34ea5d8` | `codex/expand-sd-command-pack-workflows` |

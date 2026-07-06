@@ -1263,3 +1263,47 @@ Addressed Copilot feedback on installer remove read failures, symlink preservati
 ### Next Steps
 
 - None - task complete
+
+
+## Session 32: Review PR 38 installer remove follow-up
+
+**Date**: 2026-07-05
+**Task**: Review PR 38 installer remove follow-up
+**Branch**: `codex/installer-remove-option`
+
+### Summary
+
+Resolved the remaining PR #38 installer remove-option review feedback and revalidated the branch after the fresh remote-review request.
+
+### Main Changes
+
+- Preserved local removal metadata during uninstall/remove flows.
+- Tightened local-exclude restore path validation so unsafe restore paths fail before file writes.
+- Routed install/update backup creation through the shared backup helper and report backup copy OSError failures cleanly.
+- Added focused installer regressions for metadata preservation, path validation, and backup copy failure handling.
+- Rechecked PR #38 unresolved review threads, requested a fresh Copilot review, and confirmed CI passed.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5332841` | (see git log) |
+| `629711d` | (see git log) |
+| `d2b988b` | (see git log) |
+
+### Testing
+
+- [OK] Focused installer regression tests passed for backup copy failure handling.
+- [OK] `git diff --check` passed.
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh` passed.
+- [OK] Coverage run passed with 282 tests and `coverage report --fail-under=100`.
+- [OK] GitHub Actions checks passed on PR #38 after `d2b988b`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
