@@ -849,11 +849,12 @@ Trellis local/runtime files such as `.trellis/.developer`,
 `.trellis/.runtime/`, `.trellis/.cache/`, Trellis backup directories,
 `.trellis/worktrees/`, and `.trellis/.template-hashes.json` without
 blanket-ignoring shareable `.trellis` workflow, spec, task, and script files.
-It also ignores local AI-tool state such as `.claude/settings.local.json`,
-tool caches, logs, sessions, tmp folders, Gito report/temp artifacts,
+It also keeps shared Claude SD commands trackable while ignoring the rest of
+`.claude/` as local Claude Code state. Other AI-tool local state such as tool
+caches, logs, sessions, tmp folders, Gito report/temp artifacts,
 tool-specific local state, `.opencode/node_modules/`, and root
-`node_modules/` without blanket-ignoring shareable platform adapter
-directories.
+`node_modules/` are ignored without blanket-ignoring shareable non-Claude
+platform adapter directories.
 The installer replaces exact unmarked `.trellis/` ignore entries with that
 specific-pattern block.
 
@@ -898,6 +899,10 @@ sd-ai-command-pack-uv-tools/
 .agent/**/logs/
 .agent/**/tmp/
 .agent/**/*.log
+.claude/**
+!.claude/commands/
+!.claude/commands/sd/
+!.claude/commands/sd/*.md
 .claude/settings.local.json
 .claude/**/*.local.*
 .claude/**/.cache/
