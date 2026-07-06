@@ -319,7 +319,9 @@ tracked `.gitignore`.
    folders, writes dashboard and LLM overview links to those copied paths,
    includes one-line document descriptions in the dashboard, includes a GitHub
    repository link when `origin` is a GitHub remote, groups generated index
-   links by semantic category rather than source folder name, avoids generated
+   links by semantic category rather than source folder name, normalizes
+   platform-root `agents.md`/`AGENTS.md` guidance filenames case-insensitively
+   to the same stable destination such as `codex-agents.md`, avoids generated
    KB file/folder names that start with `.` or use Trellis-specific naming, and
    keeps `.obsidian-kb/` ignored through the managed
    `obsidian-kb` block in `.gitignore` or `.git/info/exclude` for local-only

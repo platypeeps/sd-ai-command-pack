@@ -5846,6 +5846,14 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertTrue(
             files["scripts/sd-ai-command-pack-full-check.sh"].startswith("sha256:")
         )
+        helper_target = "scripts/sd-ai-command-pack-update-spec-kb.py"
+        helper_source = install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+        helper_content = helper_source.read_bytes()
+        self.assertEqual((root / helper_target).read_bytes(), helper_content)
+        self.assertEqual(
+            files[helper_target],
+            "sha256:" + hashlib.sha256(helper_content).hexdigest(),
+        )
         # User-tunable and generated files are never vouched.
         self.assertNotIn(".prism/rules.json", files)
         self.assertNotIn(".gitignore", files)
@@ -8081,6 +8089,32 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIsNone(
             module.github_repository_url_from_remote("git@example.com:owner/repo.git")
         )
+
+    def test_update_spec_kb_normalizes_platform_agents_filenames(self) -> None:
+        for script_path, module_name in (
+            (
+                install.ROOT / "scripts/sd-ai-command-pack-update-spec-kb.py",
+                "sd_ai_command_pack_update_spec_kb_source_destination_test",
+            ),
+            (
+                install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py",
+                "sd_ai_command_pack_update_spec_kb_template_destination_test",
+            ),
+        ):
+            module = self.load_module_from_path(script_path, module_name)
+            with self.subTest(script=script_path):
+                self.assertEqual(
+                    module.destination_filename_for_source(Path(".agents/agents.md")),
+                    "codex-agents.md",
+                )
+                self.assertEqual(
+                    module.destination_filename_for_source(Path(".agents/AGENTS.md")),
+                    "codex-agents.md",
+                )
+                self.assertEqual(
+                    module.destination_filename_for_source(Path("AGENTS.md")),
+                    "AGENTS.md",
+                )
 
     def test_update_spec_kb_replaces_legacy_generated_dashboard_name(self) -> None:
         root = self.make_repo()
