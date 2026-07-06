@@ -398,6 +398,7 @@ class InstallTests(unittest.TestCase):
             ".github/agents/trellis-*",
             ".zcode/agents/",
             "scripts/sd-ai-command-pack-*",
+            "`.github/prompts/` (including `continue.prompt.md`",
             "legacy `scripts/trellis-*.sh`",
             "scripts/update_repomix*",
             ".gito/**",
