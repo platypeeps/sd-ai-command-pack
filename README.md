@@ -9,8 +9,8 @@
 Install reusable AI workflow helpers into
 [Trellis-managed repositories](https://trytrellis.app/). The current pack is
 focused on Trellis enrichment: start, continue, finish-work, local review, PR
-review, full-codebase local review, review learnings, full-check, post-merge
-housekeeping, and update-spec workflows. The repository and `sd`
+creation/review, full-codebase local review, review learnings, full-check,
+post-merge housekeeping, and update-spec workflows. The repository and `sd`
 command namespace are intentionally
 broader than that initial scope, so future skills, commands, scripts, docs, or
 rules may cover adjacent AI workflow support that is not strictly
@@ -30,8 +30,9 @@ The current Trellis-focused pack installs:
 - the installed usage guide at `docs/SD_AI_COMMAND_PACK.md`
 - Prism defaults under `.prism/`
 - Gito defaults under `.gito/`
-- platform command or prompt adapters for Claude, Cursor, Gemini, GitHub
-  Copilot, and OpenCode when the matching active Trellis platform is present
+- platform command, prompt, workflow, or native-skill adapters for Trellis'
+  supported AI-tool platforms when the matching active Trellis platform is
+  present
 - a managed `sd-ai-command-pack` guidance block in
   `.github/copilot-instructions.md` for GitHub Copilot installs
 
@@ -41,15 +42,16 @@ target repos by `scripts/sd-ai-command-pack-install-audit.py`.
 The shared skills own the workflows. Platform command and prompt files are thin
 entry points that tell the agent to load the appropriate shared skill.
 Codex exposes pack entry points as enabled skills named `sd-start`, `sd-continue`,
-`sd-finish-work`, `sd-full-check`, `sd-housekeeping`, `sd-review-pr`,
-`sd-review-local`, `sd-review-local-all`, `sd-review-learnings`, and
-`sd-update-spec`; type `/sd` in Codex command completion or invoke them
-explicitly with `$sd-review-pr`-style skill mentions.
+`sd-finish-work`, `sd-create-pr`, `sd-full-check`, `sd-housekeeping`,
+`sd-review-pr`, `sd-review-local`, `sd-review-local-all`,
+`sd-review-learnings`, and `sd-update-spec`; type `/sd` in Codex command
+completion or invoke them explicitly with `$sd-review-pr`-style skill mentions.
 User-facing command adapters live under the `sd` namespace so pack-owned
 wrappers do not collide with Trellis-owned generated `/trellis:*` commands on
-future `trellis update` runs. Cursor command files, GitHub Copilot prompt
-files, and OpenCode command files use flat `sd-<command>` filenames so their
-slash-command completion lists can surface them when you type `/sd`.
+future `trellis update` runs. Command-capable adapters expose either
+namespaced `sd/<command>` files or flat `sd-<command>` files, matching the
+platform convention Trellis uses for that tool. Skill-only adapters install the
+same `sd-*` skills into the platform's native skill root.
 The update-spec workflow runs the Trellis-provided `trellis-update-spec` skill
 as-is, refreshes repo-owned repospec artifacts through existing maintenance
 infrastructure when available, then adds an explicit architectural-overview
@@ -75,9 +77,11 @@ Quick links:
 - [License](#license)
 
 Claude and Gemini expose the wrappers as namespaced commands such as
-`/sd:review-pr`. Cursor command files, GitHub Copilot prompt files, OpenCode
-command files, and Codex skills expose the same entries as flat `sd-<command>`
-names, such as `sd-review-pr`.
+`/sd:review-pr`. Cursor, GitHub Copilot, OpenCode, Qoder, and Trae use flat
+`sd-<command>` entries. CodeBuddy, Factory Droid, and ZCode use `sd/<command>`
+command folders. Antigravity, Devin, and Kilo use `sd-<command>` workflow
+files, Pi uses `sd-<command>` prompt files, and Kiro/Reasonix expose native
+`sd-*` skills.
 For Gemini CLI specifically, the `sd` directory under `.gemini/commands/` is
 intentional: Gemini maps `.gemini/commands/sd/review-pr.toml` to
 `/sd:review-pr`, and displays each TOML file's `description` in `/help`. If the
@@ -127,12 +131,24 @@ deleted diff paths. Prism and Gito scans use the pack's managed standard
 exclusions for top-level AI/tooling/cache directories:
 
 ```text
-.github/
+.agent/
+.agents/
 .claude/
 .codex/
+.codebuddy/
+.cursor/
+.devin/
+.factory/
 .gemini/
+.github/
+.kiro/
+.kilocode/
 .opencode/
-.agents/
+.pi/
+.qoder/
+.reasonix/
+.trae/
+.zcode/
 .build/
 .git/
 .pytest_cache/
@@ -183,6 +199,14 @@ fetch/prune, confirm the current feature branch's PR is merged and the local
 branch head matches that PR before deleting anything, switch to the default
 branch, fast-forward it, remove the merged local and remote branch, and finish
 with a condensed "expected clean state" plus anomalies report.
+
+The create-pr command is an end-to-end publishing wrapper. It first runs
+`sd-update-spec`, then stages only intended files, commits when needed, pushes
+the current feature branch, creates or reuses the branch PR, and hands off to
+`sd-review-pr`. It refuses duplicate PR creation, avoids default-branch PRs,
+does not hardcode `origin/main`, and does not run Prism or Gito directly; the
+existing `sd-review-pr` workflow remains responsible for the deterministic
+local PR gate and configured remote reviewer loop.
 
 The review-pr command runs a deterministic local PR gate before requesting the
 configured remote reviewer. Its command-owned full-check invocation disables
@@ -238,7 +262,8 @@ For local-only installs, the same managed block is written to `.git/info/exclude
 instead. The folder contains copies of repo files that are useful as portable
 knowledge-base context, such as README files, agent instructions, architecture
 and decision docs, `.trellis/spec/**/*.md`, `.trellis/workflow.md`,
-`.trellis/config.yaml`, repo-owned repospec or Repomix outputs such as
+`.trellis/config.yaml`, `.trellis/tasks/**/*.md`, repo-owned repospec or
+Repomix outputs such as
 `docs/repomix-map.md`, and project manifests that explain the repository shape
 when present. The helper writes those copies into visible semantic category
 folders rather than mirroring hidden source paths, so generated KB file and
@@ -290,6 +315,9 @@ Copy-Item -Recurse -Force -Path "C:\path\to\repo\.obsidian-kb\*" -Destination "C
 | `SD_AI_COMMAND_PACK_FULL_CHECK_GITO` | Enables Gito during full-check. | `0` |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR` | Gito report directory for full-check. | `.build/review/gito` |
 | `SD_AI_COMMAND_PACK_INSTALL_AUDIT` | Controls structural post-install audit; unset warns and continues, `0` skips, and `required` fails when unavailable. | unset |
+| `SD_AI_COMMAND_PACK_CREATE_PR_BASE` | Base branch override for `sd-create-pr`; unset detects the GitHub default branch. | unset |
+| `SD_AI_COMMAND_PACK_CREATE_PR_COMMIT_MESSAGE` | Commit message used by `sd-create-pr` when it creates a commit and the user did not provide a message. | `chore: prepare pull request` |
+| `SD_AI_COMMAND_PACK_CREATE_PR_DRAFT` | Create the PR as draft when set to `1`, unless the user explicitly asks for ready. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS` | Local review tool set for `sd-review-local` or `sd-review-local-all`; unset uses the runner default. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND` | Custom command for a named local review provider. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND` | Full-codebase custom command for a named provider; unset falls back to the non-`ALL` command. | unset |
@@ -416,10 +444,13 @@ operator docs, and repo-owned scripts instead of copied pack or Trellis payloads
 unless those files have obvious syntax, secret, or integration-goal issues. It
 also tells Copilot not to leave line comments on wording, spelling, links,
 formatting, examples, or implementation details inside copied Trellis or copied
-SD command-pack files. It asks Copilot to group duplicate root causes and point
-to deterministic local checks when they already cover a repeated issue class,
-or request a focused local fixture when a repeated issue needs a stronger
-preflight.
+SD command-pack files. Original Trellis-owned runtime/template copies are also
+out of scope for local edits and line-by-line review in target repos or this
+pack; when a change appears needed, the guidance asks for one handoff comment
+that sends the finding back to the sd-ai-command-pack source session. It asks
+Copilot to group duplicate root causes and point to deterministic local checks
+when they already cover a repeated issue class, or request a focused local
+fixture when a repeated issue needs a stronger preflight.
 
 Managed blocks are intentionally replaceable on future pack updates. They look
 like this:
@@ -436,6 +467,10 @@ like this:
 !.env.test
 
 # Trellis local/runtime state.
+.trellis/.developer
+.trellis/.backup-*
+.trellis/worktrees/
+.trellis/.template-hashes.json
 .trellis/.runtime/
 .trellis/.cache/
 
@@ -452,12 +487,113 @@ sd-ai-command-pack-uv-cache/
 sd-ai-command-pack-uv-tools/
 
 # AI-tool local state; keep shared platform adapters tracked.
+.agent/**/*.local.*
+.agent/**/.cache/
+.agent/**/cache/
+.agent/**/logs/
+.agent/**/tmp/
+.agent/**/*.log
+.claude/settings.local.json
+.claude/**/*.local.*
+.claude/**/.cache/
+.claude/**/cache/
+.claude/**/logs/
+.claude/**/*.log
+.codebuddy/**/*.local.*
+.codebuddy/**/.cache/
+.codebuddy/**/cache/
+.codebuddy/**/logs/
+.codebuddy/**/tmp/
+.codebuddy/**/*.log
+.codex/**/*.local.*
+.codex/**/.cache/
+.codex/**/cache/
+.codex/**/logs/
+.codex/**/sessions/
+.codex/**/tmp/
+.codex/**/*.log
+.cursor/**/*.local.*
+.cursor/**/.cache/
+.cursor/**/cache/
+.cursor/**/logs/
+.cursor/**/tmp/
+.cursor/**/*.log
+.devin/**/*.local.*
+.devin/**/.cache/
+.devin/**/cache/
+.devin/**/logs/
+.devin/**/tmp/
+.devin/**/*.log
+.factory/**/*.local.*
+.factory/**/.cache/
+.factory/**/cache/
+.factory/**/logs/
+.factory/**/tmp/
+.factory/**/*.log
+.gemini/settings.local.json
+.gemini/**/*.local.*
+.gemini/**/.cache/
+.gemini/**/cache/
+.gemini/**/logs/
+.gemini/**/tmp/
+.gemini/**/*.log
 .gito/**/*.local.*
 .gito/**/.cache/
 .gito/**/cache/
 .gito/**/logs/
 .gito/**/tmp/
 .gito/**/*.log
+.kiro/**/*.local.*
+.kiro/**/.cache/
+.kiro/**/cache/
+.kiro/**/logs/
+.kiro/**/tmp/
+.kiro/**/*.log
+.kilocode/**/*.local.*
+.kilocode/**/.cache/
+.kilocode/**/cache/
+.kilocode/**/logs/
+.kilocode/**/tmp/
+.kilocode/**/*.log
+.opencode/**/*.local.*
+.opencode/**/.cache/
+.opencode/**/cache/
+.opencode/**/logs/
+.opencode/**/tmp/
+.opencode/**/state/
+.opencode/**/sessions/
+.opencode/node_modules/
+.opencode/**/*.log
+.pi/**/*.local.*
+.pi/**/.cache/
+.pi/**/cache/
+.pi/**/logs/
+.pi/**/tmp/
+.pi/**/*.log
+.qoder/**/*.local.*
+.qoder/**/.cache/
+.qoder/**/cache/
+.qoder/**/logs/
+.qoder/**/tmp/
+.qoder/**/*.log
+.reasonix/**/*.local.*
+.reasonix/**/.cache/
+.reasonix/**/cache/
+.reasonix/**/logs/
+.reasonix/**/tmp/
+.reasonix/**/*.log
+.trae/**/*.local.*
+.trae/**/.cache/
+.trae/**/cache/
+.trae/**/logs/
+.trae/**/tmp/
+.trae/**/*.log
+.zcode/**/*.local.*
+.zcode/**/.cache/
+.zcode/**/cache/
+.zcode/**/logs/
+.zcode/**/tmp/
+.zcode/**/*.log
 node_modules/
 
 # Project-local personal ignores can be added below this managed block.
@@ -557,13 +693,20 @@ The installer runs `git diff --check` on installed pack paths unless
 `--skip-diff-check` is passed.
 
 Run the pack tests with the explicit dev dependencies from
-`requirements-dev.txt`, including `coverage.py` via the `coverage` package:
+`requirements-dev.txt`, including `coverage.py` via the `coverage` package.
+On macOS, use Homebrew Python for the local virtualenv instead of Apple/Xcode
+Python; the system Python often lacks the dev dependencies and can try to write
+bytecode caches under protected `~/Library/Caches` paths.
 
 ```bash
-python3 -m pip install -r requirements-dev.txt
-COVERAGE_PROCESS_START=.coveragerc python3 -m coverage run --parallel-mode -m unittest discover -s tests
-python3 -m coverage combine
-python3 -m coverage report --fail-under=100
+BREW_PYTHON="${BREW_PYTHON:-/opt/homebrew/bin/python3}"  # Apple Silicon Homebrew
+test -x "$BREW_PYTHON" || BREW_PYTHON=/usr/local/bin/python3  # Intel Homebrew
+"$BREW_PYTHON" -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+COVERAGE_PROCESS_START=.coveragerc python -m coverage run --parallel-mode -m unittest discover -s tests
+python -m coverage combine
+python -m coverage report --fail-under=100
 ```
 
 The `--fail-under=100` gate measures `install.py` (the installer logic) only;
@@ -600,11 +743,26 @@ still apply on the remote.
 | --- | --- |
 | Shared skills, scripts, Prism/Gito defaults, usage guide | Always |
 | Codex skill completion | `.agents/skills/sd-*` installed as shared skills |
+| Antigravity | `.agent/` exists with Trellis workflow or skill markers; or `--all` / `--platform antigravity` |
 | Claude Code | `.claude/` exists with Trellis command, hook, or skill markers; or `--all` / `--platform claude` |
+| CodeBuddy | `.codebuddy/` exists with Trellis command, hook, agent, settings, or skill markers; or `--all` / `--platform codebuddy` |
 | Cursor | `.cursor/` exists with Trellis command, hook, or skill markers; or `--all` / `--platform cursor` |
+| Devin | `.devin/` exists with Trellis workflow or skill markers; or `--all` / `--platform devin` |
+| Factory Droid | `.factory/` exists with Trellis command, hook, droid, settings, or skill markers; or `--all` / `--platform droid` |
 | Gemini CLI | `.gemini/` exists with Trellis command, hook, or agent markers; or `--all` / `--platform gemini` |
 | GitHub Copilot | `.github/` exists with Trellis hook, Copilot hook, or skill markers; or `--all` / `--platform github` |
+| Kilo | `.kilocode/` exists with Trellis workflow or skill markers; or `--all` / `--platform kilo` |
+| Kiro | `.kiro/` exists with Trellis skill, hook, or agent markers; or `--all` / `--platform kiro` |
 | OpenCode | `.opencode/` exists with Trellis command, library, or skill markers; or `--all` / `--platform opencode` |
+| Pi | `.pi/` exists with Trellis prompt, extension, setting, agent, or skill markers; or `--all` / `--platform pi` |
+| Qoder | `.qoder/` exists with Trellis command, hook, settings, agent, or skill markers; or `--all` / `--platform qoder` |
+| Reasonix | `.reasonix/` exists with Trellis skill markers; or `--all` / `--platform reasonix` |
+| Trae | `.trae/` exists with Trellis command, hook, settings, agent, or skill markers; or `--all` / `--platform trae` |
+| ZCode | `.zcode/` exists with Trellis command or `.zcode/agents/` markers; or `--all` / `--platform zcode` |
+
+ZCode Trellis agents now live under `.zcode/agents/`; the installer still
+treats the legacy `.zcode/cli/agents/` path as copied Trellis surface for
+local-only excludes and review-scope classification during the transition.
 
 ## License
 
@@ -615,6 +773,11 @@ This repository is licensed under the [MIT License](LICENSE).
 This pack is intentionally shaped so pieces could move upstream later, while
 the local command namespace stays pack-owned:
 
+- Do not patch original Trellis-owned runtime/template copies in this repo or
+  target repos. If `.trellis/scripts/**`, `.trellis/agents/**`, or platform
+  `trellis-*` payload behavior needs to change, use a pack-owned wrapper,
+  guard, or template change when the behavior belongs here; otherwise hand the
+  issue to the Trellis source owner.
 - Move the shared skill to
   `packages/cli/src/templates/common/bundled-skills/sd-review-pr/SKILL.md`.
 - Move the full-check skill and script to the equivalent shared template

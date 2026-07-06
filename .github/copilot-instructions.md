@@ -3,7 +3,7 @@
 This repository is the sd-ai-command-pack source. The installed pack copies at
 the repository root (for example `.claude/commands/sd/**`,
 `.agents/skills/sd-*/**`, `.github/prompts/sd-*`, and
-`scripts/sd-ai-command-pack-*`) are byte-verified mirrors of `templates/**`,
+`.zcode/commands/sd/**`) are byte-verified mirrors of `templates/**`,
 enforced by the full-check pack source drift gates and the test suite. Review
 the `templates/` side of a change once and treat the mirrored root copy as
 generated output; do not repeat the same finding on both copies.
@@ -25,17 +25,43 @@ generated output; do not repeat the same finding on both copies.
   <!-- narrow-globs: skip - cross-platform generated payload families include optional platform anchors. -->
   - `.trellis/scripts/**` and `.trellis/agents/**`
   - `**/skills/trellis-*/**` and `**/skills/sd-*/**` under `.agents/`,
-    `.claude/`, `.codex/`, `.cursor/`, `.gemini/`, `.github/`, `.opencode/`
-  - Trellis and `sd` command or prompt files under `.claude/commands/`,
-    `.cursor/commands/`, `.gemini/commands/`, `.opencode/commands/`, and
-    `.github/prompts/` (including `continue.prompt.md` and
-    `finish-work.prompt.md`)
+    `.agent/`, `.claude/`, `.codebuddy/`, `.codex/`, `.cursor/`, `.devin/`,
+    `.factory/`, `.gemini/`, `.github/`, `.kiro/`, `.kilocode/`,
+    `.opencode/`, `.pi/`, `.qoder/`, `.reasonix/`, and `.trae/`
+  - Trellis and `sd` command, prompt, or workflow files under
+    `.agent/workflows/`, `.claude/commands/`, `.codebuddy/commands/`,
+    `.cursor/commands/`, `.devin/workflows/`, `.factory/commands/`,
+    `.gemini/commands/`, `.github/prompts/`, `.kilocode/workflows/`,
+    `.opencode/commands/`, `.pi/prompts/`, `.qoder/commands/`,
+    `.trae/commands/`, and `.zcode/commands/` (including
+    `continue.prompt.md` and `finish-work.prompt.md`)
   - `.github/copilot/**`, `.github/hooks/trellis.json`, and
-    `.github/agents/trellis-*`
+    `.github/agents/trellis-*`; platform hook/agent payloads under
+    `.codebuddy/`, `.factory/`, `.qoder/`, `.trae/`, `.zcode/agents/`, and
+    legacy `.zcode/cli/agents/`
   - `scripts/sd-ai-command-pack-*`, legacy `scripts/trellis-*.sh`, and
     `scripts/update_repomix*`
   - `.gito/**`, `.prism/**`, `.sd-ai-command-pack/**`,
     `docs/SD_AI_COMMAND_PACK.md`, and legacy `docs/TRELLIS_REVIEW_PR_PACK.md`
+- Original Trellis-owned runtime/template copies are not valid modification
+  targets for target-repo or sd-ai-command-pack PRs, and should not be reviewed
+  line by line. Treat diffs in upstream Trellis-owned surfaces such as
+  `.trellis/scripts/**`, `.trellis/agents/**`, and platform `trellis-*` skills,
+  agents, commands, prompts, workflows, hooks, and settings as ownership/scope
+  issues. This does not apply to repo-owned `.trellis/spec/**` guidance or
+  `.trellis/tasks/**` task documents. If a change appears needed, leave one
+  handoff comment instead:
+  ```text
+  Handoff for sd-ai-command-pack source session:
+  A change appears needed in original Trellis-owned runtime/template files,
+  which should not be edited in the consumer repo copy.
+  Affected file(s): <paths>
+  Desired behavior: <short behavior>
+  Evidence/repro: <commands, review finding, or failure>
+  Please decide whether this belongs in an sd-ai-command-pack wrapper/template,
+  a pack-owned guard, or an upstream Trellis change, then implement the durable
+  source-owned fix.
+  ```
 - Spend review budget on app behavior, data contracts,
   data/access/security boundaries, migrations and rollback behavior, token or
   invitation fail-closed behavior, tests, operator-facing documentation, and

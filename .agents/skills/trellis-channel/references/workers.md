@@ -128,10 +128,11 @@ matching event; timeout exits with code **124** and prints
 
 ## Soft Interrupt — `interrupt`
 
-`channel interrupt` is the cooperative redirect: it appends interrupt-related
-events and, where the adapter supports it, issues a provider-level turn
-interrupt with a replacement instruction. Use it when the worker should drop
-its current turn and act on new input immediately, without losing its session.
+`channel interrupt` is the cooperative redirect: it appends an `interrupt`
+event (reason `"user"`) and, where the adapter supports it, issues a
+provider-level turn interrupt with a replacement instruction. Use it when the
+worker should drop its current turn and act on new input immediately, without
+losing its session.
 
 ```bash
 echo "Stop refactoring the parser — switch to fixing the failing test in src/foo.ts" \
@@ -145,13 +146,14 @@ Flags:
 - `--scope <project|global>` — channel scope.
 - `--stdin` / `--text-file <path>` / `[text]` — replacement instruction body.
 
-The appended events use interrupt-related kinds such as `interrupt_requested`
-and `interrupted`. Downstream `wait` / `messages` filters can subscribe with
-`--kind interrupt_requested,interrupted` to react to redirections (e.g. to log
-the rerouting, or to gate other workers behind a coordinator's correction).
+The appended events use interrupt lifecycle kinds — downstream `wait` /
+`messages` filters can subscribe with `--kind interrupt_requested,interrupted`
+to react to redirections (e.g.
+to log the rerouting, or to gate other workers behind a coordinator's
+correction).
 
 For low-priority hints that should wait for the worker's next turn, send a
-plain targeted message instead and include the intent in the message body:
+plain message with a clear prefix instead:
 
 ```bash
 echo "Question: check this when you reach the next turn." \
@@ -244,8 +246,8 @@ Inbox-relevant subcommands:
 - `wait <channel>` — block until matching events arrive.
   - `--as <agent>` **(required)** — `self` for filter context.
   - `--from <agents>` — CSV authors.
-  - `--kind <kind[,kind...]>` — CSV (OR semantics); supports
-    `interrupt_requested`, `interrupted`, `done`, `progress`, etc.
+  - `--kind <kind[,kind...]>` — CSV (OR semantics); supports `interrupt`,
+    `done`, `progress`, etc.
   - `--to <target>` — defaults to own agent (broadcast + explicit-to-me).
   - `--include-progress` — also wake on progress events.
   - `--all` — require every `--from` agent to match (timeout → exit **124**).

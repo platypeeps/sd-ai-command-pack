@@ -387,10 +387,16 @@ class InstallTests(unittest.TestCase):
             ".trellis/agents/**",
             "**/skills/trellis-*/**",
             "**/skills/sd-*/**",
-            "`.github/prompts/` (including `continue.prompt.md` and",
+            ".agent/",
+            ".codebuddy/",
+            ".factory/",
+            ".reasonix/",
+            ".zcode/commands/",
+            "`continue.prompt.md` and `finish-work.prompt.md`",
             ".github/copilot/**",
             ".github/hooks/trellis.json",
             ".github/agents/trellis-*",
+            ".zcode/agents/",
             "scripts/sd-ai-command-pack-*",
             "legacy `scripts/trellis-*.sh`",
             "scripts/update_repomix*",
@@ -399,6 +405,15 @@ class InstallTests(unittest.TestCase):
             ".sd-ai-command-pack/**",
             "docs/SD_AI_COMMAND_PACK.md",
             "legacy `docs/TRELLIS_REVIEW_PR_PACK.md`",
+            "Original Trellis-owned runtime/template copies",
+            "not valid modification",
+            "should not be reviewed",
+            "ownership/scope",
+            "This does not apply to repo-owned `.trellis/spec/**`",
+            "Handoff for sd-ai-command-pack source session",
+            "which should not be edited in the consumer repo copy",
+            "pack-owned guard",
+            "upstream Trellis change",
             # Review-budget and escalation guidance.
             "app behavior",
             "data contracts",
@@ -444,7 +459,26 @@ class InstallTests(unittest.TestCase):
             self.assertIn(expected, content)
         self.assertNotIn(".trellis/", content.splitlines())
         self.assertNotIn(".trellis", content.splitlines())
-        for platform_dir in (".claude/", ".codex/", ".gemini/", ".opencode/"):
+        for platform_dir in (
+            ".agent/",
+            ".agents/",
+            ".claude/",
+            ".codebuddy/",
+            ".codex/",
+            ".cursor/",
+            ".devin/",
+            ".factory/",
+            ".gemini/",
+            ".github/",
+            ".kiro/",
+            ".kilocode/",
+            ".opencode/",
+            ".pi/",
+            ".qoder/",
+            ".reasonix/",
+            ".trae/",
+            ".zcode/",
+        ):
             self.assertNotIn(platform_dir, content.splitlines())
 
     def make_housekeeping_repo(self) -> tuple[Path, Path, Path, str]:
@@ -709,6 +743,7 @@ class InstallTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-create-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-full-check/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-housekeeping/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-continue/SKILL.md").is_file())
@@ -743,6 +778,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".gemini/commands/sd/continue.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/start.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/create-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local-all.toml").is_file())
@@ -753,6 +789,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".github/prompts/sd-continue.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-start.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-finish-work.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-create-pr.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-local.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-local-all.prompt.md").is_file())
@@ -768,6 +805,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".cursor/commands/sd-continue.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-start.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-finish-work.md").is_file())
+        self.assertTrue((root / ".cursor/commands/sd-create-pr.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-pr.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-local.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-local-all.md").is_file())
@@ -778,6 +816,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".claude/commands/sd/continue.md").exists())
         self.assertFalse((root / ".claude/commands/sd/start.md").exists())
         self.assertFalse((root / ".claude/commands/sd/finish-work.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/create-pr.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-pr.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-local.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-local-all.md").exists())
@@ -788,6 +827,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".opencode/commands/sd-continue.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-start.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-finish-work.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-create-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-local.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-local-all.md").exists())
@@ -844,6 +884,25 @@ class InstallTests(unittest.TestCase):
             result.stdout,
         )
 
+    def test_installs_newer_trellis_platform_adapters_when_active(self) -> None:
+        root = self.make_repo(".kiro", ".reasonix", ".trae", ".zcode")
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertTrue((root / ".kiro/skills/sd-review-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".kiro/skills/sd-create-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".reasonix/skills/sd-review-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".reasonix/skills/sd-create-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".trae/commands/sd-review-pr.md").is_file())
+        self.assertTrue((root / ".trae/commands/sd-create-pr.md").is_file())
+        self.assertTrue((root / ".trae/skills/sd-review-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".trae/skills/sd-create-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".zcode/commands/sd/review-pr.md").is_file())
+        self.assertTrue((root / ".zcode/commands/sd/create-pr.md").is_file())
+        self.assertFalse((root / ".qoder/commands/sd-review-pr.md").exists())
+        self.assert_installed_targets_snapshot_matches_selection(root)
+
     def test_platform_filter_still_installs_shared_assets(self) -> None:
         root = self.make_repo(".claude", ".cursor", ".gemini", ".github", ".opencode")
 
@@ -851,6 +910,7 @@ class InstallTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".agents/skills/sd-start/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-create-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-local/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-local-all/SKILL.md").is_file())
@@ -874,6 +934,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".gemini/commands/sd/continue.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/start.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/create-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local-all.toml").is_file())
@@ -884,6 +945,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".claude/commands/sd/continue.md").exists())
         self.assertFalse((root / ".claude/commands/sd/start.md").exists())
         self.assertFalse((root / ".claude/commands/sd/finish-work.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/create-pr.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-pr.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-local.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-local-all.md").exists())
@@ -894,6 +956,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".cursor/commands/sd-continue.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-start.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-finish-work.md").exists())
+        self.assertFalse((root / ".cursor/commands/sd-create-pr.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-review-pr.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-review-local.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-review-local-all.md").exists())
@@ -904,6 +967,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".github/prompts/sd-continue.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-start.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-finish-work.prompt.md").exists())
+        self.assertFalse((root / ".github/prompts/sd-create-pr.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-review-pr.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-review-local.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-review-local-all.prompt.md").exists())
@@ -915,6 +979,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".opencode/commands/sd-continue.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-start.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-finish-work.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-create-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-local.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-local-all.md").exists())
@@ -930,6 +995,7 @@ class InstallTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".agents/skills/sd-start/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-create-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-local/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-local-all/SKILL.md").is_file())
@@ -953,6 +1019,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".claude/commands/sd/continue.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/start.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/finish-work.md").is_file())
+        self.assertTrue((root / ".claude/commands/sd/create-pr.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/review-pr.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/review-local.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/review-local-all.md").is_file())
@@ -963,6 +1030,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".cursor/commands/sd-continue.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-start.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-finish-work.md").is_file())
+        self.assertTrue((root / ".cursor/commands/sd-create-pr.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-pr.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-local.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-local-all.md").is_file())
@@ -973,6 +1041,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".gemini/commands/sd/continue.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/start.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/create-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local-all.toml").is_file())
@@ -983,6 +1052,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".github/prompts/sd-continue.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-start.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-finish-work.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-create-pr.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-local.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-local-all.prompt.md").is_file())
@@ -998,6 +1068,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".opencode/commands/sd-continue.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-start.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-finish-work.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd-create-pr.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-review-pr.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-review-local.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-review-local-all.md").is_file())
@@ -1013,6 +1084,7 @@ class InstallTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         review_skill = root / ".agents/skills/sd-review-pr/SKILL.md"
+        create_pr_skill = root / ".agents/skills/sd-create-pr/SKILL.md"
         review_local_skill = root / ".agents/skills/sd-review-local/SKILL.md"
         review_learnings_skill = root / ".agents/skills/sd-review-learnings/SKILL.md"
         full_check_skill = root / ".agents/skills/sd-full-check/SKILL.md"
@@ -1022,6 +1094,7 @@ class InstallTests(unittest.TestCase):
         full_check_script = root / "scripts/sd-ai-command-pack-full-check.sh"
         housekeeping_script = root / "scripts/sd-ai-command-pack-housekeeping.sh"
         self.assertTrue(review_skill.is_file())
+        self.assertTrue(create_pr_skill.is_file())
         self.assertTrue(review_local_skill.is_file())
         self.assertTrue(review_learnings_skill.is_file())
         self.assertTrue(full_check_skill.is_file())
@@ -1070,6 +1143,18 @@ class InstallTests(unittest.TestCase):
                 "Resolve the `trellis-finish-work` skill by name",
                 adapter.read_text(encoding="utf-8"),
             )
+        for adapter in [
+            root / ".claude/commands/sd/create-pr.md",
+            root / ".cursor/commands/sd-create-pr.md",
+            root / ".gemini/commands/sd/create-pr.toml",
+            root / ".github/prompts/sd-create-pr.prompt.md",
+            root / ".opencode/commands/sd-create-pr.md",
+        ]:
+            self.assertTrue(adapter.is_file(), adapter)
+            content = adapter.read_text(encoding="utf-8")
+            self.assertIn("Resolve the `sd-create-pr` skill by name", content)
+            self.assertIn("sd-update-spec", content)
+            self.assertIn("sd-review-pr", content)
         for adapter in [
             root / ".claude/commands/sd/review-pr.md",
             root / ".cursor/commands/sd-review-pr.md",
@@ -1400,6 +1485,12 @@ class InstallTests(unittest.TestCase):
             "python3 -m coverage report --fail-under=100",
         ):
             self.assertIn(expected, workflow)
+        for expected in (
+            "python -m pip install -r requirements-dev.txt",
+            "COVERAGE_PROCESS_START=.coveragerc python -m coverage run --parallel-mode -m unittest discover -s tests",
+            "python -m coverage combine",
+            "python -m coverage report --fail-under=100",
+        ):
             self.assertIn(expected, readme)
 
     def test_backup_path_skips_existing_numbered_backups(self) -> None:
@@ -1813,6 +1904,16 @@ class InstallTests(unittest.TestCase):
             "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS",
             "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS",
             "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS",
+            "sandbox-local cache directories",
+            "PYTHONPYCACHEPREFIX",
+            "UV_TOOL_DIR",
+            "RUFF_CACHE_DIR",
+            "agent-facing final response",
+            "numbered `Next Steps` list",
+            "open follow-up items from the session",
+            "existing Trellis tasks already in progress",
+            "high-value Trellis task",
+            "candidates to start next",
         ):
             self.assertIn(expected, installed)
         self.assertEqual(installed, template)
@@ -1999,6 +2100,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("mode: dry-run", result.stdout)
         self.assertFalse((root / ".agents/skills/sd-review-pr/SKILL.md").exists())
+        self.assertFalse((root / ".agents/skills/sd-create-pr/SKILL.md").exists())
         self.assertFalse((root / ".agents/skills/sd-full-check/SKILL.md").exists())
         self.assertFalse((root / ".agents/skills/sd-housekeeping/SKILL.md").exists())
         self.assertFalse((root / "scripts/sd-ai-command-pack-full-check.sh").exists())
@@ -2012,6 +2114,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / install.INSTALLED_TARGETS_FILE).exists())
         self.assertIn(".sd-ai-command-pack/installed-targets.txt", result.stdout)
         self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-create-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-full-check.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-housekeeping.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-update-spec.md").exists())
@@ -2070,7 +2173,9 @@ class InstallTests(unittest.TestCase):
         self.assertIn("local-only-marker-written", result.stdout)
         self.assertTrue((root / ".trellis/config.yaml").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-create-pr/SKILL.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-pr.md").is_file())
+        self.assertTrue((root / ".cursor/commands/sd-create-pr.md").is_file())
         self.assertEqual(
             trellis_log.read_text(encoding="utf-8").strip(),
             "init --yes --skip-existing --codex --cursor",
@@ -2087,10 +2192,12 @@ class InstallTests(unittest.TestCase):
             "AGENTS.md",
             ".trellis/",
             ".agents/skills/sd-review-pr/SKILL.md",
+            ".agents/skills/sd-create-pr/SKILL.md",
             ".codex/config.toml",
             ".codex/hooks/",
             ".cursor/agents/trellis-*.md",
             ".cursor/commands/sd-review-pr.md",
+            ".cursor/commands/sd-create-pr.md",
             "scripts/sd-ai-command-pack-full-check.sh",
             ".sd-ai-command-pack/",
             ".obsidian-kb/",
@@ -2510,6 +2617,73 @@ class InstallTests(unittest.TestCase):
         for file in files:
             self.assertTrue(file.source.is_file(), file.source)
 
+    def test_manifest_declares_current_trellis_platform_adapters(self) -> None:
+        _, files = install.load_manifest()
+        platforms_with_manifest_entries = {file.platform for file in files}
+        expected_platforms = {
+            "antigravity",
+            "claude",
+            "codebuddy",
+            "cursor",
+            "devin",
+            "droid",
+            "gemini",
+            "github",
+            "kilo",
+            "kiro",
+            "opencode",
+            "pi",
+            "qoder",
+            "reasonix",
+            "shared",
+            "trae",
+            "zcode",
+        }
+
+        self.assertEqual(platforms_with_manifest_entries, expected_platforms)
+        self.assertIn("codex", install.PLATFORMS)
+        self.assertTrue(
+            any(
+                file.platform == "shared"
+                and file.target == Path(".agents/skills/sd-review-pr/SKILL.md")
+                for file in files
+            )
+        )
+        for platform in expected_platforms - {"shared"}:
+            self.assertIn(platform, install.ACTIVE_TRELLIS_PLATFORM_MARKERS)
+            self.assertIn(platform, install.TRELLIS_INIT_PLATFORM_FLAGS)
+
+        expected_targets = {
+            ".agent/workflows/sd-review-pr.md",
+            ".agent/workflows/sd-create-pr.md",
+            ".agent/skills/sd-review-pr/SKILL.md",
+            ".agent/skills/sd-create-pr/SKILL.md",
+            ".codebuddy/commands/sd/review-pr.md",
+            ".codebuddy/commands/sd/create-pr.md",
+            ".codebuddy/skills/sd-review-pr/SKILL.md",
+            ".codebuddy/skills/sd-create-pr/SKILL.md",
+            ".devin/workflows/sd-review-pr.md",
+            ".devin/workflows/sd-create-pr.md",
+            ".factory/commands/sd/review-pr.md",
+            ".factory/commands/sd/create-pr.md",
+            ".kilocode/workflows/sd-review-pr.md",
+            ".kilocode/workflows/sd-create-pr.md",
+            ".kiro/skills/sd-review-pr/SKILL.md",
+            ".kiro/skills/sd-create-pr/SKILL.md",
+            ".pi/prompts/sd-review-pr.md",
+            ".pi/prompts/sd-create-pr.md",
+            ".qoder/commands/sd-review-pr.md",
+            ".qoder/commands/sd-create-pr.md",
+            ".reasonix/skills/sd-review-pr/SKILL.md",
+            ".reasonix/skills/sd-create-pr/SKILL.md",
+            ".trae/commands/sd-review-pr.md",
+            ".trae/commands/sd-create-pr.md",
+            ".zcode/commands/sd/review-pr.md",
+            ".zcode/commands/sd/create-pr.md",
+        }
+        actual_targets = {file.target.as_posix() for file in files}
+        self.assertTrue(expected_targets.issubset(actual_targets))
+
     def test_manifest_rejects_unknown_duplicate_and_missing_entries(self) -> None:
         source = install.ROOT / "templates/.agents/skills/sd-review-pr/SKILL.md"
         unknown_platform = install.PackFile(
@@ -2645,6 +2819,10 @@ class InstallTests(unittest.TestCase):
             elif "finish-work" in file.target.name:
                 self.assertIn("Resolve the `trellis-finish-work` skill by name", content)
                 self.assertIn("Use that skill as the primary instructions", content)
+            elif "create-pr" in file.target.name:
+                self.assertIn("Resolve the `sd-create-pr` skill by name", content)
+                self.assertIn("sd-update-spec", content)
+                self.assertIn("sd-review-pr", content)
             elif "full-check" in file.target.name:
                 self.assertIn("Resolve the `sd-full-check` skill by name", content)
                 self.assertIn("source of truth for the exact checks", content)
@@ -2698,6 +2876,17 @@ class InstallTests(unittest.TestCase):
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0", review_pr)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0", review_pr)
 
+        create_pr = (
+            install.ROOT / "templates/.agents/skills/sd-create-pr/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("name: sd-create-pr", create_pr)
+        self.assertIn("# SD Create Pull Request", create_pr)
+        self.assertIn("Resolve both `sd-update-spec` and `sd-review-pr`", create_pr)
+        self.assertIn("Do not create a duplicate PR", create_pr)
+        self.assertIn("Do not assume the base branch is `main`", create_pr)
+        self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR", create_pr)
+        self.assertIn("Do not run Prism, Gito", create_pr)
+
         review_local = (
             install.ROOT / "templates/.agents/skills/sd-review-local/SKILL.md"
         ).read_text(encoding="utf-8")
@@ -2747,6 +2936,10 @@ class InstallTests(unittest.TestCase):
         # the full env-var set (deprecated fallbacks included).
         self.assertIn("docs/SD_AI_COMMAND_PACK.md", full_check)
         self.assertIn("Configuration", full_check)
+        self.assertIn("sandboxed agent sessions", full_check)
+        self.assertIn("PYTHONPYCACHEPREFIX", full_check)
+        self.assertIn("UV_TOOL_DIR", full_check)
+        self.assertIn("RUFF_CACHE_DIR", full_check)
 
         housekeeping = (
             install.ROOT / "templates/.agents/skills/sd-housekeeping/SKILL.md"
@@ -2784,6 +2977,7 @@ class InstallTests(unittest.TestCase):
             "start",
             "continue",
             "finish-work",
+            "create-pr",
             "review-pr",
             "review-local",
             "review-local-all",
@@ -2816,6 +3010,7 @@ class InstallTests(unittest.TestCase):
             "start": "Initialize or resume a task using the Trellis start workflow.",
             "continue": "Resume the current Trellis task or workflow state.",
             "finish-work": "Wrap up the current Trellis coding session.",
+            "create-pr": "Create or reuse a PR after SD spec refresh, commit, and push, then run the SD PR review loop.",
             "review-pr": "Run the Software Delivery (SD) pull-request review loop.",
             "review-local": "Run the Software Delivery (SD) local review loop.",
             "review-local-all": "Run the Software Delivery (SD) full-codebase local review loop.",
@@ -2861,17 +3056,15 @@ class InstallTests(unittest.TestCase):
         self.assertGreater(len(github_prompt_files), 0)
         for file in command_files:
             source = file.source.relative_to(install.ROOT).as_posix()
-            if file.platform in {"cursor", "opencode"}:
-                self.assertEqual(Path(f".{file.platform}/commands"), file.target.parent)
+            target = file.target.as_posix()
+            if file.platform in {"cursor", "opencode", "qoder", "trae"}:
+                self.assertRegex(target, r"/commands/sd-[^/]+\.md$")
                 self.assertTrue(file.source.name.startswith("sd-"), file.source)
                 self.assertTrue(file.target.name.startswith("sd-"), file.target)
-                self.assertNotIn("/commands/sd/", source)
-                self.assertNotIn("/commands/sd/", file.target.as_posix())
             else:
-                self.assertIn("/commands/sd/", source)
-                self.assertIn("/commands/sd/", file.target.as_posix())
+                self.assertIn("/commands/sd/", target)
             self.assertNotIn("/commands/trellis/", source)
-            self.assertNotIn("/commands/trellis/", file.target.as_posix())
+            self.assertNotIn("/commands/trellis/", target)
         for file in github_prompt_files:
             self.assertTrue(file.source.name.startswith("sd-"), file.source)
             self.assertTrue(file.target.name.startswith("sd-"), file.target)
@@ -2914,6 +3107,7 @@ class InstallTests(unittest.TestCase):
             ".trellis/workflow.md",
             ".trellis/config.yaml",
             ".trellis/spec/**/*.md",
+            ".trellis/tasks/**/*.md",
             ".trellis/workspace/",
             ".obsidian-kb/Dashboard - <repo>.md",
             "landing page",
@@ -2973,6 +3167,7 @@ class InstallTests(unittest.TestCase):
             self.assertIn("GitHub repository link", content)
             self.assertIn("visible semantic category", content)
             self.assertIn("folder names do not start with `.`", content)
+            self.assertIn(".trellis/tasks/**/*.md", content)
             self.assertIn("older symlink-based helper", content)
             self.assertIn("scripts/sd-ai-command-pack-update-spec-kb.py", content)
             self.assertIn('cp -R "$(pwd)/.obsidian-kb/."', content)
@@ -3003,12 +3198,24 @@ class InstallTests(unittest.TestCase):
             install.ROOT / "templates/scripts/sd-ai-command-pack-review-local.sh",
         ]
         expected_dirs = (
-            ".github",
+            ".agent",
+            ".agents",
             ".claude",
             ".codex",
+            ".codebuddy",
+            ".cursor",
+            ".devin",
+            ".factory",
             ".gemini",
+            ".github",
+            ".kiro",
+            ".kilocode",
             ".opencode",
-            ".agents",
+            ".pi",
+            ".qoder",
+            ".reasonix",
+            ".trae",
+            ".zcode",
             ".build",
             ".git",
             ".pytest_cache",
@@ -3312,7 +3519,8 @@ class InstallTests(unittest.TestCase):
         self.assertIn("Local review scope: full codebase", result.stdout)
         log = log_path.read_text(encoding="utf-8")
         self.assertIn("prism review codebase", log)
-        self.assertIn("--exclude .github,.github/**", log)
+        self.assertIn("--exclude .agent,.agent/**", log)
+        self.assertIn(".github,.github/**", log)
         self.assertIn(
             f"gito review --all --path {root.resolve()} --filter ",
             log,
@@ -3322,12 +3530,24 @@ class InstallTests(unittest.TestCase):
         gito_filter = gito_line.split(" --filter ", 1)[1].split(" --out ", 1)[0]
         gito_filter_paths = set(gito_filter.split(","))
         for excluded in (
-            ".github",
+            ".agent",
+            ".agents",
             ".claude",
             ".codex",
+            ".codebuddy",
+            ".cursor",
+            ".devin",
+            ".factory",
             ".gemini",
+            ".github",
+            ".kiro",
+            ".kilocode",
             ".opencode",
-            ".agents",
+            ".pi",
+            ".qoder",
+            ".reasonix",
+            ".trae",
+            ".zcode",
             ".build",
             ".git",
             ".pytest_cache",
@@ -4699,7 +4919,9 @@ import {
 } from './scripts/sd-ai-command-pack-review-preflight.mjs';
 
 assert.equal(copiedTemplateKind('.trellis/scripts/get_context.py'), 'trellis');
+assert.equal(copiedTemplateKind('.zcode/agents/trellis-check.md'), 'trellis');
 assert.equal(copiedTemplateKind('.agents/skills/sd-review-pr/SKILL.md'), 'sd-ai-command-pack');
+assert.equal(copiedTemplateKind('.qoder/commands/sd-review-pr.md'), 'sd-ai-command-pack');
 assert.equal(copiedTemplateKind('scripts/sd-ai-command-pack-review-scope.sh'), 'sd-ai-command-pack');
 assert.deepEqual(parseNumstat('1\\t2\\tsrc/file\\tname.js\\0'), [
   { added: 1, deleted: 2, path: 'src/file\\tname.js' },
@@ -5130,6 +5352,86 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         committed = run("git", "show", "--name-only", "--format=", "HEAD").stdout
         self.assertIn("journal-1.md", committed)
         self.assertNotIn("journal-0.md", committed)
+
+    def test_record_session_wrapper_prefers_current_branch_over_task_metadata(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self._seed_trellis_session_tooling(root)
+
+        def run(*args: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                args,
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        run("git", "config", "user.email", "test@example.com")
+        run("git", "config", "user.name", "Test User")
+        run("git", "branch", "-m", "feature/current")
+
+        task_dir = root / ".trellis/tasks/07-05-demo"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "task.json").write_text(
+            json.dumps(
+                {
+                    "title": "Demo task",
+                    "status": "in_progress",
+                    "package": None,
+                    "branch": "task/stale",
+                    "base_branch": "main",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        sessions_dir = root / ".trellis/.runtime/sessions"
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        (sessions_dir / "session.json").write_text(
+            json.dumps(
+                {
+                    "current_task": ".trellis/tasks/07-05-demo",
+                    "platform": "test",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        run("git", "add", "-A")
+        run("git", "commit", "-q", "-m", "chore: seed task")
+
+        result = run(
+            sys.executable,
+            "scripts/sd-ai-command-pack-record-session.py",
+            "--title",
+            "Branch session",
+            "--summary",
+            "Recorded with current branch.",
+            "--change",
+            "captured branch context",
+            "--test",
+            "branch assertion green",
+            "--no-commit",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        journals = sorted(
+            (root / ".trellis/workspace").glob("*/journal-*.md")
+        )
+        self.assertEqual(len(journals), 1)
+        entry = journals[0].read_text(encoding="utf-8")
+        index = journals[0].with_name("index.md").read_text(encoding="utf-8")
+        self.assertIn("**Branch**: `feature/current`", entry)
+        self.assertNotIn("task/stale", entry)
+        self.assertIn("`feature/current` |", index)
+        self.assertNotIn("`task/stale`", index)
 
     def test_record_session_wrapper_fails_fast_on_unknown_hash(self) -> None:
         root = self.make_repo()
@@ -6641,6 +6943,8 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             ".trellis/workflow.md": "# Workflow\n",
             ".trellis/config.yaml": "project: test\n",
             ".trellis/spec/backend/index.md": "# Backend Spec\n",
+            ".trellis/tasks/07-01-demo/prd.md": "# Demo PRD\n",
+            ".trellis/tasks/archive/2026-07/07-00-old/design.md": "# Old Design\n",
             "package.json": "{}\n",
             "packages/api/README.md": "# API Package\n",
             "src/main.py": "print('runtime')\n",
@@ -6683,6 +6987,15 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             ".trellis/workflow.md": "Workflow and Configuration/workflow.md",
             ".trellis/config.yaml": "Workflow and Configuration/config.yaml",
             ".trellis/spec/backend/index.md": "Backend Specs/index.md",
+            ".trellis/tasks/07-01-demo/prd.md": (
+                "Task Documentation/07-01-demo-prd.md"
+            ),
+            ".trellis/tasks/archive/2026-07/07-00-old/design.md": (
+                "Task Documentation/archive-2026-07-07-00-old-design.md"
+            ),
+            ".agents/skills/sd-review-pr/SKILL.md": (
+                "Agent and Platform Guidance/codex-sd-review-pr.md"
+            ),
             "package.json": "Project Manifests/package.json",
             "packages/api/README.md": "Package Documentation/packages-api-README.md",
         }
@@ -6725,11 +7038,17 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             "Project instructions for AI coding agents.",
             dashboard_text,
         )
+        self.assertIn(
+            "[codex-sd-review-pr.md]"
+            "(Agent%20and%20Platform%20Guidance/codex-sd-review-pr.md)",
+            dashboard_text,
+        )
         self.assertIn("## Repository Overview", dashboard_text)
         self.assertIn("## Agent and Platform Guidance", dashboard_text)
         self.assertIn("## Pack Documentation", dashboard_text)
         self.assertIn("## Architecture and Decisions", dashboard_text)
         self.assertIn("## Workflow and Configuration", dashboard_text)
+        self.assertIn("## Task Documentation", dashboard_text)
         self.assertIn("## Backend Specs", dashboard_text)
         self.assertIn("## Repository Maps", dashboard_text)
         self.assertIn("## Project Manifests", dashboard_text)
@@ -6746,6 +7065,10 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         )
         self.assertIn(
             "[index.md](Backend%20Specs/index.md)",
+            dashboard_text,
+        )
+        self.assertIn(
+            "[07-01-demo-prd.md](Task%20Documentation/07-01-demo-prd.md)",
             dashboard_text,
         )
         self.assertFalse((root / ".obsidian-kb/Dashboard.md").exists())
@@ -6772,6 +7095,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("### Repository Overview", overview_text)
         self.assertIn("### Agent and Platform Guidance", overview_text)
         self.assertIn("### Pack Documentation", overview_text)
+        self.assertIn("### Task Documentation", overview_text)
         self.assertIn("### Backend Specs", overview_text)
         self.assertNotIn("### Repository root", overview_text)
         self.assertNotIn("### docs", overview_text)
@@ -7354,7 +7678,8 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         changed_files = root / "changed-files.txt"
         changed_files.write_text(
             "scripts/sd-ai-command-pack-review-local.sh\n"
-            "scripts/sd-ai-command-pack-review-learnings.py\n",
+            "scripts/sd-ai-command-pack-review-learnings.py\n"
+            ".qoder/commands/sd-review-local.md\n",
             encoding="utf-8",
         )
 
@@ -7375,6 +7700,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("detected Tooling/generated scope", result.stdout)
         self.assertIn("detected CI/review scope", result.stdout)
+        self.assertIn(".qoder/commands/sd-review-local.md", result.stdout)
         self.assertIn("scripts/sd-ai-command-pack-review-local.sh", result.stdout)
         self.assertIn("scripts/sd-ai-command-pack-review-learnings.py", result.stdout)
 
@@ -8430,6 +8756,19 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             "current stream cleanup",
             "SD finish-work flow",
             "execute the `sd-finish-work` flow",
+            "Housekeeping completed cleanly.",
+            "Final state:",
+            "PR #<number>: merged at <timestamp>",
+            "Insight:",
+            "evidence-backed observation",
+            "Do not add filler insights",
+            "No follow-up needed for this cleanup stream.",
+            "numbered `Next Steps` list",
+            "open follow-up items discovered during this session",
+            "existing Trellis tasks that are already `in_progress`",
+            "high-value Trellis task candidates",
+            "python3 ./.trellis/scripts/task.py list",
+            "Either `No follow-up needed for this cleanup stream.`",
             "--no-auto-merge",
         ]:
             self.assertIn(text, skill)

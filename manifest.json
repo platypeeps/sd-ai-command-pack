@@ -29,6 +29,13 @@
     {
       "platform": "shared",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
+      "target": ".agents/skills/sd-create-pr/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".agents/skills/sd-review-pr/SKILL.md",
       "install": "always"
@@ -204,6 +211,13 @@
     {
       "platform": "claude",
       "kind": "command",
+      "source": "templates/.claude/commands/sd/create-pr.md",
+      "target": ".claude/commands/sd/create-pr.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
       "source": "templates/.claude/commands/sd/review-pr.md",
       "target": ".claude/commands/sd/review-pr.md",
       "anchor": ".claude"
@@ -274,6 +288,13 @@
     {
       "platform": "cursor",
       "kind": "command",
+      "source": "templates/.cursor/commands/sd-create-pr.md",
+      "target": ".cursor/commands/sd-create-pr.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
       "source": "templates/.cursor/commands/sd-review-pr.md",
       "target": ".cursor/commands/sd-review-pr.md",
       "anchor": ".cursor"
@@ -339,6 +360,13 @@
       "kind": "command",
       "source": "templates/.gemini/commands/sd/finish-work.toml",
       "target": ".gemini/commands/sd/finish-work.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/create-pr.toml",
+      "target": ".gemini/commands/sd/create-pr.toml",
       "anchor": ".gemini"
     },
     {
@@ -428,6 +456,13 @@
     {
       "platform": "github",
       "kind": "prompt",
+      "source": "templates/.github/prompts/sd-create-pr.prompt.md",
+      "target": ".github/prompts/sd-create-pr.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
       "source": "templates/.github/prompts/sd-review-pr.prompt.md",
       "target": ".github/prompts/sd-review-pr.prompt.md",
       "anchor": ".github"
@@ -498,6 +533,13 @@
     {
       "platform": "opencode",
       "kind": "command",
+      "source": "templates/.opencode/commands/sd-create-pr.md",
+      "target": ".opencode/commands/sd-create-pr.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
       "source": "templates/.opencode/commands/sd-review-pr.md",
       "target": ".opencode/commands/sd-review-pr.md",
       "anchor": ".opencode"
@@ -543,6 +585,1469 @@
       "source": "templates/.opencode/commands/sd-update-spec.md",
       "target": ".opencode/commands/sd-update-spec.md",
       "anchor": ".opencode"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-start.md",
+      "target": ".agent/workflows/sd-start.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-continue.md",
+      "target": ".agent/workflows/sd-continue.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-finish-work.md",
+      "target": ".agent/workflows/sd-finish-work.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-create-pr.md",
+      "target": ".agent/workflows/sd-create-pr.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-review-pr.md",
+      "target": ".agent/workflows/sd-review-pr.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-review-local.md",
+      "target": ".agent/workflows/sd-review-local.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-review-local-all.md",
+      "target": ".agent/workflows/sd-review-local-all.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-review-learnings.md",
+      "target": ".agent/workflows/sd-review-learnings.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-full-check.md",
+      "target": ".agent/workflows/sd-full-check.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-housekeeping.md",
+      "target": ".agent/workflows/sd-housekeeping.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-update-spec.md",
+      "target": ".agent/workflows/sd-update-spec.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-start.md",
+      "target": ".codebuddy/commands/sd/start.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-continue.md",
+      "target": ".codebuddy/commands/sd/continue.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-finish-work.md",
+      "target": ".codebuddy/commands/sd/finish-work.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-create-pr.md",
+      "target": ".codebuddy/commands/sd/create-pr.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-pr.md",
+      "target": ".codebuddy/commands/sd/review-pr.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-local.md",
+      "target": ".codebuddy/commands/sd/review-local.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-local-all.md",
+      "target": ".codebuddy/commands/sd/review-local-all.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-learnings.md",
+      "target": ".codebuddy/commands/sd/review-learnings.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-full-check.md",
+      "target": ".codebuddy/commands/sd/full-check.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-housekeeping.md",
+      "target": ".codebuddy/commands/sd/housekeeping.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-update-spec.md",
+      "target": ".codebuddy/commands/sd/update-spec.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-start.md",
+      "target": ".devin/workflows/sd-start.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-continue.md",
+      "target": ".devin/workflows/sd-continue.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-finish-work.md",
+      "target": ".devin/workflows/sd-finish-work.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-create-pr.md",
+      "target": ".devin/workflows/sd-create-pr.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-review-pr.md",
+      "target": ".devin/workflows/sd-review-pr.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-review-local.md",
+      "target": ".devin/workflows/sd-review-local.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-review-local-all.md",
+      "target": ".devin/workflows/sd-review-local-all.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-review-learnings.md",
+      "target": ".devin/workflows/sd-review-learnings.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-full-check.md",
+      "target": ".devin/workflows/sd-full-check.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-housekeeping.md",
+      "target": ".devin/workflows/sd-housekeeping.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-update-spec.md",
+      "target": ".devin/workflows/sd-update-spec.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-start.md",
+      "target": ".factory/commands/sd/start.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-continue.md",
+      "target": ".factory/commands/sd/continue.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-finish-work.md",
+      "target": ".factory/commands/sd/finish-work.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-create-pr.md",
+      "target": ".factory/commands/sd/create-pr.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-pr.md",
+      "target": ".factory/commands/sd/review-pr.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-local.md",
+      "target": ".factory/commands/sd/review-local.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-local-all.md",
+      "target": ".factory/commands/sd/review-local-all.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-learnings.md",
+      "target": ".factory/commands/sd/review-learnings.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-full-check.md",
+      "target": ".factory/commands/sd/full-check.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-housekeeping.md",
+      "target": ".factory/commands/sd/housekeeping.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-update-spec.md",
+      "target": ".factory/commands/sd/update-spec.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-start.md",
+      "target": ".kilocode/workflows/sd-start.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-continue.md",
+      "target": ".kilocode/workflows/sd-continue.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-finish-work.md",
+      "target": ".kilocode/workflows/sd-finish-work.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-create-pr.md",
+      "target": ".kilocode/workflows/sd-create-pr.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-review-pr.md",
+      "target": ".kilocode/workflows/sd-review-pr.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-review-local.md",
+      "target": ".kilocode/workflows/sd-review-local.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-review-local-all.md",
+      "target": ".kilocode/workflows/sd-review-local-all.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-review-learnings.md",
+      "target": ".kilocode/workflows/sd-review-learnings.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-full-check.md",
+      "target": ".kilocode/workflows/sd-full-check.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-housekeeping.md",
+      "target": ".kilocode/workflows/sd-housekeeping.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-update-spec.md",
+      "target": ".kilocode/workflows/sd-update-spec.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.cursor/commands/sd-start.md",
+      "target": ".pi/prompts/sd-start.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.cursor/commands/sd-continue.md",
+      "target": ".pi/prompts/sd-continue.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.cursor/commands/sd-finish-work.md",
+      "target": ".pi/prompts/sd-finish-work.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.cursor/commands/sd-create-pr.md",
+      "target": ".pi/prompts/sd-create-pr.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.cursor/commands/sd-review-pr.md",
+      "target": ".pi/prompts/sd-review-pr.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.cursor/commands/sd-review-local.md",
+      "target": ".pi/prompts/sd-review-local.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.cursor/commands/sd-review-local-all.md",
+      "target": ".pi/prompts/sd-review-local-all.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.cursor/commands/sd-review-learnings.md",
+      "target": ".pi/prompts/sd-review-learnings.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.cursor/commands/sd-full-check.md",
+      "target": ".pi/prompts/sd-full-check.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.cursor/commands/sd-housekeeping.md",
+      "target": ".pi/prompts/sd-housekeeping.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.cursor/commands/sd-update-spec.md",
+      "target": ".pi/prompts/sd-update-spec.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-start.md",
+      "target": ".qoder/commands/sd-start.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-continue.md",
+      "target": ".qoder/commands/sd-continue.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-finish-work.md",
+      "target": ".qoder/commands/sd-finish-work.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-create-pr.md",
+      "target": ".qoder/commands/sd-create-pr.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-pr.md",
+      "target": ".qoder/commands/sd-review-pr.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-local.md",
+      "target": ".qoder/commands/sd-review-local.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-local-all.md",
+      "target": ".qoder/commands/sd-review-local-all.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-learnings.md",
+      "target": ".qoder/commands/sd-review-learnings.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-full-check.md",
+      "target": ".qoder/commands/sd-full-check.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-housekeeping.md",
+      "target": ".qoder/commands/sd-housekeeping.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-update-spec.md",
+      "target": ".qoder/commands/sd-update-spec.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-start.md",
+      "target": ".trae/commands/sd-start.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-continue.md",
+      "target": ".trae/commands/sd-continue.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-finish-work.md",
+      "target": ".trae/commands/sd-finish-work.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-create-pr.md",
+      "target": ".trae/commands/sd-create-pr.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-pr.md",
+      "target": ".trae/commands/sd-review-pr.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-local.md",
+      "target": ".trae/commands/sd-review-local.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-local-all.md",
+      "target": ".trae/commands/sd-review-local-all.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-learnings.md",
+      "target": ".trae/commands/sd-review-learnings.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-full-check.md",
+      "target": ".trae/commands/sd-full-check.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-housekeeping.md",
+      "target": ".trae/commands/sd-housekeeping.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-update-spec.md",
+      "target": ".trae/commands/sd-update-spec.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-start.md",
+      "target": ".zcode/commands/sd/start.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-continue.md",
+      "target": ".zcode/commands/sd/continue.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-finish-work.md",
+      "target": ".zcode/commands/sd/finish-work.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-create-pr.md",
+      "target": ".zcode/commands/sd/create-pr.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-pr.md",
+      "target": ".zcode/commands/sd/review-pr.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-local.md",
+      "target": ".zcode/commands/sd/review-local.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-local-all.md",
+      "target": ".zcode/commands/sd/review-local-all.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-review-learnings.md",
+      "target": ".zcode/commands/sd/review-learnings.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-full-check.md",
+      "target": ".zcode/commands/sd/full-check.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-housekeeping.md",
+      "target": ".zcode/commands/sd/housekeeping.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-update-spec.md",
+      "target": ".zcode/commands/sd/update-spec.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-start/SKILL.md",
+      "target": ".agent/skills/sd-start/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-continue/SKILL.md",
+      "target": ".agent/skills/sd-continue/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-finish-work/SKILL.md",
+      "target": ".agent/skills/sd-finish-work/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
+      "target": ".agent/skills/sd-create-pr/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
+      "target": ".agent/skills/sd-review-pr/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local/SKILL.md",
+      "target": ".agent/skills/sd-review-local/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local-all/SKILL.md",
+      "target": ".agent/skills/sd-review-local-all/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-learnings/SKILL.md",
+      "target": ".agent/skills/sd-review-learnings/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-full-check/SKILL.md",
+      "target": ".agent/skills/sd-full-check/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-housekeeping/SKILL.md",
+      "target": ".agent/skills/sd-housekeeping/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/SKILL.md",
+      "target": ".agent/skills/sd-update-spec/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-start/SKILL.md",
+      "target": ".codebuddy/skills/sd-start/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-continue/SKILL.md",
+      "target": ".codebuddy/skills/sd-continue/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-finish-work/SKILL.md",
+      "target": ".codebuddy/skills/sd-finish-work/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
+      "target": ".codebuddy/skills/sd-create-pr/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
+      "target": ".codebuddy/skills/sd-review-pr/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local/SKILL.md",
+      "target": ".codebuddy/skills/sd-review-local/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local-all/SKILL.md",
+      "target": ".codebuddy/skills/sd-review-local-all/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-learnings/SKILL.md",
+      "target": ".codebuddy/skills/sd-review-learnings/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-full-check/SKILL.md",
+      "target": ".codebuddy/skills/sd-full-check/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-housekeeping/SKILL.md",
+      "target": ".codebuddy/skills/sd-housekeeping/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/SKILL.md",
+      "target": ".codebuddy/skills/sd-update-spec/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-start/SKILL.md",
+      "target": ".devin/skills/sd-start/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-continue/SKILL.md",
+      "target": ".devin/skills/sd-continue/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-finish-work/SKILL.md",
+      "target": ".devin/skills/sd-finish-work/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
+      "target": ".devin/skills/sd-create-pr/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
+      "target": ".devin/skills/sd-review-pr/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local/SKILL.md",
+      "target": ".devin/skills/sd-review-local/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local-all/SKILL.md",
+      "target": ".devin/skills/sd-review-local-all/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-learnings/SKILL.md",
+      "target": ".devin/skills/sd-review-learnings/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-full-check/SKILL.md",
+      "target": ".devin/skills/sd-full-check/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-housekeeping/SKILL.md",
+      "target": ".devin/skills/sd-housekeeping/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/SKILL.md",
+      "target": ".devin/skills/sd-update-spec/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-start/SKILL.md",
+      "target": ".factory/skills/sd-start/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-continue/SKILL.md",
+      "target": ".factory/skills/sd-continue/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-finish-work/SKILL.md",
+      "target": ".factory/skills/sd-finish-work/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
+      "target": ".factory/skills/sd-create-pr/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
+      "target": ".factory/skills/sd-review-pr/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local/SKILL.md",
+      "target": ".factory/skills/sd-review-local/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local-all/SKILL.md",
+      "target": ".factory/skills/sd-review-local-all/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-learnings/SKILL.md",
+      "target": ".factory/skills/sd-review-learnings/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-full-check/SKILL.md",
+      "target": ".factory/skills/sd-full-check/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-housekeeping/SKILL.md",
+      "target": ".factory/skills/sd-housekeeping/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/SKILL.md",
+      "target": ".factory/skills/sd-update-spec/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-start/SKILL.md",
+      "target": ".kilocode/skills/sd-start/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-continue/SKILL.md",
+      "target": ".kilocode/skills/sd-continue/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-finish-work/SKILL.md",
+      "target": ".kilocode/skills/sd-finish-work/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
+      "target": ".kilocode/skills/sd-create-pr/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
+      "target": ".kilocode/skills/sd-review-pr/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local/SKILL.md",
+      "target": ".kilocode/skills/sd-review-local/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local-all/SKILL.md",
+      "target": ".kilocode/skills/sd-review-local-all/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-learnings/SKILL.md",
+      "target": ".kilocode/skills/sd-review-learnings/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-full-check/SKILL.md",
+      "target": ".kilocode/skills/sd-full-check/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-housekeeping/SKILL.md",
+      "target": ".kilocode/skills/sd-housekeeping/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/SKILL.md",
+      "target": ".kilocode/skills/sd-update-spec/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-start/SKILL.md",
+      "target": ".kiro/skills/sd-start/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-continue/SKILL.md",
+      "target": ".kiro/skills/sd-continue/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-finish-work/SKILL.md",
+      "target": ".kiro/skills/sd-finish-work/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
+      "target": ".kiro/skills/sd-create-pr/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
+      "target": ".kiro/skills/sd-review-pr/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local/SKILL.md",
+      "target": ".kiro/skills/sd-review-local/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local-all/SKILL.md",
+      "target": ".kiro/skills/sd-review-local-all/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-learnings/SKILL.md",
+      "target": ".kiro/skills/sd-review-learnings/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-full-check/SKILL.md",
+      "target": ".kiro/skills/sd-full-check/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-housekeeping/SKILL.md",
+      "target": ".kiro/skills/sd-housekeeping/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/SKILL.md",
+      "target": ".kiro/skills/sd-update-spec/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-start/SKILL.md",
+      "target": ".pi/skills/sd-start/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-continue/SKILL.md",
+      "target": ".pi/skills/sd-continue/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-finish-work/SKILL.md",
+      "target": ".pi/skills/sd-finish-work/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
+      "target": ".pi/skills/sd-create-pr/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
+      "target": ".pi/skills/sd-review-pr/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local/SKILL.md",
+      "target": ".pi/skills/sd-review-local/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local-all/SKILL.md",
+      "target": ".pi/skills/sd-review-local-all/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-learnings/SKILL.md",
+      "target": ".pi/skills/sd-review-learnings/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-full-check/SKILL.md",
+      "target": ".pi/skills/sd-full-check/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-housekeeping/SKILL.md",
+      "target": ".pi/skills/sd-housekeeping/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/SKILL.md",
+      "target": ".pi/skills/sd-update-spec/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-start/SKILL.md",
+      "target": ".qoder/skills/sd-start/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-continue/SKILL.md",
+      "target": ".qoder/skills/sd-continue/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-finish-work/SKILL.md",
+      "target": ".qoder/skills/sd-finish-work/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
+      "target": ".qoder/skills/sd-create-pr/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
+      "target": ".qoder/skills/sd-review-pr/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local/SKILL.md",
+      "target": ".qoder/skills/sd-review-local/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local-all/SKILL.md",
+      "target": ".qoder/skills/sd-review-local-all/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-learnings/SKILL.md",
+      "target": ".qoder/skills/sd-review-learnings/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-full-check/SKILL.md",
+      "target": ".qoder/skills/sd-full-check/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-housekeeping/SKILL.md",
+      "target": ".qoder/skills/sd-housekeeping/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/SKILL.md",
+      "target": ".qoder/skills/sd-update-spec/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-start/SKILL.md",
+      "target": ".reasonix/skills/sd-start/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-continue/SKILL.md",
+      "target": ".reasonix/skills/sd-continue/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-finish-work/SKILL.md",
+      "target": ".reasonix/skills/sd-finish-work/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
+      "target": ".reasonix/skills/sd-create-pr/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
+      "target": ".reasonix/skills/sd-review-pr/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local/SKILL.md",
+      "target": ".reasonix/skills/sd-review-local/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local-all/SKILL.md",
+      "target": ".reasonix/skills/sd-review-local-all/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-learnings/SKILL.md",
+      "target": ".reasonix/skills/sd-review-learnings/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-full-check/SKILL.md",
+      "target": ".reasonix/skills/sd-full-check/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-housekeeping/SKILL.md",
+      "target": ".reasonix/skills/sd-housekeeping/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/SKILL.md",
+      "target": ".reasonix/skills/sd-update-spec/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-start/SKILL.md",
+      "target": ".trae/skills/sd-start/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-continue/SKILL.md",
+      "target": ".trae/skills/sd-continue/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-finish-work/SKILL.md",
+      "target": ".trae/skills/sd-finish-work/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
+      "target": ".trae/skills/sd-create-pr/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
+      "target": ".trae/skills/sd-review-pr/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local/SKILL.md",
+      "target": ".trae/skills/sd-review-local/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local-all/SKILL.md",
+      "target": ".trae/skills/sd-review-local-all/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-learnings/SKILL.md",
+      "target": ".trae/skills/sd-review-learnings/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-full-check/SKILL.md",
+      "target": ".trae/skills/sd-full-check/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-housekeeping/SKILL.md",
+      "target": ".trae/skills/sd-housekeeping/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/SKILL.md",
+      "target": ".trae/skills/sd-update-spec/SKILL.md",
+      "anchor": ".trae"
     }
   ]
 }
