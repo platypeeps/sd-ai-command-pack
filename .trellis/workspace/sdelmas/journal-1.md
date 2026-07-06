@@ -1218,3 +1218,42 @@ Added the sd-create-pr workflow, expanded platform distribution support, tighten
 ### Next Steps
 
 - None - task complete
+
+
+## Session 31: Review PR 38 installer remove option
+
+**Date**: 2026-07-05
+**Task**: Review PR 38 installer remove option
+**Branch**: `codex/installer-remove-option`
+
+### Summary
+
+Addressed Copilot feedback on installer remove read failures, verified tests and PR checks, and resolved the review thread.
+
+### Main Changes
+
+- Fixed `install.py --remove` handling for unreadable destination files by preserving the target with a clear reason instead of raising a traceback.
+- Converted unreadable bundled template failures into clean installer errors.
+- Added focused installer tests for target read failures and template read failures.
+- Replied to and resolved the Copilot review thread on PR #38.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `df40c75` | (see git log) |
+
+### Testing
+
+- [OK] Focused installer read-failure unit test passed.
+- [OK] CI-style coverage gate passed with 277 tests and 100% coverage.
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh` passed after the fix.
+- [OK] GitHub Actions checks passed on PR #38.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
