@@ -1307,3 +1307,46 @@ Resolved the remaining PR #38 installer remove-option review feedback and revali
 ### Next Steps
 
 - None - task complete
+
+
+## Session 33: Review PR 38 unsafe uninstall follow-up
+
+**Date**: 2026-07-05
+**Task**: Review PR 38 unsafe uninstall follow-up
+**Branch**: `codex/installer-remove-option`
+
+### Summary
+
+Resolved the final PR #38 Copilot uninstall-hardening feedback by preserving unsafe remove-mode candidates and keeping uninstall progress resilient.
+
+### Main Changes
+
+- Treated unsafe or unreadable uninstall receipt/provenance state as absent so removal can fall back to manifest-selected targets.
+- Preserved unsafe pack-file removal candidates with validation details instead of aborting the uninstall run.
+- Preserved unsafe or unreadable managed-block removal targets with clear details while continuing removal.
+- Replied to and resolved the Copilot review threads for these uninstall hardening findings.
+- Revalidated focused uninstall tests, full installer coverage, the deterministic full check, unresolved review threads, and GitHub Actions.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9e22a22` | (see git log) |
+
+### Testing
+
+- [OK] Focused unsafe uninstall regression tests passed.
+- [OK] Nearby uninstall helper regression tests passed.
+- [OK] Full coverage run passed with 286 tests.
+- [OK] `coverage report --fail-under=100` passed with `install.py` at 100%.
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh` passed.
+- [OK] PR #38 unresolved thread query returned none and GitHub Actions passed after `9e22a22`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
