@@ -5964,6 +5964,21 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("has no files map", result.stdout)
 
+        provenance.write_text('{"files": {}}\n', encoding="utf-8")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("has an empty files map", result.stdout)
+
     def test_install_audit_passes_without_provenance_file(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)

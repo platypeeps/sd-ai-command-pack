@@ -140,15 +140,15 @@ tamper-evidence of last resort), on any symlink or non-regular node at a
 vouched path, on a vouched path whose real path escapes the repository
 root (symlinked parent directories), on inspection failures (per-target
 `os.lstat`, reported with the exception text), and on a provenance file
-that is itself not a regular file or is malformed. Gitignored-absent
-vouched targets skip, consistent with the structural policy; structural
-`path_exists` is lstat-based so unreadable parents degrade to
-missing-target reports instead of crashing. Absent provenance (pre-0.5.10
-installs) keeps the older audit behavior. When provenance is present and the
-audit passes, the command reports the installed payload provenance version and
-confirms vouched hashes match; that version can intentionally be older than
-the source checkout manifest when a newer release did not change installed
-payload bytes.
+that is itself not a regular file or is malformed, including an empty
+`files` map. Gitignored-absent vouched targets skip, consistent with the
+structural policy; structural `path_exists` is lstat-based so unreadable
+parents degrade to missing-target reports instead of crashing. Absent
+provenance (pre-0.5.10 installs) keeps the older audit behavior. When
+provenance is present and the audit passes, the command reports the installed
+payload provenance version and confirms vouched hashes match; that version can
+intentionally be older than the source checkout manifest when a newer release
+did not change installed payload bytes.
 
 Reference files:
 

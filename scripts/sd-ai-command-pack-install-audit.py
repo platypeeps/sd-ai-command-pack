@@ -302,6 +302,8 @@ def audit_provenance(root: Path) -> tuple[list[str], str | None]:
     )
     if not isinstance(files, dict):
         return [f"{PROVENANCE_FILE} has no files map"], None
+    if not files:
+        return [f"{PROVENANCE_FILE} has an empty files map"], None
 
     failures: list[str] = []
     root_real = os.path.realpath(root)
