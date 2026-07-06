@@ -1621,8 +1621,19 @@ def install_installed_targets_file(
     return InstallResult(file, "created")
 
 
-def sha256_file(path: Path) -> str:
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+def read_bytes_for_remove(path: Path, label: str) -> tuple[bytes | None, str | None]:
+    try:
+        return path.read_bytes(), None
+    except OSError as error:
+        return None, f"{label} cannot be read: {error}"
+
+
+def sha256_file(path: Path) -> tuple[str | None, str | None]:
+    content, detail = read_bytes_for_remove(path, "target")
+    if detail is not None:
+        return None, detail
+    assert content is not None
+    return "sha256:" + hashlib.sha256(content).hexdigest(), None
 
 
 def installed_target_candidates(
@@ -1661,10 +1672,24 @@ def may_remove_pack_file(
 ) -> tuple[bool, str | None]:
     if force:
         return True, None
-    if recorded_hash and recorded_hash == sha256_file(destination):
-        return True, None
-    if file and destination.read_bytes() == file.source.read_bytes():
-        return True, None
+    if recorded_hash:
+        digest, detail = sha256_file(destination)
+        if detail is not None:
+            return False, detail
+        if recorded_hash == digest:
+            return True, None
+    if file:
+        destination_content, detail = read_bytes_for_remove(destination, "target")
+        if detail is not None:
+            return False, detail
+        source_content, source_detail = read_bytes_for_remove(
+            file.source,
+            "pack template",
+        )
+        if source_detail is not None:
+            raise SystemExit(f"error: {source_detail}") from None
+        if destination_content == source_content:
+            return True, None
     return False, "content differs from installed pack version"
 
 

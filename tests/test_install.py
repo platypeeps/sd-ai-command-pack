@@ -6184,6 +6184,60 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.detail, "target is not a regular file")
         self.assertTrue(script.is_dir())
 
+    def test_may_remove_pack_file_handles_read_failures_cleanly(self) -> None:
+        root = self.make_repo()
+        destination = root / "scripts/sd-ai-command-pack-full-check.sh"
+        destination.parent.mkdir()
+        destination.write_text("local\n", encoding="utf-8")
+        file = self.valid_pack_file(
+            source=PACK_ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
+            target=Path("scripts/sd-ai-command-pack-full-check.sh"),
+        )
+        original_read_bytes = Path.read_bytes
+
+        def block_target(path: Path) -> bytes:
+            if path == destination:
+                raise OSError("blocked target")
+            return original_read_bytes(path)
+
+        with mock.patch.object(Path, "read_bytes", autospec=True, side_effect=block_target):
+            removable, detail = install.may_remove_pack_file(
+                destination,
+                file=None,
+                recorded_hash="sha256:" + "0" * 64,
+                force=False,
+            )
+
+        self.assertFalse(removable)
+        self.assertIsNotNone(detail)
+        self.assertIn("target cannot be read", detail)
+
+        with mock.patch.object(Path, "read_bytes", autospec=True, side_effect=block_target):
+            removable, detail = install.may_remove_pack_file(
+                destination,
+                file=file,
+                recorded_hash=None,
+                force=False,
+            )
+
+        self.assertFalse(removable)
+        self.assertIsNotNone(detail)
+        self.assertIn("target cannot be read", detail)
+
+        def block_source(path: Path) -> bytes:
+            if path == file.source:
+                raise OSError("blocked source")
+            return original_read_bytes(path)
+
+        with mock.patch.object(Path, "read_bytes", autospec=True, side_effect=block_source):
+            with self.assertRaisesRegex(SystemExit, "pack template cannot be read"):
+                install.may_remove_pack_file(
+                    destination,
+                    file=file,
+                    recorded_hash=None,
+                    force=False,
+                )
+
     def test_remove_local_only_exclude_handles_missing_and_dry_run(self) -> None:
         root = self.make_repo()
         with mock.patch.object(
