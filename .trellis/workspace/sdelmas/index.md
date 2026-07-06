@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 37
+- **Total Sessions**: 38
 - **Last Active**: 2026-07-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1518 | Active |
+| `journal-1.md` | ~1544 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 38 | 2026-07-06 | Clarify installed payload provenance | `a281aa1` | `codex/install-audit-provenance-version` |
 | 37 | 2026-07-06 | Resolve PR 38 uninstall delete review | `84480ad` | `codex/installer-remove-option` |
 | 36 | 2026-07-06 | Resolve PR 38 docs-surface review | `26ea381` | `codex/installer-remove-option` |
 | 35 | 2026-07-06 | Create PR 38 review-learning note | `b365f7c` | `codex/installer-remove-option` |

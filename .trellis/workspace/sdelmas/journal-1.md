@@ -1509,3 +1509,44 @@ Handled uninstall delete failures cleanly for managed-block and pack-file remova
 ### Next Steps
 
 - None - task complete
+
+
+## Session 38: Clarify installed payload provenance
+
+**Date**: 2026-07-06
+**Task**: Clarify installed payload provenance
+**Branch**: `codex/install-audit-provenance-version`
+
+### Summary
+
+Clarified install-audit provenance reporting so clean audits print the installed payload provenance version and documented that source manifest versions may intentionally be newer when installed payload bytes did not change.
+
+### Main Changes
+
+- Updated the install audit to return provenance status with the recorded payload version and print it on clean audits when provenance exists.
+- Clarified README, installed docs, and backend spec wording so target repos can distinguish installed payload provenance from the current source checkout manifest version.
+- Added regression coverage for the clean provenance status line and preserved the no-provenance legacy behavior.
+- Bumped the source manifest to `0.5.25`.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a281aa1` | (see git log) |
+
+### Testing
+
+- [OK] Ran focused install-audit tests for provenance reporting, legacy no-provenance behavior, and Trellis prerequisite documentation.
+- [OK] Ran `PYTHONPYCACHEPREFIX=/private/tmp/sd-ai-command-pack-pycache python3 -m py_compile scripts/sd-ai-command-pack-install-audit.py templates/scripts/sd-ai-command-pack-install-audit.py`.
+- [OK] Ran full unittest discovery with coverage and confirmed `289 tests` passed with `100%` coverage.
+- [OK] Ran `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Confirmed PR #43 CI passed: `security`, `unittest (3.10)`, `unittest (3.13)`, and `CI Result`.
+- [OK] Confirmed no unresolved PR review threads or comments after the configured remote-review request.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
