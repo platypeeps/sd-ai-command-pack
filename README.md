@@ -365,7 +365,7 @@ blanket-ignoring shareable `.trellis` workflow, spec, task, and script files.
 It also keeps shared Claude SD commands trackable while ignoring the rest of
 `.claude/` as local Claude Code state. Other AI-tool local state such as tool
 caches, logs, sessions, tmp folders, Gito report/temp artifacts,
-`.opencode/node_modules/`, and root `node_modules/` is ignored without
+`.opencode/node_modules/`, and root `node_modules/` are ignored without
 blanket-ignoring shareable `.codex/`, `.gemini/`, `.gito/`, or `.opencode/`
 platform adapter directories.
 It installs platform adapters only when the target repo has the corresponding

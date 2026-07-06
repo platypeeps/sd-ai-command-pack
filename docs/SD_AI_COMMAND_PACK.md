@@ -853,7 +853,7 @@ It also keeps shared Claude SD commands trackable while ignoring the rest of
 `.claude/` as local Claude Code state. Other AI-tool local state such as tool
 caches, logs, sessions, tmp folders, Gito report/temp artifacts,
 tool-specific local state, `.opencode/node_modules/`, and root
-`node_modules/` is ignored without blanket-ignoring shareable non-Claude
+`node_modules/` are ignored without blanket-ignoring shareable non-Claude
 platform adapter directories.
 The installer replaces exact unmarked `.trellis/` ignore entries with that
 specific-pattern block.
