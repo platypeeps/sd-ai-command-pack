@@ -6327,6 +6327,30 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             gitignore.read_text(encoding="utf-8"),
         )
 
+        gitignore.write_text(
+            f"{install.TRELLIS_GITIGNORE_START}\n"
+            ".trellis/.runtime/\n",
+            encoding="utf-8",
+        )
+
+        result = install.remove_text_block_file(
+            root,
+            install.TRELLIS_GITIGNORE_TARGET,
+            start_marker=install.TRELLIS_GITIGNORE_START,
+            end_marker=install.TRELLIS_GITIGNORE_END,
+            label=".gitignore",
+            dry_run=False,
+            backup=False,
+        )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertIsNotNone(result.detail)
+        self.assertIn("incomplete sd-ai-command-pack markers", result.detail)
+        self.assertIn(
+            install.TRELLIS_GITIGNORE_START,
+            gitignore.read_text(encoding="utf-8"),
+        )
+
     def test_remove_text_block_file_preserves_unsafe_paths_and_read_failures(
         self,
     ) -> None:
@@ -6644,6 +6668,23 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.status, "preserved")
         self.assertIsNotNone(result.detail)
         self.assertIn(".git/info/exclude is not valid UTF-8", result.detail)
+
+        exclude.write_text(
+            f"{install.LOCAL_ONLY_EXCLUDE_START}\n"
+            ".sd-ai-command-pack/\n",
+            encoding="utf-8",
+        )
+
+        result = install.remove_local_only_exclude(root, dry_run=False)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.status, "preserved")
+        self.assertIsNotNone(result.detail)
+        self.assertIn("incomplete sd-ai-command-pack markers", result.detail)
+        self.assertIn(
+            install.LOCAL_ONLY_EXCLUDE_START,
+            exclude.read_text(encoding="utf-8"),
+        )
 
     def test_remove_runs_diff_check_and_returns_failure(self) -> None:
         root = self.make_repo()

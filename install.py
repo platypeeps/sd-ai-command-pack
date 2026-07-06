@@ -1263,12 +1263,19 @@ def remove_text_block_file(
                 "preserved",
                 detail=system_exit_detail(error),
             )
-    stripped = remove_marked_block(
-        current,
-        start_marker=start_marker,
-        end_marker=end_marker,
-        label=label,
-    )
+    try:
+        stripped = remove_marked_block(
+            current,
+            start_marker=start_marker,
+            end_marker=end_marker,
+            label=label,
+        )
+    except SystemExit as error:
+        return RemoveResult(
+            relative_path,
+            "preserved",
+            detail=system_exit_detail(error),
+        )
     if stripped == current:
         return RemoveResult(relative_path, "unchanged", detail="managed block not present")
 
@@ -1829,17 +1836,18 @@ def remove_local_only_exclude(target: Path, *, dry_run: bool) -> RemoveResult | 
             "git exclude path",
         )
         current = read_text_if_exists(exclude_path, ".git/info/exclude")
+        stripped = remove_marked_block(
+            current,
+            start_marker=LOCAL_ONLY_EXCLUDE_START,
+            end_marker=LOCAL_ONLY_EXCLUDE_END,
+            label=".git/info/exclude",
+        )
     except SystemExit as error:
-        detail = str(error)
-        if detail.startswith("error: "):
-            detail = detail[len("error: ") :]
-        return RemoveResult(exclude_path, "preserved", detail=detail)
-    stripped = remove_marked_block(
-        current,
-        start_marker=LOCAL_ONLY_EXCLUDE_START,
-        end_marker=LOCAL_ONLY_EXCLUDE_END,
-        label=".git/info/exclude",
-    )
+        return RemoveResult(
+            exclude_path,
+            "preserved",
+            detail=system_exit_detail(error),
+        )
     if stripped == current:
         return None
     if dry_run:
