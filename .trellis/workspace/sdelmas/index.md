@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 38
+- **Total Sessions**: 39
 - **Last Active**: 2026-07-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1544 | Active |
+| `journal-1.md` | ~1587 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 39 | 2026-07-06 | Resolve PR 43 review loop | `b883ba4`, `e2a3e11`, `0836c88` | `codex/install-audit-provenance-version` |
 | 38 | 2026-07-06 | Clarify installed payload provenance | `a281aa1` | `codex/install-audit-provenance-version` |
 | 37 | 2026-07-06 | Resolve PR 38 uninstall delete review | `84480ad` | `codex/installer-remove-option` |
 | 36 | 2026-07-06 | Resolve PR 38 docs-surface review | `26ea381` | `codex/installer-remove-option` |

@@ -1550,3 +1550,47 @@ Clarified install-audit provenance reporting so clean audits print the installed
 ### Next Steps
 
 - None - task complete
+
+
+## Session 39: Resolve PR 43 review loop
+
+**Date**: 2026-07-06
+**Task**: Resolve PR 43 review loop
+**Branch**: `codex/install-audit-provenance-version`
+
+### Summary
+
+Addressed Copilot review feedback for install-audit provenance and journal accuracy, improved create-pr branch fallback handling and review-scope heading parsing, reran the SD PR gate, and confirmed PR #43 review threads and CI were clean.
+
+### Main Changes
+
+- Made install-audit provenance validation reject an empty `files` map and kept the source/template audit scripts in sync.
+- Updated `sd-create-pr` instructions so default-branch runs create a `codex/...` feature branch automatically when no branch is provided.
+- Relaxed PR-body/review-scope heading parsing to accept Markdown scope headings without requiring a trailing colon.
+- Corrected the session journal version note after Copilot flagged the stale `0.5.25` reference.
+- Replied to and resolved both Copilot review threads on PR #43.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b883ba4` | (see git log) |
+| `e2a3e11` | (see git log) |
+| `0836c88` | (see git log) |
+
+### Testing
+
+- [OK] Ran focused install tests for malformed provenance, wrapper references, heading parsing, review-scope parsing, and docs examples.
+- [OK] Ran `PYTHONPYCACHEPREFIX=/private/tmp/sd-ai-command-pack-pycache python3 -m py_compile scripts/sd-ai-command-pack-pr-body-scope.py templates/scripts/sd-ai-command-pack-pr-body-scope.py`.
+- [OK] Ran `bash -n scripts/sd-ai-command-pack-review-scope.sh templates/scripts/sd-ai-command-pack-review-scope.sh`.
+- [OK] Ran the full coverage gate with `291 tests` and `100%` coverage.
+- [OK] Ran `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Confirmed PR #43 review threads were resolved and CI passed on head `0836c88`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
