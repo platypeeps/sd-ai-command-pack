@@ -163,8 +163,8 @@ Concrete model in the current source:
   value). `send` and `run` cannot emit a custom kind — every `send` writes
   a `message` event.
 - Mid-turn worker abort is **not** a tag. It is the dedicated
-  `channel interrupt` command, which appends an `interrupt_requested` /
-  `interrupted` pair and provider-level interrupts the worker.
+  `channel interrupt` command, which appends an `interrupt_requested` / `interrupted`
+  pair and provider-level interrupts the worker.
 
 Practical rule for dispatchers waiting on workers:
 
@@ -199,7 +199,7 @@ trellis channel interrupt <name> [text]
 ```
 
 Behavior:
-- Appends an `interrupt` event with `reason: "user"` and a replacement
+- Appends interrupt lifecycle events with `reason: "user"` and a replacement
   instruction body; supervisor performs provider-level interrupt where
   supported (Claude `/interrupt`, Codex turn cancel).
 - Prints the appended event JSON on stdout.

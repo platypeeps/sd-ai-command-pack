@@ -1144,3 +1144,77 @@ Fixed the anomaly-metric-creator review finding: a failing git add now prints it
 ### Next Steps
 
 - fold 0.5.19 into the six fleet refresh PRs and run the gated merges
+
+
+## Session 29: Expand SD command pack workflows
+
+**Date**: 2026-07-05
+**Task**: Expand SD command pack workflows
+**Branch**: `codex/expand-sd-command-pack-workflows`
+
+### Summary
+
+Added the sd-create-pr workflow, expanded platform distribution support, tightened review and housekeeping guidance, and synchronized pack-owned docs/tests before PR merge.
+
+### Main Changes
+
+- added sd-create-pr shared skill and platform adapters
+- expanded installer manifest, platform support, docs, and tests for distributed command-pack workflows
+- tightened Copilot, housekeeping, local-review, Obsidian KB, and Trellis-channel guidance
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `34ea5d8` | feat: expand sd command pack workflows |
+
+### Testing
+
+- [OK] git diff --check
+- [OK] PYTHONPYCACHEPREFIX=/private/tmp/sd-ai-command-pack-pycache python3 -m unittest discover -s tests (264 tests)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 30: Expand SD command pack workflows
+
+**Date**: 2026-07-05
+**Task**: Expand SD command pack workflows
+**Branch**: `codex/expand-sd-command-pack-workflows`
+
+### Summary
+
+Added the sd-create-pr workflow, expanded platform distribution support, tightened review and housekeeping guidance, and synchronized pack-owned docs/tests before PR merge.
+
+### Main Changes
+
+- added sd-create-pr shared skill and platform adapters
+- expanded installer manifest, platform support, docs, and tests for distributed command-pack workflows
+- tightened Copilot, housekeeping, local-review, Obsidian KB, and Trellis-channel guidance
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `34ea5d8` | feat: expand sd command pack workflows |
+
+### Testing
+
+- [OK] git diff --check
+- [OK] PYTHONPYCACHEPREFIX=/private/tmp/sd-ai-command-pack-pycache python3 -m unittest discover -s tests (264 tests)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
