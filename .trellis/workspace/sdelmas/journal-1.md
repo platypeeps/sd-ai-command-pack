@@ -1350,3 +1350,45 @@ Resolved the final PR #38 Copilot uninstall-hardening feedback by preserving uns
 ### Next Steps
 
 - None - task complete
+
+
+## Session 34: Review PR 38 marker-parse uninstall follow-up
+
+**Date**: 2026-07-05
+**Task**: Review PR 38 marker-parse uninstall follow-up
+**Branch**: `codex/installer-remove-option`
+
+### Summary
+
+Resolved the PR #38 Copilot marker-parse feedback by preserving drifted marker files during remove-mode cleanup.
+
+### Main Changes
+
+- Preserved managed-block uninstall targets when SD marker parsing finds incomplete or duplicated markers.
+- Preserved .git/info/exclude when local-only marker parsing fails instead of aborting uninstall.
+- Added focused regressions for incomplete marker blocks in both removal paths.
+- Replied to and resolved the Copilot marker-parse review threads.
+- Revalidated focused marker tests, full coverage, deterministic full check, unresolved review threads, and GitHub Actions.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fb1233c` | (see git log) |
+
+### Testing
+
+- [OK] Focused marker-parse regression tests passed.
+- [OK] Full coverage run passed with 286 tests.
+- [OK] `coverage report --fail-under=100` passed with `install.py` at 100%.
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh` passed.
+- [OK] PR #38 unresolved thread query returned none and GitHub Actions passed after `fb1233c`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
