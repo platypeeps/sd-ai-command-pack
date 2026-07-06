@@ -1392,3 +1392,45 @@ Resolved the PR #38 Copilot marker-parse feedback by preserving drifted marker f
 ### Next Steps
 
 - None - task complete
+
+
+## Session 35: Create PR 38 review-learning note
+
+**Date**: 2026-07-06
+**Task**: Create PR 38 review-learning note
+**Branch**: `codex/installer-remove-option`
+
+### Summary
+
+Captured the uninstall preserve-and-continue lesson in repo review learnings and Trellis backend specs, then ran the create-pr/review-pr flow on PR #38.
+
+### Main Changes
+
+- Added docs/review-learnings.md with the remove-mode preserve-and-continue review learning.
+- Updated the backend manifest/filesystem spec with the concrete remove-mode contract, validation matrix, and test expectations.
+- Ran sd-update-spec extensions: no repospec infrastructure or architecture overview to refresh; Obsidian KB helper refreshed 159 copies, dashboard, and LLM overview with no conflicts.
+- Reused PR #38, pushed the docs/spec commit, requested Copilot review, and confirmed no new comments or unresolved threads.
+- Verified deterministic full-check and GitHub Actions after the push.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b365f7c` | (see git log) |
+
+### Testing
+
+- [OK] `git diff --check` and `git diff --cached --check` passed before commit.
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh` passed before and after pushing.
+- [OK] `python3 scripts/sd-ai-command-pack-update-spec-kb.py` refreshed `.obsidian-kb` with no conflicts.
+- [OK] PR #38 unresolved thread query returned none.
+- [OK] GitHub Actions passed on PR #38 after `b365f7c`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

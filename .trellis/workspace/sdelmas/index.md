@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 34
-- **Last Active**: 2026-07-05
+- **Total Sessions**: 35
+- **Last Active**: 2026-07-06
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1390 | Active |
+| `journal-1.md` | ~1432 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 35 | 2026-07-06 | Create PR 38 review-learning note | `b365f7c` | `codex/installer-remove-option` |
 | 34 | 2026-07-05 | Review PR 38 marker-parse uninstall follow-up | `fb1233c` | `codex/installer-remove-option` |
 | 33 | 2026-07-05 | Review PR 38 unsafe uninstall follow-up | `9e22a22` | `codex/installer-remove-option` |
 | 32 | 2026-07-05 | Review PR 38 installer remove follow-up | `5332841`, `629711d`, `d2b988b` | `codex/installer-remove-option` |
