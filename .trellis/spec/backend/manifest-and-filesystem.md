@@ -140,11 +140,15 @@ tamper-evidence of last resort), on any symlink or non-regular node at a
 vouched path, on a vouched path whose real path escapes the repository
 root (symlinked parent directories), on inspection failures (per-target
 `os.lstat`, reported with the exception text), and on a provenance file
-that is itself not a regular file or is malformed. Gitignored-absent
-vouched targets skip, consistent with the structural policy; structural
-`path_exists` is lstat-based so unreadable parents degrade to
-missing-target reports instead of crashing. Absent provenance (pre-0.5.10
-installs) keeps the older audit behavior.
+that is itself not a regular file or is malformed, including an empty
+`files` map. Gitignored-absent vouched targets skip, consistent with the
+structural policy; structural `path_exists` is lstat-based so unreadable
+parents degrade to missing-target reports instead of crashing. Absent
+provenance (pre-0.5.10 installs) keeps the older audit behavior. When
+provenance is present and the audit passes, the command reports the installed
+payload provenance version and confirms vouched hashes match; that version can
+intentionally be older than the source checkout manifest when a newer release
+did not change installed payload bytes.
 
 Reference files:
 
@@ -155,6 +159,7 @@ Reference files:
 - `tests/test_install.py`, `test_install_keeps_receipt_entries_for_gitignored_absent_anchor`
 - `tests/test_install.py`, `test_install_audit_downgrades_gitignored_missing_targets`
 - `tests/test_install.py`, `test_install_writes_provenance_with_hashed_targets`
+- `tests/test_install.py`, `test_install_audit_reports_installed_payload_provenance_version`
 - `tests/test_install.py`, `test_install_audit_warns_for_unlisted_gitignored_pack_files`
 
 ## Remove Mode Preserve-And-Continue Contract
@@ -314,7 +319,9 @@ tracked `.gitignore`.
    folders, writes dashboard and LLM overview links to those copied paths,
    includes one-line document descriptions in the dashboard, includes a GitHub
    repository link when `origin` is a GitHub remote, groups generated index
-   links by semantic category rather than source folder name, avoids generated
+   links by semantic category rather than source folder name, normalizes
+   platform-root `agents.md`/`AGENTS.md` guidance filenames case-insensitively
+   to the same stable destination such as `codex-agents.md`, avoids generated
    KB file/folder names that start with `.` or use Trellis-specific naming, and
    keeps `.obsidian-kb/` ignored through the managed
    `obsidian-kb` block in `.gitignore` or `.git/info/exclude` for local-only

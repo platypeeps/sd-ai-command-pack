@@ -2993,6 +2993,9 @@ class InstallTests(unittest.TestCase):
         self.assertIn("Resolve both `sd-update-spec` and `sd-review-pr`", create_pr)
         self.assertIn("Do not create a duplicate PR", create_pr)
         self.assertIn("Do not assume the base branch is `main`", create_pr)
+        self.assertIn("SD_AI_COMMAND_PACK_CREATE_PR_BRANCH", create_pr)
+        self.assertIn("SD_AI_COMMAND_PACK_CREATE_PR_BRANCH_SLUG", create_pr)
+        self.assertIn("git switch -c", create_pr)
         self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR", create_pr)
         self.assertIn("Do not run Prism, Gito", create_pr)
 
@@ -5843,6 +5846,14 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertTrue(
             files["scripts/sd-ai-command-pack-full-check.sh"].startswith("sha256:")
         )
+        helper_target = "scripts/sd-ai-command-pack-update-spec-kb.py"
+        helper_source = install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+        helper_content = helper_source.read_bytes()
+        self.assertEqual((root / helper_target).read_bytes(), helper_content)
+        self.assertEqual(
+            files[helper_target],
+            "sha256:" + hashlib.sha256(helper_content).hexdigest(),
+        )
         # User-tunable and generated files are never vouched.
         self.assertNotIn(".prism/rules.json", files)
         self.assertNotIn(".gitignore", files)
@@ -5879,6 +5890,32 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("drifted from pack", result.stdout)
         self.assertIn("scripts/sd-ai-command-pack-full-check.sh", result.stdout)
+
+    def test_install_audit_reports_installed_payload_provenance_version(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        manifest, _ = install.load_manifest()
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("install audit passed", result.stdout)
+        self.assertIn(
+            "Installed payload provenance: "
+            f"version {manifest['version']}; vouched file hashes match.",
+            result.stdout,
+        )
 
     def test_install_audit_ignores_user_tuned_preserved_files(self) -> None:
         root = self.make_repo()
@@ -5938,6 +5975,21 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("has no files map", result.stdout)
 
+        provenance.write_text('{"files": {}}\n', encoding="utf-8")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("has an empty files map", result.stdout)
+
     def test_install_audit_passes_without_provenance_file(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
@@ -5971,6 +6023,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         )
 
         self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("Installed payload provenance:", result.stdout)
 
     def test_platform_filter_run_keeps_provenance_entries(self) -> None:
         root = self.make_repo(".claude", ".gemini")
@@ -8037,6 +8090,32 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             module.github_repository_url_from_remote("git@example.com:owner/repo.git")
         )
 
+    def test_update_spec_kb_normalizes_platform_agents_filenames(self) -> None:
+        for script_path, module_name in (
+            (
+                install.ROOT / "scripts/sd-ai-command-pack-update-spec-kb.py",
+                "sd_ai_command_pack_update_spec_kb_source_destination_test",
+            ),
+            (
+                install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py",
+                "sd_ai_command_pack_update_spec_kb_template_destination_test",
+            ),
+        ):
+            module = self.load_module_from_path(script_path, module_name)
+            with self.subTest(script=script_path):
+                self.assertEqual(
+                    module.destination_filename_for_source(Path(".agents/agents.md")),
+                    "codex-agents.md",
+                )
+                self.assertEqual(
+                    module.destination_filename_for_source(Path(".agents/AGENTS.md")),
+                    "codex-agents.md",
+                )
+                self.assertEqual(
+                    module.destination_filename_for_source(Path("AGENTS.md")),
+                    "AGENTS.md",
+                )
+
     def test_update_spec_kb_replaces_legacy_generated_dashboard_name(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
@@ -8655,6 +8734,25 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             ("scripts/a.sh", "scripts/b.sh", "scripts/c.sh"),
         )
 
+    def test_pr_body_scope_accepts_markdown_heading_without_colon(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            "sd_ai_command_pack_pr_body_scope_heading_test",
+        )
+
+        self.assertTrue(
+            module._body_has_heading(
+                "## Tooling/generated scope\n- command-pack refresh.",
+                ("Tooling/generated scope:",),
+            )
+        )
+        self.assertFalse(
+            module._body_has_heading(
+                "Summary mentions Tooling/generated scope in prose.",
+                ("Tooling/generated scope:",),
+            )
+        )
+
     def test_pr_body_scope_double_star_patterns_match_nested_paths(self) -> None:
         module = self.load_module_from_path(
             install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
@@ -9106,6 +9204,60 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             "if [ \"${1:-}\" = pr ] && [ \"${2:-}\" = view ]; then\n"
             "  printf '%s\\n' "
             "'{\"title\":\"Product fix\",\"body\":\"Tooling/generated scope: command-pack refresh.\",\"url\":\"https://example.test/pr/1\"}'\n"
+            "else\n"
+            "  printf 'unexpected gh invocation: %s\\n' \"$*\" >&2\n"
+            "  exit 1\n"
+            "fi\n",
+            encoding="utf-8",
+        )
+        (stub_bin / "gh").chmod(0o755)
+
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "install command pack")
+
+        command_pack_doc = root / "docs/SD_AI_COMMAND_PACK.md"
+        command_pack_doc.write_text(
+            command_pack_doc.read_text(encoding="utf-8")
+            + "\nLocal integration note.\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-scope.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK_GH": "required",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Tooling/generated review-scope files changed", result.stdout)
+
+    def test_review_scope_script_accepts_markdown_scope_heading_without_colon(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo(".github")
+        stub_bin = root.parent / f"{root.name}-bin"
+        stub_bin.mkdir()
+        (stub_bin / "gh").write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "if [ \"${1:-}\" = pr ] && [ \"${2:-}\" = view ]; then\n"
+            "  printf '%s\\n' "
+            "'{\"title\":\"Product fix\",\"body\":\"## Tooling/generated scope\\n- command-pack refresh.\",\"url\":\"https://example.test/pr/1\"}'\n"
             "else\n"
             "  printf 'unexpected gh invocation: %s\\n' \"$*\" >&2\n"
             "  exit 1\n"

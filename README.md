@@ -316,6 +316,8 @@ Copy-Item -Recurse -Force -Path "C:\path\to\repo\.obsidian-kb\*" -Destination "C
 | `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR` | Gito report directory for full-check. | `.build/review/gito` |
 | `SD_AI_COMMAND_PACK_INSTALL_AUDIT` | Controls structural post-install audit; unset warns and continues, `0` skips, and `required` fails when unavailable. | unset |
 | `SD_AI_COMMAND_PACK_CREATE_PR_BASE` | Base branch override for `sd-create-pr`; unset detects the GitHub default branch. | unset |
+| `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH` | Feature branch name for `sd-create-pr` when it starts on the repository default branch. | auto-derived `codex/<slug>` |
+| `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH_SLUG` | Slug source used to derive `codex/<slug>` when `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH` is unset. | unset |
 | `SD_AI_COMMAND_PACK_CREATE_PR_COMMIT_MESSAGE` | Commit message used by `sd-create-pr` when it creates a commit and the user did not provide a message. | `chore: prepare pull request` |
 | `SD_AI_COMMAND_PACK_CREATE_PR_DRAFT` | Create the PR as draft when set to `1`, unless the user explicitly asks for ready. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS` | Local review tool set for `sd-review-local` or `sd-review-local-all`; unset uses the runner default. | unset |
@@ -644,14 +646,17 @@ Pack-like files that exist but are not recorded in the receipt warn instead
 of failing when they are gitignored, so repos whose receipt policy excludes
 local-only adapters pass the audit too, and hand-edited receipt entries with
 Windows-style separators are normalized before checking. The installer also
-writes `.sd-ai-command-pack/provenance.json` — the pack version plus
-`sha256` hashes of the installed pack files (user-tunable files such as
+writes `.sd-ai-command-pack/provenance.json` — the installed payload version
+plus `sha256` hashes of the installed pack files (user-tunable files such as
 `.prism/rules.json` are never vouched) — and the audit fails when a vouched
 file's content drifts from the recorded pack content, when a vouched file
 is missing while not gitignored, or when a vouched path — or the
 provenance file itself — is a symlink or other non-regular node, making
 the "reviewed upstream" exemption for vendored pack files a checkable
-claim.
+claim. The source checkout's current manifest version can intentionally be
+newer than the provenance version in a target repo when the newer release did
+not change installed payload bytes; a passing audit reports the installed
+payload provenance version and confirms the vouched hashes still match.
 Set `SD_AI_COMMAND_PACK_INSTALL_AUDIT=0` to skip it.
 
 The full-check script also runs `scripts/sd-ai-command-pack-review-scope.sh`.
@@ -659,8 +664,9 @@ That helper reads `.sd-ai-command-pack/installed-targets.txt`, reports changed
 pack/Trellis runtime files, known repository-map files when present, and
 Trellis workspace journal/index files as integration-only review surface. When
 the GitHub CLI can resolve a current PR, it can also ensure mixed PRs include a
-`Tooling/generated scope:` section in the PR body. In CI or local preflights
-where `gh pr view` should not run, pass the PR body through
+`Tooling/generated scope:` section in the PR body. Markdown headings without
+the colon, such as `## Tooling/generated scope`, are accepted too. In CI or
+local preflights where `gh pr view` should not run, pass the PR body through
 `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`.
 
 Base-ref precedence for branch-diff helpers is explicit env override first,

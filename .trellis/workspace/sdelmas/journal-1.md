@@ -1509,3 +1509,130 @@ Handled uninstall delete failures cleanly for managed-block and pack-file remova
 ### Next Steps
 
 - None - task complete
+
+
+## Session 38: Clarify installed payload provenance
+
+**Date**: 2026-07-06
+**Task**: Clarify installed payload provenance
+**Branch**: `codex/install-audit-provenance-version`
+
+### Summary
+
+Clarified install-audit provenance reporting so clean audits print the installed payload provenance version and documented that source manifest versions may intentionally be newer when installed payload bytes did not change.
+
+### Main Changes
+
+- Updated the install audit to return provenance status with the recorded payload version and print it on clean audits when provenance exists.
+- Clarified README, installed docs, and backend spec wording so target repos can distinguish installed payload provenance from the current source checkout manifest version.
+- Added regression coverage for the clean provenance status line and preserved the no-provenance legacy behavior.
+- Bumped the source manifest to `0.5.27`.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a281aa1` | (see git log) |
+
+### Testing
+
+- [OK] Ran focused install-audit tests for provenance reporting, legacy no-provenance behavior, and Trellis prerequisite documentation.
+- [OK] Ran `PYTHONPYCACHEPREFIX=/private/tmp/sd-ai-command-pack-pycache python3 -m py_compile scripts/sd-ai-command-pack-install-audit.py templates/scripts/sd-ai-command-pack-install-audit.py`.
+- [OK] Ran full unittest discovery with coverage and confirmed `289 tests` passed with `100%` coverage.
+- [OK] Ran `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Confirmed PR #43 CI passed: `security`, `unittest (3.10)`, `unittest (3.13)`, and `CI Result`.
+- [OK] Confirmed no unresolved PR review threads or comments after the configured remote-review request.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 39: Resolve PR 43 review loop
+
+**Date**: 2026-07-06
+**Task**: Resolve PR 43 review loop
+**Branch**: `codex/install-audit-provenance-version`
+
+### Summary
+
+Addressed Copilot review feedback for install-audit provenance and journal accuracy, improved create-pr branch fallback handling and review-scope heading parsing, reran the SD PR gate, and confirmed PR #43 review threads and CI were clean.
+
+### Main Changes
+
+- Made install-audit provenance validation reject an empty `files` map and kept the source/template audit scripts in sync.
+- Updated `sd-create-pr` instructions so default-branch runs create a `codex/...` feature branch automatically when no branch is provided.
+- Relaxed PR-body/review-scope heading parsing to accept Markdown scope headings without requiring a trailing colon.
+- Corrected the session journal version note after Copilot flagged the stale `0.5.25` reference.
+- Replied to and resolved both Copilot review threads on PR #43.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b883ba4` | (see git log) |
+| `e2a3e11` | (see git log) |
+| `0836c88` | (see git log) |
+
+### Testing
+
+- [OK] Ran focused install tests for malformed provenance, wrapper references, heading parsing, review-scope parsing, and docs examples.
+- [OK] Ran `PYTHONPYCACHEPREFIX=/private/tmp/sd-ai-command-pack-pycache python3 -m py_compile scripts/sd-ai-command-pack-pr-body-scope.py templates/scripts/sd-ai-command-pack-pr-body-scope.py`.
+- [OK] Ran `bash -n scripts/sd-ai-command-pack-review-scope.sh templates/scripts/sd-ai-command-pack-review-scope.sh`.
+- [OK] Ran the full coverage gate with `291 tests` and `100%` coverage.
+- [OK] Ran `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Confirmed PR #43 review threads were resolved and CI passed on head `0836c88`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 40: Normalize KB agents filenames
+
+**Date**: 2026-07-06
+**Task**: Normalize KB agents filenames
+**Branch**: `codex/install-audit-provenance-version`
+
+### Summary
+
+Normalized platform-root AGENTS.md and agents.md Obsidian KB destination filenames case-insensitively, bumped the pack manifest to 0.5.27, documented the KB contract, and added regression/provenance coverage so future installs preserve the updated helper hash.
+
+### Main Changes
+
+- Changed the KB destination helper to treat platform-root `agents.md` and `AGENTS.md` equivalently.
+- Updated both the source helper and distributed template helper so future installs preserve the behavior.
+- Bumped `manifest.json` to `0.5.27` for the distributed helper change.
+- Documented the case-insensitive platform guidance filename contract in the backend filesystem spec.
+- Added regression coverage for `.agents/agents.md`, `.agents/AGENTS.md`, and root `AGENTS.md` destination behavior, plus explicit provenance hash coverage for the KB helper target.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `76d18c8` | (see git log) |
+
+### Testing
+
+- [OK] Ran focused KB/provenance/version tests.
+- [OK] Ran `PYTHONPYCACHEPREFIX=/private/tmp/sd-ai-command-pack-pycache python3 -m py_compile scripts/sd-ai-command-pack-update-spec-kb.py templates/scripts/sd-ai-command-pack-update-spec-kb.py`.
+- [OK] Ran `python3 scripts/sd-ai-command-pack-update-spec-kb.py` and refreshed `.obsidian-kb` with 145 copies and no conflicts.
+- [OK] Ran `python3 -m unittest discover -s tests` and confirmed 292 tests passed.
+- [OK] Ran `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY="$(gh pr view 43 --json body --jq .body)" SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Confirmed PR #43 review threads remained resolved and CI passed on head `76d18c8`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
