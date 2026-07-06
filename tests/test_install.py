@@ -459,6 +459,13 @@ class InstallTests(unittest.TestCase):
             self.assertIn(expected, content)
         for expected in install.PLATFORM_LOCAL_GITIGNORE_PATTERNS:
             self.assertIn(expected, content)
+        for expected in (
+            ".claude/**",
+            "!.claude/commands/",
+            "!.claude/commands/sd/",
+            "!.claude/commands/sd/*.md",
+        ):
+            self.assertIn(expected, content)
         self.assertNotIn(".trellis/", content.splitlines())
         self.assertNotIn(".trellis", content.splitlines())
         for platform_dir in (
