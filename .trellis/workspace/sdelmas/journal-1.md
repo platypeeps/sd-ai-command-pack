@@ -1434,3 +1434,40 @@ Captured the uninstall preserve-and-continue lesson in repo review learnings and
 ### Next Steps
 
 - None - task complete
+
+
+## Session 36: Resolve PR 38 docs-surface review
+
+**Date**: 2026-07-06
+**Task**: Resolve PR 38 docs-surface review
+**Branch**: `codex/installer-remove-option`
+
+### Summary
+
+Removed an untemplated root docs review-learning note after Copilot review so docs remains a template-backed distributed surface while the durable guidance stays in Trellis specs.
+
+### Main Changes
+
+- Removed the untemplated `docs/review-learnings.md` file after Copilot identified that root `docs/` files are expected to mirror template-backed distributed assets.
+- Kept the durable installer remove-mode guidance in `.trellis/spec/backend/manifest-and-filesystem.md`, where future pack maintenance can discover it without implying the file is distributed to target repositories.
+- Replied to the Copilot review comment and resolved the review thread after validating the change.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `26ea381` | (see git log) |
+
+### Testing
+
+- [OK] Ran `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Confirmed PR #38 checks passed on head `26ea381`: `security`, `unittest (3.10)`, `unittest (3.13)`, and `CI Result`.
+- [OK] Confirmed no unresolved PR review threads or fresh Copilot comments remained after the latest review request.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
