@@ -157,6 +157,49 @@ Reference files:
 - `tests/test_install.py`, `test_install_writes_provenance_with_hashed_targets`
 - `tests/test_install.py`, `test_install_audit_warns_for_unlisted_gitignored_pack_files`
 
+## Remove Mode Preserve-And-Continue Contract
+
+1. Scope and trigger: use this contract whenever changing `install.py
+   --remove`, `installed_target_candidates()`, `remove_pack_file()`,
+   `remove_text_block_file()`, `remove_local_only_exclude()`, receipt reads,
+   provenance reads, or managed-block marker cleanup.
+2. Signatures: `python3 install.py TARGET --remove [--force] [--backup]
+   [--dry-run]` must return `0` when unsafe or drifted target state is
+   preserved and all other safe targets are processed. Preservation is a normal
+   uninstall result, not a fatal CLI validation failure.
+3. Contracts: remove mode treats target-repo state as user-owned unless the
+   specific target is proven safe to delete or update. Unsafe/unreadable
+   `.sd-ai-command-pack/installed-targets.txt` or `provenance.json` state is
+   treated as absent for uninstall candidate discovery, then removal falls back
+   to manifest-selected targets plus generated state targets. Normal
+   install/update paths may remain stricter because they are establishing
+   controlled state.
+4. Validation and error matrix: unsafe candidate path -> `preserved` with the
+   validation detail; parent directory resolving outside the target repo ->
+   `preserved`; unreadable target file -> `preserved`; invalid UTF-8 in a
+   preserve-invalid-UTF-8 path -> `preserved`; incomplete or duplicated managed
+   markers -> `preserved`; backup copy failure after a target is considered
+   removable -> fatal clean `SystemExit` because the requested destructive
+   action cannot be made reversible.
+5. Good, base, and bad cases: a generated pack file with matching content is
+   removed; a drifted file without `--force` is preserved; a receipt with
+   unsafe paths does not abort the run; `.git/info/exclude` with malformed
+   local-only markers remains untouched; aborting the whole uninstall because a
+   single user-owned file cannot be parsed is wrong.
+6. Tests required: cover unsafe receipt/provenance fallback, unsafe regular
+   candidate paths, symlinked parent directories, unreadable targets, malformed
+   managed markers, `.git/info/exclude` parse failures, backup-copy failures,
+   and CLI-level remove output that continues after preservation.
+7. Wrong vs correct:
+
+   ```text
+   Wrong: remove_marked_block() raises SystemExit and aborts install.py --remove
+   Correct: remove_text_block_file() returns preserved with the marker error detail
+
+   Wrong: unsafe receipt/provenance paths stop all uninstall candidate discovery
+   Correct: remove mode ignores unsafe receipt state and falls back to manifest targets
+   ```
+
 ## File Writes
 
 Use `install_file()` for copy behavior:
