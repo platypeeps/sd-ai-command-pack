@@ -1594,3 +1594,45 @@ Addressed Copilot review feedback for install-audit provenance and journal accur
 ### Next Steps
 
 - None - task complete
+
+
+## Session 40: Normalize KB agents filenames
+
+**Date**: 2026-07-06
+**Task**: Normalize KB agents filenames
+**Branch**: `codex/install-audit-provenance-version`
+
+### Summary
+
+Normalized platform-root AGENTS.md and agents.md Obsidian KB destination filenames case-insensitively, bumped the pack manifest to 0.5.27, documented the KB contract, and added regression/provenance coverage so future installs preserve the updated helper hash.
+
+### Main Changes
+
+- Changed the KB destination helper to treat platform-root `agents.md` and `AGENTS.md` equivalently.
+- Updated both the source helper and distributed template helper so future installs preserve the behavior.
+- Bumped `manifest.json` to `0.5.27` for the distributed helper change.
+- Documented the case-insensitive platform guidance filename contract in the backend filesystem spec.
+- Added regression coverage for `.agents/agents.md`, `.agents/AGENTS.md`, and root `AGENTS.md` destination behavior, plus explicit provenance hash coverage for the KB helper target.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `76d18c8` | (see git log) |
+
+### Testing
+
+- [OK] Ran focused KB/provenance/version tests.
+- [OK] Ran `PYTHONPYCACHEPREFIX=/private/tmp/sd-ai-command-pack-pycache python3 -m py_compile scripts/sd-ai-command-pack-update-spec-kb.py templates/scripts/sd-ai-command-pack-update-spec-kb.py`.
+- [OK] Ran `python3 scripts/sd-ai-command-pack-update-spec-kb.py` and refreshed `.obsidian-kb` with 145 copies and no conflicts.
+- [OK] Ran `python3 -m unittest discover -s tests` and confirmed 292 tests passed.
+- [OK] Ran `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY="$(gh pr view 43 --json body --jq .body)" SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Confirmed PR #43 review threads remained resolved and CI passed on head `76d18c8`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
