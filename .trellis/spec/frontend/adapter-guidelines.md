@@ -65,6 +65,13 @@ The `sd-full-check` shared skill should continue to define the canonical
 local verification script, deterministic checks, optional local review-provider
 behavior, skipped-check reporting, and no-edit safety rules.
 
+The `sd-create-pr` shared skill should never stop only because the current
+checkout is on the repository default branch. It should create a feature
+branch before committing or opening a PR, preferring
+`SD_AI_COMMAND_PACK_CREATE_PR_BRANCH`, then a derived `codex/<slug>` from
+`SD_AI_COMMAND_PACK_CREATE_PR_BRANCH_SLUG` or the commit message, with a
+timestamped fallback for empty or colliding names.
+
 The `sd-review-local` and `sd-review-local-all` shared skills should continue
 to define the interactive local review/fix loop while delegating provider
 execution to `scripts/sd-ai-command-pack-review-local.sh`. Keep their behavior

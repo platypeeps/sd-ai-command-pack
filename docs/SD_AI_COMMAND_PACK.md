@@ -311,8 +311,10 @@ runtime files, known repository-map files when present, and Trellis workspace
 journal/index files as integration-only review surface. When the GitHub CLI can
 resolve a current PR, it checks that the PR body includes a
 `Tooling/generated scope:` section before review cycles spend attention on
-copied or generated surfaces. In CI or local preflights where `gh pr view`
-should not run, pass the PR body through `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`.
+copied or generated surfaces. Markdown headings without the colon, such as
+`## Tooling/generated scope`, are accepted too. In CI or local preflights where
+`gh pr view` should not run, pass the PR body through
+`SD_AI_COMMAND_PACK_SCOPE_PR_BODY`.
 
 The review preflight is intentionally generic and safe to run without project
 dependencies. It checks for duplicate npm override sources of truth, changed
@@ -777,6 +779,13 @@ ephemeral tool state and do not change what the checks validate.
 - `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`: explicit PR body text for tooling/generated
   scope checks when `gh pr view` should not be used. Deprecated fallback:
   `REVIEW_PREFLIGHT_PR_BODY`.
+- `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH`: explicit feature branch name for
+  `sd-create-pr` when it starts on the repository default branch. When unset,
+  `sd-create-pr` derives a `codex/<slug>` branch from
+  `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH_SLUG`,
+  `SD_AI_COMMAND_PACK_CREATE_PR_COMMIT_MESSAGE`, or a timestamped fallback.
+- `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH_SLUG`: slug source used to derive the
+  default `codex/<slug>` feature branch when an explicit branch is not set.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK=0`: skip configurable PR-body scope
   checks.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK=required`: fail if the pack-provided
