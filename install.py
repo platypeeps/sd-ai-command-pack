@@ -562,7 +562,8 @@ class ManifestVersionAction(argparse.Action):
         super().__init__(option_strings, dest, nargs=0, **kwargs)
 
     def __call__(self, parser, namespace, values, option_string=None):
-        parser.exit(message=f"{manifest_cli_identity()}\n")
+        print(manifest_cli_identity())
+        parser.exit()
 
 
 def atomic_write_bytes(destination: Path, content: bytes) -> None:
@@ -1771,7 +1772,13 @@ def remove_local_only_exclude(target: Path, *, dry_run: bool) -> RemoveResult | 
     exclude_path = optional_git_info_exclude_path(target)
     if exclude_path is None:
         return None
-    current = read_text_if_exists(exclude_path, ".git/info/exclude")
+    try:
+        current = read_text_if_exists(exclude_path, ".git/info/exclude")
+    except SystemExit as error:
+        detail = str(error)
+        if detail.startswith("error: "):
+            detail = detail[len("error: ") :]
+        return RemoveResult(exclude_path, "preserved", detail=detail)
     stripped = remove_marked_block(
         current,
         start_marker=LOCAL_ONLY_EXCLUDE_START,

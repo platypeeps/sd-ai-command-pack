@@ -1803,6 +1803,12 @@ class InstallTests(unittest.TestCase):
                 output = stdout.getvalue() + stderr.getvalue()
                 for expected in expected_texts:
                     self.assertIn(expected, output)
+                if args == ["--version"]:
+                    self.assertIn(
+                        f"{manifest['name']} {manifest['version']}",
+                        stdout.getvalue(),
+                    )
+                    self.assertEqual(stderr.getvalue(), "")
 
     def test_manifest_cli_identity_reports_malformed_identity(self) -> None:
         root = self.make_repo()
@@ -6377,6 +6383,22 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             install.LOCAL_ONLY_EXCLUDE_START,
             exclude.read_text(encoding="utf-8"),
         )
+
+        with mock.patch.object(Path, "read_text", side_effect=OSError("blocked")):
+            result = install.remove_local_only_exclude(root, dry_run=False)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.status, "preserved")
+        self.assertIsNotNone(result.detail)
+        self.assertIn("cannot read .git/info/exclude", result.detail)
+
+        exclude.write_bytes(b"not utf-8: \xff\n")
+        result = install.remove_local_only_exclude(root, dry_run=False)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.status, "preserved")
+        self.assertIsNotNone(result.detail)
+        self.assertIn(".git/info/exclude is not valid UTF-8", result.detail)
 
     def test_remove_runs_diff_check_and_returns_failure(self) -> None:
         root = self.make_repo()
