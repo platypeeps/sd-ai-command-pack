@@ -409,6 +409,7 @@ class InstallTests(unittest.TestCase):
             "not valid modification",
             "should not be reviewed",
             "ownership/scope",
+            "narrow-globs: skip - optional Trellis-owned payload locations",
             "This does not apply to repo-owned `.trellis/spec/**`",
             "Handoff for sd-ai-command-pack source session",
             "which should not be edited in the consumer repo copy",
