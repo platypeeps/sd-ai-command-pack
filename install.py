@@ -1211,6 +1211,15 @@ def backup_existing_file(
     return backup_path
 
 
+def unlink_target_file(target: Path, destination: Path) -> None:
+    try:
+        destination.unlink()
+    except OSError as error:
+        raise SystemExit(
+            f"error: cannot remove {display_path(target, destination)}: {error}"
+        ) from None
+
+
 def prune_empty_parent_dirs(target: Path, destination: Path) -> None:
     current = destination.parent
     while current != target and current != current.parent:
@@ -1293,7 +1302,7 @@ def remove_text_block_file(
         dry_run=dry_run,
     )
     if status == "removed":
-        destination.unlink()
+        unlink_target_file(target, destination)
         prune_empty_parent_dirs(target, destination)
     elif preserve_invalid_utf8:
         atomic_write_text_preserving_invalid_utf8(destination, stripped)
@@ -1813,7 +1822,7 @@ def remove_pack_file(
             backup=backup,
             dry_run=dry_run,
         )
-    destination.unlink()
+    unlink_target_file(target, destination)
     prune_empty_parent_dirs(target, destination)
     return RemoveResult(relative_path, "removed", backup_path)
 

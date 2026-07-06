@@ -6433,6 +6433,37 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.status, "updated")
         self.assertEqual(gitignore.read_text(encoding="utf-8"), "dist/\n\nbuild/\n")
 
+    def test_remove_text_block_file_reports_delete_failures_cleanly(self) -> None:
+        root = self.make_repo()
+        gitignore = root / ".gitignore"
+        gitignore.write_text(
+            f"{install.TRELLIS_GITIGNORE_START}\n"
+            ".trellis/.runtime/\n"
+            f"{install.TRELLIS_GITIGNORE_END}\n",
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(Path, "unlink", side_effect=OSError("blocked delete")):
+            with self.assertRaisesRegex(
+                SystemExit,
+                r"cannot remove \.gitignore.*blocked delete",
+            ):
+                install.remove_text_block_file(
+                    root,
+                    install.TRELLIS_GITIGNORE_TARGET,
+                    start_marker=install.TRELLIS_GITIGNORE_START,
+                    end_marker=install.TRELLIS_GITIGNORE_END,
+                    label=".gitignore",
+                    dry_run=False,
+                    backup=False,
+                )
+
+        self.assertTrue(gitignore.is_file())
+        self.assertIn(
+            install.TRELLIS_GITIGNORE_START,
+            gitignore.read_text(encoding="utf-8"),
+        )
+
     def test_remove_pack_file_preserves_unsafe_target_nodes(self) -> None:
         root = self.make_repo()
         script = root / "scripts/sd-ai-command-pack-full-check.sh"
@@ -6555,6 +6586,30 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertFalse(script.exists())
         self.assertFalse(script.is_symlink())
         self.assertEqual(outside_target.read_text(encoding="utf-8"), "outside\n")
+
+    def test_remove_pack_file_reports_delete_failures_cleanly(self) -> None:
+        root = self.make_repo()
+        script = root / "scripts/sd-ai-command-pack-full-check.sh"
+        script.parent.mkdir()
+        script.write_text("installed\n", encoding="utf-8")
+
+        with mock.patch.object(Path, "unlink", side_effect=OSError("blocked delete")):
+            with self.assertRaisesRegex(
+                SystemExit,
+                r"cannot remove scripts/sd-ai-command-pack-full-check\.sh.*blocked delete",
+            ):
+                install.remove_pack_file(
+                    root,
+                    Path("scripts/sd-ai-command-pack-full-check.sh"),
+                    file=None,
+                    recorded_hash=None,
+                    force=True,
+                    dry_run=False,
+                    backup=False,
+                )
+
+        self.assertTrue(script.is_file())
+        self.assertEqual(script.read_text(encoding="utf-8"), "installed\n")
 
     def test_may_remove_pack_file_handles_read_failures_cleanly(self) -> None:
         root = self.make_repo()
