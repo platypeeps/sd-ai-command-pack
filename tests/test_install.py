@@ -2109,6 +2109,33 @@ class InstallTests(unittest.TestCase):
         )
         self.assertIn("SD PR Review Loop", target.read_text(encoding="utf-8"))
 
+    def test_install_file_reports_backup_copy_failures_cleanly(self) -> None:
+        root = self.make_repo(".gemini")
+        file = self.valid_pack_file()
+        target = root / file.target
+        target.parent.mkdir(parents=True)
+        target.write_text("local edit\n", encoding="utf-8")
+
+        with mock.patch.object(
+            install.shutil,
+            "copyfile",
+            side_effect=OSError("blocked backup"),
+        ):
+            with self.assertRaisesRegex(
+                SystemExit,
+                "cannot create backup.*blocked backup",
+            ):
+                install.install_file(
+                    file,
+                    root,
+                    force=True,
+                    dry_run=False,
+                    backup=True,
+                )
+
+        self.assertEqual(target.read_text(encoding="utf-8"), "local edit\n")
+        self.assertFalse(target.with_name("SKILL.md.bak").exists())
+
     def test_dry_run_force_backup_does_not_report_or_write_backup(self) -> None:
         root = self.make_repo(".gemini")
         target = root / ".agents/skills/sd-review-pr/SKILL.md"
@@ -6052,6 +6079,37 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         backup = root / "scripts/sd-ai-command-pack-full-check.sh.bak"
         self.assertTrue(backup.is_file())
         self.assertIn("# local drift", backup.read_text(encoding="utf-8"))
+
+    def test_remove_pack_file_reports_backup_copy_failures_cleanly(self) -> None:
+        root = self.make_repo()
+        script = root / "scripts/sd-ai-command-pack-full-check.sh"
+        script.parent.mkdir()
+        script.write_text("local drift\n", encoding="utf-8")
+
+        with mock.patch.object(
+            install.shutil,
+            "copyfile",
+            side_effect=OSError("blocked backup"),
+        ):
+            with self.assertRaisesRegex(
+                SystemExit,
+                "cannot create backup.*blocked backup",
+            ):
+                install.remove_pack_file(
+                    root,
+                    Path("scripts/sd-ai-command-pack-full-check.sh"),
+                    file=None,
+                    recorded_hash=None,
+                    force=True,
+                    dry_run=False,
+                    backup=True,
+                )
+
+        self.assertTrue(script.is_file())
+        self.assertEqual(script.read_text(encoding="utf-8"), "local drift\n")
+        self.assertFalse(
+            script.with_name("sd-ai-command-pack-full-check.sh.bak").exists()
+        )
 
     def test_remove_cleans_local_only_marker_and_exclude_block(self) -> None:
         root = self.make_git_repo_without_trellis()

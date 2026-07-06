@@ -996,13 +996,15 @@ def install_file(
             return InstallResult(file, "preserved")
         if not force:
             return InstallResult(file, "conflict")
-        backup_path = (
-            next_backup_path(target, destination) if backup and not dry_run else None
-        )
+        backup_path = None
         if not dry_run:
             destination.parent.mkdir(parents=True, exist_ok=True)
-            if backup_path:
-                shutil.copyfile(destination, backup_path)
+            backup_path = backup_existing_file(
+                target,
+                destination,
+                backup=backup,
+                dry_run=dry_run,
+            )
             atomic_write_bytes(destination, new_content)
         return InstallResult(file, "overwritten", backup_path)
 
@@ -1192,7 +1194,13 @@ def backup_existing_file(
     if not backup or dry_run:
         return None
     backup_path = next_backup_path(target, destination)
-    shutil.copyfile(destination, backup_path)
+    try:
+        shutil.copyfile(destination, backup_path)
+    except OSError as error:
+        raise SystemExit(
+            f"error: cannot create backup for {display_path(target, destination)}: "
+            f"{display_path(target, backup_path)} ({error})"
+        ) from None
     return backup_path
 
 
