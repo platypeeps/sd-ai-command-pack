@@ -1773,6 +1773,11 @@ def remove_local_only_exclude(target: Path, *, dry_run: bool) -> RemoveResult | 
     if exclude_path is None:
         return None
     try:
+        validate_resolved_target_path(
+            exclude_path.parent.parent,
+            exclude_path,
+            "git exclude path",
+        )
         current = read_text_if_exists(exclude_path, ".git/info/exclude")
     except SystemExit as error:
         detail = str(error)

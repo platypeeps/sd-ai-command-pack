@@ -6384,6 +6384,22 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             exclude.read_text(encoding="utf-8"),
         )
 
+        with mock.patch.object(
+            install,
+            "validate_resolved_target_path",
+            side_effect=SystemExit("error: git exclude path resolves outside target repo"),
+        ):
+            result = install.remove_local_only_exclude(root, dry_run=False)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.status, "preserved")
+        self.assertIsNotNone(result.detail)
+        self.assertIn("git exclude path resolves outside target repo", result.detail)
+        self.assertIn(
+            install.LOCAL_ONLY_EXCLUDE_START,
+            exclude.read_text(encoding="utf-8"),
+        )
+
         with mock.patch.object(Path, "read_text", side_effect=OSError("blocked")):
             result = install.remove_local_only_exclude(root, dry_run=False)
 
