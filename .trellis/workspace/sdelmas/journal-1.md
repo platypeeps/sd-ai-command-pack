@@ -1218,3 +1218,294 @@ Added the sd-create-pr workflow, expanded platform distribution support, tighten
 ### Next Steps
 
 - None - task complete
+
+
+## Session 31: Review PR 38 installer remove option
+
+**Date**: 2026-07-05
+**Task**: Review PR 38 installer remove option
+**Branch**: `codex/installer-remove-option`
+
+### Summary
+
+Addressed Copilot feedback on installer remove read failures, symlink preservation, text-block read failures, and backup validation messaging; verified tests and PR checks; resolved the review threads.
+
+### Main Changes
+
+- Fixed `install.py --remove` handling for unreadable destination files by preserving the target with a clear reason instead of raising a traceback.
+- Converted unreadable bundled template failures into clean installer errors.
+- Added focused installer tests for target read failures and template read failures.
+- Preserved final-component symlinks during remove path validation while still validating parent directories.
+- Preserved unreadable managed text-block targets when invalid UTF-8 preservation is enabled.
+- Clarified the `--backup` validation message for install/update mode while preserving remove-mode backup support.
+- Replied to and resolved all Copilot review threads on PR #38.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `df40c75` | fix: address review feedback round 1 |
+| `6667835` | fix: preserve removal symlinks outside repo |
+| `f3b0f02` | fix: handle remove text read failures |
+
+### Testing
+
+- [OK] Focused installer read-failure unit test passed.
+- [OK] Focused symlink and managed text-block read-failure unit tests passed.
+- [OK] Coverage test run passed with 280 tests and 100% coverage reported for `install.py`.
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh` passed after the fixes.
+- [OK] GitHub Actions checks passed on PR #38.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 32: Review PR 38 installer remove follow-up
+
+**Date**: 2026-07-05
+**Task**: Review PR 38 installer remove follow-up
+**Branch**: `codex/installer-remove-option`
+
+### Summary
+
+Resolved the remaining PR #38 installer remove-option review feedback and revalidated the branch after the fresh remote-review request.
+
+### Main Changes
+
+- Preserved local removal metadata during uninstall/remove flows.
+- Tightened local-exclude restore path validation so unsafe restore paths fail before file writes.
+- Routed install/update backup creation through the shared backup helper and report backup copy OSError failures cleanly.
+- Added focused installer regressions for metadata preservation, path validation, and backup copy failure handling.
+- Rechecked PR #38 unresolved review threads, requested a fresh Copilot review, and confirmed CI passed.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5332841` | (see git log) |
+| `629711d` | (see git log) |
+| `d2b988b` | (see git log) |
+
+### Testing
+
+- [OK] Focused installer regression tests passed for backup copy failure handling.
+- [OK] `git diff --check` passed.
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh` passed.
+- [OK] Coverage run passed with 282 tests and `coverage report --fail-under=100`.
+- [OK] GitHub Actions checks passed on PR #38 after `d2b988b`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 33: Review PR 38 unsafe uninstall follow-up
+
+**Date**: 2026-07-05
+**Task**: Review PR 38 unsafe uninstall follow-up
+**Branch**: `codex/installer-remove-option`
+
+### Summary
+
+Resolved the final PR #38 Copilot uninstall-hardening feedback by preserving unsafe remove-mode candidates and keeping uninstall progress resilient.
+
+### Main Changes
+
+- Treated unsafe or unreadable uninstall receipt/provenance state as absent so removal can fall back to manifest-selected targets.
+- Preserved unsafe pack-file removal candidates with validation details instead of aborting the uninstall run.
+- Preserved unsafe or unreadable managed-block removal targets with clear details while continuing removal.
+- Replied to and resolved the Copilot review threads for these uninstall hardening findings.
+- Revalidated focused uninstall tests, full installer coverage, the deterministic full check, unresolved review threads, and GitHub Actions.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9e22a22` | (see git log) |
+
+### Testing
+
+- [OK] Focused unsafe uninstall regression tests passed.
+- [OK] Nearby uninstall helper regression tests passed.
+- [OK] Full coverage run passed with 286 tests.
+- [OK] `coverage report --fail-under=100` passed with `install.py` at 100%.
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh` passed.
+- [OK] PR #38 unresolved thread query returned none and GitHub Actions passed after `9e22a22`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 34: Review PR 38 marker-parse uninstall follow-up
+
+**Date**: 2026-07-05
+**Task**: Review PR 38 marker-parse uninstall follow-up
+**Branch**: `codex/installer-remove-option`
+
+### Summary
+
+Resolved the PR #38 Copilot marker-parse feedback by preserving drifted marker files during remove-mode cleanup.
+
+### Main Changes
+
+- Preserved managed-block uninstall targets when SD marker parsing finds incomplete or duplicated markers.
+- Preserved .git/info/exclude when local-only marker parsing fails instead of aborting uninstall.
+- Added focused regressions for incomplete marker blocks in both removal paths.
+- Replied to and resolved the Copilot marker-parse review threads.
+- Revalidated focused marker tests, full coverage, deterministic full check, unresolved review threads, and GitHub Actions.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fb1233c` | (see git log) |
+
+### Testing
+
+- [OK] Focused marker-parse regression tests passed.
+- [OK] Full coverage run passed with 286 tests.
+- [OK] `coverage report --fail-under=100` passed with `install.py` at 100%.
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh` passed.
+- [OK] PR #38 unresolved thread query returned none and GitHub Actions passed after `fb1233c`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 35: Create PR 38 review-learning note
+
+**Date**: 2026-07-06
+**Task**: Create PR 38 review-learning note
+**Branch**: `codex/installer-remove-option`
+
+### Summary
+
+Captured the uninstall preserve-and-continue lesson in repo review learnings and Trellis backend specs, then ran the create-pr/review-pr flow on PR #38.
+
+### Main Changes
+
+- Added docs/review-learnings.md with the remove-mode preserve-and-continue review learning.
+- Updated the backend manifest/filesystem spec with the concrete remove-mode contract, validation matrix, and test expectations.
+- Ran sd-update-spec extensions: no repospec infrastructure or architecture overview to refresh; Obsidian KB helper refreshed 159 copies, dashboard, and LLM overview with no conflicts.
+- Reused PR #38, pushed the docs/spec commit, requested Copilot review, and confirmed no new comments or unresolved threads.
+- Verified deterministic full-check and GitHub Actions after the push.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b365f7c` | (see git log) |
+
+### Testing
+
+- [OK] `git diff --check` and `git diff --cached --check` passed before commit.
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh` passed before and after pushing.
+- [OK] `python3 scripts/sd-ai-command-pack-update-spec-kb.py` refreshed `.obsidian-kb` with no conflicts.
+- [OK] PR #38 unresolved thread query returned none.
+- [OK] GitHub Actions passed on PR #38 after `b365f7c`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 36: Resolve PR 38 docs-surface review
+
+**Date**: 2026-07-06
+**Task**: Resolve PR 38 docs-surface review
+**Branch**: `codex/installer-remove-option`
+
+### Summary
+
+Removed an untemplated root docs review-learning note after Copilot review so docs remains a template-backed distributed surface while the durable guidance stays in Trellis specs.
+
+### Main Changes
+
+- Removed the untemplated `docs/review-learnings.md` file after Copilot identified that root `docs/` files are expected to mirror template-backed distributed assets.
+- Kept the durable installer remove-mode guidance in `.trellis/spec/backend/manifest-and-filesystem.md`, where future pack maintenance can discover it without implying the file is distributed to target repositories.
+- Replied to the Copilot review comment and resolved the review thread after validating the change.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `26ea381` | (see git log) |
+
+### Testing
+
+- [OK] Ran `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Confirmed PR #38 checks passed on head `26ea381`: `security`, `unittest (3.10)`, `unittest (3.13)`, and `CI Result`.
+- [OK] Confirmed no unresolved PR review threads or fresh Copilot comments remained after the latest review request.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 37: Resolve PR 38 uninstall delete review
+
+**Date**: 2026-07-06
+**Task**: Resolve PR 38 uninstall delete review
+**Branch**: `codex/installer-remove-option`
+
+### Summary
+
+Handled uninstall delete failures cleanly for managed-block and pack-file removal, added regressions, and resolved the final Copilot review threads.
+
+### Main Changes
+
+- Added `unlink_target_file()` so remove-mode deletions report `SystemExit("error: ...")` instead of leaking raw `OSError` tracebacks.
+- Routed both `remove_text_block_file()` and `remove_pack_file()` through the shared helper.
+- Replied to and resolved the two Copilot review threads that identified the missing delete-failure handling.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `84480ad` | (see git log) |
+
+### Testing
+
+- [OK] Ran `python3 -m unittest tests.test_install.InstallTests.test_remove_text_block_file_reports_delete_failures_cleanly tests.test_install.InstallTests.test_remove_pack_file_reports_delete_failures_cleanly`.
+- [OK] Ran `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Confirmed PR #38 checks passed on head `84480ad`: `security`, `unittest (3.10)`, `unittest (3.13)`, and `CI Result`.
+- [OK] Confirmed no unresolved PR review threads or fresh Copilot comments remained after the latest review request.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

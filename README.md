@@ -374,12 +374,15 @@ for Actions is not enough.
 Useful options:
 
 ```bash
+python3 install.py --help
+python3 install.py --version
 python3 install.py /path/to/repo --dry-run
 python3 install.py /path/to/repo --local-only
 python3 install.py /path/to/repo --all
 python3 install.py /path/to/repo --platform cursor --platform gemini
 python3 install.py /path/to/repo --force
 python3 install.py /path/to/repo --force --backup
+python3 install.py /path/to/repo --remove
 ```
 
 After installing or refreshing a target repo, a quick smoke test is:
@@ -417,6 +420,14 @@ never overwritten or reported as a conflict. Add `--backup` with `--force` to sa
 overwritten file next to the original before it is changed. The pack-owned
 `.gito/sd-ai-command-pack.env` file is updateable like scripts and docs so the
 standard Gito concurrency cap can be refreshed.
+
+Use `--remove` to uninstall the pack from a target checkout. Removal deletes
+pack-vouched files, files that still match the bundled template, generated pack
+state under `.sd-ai-command-pack/`, and the pack-managed blocks in `.gitignore`,
+`.git/info/exclude`, and `.github/copilot-instructions.md`. Drifted files,
+symlinks, directories, and user-owned policy files are preserved by default;
+add `--force` to delete drifted regular pack files too, and add `--backup` to
+keep `.bak` copies of deleted files.
 
 Platform filters always include the shared skills, full-check, housekeeping,
 review-scope, review-preflight, review-local command assets, install-audit,

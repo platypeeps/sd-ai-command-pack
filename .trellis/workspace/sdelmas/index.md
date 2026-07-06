@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 30
-- **Last Active**: 2026-07-05
+- **Total Sessions**: 37
+- **Last Active**: 2026-07-06
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1219 | Active |
+| `journal-1.md` | ~1518 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,13 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 37 | 2026-07-06 | Resolve PR 38 uninstall delete review | `84480ad` | `codex/installer-remove-option` |
+| 36 | 2026-07-06 | Resolve PR 38 docs-surface review | `26ea381` | `codex/installer-remove-option` |
+| 35 | 2026-07-06 | Create PR 38 review-learning note | `b365f7c` | `codex/installer-remove-option` |
+| 34 | 2026-07-05 | Review PR 38 marker-parse uninstall follow-up | `fb1233c` | `codex/installer-remove-option` |
+| 33 | 2026-07-05 | Review PR 38 unsafe uninstall follow-up | `9e22a22` | `codex/installer-remove-option` |
+| 32 | 2026-07-05 | Review PR 38 installer remove follow-up | `5332841`, `629711d`, `d2b988b` | `codex/installer-remove-option` |
+| 31 | 2026-07-05 | Review PR 38 installer remove option | `df40c75`, `6667835`, `f3b0f02` | `codex/installer-remove-option` |
 | 30 | 2026-07-05 | Expand SD command pack workflows | `34ea5d8` | `codex/expand-sd-command-pack-workflows` |
 | 29 | 2026-07-05 | Expand SD command pack workflows | `34ea5d8` | `codex/expand-sd-command-pack-workflows` |
 | 28 | 2026-07-04 | Recorder git-add output surfacing (0.5.19) | `7471683` | `main` |
