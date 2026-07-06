@@ -29,7 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 31 | 2026-07-05 | Review PR 38 installer remove option | `df40c75` | `codex/installer-remove-option` |
+| 31 | 2026-07-05 | Review PR 38 installer remove option | `df40c75`, `6667835`, `f3b0f02` | `codex/installer-remove-option` |
 | 30 | 2026-07-05 | Expand SD command pack workflows | `34ea5d8` | `codex/expand-sd-command-pack-workflows` |
 | 29 | 2026-07-05 | Expand SD command pack workflows | `34ea5d8` | `codex/expand-sd-command-pack-workflows` |
 | 28 | 2026-07-04 | Recorder git-add output surfacing (0.5.19) | `7471683` | `main` |

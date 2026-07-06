@@ -1228,26 +1228,32 @@ Added the sd-create-pr workflow, expanded platform distribution support, tighten
 
 ### Summary
 
-Addressed Copilot feedback on installer remove read failures, verified tests and PR checks, and resolved the review thread.
+Addressed Copilot feedback on installer remove read failures, symlink preservation, text-block read failures, and backup validation messaging; verified tests and PR checks; resolved the review threads.
 
 ### Main Changes
 
 - Fixed `install.py --remove` handling for unreadable destination files by preserving the target with a clear reason instead of raising a traceback.
 - Converted unreadable bundled template failures into clean installer errors.
 - Added focused installer tests for target read failures and template read failures.
-- Replied to and resolved the Copilot review thread on PR #38.
+- Preserved final-component symlinks during remove path validation while still validating parent directories.
+- Preserved unreadable managed text-block targets when invalid UTF-8 preservation is enabled.
+- Clarified the `--backup` validation message for install/update mode while preserving remove-mode backup support.
+- Replied to and resolved all Copilot review threads on PR #38.
 
 ### Git Commits
 
 | Hash | Message |
 |------|---------|
-| `df40c75` | (see git log) |
+| `df40c75` | fix: address review feedback round 1 |
+| `6667835` | fix: preserve removal symlinks outside repo |
+| `f3b0f02` | fix: handle remove text read failures |
 
 ### Testing
 
 - [OK] Focused installer read-failure unit test passed.
-- [OK] CI-style coverage gate passed with 277 tests and 100% coverage.
-- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh` passed after the fix.
+- [OK] Focused symlink and managed text-block read-failure unit tests passed.
+- [OK] Coverage test run passed with 280 tests and 100% coverage reported for `install.py`.
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh` passed after the fixes.
 - [OK] GitHub Actions checks passed on PR #38.
 
 ### Status
