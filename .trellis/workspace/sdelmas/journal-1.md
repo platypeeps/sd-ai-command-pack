@@ -1526,7 +1526,7 @@ Clarified install-audit provenance reporting so clean audits print the installed
 - Updated the install audit to return provenance status with the recorded payload version and print it on clean audits when provenance exists.
 - Clarified README, installed docs, and backend spec wording so target repos can distinguish installed payload provenance from the current source checkout manifest version.
 - Added regression coverage for the clean provenance status line and preserved the no-provenance legacy behavior.
-- Bumped the source manifest to `0.5.26`.
+- Bumped the source manifest to `0.5.27`.
 
 ### Git Commits
 
