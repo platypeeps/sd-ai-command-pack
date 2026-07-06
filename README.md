@@ -644,14 +644,17 @@ Pack-like files that exist but are not recorded in the receipt warn instead
 of failing when they are gitignored, so repos whose receipt policy excludes
 local-only adapters pass the audit too, and hand-edited receipt entries with
 Windows-style separators are normalized before checking. The installer also
-writes `.sd-ai-command-pack/provenance.json` — the pack version plus
-`sha256` hashes of the installed pack files (user-tunable files such as
+writes `.sd-ai-command-pack/provenance.json` — the installed payload version
+plus `sha256` hashes of the installed pack files (user-tunable files such as
 `.prism/rules.json` are never vouched) — and the audit fails when a vouched
 file's content drifts from the recorded pack content, when a vouched file
 is missing while not gitignored, or when a vouched path — or the
 provenance file itself — is a symlink or other non-regular node, making
 the "reviewed upstream" exemption for vendored pack files a checkable
-claim.
+claim. The source checkout's current manifest version can intentionally be
+newer than the provenance version in a target repo when the newer release did
+not change installed payload bytes; a passing audit reports the installed
+payload provenance version and confirms the vouched hashes still match.
 Set `SD_AI_COMMAND_PACK_INSTALL_AUDIT=0` to skip it.
 
 The full-check script also runs `scripts/sd-ai-command-pack-review-scope.sh`.

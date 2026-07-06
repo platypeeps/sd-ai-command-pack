@@ -5880,6 +5880,32 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("drifted from pack", result.stdout)
         self.assertIn("scripts/sd-ai-command-pack-full-check.sh", result.stdout)
 
+    def test_install_audit_reports_installed_payload_provenance_version(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        manifest, _ = install.load_manifest()
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("install audit passed", result.stdout)
+        self.assertIn(
+            "Installed payload provenance: "
+            f"version {manifest['version']}; vouched file hashes match.",
+            result.stdout,
+        )
+
     def test_install_audit_ignores_user_tuned_preserved_files(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
@@ -5971,6 +5997,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         )
 
         self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("Installed payload provenance:", result.stdout)
 
     def test_platform_filter_run_keeps_provenance_entries(self) -> None:
         root = self.make_repo(".claude", ".gemini")
