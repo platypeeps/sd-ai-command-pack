@@ -1804,6 +1804,28 @@ class InstallTests(unittest.TestCase):
                 for expected in expected_texts:
                     self.assertIn(expected, output)
 
+    def test_manifest_cli_identity_reports_malformed_identity(self) -> None:
+        root = self.make_repo()
+        manifest_path = root / "manifest.json"
+        cases = [
+            ("not json\n", "manifest is not valid JSON"),
+            (json.dumps({"version": "1.2.3"}) + "\n", "manifest name is missing"),
+            (json.dumps({"name": "pack"}) + "\n", "manifest version is missing"),
+        ]
+
+        for content, expected in cases:
+            with self.subTest(expected=expected):
+                manifest_path.write_text(content, encoding="utf-8")
+                with mock.patch.object(install, "MANIFEST_PATH", manifest_path):
+                    with self.assertRaisesRegex(SystemExit, expected):
+                        install.manifest_cli_identity()
+
+    def test_require_target_directory_reports_missing_target(self) -> None:
+        root = self.make_repo()
+
+        with self.assertRaisesRegex(SystemExit, "target repo not found"):
+            install.require_target_directory(root / "missing")
+
     def test_install_gitignore_rejects_invalid_utf8(self) -> None:
         root = self.make_repo()
         (root / ".gitignore").write_bytes(b"dist-\xff/\n")
@@ -6057,6 +6079,157 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             install.LOCAL_ONLY_EXCLUDE_START,
             exclude.read_text(encoding="utf-8"),
         )
+
+    def test_remove_text_block_file_preserves_non_regular_and_unchanged_targets(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        directory_target = root / ".github/copilot-instructions.md"
+        directory_target.mkdir(parents=True)
+
+        result = install.remove_text_block_file(
+            root,
+            Path(".github/copilot-instructions.md"),
+            start_marker=install.COPILOT_GUIDANCE_START,
+            end_marker=install.COPILOT_GUIDANCE_END,
+            label=".github/copilot-instructions.md",
+            dry_run=False,
+            backup=False,
+        )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertEqual(result.detail, "target is not a regular file")
+
+        shutil.rmtree(directory_target)
+        directory_target.parent.mkdir(parents=True, exist_ok=True)
+        directory_target.write_text("repo-only guidance\n", encoding="utf-8")
+
+        result = install.remove_text_block_file(
+            root,
+            Path(".github/copilot-instructions.md"),
+            start_marker=install.COPILOT_GUIDANCE_START,
+            end_marker=install.COPILOT_GUIDANCE_END,
+            label=".github/copilot-instructions.md",
+            dry_run=False,
+            backup=False,
+        )
+
+        self.assertEqual(result.status, "unchanged")
+        self.assertEqual(result.detail, "managed block not present")
+        self.assertEqual(
+            directory_target.read_text(encoding="utf-8"),
+            "repo-only guidance\n",
+        )
+
+    def test_remove_text_block_file_updates_text_around_managed_block(self) -> None:
+        root = self.make_repo()
+        gitignore = root / ".gitignore"
+        gitignore.write_text(
+            "dist/\n\n"
+            f"{install.TRELLIS_GITIGNORE_START}\n"
+            ".trellis/.runtime/\n"
+            f"{install.TRELLIS_GITIGNORE_END}\n"
+            "build/\n",
+            encoding="utf-8",
+        )
+
+        result = install.remove_text_block_file(
+            root,
+            install.TRELLIS_GITIGNORE_TARGET,
+            start_marker=install.TRELLIS_GITIGNORE_START,
+            end_marker=install.TRELLIS_GITIGNORE_END,
+            label=".gitignore",
+            dry_run=False,
+            backup=False,
+        )
+
+        self.assertEqual(result.status, "updated")
+        self.assertEqual(gitignore.read_text(encoding="utf-8"), "dist/\n\nbuild/\n")
+
+    def test_remove_pack_file_preserves_unsafe_target_nodes(self) -> None:
+        root = self.make_repo()
+        script = root / "scripts/sd-ai-command-pack-full-check.sh"
+        script.parent.mkdir()
+        script.write_text("local\n", encoding="utf-8")
+        script.unlink()
+        script.symlink_to("elsewhere.sh")
+
+        result = install.remove_pack_file(
+            root,
+            Path("scripts/sd-ai-command-pack-full-check.sh"),
+            file=None,
+            recorded_hash=None,
+            force=False,
+            dry_run=False,
+            backup=False,
+        )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertEqual(result.detail, "target is a symlink")
+        self.assertTrue(script.is_symlink())
+
+        script.unlink()
+        script.mkdir()
+        result = install.remove_pack_file(
+            root,
+            Path("scripts/sd-ai-command-pack-full-check.sh"),
+            file=None,
+            recorded_hash=None,
+            force=True,
+            dry_run=False,
+            backup=False,
+        )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertEqual(result.detail, "target is not a regular file")
+        self.assertTrue(script.is_dir())
+
+    def test_remove_local_only_exclude_handles_missing_and_dry_run(self) -> None:
+        root = self.make_repo()
+        with mock.patch.object(
+            install,
+            "git_info_exclude_path",
+            side_effect=SystemExit("no git metadata"),
+        ):
+            self.assertIsNone(install.remove_local_only_exclude(root, dry_run=False))
+
+        exclude = root / ".git/info/exclude"
+        exclude.write_text(
+            "manual\n\n"
+            f"{install.LOCAL_ONLY_EXCLUDE_START}\n"
+            ".sd-ai-command-pack/\n"
+            f"{install.LOCAL_ONLY_EXCLUDE_END}\n",
+            encoding="utf-8",
+        )
+
+        result = install.remove_local_only_exclude(root, dry_run=True)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.status, "would-update")
+        self.assertIn(
+            install.LOCAL_ONLY_EXCLUDE_START,
+            exclude.read_text(encoding="utf-8"),
+        )
+
+    def test_remove_runs_diff_check_and_returns_failure(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        with mock.patch.object(install, "run_diff_check", return_value=7):
+            status = install.remove_installed_pack(
+                {"name": "pack", "version": "1.0.0"},
+                self._manifest_files,
+                root,
+                platforms=None,
+                install_all=False,
+                force=False,
+                dry_run=False,
+                backup=False,
+                skip_diff_check=False,
+            )
+
+        self.assertEqual(status, 7)
 
     def test_install_audit_reports_unreadable_vouched_target(self) -> None:
         if hasattr(os, "geteuid") and os.geteuid() == 0:
