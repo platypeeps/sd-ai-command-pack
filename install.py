@@ -655,6 +655,17 @@ def target_destination(target: Path, relative_path: Path, label: str = "target p
     return destination
 
 
+def removal_target_destination(
+    target: Path,
+    relative_path: Path,
+    label: str = "target path",
+) -> Path:
+    validate_relative_manifest_path("target", relative_path)
+    destination = target / relative_path
+    validate_resolved_target_path(target, destination.parent, f"{label} parent")
+    return destination
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Install SD AI command pack shared assets and command adapters."
@@ -1205,7 +1216,7 @@ def remove_text_block_file(
     backup: bool,
     preserve_invalid_utf8: bool = False,
 ) -> RemoveResult:
-    destination = target_destination(target, relative_path)
+    destination = removal_target_destination(target, relative_path)
     if not path_is_occupied(destination):
         return RemoveResult(relative_path, "missing")
     if destination.is_symlink() or not destination.is_file():
@@ -1703,7 +1714,7 @@ def remove_pack_file(
     dry_run: bool,
     backup: bool,
 ) -> RemoveResult:
-    destination = target_destination(target, relative_path)
+    destination = removal_target_destination(target, relative_path)
     if not path_is_occupied(destination):
         return RemoveResult(relative_path, "missing")
     if destination.is_symlink():

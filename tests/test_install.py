@@ -6121,6 +6121,35 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             "repo-only guidance\n",
         )
 
+    def test_remove_text_block_file_preserves_final_symlink_outside_repo(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        outside_tempdir = tempfile.TemporaryDirectory(
+            prefix="sd-ai-command-pack-outside-"
+        )
+        self.addCleanup(outside_tempdir.cleanup)
+        outside_target = Path(outside_tempdir.name) / "copilot-instructions.md"
+        outside_target.write_text("outside\n", encoding="utf-8")
+        destination = root / ".github/copilot-instructions.md"
+        destination.parent.mkdir(parents=True)
+        destination.symlink_to(outside_target)
+
+        result = install.remove_text_block_file(
+            root,
+            Path(".github/copilot-instructions.md"),
+            start_marker=install.COPILOT_GUIDANCE_START,
+            end_marker=install.COPILOT_GUIDANCE_END,
+            label=".github/copilot-instructions.md",
+            dry_run=False,
+            backup=False,
+        )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertEqual(result.detail, "target is not a regular file")
+        self.assertTrue(destination.is_symlink())
+        self.assertEqual(outside_target.read_text(encoding="utf-8"), "outside\n")
+
     def test_remove_text_block_file_updates_text_around_managed_block(self) -> None:
         root = self.make_repo()
         gitignore = root / ".gitignore"
@@ -6183,6 +6212,48 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.status, "preserved")
         self.assertEqual(result.detail, "target is not a regular file")
         self.assertTrue(script.is_dir())
+
+    def test_remove_pack_file_handles_final_symlink_outside_repo(self) -> None:
+        root = self.make_repo()
+        outside_tempdir = tempfile.TemporaryDirectory(
+            prefix="sd-ai-command-pack-outside-"
+        )
+        self.addCleanup(outside_tempdir.cleanup)
+        outside_target = Path(outside_tempdir.name) / "full-check.sh"
+        outside_target.write_text("outside\n", encoding="utf-8")
+        script = root / "scripts/sd-ai-command-pack-full-check.sh"
+        script.parent.mkdir()
+        script.symlink_to(outside_target)
+
+        result = install.remove_pack_file(
+            root,
+            Path("scripts/sd-ai-command-pack-full-check.sh"),
+            file=None,
+            recorded_hash=None,
+            force=False,
+            dry_run=False,
+            backup=False,
+        )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertEqual(result.detail, "target is a symlink")
+        self.assertTrue(script.is_symlink())
+        self.assertEqual(outside_target.read_text(encoding="utf-8"), "outside\n")
+
+        result = install.remove_pack_file(
+            root,
+            Path("scripts/sd-ai-command-pack-full-check.sh"),
+            file=None,
+            recorded_hash=None,
+            force=True,
+            dry_run=False,
+            backup=False,
+        )
+
+        self.assertEqual(result.status, "removed")
+        self.assertFalse(script.exists())
+        self.assertFalse(script.is_symlink())
+        self.assertEqual(outside_target.read_text(encoding="utf-8"), "outside\n")
 
     def test_may_remove_pack_file_handles_read_failures_cleanly(self) -> None:
         root = self.make_repo()
