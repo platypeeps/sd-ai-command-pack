@@ -2147,7 +2147,11 @@ class InstallTests(unittest.TestCase):
         result = self.run_install(root, "--backup")
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("--backup requires --force", result.stdout)
+        self.assertIn(
+            "--backup requires --force unless --remove is set",
+            result.stdout,
+        )
+        self.assertNotIn("Traceback", result.stdout)
 
     def test_dry_run_does_not_write_files(self) -> None:
         root = self.make_repo(".opencode")
@@ -6149,6 +6153,44 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.detail, "target is not a regular file")
         self.assertTrue(destination.is_symlink())
         self.assertEqual(outside_target.read_text(encoding="utf-8"), "outside\n")
+
+    def test_remove_text_block_file_handles_invalid_utf8_read_failures(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        gitignore = root / ".gitignore"
+        gitignore.write_text(
+            f"{install.TRELLIS_GITIGNORE_START}\n"
+            ".trellis/.runtime/\n"
+            f"{install.TRELLIS_GITIGNORE_END}\n",
+            encoding="utf-8",
+        )
+        original_read_bytes = Path.read_bytes
+
+        def block_target(path: Path) -> bytes:
+            if path == gitignore:
+                raise OSError("blocked target")
+            return original_read_bytes(path)
+
+        with mock.patch.object(Path, "read_bytes", autospec=True, side_effect=block_target):
+            result = install.remove_text_block_file(
+                root,
+                install.TRELLIS_GITIGNORE_TARGET,
+                start_marker=install.TRELLIS_GITIGNORE_START,
+                end_marker=install.TRELLIS_GITIGNORE_END,
+                label=".gitignore",
+                dry_run=False,
+                backup=False,
+                preserve_invalid_utf8=True,
+            )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertIsNotNone(result.detail)
+        self.assertIn("target cannot be read", result.detail)
+        self.assertIn(
+            install.TRELLIS_GITIGNORE_START,
+            gitignore.read_text(encoding="utf-8"),
+        )
 
     def test_remove_text_block_file_updates_text_around_managed_block(self) -> None:
         root = self.make_repo()

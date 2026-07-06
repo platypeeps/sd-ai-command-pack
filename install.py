@@ -1223,7 +1223,11 @@ def remove_text_block_file(
         return RemoveResult(relative_path, "preserved", detail="target is not a regular file")
 
     if preserve_invalid_utf8:
-        current = destination.read_bytes().decode(
+        content, detail = read_bytes_for_remove(destination, "target")
+        if detail is not None:
+            return RemoveResult(relative_path, "preserved", detail=detail)
+        assert content is not None
+        current = content.decode(
             "utf-8",
             errors="surrogateescape",
         )
@@ -1915,7 +1919,7 @@ def display_path(target: Path, path: Path) -> Path:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     if args.backup and not args.force and not args.remove:
-        raise SystemExit("error: --backup requires --force")
+        raise SystemExit("error: --backup requires --force unless --remove is set")
     if args.skip_trellis_init and not args.local_only:
         raise SystemExit("error: --skip-trellis-init requires --local-only")
 
