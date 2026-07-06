@@ -832,6 +832,16 @@ To refresh installed assets from the pack checkout:
 python3 /path/to/sd-ai-command-pack/install.py /path/to/target/repo --force
 ```
 
+Use `python3 /path/to/sd-ai-command-pack/install.py --help` for the safe CLI
+summary, or `--version` to print the pack name and version without touching a
+target repo.
+
+To remove the pack from a target checkout:
+
+```bash
+python3 /path/to/sd-ai-command-pack/install.py /path/to/target/repo --remove
+```
+
 Normal shared installs maintain a managed `sd-ai-command-pack
 trellis-gitignore` block in the repo root `.gitignore`. The block ignores
 Trellis local/runtime files such as `.trellis/.developer`,
@@ -1024,6 +1034,14 @@ to be preserved next to the overwritten files. Existing `.prism/rules.json` and
 review rules are not replaced during a pack refresh. The pack-owned
 `.gito/sd-ai-command-pack.env` file is updateable like scripts and docs so the
 standard Gito concurrency cap can be refreshed.
+
+Use `--remove` to uninstall pack-owned assets. Removal deletes pack-vouched
+files, files that still match the bundled template, generated pack state under
+`.sd-ai-command-pack/`, and the pack-managed blocks in `.gitignore`,
+`.git/info/exclude`, and `.github/copilot-instructions.md`. Drifted files,
+symlinks, directories, and user-owned policy files are preserved by default;
+add `--force` to delete drifted regular pack files too, and add `--backup` to
+keep `.bak` copies of deleted files.
 
 After installing or refreshing a target repo, a quick smoke test is:
 

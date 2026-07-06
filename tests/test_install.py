@@ -1465,6 +1465,7 @@ class InstallTests(unittest.TestCase):
             "python3 install.py /path/to/repo --dry-run",
             "python3 install.py /path/to/repo --force",
             "python3 install.py /path/to/repo --force --backup",
+            "python3 install.py /path/to/repo --remove",
         ):
             self.assertIn(expected, readme)
 
@@ -1768,6 +1769,40 @@ class InstallTests(unittest.TestCase):
         with mock.patch.object(install, "MANIFEST_PATH", PACK_ROOT / "missing-manifest.json"):
             with self.assertRaisesRegex(SystemExit, "manifest not found"):
                 install.load_manifest()
+
+    def test_installer_help_and_version_exit_cleanly(self) -> None:
+        manifest, _ = install.load_manifest()
+        cases = [
+            (
+                ["--help"],
+                [
+                    "usage:",
+                    "--version",
+                    "--remove",
+                    "--platform",
+                    "--local-only",
+                ],
+            ),
+            (
+                ["--version"],
+                [f"{manifest['name']} {manifest['version']}"],
+            ),
+        ]
+
+        for args, expected_texts in cases:
+            with self.subTest(args=args):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(
+                    stderr
+                ):
+                    with self.assertRaises(SystemExit) as raised:
+                        install.parse_args(args)
+
+                self.assertEqual(raised.exception.code, 0)
+                output = stdout.getvalue() + stderr.getvalue()
+                for expected in expected_texts:
+                    self.assertIn(expected, output)
 
     def test_install_gitignore_rejects_invalid_utf8(self) -> None:
         root = self.make_repo()
@@ -5902,6 +5937,126 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertNotIn(".sd-ai-command-pack/provenance.json", rebuilt)
         self.assertNotIn(".gitignore", rebuilt)
         self.assertNotIn(".github/copilot-instructions.md", rebuilt)
+
+    def test_remove_deletes_pack_files_and_managed_blocks(self) -> None:
+        root = self.make_repo(".github")
+        copilot_instructions = root / ".github/copilot-instructions.md"
+        copilot_instructions.write_text(
+            "Keep this repo-specific instruction.\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
+        self.assertTrue((root / ".prism/rules.json").is_file())
+        self.assertTrue((root / ".prism/rules.schema.json").is_file())
+        self.assertTrue((root / ".gito/config.toml").is_file())
+        self.assertTrue((root / ".gito/sd-ai-command-pack.env").is_file())
+        self.assertTrue((root / install.INSTALLED_TARGETS_FILE).is_file())
+        self.assertTrue((root / install.PROVENANCE_FILE).is_file())
+        self.assertIn(
+            install.COPILOT_GUIDANCE_START,
+            copilot_instructions.read_text(encoding="utf-8"),
+        )
+
+        result = self.run_install(root, "--remove")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("mode: remove", result.stdout)
+        self.assertIn("removed", result.stdout)
+        self.assertFalse((root / "scripts/sd-ai-command-pack-full-check.sh").exists())
+        self.assertFalse((root / ".prism/rules.json").exists())
+        self.assertFalse((root / ".prism/rules.schema.json").exists())
+        self.assertFalse((root / ".gito/config.toml").exists())
+        self.assertFalse((root / ".gito/sd-ai-command-pack.env").exists())
+        self.assertFalse((root / install.INSTALLED_TARGETS_FILE).exists())
+        self.assertFalse((root / install.PROVENANCE_FILE).exists())
+        self.assertFalse((root / ".gitignore").exists())
+        copilot_text = copilot_instructions.read_text(encoding="utf-8")
+        self.assertIn("Keep this repo-specific instruction.", copilot_text)
+        self.assertNotIn(install.COPILOT_GUIDANCE_START, copilot_text)
+        self.assertNotIn(install.COPILOT_GUIDANCE_END, copilot_text)
+
+    def test_remove_dry_run_does_not_delete_pack_files(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        result = self.run_install(root, "--remove", "--dry-run")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("mode: remove", result.stdout)
+        self.assertIn("mode: dry-run", result.stdout)
+        self.assertIn("would-remove", result.stdout)
+        self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
+        self.assertTrue((root / install.INSTALLED_TARGETS_FILE).is_file())
+        self.assertTrue((root / install.PROVENANCE_FILE).is_file())
+        self.assertTrue((root / ".gitignore").is_file())
+
+    def test_remove_preserves_drifted_files_unless_forced(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        script = root / "scripts/sd-ai-command-pack-full-check.sh"
+        script.write_text(
+            script.read_text(encoding="utf-8") + "\n# local drift\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_install(root, "--remove")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("preserved", result.stdout)
+        self.assertIn("content differs from installed pack version", result.stdout)
+        self.assertTrue(script.is_file())
+
+        result = self.run_install(root, "--remove", "--force", "--backup")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("backup", result.stdout)
+        self.assertFalse(script.exists())
+        backup = root / "scripts/sd-ai-command-pack-full-check.sh.bak"
+        self.assertTrue(backup.is_file())
+        self.assertIn("# local drift", backup.read_text(encoding="utf-8"))
+
+    def test_remove_cleans_local_only_marker_and_exclude_block(self) -> None:
+        root = self.make_git_repo_without_trellis()
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        bin_dir = Path(tools_tempdir.name) / "bin"
+        trellis_log = Path(tools_tempdir.name) / "trellis-args.log"
+        self.write_trellis_stub(bin_dir, trellis_log)
+
+        result = self.run_install(
+            root,
+            "--local-only",
+            "--platform",
+            "cursor",
+            extra_env={"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        exclude = Path(
+            self.git_output(root, "rev-parse", "--git-path", "info/exclude")
+        )
+        if not exclude.is_absolute():
+            exclude = root / exclude
+        self.assertIn(
+            install.LOCAL_ONLY_EXCLUDE_START,
+            exclude.read_text(encoding="utf-8"),
+        )
+        self.assertTrue((root / install.LOCAL_ONLY_MARKER_FILE).is_file())
+
+        result = self.run_install(root, "--remove")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("mode: remove", result.stdout)
+        self.assertFalse((root / install.LOCAL_ONLY_MARKER_FILE).exists())
+        self.assertNotIn(
+            install.LOCAL_ONLY_EXCLUDE_START,
+            exclude.read_text(encoding="utf-8"),
+        )
 
     def test_install_audit_reports_unreadable_vouched_target(self) -> None:
         if hasattr(os, "geteuid") and os.geteuid() == 0:

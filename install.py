@@ -462,6 +462,14 @@ class InstallResult:
 
 
 @dataclass(frozen=True)
+class RemoveResult:
+    target: Path
+    status: str
+    backup: Path | None = None
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
 class LocalOnlyResult:
     status: str
     target: Path
@@ -533,6 +541,28 @@ def read_text_if_exists(path: Path, label: str) -> str:
         raise SystemExit(f"error: {label} is not valid UTF-8: {path} ({error})") from None
     except OSError as error:
         raise SystemExit(f"error: cannot read {label}: {path} ({error})") from None
+
+
+def manifest_cli_identity() -> str:
+    try:
+        raw = json.loads(read_text_strict(MANIFEST_PATH, "manifest"))
+    except json.JSONDecodeError as error:
+        raise SystemExit(f"error: manifest is not valid JSON: {error}") from None
+    name = raw.get("name")
+    version = raw.get("version")
+    if not isinstance(name, str) or not name.strip():
+        raise SystemExit("error: manifest name is missing")
+    if not isinstance(version, str) or not version.strip():
+        raise SystemExit("error: manifest version is missing")
+    return f"{name} {version}"
+
+
+class ManifestVersionAction(argparse.Action):
+    def __init__(self, option_strings, dest, **kwargs):
+        super().__init__(option_strings, dest, nargs=0, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        parser.exit(message=f"{manifest_cli_identity()}\n")
 
 
 def atomic_write_bytes(destination: Path, content: bytes) -> None:
@@ -630,6 +660,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         description="Install SD AI command pack shared assets and command adapters."
     )
     parser.add_argument(
+        "--version",
+        action=ManifestVersionAction,
+        help="Print the sd-ai-command-pack version and exit.",
+    )
+    parser.add_argument(
         "target",
         nargs="?",
         default=".",
@@ -654,6 +689,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--remove",
+        action="store_true",
+        help=(
+            "Remove this pack from the target repo. By default this deletes "
+            "vouched or template-identical pack files and removes managed "
+            "blocks while preserving drifted or user-owned files; add --force "
+            "to delete drifted regular pack files too."
+        ),
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help=(
@@ -666,8 +711,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--backup",
         action="store_true",
         help=(
-            "With --force, save a .bak copy next to each overwritten or "
-            "deleted file before changing it."
+            "With --force or --remove, save a .bak copy next to each "
+            "overwritten or deleted file before changing it."
         ),
     )
     parser.add_argument(
@@ -699,6 +744,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Skip the final git diff --check validation.",
     )
     return parser.parse_args(argv)
+
+
+def require_target_directory(target: Path) -> None:
+    if not target.is_dir():
+        raise SystemExit(f"error: target repo not found or not a directory: {target}")
 
 
 def require_trellis_repo(target: Path) -> None:
@@ -1099,6 +1149,107 @@ def install_managed_block(
     return InstallResult(file, "created")
 
 
+def remove_marked_block(
+    current: str,
+    *,
+    start_marker: str,
+    end_marker: str,
+    label: str,
+) -> str:
+    start_index, end_index = marker_pair_indexes(
+        current,
+        start_marker,
+        end_marker,
+        label,
+    )
+    if start_index == -1:
+        return current
+    replace_end = end_index + len(end_marker)
+    if replace_end < len(current) and current[replace_end] == "\n":
+        replace_end += 1
+    return current[:start_index] + current[replace_end:]
+
+
+def backup_existing_file(
+    target: Path,
+    destination: Path,
+    *,
+    backup: bool,
+    dry_run: bool,
+) -> Path | None:
+    if not backup or dry_run:
+        return None
+    backup_path = next_backup_path(target, destination)
+    shutil.copyfile(destination, backup_path)
+    return backup_path
+
+
+def prune_empty_parent_dirs(target: Path, destination: Path) -> None:
+    current = destination.parent
+    while current != target and current != current.parent:
+        try:
+            current.rmdir()
+        except OSError:
+            return
+        current = current.parent
+
+
+def remove_text_block_file(
+    target: Path,
+    relative_path: Path,
+    *,
+    start_marker: str,
+    end_marker: str,
+    label: str,
+    dry_run: bool,
+    backup: bool,
+    preserve_invalid_utf8: bool = False,
+) -> RemoveResult:
+    destination = target_destination(target, relative_path)
+    if not path_is_occupied(destination):
+        return RemoveResult(relative_path, "missing")
+    if destination.is_symlink() or not destination.is_file():
+        return RemoveResult(relative_path, "preserved", detail="target is not a regular file")
+
+    if preserve_invalid_utf8:
+        current = destination.read_bytes().decode(
+            "utf-8",
+            errors="surrogateescape",
+        )
+    else:
+        current = read_text_strict(destination, str(relative_path))
+    stripped = remove_marked_block(
+        current,
+        start_marker=start_marker,
+        end_marker=end_marker,
+        label=label,
+    )
+    if stripped == current:
+        return RemoveResult(relative_path, "unchanged", detail="managed block not present")
+
+    status = "removed" if not stripped.strip() else "updated"
+    if dry_run:
+        return RemoveResult(
+            relative_path,
+            "would-remove" if status == "removed" else "would-update",
+        )
+
+    backup_path = backup_existing_file(
+        target,
+        destination,
+        backup=backup,
+        dry_run=dry_run,
+    )
+    if status == "removed":
+        destination.unlink()
+        prune_empty_parent_dirs(target, destination)
+    elif preserve_invalid_utf8:
+        atomic_write_text_preserving_invalid_utf8(destination, stripped)
+    else:
+        atomic_write_text(destination, stripped)
+    return RemoveResult(relative_path, status, backup_path)
+
+
 def installed_targets_content(
     selected: list[PackFile],
     *,
@@ -1470,6 +1621,228 @@ def install_installed_targets_file(
     return InstallResult(file, "created")
 
 
+def sha256_file(path: Path) -> str:
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def installed_target_candidates(
+    files: list[PackFile],
+    target: Path,
+    *,
+    platforms: list[str] | None,
+    install_all: bool,
+) -> set[str]:
+    receipt_targets = read_existing_installed_targets(target)
+    provenance_targets = set(read_existing_provenance_files(target))
+    if receipt_targets or provenance_targets:
+        candidates = {*receipt_targets, *provenance_targets}
+    else:
+        selected, _ = selected_files(files, target, platforms, install_all)
+        candidates = {file.target.as_posix() for file in selected}
+
+    candidates.update(
+        {
+            INSTALLED_TARGETS_FILE.as_posix(),
+            PROVENANCE_FILE.as_posix(),
+            LOCAL_ONLY_MARKER_FILE.as_posix(),
+            TRELLIS_GITIGNORE_TARGET.as_posix(),
+            COPILOT_INSTRUCTIONS_TARGET.as_posix(),
+        }
+    )
+    return candidates
+
+
+def may_remove_pack_file(
+    destination: Path,
+    *,
+    file: PackFile | None,
+    recorded_hash: str | None,
+    force: bool,
+) -> tuple[bool, str | None]:
+    if force:
+        return True, None
+    if recorded_hash and recorded_hash == sha256_file(destination):
+        return True, None
+    if file and destination.read_bytes() == file.source.read_bytes():
+        return True, None
+    return False, "content differs from installed pack version"
+
+
+def remove_pack_file(
+    target: Path,
+    relative_path: Path,
+    *,
+    file: PackFile | None,
+    recorded_hash: str | None,
+    force: bool,
+    dry_run: bool,
+    backup: bool,
+) -> RemoveResult:
+    destination = target_destination(target, relative_path)
+    if not path_is_occupied(destination):
+        return RemoveResult(relative_path, "missing")
+    if destination.is_symlink():
+        if not force:
+            return RemoveResult(relative_path, "preserved", detail="target is a symlink")
+    elif not destination.is_file():
+        return RemoveResult(relative_path, "preserved", detail="target is not a regular file")
+
+    generated_state = relative_path in {
+        INSTALLED_TARGETS_FILE,
+        PROVENANCE_FILE,
+        LOCAL_ONLY_MARKER_FILE,
+    }
+    if generated_state and not destination.is_symlink():
+        removable = True
+        detail = None
+    else:
+        removable, detail = may_remove_pack_file(
+            destination,
+            file=file,
+            recorded_hash=recorded_hash,
+            force=force,
+        )
+    if not removable:
+        return RemoveResult(relative_path, "preserved", detail=detail)
+    if dry_run:
+        return RemoveResult(relative_path, "would-remove")
+
+    backup_path = None
+    if not destination.is_symlink():
+        backup_path = backup_existing_file(
+            target,
+            destination,
+            backup=backup,
+            dry_run=dry_run,
+        )
+    destination.unlink()
+    prune_empty_parent_dirs(target, destination)
+    return RemoveResult(relative_path, "removed", backup_path)
+
+
+def optional_git_info_exclude_path(target: Path) -> Path | None:
+    try:
+        return git_info_exclude_path(target)
+    except SystemExit:
+        return None
+
+
+def remove_local_only_exclude(target: Path, *, dry_run: bool) -> RemoveResult | None:
+    exclude_path = optional_git_info_exclude_path(target)
+    if exclude_path is None:
+        return None
+    current = read_text_if_exists(exclude_path, ".git/info/exclude")
+    stripped = remove_marked_block(
+        current,
+        start_marker=LOCAL_ONLY_EXCLUDE_START,
+        end_marker=LOCAL_ONLY_EXCLUDE_END,
+        label=".git/info/exclude",
+    )
+    if stripped == current:
+        return None
+    if dry_run:
+        return RemoveResult(exclude_path, "would-update")
+    atomic_write_text(exclude_path, stripped)
+    return RemoveResult(exclude_path, "updated")
+
+
+def remove_installed_pack(
+    manifest: dict,
+    files: list[PackFile],
+    target: Path,
+    *,
+    platforms: list[str] | None,
+    install_all: bool,
+    force: bool,
+    dry_run: bool,
+    backup: bool,
+    skip_diff_check: bool,
+) -> int:
+    require_target_directory(target)
+    files_by_target = {file.target.as_posix(): file for file in files}
+    provenance_files = read_existing_provenance_files(target)
+
+    print(f"{manifest['name']} {manifest['version']}")
+    print(f"target: {target}")
+    print("mode: remove")
+    if dry_run:
+        print("mode: dry-run")
+
+    results: list[RemoveResult] = []
+    results.append(
+        remove_text_block_file(
+            target,
+            TRELLIS_GITIGNORE_TARGET,
+            start_marker=TRELLIS_GITIGNORE_START,
+            end_marker=TRELLIS_GITIGNORE_END,
+            label=".gitignore",
+            dry_run=dry_run,
+            backup=backup,
+        )
+    )
+    results.append(
+        remove_text_block_file(
+            target,
+            COPILOT_INSTRUCTIONS_TARGET,
+            start_marker=COPILOT_GUIDANCE_START,
+            end_marker=COPILOT_GUIDANCE_END,
+            label=".github/copilot-instructions.md",
+            dry_run=dry_run,
+            backup=backup,
+            preserve_invalid_utf8=True,
+        )
+    )
+
+    block_targets = {
+        TRELLIS_GITIGNORE_TARGET.as_posix(),
+        COPILOT_INSTRUCTIONS_TARGET.as_posix(),
+    }
+    for candidate in sorted(
+        installed_target_candidates(
+            files,
+            target,
+            platforms=platforms,
+            install_all=install_all,
+        )
+        - block_targets
+    ):
+        relative_path = Path(candidate)
+        file = files_by_target.get(relative_path.as_posix())
+        results.append(
+            remove_pack_file(
+                target,
+                relative_path,
+                file=file,
+                recorded_hash=provenance_files.get(relative_path.as_posix()),
+                force=force,
+                dry_run=dry_run,
+                backup=backup,
+            )
+        )
+
+    local_exclude = remove_local_only_exclude(target, dry_run=dry_run)
+    if local_exclude is not None:
+        results.append(local_exclude)
+
+    for result in results:
+        suffix = f" ({result.detail})" if result.detail else ""
+        print(f"{result.status:14} {display_path(target, result.target)}{suffix}")
+        if result.backup:
+            print(f"{'backup':14} {display_path(target, result.backup)}")
+
+    changed_paths = [
+        result.target
+        for result in results
+        if result.status in {"removed", "updated"}
+        and not result.target.is_absolute()
+    ]
+    if not dry_run and not skip_diff_check:
+        diff_status = run_diff_check(target, changed_paths)
+        if diff_status != 0:
+            return diff_status
+    return 0
+
+
 def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
     if paths == []:
         return 0
@@ -1505,7 +1878,7 @@ def display_path(target: Path, path: Path) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    if args.backup and not args.force:
+    if args.backup and not args.force and not args.remove:
         raise SystemExit("error: --backup requires --force")
     if args.skip_trellis_init and not args.local_only:
         raise SystemExit("error: --skip-trellis-init requires --local-only")
@@ -1514,6 +1887,19 @@ def main(argv: list[str] | None = None) -> int:
     manifest, files = load_manifest()
 
     validate_manifest(files)
+    if args.remove:
+        return remove_installed_pack(
+            manifest,
+            files,
+            target,
+            platforms=args.platform,
+            install_all=args.all,
+            force=args.force,
+            dry_run=args.dry_run,
+            backup=args.backup,
+            skip_diff_check=args.skip_diff_check,
+        )
+
     local_only_results: list[LocalOnlyResult] = []
     if args.local_only:
         require_git_repo_for_local_only(target)
