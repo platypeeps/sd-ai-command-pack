@@ -6111,6 +6111,77 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             script.with_name("sd-ai-command-pack-full-check.sh.bak").exists()
         )
 
+    def test_installed_target_candidates_falls_back_when_receipts_are_unsafe(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        file = self.valid_pack_file(
+            source=PACK_ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
+            target=Path("scripts/sd-ai-command-pack-full-check.sh"),
+        )
+
+        with (
+            mock.patch.object(
+                install,
+                "read_existing_installed_targets",
+                side_effect=SystemExit("error: receipt resolves outside target repo"),
+            ),
+            mock.patch.object(
+                install,
+                "read_existing_provenance_files",
+                side_effect=SystemExit("error: provenance resolves outside target repo"),
+            ),
+        ):
+            candidates = install.installed_target_candidates(
+                [file],
+                root,
+                platforms=None,
+                install_all=False,
+            )
+
+        self.assertIn("scripts/sd-ai-command-pack-full-check.sh", candidates)
+        self.assertIn(install.INSTALLED_TARGETS_FILE.as_posix(), candidates)
+        self.assertIn(install.PROVENANCE_FILE.as_posix(), candidates)
+
+    def test_remove_installed_pack_preserves_unsafe_receipt_state(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        outside_tempdir = tempfile.TemporaryDirectory(
+            prefix="sd-ai-command-pack-outside-"
+        )
+        self.addCleanup(outside_tempdir.cleanup)
+        (root / ".sd-ai-command-pack").symlink_to(
+            Path(outside_tempdir.name),
+            target_is_directory=True,
+        )
+        file = self.valid_pack_file(
+            source=PACK_ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
+            target=Path("scripts/sd-ai-command-pack-full-check.sh"),
+        )
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status = install.remove_installed_pack(
+                {"name": "pack", "version": "1.0.0"},
+                [file],
+                root,
+                platforms=None,
+                install_all=False,
+                force=False,
+                dry_run=False,
+                backup=False,
+                skip_diff_check=True,
+            )
+
+        self.assertEqual(status, 0)
+        self.assertIn("preserved", output.getvalue())
+        self.assertIn(
+            "target path parent resolves outside target repo",
+            output.getvalue(),
+        )
+        self.assertTrue((root / ".sd-ai-command-pack").is_symlink())
+
     def test_remove_cleans_local_only_marker_and_exclude_block(self) -> None:
         root = self.make_git_repo_without_trellis()
         tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-tools-")
@@ -6256,6 +6327,63 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             gitignore.read_text(encoding="utf-8"),
         )
 
+    def test_remove_text_block_file_preserves_unsafe_paths_and_read_failures(
+        self,
+    ) -> None:
+        root = self.make_repo()
+
+        result = install.remove_text_block_file(
+            root,
+            Path("../.gitignore"),
+            start_marker=install.TRELLIS_GITIGNORE_START,
+            end_marker=install.TRELLIS_GITIGNORE_END,
+            label=".gitignore",
+            dry_run=False,
+            backup=False,
+        )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertIsNotNone(result.detail)
+        self.assertIn("unsafe target path", result.detail)
+
+        gitignore = root / ".gitignore"
+        gitignore.write_text(
+            f"{install.TRELLIS_GITIGNORE_START}\n"
+            ".trellis/.runtime/\n"
+            f"{install.TRELLIS_GITIGNORE_END}\n",
+            encoding="utf-8",
+        )
+        original_read_text = Path.read_text
+
+        def block_target(path: Path, *args: object, **kwargs: object) -> str:
+            if path == gitignore:
+                raise OSError("blocked target")
+            return original_read_text(path, *args, **kwargs)
+
+        with mock.patch.object(
+            Path,
+            "read_text",
+            autospec=True,
+            side_effect=block_target,
+        ):
+            result = install.remove_text_block_file(
+                root,
+                install.TRELLIS_GITIGNORE_TARGET,
+                start_marker=install.TRELLIS_GITIGNORE_START,
+                end_marker=install.TRELLIS_GITIGNORE_END,
+                label=".gitignore",
+                dry_run=False,
+                backup=False,
+            )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertIsNotNone(result.detail)
+        self.assertIn("cannot read .gitignore", result.detail)
+        self.assertIn(
+            install.TRELLIS_GITIGNORE_START,
+            gitignore.read_text(encoding="utf-8"),
+        )
+
     def test_remove_text_block_file_updates_text_around_managed_block(self) -> None:
         root = self.make_repo()
         gitignore = root / ".gitignore"
@@ -6318,6 +6446,49 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.status, "preserved")
         self.assertEqual(result.detail, "target is not a regular file")
         self.assertTrue(script.is_dir())
+
+    def test_remove_pack_file_preserves_unsafe_candidate_paths(self) -> None:
+        root = self.make_repo()
+
+        result = install.remove_pack_file(
+            root,
+            Path("../outside.sh"),
+            file=None,
+            recorded_hash=None,
+            force=True,
+            dry_run=False,
+            backup=False,
+        )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertIsNotNone(result.detail)
+        self.assertIn("unsafe target path", result.detail)
+
+        outside_tempdir = tempfile.TemporaryDirectory(
+            prefix="sd-ai-command-pack-outside-"
+        )
+        self.addCleanup(outside_tempdir.cleanup)
+        (root / "scripts").symlink_to(
+            Path(outside_tempdir.name),
+            target_is_directory=True,
+        )
+        result = install.remove_pack_file(
+            root,
+            Path("scripts/sd-ai-command-pack-full-check.sh"),
+            file=None,
+            recorded_hash=None,
+            force=True,
+            dry_run=False,
+            backup=False,
+        )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertIsNotNone(result.detail)
+        self.assertIn(
+            "target path parent resolves outside target repo",
+            result.detail,
+        )
+        self.assertTrue((root / "scripts").is_symlink())
 
     def test_remove_pack_file_handles_final_symlink_outside_repo(self) -> None:
         root = self.make_repo()

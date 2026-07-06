@@ -543,6 +543,13 @@ def read_text_if_exists(path: Path, label: str) -> str:
         raise SystemExit(f"error: cannot read {label}: {path} ({error})") from None
 
 
+def system_exit_detail(error: SystemExit) -> str:
+    detail = str(error)
+    if detail.startswith("error: "):
+        detail = detail[len("error: ") :]
+    return detail or "operation failed"
+
+
 def manifest_cli_identity() -> str:
     try:
         raw = json.loads(read_text_strict(MANIFEST_PATH, "manifest"))
@@ -1225,7 +1232,14 @@ def remove_text_block_file(
     backup: bool,
     preserve_invalid_utf8: bool = False,
 ) -> RemoveResult:
-    destination = removal_target_destination(target, relative_path)
+    try:
+        destination = removal_target_destination(target, relative_path)
+    except SystemExit as error:
+        return RemoveResult(
+            relative_path,
+            "preserved",
+            detail=system_exit_detail(error),
+        )
     if not path_is_occupied(destination):
         return RemoveResult(relative_path, "missing")
     if destination.is_symlink() or not destination.is_file():
@@ -1241,7 +1255,14 @@ def remove_text_block_file(
             errors="surrogateescape",
         )
     else:
-        current = read_text_strict(destination, str(relative_path))
+        try:
+            current = read_text_strict(destination, str(relative_path))
+        except SystemExit as error:
+            return RemoveResult(
+                relative_path,
+                "preserved",
+                detail=system_exit_detail(error),
+            )
     stripped = remove_marked_block(
         current,
         start_marker=start_marker,
@@ -1313,6 +1334,13 @@ def read_existing_provenance_files(target: Path) -> dict[str, str]:
         for key, value in files.items()
         if isinstance(key, str) and isinstance(value, str)
     }
+
+
+def read_existing_provenance_files_for_remove(target: Path) -> dict[str, str]:
+    try:
+        return read_existing_provenance_files(target)
+    except SystemExit:
+        return {}
 
 
 def never_vouched_targets(files: list[PackFile]) -> set[str]:
@@ -1427,6 +1455,13 @@ def read_existing_installed_targets(target: Path) -> set[str]:
         if line and not line.startswith("#"):
             entries.add(line)
     return entries
+
+
+def read_existing_installed_targets_for_remove(target: Path) -> set[str]:
+    try:
+        return read_existing_installed_targets(target)
+    except (OSError, SystemExit):
+        return set()
 
 
 def is_gitignored_path(target: Path, relative_path: str) -> bool:
@@ -1667,8 +1702,8 @@ def installed_target_candidates(
     platforms: list[str] | None,
     install_all: bool,
 ) -> set[str]:
-    receipt_targets = read_existing_installed_targets(target)
-    provenance_targets = set(read_existing_provenance_files(target))
+    receipt_targets = read_existing_installed_targets_for_remove(target)
+    provenance_targets = set(read_existing_provenance_files_for_remove(target))
     if receipt_targets or provenance_targets:
         candidates = {*receipt_targets, *provenance_targets}
     else:
@@ -1727,7 +1762,14 @@ def remove_pack_file(
     dry_run: bool,
     backup: bool,
 ) -> RemoveResult:
-    destination = removal_target_destination(target, relative_path)
+    try:
+        destination = removal_target_destination(target, relative_path)
+    except SystemExit as error:
+        return RemoveResult(
+            relative_path,
+            "preserved",
+            detail=system_exit_detail(error),
+        )
     if not path_is_occupied(destination):
         return RemoveResult(relative_path, "missing")
     if destination.is_symlink():
@@ -1820,7 +1862,7 @@ def remove_installed_pack(
 ) -> int:
     require_target_directory(target)
     files_by_target = {file.target.as_posix(): file for file in files}
-    provenance_files = read_existing_provenance_files(target)
+    provenance_files = read_existing_provenance_files_for_remove(target)
 
     print(f"{manifest['name']} {manifest['version']}")
     print(f"target: {target}")
