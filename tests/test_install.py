@@ -9882,6 +9882,41 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             "feature/cleanup",
         )
 
+    def test_housekeeping_reports_fetch_failure_without_empty_action_crash(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        self.write_housekeeping_gh_stub(stub_bin, head_oid)
+        self.run_git(repo, "switch", "main")
+        self.run_git(
+            repo,
+            "remote",
+            "set-url",
+            "origin",
+            str(repo.parent / "missing.git"),
+        )
+
+        result = subprocess.run(
+            [
+                self._bash_path,
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+            ],
+            cwd=repo,
+            env={**os.environ, "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("==> Tasks performed\nnone", result.stdout)
+        self.assertIn("git fetch --prune origin failed", result.stdout)
+        self.assertIn("git pull --ff-only origin main failed", result.stdout)
+        self.assertNotIn("unbound variable", result.stdout)
+
     def test_housekeeping_skips_remote_delete_when_remote_branch_moved(self) -> None:
         repo, remote, stub_bin, merged_head_oid = self.make_housekeeping_repo()
         self.write_housekeeping_gh_stub(stub_bin, merged_head_oid)
