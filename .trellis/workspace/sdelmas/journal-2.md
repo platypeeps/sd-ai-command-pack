@@ -112,3 +112,42 @@ Implemented Trellis task 07-06-full-check-kb-freshness-gate, the last of the thr
 ### Next Steps
 
 - Set complete; remaining top candidates: introduce-platform-registry (check upstream mindfold-ai/Trellis issue 396 first) and installer-module-decomposition
+
+
+## Session 53: Platform registry consolidation
+
+**Date**: 2026-07-07
+**Task**: Platform registry consolidation
+**Branch**: `codex/introduce-platform-registry`
+
+### Summary
+
+Implemented Trellis task 07-06-introduce-platform-registry (HIGH architecture finding, the largest backlog item). PLATFORM_REGISTRY in install.py is now the single source of truth (one row per platform: directory, markers, init flag, gitignore group, Trellis local-only paths); all six per-platform tables derive from it, verified byte-identical to the pre-registry literals via snapshot comparison so consumer managed blocks see zero churn. Fixed the zcode-via-codex activation bug with a markers-under-own-directory invariant. Extended scanner coverage to all 16 platforms: audit PACK_FILE_PATTERNS 12 to 31, REFERENCE_SCAN_BASES complete, review-scope runtime paths from registry data. Added marker-miss hints and the manifest-less platform note; spec references the registry. Four Copilot rounds, each finding real: entry-level registry-driven coverage test (codex escaped via the manifest-files gate), five missing settings/config runtime paths, an overpromising header comment now test-enforced via order-tuple invariants, and the best catch - collect_pack_like_files walked a hardcoded bases list so the new patterns were unreachable there; scan bases now derive from the patterns themselves. Shipped as PR #54.
+
+### Main Changes
+
+- Replaced six parallel per-platform tables with PLATFORM_REGISTRY and derivations (byte-identical output)
+- Extended audit and review-scope coverage to all platforms with registry-driven consistency tests; derived audit scan bases from patterns
+- Added marker-miss hints, manifest-less platform note, zcode-owned markers, and registry-referencing spec
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `45aedd9` | feat: introduce single platform registry and extend scanner coverage to all platforms |
+| `a4cb2a5` | fix: address review feedback |
+| `e7077a7` | fix: address review feedback round 2 |
+| `15055d2` | fix: address review feedback round 3 |
+
+### Testing
+
+- [OK] 310 tests green; 100% install.py coverage; full-check exit 0; shellcheck clean; CI green 3.10/3.13
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Registry landed; installer-module-decomposition can now build on it
