@@ -32,11 +32,15 @@ are equally dead.
 
 ## Acceptance Criteria
 
-- [ ] `'.claude/skills/sd-*/**'` matches `.claude/skills/sd-review-pr/SKILL.md`;
+- [x] `'.claude/skills/sd-*/**'` matches `.claude/skills/sd-review-pr/SKILL.md`;
   a PR body without a scope section fails the check for such paths.
-- [ ] Table-driven DEFAULT_RULES coverage test in place and green.
-- [ ] Full battery green: unittest suite, 100% coverage on install.py,
-  full-check, shellcheck; template twin byte-identical.
+  (Verified in-process and via the behavioral subprocess test; the
+  full-check run on PR #47's own diff now detects the changed script.)
+- [x] Table-driven DEFAULT_RULES coverage test in place and green
+  (`test_pr_body_scope_default_rule_patterns_match_representatives`).
+- [x] Full battery green: 295 unittest tests, CI green on 3.10/3.13
+  incl. the 100% install.py coverage gate, full-check exit 0,
+  shellcheck lane green; template twin byte-identical (`cmp`).
 
 ## Notes
 
