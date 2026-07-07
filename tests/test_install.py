@@ -2118,6 +2118,23 @@ class InstallTests(unittest.TestCase):
         claude_ignore = gitignore.index(".claude/**")
         self.assertEqual(gitignore[claude_ignore + 1], "!.claude/commands/")
 
+        # A registry row's entries must actually reach the derived tables:
+        # any platform carrying gitignore or local-only data has to hold a
+        # slot in the byte-stability order tuples.
+        for platform, info in registry.items():
+            if info.local_gitignore_patterns:
+                self.assertIn(
+                    platform,
+                    install._LOCAL_GITIGNORE_GROUP_ORDER,
+                    f"{platform} gitignore group missing from group order",
+                )
+            if info.trellis_local_only:
+                self.assertIn(
+                    platform,
+                    install._LOCAL_ONLY_GROUP_ORDER,
+                    f"{platform} local-only group missing from group order",
+                )
+
     def test_platform_registry_dirs_covered_by_shipped_scanners(self) -> None:
         audit = self.load_module_from_path(
             install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",

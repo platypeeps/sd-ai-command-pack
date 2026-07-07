@@ -19,8 +19,10 @@ from pathlib import Path, PureWindowsPath
 ROOT = Path(__file__).resolve().parent
 MANIFEST_PATH = ROOT / "manifest.json"
 # One registry row per platform id; every per-platform table below derives
-# from it so adding a platform means adding exactly one entry here (plus
-# manifest records) instead of editing parallel tables that drift.
+# from it. Adding a platform means one registry row (plus manifest records)
+# and, when the row carries gitignore/local-only entries, a slot in the
+# byte-stability order tuples further down — a test invariant fails if a
+# row's entries are left out of those orders.
 @dataclass(frozen=True)
 class PlatformInfo:
     directory: str
