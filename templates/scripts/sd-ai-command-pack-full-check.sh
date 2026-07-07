@@ -364,7 +364,9 @@ review_filter_csv_from_paths() {
   done < <(sort -u "$patterns_file")
 
   rm -f "$patterns_file"
-  join_by_comma "${patterns[@]}"
+  # ${arr[@]+...} guards the empty-array case: bash < 4.4 (macOS ships 3.2)
+  # treats "${arr[@]}" of an empty array as unbound under set -u.
+  join_by_comma ${patterns[@]+"${patterns[@]}"}
 }
 
 reviewable_changed_filter_csv() {

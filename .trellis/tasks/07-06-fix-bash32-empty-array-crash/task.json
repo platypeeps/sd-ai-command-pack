@@ -3,7 +3,7 @@
   "name": "fix-bash32-empty-array-crash",
   "title": "Guard empty-array expansion for bash 3.2 in review filter helpers",
   "description": "join_by_comma \"${patterns[@]}\" crashes under set -u on macOS stock bash 3.2 when no changed files remain, aborting full-check.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
