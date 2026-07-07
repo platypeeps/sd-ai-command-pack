@@ -577,7 +577,23 @@ class ManifestVersionAction(argparse.Action):
         parser.exit()
 
 
-def atomic_write_bytes(destination: Path, content: bytes) -> None:
+def default_file_mode(*, executable: bool = False) -> int:
+    current_umask = os.umask(0)
+    os.umask(current_umask)
+    base_mode = 0o777 if executable else 0o666
+    return base_mode & ~current_umask
+
+
+def source_is_executable(source: Path) -> bool:
+    return bool(source.stat().st_mode & 0o111)
+
+
+def atomic_write_bytes(
+    destination: Path,
+    content: bytes,
+    *,
+    executable: bool = False,
+) -> None:
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -590,6 +606,9 @@ def atomic_write_bytes(destination: Path, content: bytes) -> None:
             temporary.flush()
             os.fsync(temporary.fileno())
             temporary_path = Path(temporary.name)
+        # NamedTemporaryFile creates 0600 files; installed files should get
+        # normal umask-derived modes, with exec bits mirroring the source.
+        os.chmod(temporary_path, default_file_mode(executable=executable))
         os.replace(temporary_path, destination)
         temporary_path = None
     except OSError as error:
@@ -999,6 +1018,7 @@ def install_file(
     if path_is_occupied(destination) and not destination.is_file():
         raise SystemExit(f"error: target exists and is not a file: {file.target}")
     new_content = source.read_bytes()
+    executable = source_is_executable(source)
     if destination.exists():
         current = destination.read_bytes()
         if current == new_content:
@@ -1016,12 +1036,12 @@ def install_file(
                 backup=backup,
                 dry_run=dry_run,
             )
-            atomic_write_bytes(destination, new_content)
+            atomic_write_bytes(destination, new_content, executable=executable)
         return InstallResult(file, "overwritten", backup_path)
 
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_bytes(destination, new_content)
+        atomic_write_bytes(destination, new_content, executable=executable)
     return InstallResult(file, "created")
 
 

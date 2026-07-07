@@ -1656,6 +1656,44 @@ class InstallTests(unittest.TestCase):
             overwritten.backup.read_text(encoding="utf-8"), "local edit\n"
         )
 
+    def test_install_applies_umask_derived_modes_and_source_exec_bits(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        current_umask = os.umask(0)
+        os.umask(current_umask)
+        expected_file_mode = 0o666 & ~current_umask
+        expected_exec_mode = 0o777 & ~current_umask
+
+        doc = root / "docs/SD_AI_COMMAND_PACK.md"
+        self.assertEqual(doc.stat().st_mode & 0o777, expected_file_mode)
+
+        recorder = root / "scripts/sd-ai-command-pack-record-session.py"
+        self.assertEqual(recorder.stat().st_mode & 0o777, expected_exec_mode)
+        self.assertTrue(os.access(recorder, os.X_OK))
+
+        receipt = root / ".sd-ai-command-pack/installed-targets.txt"
+        self.assertEqual(receipt.stat().st_mode & 0o777, expected_file_mode)
+
+    def test_force_refresh_normalizes_downgraded_file_modes(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        doc = root / "docs/SD_AI_COMMAND_PACK.md"
+        original = doc.read_text(encoding="utf-8")
+        doc.write_text("tampered\n", encoding="utf-8")
+        os.chmod(doc, 0o600)
+
+        result = self.run_install(root, "--force")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(doc.read_text(encoding="utf-8"), original)
+
+        current_umask = os.umask(0)
+        os.umask(current_umask)
+        self.assertEqual(doc.stat().st_mode & 0o777, 0o666 & ~current_umask)
+
     def test_install_file_preserves_prism_rules(self) -> None:
         root = self.make_repo()
         file = install.PackFile(
