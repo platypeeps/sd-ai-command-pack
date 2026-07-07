@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 40
+- **Total Sessions**: 41
 - **Last Active**: 2026-07-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1629 | Active |
+| `journal-1.md` | ~1674 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 41 | 2026-07-06 | Harden housekeeping failure reports | `4997343` | `codex/harden-housekeeping-report` |
 | 40 | 2026-07-06 | Normalize KB agents filenames | `76d18c8` | `codex/install-audit-provenance-version` |
 | 39 | 2026-07-06 | Resolve PR 43 review loop | `b883ba4`, `e2a3e11`, `0836c88` | `codex/install-audit-provenance-version` |
 | 38 | 2026-07-06 | Clarify installed payload provenance | `a281aa1` | `codex/install-audit-provenance-version` |
