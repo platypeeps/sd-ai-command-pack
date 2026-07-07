@@ -267,24 +267,26 @@ def matches_pack_file(relative_path: str) -> bool:
     return any(fnmatch.fnmatchcase(relative_path, pattern) for pattern in PACK_FILE_PATTERNS)
 
 
+def pack_scan_bases() -> tuple[str, ...]:
+    """Derive walk roots from PACK_FILE_PATTERNS so pattern and scan coverage
+    cannot drift apart: each base is a pattern's longest glob-free directory
+    prefix."""
+    bases: set[str] = set()
+    for pattern in PACK_FILE_PATTERNS:
+        prefix: list[str] = []
+        for part in pattern.split("/")[:-1]:
+            if any(character in part for character in "*?["):
+                break
+            prefix.append(part)
+        if prefix:
+            bases.add("/".join(prefix))
+    return tuple(sorted(bases))
+
+
 def collect_pack_like_files(root: Path) -> list[str]:
     """Return installed-pack-shaped files that exist under known pack locations."""
-    bases = [
-        ".agents/skills",
-        ".claude/commands",
-        ".cursor/commands",
-        ".gemini/commands",
-        ".github/prompts",
-        ".gito",
-        ".opencode/commands",
-        ".prism",
-        ".sd-ai-command-pack",
-        "docs",
-        "scripts",
-    ]
-
     pack_like: list[str] = []
-    for base in bases:
+    for base in pack_scan_bases():
         base_path = root / base
         if not base_path.exists():
             continue

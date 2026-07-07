@@ -2189,6 +2189,44 @@ class InstallTests(unittest.TestCase):
                 f"{directory} missing from pr-body-scope DEFAULT_RULES",
             )
 
+    def test_install_audit_discovers_pack_like_files_on_newer_platforms(
+        self,
+    ) -> None:
+        audit = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            "sd_install_audit_scan_bases",
+        )
+        for pattern in audit.PACK_FILE_PATTERNS:
+            self.assertTrue(
+                any(
+                    pattern == base or pattern.startswith(f"{base}/")
+                    for base in audit.pack_scan_bases()
+                ),
+                f"pattern {pattern} unreachable from derived scan bases",
+            )
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        rogue = root / ".qoder/skills/sd-rogue/SKILL.md"
+        rogue.parent.mkdir(parents=True, exist_ok=True)
+        rogue.write_text("# not installed by the pack\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(".qoder/skills/sd-rogue/SKILL.md", result.stdout)
+        self.assertIn(
+            "error: pack-like file is not listed in installed targets",
+            result.stdout,
+        )
+
     def test_zcode_requires_zcode_owned_markers(self) -> None:
         root = self.make_repo()
         (root / ".zcode").mkdir()
