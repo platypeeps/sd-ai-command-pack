@@ -30,8 +30,9 @@ to `templates/`), and the copies have already diverged:
 
 ## Requirements
 
-- R1: Extract the shared helpers into a sourced
-  `scripts/sd-ai-command-pack-lib.sh` (shipped via manifest with a
+- R1: Extract the shared helpers into a new sourced helper library
+  under `scripts/` (suggested name: `sd-ai-command-pack-lib` with a
+  `.sh` extension, shipped via manifest with a
   template twin), OR — if standalone-script constraints forbid
   sourcing — add an intra-script drift gate to full-check that
   byte-compares the designated shared function blocks across the

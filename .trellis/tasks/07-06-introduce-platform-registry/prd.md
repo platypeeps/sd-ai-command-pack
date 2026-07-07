@@ -13,7 +13,8 @@ README adapter table, and three shipped scripts. Drift has already
 happened: `scripts/sd-ai-command-pack-install-audit.py`
 `PACK_FILE_PATTERNS` (:30-43) and `REFERENCE_SCAN_BASES` (:82-97)
 cover only the original six platforms
-(`.agents/.claude/.cursor/.gemini/.github/.opencode`) — `.qoder`,
+(`.agents`, `.claude`, `.cursor`, `.gemini`, `.github`,
+`.opencode`) — `.qoder`,
 `.codebuddy`, `.factory`, `.trae`, `.devin`, `.kilocode`, `.pi`,
 `.kiro`, `.reasonix`, `.zcode`, `.agent` appear nowhere — so the
 audit's "pack-like file not recorded in receipt" and legacy-reference
