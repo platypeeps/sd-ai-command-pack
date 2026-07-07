@@ -3,7 +3,7 @@
   "name": "fix-pr-body-scope-wildcard-globs",
   "title": "Fix wildcard-base /** pattern matching in PR-body scope checker",
   "description": "Patterns ending in /** whose base contains a glob character never match; ~40 default scope rules are silently dead.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
