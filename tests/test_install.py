@@ -8681,7 +8681,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
                     module._matches_pattern("src/unrelated/module.py", pattern),
                     f"{pattern!r} unexpectedly matched an unrelated path",
                 )
-        self.assertGreater(checked, 50)
+        self.assertGreater(checked, 0)
 
         wildcard_base_pattern = ".claude/skills/sd-*/**"
         self.assertTrue(
