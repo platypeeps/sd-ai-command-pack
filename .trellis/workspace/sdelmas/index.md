@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 53
+- **Total Sessions**: 54
 - **Last Active**: 2026-07-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~153 | Active |
+| `journal-2.md` | ~190 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 54 | 2026-07-07 | Installer package decomposition | `92822f4`, `3a912cc`, `8004349` | `codex/installer-module-decomposition` |
 | 53 | 2026-07-07 | Platform registry consolidation | `45aedd9`, `a4cb2a5`, `e7077a7`, `15055d2` | `codex/introduce-platform-registry` |
 | 52 | 2026-07-07 | Full-check KB freshness gate | `889cd90`, `e0c80df` | `codex/full-check-kb-freshness-gate` |
 | 51 | 2026-07-07 | Legacy cleanup spec reconciliation | `07d81c3`, `d4f886d` | `codex/reconcile-legacy-cleanup-spec` |
