@@ -52,8 +52,13 @@ logic.
   variables and `sd_ai_command_pack_*` for pack-owned Python helpers. Treat
   older `sd-command-pack`, `SD_COMMAND_PACK_*`, and `sd_command_pack_*` forms as
   legacy installer cleanup aliases only.
-- Platform identifiers in manifests and CLI arguments are lowercase strings:
-  `shared`, `claude`, `cursor`, `gemini`, `github`, and `opencode`.
+- Platform identifiers in manifests and CLI arguments are lowercase strings.
+  The single source of truth is `PLATFORM_REGISTRY` in `install.py` (one row
+  per platform: anchor directory, Trellis markers, init flag, local-gitignore
+  group, and Trellis-owned local-only paths); every per-platform table is
+  derived from it, so adding a platform means adding one registry row plus
+  manifest records. Do not enumerate platform ids in prose that can go stale —
+  reference the registry.
 
 ## Examples
 

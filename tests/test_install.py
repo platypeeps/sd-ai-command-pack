@@ -2079,6 +2079,126 @@ class InstallTests(unittest.TestCase):
         self.assertIs(raw.get("requiresTrellis"), True)
         self.assertIn("Trellis", raw["description"])
 
+    def test_platform_registry_derives_consistent_tables(self) -> None:
+        registry = install.PLATFORM_REGISTRY
+        self.assertEqual(install.PLATFORMS, tuple(sorted(registry)))
+
+        _, files = install.load_manifest()
+        platforms_with_files = {
+            file.platform for file in files if file.platform != "shared"
+        }
+        for platform in sorted(platforms_with_files):
+            info = registry[platform]
+            self.assertTrue(
+                info.markers, f"{platform} has manifest files but no markers"
+            )
+            self.assertTrue(
+                info.init_flag, f"{platform} has manifest files but no init flag"
+            )
+        # Markers must be owned by the platform's own directory so an
+        # unrelated platform's install can never activate this one (the
+        # zcode-via-codex regression).
+        for platform, info in registry.items():
+            for marker in info.markers:
+                self.assertTrue(
+                    marker.startswith(f"{info.directory}/"),
+                    f"{platform} marker {marker} is outside {info.directory}/",
+                )
+
+        derived_checks = install.LOCAL_ONLY_TRACKED_CHECK_PATHS
+        self.assertEqual(derived_checks[0], "AGENTS.md")
+        self.assertEqual(derived_checks[1], ".trellis")
+        self.assertFalse(
+            [path for path in derived_checks if path.endswith("/")],
+            "tracked-check paths must not keep exclude-form trailing slashes",
+        )
+
+        gitignore = install.PLATFORM_LOCAL_GITIGNORE_PATTERNS
+        self.assertEqual(gitignore[-1], "node_modules/")
+        claude_ignore = gitignore.index(".claude/**")
+        self.assertEqual(gitignore[claude_ignore + 1], "!.claude/commands/")
+
+    def test_platform_registry_dirs_covered_by_shipped_scanners(self) -> None:
+        audit = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            "sd_install_audit_registry_coverage",
+        )
+        scope_script = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            "sd_pr_body_scope_registry_coverage",
+        )
+        review_scope_text = (
+            install.ROOT / "scripts/sd-ai-command-pack-review-scope.sh"
+        ).read_text(encoding="utf-8")
+        scope_patterns = {
+            pattern
+            for rule in scope_script.DEFAULT_RULES
+            for pattern in rule.patterns
+        }
+        _, files = install.load_manifest()
+        platforms_with_files = {
+            file.platform for file in files if file.platform != "shared"
+        }
+
+        for platform, info in sorted(install.PLATFORM_REGISTRY.items()):
+            directory = info.directory
+            self.assertIn(
+                directory,
+                audit.REFERENCE_SCAN_BASES,
+                f"{directory} missing from audit REFERENCE_SCAN_BASES",
+            )
+            if platform not in platforms_with_files:
+                continue
+            self.assertTrue(
+                any(
+                    pattern.startswith(f"{directory}/")
+                    for pattern in audit.PACK_FILE_PATTERNS
+                ),
+                f"{directory} has adapter files but no audit PACK_FILE_PATTERNS",
+            )
+            self.assertIn(
+                f"{directory}/",
+                review_scope_text,
+                f"{directory} missing from review-scope runtime paths",
+            )
+            self.assertTrue(
+                any(pattern.startswith(f"{directory}/") for pattern in scope_patterns),
+                f"{directory} missing from pr-body-scope DEFAULT_RULES",
+            )
+
+    def test_zcode_requires_zcode_owned_markers(self) -> None:
+        root = self.make_repo()
+        (root / ".zcode").mkdir()
+        codex_marker = root / ".agents/skills/trellis-before-dev/SKILL.md"
+        codex_marker.parent.mkdir(parents=True, exist_ok=True)
+        codex_marker.write_text("# codex install artifact\n", encoding="utf-8")
+
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse((root / ".zcode/commands/sd/start.md").exists())
+        self.assertIn(
+            "hint: .zcode/ exists but no active Trellis zcode install was "
+            "detected; pass --platform zcode or update Trellis",
+            result.stdout,
+        )
+
+        zcode_marker = root / ".zcode/cli/agents/trellis-check.md"
+        zcode_marker.parent.mkdir(parents=True, exist_ok=True)
+        zcode_marker.write_text("# zcode trellis agent\n", encoding="utf-8")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertTrue((root / ".zcode/commands/sd/start.md").is_file())
+
+    def test_install_prints_platform_note_for_manifest_less_platform(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root, "--platform", "codex")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "note: platform codex has no dedicated manifest files; "
+            "its commands are provided by the shared .agents skills",
+            result.stdout,
+        )
+
     def test_repo_declares_mit_license(self) -> None:
         raw, _ = install.load_manifest()
         readme = (PACK_ROOT / "README.md").read_text(encoding="utf-8")

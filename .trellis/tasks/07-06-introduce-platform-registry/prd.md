@@ -58,13 +58,27 @@ proof the tables evolve independently.
 
 ## Acceptance Criteria
 
-- [ ] One source of truth for platform metadata; per-platform tables
-  derived or consistency-tested against it.
-- [ ] Audit and review-scope recognize pack files on all 16 platforms
-  (fixture test per platform dir).
-- [ ] codex/zcode identifier quirks resolved and spec platform list
-  current.
-- [ ] Full battery green; template twins byte-identical.
+- [x] One source of truth for platform metadata; per-platform tables
+  derived or consistency-tested against it. (PLATFORM_REGISTRY in
+  install.py, one row per platform; all six tables derived, verified
+  byte-identical to the pre-registry literals except the intended zcode
+  marker fix. The manifest-section variant was considered and deferred
+  to installer-module-decomposition since it is a schema change.)
+- [x] Audit and review-scope recognize pack files on all 16 platforms
+  (audit PACK_FILE_PATTERNS 12 to 31 entries, REFERENCE_SCAN_BASES all
+  registry dirs, review-scope runtime paths extended; pinned by
+  test_platform_registry_dirs_covered_by_shipped_scanners across audit,
+  review-scope, and pr-body-scope).
+- [x] codex/zcode identifier quirks resolved and spec platform list
+  current. (zcode markers now zcode-owned with a markers-under-own-dir
+  invariant test; --platform codex prints an explanatory note;
+  directory-structure spec references the registry instead of a stale
+  id list. Marker-miss hints implemented per R5; Trellis version-range
+  contract stays deferred, upstream mindfold-ai/Trellis issue 396 still
+  unanswered at implementation time.)
+- [x] Full battery green: 309 tests, 100% install.py coverage (912
+  stmts), full-check exit 0, shellcheck clean; template twins
+  byte-identical.
 
 ## Notes
 
