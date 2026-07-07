@@ -3,7 +3,7 @@
   "name": "align-installer-symlink-contract",
   "title": "Align installer symlink handling with the audit fail-closed contract",
   "description": "install_file vouches a symlinked byte-identical target as unchanged while the audit lstat-fails it as tampering, with no remediation path.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

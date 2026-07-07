@@ -1694,6 +1694,107 @@ class InstallTests(unittest.TestCase):
         os.umask(current_umask)
         self.assertEqual(doc.stat().st_mode & 0o777, 0o666 & ~current_umask)
 
+    def test_install_file_unit_covers_symlink_branches(self) -> None:
+        root = self.make_repo()
+        source = root / "source.md"
+        source.write_text("pack template\n", encoding="utf-8")
+        file = self.valid_pack_file(source=source, target=Path("docs/example.md"))
+        destination = root / "docs/example.md"
+
+        created = install.install_file(
+            file, root, force=False, dry_run=False, backup=False
+        )
+        self.assertEqual(created.status, "created")
+
+        # Byte-identical content behind a symlink must not report unchanged:
+        # provenance and the audit vouch plain regular files only.
+        real_copy = root / "docs/example.real.md"
+        destination.rename(real_copy)
+        destination.symlink_to("example.real.md")
+        self.assertEqual(
+            destination.read_bytes(), source.read_bytes(), "fixture must be identical"
+        )
+
+        conflict = install.install_file(
+            file, root, force=False, dry_run=False, backup=False
+        )
+        self.assertEqual(conflict.status, "symlink-conflict")
+        self.assertTrue(destination.is_symlink())
+
+        dry = install.install_file(file, root, force=True, dry_run=True, backup=False)
+        self.assertEqual(dry.status, "overwritten")
+        self.assertTrue(
+            destination.is_symlink(), "dry-run must not replace the symlink"
+        )
+
+        forced = install.install_file(
+            file, root, force=True, dry_run=False, backup=True
+        )
+        self.assertEqual(forced.status, "overwritten")
+        self.assertFalse(destination.is_symlink())
+        self.assertEqual(destination.read_text(encoding="utf-8"), "pack template\n")
+
+        # Force-preserved targets stay untouched even when symlinked.
+        preserved_target = root / ".prism/rules.json"
+        preserved_source = root / "preserved-source.json"
+        preserved_source.write_text("{}\n", encoding="utf-8")
+        preserved_target.parent.mkdir(parents=True, exist_ok=True)
+        preserved_real = root / ".prism/rules.real.json"
+        preserved_real.write_text("{}\n", encoding="utf-8")
+        preserved_target.symlink_to("rules.real.json")
+        preserved_file = self.valid_pack_file(
+            source=preserved_source, target=Path(".prism/rules.json")
+        )
+        preserved = install.install_file(
+            preserved_file, root, force=True, dry_run=False, backup=False
+        )
+        self.assertEqual(preserved.status, "preserved")
+        self.assertTrue(preserved_target.is_symlink())
+
+    def test_install_symlinked_target_conflicts_then_force_repairs_and_audits(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        doc = root / "docs/SD_AI_COMMAND_PACK.md"
+        aside = root / "docs/SD_AI_COMMAND_PACK.real.md"
+        doc.rename(aside)
+        doc.symlink_to("SD_AI_COMMAND_PACK.real.md")
+
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("symlink-conflict docs/SD_AI_COMMAND_PACK.md", result.stdout)
+        self.assertIn(
+            "docs/SD_AI_COMMAND_PACK.md "
+            "(target is a symlink; the pack installs regular files only)",
+            result.stdout,
+        )
+
+        result = self.run_install(root, "--force", "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("overwritten docs/SD_AI_COMMAND_PACK.md", result.stdout)
+        self.assertTrue(doc.is_symlink(), "dry-run must not modify the target")
+
+        result = self.run_install(root, "--force")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(doc.is_symlink())
+        self.assertEqual(
+            doc.read_bytes(),
+            (install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md").read_bytes(),
+        )
+
+        audit = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(audit.returncode, 0, audit.stdout)
+
     def test_install_file_preserves_prism_rules(self) -> None:
         root = self.make_repo()
         file = install.PackFile(
