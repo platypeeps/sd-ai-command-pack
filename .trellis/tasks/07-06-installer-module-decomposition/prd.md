@@ -21,13 +21,13 @@ The current behavior is well tested, but continued feature work is increasing th
 
 ## Acceptance Criteria
 
-- [ ] `python3 install.py --help` and `python3 install.py --version` continue to work from a fresh clone.
-- [ ] Existing install/update/remove/local-only tests pass without reducing coverage.
-- [ ] Core responsibilities are separated into named modules or clearly bounded components, for example manifest handling, path safety, install planning, file operations, provenance, and CLI orchestration.
-- [ ] The top-level `install.py` becomes a thin CLI entrypoint rather than the home for most implementation details.
-- [ ] Documentation does not need to change for end users except possibly developer-facing notes about the new internal layout.
-- [ ] `python3 -m unittest discover -s tests` passes.
-- [ ] `git diff --check` passes.
+- [x] `python3 install.py --help` and `python3 install.py --version` continue to work from a fresh clone (plus remote-cwd and symlink execution, both test-pinned).
+- [x] Existing install/update/remove/local-only tests pass without reducing coverage — the 100% gate was widened to cover the whole package (1,007 stmts, 0 miss).
+- [x] Core responsibilities separated: installer/{registry,manifest,fileops,provenance,localonly,removal} in one-way dependency order; largest module 564 lines.
+- [x] The top-level `install.py` is a 330-line thin entry (argparse, main, exit, re-exports).
+- [x] No end-user documentation changes needed; internal layout documented in the task design.md.
+- [x] `python3 -m unittest discover -s tests` passes (311 tests).
+- [x] `git diff --check` passes.
 
 ## Suggested Phasing
 
