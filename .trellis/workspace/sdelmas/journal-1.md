@@ -1757,3 +1757,45 @@ Ran a seven-agent deep architectural/code/testing/docs/tooling review of the pac
 ### Next Steps
 
 - Merge PR #46, then start the four P1 tasks (pr-body-scope wildcard fix, bash 3.2 guard, installer file modes, installer symlink contract)
+
+
+## Session 44: Session decisions and upstream Trellis issues
+
+**Date**: 2026-07-07
+**Task**: Session decisions and upstream Trellis issues
+**Branch**: `main`
+
+### Summary
+
+Decided the four open review follow-ups: created the neutral-shared-command-templates task, folded marker-miss observability into the platform-registry task (version-range contract deferred), folded the silent-paths-must-say-why convention into the legacy-cleanup spec task, and armed the pre-push chore-scope guard in this clone. Then located the upstream Trellis tracker (mindfold-ai/Trellis, npm bugs URL, 0.6.5 matches vendored), verified no duplicate issues, and filed four upstream issues: #394 add_session structured content, #395 --json output for task/context scripts, #396 machine-readable active-platform state (referencing epic #349), #397 task CLI hygiene. Issue 5 (journal duplicate sessions 29/30, bodies verified byte-identical) stays parked pending the close-fleet-refresh-loop R4 root-cause check. All work landed as direct-to-main chore commits validated by the newly armed hook.
+
+### Main Changes
+
+- Created task 07-06-neutral-shared-command-templates and task 07-07-file-upstream-trellis-issues with five ready-to-file issue drafts
+- Added marker-miss observability (R5) to introduce-platform-registry and the silent-paths convention (R5) to reconcile-legacy-cleanup-spec
+- Added upstream supersession notes to four PRDs and recorded filed issue URLs #394-#397 in the 07-07 PRD
+- Armed core.hooksPath=.githooks in this clone
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `18c1c38` | chore: adopt session decisions on review follow-ups as task updates |
+| `84309cf` | chore: draft upstream Trellis issues and link superseded tasks |
+| `1e71297` | chore: record filed upstream Trellis issue URLs |
+
+### Testing
+
+- [OK] review preflight: 0 failures, 0 warnings on each chore commit
+- [OK] pre-push chore-scope hook validated all three direct-to-main pushes
+- [OK] gh dedup search of mindfold-ai/Trellis found no existing issues for any of the five topics
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Start the four P1 bug-fix tasks; watch mindfold-ai/Trellis #394-#397 for maintainer responses
+- Run close-fleet-refresh-loop R4 to unblock or re-route upstream issue draft 5

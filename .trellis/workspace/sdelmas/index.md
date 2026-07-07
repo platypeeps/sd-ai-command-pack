@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 43
-- **Last Active**: 2026-07-06
+- **Total Sessions**: 44
+- **Last Active**: 2026-07-07
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1757 | Active |
+| `journal-1.md` | ~1798 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 44 | 2026-07-07 | Session decisions and upstream Trellis issues | `18c1c38`, `84309cf`, `1e71297` | `main` |
 | 43 | 2026-07-06 | Deep review task backlog PR | `31bd7f9`, `de60b45` | `codex/deep-review-trellis-task-backlog` |
 | 42 | 2026-07-06 | Create architecture follow-up task PR | `1a8a950`, `c0a70bc` | `codex/add-architecture-followup-tasks` |
 | 41 | 2026-07-06 | Harden housekeeping failure reports | `4997343` | `codex/harden-housekeeping-report` |
