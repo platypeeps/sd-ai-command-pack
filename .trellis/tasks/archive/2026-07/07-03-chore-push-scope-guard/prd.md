@@ -29,6 +29,17 @@ through pull requests — and make the bypass mechanically honest.
   have their own conventions, and shipping it as a pack template is a
   separate decision.
 
+> **Deferral resolved 2026-07-07: keep the hook repo-local; no fleet
+> distribution.** Validation across the five consumer repos
+> (anomaly-metric-creator, rwbp-website, rwbp-coordinator, loadsmith,
+> mezmo_benchmark): every sampled `chore: record journal` /
+> `chore(task): archive` commit on each repo's main (10 of 10) arrived
+> via a merged PR — no fleet repo pushes chores directly to main, so
+> none shares the exposure this hook guards. mezmo_benchmark
+> additionally has `enforce_admins` on (hook redundant); loadsmith
+> requires PR reviews. The direct-to-main chore-commit model is unique
+> to this pack-source repo, where the hook stays.
+
 ## Acceptance Criteria
 
 - [x] Chore-only direct push to main succeeds; a push touching any other
