@@ -7,8 +7,8 @@
 ## Current Status
 
 <!-- @@@auto:current-status -->
-- **Active File**: `journal-1.md`
-- **Total Sessions**: 49
+- **Active File**: `journal-2.md`
+- **Total Sessions**: 50
 - **Last Active**: 2026-07-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1989 | Active |
+| `journal-2.md` | ~42 | Active |
+| `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 50 | 2026-07-07 | KB runtime artifact exclusion hardening | `8098d5a` | `codex/kb-runtime-exclusion-hardening` |
 | 49 | 2026-07-07 | Installer symlink contract alignment | `8a46fa5`, `355bfd3` | `codex/align-installer-symlink-contract` |
 | 48 | 2026-07-07 | Installer umask-derived file modes | `899f728`, `0b9626f`, `84bcef1` | `codex/fix-installer-file-modes` |
 | 47 | 2026-07-07 | Guard bash 3.2 empty-array expansions | `f5494d6`, `95b539a` | `codex/fix-bash32-empty-array-crash` |
