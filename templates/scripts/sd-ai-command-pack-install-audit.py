@@ -59,6 +59,43 @@ LEGACY_PACK_PATHS = {
     ".opencode/commands/sd-refresh-specs.md": "use .opencode/commands/sd-update-spec.md",
     "scripts/trellis-full-check.sh": "use scripts/sd-ai-command-pack-full-check.sh",
     "scripts/trellis-housekeeping.sh": "use scripts/sd-ai-command-pack-housekeeping.sh",
+    # Pack rename era (trellis-review-pr-pack / sd-command-pack -> sd-ai-command-pack):
+    "docs/TRELLIS_REVIEW_PR_PACK.md": "use docs/SD_AI_COMMAND_PACK.md",
+    **{
+        f".opencode/commands/sd/{command}.md": (
+            f"use .opencode/commands/sd-{command}.md"
+        )
+        for command in (
+            "start",
+            "continue",
+            "finish-work",
+            "create-pr",
+            "full-check",
+            "housekeeping",
+            "review-learnings",
+            "review-local",
+            "review-local-all",
+            "review-pr",
+            "update-spec",
+        )
+    },
+    **{
+        f"scripts/sd-command-pack-{name}": (
+            f"use scripts/sd-ai-command-pack-{name}"
+        )
+        for name in (
+            "full-check.sh",
+            "housekeeping.sh",
+            "install-audit.py",
+            "pr-body-scope.py",
+            "record-session.py",
+            "review-learnings.py",
+            "review-local.sh",
+            "review-preflight.mjs",
+            "review-scope.sh",
+            "update-spec-kb.py",
+        )
+    },
 }
 
 LEGACY_PACK_REFERENCES = {
@@ -70,6 +107,24 @@ LEGACY_PACK_REFERENCES = {
     "sd-refresh-specs": "sd-update-spec",
     "TRELLIS_FULL_CHECK": "SD_AI_COMMAND_PACK_FULL_CHECK",
     "TRELLIS_HOUSEKEEPING": "SD_AI_COMMAND_PACK_HOUSEKEEPING",
+    # Pack rename era: needles are full tokens because the boundary class
+    # treats "-" and "." as word characters.
+    "TRELLIS_REVIEW_PR_PACK.md": "SD_AI_COMMAND_PACK.md",
+    **{
+        f"sd-command-pack-{name}": f"sd-ai-command-pack-{name}"
+        for name in (
+            "full-check.sh",
+            "housekeeping.sh",
+            "install-audit.py",
+            "pr-body-scope.py",
+            "record-session.py",
+            "review-learnings.py",
+            "review-local.sh",
+            "review-preflight.mjs",
+            "review-scope.sh",
+            "update-spec-kb.py",
+        )
+    },
 }
 LEGACY_REFERENCE_BOUNDARY = r"[A-Za-z0-9_.-]"
 LEGACY_PACK_REFERENCE_PATTERNS = {

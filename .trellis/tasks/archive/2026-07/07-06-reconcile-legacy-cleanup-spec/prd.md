@@ -48,13 +48,29 @@ install statuses reviewers and agents will never see.
   on skipped tests); the convention gives their fixes a durable spec
   anchor.
 
+## Decision (2026-07-07)
+
+Option (a): the 0.4.0 removal was deliberate and stands. Cleanup
+responsibility lives in the install audit's advisory warnings. Rationale:
+the advisory model has held unquestioned across 24+ releases, install-time
+removal machinery would reintroduce ~500 lines of hardcoded-path handling
+the manifest cannot express today, and warnings preserve consumer intent
+(a repo may keep a legacy artifact deliberately). If automatic removal is
+ever needed again it must be manifest-driven data, not code — recorded in
+the rewritten spec section.
+
 ## Acceptance Criteria
 
-- [ ] Spec and code agree on the cleanup model; no spec section
-  describes statuses install.py cannot emit.
-- [ ] Audit warns on all rename-era legacy families in a consumer repo
-  fixture; tests cover the new advisory entries.
-- [ ] Full battery green: unittest suite, 100% coverage on install.py,
+- [x] Spec and code agree on the cleanup model; no spec section
+  describes statuses install.py cannot emit. (Legacy/obsolete sections
+  replaced by Legacy And Obsolete Artifact Advisories; logging spec
+  updated to symlink-conflict + advisory pointer; grep confirms no
+  stale status names remain.)
+- [x] Audit warns on all rename-era legacy families in a consumer repo
+  fixture; tests cover the new advisory entries
+  (test_install_audit_warns_about_rename_era_legacy_paths,
+  test_install_audit_legacy_advisories_cover_all_pack_scripts).
+- [x] Full battery green: unittest suite, 100% coverage on install.py,
   full-check, shellcheck; template twin byte-identical.
 
 ## Notes

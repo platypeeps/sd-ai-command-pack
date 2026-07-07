@@ -7571,6 +7571,61 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("scripts/trellis-full-check.sh", result.stdout)
         self.assertIn("install audit passed", result.stdout)
 
+    def test_install_audit_warns_about_rename_era_legacy_paths(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        rename_era_paths = [
+            "docs/TRELLIS_REVIEW_PR_PACK.md",
+            ".opencode/commands/sd/start.md",
+            "scripts/sd-command-pack-full-check.sh",
+        ]
+        for relative_path in rename_era_paths:
+            path = root / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("# stale pre-rename artifact\n", encoding="utf-8")
+        (root / "README.md").write_text(
+            "Run scripts/sd-command-pack-full-check.sh before review.\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        for relative_path in rename_era_paths:
+            self.assertIn(relative_path, result.stdout)
+        self.assertIn("legacy pack target remains", result.stdout)
+        self.assertIn("legacy pack reference remains", result.stdout)
+        self.assertIn("install audit passed", result.stdout)
+
+    def test_install_audit_legacy_advisories_cover_all_pack_scripts(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            "sd_install_audit_legacy_paths",
+        )
+        current_scripts = sorted(
+            path.name
+            for path in (install.ROOT / "templates/scripts").iterdir()
+            if path.is_file() and path.name.startswith("sd-ai-command-pack-")
+        )
+        self.assertTrue(current_scripts)
+        for name in current_scripts:
+            legacy = "scripts/" + name.replace(
+                "sd-ai-command-pack-", "sd-command-pack-", 1
+            )
+            self.assertIn(
+                legacy,
+                module.LEGACY_PACK_PATHS,
+                f"missing rename-era advisory for {name}",
+            )
+
     def test_install_audit_legacy_reference_scan_uses_boundaries(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
