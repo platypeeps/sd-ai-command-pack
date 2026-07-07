@@ -1022,6 +1022,24 @@ def install_file(
         raise SystemExit(f"error: target exists and is not a file: {file.target}")
     new_content = source.read_bytes()
     executable = source_is_executable(source)
+    if destination.is_symlink():
+        # Provenance and the install audit vouch plain regular files only
+        # (lstat-based), so a symlinked target must never report
+        # "unchanged"/vouchable even when the linked content is identical.
+        if file.install == IF_NOT_EXISTS or file.target in FORCE_PRESERVED_TARGETS:
+            return InstallResult(file, "preserved")
+        if not force:
+            return InstallResult(file, "symlink-conflict")
+        backup_path = None
+        if not dry_run:
+            backup_path = backup_existing_file(
+                target,
+                destination,
+                backup=backup,
+                dry_run=dry_run,
+            )
+            atomic_write_bytes(destination, new_content, executable=executable)
+        return InstallResult(file, "overwritten", backup_path)
     if destination.exists():
         current = destination.read_bytes()
         if current == new_content:
@@ -2163,12 +2181,22 @@ def main(argv: list[str] | None = None) -> int:
             "file may be local-only)"
         )
 
-    conflicts = [result.file for result in results if result.status == "conflict"]
-    if conflicts:
+    conflict_results = [
+        result
+        for result in results
+        if result.status in {"conflict", "symlink-conflict"}
+    ]
+    if conflict_results:
         print("")
         print("Conflicts:")
-        for file in conflicts:
-            print(f"- {file.target}")
+        for result in conflict_results:
+            if result.status == "symlink-conflict":
+                print(
+                    f"- {result.file.target} "
+                    "(target is a symlink; the pack installs regular files only)"
+                )
+            else:
+                print(f"- {result.file.target}")
         print("Re-run with --force to overwrite these files.")
         return 2
 
@@ -2176,7 +2204,7 @@ def main(argv: list[str] | None = None) -> int:
         diff_paths = [
             result.file.target
             for result in results
-            if result.status not in {"conflict", "preserved"}
+            if result.status not in {"conflict", "symlink-conflict", "preserved"}
         ]
         diff_status = run_diff_check(target, diff_paths)
         if diff_status != 0:
