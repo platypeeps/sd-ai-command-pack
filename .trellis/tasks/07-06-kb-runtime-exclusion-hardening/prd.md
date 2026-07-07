@@ -26,10 +26,10 @@ This makes the LLM-KB output depend on local Trellis runtime state instead of th
 - Update `scripts/sd-ai-command-pack-update-spec-kb.py` so source discovery excludes Trellis runtime and backup artifacts without excluding durable Trellis knowledge.
 - Exclude at least:
   - `.trellis/.backup-*`
-  - `.trellis/.cache`
-  - `.trellis/.runtime`
+  - Trellis cache folders named `.cache`
+  - Trellis runtime folders named `.runtime`
   - `.trellis/workspace`
-  - `.trellis/worktrees`
+  - Trellis worktree folders named `worktrees`
 - Preserve inclusion of durable Trellis documentation that is useful to the KB, such as `.trellis/spec/`, `.trellis/tasks/`, `.trellis/workflow.md`, and other tracked repo guidance.
 - Add focused regression coverage for hidden/runtime Trellis folders so future local artifacts cannot leak into the KB.
 - Ensure existing generated KB naming and category behavior is unchanged for normal repo-owned source files.
@@ -40,7 +40,7 @@ This makes the LLM-KB output depend on local Trellis runtime state instead of th
 - [ ] `python3 scripts/sd-ai-command-pack-update-spec-kb.py --check` passes in a checkout that contains a `.trellis/.backup-*` folder.
 - [ ] Regression tests prove backup/runtime Trellis files are excluded while durable Trellis docs remain eligible.
 - [ ] Existing `.obsidian-kb` copy generation still produces self-contained documents and dashboard links.
-- [ ] No generated KB destination is sourced from `.trellis/.backup-*`, `.trellis/.cache`, `.trellis/.runtime`, `.trellis/workspace`, or `.trellis/worktrees`.
+- [ ] No generated KB destination is sourced from Trellis backup, cache, runtime, workspace, or worktree folders.
 - [ ] `python3 -m unittest discover -s tests` passes.
 - [ ] `git diff --check` passes.
 
