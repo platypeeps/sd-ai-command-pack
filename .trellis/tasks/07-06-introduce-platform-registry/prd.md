@@ -47,6 +47,14 @@ proof the tables evolve independently.
   so any repo with `.zcode/` plus a Codex Trellis install auto-installs
   zcode adapters — give zcode a zcode-owned marker. Refresh the stale
   platform list in `.trellis/spec/backend/directory-structure.md:55-56`.
+- R5: Make marker-miss detection observable: when a platform's anchor
+  directory exists but no Trellis marker for that platform matches,
+  the installer prints a hint (e.g. "`.qoder/` present but no active
+  Trellis qoder install detected; pass `--platform qoder` or update
+  Trellis") instead of skipping silently. This is the adopted scope of
+  the Trellis-coupling follow-up: a declared Trellis version-range
+  contract was considered and explicitly deferred (2026-07-06 session
+  decision) until a real version incompatibility motivates it.
 
 ## Acceptance Criteria
 

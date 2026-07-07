@@ -38,6 +38,15 @@ install statuses reviewers and agents will never see.
   `scripts/sd-command-pack-*`), with tests.
 - R4: Record the decision and rationale in the PRD/design so the next
   reviewer does not re-open the divergence.
+- R5: While editing `quality-guidelines.md`, add the repo-wide
+  "silent paths must say why" convention (adopted 2026-07-06): any
+  code path that intentionally does nothing — skipped platform,
+  no-op refresh, empty scan, disabled gate — must print a one-line
+  reason. The 2026-07-06 deep review found four independent defects of
+  this shape (silent marker-miss adapter skips, preflight symlink
+  no-op exit 0, review-learnings "OK" after scanning nothing, CI green
+  on skipped tests); the convention gives their fixes a durable spec
+  anchor.
 
 ## Acceptance Criteria
 
