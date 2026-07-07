@@ -19,11 +19,16 @@ without installation, satisfying the PRD's fresh-clone constraint.
    safety (`validate_relative_manifest_path`, `validate_pack_source`,
    `validate_resolved_target_path`, `target_destination`,
    `removal_target_destination`), strict readers, `system_exit_detail`,
-   `manifest_cli_identity`.
-3. `installer/fileops.py` — `InstallResult`, atomic writes and file modes,
-   backup/unlink/prune helpers, `install_file`, managed-block and gitignore
-   merge/install/remove, platform detection (`has_active_trellis_platform`)
-   and `selected_files`.
+   `manifest_cli_identity`, and the target/Trellis precondition checks
+   (`require_target_directory`, `require_trellis_repo`) shared by the entry
+   and the removal flow.
+3. `installer/fileops.py` — `InstallResult` and `RemoveResult`, atomic
+   writes and file modes, backup/unlink/prune helpers and the remove-flow
+   byte readers, `install_file`, managed-block and gitignore
+   merge/install/remove, platform detection (`has_active_trellis_platform`),
+   `selected_files`, plus the shared reporting helpers `run_diff_check` and
+   `display_path` (both the entry's install flow and `removal` call them,
+   so they live at the fileops layer rather than in `install.py`).
 4. `installer/provenance.py` — receipt and provenance content, vouching
    rules (`PROVENANCE_EXCLUDED_KINDS`, `never_vouched_targets`), readers for
    install and remove flows, `preserved_receipt_targets`, gitignore-aware
@@ -34,8 +39,7 @@ without installation, satisfying the PRD's fresh-clone constraint.
 6. `installer/removal.py` — `RemoveResult`, removal candidacy/safety
    (`may_remove_pack_file`), `remove_pack_file`, `remove_installed_pack`.
 7. `install.py` (thin) — argparse (`parse_args`, `ManifestVersionAction`),
-   target/Trellis preconditions, `run_diff_check`, `display_path`, `main`,
-   process exit; plus a re-export aggregator (`from installer.<module>
+   `main`, process exit; plus a re-export aggregator (`from installer.<module>
    import *` and the two underscore order tuples explicitly) so the existing
    test suite's `install.<name>` references keep working unchanged — the
    PRD's no-test-churn requirement.

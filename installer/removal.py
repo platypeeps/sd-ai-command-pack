@@ -28,7 +28,7 @@ def installed_target_candidates(
     install_all: bool,
 ) -> set[str]:
     receipt_targets = read_existing_installed_targets_for_remove(target)
-    provenance_targets = set(read_existing_provenance_files_for_remove(target))
+    provenance_targets = set(read_existing_provenance_files_for_remove(target).keys())
     if receipt_targets or provenance_targets:
         candidates = {*receipt_targets, *provenance_targets}
     else:
