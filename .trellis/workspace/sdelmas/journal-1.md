@@ -1914,3 +1914,40 @@ Implemented Trellis task 07-06-fix-bash32-empty-array-crash (second P1 from the 
 ### Next Steps
 
 - Continue P1 backlog with 07-06-fix-installer-file-modes
+
+
+## Session 48: Installer umask-derived file modes
+
+**Date**: 2026-07-07
+**Task**: Installer umask-derived file modes
+**Branch**: `codex/fix-installer-file-modes`
+
+### Summary
+
+Implemented Trellis task 07-06-fix-installer-file-modes (third P1 from the deep review). atomic_write_bytes inherited NamedTemporaryFile's 0600 mode through os.replace with no chmod anywhere, so every installed file landed owner-only and exec bits were stripped. The temp file is now chmod'd to a umask-derived default (0o666 or 0o777 for executables, masked) before the atomic replace, and install_file mirrors the pack source's executable bit. Deliberate scope edge: content-unchanged files keep their mode so preserved targets are never touched; --force is the repair path. Shipped as PR #49. Copilot round 1 raised two comments (umask restore hardened with try/finally; comment reworded), both fixed and threads resolved; the round-2 re-review request stuck in GitHub's bot-reviewer state and never dispatched despite a remove/re-add attempt, so the merge proceeded on the completed substantive round plus green CI — same documented deviation as PR #31 (Session 23).
+
+### Main Changes
+
+- Added default_file_mode/source_is_executable and chmod in atomic_write_bytes; wired executable flag through install_file writes
+- Added fresh-install mode/exec-bit test and force-refresh mode-normalization test
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `899f728` | fix: apply umask-derived modes and source exec bits in installer writes |
+| `0b9626f` | fix: address review feedback |
+| `84bcef1` | chore(task): tick acceptance criteria for installer file-modes fix |
+
+### Testing
+
+- [OK] 298 unittest tests green; coverage --fail-under=100 on install.py (881 stmts); full-check exit 0; CI green 3.10/3.13
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Final P1: 07-06-align-installer-symlink-contract
