@@ -16,6 +16,16 @@ Partition the monolithic installer test file into subsystem-focused test files w
 - Avoid changing production behavior as part of the test move.
 - Preserve test names or comments where they encode important historical regressions.
 - Make it easier to run focused areas such as installer CLI, provenance, review-local, update-spec KB, full-check, housekeeping, and generated/platform parity.
+- Verify the collected test count is identical before and after the split
+  (293 methods as of 2026-07-06) so no test is silently dropped by
+  discovery.
+- Before renaming any test, grep docs and the preflight fixtures for
+  hardcoded test node ids: `sd-ai-command-pack-review-preflight.mjs`
+  resolves pytest node ids, so a rename can break documented references.
+- Update `.trellis/spec/backend/directory-structure.md` (test layout
+  section) to describe the new multi-file structure; its current "one
+  file unless volume justifies splitting" clause is the trigger this
+  task executes.
 
 ## Acceptance Criteria
 
