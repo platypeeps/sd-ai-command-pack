@@ -1799,3 +1799,43 @@ Decided the four open review follow-ups: created the neutral-shared-command-temp
 
 - Start the four P1 bug-fix tasks; watch mindfold-ai/Trellis #394-#397 for maintainer responses
 - Run close-fleet-refresh-loop R4 to unblock or re-route upstream issue draft 5
+
+
+## Session 45: Fleet push-model standardization
+
+**Date**: 2026-07-07
+**Task**: Fleet push-model standardization
+**Branch**: `main`
+
+### Summary
+
+Resolved the fleet-hook handoff and standardized the fleet's push model. Step-1 validation across the five consumer repos first sampled chore commits (all PR-routed), then a full 100-commit-per-repo audit corrected the picture: rare human direct-to-main Trellis chore pushes in anomaly-metric-creator, rwbp-website, and rwbp-coordinator, and an active ~14% direct-push chore workflow in loadsmith. Decided to keep the chore-scope pre-push hook repo-local (no pack distribution) and instead enforce server-side: enabled enforce_admins on anomaly-metric-creator, rwbp-website, rwbp-coordinator, and (by explicit owner choice, trading convenience for uniformity) loadsmith. With mezmo_benchmark already enforced, all five fleet repos now have PR-only mains; this pack-source repo deliberately remains the only direct-push chore repo, guarded by the armed hook. All decisions and corrected evidence recorded in the archived 07-03-chore-push-scope-guard PRD.
+
+### Main Changes
+
+- Appended the deferral resolution, corrected full-audit evidence, and final fleet state to the archived chore-push-scope-guard PRD
+- Enabled enforce_admins on platypeeps/anomaly-metric-creator, rwbp-website, rwbp-coordinator, and loadsmith via the surgical protection endpoint (GitHub-side, no repo file changes)
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9cb9b76` | chore: resolve fleet hook deferral - keep pre-push guard repo-local |
+| `61e52ac` | chore: correct fleet audit evidence and record enforce_admins flips |
+| `71e6714` | chore: record loadsmith enforce_admins flip - fleet now uniformly enforced |
+
+### Testing
+
+- [OK] 100-commit GraphQL audit per fleet repo: direct pushes all human (sventhegrinch/sdelmas), no automation affected
+- [OK] Post-flip verification: enforce_admins=true on all five fleet repos
+- [OK] review preflight: 0 failures on the PRD note edits; chore-scope hook validated all three direct-to-main pushes
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Run loadsmith Trellis chores on a branch/micro-PR going forward (direct main pushes now rejected there)
+- Start the four P1 bug-fix tasks; watch mindfold-ai/Trellis #394-#397

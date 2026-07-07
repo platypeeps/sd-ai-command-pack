@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 44
+- **Total Sessions**: 45
 - **Last Active**: 2026-07-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1798 | Active |
+| `journal-1.md` | ~1838 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 45 | 2026-07-07 | Fleet push-model standardization | `9cb9b76`, `61e52ac`, `71e6714` | `main` |
 | 44 | 2026-07-07 | Session decisions and upstream Trellis issues | `18c1c38`, `84309cf`, `1e71297` | `main` |
 | 43 | 2026-07-06 | Deep review task backlog PR | `31bd7f9`, `de60b45` | `codex/deep-review-trellis-task-backlog` |
 | 42 | 2026-07-06 | Create architecture follow-up task PR | `1a8a950`, `c0a70bc` | `codex/add-architecture-followup-tasks` |
