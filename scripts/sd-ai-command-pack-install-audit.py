@@ -28,12 +28,31 @@ SOURCE_REPO_MARKERS = (
 )
 
 PACK_FILE_PATTERNS = [
+    ".agent/skills/sd-*/*",
+    ".agent/workflows/sd-*",
     ".agents/skills/sd-*/*",
     ".claude/commands/sd/*",
+    ".codebuddy/commands/sd/*",
+    ".codebuddy/skills/sd-*/*",
     ".cursor/commands/sd-*",
+    ".devin/skills/sd-*/*",
+    ".devin/workflows/sd-*",
+    ".factory/commands/sd/*",
+    ".factory/skills/sd-*/*",
     ".gemini/commands/sd/*",
     ".github/prompts/sd-*.prompt.md",
+    ".kilocode/skills/sd-*/*",
+    ".kilocode/workflows/sd-*",
+    ".kiro/skills/sd-*/*",
     ".opencode/commands/sd-*.md",
+    ".pi/prompts/sd-*",
+    ".pi/skills/sd-*/*",
+    ".qoder/commands/sd-*",
+    ".qoder/skills/sd-*/*",
+    ".reasonix/skills/sd-*/*",
+    ".trae/commands/sd-*",
+    ".trae/skills/sd-*/*",
+    ".zcode/commands/sd/*",
     ".gito/config.toml",
     ".gito/sd-ai-command-pack.env",
     ".prism/rules.json",
@@ -138,12 +157,24 @@ REFERENCE_SCAN_BASES = (
     "AGENTS.md",
     "CLAUDE.md",
     "README.md",
+    ".agent",
     ".agents",
     ".claude",
+    ".codebuddy",
+    ".codex",
     ".cursor",
+    ".devin",
+    ".factory",
     ".gemini",
     ".github",
+    ".kilocode",
+    ".kiro",
     ".opencode",
+    ".pi",
+    ".qoder",
+    ".reasonix",
+    ".trae",
+    ".zcode",
     ".trellis/spec",
     "docs",
     "scripts",
@@ -236,24 +267,26 @@ def matches_pack_file(relative_path: str) -> bool:
     return any(fnmatch.fnmatchcase(relative_path, pattern) for pattern in PACK_FILE_PATTERNS)
 
 
+def pack_scan_bases() -> tuple[str, ...]:
+    """Derive walk roots from PACK_FILE_PATTERNS so pattern and scan coverage
+    cannot drift apart: each base is a pattern's longest glob-free directory
+    prefix."""
+    bases: set[str] = set()
+    for pattern in PACK_FILE_PATTERNS:
+        prefix: list[str] = []
+        for part in pattern.split("/")[:-1]:
+            if any(character in part for character in "*?["):
+                break
+            prefix.append(part)
+        if prefix:
+            bases.add("/".join(prefix))
+    return tuple(sorted(bases))
+
+
 def collect_pack_like_files(root: Path) -> list[str]:
     """Return installed-pack-shaped files that exist under known pack locations."""
-    bases = [
-        ".agents/skills",
-        ".claude/commands",
-        ".cursor/commands",
-        ".gemini/commands",
-        ".github/prompts",
-        ".gito",
-        ".opencode/commands",
-        ".prism",
-        ".sd-ai-command-pack",
-        "docs",
-        "scripts",
-    ]
-
     pack_like: list[str] = []
-    for base in bases:
+    for base in pack_scan_bases():
         base_path = root / base
         if not base_path.exists():
             continue
