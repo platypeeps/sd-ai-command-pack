@@ -30,11 +30,17 @@ EACCES on all pack files.
 
 ## Acceptance Criteria
 
-- [ ] `stat` on freshly installed files shows umask-derived modes, not
+- [x] `stat` on freshly installed files shows umask-derived modes, not
   0600; `sd-ai-command-pack-record-session.py` is executable.
-- [ ] `--force` refresh preserves sane modes on existing targets.
-- [ ] Full battery green: unittest suite, 100% coverage on install.py
-  (new branches covered), full-check, shellcheck.
+  (test_install_applies_umask_derived_modes_and_source_exec_bits)
+- [x] `--force` refresh preserves sane modes on existing targets
+  (test_force_refresh_normalizes_downgraded_file_modes). Deliberate
+  scope edge: content-unchanged files keep their current mode so
+  preserved/user-tunable targets are never chmod'd; --force is the
+  documented mode-repair path.
+- [x] Full battery green: 298 tests, coverage --fail-under=100 passes
+  on install.py (881 stmts, 0 miss), full-check exit 0. Shipped as
+  PR #49.
 
 ## Notes
 
