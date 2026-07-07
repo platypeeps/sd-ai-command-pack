@@ -2147,6 +2147,17 @@ class InstallTests(unittest.TestCase):
                 audit.REFERENCE_SCAN_BASES,
                 f"{directory} missing from audit REFERENCE_SCAN_BASES",
             )
+            # Every Trellis-owned local-only path must be classified as
+            # Trellis runtime by review-scope — including platforms with no
+            # pack adapter files (e.g. codex config/hook paths).
+            for entry in info.trellis_local_only:
+                expected = entry + "*" if entry.endswith("/") else entry
+                self.assertIn(
+                    expected,
+                    review_scope_text,
+                    f"{platform} runtime path {entry} missing from "
+                    "review-scope is_trellis_runtime_path",
+                )
             if platform not in platforms_with_files:
                 continue
             self.assertTrue(
@@ -2155,11 +2166,6 @@ class InstallTests(unittest.TestCase):
                     for pattern in audit.PACK_FILE_PATTERNS
                 ),
                 f"{directory} has adapter files but no audit PACK_FILE_PATTERNS",
-            )
-            self.assertIn(
-                f"{directory}/",
-                review_scope_text,
-                f"{directory} missing from review-scope runtime paths",
             )
             self.assertTrue(
                 any(pattern.startswith(f"{directory}/") for pattern in scope_patterns),
