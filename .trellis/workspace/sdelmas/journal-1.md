@@ -1699,8 +1699,8 @@ Created five Trellis planning tasks from the architecture/code review findings, 
 
 | Hash | Message |
 |------|---------|
-| `1a8a950` | (see git log) |
-| `c0a70bc` | (see git log) |
+| `1a8a950` | chore: add architecture follow-up tasks |
+| `c0a70bc` | fix: address local review feedback |
 
 ### Testing
 
