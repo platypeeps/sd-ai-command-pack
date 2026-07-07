@@ -1839,3 +1839,41 @@ Resolved the fleet-hook handoff and standardized the fleet's push model. Step-1 
 
 - Run loadsmith Trellis chores on a branch/micro-PR going forward (direct main pushes now rejected there)
 - Start the four P1 bug-fix tasks; watch mindfold-ai/Trellis #394-#397
+
+
+## Session 46: Fix wildcard-base PR-body scope patterns
+
+**Date**: 2026-07-07
+**Task**: Fix wildcard-base PR-body scope patterns
+**Branch**: `codex/fix-pr-body-scope-wildcard-globs`
+
+### Summary
+
+Implemented Trellis task 07-06-fix-pr-body-scope-wildcard-globs (first P1 from the 2026-07-06 deep review). _matches_pattern in sd-ai-command-pack-pr-body-scope.py compared /** pattern bases literally, so any base containing a glob (like .claude/skills/sd-*/**) never matched and roughly 40 default Tooling/generated scope rules were silently dead. The base now expands through fnmatch.fnmatchcase (base and base/*), preserving wildcard-free semantics. Added a table-driven test asserting every DEFAULT_RULES pattern matches a derived representative and rejects an unrelated path, plus a behavioral regression test for the previously-dead platform-skill category. Shipped as PR #47: two Copilot rounds (one test-brittleness comment fixed by relaxing the count assertion), CI green on both matrix legs, full-check exit 0 with the fixed checker now detecting its own diff.
+
+### Main Changes
+
+- Expanded wildcard bases in /** pattern matching in scripts/sd-ai-command-pack-pr-body-scope.py and its byte-identical templates twin
+- Added table-driven DEFAULT_RULES representative-path test and a behavioral wildcard-base regression test to tests/test_install.py
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ac689cd` | fix: expand wildcard bases in PR-body scope /** patterns |
+| `3c3a366` | fix: address review feedback |
+
+### Testing
+
+- [OK] 295 unittest tests green locally in 106s; CI green on 3.10 and 3.13 with the 100 percent install.py coverage gate
+- [OK] full-check exit 0; template twin byte-identity verified with cmp
+- [OK] 8-case in-process match/non-match verification of the fixed predicate
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #47, then continue the P1 backlog with 07-06-fix-bash32-empty-array-crash
