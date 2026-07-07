@@ -8656,6 +8656,81 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("scripts/sd-ai-command-pack-review-local.sh", result.stdout)
         self.assertIn("scripts/sd-ai-command-pack-review-learnings.py", result.stdout)
 
+    def test_pr_body_scope_default_rule_patterns_match_representatives(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            "sd_pr_body_scope_default_rules",
+        )
+
+        def representative(pattern: str) -> str:
+            if pattern.endswith("/**"):
+                base = pattern[:-3].replace("*", "x")
+                return f"{base}/nested/file.md"
+            return pattern.replace("*", "x")
+
+        checked = 0
+        for rule in module.DEFAULT_RULES:
+            for pattern in rule.patterns:
+                checked += 1
+                candidate = representative(pattern)
+                self.assertTrue(
+                    module._matches_pattern(candidate, pattern),
+                    f"{pattern!r} failed to match its representative {candidate!r}",
+                )
+                self.assertFalse(
+                    module._matches_pattern("src/unrelated/module.py", pattern),
+                    f"{pattern!r} unexpectedly matched an unrelated path",
+                )
+        self.assertGreater(checked, 50)
+
+        wildcard_base_pattern = ".claude/skills/sd-*/**"
+        self.assertTrue(
+            module._matches_pattern(
+                ".claude/skills/sd-review-pr/SKILL.md", wildcard_base_pattern
+            )
+        )
+        self.assertTrue(
+            module._matches_pattern(".claude/skills/sd-review-pr", wildcard_base_pattern)
+        )
+        self.assertFalse(
+            module._matches_pattern(
+                ".claude/skills/other/SKILL.md", wildcard_base_pattern
+            )
+        )
+        self.assertFalse(
+            module._matches_pattern(".claude/skillsX/sd-a/file.md", wildcard_base_pattern)
+        )
+
+    def test_pr_body_scope_script_detects_wildcard_base_skill_paths(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        changed_files = root / "changed-files.txt"
+        changed_files.write_text(
+            ".claude/skills/sd-review-pr/SKILL.md\n"
+            ".github/skills/trellis-before-dev/SKILL.md\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/sd-ai-command-pack-pr-body-scope.py",
+                "--changed-files",
+                str(changed_files),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("detected Tooling/generated scope", result.stdout)
+        self.assertIn(".claude/skills/sd-review-pr/SKILL.md", result.stdout)
+        self.assertIn(".github/skills/trellis-before-dev/SKILL.md", result.stdout)
+
     def test_pr_body_scope_script_merges_matching_configured_scope(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)

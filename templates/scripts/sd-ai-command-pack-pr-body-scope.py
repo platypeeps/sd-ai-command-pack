@@ -298,9 +298,11 @@ def _matches_pattern(normalized_path: str, pattern: str) -> bool:
     """Match a normalized repository path against a PR-body scope glob."""
     normalized_pattern = _remove_dot_slash(pattern.replace("\\", "/"))
     if normalized_pattern.endswith("/**"):
+        # fnmatch expands glob characters in the base (e.g. sd-*), and its
+        # "*" crosses "/" so f"{base}/*" covers arbitrary depth under it.
         base_pattern = normalized_pattern[:-3].rstrip("/")
-        return normalized_path == base_pattern or normalized_path.startswith(
-            f"{base_pattern}/"
+        return fnmatch.fnmatchcase(normalized_path, base_pattern) or fnmatch.fnmatchcase(
+            normalized_path, f"{base_pattern}/*"
         )
     return fnmatch.fnmatchcase(normalized_path, normalized_pattern)
 
