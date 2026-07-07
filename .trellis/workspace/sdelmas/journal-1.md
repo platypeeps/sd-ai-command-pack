@@ -1877,3 +1877,40 @@ Implemented Trellis task 07-06-fix-pr-body-scope-wildcard-globs (first P1 from t
 ### Next Steps
 
 - Merge PR #47, then continue the P1 backlog with 07-06-fix-bash32-empty-array-crash
+
+
+## Session 47: Guard bash 3.2 empty-array expansions
+
+**Date**: 2026-07-07
+**Task**: Guard bash 3.2 empty-array expansions
+**Branch**: `codex/fix-bash32-empty-array-crash`
+
+### Summary
+
+Implemented Trellis task 07-06-fix-bash32-empty-array-crash (second P1 from the deep review). join_by_comma "${patterns[@]}" in the review filter helpers crashed with an unbound-variable error on macOS stock bash 3.2 under set -u whenever no reviewable files remained, aborting full-check instead of taking the skip-Gito branch. Both call sites now use the ${arr[@]+...} guard; a shell-wide audit found and fixed one more reachable-empty site (review-local's Prism local_paths call, now skipping with an explicit warning). Regression test drives full-check against a clean tree under /bin/bash and was verified RED on the unfixed script. Shipped as PR #48: two Copilot rounds (one skip-guard comment fixed), CI green.
+
+### Main Changes
+
+- Guarded empty-array expansions in full-check and review-local (plus template twins)
+- Added clean-tree Gito-skip regression test using /bin/bash
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f5494d6` | fix: guard empty-array expansions for bash 3.2 in review filter helpers |
+| `95b539a` | chore(task): tick acceptance criteria for bash32 guard fix |
+
+### Testing
+
+- [OK] 296 unittest tests green; CI green on 3.10/3.13; shellcheck clean; full-check exit 0
+- [OK] RED/GREEN verified: unfixed script reproduces patterns[@] unbound variable under bash 3.2.57
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Continue P1 backlog with 07-06-fix-installer-file-modes
