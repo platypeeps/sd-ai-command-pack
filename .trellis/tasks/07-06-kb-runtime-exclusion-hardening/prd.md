@@ -39,12 +39,12 @@ This makes the LLM-KB output depend on local Trellis runtime state instead of th
 
 ## Acceptance Criteria
 
-- [ ] `python3 scripts/sd-ai-command-pack-update-spec-kb.py --check` passes in a checkout that contains a `.trellis/.backup-*` folder.
-- [ ] Regression tests prove backup/runtime Trellis files are excluded while durable Trellis docs remain eligible.
-- [ ] Existing `.obsidian-kb` copy generation still produces self-contained documents and dashboard links.
-- [ ] No generated KB destination is sourced from Trellis backup, cache, runtime, workspace, or worktree folders.
-- [ ] `python3 -m unittest discover -s tests` passes.
-- [ ] `git diff --check` passes.
+- [x] `python3 scripts/sd-ai-command-pack-update-spec-kb.py --check` passes in a checkout that contains a `.trellis/.backup-*` folder. (Asserted in the regression test with the backup tree on disk.)
+- [x] Regression tests prove backup/runtime Trellis files are excluded while durable Trellis docs remain eligible (verified RED on the unfixed script: backup agents.md and worktree README both leaked).
+- [x] Existing `.obsidian-kb` copy generation still produces self-contained documents and dashboard links (full KB test cluster green).
+- [x] No generated KB destination is sourced from Trellis backup, cache, runtime, workspace, or worktree folders.
+- [x] `python3 -m unittest discover -s tests` passes (301 tests).
+- [x] `git diff --check` passes.
 
 ## Implementation Notes
 
