@@ -5408,6 +5408,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
             "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK": "0",
             "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_KB": "auto",
         }
         if extra_env:
             env.update(extra_env)

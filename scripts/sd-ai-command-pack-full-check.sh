@@ -589,8 +589,7 @@ run_sd_ai_command_pack_kb_freshness_check() {
     return 0
   fi
 
-  section "SD AI command pack Obsidian KB freshness check"
-  if ! python3 "$script" --check; then
+  if ! run "SD AI command pack Obsidian KB freshness check" python3 "$script" --check; then
     printf 'Generated Obsidian KB is stale or blocked. Refresh it with: python3 %s\n' "$script" >&2
     exit 1
   fi
