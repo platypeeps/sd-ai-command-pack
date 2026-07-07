@@ -40,9 +40,13 @@ through pull requests — and make the bypass mechanically honest.
 > anomaly-metric-creator, rwbp-website, and rwbp-coordinator on
 > 2026-07-07 (rare pushes become micro-PRs; no automation affected),
 > making the hook definitively unnecessary there; mezmo_benchmark
-> already had it on. loadsmith is the one repo whose workflow mirrors
-> this pack-source repo — if any fleet repo ever adopts the hook, it
-> is loadsmith, as a repo-local opt-in rather than pack payload.
+> already had it on. loadsmith — whose workflow mirrored this
+> pack-source repo (~14% direct chore pushes) — was also flipped to
+> `enforce_admins` on later the same day by explicit owner choice,
+> trading that convenience for uniform server-side enforcement. All
+> five fleet repos now enforce PR-only mains; the hook is moot
+> fleet-wide and remains exclusively in this pack-source repo, the
+> only repo retaining the direct-to-main chore-commit model.
 
 ## Acceptance Criteria
 
