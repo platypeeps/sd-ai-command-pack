@@ -8,6 +8,13 @@ include =
     installer/*
 parallel = True
 
+[paths]
+# The symlink-execution test runs the entry through a temp-dir symlink;
+# map that recorded path back onto the real entry file.
+entry =
+    install.py
+    */install.py
+
 [report]
 show_missing = True
 fail_under = 100

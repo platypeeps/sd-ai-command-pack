@@ -17,13 +17,7 @@ from pathlib import Path, PureWindowsPath
 
 
 
-# When the entry script is executed through a symlink, sys.path[0] is the
-# symlink's directory, so the sibling installer/ package would not resolve.
-_PACK_SOURCE_DIR = str(Path(__file__).resolve().parent)
-if _PACK_SOURCE_DIR not in sys.path:
-    sys.path.insert(0, _PACK_SOURCE_DIR)
-
-from installer import (  # noqa: F401,E402
+from installer import (  # noqa: F401
     fileops,
     localonly,
     manifest,

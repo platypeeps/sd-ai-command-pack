@@ -2258,7 +2258,7 @@ class InstallTests(unittest.TestCase):
 
         result = subprocess.run(
             [sys.executable, str(link), "--version"],
-            cwd=link_dir,
+            env=self.installer_subprocess_env(),
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
