@@ -29,16 +29,20 @@ through pull requests — and make the bypass mechanically honest.
   have their own conventions, and shipping it as a pack template is a
   separate decision.
 
-> **Deferral resolved 2026-07-07: keep the hook repo-local; no fleet
-> distribution.** Validation across the five consumer repos
-> (anomaly-metric-creator, rwbp-website, rwbp-coordinator, loadsmith,
-> mezmo_benchmark): every sampled `chore: record journal` /
-> `chore(task): archive` commit on each repo's main (10 of 10) arrived
-> via a merged PR — no fleet repo pushes chores directly to main, so
-> none shares the exposure this hook guards. mezmo_benchmark
-> additionally has `enforce_admins` on (hook redundant); loadsmith
-> requires PR reviews. The direct-to-main chore-commit model is unique
-> to this pack-source repo, where the hook stays.
+> **Deferral resolved 2026-07-07: keep the hook repo-local; no
+> blanket fleet distribution.** Initial 10-of-10 sampled chore commits
+> were PR-routed, but a fuller 100-commit-per-repo audit the same day
+> corrected the picture: anomaly-metric-creator (2, 2026-06-26),
+> rwbp-website (1, 2026-07-02), and rwbp-coordinator (1, 2026-07-03)
+> each had rare human direct-to-main Trellis chore pushes, and
+> loadsmith had 14 (~14% of commits — an active direct-push chore
+> workflow). Outcome: `enforce_admins` was enabled on
+> anomaly-metric-creator, rwbp-website, and rwbp-coordinator on
+> 2026-07-07 (rare pushes become micro-PRs; no automation affected),
+> making the hook definitively unnecessary there; mezmo_benchmark
+> already had it on. loadsmith is the one repo whose workflow mirrors
+> this pack-source repo — if any fleet repo ever adopts the hook, it
+> is loadsmith, as a repo-local opt-in rather than pack payload.
 
 ## Acceptance Criteria
 
