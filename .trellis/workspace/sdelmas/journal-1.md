@@ -1676,3 +1676,45 @@ Hardened housekeeping reporting so fetch or pull failures can be reported withou
 ### Next Steps
 
 - None - task complete
+
+
+## Session 42: Create architecture follow-up task PR
+
+**Date**: 2026-07-06
+**Task**: Create architecture follow-up task PR
+**Branch**: `codex/add-architecture-followup-tasks`
+
+### Summary
+
+Created five Trellis planning tasks from the architecture/code review findings, opened PR #45, fixed local preflight path-reference wording, and completed a clean local/remote PR review cycle.
+
+### Main Changes
+
+- Created five planning-phase Trellis tasks for the architecture review follow-ups.
+- Opened PR #45 from `codex/add-architecture-followup-tasks`.
+- Fixed the KB runtime-exclusion task PRD so hypothetical Trellis runtime folders are described as patterns instead of unresolved repo paths.
+- Completed the SD PR review loop with the deterministic local gate, a Copilot review round, and green GitHub Actions checks.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1a8a950` | (see git log) |
+| `c0a70bc` | (see git log) |
+
+### Testing
+
+- [OK] Validated all five new Trellis task context files with `task.py validate`.
+- [OK] Ran `git diff --check`.
+- [OK] Refreshed the generated Obsidian KB with `python3 scripts/sd-ai-command-pack-update-spec-kb.py`.
+- [OK] Ran `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 PYTHONPYCACHEPREFIX=/private/tmp/sd-ai-command-pack-pycache bash scripts/sd-ai-command-pack-full-check.sh`.
+- [OK] Confirmed Copilot review produced no comments and GitHub Actions passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #45 when ready.
+- Start with the KB runtime-exclusion hardening task as the highest-value follow-up.
