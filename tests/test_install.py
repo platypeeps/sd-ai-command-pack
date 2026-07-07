@@ -8268,6 +8268,79 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             1,
         )
 
+    def test_update_spec_kb_excludes_trellis_runtime_and_backup_artifacts(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        files = {
+            ".trellis/workflow.md": "# Workflow\n",
+            ".trellis/spec/backend/index.md": "# Backend Spec\n",
+            ".trellis/tasks/07-01-demo/prd.md": "# Demo PRD\n",
+            ".trellis/.backup-2026-07-06T01-42-40/.agents/skills/trellis-meta/"
+            "references/platform-files/agents.md": "# stale backup copy\n",
+            ".trellis/.runtime/session-notes.md": "# runtime scratch\n",
+            ".trellis/worktrees/feature-x/README.md": "# worktree checkout\n",
+        }
+        for relative_path, content in files.items():
+            path = root / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        kb = root / ".obsidian-kb"
+        copies = {
+            path.relative_to(kb).as_posix(): path.read_text(encoding="utf-8")
+            for path in kb.rglob("*")
+            if path.is_file()
+        }
+        self.assertTrue(
+            any("# Workflow" in content for content in copies.values()),
+            sorted(copies),
+        )
+        self.assertTrue(
+            any("# Backend Spec" in content for content in copies.values()),
+            sorted(copies),
+        )
+        self.assertTrue(
+            any("# Demo PRD" in content for content in copies.values()),
+            sorted(copies),
+        )
+        for leaked_marker in (
+            "stale backup copy",
+            "runtime scratch",
+            "worktree checkout",
+        ):
+            self.assertFalse(
+                any(leaked_marker in content for content in copies.values()),
+                f"{leaked_marker!r} leaked into the generated KB: {sorted(copies)}",
+            )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/sd-ai-command-pack-update-spec-kb.py",
+                "--check",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_update_spec_kb_derives_github_repo_url_from_remote(self) -> None:
         module = self.load_module_from_path(
             install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py",

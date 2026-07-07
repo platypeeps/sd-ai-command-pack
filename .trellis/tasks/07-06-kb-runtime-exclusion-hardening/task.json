@@ -3,7 +3,7 @@
   "name": "kb-runtime-exclusion-hardening",
   "title": "Harden Obsidian KB runtime artifact exclusions",
   "description": "Exclude Trellis runtime and backup artifacts from Obsidian KB source discovery so generated LLM-KB output is stable and repo-relevant.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
