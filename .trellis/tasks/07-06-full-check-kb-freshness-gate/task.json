@@ -3,7 +3,7 @@
   "name": "full-check-kb-freshness-gate",
   "title": "Add KB freshness verification to local gates",
   "description": "Add a full-check or spec-update verification path that detects stale generated Obsidian KB output before review or release.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

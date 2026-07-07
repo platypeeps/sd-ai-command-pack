@@ -25,14 +25,14 @@ That means the normal expensive local readiness gate can miss a stale or incorre
 
 ## Acceptance Criteria
 
-- [ ] A stale generated KB package is detected by the selected verification path.
-- [ ] A repo without `.obsidian-kb` does not fail unexpectedly unless strict KB verification is explicitly enabled.
-- [ ] The check emits an actionable message that tells the user which command to run to refresh or verify the KB.
-- [ ] Full-check documentation and installed docs describe the KB verification behavior and any opt-in/opt-out environment variable.
-- [ ] Existing full-check behavior for Prism, Gito, CI classifier, install audit, and pack drift remains unchanged.
-- [ ] Focused tests cover pass, skip, and stale/failing KB states.
-- [ ] `python3 -m unittest discover -s tests` passes.
-- [ ] `git diff --check` passes.
+- [x] A stale generated KB package is detected by the selected verification path (full-check lane, mode auto; test asserts the failure).
+- [x] A repo without `.obsidian-kb` does not fail unexpectedly unless strict KB verification is explicitly enabled (auto skips with a warning; `required` fails).
+- [x] The check emits an actionable message that tells the user which command to run to refresh or verify the KB.
+- [x] Full-check documentation and installed docs describe the KB verification behavior and any opt-in/opt-out environment variable (README table, installed guide, sd-full-check skill).
+- [x] Existing full-check behavior for Prism, Gito, CI classifier, install audit, and pack drift remains unchanged.
+- [x] Focused tests cover pass, skip, stale, and disabled KB states.
+- [x] `python3 -m unittest discover -s tests` passes (305 tests).
+- [x] `git diff --check` passes.
 
 ## Implementation Notes
 

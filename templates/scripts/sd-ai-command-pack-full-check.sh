@@ -557,6 +557,45 @@ run_sd_ai_command_pack_install_audit() {
   run "SD AI command pack install audit" python3 "$script"
 }
 
+run_sd_ai_command_pack_kb_freshness_check() {
+  local mode="${SD_AI_COMMAND_PACK_FULL_CHECK_KB:-auto}"
+  local script="scripts/sd-ai-command-pack-update-spec-kb.py"
+
+  if is_disabled "$mode"; then
+    warn "Skipping Obsidian KB freshness check because SD_AI_COMMAND_PACK_FULL_CHECK_KB=$mode."
+    return 0
+  fi
+
+  if [ ! -f "$script" ]; then
+    if [ "$mode" = "required" ]; then
+      printf 'Obsidian KB freshness check is required but %s is missing.\n' "$script" >&2
+      exit 127
+    fi
+    warn "$script not found; skipping Obsidian KB freshness check."
+    return 0
+  fi
+
+  if ! have python3; then
+    if [ "$mode" = "required" ]; then
+      printf 'Obsidian KB freshness check is required but python3 is not found on PATH.\n' >&2
+      exit 127
+    fi
+    warn "python3 not found on PATH; skipping Obsidian KB freshness check."
+    return 0
+  fi
+
+  if [ "$mode" != "required" ] && [ ! -d ".obsidian-kb" ]; then
+    warn "No generated .obsidian-kb folder; skipping Obsidian KB freshness check. Run 'python3 $script' to generate it."
+    return 0
+  fi
+
+  section "SD AI command pack Obsidian KB freshness check"
+  if ! python3 "$script" --check; then
+    printf 'Generated Obsidian KB is stale or blocked. Refresh it with: python3 %s\n' "$script" >&2
+    exit 1
+  fi
+}
+
 run_pack_source_drift_gates() {
   # Deterministic pre-PR gates that only apply inside the sd-ai-command-pack
   # source repository itself: every tracked manifest target must match its
@@ -791,6 +830,7 @@ main() {
   run "Whitespace check: staged diff" git diff --cached --check
   run_review_preflight
   run_sd_ai_command_pack_install_audit
+  run_sd_ai_command_pack_kb_freshness_check
   run_pack_source_drift_gates
   run_sd_ai_command_pack_scope_check
   run_sd_ai_command_pack_pr_body_scope_check
