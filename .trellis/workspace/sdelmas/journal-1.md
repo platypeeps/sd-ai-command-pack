@@ -1951,3 +1951,40 @@ Implemented Trellis task 07-06-fix-installer-file-modes (third P1 from the deep 
 ### Next Steps
 
 - Final P1: 07-06-align-installer-symlink-contract
+
+
+## Session 49: Installer symlink contract alignment
+
+**Date**: 2026-07-07
+**Task**: Installer symlink contract alignment
+**Branch**: `codex/align-installer-symlink-contract`
+
+### Summary
+
+Implemented Trellis task 07-06-align-installer-symlink-contract (fourth and final P1 from the deep review). install_file used is_file() which follows symlinks, so a symlinked byte-identical target reported unchanged and got vouched in provenance while the lstat-based audit failed it forever as tampering with no remediation path. install_file now checks is_symlink() up front: distinct symlink-conflict status with an explanatory Conflicts line and exit 2, --force atomically replaces the link itself with a regular file, force-preserved targets stay untouched even when symlinked, dry-run stays truthful. Scope deliberately covers symlinks resolving to regular files; broken/non-file symlinks keep the pre-existing fatal fail-closed path. Shipped as PR #50: Copilot round 1 raised one scope observation, rebutted with the existing pinned test as evidence and the PR description clarified; CI green.
+
+### Main Changes
+
+- Added symlink branch to install_file with symlink-conflict status, force replacement, and preserved-target protection
+- Extended conflicts reporting and diff-check exclusion for the new status; added unit and behavioral symlink tests
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8a46fa5` | fix: treat symlinked install targets as conflicts, force replaces with regular files |
+| `355bfd3` | chore(task): tick acceptance criteria for symlink contract fix |
+
+### Testing
+
+- [OK] 300 unittest tests green; coverage --fail-under=100 on install.py (894 stmts); full-check exit 0; CI green 3.10/3.13
+- [OK] End-to-end remediation verified: symlinked target conflict, force repair, install audit exit 0
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- P1 backlog complete; next candidates are kb-runtime-exclusion-hardening and the P2 architecture tasks

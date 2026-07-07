@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 48
+- **Total Sessions**: 49
 - **Last Active**: 2026-07-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1953 | Active |
+| `journal-1.md` | ~1989 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 49 | 2026-07-07 | Installer symlink contract alignment | `8a46fa5`, `355bfd3` | `codex/align-installer-symlink-contract` |
 | 48 | 2026-07-07 | Installer umask-derived file modes | `899f728`, `0b9626f`, `84bcef1` | `codex/fix-installer-file-modes` |
 | 47 | 2026-07-07 | Guard bash 3.2 empty-array expansions | `f5494d6`, `95b539a` | `codex/fix-bash32-empty-array-crash` |
 | 46 | 2026-07-07 | Fix wildcard-base PR-body scope patterns | `ac689cd`, `3c3a366` | `codex/fix-pr-body-scope-wildcard-globs` |
