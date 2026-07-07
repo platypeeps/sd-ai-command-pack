@@ -11,19 +11,32 @@ they supersede. None of the pack tasks block on these — they are all
 written to fix things pack-side; an upstream fix lets the corresponding
 workaround shrink or be removed later.
 
-Issue drafts (ready to copy into the Trellis tracker):
+Issue drafts and filed URLs (tracker:
+https://github.com/mindfold-ai/Trellis/issues — resolved from the npm
+`bugs` URL for `@mindfoldhq/trellis`; upstream 0.6.5 matches our
+vendored version; no duplicate issues existed for any topic):
 
 - `upstream-issue-1-add-session-structured-content.md` — add_session
   placeholder auto-commit (supersedes most of the pack recorder
-  wrapper).
+  wrapper). **Filed 2026-07-07:**
+  https://github.com/mindfold-ai/Trellis/issues/394
 - `upstream-issue-2-machine-readable-output.md` — `--json` output for
   task/context scripts (kills sentinel-grepping in housekeeping).
+  **Filed 2026-07-07:**
+  https://github.com/mindfold-ai/Trellis/issues/395
 - `upstream-issue-3-platform-state-contract.md` — machine-readable
-  active-platform state (replaces marker-file tables).
+  active-platform state (replaces marker-file tables). References the
+  upstream platform-support epic mindfold-ai/Trellis#349, which shows
+  the CLI already has an internal registry
+  (`packages/cli/src/types/ai-tools.ts`). **Filed 2026-07-07:**
+  https://github.com/mindfold-ai/Trellis/issues/396
 - `upstream-issue-4-task-cli-hygiene.md` — blank descriptions accepted;
   create() moves the current-task pointer during batch creation.
+  **Filed 2026-07-07:**
+  https://github.com/mindfold-ai/Trellis/issues/397
 - `upstream-issue-5-journal-duplicate-session.md` — duplicate
   journal session bug report (verified byte-identical bodies).
+  **Not filed** pending root-cause confirmation (R2).
 
 ## Requirements
 
@@ -46,7 +59,8 @@ Issue drafts (ready to copy into the Trellis tracker):
 
 ## Acceptance Criteria
 
-- [ ] Issues 1-4 filed upstream with URLs recorded here.
+- [x] Issues 1-4 filed upstream with URLs recorded here (#394, #395,
+  #396, #397 in mindfold-ai/Trellis, filed 2026-07-07).
 - [ ] Issue 5 either filed upstream with a confirmed Trellis root
   cause, or re-routed to the pack with the draft updated to say so.
 - [ ] Superseded pack tasks reference the filed issue URLs.
