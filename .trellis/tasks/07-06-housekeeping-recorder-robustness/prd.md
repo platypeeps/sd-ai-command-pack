@@ -68,3 +68,9 @@ Update-spec-kb (`scripts/sd-ai-command-pack-update-spec-kb.py`):
 - Origin: 2026-07-06 deep review (Shell M2/L2/L3; Python M4/M7 and
   record-session/learnings LOW items). Split into sub-tasks if any
   single item balloons.
+- Upstream: two drafted Trellis issues in
+  `07-07-file-upstream-trellis-issues` reduce this task's long-term
+  surface — issue 1 (structured add_session content) shrinks the
+  recorder wrapper, and issue 2 (`--json` output) removes the
+  sentinel-grep that item 8's neighbor code relies on. Fix pack-side
+  regardless; revisit when the issues land.

@@ -38,7 +38,11 @@ record it closing:
 - R4: Investigate the Session 29/30 duplicate journal write in
   `sd-ai-command-pack-record-session.py` / `add_session.py`
   interaction; fix or file a follow-up if a double-fire path exists;
-  deduplicate the journal entries.
+  deduplicate the journal entries. (Duplicate bodies verified
+  byte-identical on 2026-07-07.) An upstream bug-report draft exists in
+  `07-07-file-upstream-trellis-issues` (issue 5) — file it upstream if
+  the root cause is in Trellis-owned `add_session.py`, otherwise fix
+  here and update that draft.
 - R5: Record completion in the journal so the loop is visibly closed.
 
 ## Acceptance Criteria

@@ -40,3 +40,8 @@ The tasks themselves are accurate, but blank descriptions reduce searchability a
 ## Notes
 
 - This is a hygiene task. It is intentionally small and can be handled independently of the larger architecture work.
+- Upstream: a drafted Trellis issue in `07-07-file-upstream-trellis-issues`
+  (issue 4) asks `task.py` itself to warn on blank descriptions at
+  create/archive time. If Trellis adopts it, the "lightweight guard"
+  requirement here can be satisfied by the upstream warning; the
+  backfill of the three known blank descriptions is needed either way.

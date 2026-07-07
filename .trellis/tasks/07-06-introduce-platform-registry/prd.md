@@ -75,3 +75,9 @@ proof the tables evolve independently.
   splits install.py into modules. Sequence or coordinate these: the
   registry extraction removes ~450 lines of constant tables and should
   inform the decomposition's module boundaries.
+- Upstream: an issue asking Trellis for a machine-readable
+  active-platform state is drafted in
+  `07-07-file-upstream-trellis-issues` (issue 3). If Trellis ships it,
+  the registry's marker tables become a thin consumer of that state —
+  do not block on it, but check the filed issue's status before
+  implementing the marker layer.
