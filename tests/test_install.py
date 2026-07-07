@@ -5399,6 +5399,84 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertNotIn("legacy pack reference remains", result.stdout)
         self.assertNotIn("legacy pack target remains", result.stdout)
 
+    def _run_full_check_kb_lane(self, root, extra_env=None):
+        env = {
+            **os.environ,
+            "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT": "0",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS": "1",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
+            "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
+            "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK": "0",
+            "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_KB": "auto",
+        }
+        if extra_env:
+            env.update(extra_env)
+        return subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-full-check.sh"],
+            cwd=root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+    def test_full_check_kb_freshness_skips_without_generated_kb(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        result = self._run_full_check_kb_lane(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "No generated .obsidian-kb folder; skipping Obsidian KB freshness",
+            result.stdout,
+        )
+
+    def test_full_check_kb_freshness_passes_and_fails_on_stale_kb(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Fresh Project\n", encoding="utf-8")
+        kb_refresh = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(kb_refresh.returncode, 0, kb_refresh.stdout)
+
+        result = self._run_full_check_kb_lane(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "SD AI command pack Obsidian KB freshness check", result.stdout
+        )
+
+        (root / "README.md").write_text("# Fresh Project, edited\n", encoding="utf-8")
+        result = self._run_full_check_kb_lane(root)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Generated Obsidian KB is stale or blocked", result.stdout)
+        self.assertIn(
+            "python3 scripts/sd-ai-command-pack-update-spec-kb.py", result.stdout
+        )
+
+        result = self._run_full_check_kb_lane(
+            root, {"SD_AI_COMMAND_PACK_FULL_CHECK_KB": "0"}
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "Skipping Obsidian KB freshness check because "
+            "SD_AI_COMMAND_PACK_FULL_CHECK_KB=0",
+            result.stdout,
+        )
+
     def test_install_audit_detects_missing_current_targets(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)

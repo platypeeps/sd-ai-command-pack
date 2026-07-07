@@ -659,6 +659,12 @@ ephemeral tool state and do not change what the checks validate.
   review preflight script to run before the legacy repo-local
   `scripts/check-review-preflight.mjs` fallback.
 - `SD_AI_COMMAND_PACK_INSTALL_AUDIT=0`: skip the structural post-install audit.
+- `SD_AI_COMMAND_PACK_FULL_CHECK_KB`: Obsidian KB freshness check mode.
+  Default `auto` runs `scripts/sd-ai-command-pack-update-spec-kb.py --check`
+  only when a generated `.obsidian-kb/` folder exists and skips with a warning
+  otherwise; `0` skips entirely; `required` fails when the helper, `python3`,
+  or a passing check is unavailable. A stale KB fails the full check with a
+  refresh hint.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT=0`: skip the pack source drift
   gates (template twin parity and env-var documentation coverage). These gates
   only run inside the sd-ai-command-pack source repository itself and are

@@ -76,3 +76,39 @@ Implemented Trellis task 07-06-reconcile-legacy-cleanup-spec (HIGH architecture 
 ### Next Steps
 
 - Final task of the set: 07-06-full-check-kb-freshness-gate
+
+
+## Session 52: Full-check KB freshness gate
+
+**Date**: 2026-07-07
+**Task**: Full-check KB freshness gate
+**Branch**: `codex/full-check-kb-freshness-gate`
+
+### Summary
+
+Implemented Trellis task 07-06-full-check-kb-freshness-gate, the last of the three-task set. Full-check previously passed while update-spec-kb --check failed, letting stale generated .obsidian-kb output ship. Added a KB freshness lane after the install audit following the existing lane conventions: SD_AI_COMMAND_PACK_FULL_CHECK_KB defaults to auto (checks only when a generated .obsidian-kb exists, skips with an explicit reason otherwise per the silent-paths convention), 0 skips, required fails when unavailable; stale output fails with the exact refresh command. Documented in README, the installed guide (env-var drift gate satisfied), and the sd-full-check skill; four-state tests. Sequenced after the KB exclusion hardening as required. Copilot round 1: two comments (run-helper consistency, env-pinned test helper), fixed; round 2 clean. Notably the lane made its first real catch during its own PR cycle: PRD-ticking edits staled this repo's KB and the gate failed until the documented refresh was run. Shipped as PR #53.
+
+### Main Changes
+
+- Added run_sd_ai_command_pack_kb_freshness_check lane to full-check (both copies) wired after the install audit
+- Documented SD_AI_COMMAND_PACK_FULL_CHECK_KB across README, installed guide, and sd-full-check skill (twins byte-identical); added four-state lane tests
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `889cd90` | feat: add Obsidian KB freshness lane to full-check |
+| `e0c80df` | fix: address review feedback |
+
+### Testing
+
+- [OK] 305 tests green; shellcheck clean; full-check exit 0 with the new lane live; CI green 3.10/3.13
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Set complete; remaining top candidates: introduce-platform-registry (check upstream mindfold-ai/Trellis issue 396 first) and installer-module-decomposition

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 51
+- **Total Sessions**: 52
 - **Last Active**: 2026-07-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~78 | Active |
+| `journal-2.md` | ~114 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 52 | 2026-07-07 | Full-check KB freshness gate | `889cd90`, `e0c80df` | `codex/full-check-kb-freshness-gate` |
 | 51 | 2026-07-07 | Legacy cleanup spec reconciliation | `07d81c3`, `d4f886d` | `codex/reconcile-legacy-cleanup-spec` |
 | 50 | 2026-07-07 | KB runtime artifact exclusion hardening | `8098d5a` | `codex/kb-runtime-exclusion-hardening` |
 | 49 | 2026-07-07 | Installer symlink contract alignment | `8a46fa5`, `355bfd3` | `codex/align-installer-symlink-contract` |
