@@ -3,7 +3,7 @@
   "name": "installer-module-decomposition",
   "title": "Decompose installer module boundaries",
   "description": "Split the large installer implementation into focused internal modules while preserving CLI behavior, safety checks, provenance, and tests.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
