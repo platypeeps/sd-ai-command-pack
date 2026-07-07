@@ -4634,12 +4634,12 @@ class InstallTests(unittest.TestCase):
         self.assertIn("gito attempt 2 review --vs HEAD --filter app.txt", log)
 
     def test_full_check_script_skips_gito_cleanly_with_no_changed_files(self) -> None:
-        if self._bash_path is None:
-            self.skipTest("bash is not available on PATH")
         # Prefer the system bash: on macOS that is 3.2, where an empty
         # array expansion under `set -u` is an unbound-variable error.
         system_bash = Path("/bin/bash")
         bash_path = str(system_bash) if system_bash.is_file() else self._bash_path
+        if bash_path is None:
+            self.skipTest("bash is not available on PATH or at /bin/bash")
 
         root = self.make_repo()
         result = self.run_install(root)
