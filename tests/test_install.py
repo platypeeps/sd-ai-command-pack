@@ -4633,6 +4633,70 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(log.count("gito attempt"), 2, log)
         self.assertIn("gito attempt 2 review --vs HEAD --filter app.txt", log)
 
+    def test_full_check_script_skips_gito_cleanly_with_no_changed_files(self) -> None:
+        # Prefer the system bash: on macOS that is 3.2, where an empty
+        # array expansion under `set -u` is an unbound-variable error.
+        system_bash = Path("/bin/bash")
+        bash_path = str(system_bash) if system_bash.is_file() else self._bash_path
+        if bash_path is None:
+            self.skipTest("bash is not available on PATH or at /bin/bash")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.write_gito_pack_env(root)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-full-check-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        gito = stub_bin / "gito"
+        gito.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'gito invoked %s\\n' \"$*\" >> {str(log_path)!r}\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        gito.chmod(0o755)
+
+        result = subprocess.run(
+            [bash_path, "scripts/sd-ai-command-pack-full-check.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT": "0",
+                "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0",
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
+                "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF": "HEAD",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "No changed files remain after standard review-scan exclusions; "
+            "skipping Gito review.",
+            result.stdout,
+        )
+        self.assertNotIn("unbound variable", result.stdout)
+        self.assertFalse(
+            log_path.exists(),
+            "gito must not be invoked when no reviewable files changed",
+        )
+
     def test_full_check_script_loads_gito_concurrency_env(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")

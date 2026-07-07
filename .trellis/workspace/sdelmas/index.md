@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 46
+- **Total Sessions**: 47
 - **Last Active**: 2026-07-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1877 | Active |
+| `journal-1.md` | ~1915 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 47 | 2026-07-07 | Guard bash 3.2 empty-array expansions | `f5494d6`, `95b539a` | `codex/fix-bash32-empty-array-crash` |
 | 46 | 2026-07-07 | Fix wildcard-base PR-body scope patterns | `ac689cd`, `3c3a366` | `codex/fix-pr-body-scope-wildcard-globs` |
 | 45 | 2026-07-07 | Fleet push-model standardization | `9cb9b76`, `61e52ac`, `71e6714` | `main` |
 | 44 | 2026-07-07 | Session decisions and upstream Trellis issues | `18c1c38`, `84309cf`, `1e71297` | `main` |

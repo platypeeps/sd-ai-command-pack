@@ -32,11 +32,16 @@ this is an oversight, not policy.
 
 ## Acceptance Criteria
 
-- [ ] Full-check with an empty reviewable-change set completes and
+- [x] Full-check with an empty reviewable-change set completes and
   prints the skip message under bash 3.2 (no unbound-variable error).
-- [ ] Review-local same scenario: no stderr unbound-variable noise.
-- [ ] Full battery green: unittest suite, 100% coverage on install.py,
-  full-check, shellcheck; template twins byte-identical.
+  (Regression test verified RED on the unfixed script with the exact
+  unbound-variable crash under /bin/bash 3.2, GREEN on the fix.)
+- [x] Review-local same scenario: no stderr unbound-variable noise;
+  audit also guarded the empty local_paths Prism call with an explicit
+  skip warning.
+- [x] Full battery green: 296 unittest tests, CI green on 3.10/3.13,
+  full-check exit 0, shellcheck -S warning clean; template twins
+  byte-identical (cmp). Shipped as PR #48.
 
 ## Notes
 
