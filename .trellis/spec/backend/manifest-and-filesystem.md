@@ -383,7 +383,10 @@ remain in a consumer repo:
   OpenCode nested `.opencode/commands/sd/` command layout replaced by flat
   `sd-<command>` files
 - stale references to those legacy names inside repo docs, configs, and
-  scripts (boundary-aware substring scan)
+  scripts (boundary-aware token scan; needles cover the `trellis-*` command
+  names, `sd-refresh-specs`, the legacy env-var prefixes, the old
+  `TRELLIS_REVIEW_PR_PACK.md` guide name, and each rename-era
+  `sd-command-pack-*` script filename)
 
 Consumers remove flagged artifacts manually; the audit keeps warning until
 they do, and the warnings never block an otherwise clean audit. Do not
@@ -396,6 +399,8 @@ Reference files:
 - `scripts/sd-ai-command-pack-install-audit.py`, `LEGACY_PACK_PATHS`
 - `scripts/sd-ai-command-pack-install-audit.py`, `LEGACY_PACK_REFERENCES`
 - `tests/test_install.py`, `test_install_audit_warns_about_legacy_pack_names`
+- `tests/test_install.py`, `test_install_audit_warns_about_rename_era_legacy_paths`
+- `tests/test_install.py`, `test_install_audit_legacy_advisories_cover_all_pack_scripts`
 
 ## Anti-Patterns
 

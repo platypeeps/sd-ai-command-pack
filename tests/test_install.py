@@ -7584,6 +7584,10 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             path = root / relative_path
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("# stale pre-rename artifact\n", encoding="utf-8")
+        (root / "README.md").write_text(
+            "Run scripts/sd-command-pack-full-check.sh before review.\n",
+            encoding="utf-8",
+        )
 
         result = subprocess.run(
             [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
@@ -7598,6 +7602,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         for relative_path in rename_era_paths:
             self.assertIn(relative_path, result.stdout)
         self.assertIn("legacy pack target remains", result.stdout)
+        self.assertIn("legacy pack reference remains", result.stdout)
         self.assertIn("install audit passed", result.stdout)
 
     def test_install_audit_legacy_advisories_cover_all_pack_scripts(self) -> None:

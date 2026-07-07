@@ -107,6 +107,24 @@ LEGACY_PACK_REFERENCES = {
     "sd-refresh-specs": "sd-update-spec",
     "TRELLIS_FULL_CHECK": "SD_AI_COMMAND_PACK_FULL_CHECK",
     "TRELLIS_HOUSEKEEPING": "SD_AI_COMMAND_PACK_HOUSEKEEPING",
+    # Pack rename era: needles are full tokens because the boundary class
+    # treats "-" and "." as word characters.
+    "TRELLIS_REVIEW_PR_PACK.md": "SD_AI_COMMAND_PACK.md",
+    **{
+        f"sd-command-pack-{name}": f"sd-ai-command-pack-{name}"
+        for name in (
+            "full-check.sh",
+            "housekeeping.sh",
+            "install-audit.py",
+            "pr-body-scope.py",
+            "record-session.py",
+            "review-learnings.py",
+            "review-local.sh",
+            "review-preflight.mjs",
+            "review-scope.sh",
+            "update-spec-kb.py",
+        )
+    },
 }
 LEGACY_REFERENCE_BOUNDARY = r"[A-Za-z0-9_.-]"
 LEGACY_PACK_REFERENCE_PATTERNS = {
