@@ -72,7 +72,7 @@ jobs:
       # and the unshipped test suite are out of scope; the gate blocks on
       # medium+ severity so subprocess-to-git/gh Low findings stay advisory.
       - name: Bandit (shipped Python)
-        run: bandit -q -r --severity-level medium install.py scripts templates/scripts
+        run: bandit -q -r --severity-level medium install.py installer scripts templates/scripts
 
       - name: Zizmor (workflow security)
         run: zizmor --offline .github/workflows/

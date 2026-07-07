@@ -1920,7 +1920,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(destination.read_text(encoding="utf-8"), '{"local": true}\n')
 
     def test_load_manifest_reports_missing_manifest_cleanly(self) -> None:
-        with mock.patch.object(install, "MANIFEST_PATH", PACK_ROOT / "missing-manifest.json"):
+        with mock.patch.object(install.manifest, "MANIFEST_PATH", PACK_ROOT / "missing-manifest.json"):
             with self.assertRaisesRegex(SystemExit, "manifest not found"):
                 install.load_manifest()
 
@@ -1976,7 +1976,7 @@ class InstallTests(unittest.TestCase):
         for content, expected in cases:
             with self.subTest(expected=expected):
                 manifest_path.write_text(content, encoding="utf-8")
-                with mock.patch.object(install, "MANIFEST_PATH", manifest_path):
+                with mock.patch.object(install.manifest, "MANIFEST_PATH", manifest_path):
                     with self.assertRaisesRegex(SystemExit, expected):
                         install.manifest_cli_identity()
 
@@ -2249,6 +2249,23 @@ class InstallTests(unittest.TestCase):
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".zcode/commands/sd/start.md").is_file())
+
+    def test_entry_script_runs_via_symlink(self) -> None:
+        link_dir = Path(tempfile.mkdtemp(prefix="sd-install-symlink-"))
+        self.addCleanup(shutil.rmtree, link_dir, True)
+        link = link_dir / "install.py"
+        link.symlink_to(INSTALLER)
+
+        result = subprocess.run(
+            [sys.executable, str(link), "--version"],
+            env=self.installer_subprocess_env(),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("sd-ai-command-pack", result.stdout)
 
     def test_install_prints_platform_note_for_manifest_less_platform(self) -> None:
         root = self.make_repo()
@@ -2817,16 +2834,16 @@ class InstallTests(unittest.TestCase):
         with mock.patch.object(subprocess, "run", return_value=failed_git):
             self.assertIsNone(install.git_output(root, "status"))
 
-        with mock.patch.object(install, "git_output", return_value=None):
+        with mock.patch.object(install.localonly, "git_output", return_value=None):
             with self.assertRaisesRegex(SystemExit, "requires the target to be a Git repo"):
                 install.require_git_repo_for_local_only(root)
 
-        with mock.patch.object(install, "git_output", return_value=str(root)):
+        with mock.patch.object(install.localonly, "git_output", return_value=str(root)):
             with mock.patch.object(Path, "resolve", side_effect=OSError("boom")):
                 with self.assertRaisesRegex(SystemExit, "cannot resolve target repo"):
                     install.require_git_repo_for_local_only(root)
 
-        with mock.patch.object(install, "git_output", return_value=None):
+        with mock.patch.object(install.localonly, "git_output", return_value=None):
             with self.assertRaisesRegex(SystemExit, "cannot find .git/info/exclude"):
                 install.git_info_exclude_path(root)
 
@@ -2894,7 +2911,7 @@ class InstallTests(unittest.TestCase):
         root = self.make_git_repo_without_trellis()
         tracked = [f"path-{index}.txt" for index in range(22)]
 
-        with mock.patch.object(install, "tracked_paths", return_value=tracked):
+        with mock.patch.object(install.localonly, "tracked_paths", return_value=tracked):
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 with self.assertRaisesRegex(SystemExit, "Remove these paths"):
@@ -3203,7 +3220,7 @@ class InstallTests(unittest.TestCase):
         source.parent.mkdir(parents=True)
         source.symlink_to(outside_source)
 
-        with mock.patch.object(install, "ROOT", pack_root):
+        with mock.patch.object(install.manifest, "ROOT", pack_root):
             with self.assertRaisesRegex(SystemExit, "unsafe source path"):
                 install.validate_manifest([self.valid_pack_file(source=source)])
 
@@ -7198,7 +7215,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
     def test_remove_local_only_exclude_handles_missing_and_dry_run(self) -> None:
         root = self.make_repo()
         with mock.patch.object(
-            install,
+            install.localonly,
             "git_info_exclude_path",
             side_effect=SystemExit("no git metadata"),
         ):
@@ -7223,7 +7240,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         )
 
         with mock.patch.object(
-            install,
+            install.localonly,
             "validate_resolved_target_path",
             side_effect=SystemExit("error: git exclude path resolves outside target repo"),
         ):
@@ -7276,7 +7293,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
 
-        with mock.patch.object(install, "run_diff_check", return_value=7):
+        with mock.patch.object(install.removal, "run_diff_check", return_value=7):
             status = install.remove_installed_pack(
                 {"name": "pack", "version": "1.0.0"},
                 self._manifest_files,

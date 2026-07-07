@@ -151,3 +151,40 @@ Implemented Trellis task 07-06-introduce-platform-registry (HIGH architecture fi
 ### Next Steps
 
 - Registry landed; installer-module-decomposition can now build on it
+
+
+## Session 54: Installer package decomposition
+
+**Date**: 2026-07-07
+**Task**: Installer package decomposition
+**Branch**: `codex/installer-module-decomposition`
+
+### Summary
+
+Implemented Trellis task 07-06-installer-module-decomposition per its design.md. install.py went from 2,300 lines to a 330-line CLI entry with the implementation in a sibling installer/ package of six modules in one-way dependency order (registry, manifest, fileops, provenance, localonly, removal), every module under the 800-line guideline. Pure mechanical movement verified by the unchanged behavioral suite; the 100% coverage gate was deliberately widened to the whole package (1,007 statements, 0 missed) and CI bandit gained the installer target. Test churn confined to nine patch-target retargets the move semantically required. Three Copilot rounds: a keys() explicitness nit and design.md drift (both fixed), then a symlink-execution concern that turned out to be a false premise - CPython resolves script symlinks for sys.path[0], proven when the coverage gate flagged the proposed guard's branch as permanently dead; the guard was dropped, the symlink regression test kept, and the thread corrected on record. Shipped as PR #55.
+
+### Main Changes
+
+- Split install.py into installer/{registry,manifest,fileops,provenance,localonly,removal} with a thin re-exporting entry
+- Widened .coveragerc to the package with a [paths] alias for the symlink subprocess; bandit target added; symlink execution test-pinned
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `92822f4` | refactor: decompose install.py into an installer package with a thin CLI entry |
+| `3a912cc` | fix: address review feedback |
+| `8004349` | fix: address review feedback round 2 - pin symlink execution instead of dead guard |
+
+### Testing
+
+- [OK] 311 tests green; coverage --fail-under=100 across entry plus package; full-check exit 0; CI green 3.10/3.13
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Remaining top candidates: harden-manifest-loading (now against installer/manifest.py) and the coverage tasks
