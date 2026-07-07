@@ -579,9 +579,11 @@ class ManifestVersionAction(argparse.Action):
 
 def default_file_mode(*, executable: bool = False) -> int:
     current_umask = os.umask(0)
-    os.umask(current_umask)
-    base_mode = 0o777 if executable else 0o666
-    return base_mode & ~current_umask
+    try:
+        base_mode = 0o777 if executable else 0o666
+        return base_mode & ~current_umask
+    finally:
+        os.umask(current_umask)
 
 
 def source_is_executable(source: Path) -> bool:
@@ -607,7 +609,8 @@ def atomic_write_bytes(
             os.fsync(temporary.fileno())
             temporary_path = Path(temporary.name)
         # NamedTemporaryFile creates 0600 files; installed files should get
-        # normal umask-derived modes, with exec bits mirroring the source.
+        # normal umask-derived modes, executable when the caller requests it
+        # (install_file passes the pack source's executable state).
         os.chmod(temporary_path, default_file_mode(executable=executable))
         os.replace(temporary_path, destination)
         temporary_path = None
