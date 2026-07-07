@@ -1636,3 +1636,43 @@ Normalized platform-root AGENTS.md and agents.md Obsidian KB destination filenam
 ### Next Steps
 
 - None - task complete
+
+
+## Session 41: Harden housekeeping failure reports
+
+**Date**: 2026-07-06
+**Task**: Harden housekeeping failure reports
+**Branch**: `codex/harden-housekeeping-report`
+
+### Summary
+
+Hardened housekeeping reporting so fetch or pull failures can be reported without Bash 3.2 empty-array crashes, bumped the pack to 0.5.28, and rolled the release into the fleet.
+
+### Main Changes
+
+- Hardened housekeeping report rendering to guard empty action, expectation, and inventory arrays before expansion.
+- Updated the installed script template and added regression coverage for fetch-failure reporting.
+- Bumped sd-ai-command-pack to 0.5.28 and opened rollout PRs across the fleet.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4997343` | fix: harden housekeeping failure reports |
+
+### Testing
+
+- [OK] python3 -m unittest discover -s tests
+- [OK] bash -n scripts/sd-ai-command-pack-housekeeping.sh
+- [OK] bash -n templates/scripts/sd-ai-command-pack-housekeeping.sh
+- [OK] bash scripts/sd-ai-command-pack-housekeeping.sh --self-test
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
