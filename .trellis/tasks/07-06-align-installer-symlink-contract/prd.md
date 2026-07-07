@@ -32,10 +32,15 @@ fail-closed on symlinks; the INSTALLER side was never aligned.
 
 ## Acceptance Criteria
 
-- [ ] Install + audit agree on symlinked targets in both default and
+- [x] Install + audit agree on symlinked targets in both default and
   `--force` modes; the permanent-audit-failure scenario is gone.
-- [ ] Full battery green: unittest suite, 100% coverage on install.py,
-  full-check, shellcheck.
+  (Behavioral test: symlinked byte-identical target → exit 2
+  symlink-conflict; --force → regular file; audit exit 0. Scope:
+  symlinks resolving to regular files — broken/non-file symlinks keep
+  the pre-existing fatal fail-closed path.)
+- [x] Full battery green: 300 tests, coverage --fail-under=100 on
+  install.py (894 stmts, 0 miss), full-check exit 0, CI green on
+  3.10/3.13. Shipped as PR #50.
 
 ## Notes
 
