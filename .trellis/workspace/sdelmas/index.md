@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 41
+- **Total Sessions**: 42
 - **Last Active**: 2026-07-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1674 | Active |
+| `journal-1.md` | ~1712 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 42 | 2026-07-06 | Create architecture follow-up task PR | `1a8a950`, `c0a70bc` | `codex/add-architecture-followup-tasks` |
 | 41 | 2026-07-06 | Harden housekeeping failure reports | `4997343` | `codex/harden-housekeeping-report` |
 | 40 | 2026-07-06 | Normalize KB agents filenames | `76d18c8` | `codex/install-audit-provenance-version` |
 | 39 | 2026-07-06 | Resolve PR 43 review loop | `b883ba4`, `e2a3e11`, `0836c88` | `codex/install-audit-provenance-version` |
