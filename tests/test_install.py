@@ -2250,6 +2250,23 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".zcode/commands/sd/start.md").is_file())
 
+    def test_entry_script_runs_via_symlink(self) -> None:
+        link_dir = Path(tempfile.mkdtemp(prefix="sd-install-symlink-"))
+        self.addCleanup(shutil.rmtree, link_dir, True)
+        link = link_dir / "install.py"
+        link.symlink_to(INSTALLER)
+
+        result = subprocess.run(
+            [sys.executable, str(link), "--version"],
+            cwd=link_dir,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("sd-ai-command-pack", result.stdout)
+
     def test_install_prints_platform_note_for_manifest_less_platform(self) -> None:
         root = self.make_repo()
         result = self.run_install(root, "--platform", "codex")
