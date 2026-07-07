@@ -39,12 +39,11 @@ skipped     .github/prompts/sd-review-pr.prompt.md (active Trellis github instal
 - Print backup paths created by `--force --backup`.
 - Print `preserved` for `.prism/rules.json` when existing repo-local rules
   differ from the pack template; do this with or without `--force`.
-- Print `legacy-conflict` for old `/trellis:*` adapter files that differ from
-  known pack templates and need `--force` before removal.
-- Print `obsolete-conflict` for old pack-owned adapter paths that moved and
-  differ from known pack templates, such as nested OpenCode `sd/<command>.md`
-  files or the old `docs/TRELLIS_REVIEW_PR_PACK.md` guide.
-- Print conflict paths and the exact retry hint.
+- Print `symlink-conflict` for targets occupied by a symlink; the pack
+  installs regular files only (see manifest-and-filesystem.md).
+- Print conflict paths and the exact retry hint. Legacy and obsolete
+  artifacts are not install statuses; the install audit warns about them
+  (Legacy And Obsolete Artifact Advisories in manifest-and-filesystem.md).
 - Print `git diff --check` output when that validation fails.
 
 ## What NOT to Log

@@ -19,9 +19,24 @@ remain easy to audit because it writes files into other repositories.
 - Do not duplicate platform install rules in several places; update
   `manifest.json` and let `selected_files()` apply the rules.
 - Do not replace structured parsing with ad hoc string parsing for JSON.
-- Do not preserve edited legacy `/trellis:*` adapter files with a separate keep
-  status; report them as conflicts by default and remove them when `--force` is
-  set.
+- Do not reintroduce install-time legacy or obsolete cleanup in `install.py`;
+  legacy artifacts are advisory-only, reported by the install audit's
+  `LEGACY_PACK_PATHS` / `LEGACY_PACK_REFERENCES` scans (see
+  manifest-and-filesystem.md, Legacy And Obsolete Artifact Advisories).
+
+## Silent Paths Must Say Why
+
+Adopted 2026-07-06. Any code path that intentionally does nothing must print a
+one-line reason: a skipped platform install, a no-op refresh, an empty scan,
+a disabled or short-circuited gate. Silence is indistinguishable from success
+and from breakage. The 2026-07-06 deep review found four independent defects
+of this shape (silent marker-miss adapter skips, a review gate exiting 0 via
+symlink without running, a learnings scan reporting OK after scanning
+nothing, CI staying green over skipped tests).
+
+- Good: `warn "No changed files remain after standard review-scan exclusions; skipping Gito review."`
+- Bad: `return 0` out of a gate because a tool or input was missing, with no
+  output.
 
 ## Required Patterns
 

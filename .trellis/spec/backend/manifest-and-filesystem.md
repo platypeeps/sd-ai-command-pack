@@ -366,36 +366,36 @@ tracked `.gitignore`.
    Correct: .obsidian-kb/Backend Specs/index.md contains the copied backend spec bytes
    ```
 
-## Legacy Adapter Cleanup
+## Legacy And Obsolete Artifact Advisories
 
-When installing `sd` adapter files, remove old pack-generated `/trellis:*`
-adapter files whose content still matches a known pack template variant. If a
-legacy adapter path exists with other file content, report `legacy-conflict`
-and leave it untouched unless `--force` is supplied. With `--force`, remove the
-legacy file or symlink so the `sd` replacement becomes the only pack-owned
-adapter. Do not introduce a separate keep status for legacy adapter files.
-Validate the resolved parent directory before inspecting or unlinking legacy
-adapter paths, but do not resolve the final path when it is a symlink slated for
-conflict reporting or removal; unlinking the symlink itself is safe when its
-parent remains inside the target repo.
+Since pack 0.4.0 the installer performs no legacy or obsolete cleanup: the
+`legacy-conflict` and `obsolete-conflict` install statuses no longer exist,
+and `install.py` never removes, renames, or conflict-reports old pack
+artifacts. Cleanup responsibility lives in the install audit, which emits
+advisory warnings (never failures) when known legacy or obsolete artifacts
+remain in a consumer repo:
+
+- legacy `trellis-*` and `sd-refresh-specs` adapter, skill, and script names
+  replaced by their `sd-*` equivalents
+- the pack rename family: `docs/TRELLIS_REVIEW_PR_PACK.md` replaced by
+  `docs/SD_AI_COMMAND_PACK.md`, old generated `sd-command-pack-*` script
+  filenames replaced by the canonical `sd-ai-command-pack-*` names, and the
+  OpenCode nested `.opencode/commands/sd/` command layout replaced by flat
+  `sd-<command>` files
+- stale references to those legacy names inside repo docs, configs, and
+  scripts (boundary-aware substring scan)
+
+Consumers remove flagged artifacts manually; the audit keeps warning until
+they do, and the warnings never block an otherwise clean audit. Do not
+reintroduce install-time cleanup in `install.py`; if automatic removal is ever
+needed again, design it as manifest-driven data (old path plus known template
+hashes), not hardcoded paths.
 
 Reference files:
 
-- `install.py`, `install_file()`
-- `tests/test_install.py`, `test_conflict_requires_force`
-- `tests/test_install.py`, `test_dry_run_does_not_write_files`
-
-## Obsolete Adapter Cleanup
-
-When a pack-owned adapter path moves for platform-discovery reasons, remove the
-old generated target if it still matches a known pack template variant. If the
-old target contains custom content, report `obsolete-conflict` and leave it
-untouched unless `--force` is supplied. This currently protects the OpenCode
-move from nested `.opencode/commands/sd/<command>.md` files to flat
-`.opencode/commands/sd-<command>.md` files, the pack rename from
-`docs/TRELLIS_REVIEW_PR_PACK.md` to `docs/SD_AI_COMMAND_PACK.md`, and old
-generated `sd-command-pack-*` script filenames replaced by the canonical
-`sd-ai-command-pack-*` names.
+- `scripts/sd-ai-command-pack-install-audit.py`, `LEGACY_PACK_PATHS`
+- `scripts/sd-ai-command-pack-install-audit.py`, `LEGACY_PACK_REFERENCES`
+- `tests/test_install.py`, `test_install_audit_warns_about_legacy_pack_names`
 
 ## Anti-Patterns
 
