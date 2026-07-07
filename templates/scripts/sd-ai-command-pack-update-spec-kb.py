@@ -271,6 +271,13 @@ def is_excluded(path: Path) -> bool:
     parts = path.parts
     if any(part in EXCLUDED_PARTS for part in parts):
         return True
+    # Trellis runtime and backup artifacts must never feed KB source
+    # discovery; durable .trellis knowledge (spec/tasks/workflow) stays
+    # eligible through the path-aware checks below.
+    if any(part.startswith(".backup-") or part == ".runtime" for part in parts):
+        return True
+    if parts[:1] == (".trellis",) and "worktrees" in parts[1:]:
+        return True
     return len(parts) >= 2 and parts[0] == ".trellis" and parts[1] == "workspace"
 
 
