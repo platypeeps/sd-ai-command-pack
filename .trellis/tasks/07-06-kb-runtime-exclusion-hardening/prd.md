@@ -8,7 +8,9 @@ Exclude Trellis runtime and backup artifacts from Obsidian KB source discovery s
 
 The Obsidian KB updater currently scans useful repo documentation, but its Trellis exclusion logic only skips generic excluded parts and `.trellis/workspace`. A local Trellis backup directory was discovered during review:
 
-- `.trellis/.backup-2026-07-06T01-42-40/.agents/skills/trellis-meta/references/platform-files/agents.md`
+- a gitignored local `.trellis/.backup-<timestamp>/` tree (observed as
+  `.backup-2026-07-06T01-42-40`) containing a copy of
+  `trellis-meta/references/platform-files/agents.md`
 
 That backup copy mapped into the generated KB as `Other Documentation/agents.md`, causing:
 

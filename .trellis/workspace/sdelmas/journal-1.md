@@ -1718,3 +1718,42 @@ Created five Trellis planning tasks from the architecture/code review findings, 
 
 - Merge PR #45 when ready.
 - Start with the KB runtime-exclusion hardening task as the highest-value follow-up.
+
+
+## Session 43: Deep review task backlog PR
+
+**Date**: 2026-07-06
+**Task**: Deep review task backlog PR
+**Branch**: `codex/deep-review-trellis-task-backlog`
+
+### Summary
+
+Ran a seven-agent deep architectural/code/testing/docs/tooling review of the pack, cross-checked findings against the archived Trellis task history, and published the resulting backlog as PR #46. Created 19 new planning tasks (4 verified P1 bugs, 10 P2 architecture/robustness/testing tasks, 5 P3 docs/tooling/process tasks), dropped one planned task as a duplicate of PR #45's partition-pack-test-suite and enriched that PRD instead, and cross-referenced the platform-registry task with installer-module-decomposition. Local full-check surfaced three doc-path preflight failures (proposed lib path, slash-joined platform list, PR #45's local backup path) which were fixed and pushed. Copilot reviewed all 78 files with zero comments; CI green on both matrix legs.
+
+### Main Changes
+
+- Added 19 Trellis planning task directories under .trellis/tasks/07-06-* capturing deep-review findings with full PRDs
+- Enriched 07-06-partition-pack-test-suite PRD with test-count invariance, pytest node-id caveat, and spec layout update; removed duplicate split-test-install-monolith task before commit
+- Fixed three preflight doc-path failures in PRDs (dedupe-shared-shell-helpers, introduce-platform-registry, kb-runtime-exclusion-hardening)
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `31bd7f9` | chore: add deep-review task backlog from architecture and code audit |
+| `de60b45` | fix: address local review feedback |
+
+### Testing
+
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh passes (preflight 0 failures)
+- [OK] PR #46 CI green: unittest 3.10 + 3.13, security lane, CI Result
+- [OK] Copilot review round 1 on head de60b45: 78/78 files reviewed, no comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #46, then start the four P1 tasks (pr-body-scope wildcard fix, bash 3.2 guard, installer file modes, installer symlink contract)
