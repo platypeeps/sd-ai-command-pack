@@ -728,9 +728,12 @@ test -x "$BREW_PYTHON" || BREW_PYTHON=/usr/local/bin/python3  # Intel Homebrew
 "$BREW_PYTHON" -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements-dev.txt
-COVERAGE_PROCESS_START=.coveragerc python -m coverage run --parallel-mode -m unittest discover -s tests
+COVERAGE_PROCESS_START="$(pwd)/.coveragerc" COVERAGE_FILE="$(pwd)/.coverage" \
+  PYTHONPATH="$(pwd)/tests/coverage_sitecustomize" \
+  python -m coverage run --parallel-mode -m unittest discover -s tests
 python -m coverage combine
-python -m coverage report --fail-under=100
+python -m coverage report --include="install.py,installer/*" --fail-under=100
+python -m coverage report --include="scripts/sd-ai-command-pack-*" --fail-under=76
 ```
 
 The `--fail-under=100` gate measures `install.py` (the installer logic) only;

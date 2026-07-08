@@ -6,6 +6,8 @@
 include =
     install.py
     installer/*
+    scripts/sd-ai-command-pack-*.py
+    */scripts/sd-ai-command-pack-*.py
 parallel = True
 branch = True
 
@@ -15,6 +17,12 @@ branch = True
 entry =
     install.py
     */install.py
+# Shipped helper scripts execute as installed copies inside temp consumer
+# repos (and as templates/scripts twins); map every copy back onto the
+# canonical scripts/ source. Twins are byte-identical so line numbers align.
+helper_scripts =
+    scripts/
+    */scripts/
 
 [report]
 show_missing = True

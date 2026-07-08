@@ -42,13 +42,22 @@ jobs:
         run: python3 -m pip install -r requirements-dev.txt
 
       - name: Run tests
-        run: COVERAGE_PROCESS_START=.coveragerc python3 -m coverage run --parallel-mode -m unittest discover -s tests
+        # Absolute env paths so subprocesses launched from temp cwds still
+        # load the config and write their shards where combine finds them.
+        run: >-
+          COVERAGE_PROCESS_START="$(pwd)/.coveragerc"
+          COVERAGE_FILE="$(pwd)/.coverage"
+          PYTHONPATH="$(pwd)/tests/coverage_sitecustomize"
+          python3 -m coverage run --parallel-mode -m unittest discover -s tests
 
       - name: Combine coverage data
         run: python3 -m coverage combine
 
-      - name: Report coverage
-        run: python3 -m coverage report --fail-under=100
+      - name: Report installer coverage (gate 100%)
+        run: python3 -m coverage report --include="install.py,installer/*" --fail-under=100
+
+      - name: Report shipped-scripts coverage (gate 76%)
+        run: python3 -m coverage report --include="scripts/sd-ai-command-pack-*" --fail-under=76
 
   security:
     runs-on: ubuntu-latest

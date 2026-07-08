@@ -3,7 +3,7 @@
   "name": "measure-scripts-coverage",
   "title": "Measure coverage for shipped scripts Python helpers",
   "description": "About 3.8k lines of scripts/*.py have behavioral tests but no measured coverage number.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
