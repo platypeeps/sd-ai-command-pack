@@ -3,7 +3,7 @@
   "name": "housekeeping-recorder-robustness",
   "title": "Robustness fixes for housekeeping, recorder, learnings, and KB scripts",
   "description": "Fail-open clean-tree check, remote arg hardening, null default branch, recorder status parsing, learnings AttributeError and marker injection, KB exit 0 on conflicts.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

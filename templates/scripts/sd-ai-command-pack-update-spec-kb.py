@@ -1415,7 +1415,11 @@ def refresh(root: Path) -> int:
         overview_state=overview_state,
         conflicts=conflicts,
     )
-    return 0
+    # Exit 3: refresh completed but some entries could not be brought
+    # current (user-owned symlinks, occupied non-files, dashboard
+    # collisions). Automation must not read a partially-stale KB as
+    # success; 1 stays --check-stale and 2 stays hard errors.
+    return 3 if conflicts else 0
 
 
 def main(argv: list[str] | None = None) -> int:

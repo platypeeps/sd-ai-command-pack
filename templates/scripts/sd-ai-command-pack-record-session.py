@@ -79,9 +79,20 @@ def current_git_branch() -> str | None:
 
 def modified_workspace_journals() -> list[Path]:
     result = run_git("status", "--porcelain", "--", WORKSPACE)
+    if result.returncode != 0:
+        detail = (result.stdout or "").strip()
+        suffix = f": {detail}" if detail else ""
+        raise SystemExit(f"error: git status failed for {WORKSPACE}{suffix}")
     journals = []
     for line in result.stdout.splitlines():
         path_text = line[3:].strip()
+        # Rename entries are reported as "old -> new"; the journal we care
+        # about is the current (new) path.
+        if " -> " in path_text:
+            path_text = path_text.split(" -> ", 1)[1]
+        # core.quotePath wraps non-ASCII paths in double quotes.
+        if path_text.startswith('"') and path_text.endswith('"'):
+            path_text = path_text[1:-1]
         if path_text.endswith(".md") and "/journal-" in path_text:
             journals.append(Path(path_text))
     return journals

@@ -103,6 +103,10 @@ class PullRequestComment:
     def markdown_item(self) -> str:
         state = "current" if not self.is_resolved and not self.is_outdated else "historical"
         body = _one_line(self.body, limit=220)
+        # Comment bodies are untrusted: an embedded managed marker would
+        # splice the managed block on the next update.
+        body = body.replace(MANAGED_START, "[managed-start marker removed]")
+        body = body.replace(MANAGED_END, "[managed-end marker removed]")
         return f"- **{state}** PR #{self.pr_number} `{self.path}`: {body} ({self.pr_url})"
 
 
@@ -640,6 +644,8 @@ query($owner:String!, $name:String!, $number:Int!) {
             ],
             repo_root,
         )
+        if not isinstance(payload, dict):
+            continue
         data = payload.get("data")
         if not isinstance(data, dict):
             continue
@@ -817,9 +823,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.diff_from is not None:
             diff_text = args.diff_from.read_text(encoding="utf-8", errors="replace")
         else:
+            resolved_base = args.base or default_base_ref(repo_root)
+            if not resolved_base and not args.include_working_tree:
+                print(
+                    "[sd-review-learnings:scan] no base ref could be "
+                    "resolved (no origin/HEAD, upstream, or remote refs); "
+                    "nothing was scanned",
+                    file=sys.stderr,
+                )
             diff_text = build_local_diff(
                 repo_root,
-                base=args.base,
+                base=resolved_base or None,
                 include_working_tree=args.include_working_tree,
             )
         findings = extract_findings(diff_text, repo_root, env_prefixes=env_prefixes)
