@@ -497,7 +497,10 @@ maps, and project manifests rather than by source folder name.
 `LLM-KB - <repo>.md` is a generated, self-contained overview for LLM and
 Obsidian indexing. If a
 user-owned file already exists at either generated path, the helper leaves it
-untouched and reports a conflict. Run
+untouched and reports a conflict. Exit codes: `0` clean, `1` for `--check`
+staleness, `2` for hard errors, and `3` when a refresh completes but reports
+conflicts it could not bring current — automation should treat `3` as
+"KB partially stale", not success. Run
 `python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run` to preview the
 refresh without writes, `--check` to verify the generated folder and ignore
 entry are current, or `--help` for the safe CLI summary.

@@ -59,9 +59,16 @@ Update-spec-kb (`scripts/sd-ai-command-pack-update-spec-kb.py`):
 
 ## Acceptance Criteria
 
-- [ ] Each of the eight scenarios has a test demonstrating the fixed
-  behavior (fail-closed, hardened, or explicit-notice as applicable).
-- [ ] Full battery green; template twins byte-identical.
+- [x] Each of the eight scenarios has a test demonstrating the fixed
+  behavior: fail-closed clean check (awk-extracted real function under a
+  failing git stub), dash-remote rejection, gh-null default-branch
+  fallback, recorder git-failure + rename parsing, learnings non-object
+  payload tolerance, managed-marker neutralization, no-base-ref notice,
+  and KB refresh exit 3 on conflicts (one pre-existing test pinning the
+  old silent-success exit 0 updated to the corrected contract).
+- [x] Full battery green: 333 tests, installer gate 100% lines+branches,
+  scripts gate raised past baseline (78%), full-check exit 0; all four
+  script twins byte-identical. Shipped as PR #60.
 
 ## Notes
 

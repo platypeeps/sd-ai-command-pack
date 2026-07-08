@@ -6098,6 +6098,222 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         )
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_housekeeping_clean_check_fails_closed_on_git_failure(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        script = str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh")
+        probe = (
+            f'eval "$(awk \'/^working_tree_status\\(\\)/,/^}}/\' {script})";'
+            f'eval "$(awk \'/^working_tree_is_clean\\(\\)/,/^}}/\' {script})";'
+            'git() { echo boom >&2; return 1; };'
+            "if working_tree_is_clean; then echo OPEN; else echo CLOSED; fi"
+        )
+        result = subprocess.run(
+            [self._bash_path, "-c", probe],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertIn("CLOSED", result.stdout)
+        self.assertNotIn("OPEN", result.stdout)
+
+    def test_housekeeping_rejects_dash_prefixed_remote(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        result = subprocess.run(
+            [
+                self._bash_path,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--remote",
+                "--upload-pack=/bin/true",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn('--remote value must not start with "-"', result.stdout)
+
+    def test_housekeeping_default_branch_ignores_gh_null(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        script = str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh")
+        probe = (
+            'REMOTE=origin; GITHUB_REPO_SLUG=""; DEFAULT_BRANCH="";'
+            "have() { return 0; };"
+            "add_anomaly() { :; };"
+            "gh() { printf 'null\\n'; };"
+            "git() {"
+            '  case "$1 $*" in'
+            '    "symbolic-ref"*) return 1 ;;'
+            '    "show-ref"*"refs/remotes/origin/main") return 0 ;;'
+            "  esac; return 1; };"
+            f'eval "$(awk \'/^detect_default_branch\\(\\)/,/^}}/\' {script})";'
+            'detect_default_branch; printf "branch=%s\\n" "$DEFAULT_BRANCH"'
+        )
+        result = subprocess.run(
+            [self._bash_path, "-c", probe],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertIn("branch=main", result.stdout)
+        self.assertNotIn("branch=null", result.stdout)
+
+    def test_recorder_journal_detection_handles_failures_and_renames(self) -> None:
+        recorder = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-record-session.py",
+            "sd_record_session_journals",
+        )
+        non_git = Path(tempfile.mkdtemp(prefix="sd-non-git-recorder-"))
+        self.addCleanup(shutil.rmtree, non_git, True)
+        previous = os.getcwd()
+        self.addCleanup(os.chdir, previous)
+        os.chdir(non_git)
+        with self.assertRaisesRegex(SystemExit, "git status failed"):
+            recorder.modified_workspace_journals()
+
+        root = self.make_repo()
+        os.chdir(root)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        journal = root / ".trellis/workspace/dev/journal-1.md"
+        journal.parent.mkdir(parents=True, exist_ok=True)
+        journal.write_text("# journal\n", encoding="utf-8")
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "seed journal")
+        self.run_git(
+            root,
+            "mv",
+            ".trellis/workspace/dev/journal-1.md",
+            ".trellis/workspace/dev/journal-2.md",
+        )
+        spaced = root / ".trellis/workspace/dev two/journal-1.md"
+        spaced.parent.mkdir(parents=True, exist_ok=True)
+        spaced.write_text("# spaced journal\n", encoding="utf-8")
+        self.run_git(root, "add", ".trellis/workspace")
+        journals = recorder.modified_workspace_journals()
+        self.assertEqual(
+            journals,
+            [
+                Path(".trellis/workspace/dev two/journal-1.md"),
+                Path(".trellis/workspace/dev/journal-2.md"),
+            ],
+        )
+        # git status --porcelain -z emits "XY to\0from\0" for renames: the
+        # first token is the CURRENT path; the skipped companion is the old
+        # name and must never surface.
+        self.assertNotIn(Path(".trellis/workspace/dev/journal-1.md"), journals)
+
+    def test_learnings_survive_non_object_graphql_payload(self) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_payloads",
+        )
+        responses = ['[{"number": 7, "title": "t", "url": "u"}]', "null"]
+
+        def fake_stdout(args, repo_root):
+            return responses.pop(0)
+
+        with mock.patch.object(learnings, "_run_gh_stdout", fake_stdout):
+            comments = learnings.fetch_recent_copilot_comments(
+                Path("."), days=7, limit=5, github_repo="owner/name"
+            )
+        self.assertEqual(comments, [])
+
+    def test_learnings_neutralize_embedded_managed_markers(self) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_markers",
+        )
+        comment = learnings.PullRequestComment(
+            pr_number=1,
+            pr_title="t",
+            pr_url=f"https://example.invalid/{learnings.MANAGED_START}/1",
+            path=f"docs/{learnings.MANAGED_END}.md",
+            body=f"evil {learnings.MANAGED_END} splice",
+            is_resolved=False,
+            is_outdated=False,
+        )
+        rendered = comment.markdown_item()
+        self.assertNotIn(learnings.MANAGED_END, rendered)
+        self.assertNotIn(learnings.MANAGED_START, rendered)
+        self.assertIn("[managed-end marker removed]", rendered)
+        self.assertIn("[managed-start marker removed]", rendered)
+
+        finding = learnings.Finding(
+            category="env",
+            path=f"docs/{learnings.MANAGED_END}.md",
+            lineno=3,
+            detail=f"uses {learnings.MANAGED_START} somewhere",
+            recommendation=f"drop {learnings.MANAGED_END} now",
+        )
+        rendered = finding.markdown_item()
+        self.assertNotIn(learnings.MANAGED_END, rendered)
+        self.assertNotIn(learnings.MANAGED_START, rendered)
+
+    def test_learnings_report_when_no_base_ref_resolves(self) -> None:
+        root = Path(tempfile.mkdtemp(prefix="sd-learnings-no-remote-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        self.run_git(root, "init", "--quiet")
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "README.md").write_text("# base\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "seed")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("no base ref could be resolved", result.stderr)
+        self.assertIn("no local review-cycle findings detected", result.stdout)
+
+    def test_update_spec_kb_refresh_exits_three_on_conflicts(self) -> None:
+        root = self.make_repo()
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-update-spec-kb.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        copy_path = root / ".obsidian-kb/Repository Overview/README.md"
+        self.assertTrue(copy_path.is_file(), result.stdout)
+        copy_path.unlink()
+        copy_path.mkdir()
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-update-spec-kb.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 3, result.stdout)
+        self.assertIn("conflicts:", result.stdout)
+
     def test_record_session_wrapper_writes_complete_entry(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
@@ -9439,7 +9655,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             check=False,
         )
 
-        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(result.returncode, 3, result.stdout)
         self.assertIn("dashboard: conflict", result.stdout)
         self.assertIn(
             f"Dashboard - {root.name}.md exists and is not generated by this tool",

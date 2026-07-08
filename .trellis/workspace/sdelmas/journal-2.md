@@ -338,3 +338,42 @@ Implemented Trellis task 07-06-audit-installer-reporting-fixes: six operator-fac
 ### Next Steps
 
 - Final task of the set: housekeeping-recorder-robustness
+
+
+## Session 59: Helper robustness bundle
+
+**Date**: 2026-07-08
+**Task**: Helper robustness bundle
+**Branch**: `codex/housekeeping-recorder-robustness`
+
+### Summary
+
+Implemented Trellis task 07-06-housekeeping-recorder-robustness, closing the five-task set. Eight fail-open/silent-degrade defects fixed across four shipped helpers: housekeeping's clean-tree check fails closed on git failures, dash-prefixed --remote values are rejected and the SC2295 expansion quoted, gh's literal null no longer short-circuits default-branch detection; the recorder raises a clean error on git status failures and parses renames via porcelain -z (round-1 feedback replaced quote-stripping with NUL parsing, and round-3's order concern was rebutted with the passing git-mv regression plus an explicit negative assertion); learnings tolerate non-object GraphQL payloads, neutralize managed markers in every rendered field including Finding entries (round-2 caught the parallel surface), and say why when no base ref resolves; KB refresh exits 3 on conflicts with exit codes documented (two pre-existing tests pinning old silent-success behavior updated). Five Copilot rounds closing clean at the limit. Shipped as PR #60.
+
+### Main Changes
+
+- Fixed eight robustness defects across housekeeping, record-session, review-learnings, and update-spec-kb (all twins byte-identical)
+- Added eight-plus regression tests including awk-extracted shell probes and all-field marker injection coverage
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7784cd6` | fix: robustness bundle for housekeeping, recorder, learnings, and KB scripts |
+| `465fcdb` | fix: address review feedback |
+| `67d5fb6` | fix: address review feedback round 2 |
+| `721fb5a` | fix: address review feedback round 3 |
+| `3a5fec0` | fix: address review feedback round 4 |
+
+### Testing
+
+- [OK] 333 tests green; installer gate 100 percent; scripts gate 78 percent; housekeeping self-test green; shellcheck clean; full-check exit 0; CI green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Five-task set complete; remaining backlog is docs/tooling/process plus the fleet-loop and preflight-mjs tasks
