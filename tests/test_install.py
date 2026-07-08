@@ -1729,6 +1729,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(provenance_path.read_text(encoding="utf-8"), "{}\n")
 
         receipt_path = root / str(install.INSTALLED_TARGETS_FILE)
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
         receipt_path.write_text("stale-entry\n", encoding="utf-8")
         result = install.install_installed_targets_file([], root, dry_run=True)
         self.assertEqual(result.status, "updated")
