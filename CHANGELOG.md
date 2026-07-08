@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.1 - 2026-07-08
+
+- Hardened the `sd-review-pr` wait-for-review step against a remote-review race:
+  the completion signal (a reviewer request clearing / a review event) can fire
+  before the reviewer's inline review-thread comments are queryable, so an
+  immediate thread read can report a false "clean". The skill now waits a short
+  settle interval before reading threads and treats the pre-merge unresolved-thread
+  re-check (the housekeeping merge guard) as the authoritative clean check, never a
+  single post-completion read.
+
 ## 0.6.0 - 2026-07-08
 
 - Added the full-check Obsidian KB freshness lane
