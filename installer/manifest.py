@@ -63,6 +63,12 @@ def load_manifest() -> tuple[dict, list[PackFile]]:
             f"installer supports ({SUPPORTED_MANIFEST_SCHEMA_VERSION}); update "
             "the pack checkout before installing"
         )
+    requires_trellis = raw.get("requiresTrellis", True)
+    if not isinstance(requires_trellis, bool):
+        raise SystemExit(
+            "error: manifest requiresTrellis must be a boolean, got "
+            f"{requires_trellis!r}"
+        )
     files_value = raw.get("files", [])
     if not isinstance(files_value, list):
         raise SystemExit(

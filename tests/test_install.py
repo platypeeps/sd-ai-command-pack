@@ -1985,6 +1985,10 @@ class InstallTests(unittest.TestCase):
             ),
             ('{"files": ["not-an-object"]}', r"files\[0\] must be an object"),
             ("[]", "manifest must be a JSON object"),
+            (
+                '{"requiresTrellis": "yes", "files": []}',
+                "requiresTrellis must be a boolean",
+            ),
             ('{"files": null}', "'files' must be an array"),
         ]
         for index, (content, expected) in enumerate(cases):
