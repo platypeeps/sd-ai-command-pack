@@ -1700,7 +1700,7 @@ class InstallTests(unittest.TestCase):
         root = self.make_repo()
         copilot_file = next(
             file
-            for _, file in [(None, f) for f in install.load_manifest()[1]]
+            for file in self._manifest_files
             if file.kind == install.MANAGED_BLOCK_KIND
         )
         destination = root / str(install.COPILOT_INSTRUCTIONS_TARGET)
