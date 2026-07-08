@@ -1668,6 +1668,8 @@ class InstallTests(unittest.TestCase):
         gi_end = install.TRELLIS_GITIGNORE_END
         merged = install.merge_trellis_gitignore_block(f"{gi_start}\nold\n{gi_end}")
         self.assertIn(gi_end, merged)
+        self.assertNotIn("\nold\n", merged)
+        self.assertTrue(merged.startswith(gi_start))
         # Existing gitignore content without a trailing newline.
         merged = install.merge_trellis_gitignore_block("dist/")
         self.assertTrue(merged.startswith("dist/\n\n"))
@@ -1781,6 +1783,7 @@ class InstallTests(unittest.TestCase):
                             dry_run=False,
                             skip_trellis_init=False,
                         )
+        self.assertEqual(output.getvalue(), "")
 
     def test_remove_passes_clean_diff_check(self) -> None:
         root = self.make_repo()
