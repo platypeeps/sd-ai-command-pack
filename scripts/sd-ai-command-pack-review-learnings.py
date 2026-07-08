@@ -88,10 +88,15 @@ class Finding:
         return f"[sd-review-learnings:{self.category}] {location}: {self.detail}"
 
     def markdown_item(self) -> str:
+        # Same managed-block injection surface as PR comment rendering:
+        # paths and details originate from repo-controlled diff content.
         location = f"{self.path}:{self.lineno}" if self.lineno else self.path
+        location = _neutralize_managed_markers(location)
+        detail = _neutralize_managed_markers(self.detail)
+        recommendation = _neutralize_managed_markers(self.recommendation)
         return (
-            f"- **{self.category}** `{location}`: {self.detail} "
-            f"Recommendation: {self.recommendation}"
+            f"- **{self.category}** `{location}`: {detail} "
+            f"Recommendation: {recommendation}"
         )
 
 

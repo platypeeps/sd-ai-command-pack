@@ -6240,6 +6240,17 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("[managed-end marker removed]", rendered)
         self.assertIn("[managed-start marker removed]", rendered)
 
+        finding = learnings.Finding(
+            category="env",
+            path=f"docs/{learnings.MANAGED_END}.md",
+            lineno=3,
+            detail=f"uses {learnings.MANAGED_START} somewhere",
+            recommendation=f"drop {learnings.MANAGED_END} now",
+        )
+        rendered = finding.markdown_item()
+        self.assertNotIn(learnings.MANAGED_END, rendered)
+        self.assertNotIn(learnings.MANAGED_START, rendered)
+
     def test_learnings_report_when_no_base_ref_resolves(self) -> None:
         root = Path(tempfile.mkdtemp(prefix="sd-learnings-no-remote-"))
         self.addCleanup(shutil.rmtree, root, True)
