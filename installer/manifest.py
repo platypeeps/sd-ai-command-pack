@@ -34,7 +34,7 @@ KNOWN_MANIFEST_KINDS = frozenset(
         "command",
         "config",
         "doc",
-        "managed-block",
+        MANAGED_BLOCK_KIND,
         "prompt",
         "script",
         "skill",

@@ -53,7 +53,7 @@ tracebacks leak for expected user errors").
 ## Acceptance Criteria
 
 - [x] No raw traceback for any malformed-manifest scenario; each
-  prints a single actionable `error:` line and exits 1 (six-case
+  prints a single actionable `error:` line and exits 1 (table-driven
   test_load_manifest_rejects_malformed_manifests).
 - [x] Unknown `kind` can no longer clobber a consumer file under
   `--force` — validate_manifest enforces KNOWN_MANIFEST_KINDS as a
