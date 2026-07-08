@@ -416,3 +416,41 @@ Prepared the 0.6.0 release process update, added a changelog and README release 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 61: PR-body scope bot actor exemption
+
+**Date**: 2026-07-08
+**Task**: PR-body scope bot actor exemption
+**Branch**: `sdelmas/pr-body-scope-bot-actor-exemption`
+
+### Summary
+
+Reconciled the completed PR-body scope bot-actor task after PR #61 had already merged. The shipped checker now accepts an explicit or env-provided GitHub actor and skips strict PR-body scope validation for [bot]-suffixed automated authors while preserving strict behavior for humans and unspecified actors.
+
+### Main Changes
+
+- Added actor resolution to sd-ai-command-pack-pr-body-scope.py through --actor and SD_AI_COMMAND_PACK_PR_BODY_SCOPE_ACTOR with flag-over-env precedence and trimming.
+- Exempted GitHub bot logins ending in [bot] from strict PR-body scope validation so Dependabot/Renovate-style PRs are not blocked by human scope headings.
+- Updated README, installed docs, template twins, manifest version, and added focused behavioral tests for bot and human actor paths.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7238a44` | feat: exempt automated PR authors from pr-body-scope check |
+
+### Testing
+
+- [OK] PR #61 merged at 2026-07-08T19:17:48Z with CI green.
+- [OK] tests/test_pr_body_scope.py covers bot suffix matching, actor resolution precedence, bot skip behavior, and strict human/no-actor behavior.
+- [OK] Source/template parity is covered by existing pack sync tests.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
