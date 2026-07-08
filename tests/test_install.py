@@ -8128,7 +8128,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 2, result.stdout)
 
     def test_install_audit_reports_unreadable_targets_distinctly(self) -> None:
-        if os.geteuid() == 0:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
             self.skipTest("root bypasses permissions")
         root = self.make_repo()
         result = self.run_install(root)
@@ -8153,7 +8153,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         )
 
     def test_install_reports_unreadable_receipt_cleanly(self) -> None:
-        if os.geteuid() == 0:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
             self.skipTest("root bypasses permissions")
         root = self.make_repo()
         result = self.run_install(root)
