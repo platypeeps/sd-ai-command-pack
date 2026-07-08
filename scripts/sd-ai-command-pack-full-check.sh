@@ -614,10 +614,14 @@ run_pack_source_drift_gates() {
     return 0
   fi
 
-  section "Pack source drift gates: template twins and env-var docs"
-  python3 - <<'PACK_SOURCE_DRIFT_GATES'
+  section "Pack source drift gates: template twins, release version, and env-var docs"
+  local release_base_ref
+  release_base_ref="$(full_check_base_ref)"
+  SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF="${SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF:-$release_base_ref}" python3 - <<'PACK_SOURCE_DRIFT_GATES'
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -636,6 +640,120 @@ for item in manifest.get("files", []):
     if source.read_bytes() != target.read_bytes():
         errors.append(f"template drift: {target} differs from {source}")
 print(f"template twin pairs compared: {compared}")
+
+def git_output(args, *, allow_fail=False):
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except OSError as exc:
+        if allow_fail:
+            return None
+        errors.append(f"git command failed to start: git {' '.join(args)}: {exc}")
+        return None
+    if result.returncode != 0:
+        if allow_fail:
+            return None
+        detail = (result.stderr or result.stdout).strip()
+        errors.append(f"git command failed: git {' '.join(args)}: {detail}")
+        return None
+    return result.stdout
+
+
+def git_paths(args):
+    output = git_output(args, allow_fail=True)
+    if output is None:
+        return set()
+    return {line.strip() for line in output.splitlines() if line.strip()}
+
+
+def git_ref_resolves(ref):
+    if not ref:
+        return False
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+base_ref = os.environ.get("SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF", "").strip()
+changed_paths = set()
+base_resolves = git_ref_resolves(base_ref)
+if base_ref and base_resolves:
+    changed_paths |= git_paths(["diff", "--name-only", f"{base_ref}...HEAD"])
+elif base_ref:
+    print(
+        f"warning: Could not resolve {base_ref}; release version gate will use local changes only.",
+        file=sys.stderr,
+    )
+changed_paths |= git_paths(["diff", "--cached", "--name-only"])
+changed_paths |= git_paths(["diff", "--name-only"])
+
+payload_singletons = {
+    "manifest.json",
+    "docs/SD_AI_COMMAND_PACK.md",
+    "templates/docs/SD_AI_COMMAND_PACK.md",
+}
+payload_changed = sorted(
+    path
+    for path in changed_paths
+    if path.startswith("templates/") or path in payload_singletons
+)
+current_version = str(manifest.get("version", "")).strip()
+base_version = None
+if base_ref and base_resolves:
+    base_manifest = git_output(["show", f"{base_ref}:manifest.json"], allow_fail=True)
+    if base_manifest is not None:
+        try:
+            base_version = str(json.loads(base_manifest).get("version", "")).strip()
+        except json.JSONDecodeError:
+            base_version = None
+
+if base_version is not None:
+    version_bumped = bool(current_version and current_version != base_version)
+else:
+    manifest_diff = "\n".join(
+        output
+        for output in (
+            git_output(["diff", "--cached", "--", "manifest.json"], allow_fail=True),
+            git_output(["diff", "--", "manifest.json"], allow_fail=True),
+        )
+        if output
+    )
+    version_bumped = bool(re.search(r'(?m)^[+-]\s*"version"\s*:', manifest_diff))
+
+if payload_changed:
+    preview = ", ".join(payload_changed[:8])
+    if len(payload_changed) > 8:
+        preview += f", ... ({len(payload_changed)} total)"
+    if not version_bumped:
+        if base_version is None:
+            version_detail = "manifest version change was not visible in the current diff"
+        else:
+            version_detail = (
+                f"manifest version stayed at {current_version!r} relative to {base_ref}"
+            )
+        errors.append(
+            "release version drift: shipped payload changed without manifest "
+            f"version bump ({preview}); {version_detail}"
+        )
+    elif base_version is None:
+        print("release version gate: shipped payload changed and manifest version diff was detected")
+    else:
+        print(
+            "release version gate: shipped payload changed; "
+            f"manifest version {base_version} -> {current_version}"
+        )
+else:
+    print("release version gate: no shipped payload changes detected")
 
 var_re = re.compile(r"SD_AI_COMMAND_PACK_[A-Z0-9_]+")
 exempt = {

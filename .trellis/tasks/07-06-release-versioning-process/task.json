@@ -3,7 +3,7 @@
   "name": "release-versioning-process",
   "title": "Establish release tagging and changelog process",
   "description": "Zero git tags across 28 releases; release-commit convention lapsed; consumers lack an auditable version anchor.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
