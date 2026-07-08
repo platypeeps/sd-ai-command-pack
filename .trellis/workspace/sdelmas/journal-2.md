@@ -377,3 +377,42 @@ Implemented Trellis task 07-06-housekeeping-recorder-robustness, closing the fiv
 ### Next Steps
 
 - Five-task set complete; remaining backlog is docs/tooling/process plus the fleet-loop and preflight-mjs tasks
+
+
+## Session 60: Release versioning process
+
+**Date**: 2026-07-08
+**Task**: Release versioning process
+**Branch**: `codex/release-0.6.0`
+
+### Summary
+
+Prepared the 0.6.0 release process update, added a changelog and README release instructions, and introduced a full-check guard that requires manifest version bumps for shipped payload changes.
+
+### Main Changes
+
+- Bumped sd-ai-command-pack manifest to 0.6.0 and started CHANGELOG.md with the accumulated shipped payload changes.
+- Documented the release sequence, post-merge tagging, and fleet refresh expectations in README.md.
+- Added and tested a pack-source full-check guard that detects shipped payload changes without a manifest version bump.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `deb4b5d` | chore: release sd-ai-command-pack 0.6.0 |
+
+### Testing
+
+- [OK] Focused release guard tests passed.
+- [OK] Full unit suite passed: 344 tests.
+- [OK] Coverage gates passed: installer 100%, shipped Python helpers 79% over the 76% floor.
+- [OK] Full-check passed with Prism and Gito disabled; GitHub PR checks passed for PR #62.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
