@@ -3,7 +3,7 @@
   "name": "enable-branch-coverage",
   "title": "Enable branch coverage in the install.py gate",
   "description": "The 100 percent gate is line-only; branch=True reveals 16 partial branches, several in remove mode.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

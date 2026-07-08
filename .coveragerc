@@ -7,6 +7,7 @@ include =
     install.py
     installer/*
 parallel = True
+branch = True
 
 [paths]
 # The symlink-execution test runs the entry through a temp-dir symlink;
