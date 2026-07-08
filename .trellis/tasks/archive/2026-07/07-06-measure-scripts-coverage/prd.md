@@ -30,10 +30,21 @@ but "focused tests exist" is not "coverage is known".
 
 ## Acceptance Criteria
 
-- [ ] CI prints per-file coverage for all five shipped Python helpers.
-- [ ] A threshold (even provisional) is enforced for scripts coverage,
-  or an explicit follow-up ratchet plan is recorded in the PRD.
-- [ ] Full battery green on both matrix legs.
+- [x] CI prints per-file coverage for all five shipped Python helpers
+  (dedicated report step). Wiring fix discovered en route: subprocess
+  collection silently no-oped whenever a test set cwd to a temp repo,
+  because the relative COVERAGE_PROCESS_START resolved against the
+  subprocess cwd and shards were written there and destroyed — the
+  invocation now uses absolute COVERAGE_PROCESS_START/COVERAGE_FILE
+  plus runner-level PYTHONPATH so every subprocess is collected.
+- [x] A threshold is enforced: provisional --fail-under=76 (measured
+  truthful baseline; per-file: audit 95, pr-body-scope 76,
+  record-session 74, update-spec-kb 81, review-learnings 58). The
+  installer gate stays independent at 100 (lines+branches). Ratchet
+  plan: raise the floor as the robustness tasks add script tests;
+  review-learnings is the priority laggard.
+- [x] Full battery green on both matrix legs (CI); locally 319 tests,
+  both report gates pass, full-check exit 0. Shipped as PR #58.
 
 ## Notes
 
