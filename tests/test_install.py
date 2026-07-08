@@ -648,6 +648,50 @@ class InstallTests(unittest.TestCase):
             check=False,
         )
 
+    def make_pack_source_fixture(self) -> Path:
+        root = self.make_git_repo_without_trellis()
+        for dirname in ("templates", "scripts", "docs"):
+            shutil.copytree(PACK_ROOT / dirname, root / dirname)
+        shutil.copyfile(PACK_ROOT / "manifest.json", root / "manifest.json")
+        (root / "install.py").write_text("# source repo marker\n", encoding="utf-8")
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        return root
+
+    def run_pack_source_drift_gates(
+        self,
+        root: Path,
+        *,
+        extra_env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        env = {
+            **os.environ,
+            "SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE": "1",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF": "HEAD",
+        }
+        if extra_env:
+            env.update(extra_env)
+        return subprocess.run(
+            [
+                self._bash_path,
+                "-c",
+                "source scripts/sd-ai-command-pack-full-check.sh; "
+                "if [ -n \"${SD_AI_COMMAND_PACK_FULL_CHECK_TEST_RUNTIME_PATH:-}\" ]; "
+                "then PATH=\"$SD_AI_COMMAND_PACK_FULL_CHECK_TEST_RUNTIME_PATH\"; fi; "
+                "run_pack_source_drift_gates",
+            ],
+            cwd=root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
     def installer_subprocess_env(self) -> dict[str, str] | None:
         if "COVERAGE_PROCESS_START" not in os.environ:
             return None
@@ -10851,8 +10895,103 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
 
         self.assertIn("run_pack_source_drift_gates", script)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT", script)
+        self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF", script)
         self.assertIn("template twin pairs compared", script)
+        self.assertIn("release version drift", script)
         self.assertIn("undocumented env var", script)
+
+    def test_pack_source_drift_gate_rejects_payload_without_version_bump(
+        self,
+    ) -> None:
+        root = self.make_pack_source_fixture()
+        for relative in (
+            "templates/scripts/sd-ai-command-pack-housekeeping.sh",
+            "scripts/sd-ai-command-pack-housekeeping.sh",
+        ):
+            path = root / relative
+            path.write_text(
+                path.read_text(encoding="utf-8") + "\n# release gate fixture\n",
+                encoding="utf-8",
+            )
+
+        result = self.run_pack_source_drift_gates(root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("release version drift", result.stdout)
+        self.assertIn(
+            "shipped payload changed without manifest version bump",
+            result.stdout,
+        )
+
+    def test_pack_source_drift_gate_accepts_payload_with_version_bump(
+        self,
+    ) -> None:
+        root = self.make_pack_source_fixture()
+        for relative in (
+            "templates/scripts/sd-ai-command-pack-housekeeping.sh",
+            "scripts/sd-ai-command-pack-housekeeping.sh",
+        ):
+            path = root / relative
+            path.write_text(
+                path.read_text(encoding="utf-8") + "\n# release gate fixture\n",
+                encoding="utf-8",
+            )
+        manifest_path = root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["version"] = "99.0.0"
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_pack_source_drift_gates(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "release version gate: shipped payload changed; manifest version",
+            result.stdout,
+        )
+
+    def test_pack_source_drift_gate_rejects_unresolved_release_base_ref(
+        self,
+    ) -> None:
+        root = self.make_pack_source_fixture()
+        path = root / "templates/scripts/sd-ai-command-pack-housekeeping.sh"
+        path.write_text(
+            path.read_text(encoding="utf-8") + "\n# release gate fixture\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "payload without release bump")
+
+        result = self.run_pack_source_drift_gates(
+            root,
+            extra_env={"SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF": "missing-ref"},
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("release version gate cannot compare", result.stdout)
+        self.assertIn("base ref 'missing-ref' does not resolve", result.stdout)
+        self.assertNotIn("Traceback", result.stdout)
+
+    def test_pack_source_drift_gate_reports_missing_git_without_traceback(
+        self,
+    ) -> None:
+        root = self.make_pack_source_fixture()
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-pack-source-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        (stub_bin / "python3").symlink_to(Path(sys.executable))
+
+        result = self.run_pack_source_drift_gates(
+            root,
+            extra_env={"SD_AI_COMMAND_PACK_FULL_CHECK_TEST_RUNTIME_PATH": str(stub_bin)},
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("git executable unavailable", result.stdout)
+        self.assertNotIn("Traceback", result.stdout)
 
     def test_review_learnings_reports_subprocess_timeout_as_setup_failure(
         self,

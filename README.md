@@ -73,6 +73,7 @@ Quick links:
 
 - [Install](#install)
 - [Verify](#verify)
+- [Releasing](#releasing)
 - [Supported Adapters](#supported-adapters)
 - [License](#license)
 
@@ -316,6 +317,7 @@ Copy-Item -Recurse -Force -Path "C:\path\to\repo\.obsidian-kb\*" -Destination "C
 | `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR` | Gito report directory for full-check. | `.build/review/gito` |
 | `SD_AI_COMMAND_PACK_INSTALL_AUDIT` | Controls structural post-install audit; unset warns and continues, `0` skips, and `required` fails when unavailable. | unset |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_KB` | Obsidian KB freshness check in full-check; `auto` checks only when `.obsidian-kb/` exists, `0` skips, `required` fails when unavailable or stale. | `auto` |
+| `SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF` | Base ref used by pack-source full-check to confirm shipped payload changes include a manifest version bump. | full-check base ref |
 | `SD_AI_COMMAND_PACK_CREATE_PR_BASE` | Base branch override for `sd-create-pr`; unset detects the GitHub default branch. | unset |
 | `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH` | Feature branch name for `sd-create-pr` when it starts on the repository default branch. | auto-derived `codex/<slug>` |
 | `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH_SLUG` | Slug source used to derive `codex/<slug>` when `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH` is unset. | unset |
@@ -746,6 +748,40 @@ behavioral tests rather than a coverage number; CI also runs
 `shellcheck -S warning` over every tracked shell script and the git hooks —
 consumers exempt the vendored pack shell from line review ("reviewed
 upstream"), so upstream lint rigor is the compensating control.
+
+## Releasing
+
+Start every release from a clean, up-to-date `main`, then create a release
+branch. Bump `manifest.json` whenever the shipped payload changes: `templates/**`,
+`docs/SD_AI_COMMAND_PACK.md`, or the manifest itself. The full-check pack-source
+drift gate fails when those files change without a manifest version bump.
+
+For docs, spec, README, or PRD edits, refresh the local KB before full-check:
+
+```bash
+python3 scripts/sd-ai-command-pack-update-spec-kb.py
+```
+
+Run the local release gate with local AI reviewers disabled unless the release
+is explicitly about Prism or Gito behavior:
+
+```bash
+SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 \
+  bash scripts/sd-ai-command-pack-full-check.sh
+```
+
+Use a conventional release commit such as
+`chore: release sd-ai-command-pack 0.6.0`, merge the PR, fast-forward `main`,
+then tag the merge/release commit:
+
+```bash
+git tag v0.6.0
+git push origin v0.6.0
+```
+
+After the tag is pushed, refresh the fleet with `install.py <repo> --force`,
+run the install audit/full-check appropriate to each target repo, and publish
+those refreshes through PRs.
 
 ## Direct-to-main Chore Commits
 

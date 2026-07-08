@@ -669,9 +669,14 @@ ephemeral tool state and do not change what the checks validate.
   or a passing check is unavailable. A stale KB fails the full check with a
   refresh hint.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT=0`: skip the pack source drift
-  gates (template twin parity and env-var documentation coverage). These gates
-  only run inside the sd-ai-command-pack source repository itself and are
-  skipped automatically in target repos.
+  gates (template twin parity, release-version coverage for shipped payload
+  changes, and env-var documentation coverage). These gates only run inside the
+  sd-ai-command-pack source repository itself and are skipped automatically in
+  target repos.
+- `SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF`: explicit base ref for the
+  pack-source release-version gate. Defaults to
+  `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then the discovered branch-diff
+  sequence above.
 - `SD_AI_COMMAND_PACK_INSTALL_AUDIT=required`: fail if the full-check cannot run
   the audit script.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS`: space-separated package scripts

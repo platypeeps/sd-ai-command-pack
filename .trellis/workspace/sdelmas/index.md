@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 59
+- **Total Sessions**: 60
 - **Last Active**: 2026-07-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~379 | Active |
+| `journal-2.md` | ~415 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 60 | 2026-07-08 | Release versioning process | `deb4b5d` | `codex/release-0.6.0` |
 | 59 | 2026-07-08 | Helper robustness bundle | `7784cd6`, `465fcdb`, `67d5fb6`, `721fb5a`, `3a5fec0` | `codex/housekeeping-recorder-robustness` |
 | 58 | 2026-07-08 | Audit and installer reporting fixes | `c1bae00`, `12ff5be`, `d005f30`, `be84a2e`, `a6c59d6` | `codex/audit-installer-reporting-fixes` |
 | 57 | 2026-07-08 | Shipped-scripts coverage measurement | `291001d`, `f5d2db8`, `537820e` | `codex/measure-scripts-coverage` |
