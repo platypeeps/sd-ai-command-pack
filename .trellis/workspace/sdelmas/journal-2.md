@@ -263,3 +263,39 @@ Implemented Trellis task 07-06-enable-branch-coverage. The 100 percent gate was 
 ### Next Steps
 
 - Continue the set with measure-scripts-coverage
+
+
+## Session 57: Shipped-scripts coverage measurement
+
+**Date**: 2026-07-08
+**Task**: Shipped-scripts coverage measurement
+**Branch**: `codex/measure-scripts-coverage`
+
+### Summary
+
+Implemented Trellis task 07-06-measure-scripts-coverage. The ~1,800 statements of shipped scripts helpers now have measured coverage with a provisional 76 percent CI gate alongside the untouched installer 100 percent gate (default report scope stays installer-only via [report] include; the scripts step overrides on the CLI). The more valuable half was the en-route discovery: subprocess coverage collection had silently no-oped for every test that set cwd to a temp repo, because the relative COVERAGE_PROCESS_START resolved against the subprocess cwd and shards were written there and destroyed - the first honest measurement was 29 percent. The invocation now uses absolute COVERAGE_PROCESS_START and COVERAGE_FILE plus runner-level PYTHONPATH (prepending, preserving any existing value) so every subprocess is collected without per-test env wiring. Truthful baseline 76 percent: audit 95, update-spec-kb 81, pr-body-scope 76, record-session 74, review-learnings 58 (the ratchet laggard). Three Copilot rounds: PYTHONPATH clobber in two surfaces plus the stale CI-pinning test (the round-1 CI failure), stale README paragraph, and the bare-report footgun; all fixed with empirical verification. Shipped as PR #58.
+
+### Main Changes
+
+- Measured shipped scripts coverage with [paths] aliasing and precise includes; two-gate CI reports; fixed subprocess shard collection with absolute env paths
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `291001d` | test: measure shipped-scripts coverage with a provisional gate and fix subprocess collection |
+| `f5d2db8` | fix: address review feedback |
+| `537820e` | fix: address review feedback round 2 |
+
+### Testing
+
+- [OK] 319 tests green; installer gate 100 percent lines+branches; scripts gate 76 percent; full-check exit 0; CI green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Continue the set with audit-installer-reporting-fixes
