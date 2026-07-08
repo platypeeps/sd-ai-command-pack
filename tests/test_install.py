@@ -6191,9 +6191,17 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             ".trellis/workspace/dev/journal-1.md",
             ".trellis/workspace/dev/journal-2.md",
         )
+        spaced = root / ".trellis/workspace/dev two/journal-1.md"
+        spaced.parent.mkdir(parents=True, exist_ok=True)
+        spaced.write_text("# spaced journal\n", encoding="utf-8")
+        self.run_git(root, "add", ".trellis/workspace")
         journals = recorder.modified_workspace_journals()
         self.assertEqual(
-            journals, [Path(".trellis/workspace/dev/journal-2.md")]
+            journals,
+            [
+                Path(".trellis/workspace/dev two/journal-1.md"),
+                Path(".trellis/workspace/dev/journal-2.md"),
+            ],
         )
 
     def test_learnings_survive_non_object_graphql_payload(self) -> None:
@@ -6220,15 +6228,17 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         comment = learnings.PullRequestComment(
             pr_number=1,
             pr_title="t",
-            pr_url="https://example.invalid/pr/1",
-            path="docs/x.md",
+            pr_url=f"https://example.invalid/{learnings.MANAGED_START}/1",
+            path=f"docs/{learnings.MANAGED_END}.md",
             body=f"evil {learnings.MANAGED_END} splice",
             is_resolved=False,
             is_outdated=False,
         )
         rendered = comment.markdown_item()
         self.assertNotIn(learnings.MANAGED_END, rendered)
+        self.assertNotIn(learnings.MANAGED_START, rendered)
         self.assertIn("[managed-end marker removed]", rendered)
+        self.assertIn("[managed-start marker removed]", rendered)
 
     def test_learnings_report_when_no_base_ref_resolves(self) -> None:
         root = Path(tempfile.mkdtemp(prefix="sd-learnings-no-remote-"))

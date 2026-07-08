@@ -70,6 +70,11 @@ class AddedLine:
     content: str
 
 
+def _neutralize_managed_markers(text: str) -> str:
+    text = text.replace(MANAGED_START, "[managed-start marker removed]")
+    return text.replace(MANAGED_END, "[managed-end marker removed]")
+
+
 @dataclasses.dataclass(frozen=True)
 class Finding:
     category: str
@@ -102,12 +107,13 @@ class PullRequestComment:
 
     def markdown_item(self) -> str:
         state = "current" if not self.is_resolved and not self.is_outdated else "historical"
-        body = _one_line(self.body, limit=220)
-        # Comment bodies are untrusted: an embedded managed marker would
+        # Every rendered field is untrusted (bodies, file paths, URLs can
+        # all carry repo-controlled text): an embedded managed marker would
         # splice the managed block on the next update.
-        body = body.replace(MANAGED_START, "[managed-start marker removed]")
-        body = body.replace(MANAGED_END, "[managed-end marker removed]")
-        return f"- **{state}** PR #{self.pr_number} `{self.path}`: {body} ({self.pr_url})"
+        body = _neutralize_managed_markers(_one_line(self.body, limit=220))
+        path = _neutralize_managed_markers(self.path)
+        url = _neutralize_managed_markers(self.pr_url)
+        return f"- **{state}** PR #{self.pr_number} `{path}`: {body} ({url})"
 
 
 def _parse_diff(diff_text: str) -> tuple[set[str], list[AddedLine]]:
