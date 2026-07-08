@@ -8082,6 +8082,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 0, result.stdout)
         (root / ".agents/skills/sd-review-pr/SKILL.md").unlink()
         legacy = root / "docs/TRELLIS_REVIEW_PR_PACK.md"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
         legacy.write_text("# stale guide\n", encoding="utf-8")
 
         result = subprocess.run(

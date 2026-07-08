@@ -258,7 +258,9 @@ def inspect_target_presence(root: Path, relative_path: Path) -> str:
     except FileNotFoundError:
         return "missing"
     except OSError as error:
-        return str(error)
+        # Stable, path-free detail: the failure line already names the
+        # relative target, and absolute paths do not belong in shared logs.
+        return error.strerror or error.__class__.__name__
     return "present"
 
 
