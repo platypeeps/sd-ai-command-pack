@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 55
+- **Total Sessions**: 56
 - **Last Active**: 2026-07-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~228 | Active |
+| `journal-2.md` | ~265 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 56 | 2026-07-08 | Branch coverage gate | `c270856`, `9bf9e68`, `de829c4`, `1323edc` | `codex/enable-branch-coverage` |
 | 55 | 2026-07-08 | Manifest loading hardening | `0e71416`, `9ab19f8`, `f280bd0`, `767f999` | `codex/harden-manifest-loading` |
 | 54 | 2026-07-07 | Installer package decomposition | `92822f4`, `3a912cc`, `8004349` | `codex/installer-module-decomposition` |
 | 53 | 2026-07-07 | Platform registry consolidation | `45aedd9`, `a4cb2a5`, `e7077a7`, `15055d2` | `codex/introduce-platform-registry` |
