@@ -663,22 +663,29 @@ class InstallTests(unittest.TestCase):
     def run_pack_source_drift_gates(
         self,
         root: Path,
+        *,
+        extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
+        env = {
+            **os.environ,
+            "SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE": "1",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF": "HEAD",
+        }
+        if extra_env:
+            env.update(extra_env)
         return subprocess.run(
             [
                 self._bash_path,
                 "-c",
                 "source scripts/sd-ai-command-pack-full-check.sh; "
+                "if [ -n \"${SD_AI_COMMAND_PACK_FULL_CHECK_TEST_RUNTIME_PATH:-}\" ]; "
+                "then PATH=\"$SD_AI_COMMAND_PACK_FULL_CHECK_TEST_RUNTIME_PATH\"; fi; "
                 "run_pack_source_drift_gates",
             ],
             cwd=root,
-            env={
-                **os.environ,
-                "SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE": "1",
-                "SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF": "HEAD",
-            },
+            env=env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -10944,6 +10951,47 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             "release version gate: shipped payload changed; manifest version",
             result.stdout,
         )
+
+    def test_pack_source_drift_gate_rejects_unresolved_release_base_ref(
+        self,
+    ) -> None:
+        root = self.make_pack_source_fixture()
+        path = root / "templates/scripts/sd-ai-command-pack-housekeeping.sh"
+        path.write_text(
+            path.read_text(encoding="utf-8") + "\n# release gate fixture\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "payload without release bump")
+
+        result = self.run_pack_source_drift_gates(
+            root,
+            extra_env={"SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF": "missing-ref"},
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("release version gate cannot compare", result.stdout)
+        self.assertIn("base ref 'missing-ref' does not resolve", result.stdout)
+        self.assertNotIn("Traceback", result.stdout)
+
+    def test_pack_source_drift_gate_reports_missing_git_without_traceback(
+        self,
+    ) -> None:
+        root = self.make_pack_source_fixture()
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-pack-source-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        (stub_bin / "python3").symlink_to(Path(sys.executable))
+
+        result = self.run_pack_source_drift_gates(
+            root,
+            extra_env={"SD_AI_COMMAND_PACK_FULL_CHECK_TEST_RUNTIME_PATH": str(stub_bin)},
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("git executable unavailable", result.stdout)
+        self.assertNotIn("Traceback", result.stdout)
 
     def test_review_learnings_reports_subprocess_timeout_as_setup_failure(
         self,

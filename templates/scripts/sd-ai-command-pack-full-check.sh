@@ -671,29 +671,39 @@ def git_paths(args):
     return {line.strip() for line in output.splitlines() if line.strip()}
 
 
-def git_ref_resolves(ref):
+def git_ref_status(ref):
     if not ref:
-        return False
-    result = subprocess.run(
-        ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
-    return result.returncode == 0
+        return False, None
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except OSError as exc:
+        return False, (
+            f"release version gate cannot resolve base ref {ref!r}: "
+            f"git executable unavailable: {exc}"
+        )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        suffix = f": {detail}" if detail else ""
+        return False, (
+            f"release version gate cannot compare committed payload changes "
+            f"because base ref {ref!r} does not resolve{suffix}"
+        )
+    return True, None
 
 
 base_ref = os.environ.get("SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF", "").strip()
 changed_paths = set()
-base_resolves = git_ref_resolves(base_ref)
+base_resolves, base_ref_error = git_ref_status(base_ref)
 if base_ref and base_resolves:
     changed_paths |= git_paths(["diff", "--name-only", f"{base_ref}...HEAD"])
-elif base_ref:
-    print(
-        f"warning: Could not resolve {base_ref}; release version gate will use local changes only.",
-        file=sys.stderr,
-    )
+elif base_ref and base_ref_error:
+    errors.append(base_ref_error)
 changed_paths |= git_paths(["diff", "--cached", "--name-only"])
 changed_paths |= git_paths(["diff", "--name-only"])
 
