@@ -299,3 +299,42 @@ Implemented Trellis task 07-06-measure-scripts-coverage. The ~1,800 statements o
 ### Next Steps
 
 - Continue the set with audit-installer-reporting-fixes
+
+
+## Session 58: Audit and installer reporting fixes
+
+**Date**: 2026-07-08
+**Task**: Audit and installer reporting fixes
+**Branch**: `codex/audit-installer-reporting-fixes`
+
+### Summary
+
+Implemented Trellis task 07-06-audit-installer-reporting-fixes: six operator-facing reporting defects. Audit advisories now print before the failure block (ordering pinned by test); an unreadable receipt on the install path yields a clean single-line error instead of a PermissionError traceback; a fresh gitignore reports created; git diff --check failures no longer leak git's exit code for non-git Trellis targets - after round-4 review feedback the blanket 128/129 handling became a precise rev-parse --is-inside-work-tree gate so real git failures inside a work tree propagate untouched; the audit env kill-switch runs after argparse so --help works while disabled; EACCES targets report cannot-be-inspected with stable path-free errno detail instead of the misleading missing (one pre-existing test pinning the old message updated). Five Copilot rounds, closing exactly at the limit with round 5 clean. Shipped as PR #59.
+
+### Main Changes
+
+- Fixed six reporting/error-path defects across the audit script (both copies) and installer fileops/provenance
+- Added six regression tests including warning-order and work-tree-gate coverage
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c1bae00` | fix: audit and installer reporting gaps |
+| `12ff5be` | fix: address review feedback |
+| `d005f30` | fix: address review feedback round 2 |
+| `be84a2e` | fix: address review feedback round 3 |
+| `a6c59d6` | fix: address review feedback round 4 |
+
+### Testing
+
+- [OK] 325 tests green; installer gate 100 percent lines+branches; scripts gate 76 percent; full-check exit 0; CI green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Final task of the set: housekeeping-recorder-robustness

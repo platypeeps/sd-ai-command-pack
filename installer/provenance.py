@@ -172,8 +172,14 @@ def read_existing_installed_targets(target: Path) -> set[str]:
     receipt = target_destination(target, INSTALLED_TARGETS_FILE)
     if not receipt.is_file():
         return set()
+    try:
+        content = receipt.read_text(encoding="utf-8", errors="replace")
+    except OSError as error:
+        raise SystemExit(
+            f"error: cannot read installed-targets receipt {receipt}: {error}"
+        ) from None
     entries: set[str] = set()
-    for raw_line in receipt.read_text(encoding="utf-8", errors="replace").splitlines():
+    for raw_line in content.splitlines():
         line = raw_line.strip()
         if line and not line.startswith("#"):
             entries.add(line)

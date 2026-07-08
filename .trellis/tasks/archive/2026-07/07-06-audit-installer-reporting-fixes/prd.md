@@ -44,12 +44,18 @@ exactly when accurate reporting matters most.
 
 ## Acceptance Criteria
 
-- [ ] Audit run with 1 failure + N warnings prints both.
-- [ ] Unreadable receipt → controlled `error:` message, exit 1.
-- [ ] Fresh gitignore reports `created`; non-repo diff-check warns and
-  exits 0; `--help` works with the audit disabled; EACCES targets are
-  reported distinctly from missing ones.
-- [ ] Full battery green; template twins byte-identical.
+- [x] Audit run with 1 failure + N warnings prints both (warnings
+  first; test_install_audit_prints_warnings_even_with_failures).
+- [x] Unreadable receipt → controlled `error:` message, exit 1
+  (test_install_reports_unreadable_receipt_cleanly).
+- [x] Fresh gitignore reports `created`; non-repo diff-check warns and
+  exits 0 (git 128/129 mirrored to the git-missing case); `--help`
+  works with the audit disabled and invalid flags still exit 2; EACCES
+  targets report `cannot be inspected` with the OS detail — a
+  pre-existing test pinning the old misleading `missing` message was
+  updated to the corrected contract.
+- [x] Full battery green: 325 tests, both coverage gates, full-check
+  exit 0; audit template twin byte-identical. Shipped as PR #59.
 
 ## Notes
 

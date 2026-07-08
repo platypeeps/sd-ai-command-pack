@@ -323,6 +323,7 @@ def install_trellis_gitignore(target: Path, *, dry_run: bool) -> InstallResult:
     if path_is_occupied(destination) and not destination.is_file():
         raise SystemExit(f"error: target exists and is not a file: {file.target}")
 
+    existed = destination.exists()
     current = read_text_if_exists(destination, str(file.target))
     merged = merge_trellis_gitignore_block(current)
     if merged == current:
@@ -330,7 +331,7 @@ def install_trellis_gitignore(target: Path, *, dry_run: bool) -> InstallResult:
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(destination, merged)
-    return InstallResult(file, "updated" if destination.exists() else "created")
+    return InstallResult(file, "updated" if existed else "created")
 
 
 def install_managed_block(
@@ -535,13 +536,9 @@ def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
     if paths == []:
         return 0
 
-    command = ["git", "diff", "--check"]
-    if paths:
-        command.extend(["--", *(str(path) for path in paths)])
-
     try:
-        result = subprocess.run(
-            command,
+        work_tree_probe = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
             cwd=target,
             text=True,
             stdout=subprocess.PIPE,
@@ -551,6 +548,29 @@ def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
     except FileNotFoundError:
         print("warning: git not found; skipped git diff --check")
         return 0
+    if work_tree_probe.returncode != 0 or work_tree_probe.stdout.strip() != "true":
+        # The Trellis target is not a git work tree (e.g. a tarball
+        # export); skip the whitespace validation instead of surfacing
+        # git's own exit code as the installer's. Real git failures inside
+        # a work tree still propagate below.
+        print(
+            "warning: git diff --check could not run in this target "
+            "(not a git work tree); skipped whitespace validation"
+        )
+        return 0
+
+    command = ["git", "diff", "--check"]
+    if paths:
+        command.extend(["--", *(str(path) for path in paths)])
+
+    result = subprocess.run(
+        command,
+        cwd=target,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
 
     if result.stdout:
         print(result.stdout.rstrip())
