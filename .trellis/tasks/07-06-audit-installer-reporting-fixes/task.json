@@ -3,7 +3,7 @@
   "name": "audit-installer-reporting-fixes",
   "title": "Fix audit and installer reporting gaps",
   "description": "Audit drops warnings when failures exist, install path crashes on unreadable receipt, created-vs-updated misreport, git exit 128 propagation, EACCES reported as missing.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

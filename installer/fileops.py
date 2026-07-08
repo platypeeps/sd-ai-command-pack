@@ -323,6 +323,7 @@ def install_trellis_gitignore(target: Path, *, dry_run: bool) -> InstallResult:
     if path_is_occupied(destination) and not destination.is_file():
         raise SystemExit(f"error: target exists and is not a file: {file.target}")
 
+    existed = destination.exists()
     current = read_text_if_exists(destination, str(file.target))
     merged = merge_trellis_gitignore_block(current)
     if merged == current:
@@ -330,7 +331,7 @@ def install_trellis_gitignore(target: Path, *, dry_run: bool) -> InstallResult:
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(destination, merged)
-    return InstallResult(file, "updated" if destination.exists() else "created")
+    return InstallResult(file, "updated" if existed else "created")
 
 
 def install_managed_block(
@@ -554,6 +555,15 @@ def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
 
     if result.stdout:
         print(result.stdout.rstrip())
+    if result.returncode in {128, 129}:
+        # git itself failed (most commonly: the Trellis target is not a git
+        # repository, e.g. a tarball export); mirror the git-missing case
+        # rather than surfacing git's own exit code as the installer's.
+        print(
+            "warning: git diff --check could not run in this target "
+            f"(git exited {result.returncode}); skipped whitespace validation"
+        )
+        return 0
     return result.returncode
 
 

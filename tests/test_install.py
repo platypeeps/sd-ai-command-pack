@@ -7766,7 +7766,8 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             result.stdout,
         )
         self.assertIn(
-            "installed target is missing: .agents/skills/sd-continue/SKILL.md",
+            "installed target cannot be inspected: "
+            ".agents/skills/sd-continue/SKILL.md",
             result.stdout,
         )
 
@@ -8074,6 +8075,117 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("legacy pack reference remains", result.stdout)
         self.assertIn("scripts/trellis-full-check.sh", result.stdout)
         self.assertIn("install audit passed", result.stdout)
+
+    def test_install_audit_prints_warnings_even_with_failures(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / ".agents/skills/sd-review-pr/SKILL.md").unlink()
+        legacy = root / "docs/TRELLIS_REVIEW_PR_PACK.md"
+        legacy.write_text("# stale guide\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("error: installed target is missing", result.stdout)
+        self.assertIn("warning: legacy pack target remains", result.stdout)
+
+    def test_install_audit_help_works_when_disabled(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                "--help",
+            ],
+            env={**os.environ, "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0"},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("usage:", result.stdout)
+        self.assertNotIn("skipping install audit", result.stdout)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                "--definitely-not-a-flag",
+            ],
+            env={**os.environ, "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0"},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+
+    def test_install_audit_reports_unreadable_targets_distinctly(self) -> None:
+        if os.geteuid() == 0:
+            self.skipTest("root bypasses permissions")
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        blocked_dir = root / ".agents/skills/sd-review-pr"
+        blocked_dir.chmod(0o000)
+        self.addCleanup(blocked_dir.chmod, 0o755)
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("installed target cannot be inspected", result.stdout)
+        self.assertNotIn(
+            "installed target is missing: .agents/skills/sd-review-pr/SKILL.md",
+            result.stdout,
+        )
+
+    def test_install_reports_unreadable_receipt_cleanly(self) -> None:
+        if os.geteuid() == 0:
+            self.skipTest("root bypasses permissions")
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        receipt = root / str(install.INSTALLED_TARGETS_FILE)
+        receipt.chmod(0o000)
+        self.addCleanup(receipt.chmod, 0o644)
+
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("cannot read installed-targets receipt", result.stdout)
+
+    def test_fresh_gitignore_reports_created_status(self) -> None:
+        root = self.make_repo()
+        gitignore = root / ".gitignore"
+        if gitignore.exists():
+            gitignore.unlink()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("created     .gitignore", result.stdout)
+
+        result = self.run_install(root)
+        self.assertIn("unchanged   .gitignore", result.stdout)
+
+    def test_run_diff_check_skips_cleanly_outside_git_repo(self) -> None:
+        plain_dir = Path(tempfile.mkdtemp(prefix="sd-non-git-"))
+        self.addCleanup(shutil.rmtree, plain_dir, True)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status = install.run_diff_check(plain_dir, [Path("README.md")])
+        self.assertEqual(status, 0)
+        self.assertIn("git diff --check could not run", output.getvalue())
 
     def test_install_audit_warns_about_rename_era_legacy_paths(self) -> None:
         root = self.make_repo()

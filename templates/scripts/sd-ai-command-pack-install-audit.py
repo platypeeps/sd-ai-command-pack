@@ -250,6 +250,18 @@ def load_installed_targets(root: Path) -> tuple[set[str], list[str]]:
     return targets, failures
 
 
+def inspect_target_presence(root: Path, relative_path: Path) -> str:
+    """Return "present", "missing", or the OS error detail for unreadable
+    targets, so permission problems are never misreported as missing files."""
+    try:
+        os.lstat(root / relative_path)
+    except FileNotFoundError:
+        return "missing"
+    except OSError as error:
+        return str(error)
+    return "present"
+
+
 def path_exists(root: Path, relative_path: Path) -> bool:
     # lstat-based: Path.exists() swallows OSErrors on some Python versions
     # and raises on others (observed crashing on 3.9 under an unreadable
@@ -322,7 +334,13 @@ def audit_structural_state(root: Path, targets: set[str]) -> tuple[list[str], li
     warnings: list[str] = []
 
     for target in sorted(targets):
-        if path_exists(root, Path(target)):
+        target_state = inspect_target_presence(root, Path(target))
+        if target_state == "present":
+            continue
+        if target_state != "missing":
+            failures.append(
+                f"installed target cannot be inspected: {target} ({target_state})"
+            )
             continue
         # Platform adapters may be recorded by a checkout that has them
         # while being gitignored (e.g. repos ignoring .claude/): absence
@@ -541,11 +559,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    args = parse_args()
     if is_disabled(os.environ.get("SD_AI_COMMAND_PACK_INSTALL_AUDIT")):
         print("warning: skipping install audit because SD_AI_COMMAND_PACK_INSTALL_AUDIT is disabled")
         return 0
 
-    args = parse_args()
     root = Path(args.repo).resolve()
 
     if is_pack_source_checkout(root) and not (root / INSTALLED_TARGETS_FILE).exists():
@@ -564,13 +582,15 @@ def main() -> int:
     failures.extend(provenance_failures)
     warnings = [*structural_warnings, *audit_migration_advisories(root, targets)]
 
+    # Advisory warnings print even when the audit fails: the operator
+    # debugging a failed audit is exactly who needs them.
+    for warning in warnings:
+        print(f"warning: {warning}")
+
     if failures:
         for failure in failures:
             print(f"error: {failure}")
         return 1
-
-    for warning in warnings:
-        print(f"warning: {warning}")
 
     print(f"SD AI command pack install audit passed: {len(targets)} targets checked.")
     if provenance_version is not None:
