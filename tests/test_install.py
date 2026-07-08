@@ -6203,6 +6203,10 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
                 Path(".trellis/workspace/dev/journal-2.md"),
             ],
         )
+        # git status --porcelain -z emits "XY to\0from\0" for renames: the
+        # first token is the CURRENT path; the skipped companion is the old
+        # name and must never surface.
+        self.assertNotIn(Path(".trellis/workspace/dev/journal-1.md"), journals)
 
     def test_learnings_survive_non_object_graphql_payload(self) -> None:
         learnings = self.load_module_from_path(
