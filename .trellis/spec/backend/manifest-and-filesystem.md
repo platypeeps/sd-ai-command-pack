@@ -366,6 +366,22 @@ tracked `.gitignore`.
    Correct: .obsidian-kb/Backend Specs/index.md contains the copied backend spec bytes
    ```
 
+## Manifest Schema Contract
+
+`manifest.json` carries `schemaVersion` (currently 1). `load_manifest()`
+rejects manifests with a newer major schema, converts JSON parse errors and
+missing entry fields to single-line `error:` messages (no tracebacks), and
+`validate_manifest()` enforces the closed `KNOWN_MANIFEST_KINDS` set so a
+misspelled kind can never silently downgrade a managed-block entry to a plain
+file copy. `requiresTrellis` is wired: when a manifest sets it false, the
+installer skips the Trellis-repo precondition.
+
+Reference files:
+
+- `installer/manifest.py`, `load_manifest` / `validate_manifest`
+- `tests/test_install.py`, `test_load_manifest_rejects_malformed_manifests`
+- `tests/test_install.py`, `test_validate_manifest_rejects_unknown_kind`
+
 ## Legacy And Obsolete Artifact Advisories
 
 Since pack 0.4.0 the installer performs no legacy or obsolete cleanup: the

@@ -1964,6 +1964,78 @@ class InstallTests(unittest.TestCase):
                     )
                     self.assertEqual(stderr.getvalue(), "")
 
+    def test_load_manifest_rejects_malformed_manifests(self) -> None:
+        fixtures = Path(tempfile.mkdtemp(prefix="sd-manifest-fixtures-"))
+        self.addCleanup(shutil.rmtree, fixtures, True)
+        cases = [
+            ("{not json", "manifest is not valid JSON"),
+            ('{"schemaVersion": 2, "files": []}', "schemaVersion 2 is newer"),
+            (
+                '{"schemaVersion": "1", "files": []}',
+                "schemaVersion must be an integer",
+            ),
+            (
+                '{"schemaVersion": true, "files": []}',
+                "schemaVersion must be an integer",
+            ),
+            (
+                '{"files": [{"kind": "doc", "source": "docs/x.md",'
+                ' "target": "docs/x.md"}]}',
+                "missing required field 'platform'",
+            ),
+            ('{"files": ["not-an-object"]}', r"files\[0\] must be an object"),
+        ]
+        for index, (content, expected) in enumerate(cases):
+            with self.subTest(expected=expected):
+                manifest_path = fixtures / f"manifest-{index}.json"
+                manifest_path.write_text(content, encoding="utf-8")
+                with mock.patch.object(
+                    install.manifest, "MANIFEST_PATH", manifest_path
+                ):
+                    with self.assertRaisesRegex(SystemExit, expected):
+                        install.load_manifest()
+
+    def test_validate_manifest_rejects_unknown_kind(self) -> None:
+        file = install.PackFile(
+            platform="shared",
+            kind="managed_block",
+            source=install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md",
+            target=Path("docs/example.md"),
+            anchor=None,
+            install="always",
+        )
+        with self.assertRaisesRegex(
+            SystemExit, "unknown kind 'managed_block' in manifest"
+        ):
+            install.validate_manifest([file])
+
+    def test_install_skips_trellis_requirement_when_manifest_opts_out(self) -> None:
+        fixtures = Path(tempfile.mkdtemp(prefix="sd-manifest-opt-out-"))
+        self.addCleanup(shutil.rmtree, fixtures, True)
+        manifest_path = fixtures / "manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "name": "sd-ai-command-pack",
+                    "version": "0.0.1",
+                    "requiresTrellis": False,
+                    "files": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        plain_dir = Path(tempfile.mkdtemp(prefix="sd-plain-target-"))
+        self.addCleanup(shutil.rmtree, plain_dir, True)
+
+        output = io.StringIO()
+        with mock.patch.object(install.manifest, "MANIFEST_PATH", manifest_path):
+            with contextlib.redirect_stdout(output):
+                result = install.main([str(plain_dir), "--skip-diff-check"])
+
+        self.assertEqual(result, 0, output.getvalue())
+        self.assertFalse((plain_dir / ".trellis").exists())
+
     def test_manifest_cli_identity_reports_malformed_identity(self) -> None:
         root = self.make_repo()
         manifest_path = root / "manifest.json"
