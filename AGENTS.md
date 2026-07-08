@@ -19,3 +19,10 @@ If you're using Codex or another agent-capable tool, additional project-scoped h
 Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
 
 <!-- TRELLIS:END -->
+
+## Maintainer Rules
+
+- Do not create pull requests in the upstream `Trellis` repository without
+  explicit approval from the user for that specific upstream PR. If
+  `sd-ai-command-pack` work uncovers a `Trellis`-owned change, document the
+  finding and provide a paste-ready handoff instead of opening a `Trellis` PR.
