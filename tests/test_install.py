@@ -8095,6 +8095,11 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("error: installed target is missing", result.stdout)
         self.assertIn("warning: legacy pack target remains", result.stdout)
+        self.assertLess(
+            result.stdout.index("warning: legacy pack target remains"),
+            result.stdout.index("error: installed target is missing"),
+            "advisory warnings must print before the failure block",
+        )
 
     def test_install_audit_help_works_when_disabled(self) -> None:
         result = subprocess.run(
