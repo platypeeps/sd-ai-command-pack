@@ -536,13 +536,9 @@ def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
     if paths == []:
         return 0
 
-    command = ["git", "diff", "--check"]
-    if paths:
-        command.extend(["--", *(str(path) for path in paths)])
-
     try:
-        result = subprocess.run(
-            command,
+        work_tree_probe = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
             cwd=target,
             text=True,
             stdout=subprocess.PIPE,
@@ -552,18 +548,32 @@ def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
     except FileNotFoundError:
         print("warning: git not found; skipped git diff --check")
         return 0
+    if work_tree_probe.returncode != 0 or work_tree_probe.stdout.strip() != "true":
+        # The Trellis target is not a git work tree (e.g. a tarball
+        # export); skip the whitespace validation instead of surfacing
+        # git's own exit code as the installer's. Real git failures inside
+        # a work tree still propagate below.
+        print(
+            "warning: git diff --check could not run in this target "
+            "(not a git work tree); skipped whitespace validation"
+        )
+        return 0
+
+    command = ["git", "diff", "--check"]
+    if paths:
+        command.extend(["--", *(str(path) for path in paths)])
+
+    result = subprocess.run(
+        command,
+        cwd=target,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
 
     if result.stdout:
         print(result.stdout.rstrip())
-    if result.returncode in {128, 129}:
-        # git itself failed (most commonly: the Trellis target is not a git
-        # repository, e.g. a tarball export); mirror the git-missing case
-        # rather than surfacing git's own exit code as the installer's.
-        print(
-            "warning: git diff --check could not run in this target "
-            f"(git exited {result.returncode}); skipped whitespace validation"
-        )
-        return 0
     return result.returncode
 
 
