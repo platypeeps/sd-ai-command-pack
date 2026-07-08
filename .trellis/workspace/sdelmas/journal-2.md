@@ -188,3 +188,41 @@ Implemented Trellis task 07-06-installer-module-decomposition per its design.md.
 ### Next Steps
 
 - Remaining top candidates: harden-manifest-loading (now against installer/manifest.py) and the coverage tasks
+
+
+## Session 55: Manifest loading hardening
+
+**Date**: 2026-07-08
+**Task**: Manifest loading hardening
+**Branch**: `codex/harden-manifest-loading`
+
+### Summary
+
+Implemented Trellis task 07-06-harden-manifest-loading against the new installer/manifest.py. load_manifest now converts JSON parse errors, non-object top-level JSON, non-list files values, and per-entry missing-field/shape errors into single-line error messages naming the entry; validate_manifest enforces the closed KNOWN_MANIFEST_KINDS set (via the shared MANAGED_BLOCK_KIND constant) so a misspelled kind can never silently downgrade a managed-block entry into a plain-copy clobber; manifest.json carries schemaVersion 1 with newer-major rejection and type checks; requiresTrellis is wired into the Trellis-repo precondition with boolean type validation and an end-to-end opt-out test. Spec gained a Manifest Schema Contract section. Four Copilot rounds: top-level shape gaps plus matching test rows, requiresTrellis type check, constant reuse and doc wording; round 4 clean. Shipped as PR #56.
+
+### Main Changes
+
+- Hardened load_manifest/validate_manifest with table-driven failure-mode tests; schemaVersion and requiresTrellis wiring
+- Documented the Manifest Schema Contract in the backend spec
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0e71416` | fix: harden manifest loading with schema version, kind validation, and clean errors |
+| `9ab19f8` | fix: address review feedback |
+| `f280bd0` | fix: address review feedback round 2 |
+| `767f999` | fix: address review feedback round 3 |
+
+### Testing
+
+- [OK] 315 tests green; coverage 100% across the installer package; full-check exit 0; CI green 3.10/3.13
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Continue the five-task set with enable-branch-coverage
