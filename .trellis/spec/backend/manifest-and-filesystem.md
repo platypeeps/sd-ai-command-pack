@@ -381,6 +381,8 @@ Reference files:
 - `installer/manifest.py`, `load_manifest` / `validate_manifest`
 - `tests/test_install.py`, `test_load_manifest_rejects_malformed_manifests`
 - `tests/test_install.py`, `test_validate_manifest_rejects_unknown_kind`
+- `tests/test_install.py`,
+  `test_install_skips_trellis_requirement_when_manifest_opts_out`
 
 ## Legacy And Obsolete Artifact Advisories
 

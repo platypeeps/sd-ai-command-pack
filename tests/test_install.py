@@ -1984,6 +1984,8 @@ class InstallTests(unittest.TestCase):
                 "missing required field 'platform'",
             ),
             ('{"files": ["not-an-object"]}', r"files\[0\] must be an object"),
+            ("[]", "manifest must be a JSON object"),
+            ('{"files": null}', "'files' must be an array"),
         ]
         for index, (content, expected) in enumerate(cases):
             with self.subTest(expected=expected):

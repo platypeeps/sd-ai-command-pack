@@ -48,6 +48,10 @@ def load_manifest() -> tuple[dict, list[PackFile]]:
         raw = json.loads(read_text_strict(MANIFEST_PATH, "manifest"))
     except json.JSONDecodeError as error:
         raise SystemExit(f"error: manifest is not valid JSON: {error}") from None
+    if not isinstance(raw, dict):
+        raise SystemExit(
+            f"error: manifest must be a JSON object, got {type(raw).__name__}"
+        )
     schema_version = raw.get("schemaVersion", 1)
     if isinstance(schema_version, bool) or not isinstance(schema_version, int):
         raise SystemExit(
@@ -59,8 +63,14 @@ def load_manifest() -> tuple[dict, list[PackFile]]:
             f"installer supports ({SUPPORTED_MANIFEST_SCHEMA_VERSION}); update "
             "the pack checkout before installing"
         )
+    files_value = raw.get("files", [])
+    if not isinstance(files_value, list):
+        raise SystemExit(
+            f"error: manifest 'files' must be an array, got "
+            f"{type(files_value).__name__}"
+        )
     files: list[PackFile] = []
-    for index, item in enumerate(raw.get("files", [])):
+    for index, item in enumerate(files_value):
         try:
             files.append(
                 PackFile(
