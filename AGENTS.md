@@ -22,7 +22,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## Maintainer Rules
 
-- Do not create pull requests in the upstream Trellis repository without
-  explicit user consent for that PR. If sd-ai-command-pack work uncovers a
-  Trellis-owned change, document the finding and provide a paste-ready handoff
-  instead of opening a Trellis PR.
+- Do not create pull requests in the upstream `Trellis` repository without
+  explicit approval from the user for that specific upstream PR. If
+  `sd-ai-command-pack` work uncovers a `Trellis`-owned change, document the
+  finding and provide a paste-ready handoff instead of opening a `Trellis` PR.
