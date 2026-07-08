@@ -479,8 +479,8 @@ Documented the maintainer rule that agents must not create upstream Trellis pull
 
 | Hash | Message |
 |------|---------|
-| `be9249e` | (see git log) |
-| `9c2b9a1` | (see git log) |
+| `be9249e` | docs: require consent for trellis prs |
+| `9c2b9a1` | docs: clarify trellis pr consent rule |
 
 ### Testing
 
