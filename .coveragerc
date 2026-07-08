@@ -25,5 +25,10 @@ helper_scripts =
     */scripts/
 
 [report]
+# Default report scope stays the strict installer gate; the shipped-scripts
+# gate passes its own --include/--fail-under on the command line.
+include =
+    install.py
+    installer/*
 show_missing = True
 fail_under = 100

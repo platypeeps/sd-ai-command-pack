@@ -736,13 +736,15 @@ python -m coverage report --include="install.py,installer/*" --fail-under=100
 python -m coverage report --include="scripts/sd-ai-command-pack-*" --fail-under=76
 ```
 
-The `--fail-under=100` gate measures `install.py` (the installer logic) only;
-`.coveragerc` scopes coverage to that file. The shipped shell and Python helper
-scripts under `scripts/` are exercised by their own runtime behavior, not by
-this coverage number. CI also runs `shellcheck -S warning` over every tracked
-shell script and the git hooks — consumers exempt the vendored pack shell from
-line review ("reviewed upstream"), so upstream lint rigor is the compensating
-control.
+Two coverage gates run: the `--fail-under=100` gate measures the installer
+(`install.py` plus the `installer/` package, lines and branches; this is also
+the default scope of a bare `coverage report`), and a second gate measures the
+shipped Python helpers under `scripts/` with a provisional 76% floor that
+ratchets up as helper tests grow. The shipped shell scripts are exercised by
+behavioral tests rather than a coverage number; CI also runs
+`shellcheck -S warning` over every tracked shell script and the git hooks —
+consumers exempt the vendored pack shell from line review ("reviewed
+upstream"), so upstream lint rigor is the compensating control.
 
 ## Direct-to-main Chore Commits
 
