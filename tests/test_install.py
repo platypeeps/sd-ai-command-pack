@@ -1656,6 +1656,142 @@ class InstallTests(unittest.TestCase):
             overwritten.backup.read_text(encoding="utf-8"), "local edit\n"
         )
 
+    def test_branch_edges_in_block_merges(self) -> None:
+        start = install.COPILOT_GUIDANCE_START
+        end = install.COPILOT_GUIDANCE_END
+        block = f"{start}\nnew body\n{end}\n"
+        # Managed block whose END marker sits at EOF without a newline.
+        merged = install.merge_managed_block(f"{start}\nold\n{end}", block)
+        self.assertEqual(merged, block)
+
+        gi_start = install.TRELLIS_GITIGNORE_START
+        gi_end = install.TRELLIS_GITIGNORE_END
+        merged = install.merge_trellis_gitignore_block(f"{gi_start}\nold\n{gi_end}")
+        self.assertIn(gi_end, merged)
+        self.assertNotIn("\nold\n", merged)
+        self.assertTrue(merged.startswith(gi_start))
+        # Existing gitignore content without a trailing newline.
+        merged = install.merge_trellis_gitignore_block("dist/")
+        self.assertTrue(merged.startswith("dist/\n\n"))
+        merged = install.merge_trellis_gitignore_block("dist/\n\n")
+        self.assertTrue(merged.startswith("dist/\n\n"))
+        self.assertNotIn("dist/\n\n\n", merged)
+
+        lo_start = install.LOCAL_ONLY_EXCLUDE_START
+        lo_end = install.LOCAL_ONLY_EXCLUDE_END
+        lo_block = f"{lo_start}\npattern\n{lo_end}\n"
+        merged = install.merge_local_only_exclude_block(
+            f"{lo_start}\nold\n{lo_end}", lo_block
+        )
+        self.assertEqual(merged, lo_block)
+        merged = install.merge_local_only_exclude_block("existing", lo_block)
+        self.assertTrue(merged.startswith("existing\n\n"))
+        merged = install.merge_local_only_exclude_block("existing\n\n", lo_block)
+        self.assertTrue(merged.startswith("existing\n\n"))
+        self.assertNotIn("existing\n\n\n", merged)
+
+        removed = install.remove_marked_block(
+            f"keep\n{gi_start}\nold\n{gi_end}",
+            start_marker=gi_start,
+            end_marker=gi_end,
+            label=".gitignore",
+        )
+        self.assertEqual(removed, "keep\n")
+
+    def test_branch_edges_in_dry_run_updated_paths(self) -> None:
+        root = self.make_repo()
+        copilot_file = next(
+            file
+            for file in self._manifest_files
+            if file.kind == install.MANAGED_BLOCK_KIND
+        )
+        destination = root / str(install.COPILOT_INSTRUCTIONS_TARGET)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            f"{install.COPILOT_GUIDANCE_START}\nstale\n"
+            f"{install.COPILOT_GUIDANCE_END}\n",
+            encoding="utf-8",
+        )
+        result = install.install_managed_block(copilot_file, root, dry_run=True)
+        self.assertEqual(result.status, "updated")
+        self.assertIn("stale", destination.read_text(encoding="utf-8"))
+
+        provenance_path = root / str(install.PROVENANCE_FILE)
+        provenance_path.parent.mkdir(parents=True, exist_ok=True)
+        provenance_path.write_text("{}\n", encoding="utf-8")
+        result = install.install_provenance_file(
+            {"name": "sd-ai-command-pack", "version": "0.0.1"},
+            [],
+            root,
+            receipt_targets=set(),
+            never_vouched=set(),
+            dry_run=True,
+        )
+        self.assertEqual(result.status, "updated")
+        self.assertEqual(provenance_path.read_text(encoding="utf-8"), "{}\n")
+
+        receipt_path = root / str(install.INSTALLED_TARGETS_FILE)
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path.write_text("stale-entry\n", encoding="utf-8")
+        result = install.install_installed_targets_file([], root, dry_run=True)
+        self.assertEqual(result.status, "updated")
+        self.assertEqual(receipt_path.read_text(encoding="utf-8"), "stale-entry\n")
+
+    def test_branch_edges_in_misc_helpers(self) -> None:
+        self.assertEqual(install.system_exit_detail(SystemExit("boom")), "boom")
+
+        root = self.make_repo()
+        receipt_path = root / str(install.INSTALLED_TARGETS_FILE)
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path.write_text("# comment\n\nreal-entry\n", encoding="utf-8")
+        self.assertEqual(
+            install.read_existing_installed_targets(root), {"real-entry"}
+        )
+
+        absolute_exclude = root / ".git/info/exclude"
+        with mock.patch.object(
+            install.localonly, "git_output", return_value=str(absolute_exclude)
+        ):
+            self.assertEqual(install.git_info_exclude_path(root), absolute_exclude)
+
+        self.assertEqual(install.run_diff_check(root), 0)
+
+        drifted = root / "docs/example.md"
+        drifted.parent.mkdir(parents=True, exist_ok=True)
+        drifted.write_text("drifted\n", encoding="utf-8")
+        allowed, detail = install.may_remove_pack_file(
+            drifted,
+            file=None,
+            recorded_hash="sha256:0000",
+            force=False,
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(detail, "content differs from installed pack version")
+
+    def test_local_only_init_failure_without_output(self) -> None:
+        root = self.make_git_repo_without_trellis()
+        failed = subprocess.CompletedProcess(["trellis", "init"], 2, stdout="")
+        with mock.patch.object(shutil, "which", return_value="/bin/trellis"):
+            with mock.patch.object(subprocess, "run", return_value=failed):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    with self.assertRaisesRegex(SystemExit, "trellis init failed"):
+                        install.ensure_trellis_for_local_only(
+                            root,
+                            platforms=[],
+                            install_all=False,
+                            dry_run=False,
+                            skip_trellis_init=False,
+                        )
+        self.assertEqual(output.getvalue(), "")
+
+    def test_remove_passes_clean_diff_check(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        result = self.run_install(root, "--remove", skip_diff_check=False)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_install_applies_umask_derived_modes_and_source_exec_bits(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)

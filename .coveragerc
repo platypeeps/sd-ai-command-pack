@@ -1,5 +1,5 @@
 [run]
-# Keep the 100% line gate focused on the installer. Helper scripts are covered
+# Keep the 100% line-and-branch gate focused on the installer. Helper scripts are covered
 # by focused unit/subprocess tests and syntax checks, but many branches
 # intentionally depend on optional local CLIs such as Prism, Gito, GitHub, and
 # Trellis and are not part of this strict installer coverage metric.
@@ -7,6 +7,7 @@ include =
     install.py
     installer/*
 parallel = True
+branch = True
 
 [paths]
 # The symlink-execution test runs the entry through a temp-dir symlink;

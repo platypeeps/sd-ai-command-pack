@@ -226,3 +226,40 @@ Implemented Trellis task 07-06-harden-manifest-loading against the new installer
 ### Next Steps
 
 - Continue the five-task set with enable-branch-coverage
+
+
+## Session 56: Branch coverage gate
+
+**Date**: 2026-07-08
+**Task**: Branch coverage gate
+**Branch**: `codex/enable-branch-coverage`
+
+### Summary
+
+Implemented Trellis task 07-06-enable-branch-coverage. The 100 percent gate was line-only; branch=True is now set in .coveragerc with fail_under=100 kept, and the measured 16 partial branches across fileops, localonly, manifest, provenance, and removal each received a focused test for the untaken direction (block merges with END markers at EOF and prefix newline variants, dry-run updated paths that must not write, system_exit_detail without the error prefix, receipts with comments and blanks, absolute git exclude paths, run_diff_check without paths, trellis init failure with empty output, may_remove_pack_file without a manifest file, and the remove flow passing a clean diff check). No pragmas. Final: 1,033 statements plus 417 branches, zero missed, zero partial. Four Copilot rounds of small test-quality nits, all applied; the task.json in_progress observation was rebutted as intentional lifecycle state. Shipped as PR #57.
+
+### Main Changes
+
+- Enabled branch coverage with fail_under 100 and closed all 16 partial branches with focused tests
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c270856` | test: enable branch coverage and close all 16 partial branches |
+| `9bf9e68` | fix: address review feedback |
+| `de829c4` | fix: address review feedback round 2 |
+| `1323edc` | fix: address review feedback round 3 |
+
+### Testing
+
+- [OK] 319 tests green; coverage 100 percent lines and branches; full-check exit 0; CI green 3.10/3.13
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Continue the set with measure-scripts-coverage

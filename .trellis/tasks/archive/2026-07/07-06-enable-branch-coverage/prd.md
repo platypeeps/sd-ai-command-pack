@@ -30,10 +30,15 @@ proven.
 
 ## Acceptance Criteria
 
-- [ ] `coverage report --fail-under=100` passes with branch coverage
-  enabled on Python 3.10 and 3.13.
-- [ ] No unexplained `# pragma: no branch` exclusions.
-- [ ] Full battery green.
+- [x] `coverage report --fail-under=100` passes with branch coverage
+  enabled (417 branches, 0 partial across install.py + installer/*;
+  CI matrix validates 3.10 and 3.13). The pre-decomposition estimate
+  of 16 partials matched exactly what measurement found; all 16
+  directions now have focused tests.
+- [x] No unexplained `# pragma: no branch` exclusions — zero pragmas
+  added; every partial got a real test.
+- [x] Full battery green: 319 tests, full-check exit 0. Shipped as
+  PR #57.
 
 ## Notes
 
