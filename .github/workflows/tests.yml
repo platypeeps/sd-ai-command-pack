@@ -47,7 +47,7 @@ jobs:
         run: >-
           COVERAGE_PROCESS_START="$(pwd)/.coveragerc"
           COVERAGE_FILE="$(pwd)/.coverage"
-          PYTHONPATH="$(pwd)/tests/coverage_sitecustomize"
+          PYTHONPATH="$(pwd)/tests/coverage_sitecustomize${PYTHONPATH:+:$PYTHONPATH}"
           python3 -m coverage run --parallel-mode -m unittest discover -s tests
 
       - name: Combine coverage data

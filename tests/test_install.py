@@ -1496,16 +1496,30 @@ class InstallTests(unittest.TestCase):
         self.assertRegex(requirements, r"(?m)^coverage[<>=!~]")
         for expected in (
             "python3 -m pip install -r requirements-dev.txt",
-            "COVERAGE_PROCESS_START=.coveragerc python3 -m coverage run --parallel-mode -m unittest discover -s tests",
+            'COVERAGE_PROCESS_START="$(pwd)/.coveragerc"',
+            'COVERAGE_FILE="$(pwd)/.coverage"',
+            'PYTHONPATH="$(pwd)/tests/coverage_sitecustomize'
+            '${PYTHONPATH:+:$PYTHONPATH}"',
+            "python3 -m coverage run --parallel-mode -m unittest discover -s tests",
             "python3 -m coverage combine",
-            "python3 -m coverage report --fail-under=100",
+            'python3 -m coverage report --include="install.py,installer/*"'
+            " --fail-under=100",
+            'python3 -m coverage report'
+            ' --include="scripts/sd-ai-command-pack-*" --fail-under=76',
         ):
             self.assertIn(expected, workflow)
         for expected in (
             "python -m pip install -r requirements-dev.txt",
-            "COVERAGE_PROCESS_START=.coveragerc python -m coverage run --parallel-mode -m unittest discover -s tests",
+            'COVERAGE_PROCESS_START="$(pwd)/.coveragerc"',
+            'COVERAGE_FILE="$(pwd)/.coverage"',
+            'PYTHONPATH="$(pwd)/tests/coverage_sitecustomize'
+            '${PYTHONPATH:+:$PYTHONPATH}"',
+            "python -m coverage run --parallel-mode -m unittest discover -s tests",
             "python -m coverage combine",
-            "python -m coverage report --fail-under=100",
+            'python -m coverage report --include="install.py,installer/*"'
+            " --fail-under=100",
+            'python -m coverage report'
+            ' --include="scripts/sd-ai-command-pack-*" --fail-under=76',
         ):
             self.assertIn(expected, readme)
 

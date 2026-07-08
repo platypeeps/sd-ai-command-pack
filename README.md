@@ -729,7 +729,7 @@ test -x "$BREW_PYTHON" || BREW_PYTHON=/usr/local/bin/python3  # Intel Homebrew
 . .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 COVERAGE_PROCESS_START="$(pwd)/.coveragerc" COVERAGE_FILE="$(pwd)/.coverage" \
-  PYTHONPATH="$(pwd)/tests/coverage_sitecustomize" \
+  PYTHONPATH="$(pwd)/tests/coverage_sitecustomize${PYTHONPATH:+:$PYTHONPATH}" \
   python -m coverage run --parallel-mode -m unittest discover -s tests
 python -m coverage combine
 python -m coverage report --include="install.py,installer/*" --fail-under=100
