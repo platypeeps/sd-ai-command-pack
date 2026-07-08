@@ -28,20 +28,76 @@ class PackFile:
     install: str
 
 
+SUPPORTED_MANIFEST_SCHEMA_VERSION = 1
+KNOWN_MANIFEST_KINDS = frozenset(
+    {
+        "command",
+        "config",
+        "doc",
+        MANAGED_BLOCK_KIND,
+        "prompt",
+        "script",
+        "skill",
+        "workflow",
+    }
+)
+
+
 def load_manifest() -> tuple[dict, list[PackFile]]:
-    raw = json.loads(read_text_strict(MANIFEST_PATH, "manifest"))
-    files: list[PackFile] = []
-    for item in raw.get("files", []):
-        files.append(
-            PackFile(
-                platform=str(item["platform"]),
-                kind=str(item["kind"]),
-                source=ROOT / str(item["source"]),
-                target=Path(str(item["target"])),
-                anchor=Path(str(item["anchor"])) if item.get("anchor") else None,
-                install=str(item.get("install", "if-anchor-exists")),
-            )
+    try:
+        raw = json.loads(read_text_strict(MANIFEST_PATH, "manifest"))
+    except json.JSONDecodeError as error:
+        raise SystemExit(f"error: manifest is not valid JSON: {error}") from None
+    if not isinstance(raw, dict):
+        raise SystemExit(
+            f"error: manifest must be a JSON object, got {type(raw).__name__}"
         )
+    schema_version = raw.get("schemaVersion", 1)
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+        raise SystemExit(
+            f"error: manifest schemaVersion must be an integer, got {schema_version!r}"
+        )
+    if schema_version > SUPPORTED_MANIFEST_SCHEMA_VERSION:
+        raise SystemExit(
+            f"error: manifest schemaVersion {schema_version} is newer than this "
+            f"installer supports ({SUPPORTED_MANIFEST_SCHEMA_VERSION}); update "
+            "the pack checkout before installing"
+        )
+    requires_trellis = raw.get("requiresTrellis", True)
+    if not isinstance(requires_trellis, bool):
+        raise SystemExit(
+            "error: manifest requiresTrellis must be a boolean, got "
+            f"{requires_trellis!r}"
+        )
+    files_value = raw.get("files", [])
+    if not isinstance(files_value, list):
+        raise SystemExit(
+            f"error: manifest 'files' must be an array, got "
+            f"{type(files_value).__name__}"
+        )
+    files: list[PackFile] = []
+    for index, item in enumerate(files_value):
+        try:
+            files.append(
+                PackFile(
+                    platform=str(item["platform"]),
+                    kind=str(item["kind"]),
+                    source=ROOT / str(item["source"]),
+                    target=Path(str(item["target"])),
+                    anchor=Path(str(item["anchor"])) if item.get("anchor") else None,
+                    install=str(item.get("install", "if-anchor-exists")),
+                )
+            )
+        except KeyError as error:
+            raise SystemExit(
+                f"error: manifest files[{index}] is missing required field "
+                f"{error.args[0]!r}"
+            ) from None
+        except TypeError:
+            raise SystemExit(
+                f"error: manifest files[{index}] must be an object with "
+                "platform/kind/source/target fields"
+            ) from None
     return raw, files
 
 
@@ -50,6 +106,11 @@ def validate_manifest(files: list[PackFile]) -> None:
     for file in files:
         if file.platform not in PLATFORMS:
             raise SystemExit(f"error: unknown platform {file.platform!r} in manifest")
+        if file.kind not in KNOWN_MANIFEST_KINDS:
+            raise SystemExit(
+                f"error: unknown kind {file.kind!r} in manifest for {file.target} "
+                f"(known kinds: {', '.join(sorted(KNOWN_MANIFEST_KINDS))})"
+            )
         validate_pack_source(file.source)
         validate_relative_manifest_path("target", file.target)
         if file.anchor is not None:

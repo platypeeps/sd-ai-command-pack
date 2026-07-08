@@ -177,7 +177,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
     else:
-        require_trellis_repo(target)
+        if manifest.get("requiresTrellis", True):
+            require_trellis_repo(target)
         selected, skipped = selected_files(files, target, args.platform, args.all)
     if args.local_only:
         local_only_results.append(

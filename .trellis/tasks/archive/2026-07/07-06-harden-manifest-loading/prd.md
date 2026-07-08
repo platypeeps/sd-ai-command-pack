@@ -52,12 +52,17 @@ tracebacks leak for expected user errors").
 
 ## Acceptance Criteria
 
-- [ ] No raw traceback for any malformed-manifest scenario; each
-  prints a single actionable `error:` line and exits 1.
-- [ ] Unknown `kind` can no longer clobber a consumer file under
-  `--force`.
-- [ ] Full battery green: unittest suite, 100% coverage on install.py,
-  full-check, shellcheck.
+- [x] No raw traceback for any malformed-manifest scenario; each
+  prints a single actionable `error:` line and exits 1 (table-driven
+  test_load_manifest_rejects_malformed_manifests).
+- [x] Unknown `kind` can no longer clobber a consumer file under
+  `--force` — validate_manifest enforces KNOWN_MANIFEST_KINDS as a
+  hard error before any write. schemaVersion 1 added to manifest.json
+  with a newer-major rejection; requiresTrellis wired into the
+  Trellis-repo precondition (opt-out tested); spec section added.
+- [x] Full battery green: 314 tests, 100% coverage across the
+  installer package (1,025 stmts), full-check exit 0. Shipped as
+  PR #56.
 
 ## Notes
 
