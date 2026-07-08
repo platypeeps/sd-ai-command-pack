@@ -454,3 +454,45 @@ Reconciled the completed PR-body scope bot-actor task after PR #61 had already m
 ### Next Steps
 
 - None - task complete
+
+
+## Session 62: Trellis PR consent rule
+
+**Date**: 2026-07-08
+**Task**: Trellis PR consent rule
+**Branch**: `codex/trellis-pr-consent-rule`
+
+### Summary
+
+Documented the maintainer rule that agents must not create upstream Trellis pull requests without explicit user approval for that specific PR. Published it through PR #64, addressed Copilot's wording/formatting comment, reran the deterministic full-check with Prism and Gito disabled, and confirmed GitHub Actions passed.
+
+### Main Changes
+
+- Added a maintainer rule to `AGENTS.md` outside the Trellis-managed block so
+  future `trellis update` runs preserve it.
+- Clarified after Copilot review that the required consent must come from the
+  user for the specific upstream `Trellis` PR.
+- Kept the rule explicit that `sd-ai-command-pack` work should produce a
+  paste-ready handoff when a `Trellis`-owned change is found.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `be9249e` | (see git log) |
+| `9c2b9a1` | (see git log) |
+
+### Testing
+
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`
+- [OK] GitHub Actions passed on PR #64: security, unittest (3.10),
+  unittest (3.13), and CI Result.
+- [OK] Copilot review round 2 reported no new comments after the wording fix.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
