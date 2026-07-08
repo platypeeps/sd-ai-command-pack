@@ -810,6 +810,12 @@ ephemeral tool state and do not change what the checks validate.
   NUL-delimited changed path list for configurable PR-body scope checks.
 - `SD_AI_COMMAND_PACK_CHANGED_FILES`: fallback changed-path list for the
   PR-body scope check when the `PR_BODY_SCOPE` variant above is unset.
+- `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_ACTOR`: PR author login (or pass
+  `--actor`). A bot login ending in `[bot]` (`dependabot[bot]`,
+  `github-actions[bot]`, `renovate[bot]`, …) is exempt from strict PR-body
+  scope validation and exits `0`, so wiring the check into CI does not fail
+  automated PRs (whose bodies never carry the human scope headings) and
+  block their auto-merge.
 - `SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO`: explicit `owner/repo` slug when the
   selected remote URL cannot be parsed as a GitHub repository.
 - `SD_AI_COMMAND_PACK_HOUSEKEEPING_MERGE_STRATEGY`: auto-merge strategy: `merge`,
