@@ -548,7 +548,15 @@ Hardened the review-preflight Node script so symlink invocation runs checks, Nod
 
 ### Main Changes
 
-(Add details)
+- Hardened `sd-ai-command-pack-review-preflight.mjs` so symlink invocation
+  resolves real paths and runs the preflight checks.
+- Added a clear Node 16.9 minimum-version error path and removed syntax/runtime
+  assumptions that would hide that message on older supported-parser runtimes.
+- Included untracked files in copied-surface detection, tolerated trailing
+  whitespace in workspace index rows, and documented regular-file-only docs
+  scanning.
+- Added focused tests, updated docs/specs, and bumped shipped payload metadata
+  to 0.7.1.
 
 ### Git Commits
 
@@ -558,7 +566,12 @@ Hardened the review-preflight Node script so symlink invocation runs checks, Nod
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] `node --check scripts/sd-ai-command-pack-review-preflight.mjs`
+- [OK] `node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs`
+- [OK] Focused review-preflight unittest cases.
+- [OK] `.venv/bin/python -m unittest discover -s tests`
+- [OK] `git diff --check`
+- [OK] `git diff --cached --check`
 
 ### Status
 
