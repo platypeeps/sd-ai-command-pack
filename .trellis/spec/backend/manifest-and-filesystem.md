@@ -434,6 +434,41 @@ Reference files:
 - `tests/test_install_audit.py`,
   `test_install_audit_legacy_advisories_cover_all_pack_scripts`
 
+## Source Checkout Dogfood Drift Gates
+
+The `sd-ai-command-pack` source checkout dogfoods installed pack payloads at
+the repository root. For every platform directory that exists in this source
+repo, every non-managed-block manifest target for that platform must also exist
+at the root and byte-match its manifest source. Shared manifest targets are
+always required. This catches missing installed twins, not only content drift in
+twins that happen to be present.
+
+Keep these checks in the pack-source drift tests:
+
+- The dogfood target set is derived from `manifest.json`, `PLATFORM_REGISTRY`,
+  and root platform directories; do not maintain a hand-written allowlist.
+- Missing dogfood targets fail before comparison, so adding a command to
+  `templates/` plus `manifest.json` requires refreshing the root installed copy
+  with `install.py . --force --platform <platform>`.
+- `git ls-files templates` must equal manifest sources so orphaned template
+  files and manifest entries without tracked source files both fail locally.
+- Manifest targets must be unique under `casefold()` to avoid collisions on
+  case-insensitive filesystems.
+- Source-checkout install state such as `.sd-ai-command-pack/provenance.json`
+  and `.sd-ai-command-pack/installed-targets.txt` remains local/ignored here;
+  consumer repos should track normal install state unless they use
+  `--local-only`.
+
+Reference files:
+
+- `tests/test_pack_drift.py`,
+  `test_tracked_pack_targets_match_templates`
+- `tests/test_pack_drift.py`,
+  `test_dogfood_drift_gate_detects_missing_existing_platform_targets`
+- `tests/test_pack_drift.py`,
+  `test_tracked_template_sources_match_manifest_sources`
+- `tests/test_pack_drift.py`, `test_manifest_targets_are_casefold_unique`
+
 ## Anti-Patterns
 
 - Do not infer installable files by scanning `templates/`.

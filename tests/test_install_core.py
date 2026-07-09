@@ -367,7 +367,10 @@ class InstallCoreTests(InstallTestCase):
         self.assertEqual(installed.count(install.COPILOT_GUIDANCE_END), 1)
         self.assertIn(template.strip("\n"), installed)
         self.assertIn("byte-verified mirrors of `templates/**`", installed)
-        self.assertIn("do not repeat the same finding on both copies", installed)
+        self.assertRegex(
+            installed,
+            r"do not repeat\s+the same finding on both copies",
+        )
 
     def test_copilot_block_keeps_scanner_phrases_contiguous(self) -> None:
         # The review-learnings scanner and the guidance-block assertions match

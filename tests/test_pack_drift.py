@@ -29,6 +29,34 @@ SECRET_MARKER_PATTERNS = _support.SECRET_MARKER_PATTERNS
 InstallTestCase = _support.InstallTestCase
 
 
+def dogfood_manifest_files(
+    files: list[install.PackFile],
+    root: Path = install.ROOT,
+) -> list[install.PackFile]:
+    dogfood_platforms = {
+        platform
+        for platform, info in install.PLATFORM_REGISTRY.items()
+        if (root / info.directory).is_dir()
+    }
+    return [
+        file
+        for file in files
+        if file.kind != install.MANAGED_BLOCK_KIND
+        and (file.platform == "shared" or file.platform in dogfood_platforms)
+    ]
+
+
+def missing_dogfood_targets(
+    files: list[install.PackFile],
+    root: Path = install.ROOT,
+) -> list[str]:
+    return [
+        file.target.as_posix()
+        for file in files
+        if (root / file.target).is_symlink() or not (root / file.target).is_file()
+    ]
+
+
 class PackDriftTests(InstallTestCase):
     """Tests for source/template drift gates, shipped env vars, and release guards."""
 
@@ -48,23 +76,115 @@ class PackDriftTests(InstallTestCase):
             self.assert_no_secret_markers(file.source)
 
     def test_tracked_pack_targets_match_templates(self) -> None:
-        # Every tracked installed twin must match its manifest source so this
-        # repo's own footprint can never drift from the shipped templates.
+        # Every dogfood installed twin must exist and match its manifest source
+        # so this repo's own footprint can never drift from the shipped
+        # templates.
         # (The managed copilot block has its own dedicated full-file test.)
         _, files = install.load_manifest()
+        required_files = dogfood_manifest_files(files)
         compared = 0
+        missing = missing_dogfood_targets(required_files)
         drifted: list[str] = []
-        for file in files:
-            if file.kind == install.MANAGED_BLOCK_KIND:
-                continue
+        for file in required_files:
             installed = install.ROOT / file.target
-            if not installed.exists():
+            if not installed.is_file():
                 continue
             compared += 1
             if installed.read_bytes() != file.source.read_bytes():
                 drifted.append(file.target.as_posix())
-        self.assertGreaterEqual(compared, 50)
+
+        self.assertEqual(missing, [])
+        self.assertGreaterEqual(compared, len(required_files))
         self.assertEqual(drifted, [])
+
+    def test_dogfood_drift_gate_detects_missing_existing_platform_targets(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        (root / ".opencode").mkdir()
+        pack_file = install.PackFile(
+            platform="opencode",
+            kind="command",
+            source=install.ROOT / "templates/.commands/sd-review-pr.md",
+            target=Path(".opencode/commands/sd-review-pr.md"),
+            anchor=Path(".opencode"),
+            install="if-anchor-exists",
+        )
+
+        required = dogfood_manifest_files([pack_file], root)
+
+        self.assertEqual(required, [pack_file])
+        self.assertEqual(
+            missing_dogfood_targets(required, root),
+            [".opencode/commands/sd-review-pr.md"],
+        )
+
+    def test_dogfood_drift_gate_requires_platform_directory(self) -> None:
+        root = self.make_repo()
+        (root / ".opencode").write_text("not a directory\n", encoding="utf-8")
+        pack_file = install.PackFile(
+            platform="opencode",
+            kind="command",
+            source=install.ROOT / "templates/.commands/sd-review-pr.md",
+            target=Path(".opencode/commands/sd-review-pr.md"),
+            anchor=Path(".opencode"),
+            install="if-anchor-exists",
+        )
+
+        self.assertEqual(dogfood_manifest_files([pack_file], root), [])
+
+    def test_dogfood_drift_gate_rejects_symlink_targets(self) -> None:
+        root = self.make_repo()
+        target = root / ".opencode/commands/sd-review-pr.md"
+        target.parent.mkdir(parents=True)
+        target.symlink_to(install.ROOT / "templates/.commands/sd-review-pr.md")
+        pack_file = install.PackFile(
+            platform="opencode",
+            kind="command",
+            source=install.ROOT / "templates/.commands/sd-review-pr.md",
+            target=Path(".opencode/commands/sd-review-pr.md"),
+            anchor=Path(".opencode"),
+            install="if-anchor-exists",
+        )
+
+        self.assertEqual(
+            missing_dogfood_targets([pack_file], root),
+            [".opencode/commands/sd-review-pr.md"],
+        )
+
+    def test_tracked_template_sources_match_manifest_sources(self) -> None:
+        result = subprocess.run(
+            ["git", "ls-files", "templates"],
+            cwd=install.ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        tracked_template_sources = {
+            (install.ROOT / line).resolve()
+            for line in result.stdout.splitlines()
+            if line
+        }
+        _, files = install.load_manifest()
+        manifest_sources = {file.source.resolve() for file in files}
+
+        self.assertEqual(tracked_template_sources, manifest_sources)
+
+    def test_manifest_targets_are_casefold_unique(self) -> None:
+        _, files = install.load_manifest()
+        seen: dict[str, str] = {}
+        collisions: list[str] = []
+        for file in files:
+            target = file.target.as_posix()
+            key = target.casefold()
+            if key in seen:
+                collisions.append(f"{seen[key]} <-> {target}")
+            else:
+                seen[key] = target
+
+        self.assertEqual(collisions, [])
 
     def test_shipped_env_vars_are_documented(self) -> None:
         var_re = re.compile(r"SD_AI_COMMAND_PACK_[A-Z0-9_]+")

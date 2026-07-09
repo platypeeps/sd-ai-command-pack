@@ -16,9 +16,10 @@ build/
 dist/
 *.egg-info/
 
-# Source-checkout local install markers; consumer repos track the normal
-# installed-targets snapshot unless installed with --local-only.
+# Source-checkout local install markers; consumer repos track normal install
+# state unless installed with --local-only.
 .sd-ai-command-pack/installed-targets.txt
+.sd-ai-command-pack/provenance.json
 .sd-ai-command-pack/local-only.txt
 
 # sd-ai-command-pack trellis-gitignore start

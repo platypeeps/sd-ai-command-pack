@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 83
+- **Total Sessions**: 84
 - **Last Active**: 2026-07-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1356 | Active |
+| `journal-2.md` | ~1402 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 84 | 2026-07-09 | Close source dogfood drift gates | `2fdaca5`, `22c4602` | `codex/drift-gate-absence-blindness` |
 | 83 | 2026-07-09 | Enforce adapter command parity | `517e97c`, `ba26052` | `codex/adapter-parity-generation` |
 | 82 | 2026-07-09 | Constrain remove to pack targets | `9cb8319` | `codex/remove-receipt-trust-boundary` |
 | 81 | 2026-07-09 | Address recorder retry review feedback | `135af47` | `codex/recorder-untracked-workspace` |
