@@ -27,6 +27,9 @@ Quick links:
   creation/reuse, and PR-review orchestration workflow.
 - `.agents/skills/sd-work-backlog/SKILL.md`: sequential Trellis backlog work
   loop that delegates PR/review/cleanup to the existing SD commands.
+- `.agents/skills/sd-work-designs/SKILL.md`: Trellis planning loop that adds
+  `design.md` and `implement.md` proposals for tasks that need design before
+  implementation.
 - `.agents/skills/sd-review-pr/SKILL.md`: deterministic local gate plus remote
   PR review workflow.
 - `.agents/skills/sd-review-local/SKILL.md`: local review provider fix loop.
@@ -90,10 +93,11 @@ Trellis-provided `trellis-update-spec` skill as-is, refreshes repo-owned
 repospec artifacts through existing maintenance infrastructure when available,
 and then performs the architecture-overview check.
 Codex exposes the pack entry points as skills named `sd-start`, `sd-continue`,
-`sd-finish-work`, `sd-create-pr`, `sd-work-backlog`, `sd-full-check`,
-`sd-housekeeping`, `sd-review-pr`, `sd-review-local`, `sd-review-local-all`,
-`sd-review-learnings`, and `sd-update-spec`; type `/sd` in Codex command
-completion or invoke them with `$sd-review-pr`-style skill mentions.
+`sd-finish-work`, `sd-create-pr`, `sd-work-backlog`, `sd-work-designs`,
+`sd-full-check`, `sd-housekeeping`, `sd-review-pr`, `sd-review-local`,
+`sd-review-local-all`, `sd-review-learnings`, and `sd-update-spec`; type
+`/sd` in Codex command completion or invoke them with
+`$sd-review-pr`-style skill mentions.
 The start, continue, and finish-work wrappers run Trellis' existing
 `trellis-start`, `trellis-continue`, and `trellis-finish-work` skills as-is.
 On Claude Code — where Trellis ships a SessionStart hook instead of a
@@ -137,29 +141,33 @@ loaded project command files.
    through create-pr, review-pr, housekeeping, and an extra housekeeping
    verification, then addresses or records follow-ups and learnings before
    selecting the next task.
-9. Use the review-pr command for an existing PR loop. It should run the deterministic
+9. Use the work-designs command when existing Trellis tasks have real PRDs but
+   still need `design.md` or `implement.md`. It adds implementation proposals
+   and execution guidance to those task artifacts, parks tasks that need user
+   input, and reports links to every planning document it created or updated.
+10. Use the review-pr command for an existing PR loop. It should run the deterministic
    local full-check path with Prism/Gito disabled before requesting remote
    review. Run `sd-full-check`, `sd-review-local`, or `sd-review-local-all`
    explicitly when you want Prism/Gito.
-10. Request the configured remote reviewer, defaulting to GitHub Copilot, after
+11. Request the configured remote reviewer, defaulting to GitHub Copilot, after
    a clean local pass and again after every pushed review-fix commit made
    during the loop, unless the user explicitly asked for local-only review.
-11. Let the review-pr command reply to and resolve review threads as part of the
+12. Let the review-pr command reply to and resolve review threads as part of the
    normal loop once findings are fixed, rebutted with evidence, or confirmed
    already addressed.
-12. Use the review-learnings command when review comments repeat across PRs and
+13. Use the review-learnings command when review comments repeat across PRs and
    you want to capture repo-specific preventive guidance.
-13. Run the update-spec command when the work taught you a durable
+14. Run the update-spec command when the work taught you a durable
    implementation contract or convention. It runs the existing update-spec skill
    and also checks whether an existing architectural overview needs to be
    updated.
-14. Run the finish-work command when the coding session is complete and you need
+15. Run the finish-work command when the coding session is complete and you need
    the Trellis finish-work skill's quality gate, archive, journal, and commit
    reminder behavior.
-15. After the PR merges, run the housekeeping command to get back to the default
+16. After the PR merges, run the housekeeping command to get back to the default
    branch, prune/delete the merged development stream, and see the condensed
    clean-state/anomaly report.
-16. If the review-pr command sees the PR is already merged or becomes merged
+17. If the review-pr command sees the PR is already merged or becomes merged
    while the command is running, it stops the review loop and runs post-merge
    housekeeping before the final report. This does not wake inactive sessions;
    it only runs when the active agent observes the merge.
@@ -194,6 +202,13 @@ to the next actionable task. It stops when no active tasks remain, all remaining
 tasks are parked or require input, or a delegated SD/Trellis gate reports a
 blocker.
 
+The work-designs command is a planning-artifact runner. It inventories active
+Trellis tasks with real PRDs, selects tasks that still need `design.md` or
+`implement.md`, writes grounded implementation proposals and execution
+guidance without starting implementation, parks tasks that need user input,
+and ends with numbered links to every planning document it created or
+updated.
+
 ## Commands
 
 Use the platform-native command when available.
@@ -206,6 +221,7 @@ Claude Code and Gemini CLI:
 /sd:finish-work
 /sd:create-pr
 /sd:work-backlog
+/sd:work-designs
 /sd:full-check
 /sd:housekeeping
 /sd:review-pr
@@ -224,6 +240,7 @@ Qoder commands, Trae commands, Pi prompts, workflow adapters, and Codex skills:
 /sd-finish-work
 /sd-create-pr
 /sd-work-backlog
+/sd-work-designs
 /sd-full-check
 /sd-housekeeping
 /sd-review-pr

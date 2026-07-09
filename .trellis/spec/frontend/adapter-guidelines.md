@@ -17,6 +17,7 @@ Reference files:
 - `templates/.agents/skills/sd-full-check/SKILL.md`
 - `templates/.agents/skills/sd-housekeeping/SKILL.md`
 - `templates/.agents/skills/sd-work-backlog/SKILL.md`
+- `templates/.agents/skills/sd-work-designs/SKILL.md`
 - `templates/.agents/skills/sd-continue/SKILL.md`
 - `templates/.agents/skills/sd-finish-work/SKILL.md`
 - `templates/.agents/skills/sd-update-spec/SKILL.md`
@@ -24,19 +25,24 @@ Reference files:
 - `templates/.commands/sd-review-local.md`
 - `templates/.commands/sd-review-local-all.md`
 - `templates/.commands/sd-work-backlog.md`
+- `templates/.commands/sd-work-designs.md`
 - `templates/.commands/sd-review-pr.md`
 - `templates/.claude/commands/sd/continue.md`
 - `templates/.claude/commands/sd/finish-work.md`
 - `templates/.claude/commands/sd/work-backlog.md`
+- `templates/.claude/commands/sd/work-designs.md`
 - `templates/.claude/commands/sd/review-pr.md`
 - `templates/.claude/commands/sd/review-local.md`
 - `templates/.claude/commands/sd/review-local-all.md`
 - `templates/.gemini/commands/sd/review-pr.toml`
 - `templates/.gemini/commands/sd/work-backlog.toml`
+- `templates/.gemini/commands/sd/work-designs.toml`
 - `templates/.github/prompts/sd-review-pr.prompt.md`
 - `templates/.github/prompts/sd-work-backlog.prompt.md`
+- `templates/.github/prompts/sd-work-designs.prompt.md`
 - `templates/.opencode/commands/sd-review-pr.md`
 - `templates/.opencode/commands/sd-work-backlog.md`
+- `templates/.opencode/commands/sd-work-designs.md`
 
 ## Shared Skill Pattern
 
@@ -116,6 +122,14 @@ one Trellis backlog task per iteration, rank only implementation-ready tasks,
 delegate publish/review to `sd-create-pr`, delegate merge/cleanup to
 `sd-housekeeping`, and address or record follow-ups and learnings before
 selecting the next task.
+
+The `sd-work-designs` shared skill should compose existing Trellis planning
+artifacts instead of starting implementation. It must inventory existing
+Trellis tasks, rank tasks that have real PRDs but still need `design.md` or
+`implement.md`, create or append grounded implementation proposals and
+execution guidance, preserve existing user-authored artifact content, park
+tasks that need user input, and finish with numbered links to every planning
+document it created or updated.
 
 Codex does not read the platform command adapter directories for slash-command
 completion. It exposes enabled skills in the slash list, so this pack also
