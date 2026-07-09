@@ -59,5 +59,6 @@
   behavior, create a new pack task before implementing it.
 - If issue 5 is rerouted locally, make sure the upstream issue draft remains in
   the task directory as historical evidence but clearly says "not filed".
-- If issues #394-#397 close upstream, create a future cleanup task to evaluate
-  whether corresponding pack workarounds can shrink or be removed.
+- If issues #394-#397 close upstream, use
+  `07-09-upstream-issue-closure-cleanup` to evaluate whether
+  corresponding pack workarounds can shrink or be removed.
