@@ -783,9 +783,9 @@ for path in Path("templates/.agents/skills").glob("*/SKILL.md"):
 documented = set(
     var_re.findall(Path("docs/SD_AI_COMMAND_PACK.md").read_text(encoding="utf-8"))
 )
-for name in sorted(script_vars - documented - exempt):
+for name in sorted((script_vars | skill_vars) - documented - exempt):
     errors.append(
-        f"undocumented env var: {name} is read by scripts/ but missing "
+        f"undocumented env var: {name} is read by shipped scripts or skills but missing "
         "from docs/SD_AI_COMMAND_PACK.md"
     )
 for name in sorted(documented - script_vars - skill_vars):
@@ -793,7 +793,10 @@ for name in sorted(documented - script_vars - skill_vars):
         f"stale documented env var: {name} is documented but no shipped "
         "script or skill consumes it"
     )
-print(f"env vars checked: {len(script_vars)} in scripts, {len(documented)} documented")
+print(
+    f"env vars checked: {len(script_vars)} in scripts, "
+    f"{len(skill_vars)} in skills, {len(documented)} documented"
+)
 
 if errors:
     for error in errors:

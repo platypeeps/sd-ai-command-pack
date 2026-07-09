@@ -73,8 +73,11 @@ Quick links:
 
 - [Install](#install)
 - [Verify](#verify)
+- [Configuration Quick Reference](#configuration-quick-reference)
 - [Releasing](#releasing)
+- [Direct-to-main Chore Commits](#direct-to-main-chore-commits)
 - [Supported Adapters](#supported-adapters)
+- [Upstream Path](#upstream-path)
 - [License](#license)
 
 Claude and Gemini expose the wrappers as namespaced commands such as
@@ -89,9 +92,9 @@ intentional: Gemini maps `.gemini/commands/sd/review-pr.toml` to
 CLI was already running when the files were installed, run `/commands reload`;
 run `/commands list` to confirm the project command files Gemini loaded.
 
-The full-check command (`/sd:full-check` in Claude/Gemini; `sd-full-check` in
-Cursor, GitHub Copilot, OpenCode, and Codex) is optional but strongly
-recommended before PR readiness.
+The full-check command (see [Supported Adapters](#supported-adapters) for
+platform command shapes) is optional but strongly recommended before PR
+readiness.
 It runs deterministic checks, the generic
 `scripts/sd-ai-command-pack-review-preflight.mjs`, any configured
 `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND`, the legacy repo-local
@@ -109,10 +112,10 @@ local cache access, network access, and configured LLM credentials. When
 enabled, Gito writes reports to `.build/review/gito` by default; override with
 `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR` when needed.
 
-The review-local command (`/sd:review-local` in Claude/Gemini;
-`sd-review-local` in Cursor, GitHub Copilot, OpenCode, and Codex) runs local
-review providers against local changed files, or against the current branch
-diff when there are no local changed files, and enters a user-selected fix loop.
+The review-local command (see [Supported Adapters](#supported-adapters) for
+platform command shapes) runs local review providers against local changed
+files, or against the current branch diff when there are no local changed
+files, and enters a user-selected fix loop.
 By default it runs Prism and Gito through
 `scripts/sd-ai-command-pack-review-local.sh`, presents grouped findings, asks
 which findings to fix, fixes only selected items, and repeats the same local
@@ -121,9 +124,9 @@ review stack until no items are selected or no actionable findings remain. Use
 a specific stack, and configure third-party tools with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND`.
 
-The review-local-all command (`/sd:review-local-all` in Claude/Gemini;
-`sd-review-local-all` in Cursor, GitHub Copilot, OpenCode, and Codex) uses the
-same fix-loop behavior but reviews the entire checked-out repository. It runs
+The review-local-all command (see [Supported Adapters](#supported-adapters) for
+platform command shapes) uses the same fix-loop behavior but reviews the
+entire checked-out repository. It runs
 `bash scripts/sd-ai-command-pack-review-local.sh --full-codebase`, which calls
 `prism review codebase` for Prism and normally calls
 `gito review --all --path <absolute-repo-root>` for Gito with an include filter
@@ -337,6 +340,8 @@ Copy-Item -Recurse -Force -Path "C:\path\to\repo\.obsidian-kb\*" -Destination "C
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS` | Local review tool set for `sd-review-local` or `sd-review-local-all`; unset uses the runner default. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND` | Custom command for a named local review provider. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND` | Full-codebase custom command for a named provider; unset falls back to the non-`ALL` command. | unset |
+| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_SEMGREP_COMMAND` | Example Semgrep custom-provider command for `sd-review-local`; follows the generic `<TOOL>` command naming pattern. | unset |
+| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_SEMGREP_COMMAND` | Example Semgrep custom-provider command for `sd-review-local-all`; falls back to the non-`ALL` Semgrep command when unset. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS` | Max Gito attempts for HTTP 429 provider rate limits. | `2` |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS` | Initial Gito retry delay. | `30` |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS` | Maximum Gito retry delay after backoff. | `120` |
@@ -345,6 +350,7 @@ Copy-Item -Recurse -Force -Path "C:\path\to\repo\.obsidian-kb\*" -Destination "C
 | `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` | General PR body override for review-scope and fallback PR-body scope checks. | unset |
 | `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY` | PR body override consumed specifically by `sd-ai-command-pack-pr-body-scope.py`; unset falls back to `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`. | unset |
 | `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_ACTOR` | PR author login (or `--actor`) for `sd-ai-command-pack-pr-body-scope.py`; a `[bot]`-suffixed login (e.g. `dependabot[bot]`) is exempt from strict validation so automated PRs are not blocked. | unset |
+| `SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR` | PR number or URL for `sd-review-pr` when it cannot resolve the pull request from the current branch. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER` | Remote reviewer login/slug for `sd-review-pr`. | `copilot-pull-request-reviewer` |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND` | Custom command for requesting a remote review. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote review request/fix rounds before asking whether to continue. | `5` |

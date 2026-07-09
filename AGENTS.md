@@ -26,3 +26,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
   explicit approval from the user for that specific upstream PR. If
   `sd-ai-command-pack` work uncovers a `Trellis`-owned change, document the
   finding and provide a paste-ready handoff instead of opening a `Trellis` PR.
+- Treat `templates/**` as the source of truth for shipped pack payloads.
+  Root-level installed copies are byte-verified mirrors; when changing a
+  shipped script, skill, prompt, command, or guide, update the template side
+  first and keep the installed copy synchronized.

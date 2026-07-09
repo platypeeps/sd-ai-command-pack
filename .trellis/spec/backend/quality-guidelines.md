@@ -105,6 +105,10 @@ Correct: currentChangedPaths unions staged, branch, working-tree, and untracked 
 
 - Use `pathlib.Path` for filesystem work.
 - Keep pack files declared in `manifest.json`.
+- The pack-source full-check env-var documentation gate must scan both shipped
+  scripts and shipped skill templates. A `SD_AI_COMMAND_PACK_*` variable that
+  appears only in `templates/.agents/skills/**/SKILL.md` is still user-facing
+  and must be documented in `docs/SD_AI_COMMAND_PACK.md`.
 - Validate manifest paths before deriving target destinations or anchors.
 - Treat Windows drive/root anchors and backslash-separated parent traversal as
   unsafe manifest paths, even when tests run on POSIX.

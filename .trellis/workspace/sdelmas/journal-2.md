@@ -626,3 +626,46 @@ Backfilled archived Trellis task descriptions and added a regression guard befor
 ### Next Steps
 
 - Continue sd-work-backlog with the next actionable implementation-ready task.
+
+
+## Session 66: Fix documentation accuracy gaps
+
+**Date**: 2026-07-08
+**Task**: Fix documentation accuracy gaps
+**Branch**: `codex/docs-accuracy-fixes`
+
+### Summary
+
+Fixed shipped guide anchors, documented skill-only review variables, and widened the pack-source env-var docs gate for PR #69.
+
+### Main Changes
+
+- Fixed installed-guide quick links and documented SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR plus literal Semgrep local-review example variables.
+- Widened the pack-source full-check env-var documentation gate so shipped skill templates and shipped scripts are both checked.
+- Added maintainer guidance that templates/** are the shipped payload source of truth, replaced stale-prone README platform lists, bumped the manifest to 0.7.2, and archived 07-06-docs-accuracy-fixes.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c3f3314` | fix: close docs accuracy gaps |
+| `dea9e40` | chore(task): archive docs accuracy fixes |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_install.InstallTests.test_shipped_env_vars_are_documented tests.test_install.InstallTests.test_full_check_script_runs_pack_source_drift_gates tests.test_install.InstallTests.test_pack_source_drift_gate_rejects_undocumented_skill_env_vars tests.test_install.InstallTests.test_tracked_pack_targets_match_templates
+- [OK] python3 anchor sanity check for README.md, docs/SD_AI_COMMAND_PACK.md, templates/docs/SD_AI_COMMAND_PACK.md
+- [OK] bash -n scripts/sd-ai-command-pack-full-check.sh && bash -n templates/scripts/sd-ai-command-pack-full-check.sh && git diff --check
+- [OK] .venv/bin/python scripts/sd-ai-command-pack-update-spec-kb.py
+- [OK] .venv/bin/python -m unittest discover -s tests
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+- [OK] GitHub CI passed on PR #69: security, unittest (3.10), unittest (3.13), CI Result
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Continue sd-work-backlog with the next actionable implementation-ready task.

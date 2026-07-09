@@ -11119,11 +11119,14 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             )
         )
 
-        undocumented = sorted(script_vars - documented - self.ENV_VAR_DOC_EXEMPT)
+        undocumented = sorted(
+            (script_vars | skill_vars) - documented - self.ENV_VAR_DOC_EXEMPT
+        )
         self.assertEqual(
             undocumented,
             [],
-            "env vars read by shipped scripts but missing from the installed guide",
+            "env vars read by shipped scripts or skills but missing from the "
+            "installed guide",
         )
         stale = sorted(documented - script_vars - skill_vars)
         self.assertEqual(
@@ -11144,6 +11147,28 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("template twin pairs compared", script)
         self.assertIn("release version drift", script)
         self.assertIn("undocumented env var", script)
+        self.assertIn("shipped scripts or skills", script)
+        self.assertIn("in skills", script)
+
+    def test_pack_source_drift_gate_rejects_undocumented_skill_env_vars(
+        self,
+    ) -> None:
+        root = self.make_pack_source_fixture()
+        skill = root / "templates/.agents/skills/sd-review-pr/SKILL.md"
+        skill.write_text(
+            skill.read_text(encoding="utf-8")
+            + "\nFixture: ${SD_AI_COMMAND_PACK_UNDOCUMENTED_SKILL_ONLY}\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_pack_source_drift_gates(root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "undocumented env var: SD_AI_COMMAND_PACK_UNDOCUMENTED_SKILL_ONLY",
+            result.stdout,
+        )
+        self.assertIn("shipped scripts or skills", result.stdout)
 
     def test_pack_source_drift_gate_rejects_payload_without_version_bump(
         self,

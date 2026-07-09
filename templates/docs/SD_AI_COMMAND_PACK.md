@@ -13,9 +13,9 @@ Quick links:
 
 - [What is installed](#what-is-installed)
 - [Recommended review loop](#recommended-review-loop)
-- [Local commands](#local-commands)
+- [Commands](#commands)
 - [Configuration](#configuration)
-- [Install or refresh this pack](#install-or-refresh-this-pack)
+- [Updating the pack](#updating-the-pack)
 - [Troubleshooting](#troubleshooting)
 
 ## What is installed
@@ -792,6 +792,12 @@ ephemeral tool state and do not change what the checks validate.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND`: full-codebase command
   for a repo-specific or third-party local review tool. Takes precedence over
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND` when scope is `all`.
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_SEMGREP_COMMAND`: example Semgrep custom
+  provider command for `sd-review-local`; follows the generic `<TOOL>` command
+  naming pattern.
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_SEMGREP_COMMAND`: example Semgrep custom
+  provider command for `sd-review-local-all`; falls back to the non-`ALL`
+  Semgrep command when unset.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF`: base ref for review-local Gito
   review. Defaults to `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF`, then
   `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then the discovered branch-diff
@@ -817,6 +823,8 @@ ephemeral tool state and do not change what the checks validate.
 - `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`: explicit PR body text for tooling/generated
   scope checks when `gh pr view` should not be used. Deprecated fallback:
   `REVIEW_PREFLIGHT_PR_BODY`.
+- `SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR`: PR number or URL for `sd-review-pr`
+  when the command cannot resolve the pull request from the current branch.
 - `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH`: explicit feature branch name for
   `sd-create-pr` when it starts on the repository default branch. When unset,
   `sd-create-pr` derives a `codex/<slug>` branch from

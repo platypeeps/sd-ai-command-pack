@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.2 - 2026-07-09
+
+- Fixed installed-guide quick links, documented
+  `SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR`, and made the pack-source full-check
+  env-var documentation gate cover shipped skill-only variables.
+- Added maintainer guidance that `templates/**` are the shipped payload source
+  of truth and replaced stale-prone README per-command platform lists with
+  references to the supported adapter mapping.
+
 ## 0.7.1 - 2026-07-09
 
 - Hardened `sd-ai-command-pack-review-preflight.mjs`: symlink invocation now
