@@ -920,3 +920,47 @@ Moved generic Markdown command template sources out of Cursor-owned paths and in
 ### Next Steps
 
 - Merge PR #74 and continue the sd-work-backlog loop with the next actionable Trellis task.
+
+
+## Session 73: Partition pack test suite by subsystem
+
+**Date**: 2026-07-09
+**Task**: Partition pack test suite by subsystem
+**Branch**: `codex/partition-pack-test-suite`
+
+### Summary
+
+Split the monolithic installer test suite into focused subsystem modules while preserving discovery, historical unittest node compatibility, and coverage gates.
+
+### Main Changes
+
+- Moved shared installer test fixtures and subprocess helpers into tests/install_test_support.py.
+- Split the 351 tests formerly in tests/test_install.py across focused subsystem modules for install core, audit, review-local, full-check, review preflight, review scope, update-spec KB, record-session, housekeeping, removal, generated parity, and pack drift.
+- Kept tests/test_install.py as a compatibility facade for historical tests.test_install.InstallTests node IDs without duplicating discovery.
+- Updated Trellis specs and the archived task PRD to describe the new test layout and current 360-test baseline.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `64c2fbe` | test: partition pack suite by subsystem |
+
+### Testing
+
+- [OK] PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests (360 tests)
+- [OK] PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest tests.test_install.InstallTests.test_archived_prd_backed_tasks_have_descriptions
+- [OK] PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest tests.test_full_check.FullCheckTests.test_full_check_script_runs_pack_source_drift_gates
+- [OK] .venv/bin/python -m ruff check install.py installer scripts templates/scripts tests
+- [OK] git diff --check
+- [OK] coverage gates via /private/tmp COVERAGE_FILE: installer 100%, shipped scripts 79% against 76% floor
+- [OK] python3 scripts/sd-ai-command-pack-update-spec-kb.py
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
