@@ -2228,6 +2228,7 @@ class InstallCoreTests(InstallTestCase):
             "devin",
             "droid",
             "kilo",
+            "opencode",
             "pi",
             "qoder",
             "trae",

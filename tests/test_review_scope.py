@@ -1058,7 +1058,6 @@ class ReviewScopeTests(InstallTestCase):
             install.ROOT / "templates/.commands/sd-review-pr.md",
             install.ROOT / "templates/.gemini/commands/sd/review-pr.toml",
             install.ROOT / "templates/.github/prompts/sd-review-pr.prompt.md",
-            install.ROOT / "templates/.opencode/commands/sd-review-pr.md",
         ]
         detailed_doc_paths = [
             install.ROOT / "docs/SD_AI_COMMAND_PACK.md",

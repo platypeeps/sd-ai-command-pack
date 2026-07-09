@@ -29,6 +29,91 @@ SECRET_MARKER_PATTERNS = _support.SECRET_MARKER_PATTERNS
 InstallTestCase = _support.InstallTestCase
 
 
+GITHUB_UNTRUSTED_PR_NOTE = (
+    "   - Before running commands from repo-owned skill instructions in an "
+    "untrusted PR or fork context, require maintainer approval or use a sandbox "
+    "with no secrets and only required network access."
+)
+
+CLAUDE_COMMAND_ALIAS_REWRITES = {
+    "continue": (
+        "1. Resolve the `trellis-continue` skill by name using the agent's trusted "
+        "skill discovery mechanism for installed skills. On Claude Code this "
+        "workflow is installed as the `trellis:continue` command; resolving "
+        "`trellis:continue` counts as resolving this skill.",
+        "1. Resolve the `trellis-continue` skill by name using the agent's trusted "
+        "skill discovery mechanism for installed skills.",
+    ),
+    "finish-work": (
+        "1. Resolve the `trellis-finish-work` skill by name using the agent's "
+        "trusted skill discovery mechanism for installed skills. On Claude Code "
+        "this workflow is installed as the `trellis:finish-work` command; "
+        "resolving `trellis:finish-work` counts as resolving this skill.",
+        "1. Resolve the `trellis-finish-work` skill by name using the agent's "
+        "trusted skill discovery mechanism for installed skills.",
+    ),
+}
+
+BESPOKE_BODY_PARITY_EXEMPTIONS = {
+    ("claude", "start"): (
+        "Claude Code receives Trellis start context from the SessionStart hook "
+        "and intentionally has no trellis-start skill."
+    ),
+}
+
+
+def strip_yaml_frontmatter(content: str) -> str:
+    if not content.startswith("---\n"):
+        return content.strip()
+    end = content.find("\n---\n", 4)
+    if end == -1:
+        return content.strip()
+    return content[end + len("\n---\n") :].strip()
+
+
+def extract_gemini_prompt_body(content: str, path: Path) -> str:
+    match = re.search(r'prompt = """\n(.*)\n"""\s*$', content, re.DOTALL)
+    if not match:
+        raise AssertionError(f"{path}: missing Gemini prompt body")
+    return match.group(1).strip()
+
+
+def normalize_shared_command_body(content: str) -> str:
+    lines: list[str] = []
+    for line in content.strip().splitlines():
+        if line in {
+            "In this pack, SD means Software Delivery.",
+            (
+                "In this pack, SD means Software Delivery. A skill is a "
+                "project-installed Markdown instruction bundle resolved by the "
+                "agent's trusted installed-skill resolver."
+            ),
+        }:
+            continue
+        if line.startswith("# SD "):
+            line = "# " + line[len("# SD ") :]
+        lines.append(line.rstrip())
+    normalized = "\n".join(lines).strip()
+    return re.sub(r"\n{3,}", "\n\n", normalized)
+
+
+def apply_platform_body_deviations(platform: str, command: str, body: str) -> str:
+    if platform == "github":
+        body = body.replace(f"\n{GITHUB_UNTRUSTED_PR_NOTE}", "")
+    if platform == "claude" and command in CLAUDE_COMMAND_ALIAS_REWRITES:
+        platform_text, neutral_text = CLAUDE_COMMAND_ALIAS_REWRITES[command]
+        body = body.replace(platform_text, neutral_text)
+    return body
+
+
+def neutral_command_sources() -> list[Path]:
+    return sorted((install.ROOT / "templates/.commands").glob("sd-*.md"))
+
+
+def command_name_from_source(source: Path) -> str:
+    return source.stem.removeprefix("sd-")
+
+
 class GeneratedParityTests(InstallTestCase):
     """Tests for generated payload, adapter parity, docs, and template validation."""
 
@@ -888,6 +973,82 @@ class GeneratedParityTests(InstallTestCase):
             else:
                 self.assertIn("Resolve the `sd-review-pr` skill by name", content)
 
+    def test_bespoke_command_bodies_match_neutral_sources(self) -> None:
+        platform_paths = {
+            "claude": lambda command: (
+                install.ROOT / f"templates/.claude/commands/sd/{command}.md"
+            ),
+            "gemini": lambda command: (
+                install.ROOT / f"templates/.gemini/commands/sd/{command}.toml"
+            ),
+            "github": lambda command: (
+                install.ROOT / f"templates/.github/prompts/sd-{command}.prompt.md"
+            ),
+        }
+
+        for neutral_source in neutral_command_sources():
+            command = command_name_from_source(neutral_source)
+            neutral_body = normalize_shared_command_body(
+                strip_yaml_frontmatter(neutral_source.read_text(encoding="utf-8"))
+            )
+            for platform, path_for_command in platform_paths.items():
+                path = path_for_command(command)
+                if not path.exists():
+                    continue
+                with self.subTest(platform=platform, command=command):
+                    exemption = BESPOKE_BODY_PARITY_EXEMPTIONS.get((platform, command))
+                    content = path.read_text(encoding="utf-8")
+                    if exemption:
+                        self.assertIn("installs no `trellis-start` skill", content)
+                        continue
+                    if platform == "gemini":
+                        body = extract_gemini_prompt_body(content, path)
+                    else:
+                        body = strip_yaml_frontmatter(content)
+                    adapter_body = normalize_shared_command_body(
+                        apply_platform_body_deviations(platform, command, body)
+                    )
+                    self.assertEqual(adapter_body, neutral_body)
+
+    def test_neutral_command_fanout_matches_registry(self) -> None:
+        _, files = install.load_manifest()
+        neutral_sources = {
+            source.name: source.relative_to(install.ROOT).as_posix()
+            for source in neutral_command_sources()
+        }
+        expected_entries = set()
+
+        for platform in install.NEUTRAL_COMMAND_SOURCE_PLATFORMS:
+            info = install.PLATFORM_REGISTRY[platform]
+            self.assertIsNotNone(info.command_kind, platform)
+            self.assertIsNotNone(info.command_target_pattern, platform)
+            for filename, source in neutral_sources.items():
+                command = filename.removeprefix("sd-").removesuffix(".md")
+                target = info.command_target_pattern.format(
+                    filename=filename,
+                    name=command,
+                )
+                expected_entries.add((platform, info.command_kind, source, target))
+
+        actual_entries = {
+            (
+                file.platform,
+                file.kind,
+                file.source.relative_to(install.ROOT).as_posix(),
+                file.target.as_posix(),
+            )
+            for file in files
+            if file.platform in install.NEUTRAL_COMMAND_SOURCE_PLATFORMS
+            and file.source.relative_to(install.ROOT).parts[:2]
+            == ("templates", ".commands")
+        }
+
+        self.assertEqual(actual_entries, expected_entries)
+        self.assertEqual(
+            list((install.ROOT / "templates/.opencode/commands").glob("sd-*.md")),
+            [],
+        )
+
     def test_shared_skill_frontmatter_is_strict_yaml(self) -> None:
         allowed_keys = {"name", "description", "license", "allowed-tools", "metadata"}
         skill_paths = sorted((install.ROOT / "templates/.agents/skills").glob("*/SKILL.md"))
@@ -912,6 +1073,12 @@ class GeneratedParityTests(InstallTestCase):
                 )
 
     def test_flat_markdown_entries_are_completion_visible(self) -> None:
+        _, files = install.load_manifest()
+        opencode_files = {
+            file.target.name: file
+            for file in files
+            if file.platform == "opencode" and file.kind == "command"
+        }
         commands = [
             "start",
             "continue",
@@ -942,12 +1109,8 @@ class GeneratedParityTests(InstallTestCase):
             self.assertTrue(generic_content.startswith("---\n"), generic_path)
             self.assertIn("description:", generic_content)
 
-            opencode_path = (
-                install.ROOT / f"templates/.opencode/commands/sd-{command}.md"
-            )
-            opencode_content = opencode_path.read_text(encoding="utf-8")
-            self.assertTrue(opencode_content.startswith("---\n"), opencode_path)
-            self.assertIn("description:", opencode_content)
+            opencode_file = opencode_files[f"sd-{command}.md"]
+            self.assertEqual(opencode_file.source, generic_path)
 
     def test_gemini_entries_use_namespaced_toml_completion_shape(self) -> None:
         expected_descriptions = {

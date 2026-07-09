@@ -40,9 +40,9 @@ Reference files:
 - `templates/.github/prompts/sd-review-pr.prompt.md`
 - `templates/.github/prompts/sd-work-backlog.prompt.md`
 - `templates/.github/prompts/sd-work-designs.prompt.md`
-- `templates/.opencode/commands/sd-review-pr.md`
-- `templates/.opencode/commands/sd-work-backlog.md`
-- `templates/.opencode/commands/sd-work-designs.md`
+
+OpenCode command targets use the neutral `templates/.commands/sd-*.md` files
+as their source; do not add platform-owned OpenCode command source copies.
 
 ## Shared Skill Pattern
 
@@ -145,14 +145,15 @@ its matching shared skill.
 
 GitHub Copilot prompt adapters use `.github/prompts/sd-<command>.prompt.md`
 with YAML frontmatter descriptions and `mode: agent`, so prompt completion has
-explicit metadata and runs in agent mode. Cursor and the generic Markdown
-adapters for Antigravity, CodeBuddy, Devin, Droid/Factory, Kilo Code, Pi,
-Qoder, Trae, and Zed Code are installed from the neutral
+explicit metadata and runs in agent mode. Cursor, OpenCode, and the generic
+Markdown adapters for Antigravity, CodeBuddy, Devin, Droid/Factory, Kilo Code,
+Pi, Qoder, Trae, and Zed Code are installed from the neutral
 `templates/.commands/sd-<command>.md` source files. Their installed target
 paths still use each platform's native command/workflow/prompt directory, but
 the shared source must not live under a platform-owned template directory.
-OpenCode keeps its own Markdown source under `templates/.opencode/commands/`
-because its wording is platform-specific.
+Do not add duplicate OpenCode command source files under
+`templates/.opencode/commands/`; if OpenCode ever needs wording that differs
+from the neutral source, record the deviation beside the parity test.
 
 Gemini CLI command adapters use TOML under `.gemini/commands/sd/<command>.toml`
 because Gemini derives command names from paths under `.gemini/commands/`, with

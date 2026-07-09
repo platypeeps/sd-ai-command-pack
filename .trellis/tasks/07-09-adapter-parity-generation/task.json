@@ -3,7 +3,7 @@
   "name": "adapter-parity-generation",
   "title": "Enforce adapter content parity and generate command fan-out",
   "description": "opencode near-duplicate set, copilot housekeeping drift, marker-only parity tests, registry-derived command fan-out to cut 26 hand-written manifest entries per command",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

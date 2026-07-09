@@ -79,7 +79,6 @@ class UpdateSpecKbTests(InstallTestCase):
             install.ROOT / "templates/.commands/sd-update-spec.md",
             install.ROOT / "templates/.gemini/commands/sd/update-spec.toml",
             install.ROOT / "templates/.github/prompts/sd-update-spec.prompt.md",
-            install.ROOT / "templates/.opencode/commands/sd-update-spec.md",
         ]
         for adapter_path in adapter_paths:
             content = adapter_path.read_text(encoding="utf-8")
