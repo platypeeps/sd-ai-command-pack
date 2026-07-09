@@ -101,7 +101,9 @@ For the selected task:
 1. Re-read the task's `prd.md`, existing `design.md` if present, existing
    `implement.md` if present, and any files or specs referenced by the PRD.
 2. Inspect only the smallest relevant source/doc set needed to ground the
-   proposal. Use `rg`/`rg --files` first.
+   proposal. Prefer `rg`/`rg --files` when available; if ripgrep is missing,
+   fall back to repository-native search such as `git grep` and
+   `git ls-files`.
 3. Create `design.md` when missing. If it exists, preserve the existing text
    and append or update a dated proposal section instead of rewriting the file.
 4. Include enough implementation proposal detail for a future coding session:
