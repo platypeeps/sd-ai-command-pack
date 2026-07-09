@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.3 - 2026-07-09
+
+- Hardened `install.py --remove` so consumer-editable receipts and provenance
+  can discover prior pack files but cannot authorize deletion of `.git/*` or
+  arbitrary non-pack repository files, even when hashes match and `--force` is
+  set.
+
 ## 0.8.2 - 2026-07-09
 
 - Fixed session recorder retry safety for local-only or fresh workspaces where

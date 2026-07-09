@@ -929,6 +929,11 @@ To remove the pack from a target checkout:
 python3 /path/to/sd-ai-command-pack/install.py /path/to/target/repo --remove
 ```
 
+Remove mode treats receipts and provenance as candidate discovery only. It
+deletes only manifest-recognized pack artifacts and generated pack state;
+tampered entries for `.git/*` or arbitrary repo files are reported as
+`ignored`, even with `--force`.
+
 Normal shared installs maintain a managed `sd-ai-command-pack
 trellis-gitignore` block in the repo root `.gitignore`. The block ignores
 Trellis local/runtime files such as `.trellis/.developer`,
@@ -1134,6 +1139,9 @@ files, files that still match the bundled template, generated pack state under
 symlinks, directories, and user-owned policy files are preserved by default;
 add `--force` to delete drifted regular pack files too, and add `--backup` to
 keep `.bak` copies of deleted files.
+Receipt and provenance entries do not by themselves authorize deletion:
+remove mode ignores `.git/*` and non-manifest paths instead of deleting them,
+even when their recorded hashes match and `--force` is set.
 
 After installing or refreshing a target repo, a quick smoke test is:
 

@@ -3,7 +3,7 @@
   "name": "remove-receipt-trust-boundary",
   "title": "Constrain --remove to manifest-recognized targets",
   "description": "Stop --remove from honoring arbitrary consumer-editable provenance/receipt entries; reproduced deletion of .git/config via tampered provenance.json",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

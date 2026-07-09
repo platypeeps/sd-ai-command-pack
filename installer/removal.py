@@ -20,6 +20,52 @@ from installer.fileops import *  # noqa: F401,F403
 from installer.provenance import *  # noqa: F401,F403
 from installer.localonly import *  # noqa: F401,F403
 
+
+GENERATED_REMOVAL_TARGETS = frozenset(
+    {
+        INSTALLED_TARGETS_FILE.as_posix(),
+        PROVENANCE_FILE.as_posix(),
+        LOCAL_ONLY_MARKER_FILE.as_posix(),
+    }
+)
+MANAGED_BLOCK_REMOVAL_TARGETS = frozenset(
+    {
+        TRELLIS_GITIGNORE_TARGET.as_posix(),
+        COPILOT_INSTRUCTIONS_TARGET.as_posix(),
+    }
+)
+
+
+def normalize_removal_candidate(candidate: str) -> str:
+    normalized = candidate.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
+def is_git_internal_candidate(candidate: str) -> bool:
+    return candidate == ".git" or candidate.startswith(".git/")
+
+
+def recognized_removal_targets(files: list[PackFile]) -> set[str]:
+    return {
+        *(file.target.as_posix() for file in files),
+        *GENERATED_REMOVAL_TARGETS,
+        *MANAGED_BLOCK_REMOVAL_TARGETS,
+    }
+
+
+def removal_candidate_rejection(
+    candidate: str,
+    recognized_targets: set[str],
+) -> str | None:
+    if is_git_internal_candidate(candidate):
+        return "refusing to remove .git internals"
+    if candidate not in recognized_targets:
+        return "not a recognized sd-ai-command-pack target"
+    return None
+
+
 def installed_target_candidates(
     files: list[PackFile],
     target: Path,
@@ -27,23 +73,22 @@ def installed_target_candidates(
     platforms: list[str] | None,
     install_all: bool,
 ) -> set[str]:
-    receipt_targets = read_existing_installed_targets_for_remove(target)
-    provenance_targets = set(read_existing_provenance_files_for_remove(target).keys())
+    receipt_targets = {
+        normalize_removal_candidate(path)
+        for path in read_existing_installed_targets_for_remove(target)
+    }
+    provenance_targets = {
+        normalize_removal_candidate(path)
+        for path in read_existing_provenance_files_for_remove(target).keys()
+    }
     if receipt_targets or provenance_targets:
         candidates = {*receipt_targets, *provenance_targets}
     else:
         selected, _ = selected_files(files, target, platforms, install_all)
         candidates = {file.target.as_posix() for file in selected}
 
-    candidates.update(
-        {
-            INSTALLED_TARGETS_FILE.as_posix(),
-            PROVENANCE_FILE.as_posix(),
-            LOCAL_ONLY_MARKER_FILE.as_posix(),
-            TRELLIS_GITIGNORE_TARGET.as_posix(),
-            COPILOT_INSTRUCTIONS_TARGET.as_posix(),
-        }
-    )
+    candidates.update(GENERATED_REMOVAL_TARGETS)
+    candidates.update(MANAGED_BLOCK_REMOVAL_TARGETS)
     return candidates
 
 
@@ -150,7 +195,11 @@ def remove_installed_pack(
 ) -> int:
     require_target_directory(target)
     files_by_target = {file.target.as_posix(): file for file in files}
-    provenance_files = read_existing_provenance_files_for_remove(target)
+    provenance_files = {
+        normalize_removal_candidate(path): digest
+        for path, digest in read_existing_provenance_files_for_remove(target).items()
+    }
+    recognized_targets = recognized_removal_targets(files)
 
     print(f"{manifest['name']} {manifest['version']}")
     print(f"target: {target}")
@@ -183,10 +232,7 @@ def remove_installed_pack(
         )
     )
 
-    block_targets = {
-        TRELLIS_GITIGNORE_TARGET.as_posix(),
-        COPILOT_INSTRUCTIONS_TARGET.as_posix(),
-    }
+    block_targets = MANAGED_BLOCK_REMOVAL_TARGETS
     for candidate in sorted(
         installed_target_candidates(
             files,
@@ -196,6 +242,10 @@ def remove_installed_pack(
         )
         - block_targets
     ):
+        rejection = removal_candidate_rejection(candidate, recognized_targets)
+        if rejection is not None:
+            results.append(RemoveResult(Path(candidate), "ignored", detail=rejection))
+            continue
         relative_path = Path(candidate)
         file = files_by_target.get(relative_path.as_posix())
         results.append(
