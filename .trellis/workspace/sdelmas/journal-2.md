@@ -715,3 +715,81 @@ Added CI protections for skipped tests, reproducible Ruff/JavaScript linting, an
 ### Next Steps
 
 - Merge PR #70 and run housekeeping; no task-specific follow-up remains.
+
+
+## Session 68: Contributor workflow baseline
+
+**Date**: 2026-07-08
+**Task**: Contributor workflow baseline
+**Branch**: `codex/contributor-experience-baseline`
+
+### Summary
+
+Added a Makefile and CONTRIBUTING workflow, full-check hook warning, regression coverage, and shipped manifest/changelog updates for the contributor baseline task.
+
+### Main Changes
+
+- Added Makefile targets for setup, hooks, test, lint, audit, full-check, and check with Homebrew Python 3.13 preference.
+- Added CONTRIBUTING.md and README pointers for setup, verification, manifest bumping, template source-of-truth, self-sync, and spec references.
+- Updated source and shipped full-check scripts to warn when the pack source checkout has not armed .githooks.
+- Pinned the OpenCode plugin dependency and bumped the shipped manifest to 0.7.3.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eca1f9d` | chore: add contributor workflow baseline |
+
+### Testing
+
+- [OK] Focused contributor/full-check unittest coverage passed.
+- [OK] Obsidian KB refresh completed with 182 copies and no conflicts.
+- [OK] SD full-check passed with Prism and Gito disabled.
+- [OK] GitHub CI passed on PR #71.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Continue the sd-work-backlog loop with the next actionable Trellis task after housekeeping.
+
+
+## Session 69: Contributor workflow review follow-up
+
+**Date**: 2026-07-08
+**Task**: Contributor workflow review follow-up
+**Branch**: `codex/contributor-experience-baseline`
+
+### Summary
+
+Addressed Copilot review feedback by making the Makefile Node syntax checks optional for Python-only contributor environments.
+
+### Main Changes
+
+- Guarded the Makefile review-preflight JavaScript syntax checks behind command -v node and emit a warning when Node is unavailable.
+- Updated README and CONTRIBUTING.md to document optional Node/ShellCheck-style warnings for local maintainer checks.
+- Extended contributor workflow regression coverage to assert the optional Node warning path is documented.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `72b0dfa` | fix: make node lint optional |
+
+### Testing
+
+- [OK] Focused contributor/full-check unittest coverage passed.
+- [OK] make lint passes in a Python-only PATH and warns that Node/ShellCheck are unavailable.
+- [OK] SD full-check passed with Prism and Gito disabled.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Push the review fix, request a fresh Copilot review, and merge after CI and review threads are clean.

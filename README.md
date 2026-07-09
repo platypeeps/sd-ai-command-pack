@@ -739,6 +739,11 @@ remote CI budget.
 The installer runs `git diff --check` on installed pack paths unless
 `--skip-diff-check` is passed.
 
+For the complete maintainer workflow, run `make setup` once and then
+`make check`; see [CONTRIBUTING.md](CONTRIBUTING.md) for the target-by-target
+breakdown and release rules. The explicit commands below mirror the main test
+lane for environments without `make`.
+
 Run the pack tests with the explicit dev dependencies from
 `requirements-dev.txt`, including `coverage.py` via the `coverage` package.
 On macOS, use Homebrew Python for the local virtualenv instead of Apple/Xcode
@@ -752,8 +757,12 @@ test -x "$BREW_PYTHON" || BREW_PYTHON=/usr/local/bin/python3  # Intel Homebrew
 . .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 python -m ruff check install.py installer scripts templates/scripts tests
-node --check scripts/sd-ai-command-pack-review-preflight.mjs
-node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs
+if command -v node >/dev/null 2>&1; then
+  node --check scripts/sd-ai-command-pack-review-preflight.mjs
+  node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs
+else
+  printf '%s\n' "warning: node not found; skipping review-preflight JavaScript syntax checks."
+fi
 COVERAGE_PROCESS_START="$(pwd)/.coveragerc" COVERAGE_FILE="$(pwd)/.coverage" \
   PYTHONPATH="$(pwd)/tests/coverage_sitecustomize${PYTHONPATH:+:$PYTHONPATH}" \
   python -m coverage run --parallel-mode -m unittest discover -s tests
@@ -768,11 +777,12 @@ the default scope of a bare `coverage report`), and a second gate measures the
 shipped Python helpers under `scripts/` with a provisional 76% floor that
 ratchets up as helper tests grow. CI fails when `unittest` reports any skipped
 tests, runs the test suite on Ubuntu and macOS, and runs Ruff over pack Python
-plus `node --check` over the review-preflight JavaScript twins. The shipped
-shell scripts are exercised by behavioral tests rather than a coverage number;
-CI also runs `shellcheck -S warning` over every tracked shell script and the
-git hooks — consumers exempt the vendored pack shell from line review
-("reviewed upstream"), so upstream lint rigor is the compensating control.
+plus `node --check` over the review-preflight JavaScript twins when Node is
+available locally. The shipped shell scripts are exercised by behavioral tests
+rather than a coverage number; CI also runs `shellcheck -S warning` over every
+tracked shell script and the git hooks — consumers exempt the vendored pack
+shell from line review ("reviewed upstream"), so upstream lint rigor is the
+compensating control.
 
 ## Releasing
 
@@ -823,6 +833,10 @@ directories. Install it once per clone:
 ```bash
 git config core.hooksPath .githooks
 ```
+
+`make setup` also arms the hook. The full-check script warns in this source
+checkout when `.githooks` is not configured, because direct-to-main chore
+commits rely on that local guard when maintainer bypass is available.
 
 For a deliberate one-shot exception, bypass the hook with
 `SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS=1 git push ...` — GitHub's own rules

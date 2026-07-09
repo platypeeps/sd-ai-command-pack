@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.3 - 2026-07-09
+
+- Added maintainer contributor workflow docs and a Makefile for setup, tests,
+  linting, audits, and the SD full-check gate.
+- Made the shipped full-check script warn in the pack source checkout when the
+  `.githooks` pre-push guard is not armed.
+- Pinned the OpenCode plugin dependency used by the dogfood platform files.
+
 ## 0.7.2 - 2026-07-09
 
 - Fixed installed-guide quick links, documented
