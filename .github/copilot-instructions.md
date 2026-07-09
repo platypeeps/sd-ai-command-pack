@@ -3,10 +3,11 @@
 This repository is the sd-ai-command-pack source. The installed pack copies at
 the repository root (for example `.claude/commands/sd/**`,
 `.agents/skills/sd-*/**`, `.github/prompts/sd-*`, and
-`.zcode/commands/sd/**`) are byte-verified mirrors of `templates/**`,
-enforced by the full-check pack source drift gates and the test suite. Review
-the `templates/` side of a change once and treat the mirrored root copy as
-generated output; do not repeat the same finding on both copies.
+`.opencode/commands/sd-*`) are byte-verified mirrors of `templates/**` for the
+platform directories present in this source checkout, enforced by the full-check
+pack source drift gates and the test suite. Review the `templates/` side of a
+change once and treat the mirrored root copy as generated output; do not repeat
+the same finding on both copies.
 
 <!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START -->
 ## Trellis And SD AI Command Pack Review Guidance

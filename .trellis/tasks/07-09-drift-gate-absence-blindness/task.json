@@ -3,7 +3,7 @@
   "name": "drift-gate-absence-blindness",
   "title": "Close drift-gate absence blindness and refresh dogfood copies",
   "description": "Drift gate skips missing twins; pack's own .claude/.gemini/.opencode/.github copies are stale; templates-to-manifest completeness and casefold uniqueness unpinned; byte-verified-mirrors doc claim false",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
