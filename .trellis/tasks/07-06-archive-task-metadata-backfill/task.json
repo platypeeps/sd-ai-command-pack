@@ -3,7 +3,7 @@
   "name": "archive-task-metadata-backfill",
   "title": "Backfill archived task metadata descriptions",
   "description": "Backfill blank archived Trellis task metadata descriptions and add a lightweight guard against future blank completed-task descriptions.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

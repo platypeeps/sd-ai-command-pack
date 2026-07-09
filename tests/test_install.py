@@ -5926,6 +5926,25 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("WARN untracked files changes copied", result.stdout)
         self.assertIn(".agents/skills/sd-review-pr/SKILL.md", result.stdout)
 
+    def test_archived_prd_backed_tasks_have_descriptions(self) -> None:
+        missing_descriptions: list[str] = []
+
+        for task_json in sorted((PACK_ROOT / ".trellis/tasks/archive").glob("**/task.json")):
+            task_dir = task_json.parent
+            prd = task_dir / "prd.md"
+            if not prd.exists():
+                continue
+
+            task = json.loads(task_json.read_text(encoding="utf-8"))
+            if task.get("status") != "completed":
+                continue
+
+            description = task.get("description")
+            if not isinstance(description, str) or not description.strip():
+                missing_descriptions.append(task_json.relative_to(PACK_ROOT).as_posix())
+
+        self.assertEqual([], missing_descriptions)
+
     def test_review_preflight_script_detects_trellis_journal_drift(self) -> None:
         node = shutil.which("node")
         if node is None:
