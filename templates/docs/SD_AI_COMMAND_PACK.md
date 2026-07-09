@@ -39,6 +39,8 @@ Quick links:
 - `.agents/skills/sd-update-spec/SKILL.md`: Trellis update-spec workflow plus
   pack-managed repository knowledge refresh.
 - `scripts/sd-ai-command-pack-full-check.sh`: canonical full-check script.
+- `scripts/sd-ai-command-pack-shell-lib.sh`: shared Bash helpers sourced by
+  the full-check, review-local, and review-scope scripts.
 - `scripts/sd-ai-command-pack-housekeeping.sh`: canonical post-merge housekeeping script.
 - `scripts/sd-ai-command-pack-record-session.py`: one-shot session journal
   recorder — wraps Trellis' `add_session.py`, resolving commit subjects
@@ -403,9 +405,9 @@ AI/tooling/cache directories:
 node_modules/
 ```
 
-For `uvx`-based Gito wrappers, the
-runner sets `UV_CACHE_DIR` and `UV_TOOL_DIR` to writable temp directories when
-they are unset. When Gito reports provider rate limiting through an explicit
+For `uvx`-based Gito wrappers, the full-check and review-local runners set
+`UV_CACHE_DIR` and `UV_TOOL_DIR` to writable temp directories when they are
+unset. When Gito reports provider rate limiting through an explicit
 HTTP 429 status such as `ClientError: 429` or a 429 slow-down response, the
 runner retries with bounded exponential backoff. Tune attempts and delays with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`,
@@ -681,7 +683,7 @@ ephemeral tool state and do not change what the checks validate.
   review preflight command can run and the shared or legacy review preflight is
   unavailable.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND`: repo-specific review
-  preflight command to run with `bash -lc`.
+  preflight command to run with `bash -c`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_SCRIPT`: custom JavaScript
   review preflight script to run before the legacy repo-local
   `scripts/check-review-preflight.mjs` fallback.
@@ -782,10 +784,10 @@ ephemeral tool state and do not change what the checks validate.
   installed `.gito/sd-ai-command-pack.env` default of `4` when this variable is
   unset.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_UV_CACHE_DIR`: fallback `UV_CACHE_DIR` for
-  Gito when `UV_CACHE_DIR` is unset. Defaults to a temp
+  full-check and review-local Gito when `UV_CACHE_DIR` is unset. Defaults to a temp
   `sd-ai-command-pack-uv-cache` directory.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_UV_TOOL_DIR`: fallback `UV_TOOL_DIR` for
-  Gito when `UV_TOOL_DIR` is unset. Defaults to a temp
+  full-check and review-local Gito when `UV_TOOL_DIR` is unset. Defaults to a temp
   `sd-ai-command-pack-uv-tools` directory.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND`: command for a repo-specific
   or third-party local review tool, run with `bash -c`.
@@ -1125,6 +1127,7 @@ export UV_TOOL_DIR="${UV_TOOL_DIR:-$SANDBOX_TMP/sd-ai-command-pack-uv-tools}"
 export RUFF_CACHE_DIR="${RUFF_CACHE_DIR:-$SANDBOX_TMP/sd-ai-command-pack-ruff-cache}"
 python3 scripts/sd-ai-command-pack-install-audit.py
 bash -n scripts/sd-ai-command-pack-full-check.sh
+bash -n scripts/sd-ai-command-pack-shell-lib.sh
 bash -n scripts/sd-ai-command-pack-review-local.sh
 bash -n scripts/sd-ai-command-pack-review-scope.sh
 python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run
@@ -1155,11 +1158,12 @@ python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run
   `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0` to skip it, or set
   `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=required` when review must be mandatory.
 - Gito fails due to cache, network sandboxing, or provider rate limiting:
-  `sd-review-local` and `sd-review-local-all` set writable `UV_CACHE_DIR` and
-  `UV_TOOL_DIR` defaults and retry HTTP 429 / slow-down responses with bounded
-  backoff. If the failure is network or credential related, run from an
-  environment with the needed access. For `sd-full-check`, leave
-  `SD_AI_COMMAND_PACK_FULL_CHECK_GITO` unset unless Gito is configured locally.
+  `sd-full-check` when Gito is explicitly enabled, `sd-review-local`, and
+  `sd-review-local-all` set writable `UV_CACHE_DIR` and `UV_TOOL_DIR` defaults
+  and retry HTTP 429 / slow-down responses with bounded backoff. If the failure
+  is network or credential related, run from an environment with the needed
+  access. Leave `SD_AI_COMMAND_PACK_FULL_CHECK_GITO` unset unless Gito is
+  configured locally.
 - `uvx`, Ruff, Python compile/coverage, preflight, or full-check fail with
   `Operation not permitted` while creating cache or temporary files: export the
   sandbox-local `PYTHONPYCACHEPREFIX`, `UV_CACHE_DIR`, `UV_TOOL_DIR`, and

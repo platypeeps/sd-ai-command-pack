@@ -112,6 +112,7 @@ LEGACY_PACK_PATHS = {
             "review-local.sh",
             "review-preflight.mjs",
             "review-scope.sh",
+            "shell-lib.sh",
             "update-spec-kb.py",
         )
     },

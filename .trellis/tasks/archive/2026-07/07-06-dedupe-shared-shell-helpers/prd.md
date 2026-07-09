@@ -47,11 +47,38 @@ to `templates/`), and the copies have already diverged:
 
 ## Acceptance Criteria
 
-- [ ] No divergent copies of the shared helpers remain (verified by
+- [x] No divergent copies of the shared helpers remain (verified by
   the chosen mechanism: sourcing or drift gate).
-- [ ] Rate-limit retry behavior identical across entry points (test).
-- [ ] Full battery green: unittest suite, full-check, shellcheck;
+- [x] Rate-limit retry behavior identical across entry points (test).
+- [x] Full battery green: unittest suite, full-check, shellcheck;
   template twins byte-identical.
+
+## Implementation Notes
+
+- Added `scripts/sd-ai-command-pack-shell-lib.sh` and matching template twin as
+  the single source for review-scan exclusions, base-ref discovery,
+  `MAX_CONCURRENT_TASKS` loading, uv cache/tool directory setup, and Gito
+  HTTP-429 retry handling.
+- Updated full-check, review-local, and review-scope scripts to source the
+  shared helper instead of carrying divergent copies. Full-check now uses the
+  shared uv cache setup before Gito and runs configured review-preflight
+  commands with `bash -c`.
+- Bumped the manifest to `0.7.4`, added the helper as an always-installed
+  shared script, and updated README/installed-guide references plus PR-body
+  scope and install-audit script lists.
+- Added regression tests for helper sourcing, installed helper coverage, the
+  early-429-then-500 non-retry case in both entry points, full-check uv cache
+  setup, and non-login preflight execution.
+- Addressed review feedback by registering `run_gito_command` temp output files
+  with review-local's cleanup trap when that optional array is present.
+
+## Validation
+
+- [x] Focused helper/Gito/full-check tests: 17 tests passed.
+- [x] Full unit suite: 359 tests passed.
+- [x] Shellcheck passed for changed shell scripts and template twins.
+- [x] Final `sd-ai-command-pack-full-check.sh` gate passed after KB refresh.
+- [x] Focused temp cleanup/Gito tests passed after review follow-up.
 
 ## Notes
 
