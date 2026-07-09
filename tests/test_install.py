@@ -1621,8 +1621,10 @@ class InstallTests(unittest.TestCase):
         for expected in (
             "python -m pip install -r requirements-dev.txt",
             "python -m ruff check install.py installer scripts templates/scripts tests",
+            "command -v node >/dev/null 2>&1",
             "node --check scripts/sd-ai-command-pack-review-preflight.mjs",
             "node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs",
+            "warning: node not found; skipping review-preflight JavaScript syntax checks.",
             'COVERAGE_PROCESS_START="$(pwd)/.coveragerc"',
             'COVERAGE_FILE="$(pwd)/.coverage"',
             'PYTHONPATH="$(pwd)/tests/coverage_sitecustomize'
@@ -1658,6 +1660,8 @@ class InstallTests(unittest.TestCase):
             "make audit",
             "make full-check",
             "make check",
+            "review-preflight JavaScript syntax checks when Node is available",
+            "Missing optional tools print warnings",
             "Bump `manifest.json` whenever shipped payload changes",
             "Treat `templates/**` as the source of truth",
             "python3 install.py . --force",
@@ -1676,6 +1680,8 @@ class InstallTests(unittest.TestCase):
             "git config core.hooksPath .githooks",
             "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0",
             "SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0",
+            "command -v node >/dev/null 2>&1",
+            "warning: node not found; skipping review-preflight JavaScript syntax checks.",
         ):
             self.assertIn(target, makefile)
         self.assertIn('"@opencode-ai/plugin": "1.14.39"', opencode_package)

@@ -22,8 +22,12 @@ test:
 
 lint:
 	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests
-	node --check scripts/sd-ai-command-pack-review-preflight.mjs
-	node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs
+	@if command -v node >/dev/null 2>&1; then \
+		node --check scripts/sd-ai-command-pack-review-preflight.mjs; \
+		node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs; \
+	else \
+		printf '%s\n' "warning: node not found; skipping review-preflight JavaScript syntax checks."; \
+	fi
 	@if command -v shellcheck >/dev/null 2>&1; then \
 		git ls-files -z '*.sh' | xargs -0 shellcheck -S warning .githooks/pre-push; \
 	else \

@@ -25,8 +25,10 @@ make check
 ```
 
 `make check` runs the full local maintainer battery: coverage-gated tests,
-Ruff, review-preflight JavaScript syntax checks, optional ShellCheck, optional
-Bandit/Zizmor, and the SD full-check gate with Prism/Gito disabled.
+Ruff, review-preflight JavaScript syntax checks when Node is available,
+optional ShellCheck, optional Bandit/Zizmor, and the SD full-check gate with
+Prism/Gito disabled. Missing optional tools print warnings instead of blocking
+Python-only contributor setups.
 
 ## Release And Payload Rules
 
