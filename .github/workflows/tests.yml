@@ -19,13 +19,18 @@ permissions:
 
 jobs:
   unittest:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
-        python-version:
-          - "3.10"
-          - "3.13"
+        include:
+          - os: ubuntu-latest
+            python-version: "3.10"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: macos-latest
+            python-version: "3.13"
 
     steps:
       - name: Check out repository
@@ -44,11 +49,21 @@ jobs:
       - name: Run tests
         # Absolute env paths so subprocesses launched from temp cwds still
         # load the config and write their shards where combine finds them.
-        run: >-
-          COVERAGE_PROCESS_START="$(pwd)/.coveragerc"
-          COVERAGE_FILE="$(pwd)/.coverage"
-          PYTHONPATH="$(pwd)/tests/coverage_sitecustomize${PYTHONPATH:+:$PYTHONPATH}"
-          python3 -m coverage run --parallel-mode -m unittest discover -s tests
+        shell: bash
+        run: |
+          set -o pipefail
+          COVERAGE_PROCESS_START="$(pwd)/.coveragerc" \
+          COVERAGE_FILE="$(pwd)/.coverage" \
+          PYTHONPATH="$(pwd)/tests/coverage_sitecustomize${PYTHONPATH:+:$PYTHONPATH}" \
+          python3 -m coverage run --parallel-mode -m unittest discover -s tests 2>&1 | tee unittest-output.log
+
+      - name: Fail on skipped tests
+        shell: bash
+        run: |
+          if grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log; then
+            echo "Tests skipped under CI; install required tools or make the skip explicit."
+            exit 1
+          fi
 
       - name: Combine coverage data
         run: python3 -m coverage combine
@@ -58,6 +73,32 @@ jobs:
 
       - name: Report shipped-scripts coverage (gate 76%)
         run: python3 -m coverage report --include="scripts/sd-ai-command-pack-*" --fail-under=76
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install lint dependencies
+        run: python3 -m pip install -r requirements-dev.txt
+
+      - name: Ruff (pack Python)
+        run: python3 -m ruff check install.py installer scripts templates/scripts tests
+
+      - name: Review preflight JavaScript syntax
+        run: |
+          node --check scripts/sd-ai-command-pack-review-preflight.mjs
+          node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs
 
   security:
     runs-on: ubuntu-latest
@@ -100,17 +141,18 @@ jobs:
     name: CI Result
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [unittest, security]
+    needs: [unittest, lint, security]
     if: always()
 
     steps:
       - name: Evaluate required lanes
         env:
           UNITTEST_RESULT: ${{ needs.unittest.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
           SECURITY_RESULT: ${{ needs.security.result }}
         run: |
-          echo "unittest=$UNITTEST_RESULT security=$SECURITY_RESULT"
-          if [ "$UNITTEST_RESULT" != "success" ] || [ "$SECURITY_RESULT" != "success" ]; then
+          echo "unittest=$UNITTEST_RESULT lint=$LINT_RESULT security=$SECURITY_RESULT"
+          if [ "$UNITTEST_RESULT" != "success" ] || [ "$LINT_RESULT" != "success" ] || [ "$SECURITY_RESULT" != "success" ]; then
             echo "A required lane did not succeed."
             exit 1
           fi

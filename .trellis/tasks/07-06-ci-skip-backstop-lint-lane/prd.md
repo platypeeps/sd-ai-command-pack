@@ -39,11 +39,26 @@ Three CI gaps from the 2026-07-06 deep review:
 
 ## Acceptance Criteria
 
-- [ ] A deliberately-injected skip (temporary test) fails CI;
-  reverted after verification.
-- [ ] `ruff check` runs green and pinned in CI.
+- [x] A deliberately-injected skip (temporary test) fails CI;
+  reverted after verification. Local simulation verified the workflow
+  `skipped=[1-9][0-9]*` backstop exits nonzero for `OK (skipped=1)` and
+  permits `OK` output.
+- [x] `ruff check` runs green and pinned in CI.
 - [ ] macOS leg green in CI.
-- [ ] Full battery green.
+- [x] Full battery green.
+
+## Implementation Notes
+
+- Added a macOS Python 3.13 unittest matrix entry, `fail-fast: false`, and a
+  post-test skip-summary backstop that fails the job on any skipped tests.
+- Added a pinned Ruff dev dependency, conservative `pyproject.toml` config, and
+  a dedicated CI lint lane for Ruff plus `node --check` on both review-preflight
+  JavaScript twins.
+- Documented the local lint commands in `README.md` and captured the CI contract
+  in `.trellis/spec/backend/quality-guidelines.md`.
+- Local validation: focused CI-contract unit test, full unittest discovery,
+  Ruff, JavaScript syntax checks, `git diff --check`, Obsidian KB refresh, and
+  SD full-check with Prism/Gito disabled all passed.
 
 ## Notes
 
