@@ -755,3 +755,41 @@ Added a Makefile and CONTRIBUTING workflow, full-check hook warning, regression 
 ### Next Steps
 
 - Continue the sd-work-backlog loop with the next actionable Trellis task after housekeeping.
+
+
+## Session 69: Contributor workflow review follow-up
+
+**Date**: 2026-07-08
+**Task**: Contributor workflow review follow-up
+**Branch**: `codex/contributor-experience-baseline`
+
+### Summary
+
+Addressed Copilot review feedback by making the Makefile Node syntax checks optional for Python-only contributor environments.
+
+### Main Changes
+
+- Guarded the Makefile review-preflight JavaScript syntax checks behind command -v node and emit a warning when Node is unavailable.
+- Updated README and CONTRIBUTING.md to document optional Node/ShellCheck-style warnings for local maintainer checks.
+- Extended contributor workflow regression coverage to assert the optional Node warning path is documented.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `72b0dfa` | fix: make node lint optional |
+
+### Testing
+
+- [OK] Focused contributor/full-check unittest coverage passed.
+- [OK] make lint passes in a Python-only PATH and warns that Node/ShellCheck are unavailable.
+- [OK] SD full-check passed with Prism and Gito disabled.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Push the review fix, request a fresh Copilot review, and merge after CI and review threads are clean.
