@@ -95,3 +95,6 @@ proof the tables evolve independently.
   the registry's marker tables become a thin consumer of that state —
   do not block on it, but check the filed issue's status before
   implementing the marker layer.
+- Upstream reference recorded 2026-07-09: issue 3 was filed as
+  [mindfold-ai/Trellis#396](https://github.com/mindfold-ai/Trellis/issues/396)
+  and is currently open.

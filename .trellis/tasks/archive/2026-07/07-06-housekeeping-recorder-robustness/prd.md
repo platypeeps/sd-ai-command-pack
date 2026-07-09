@@ -81,3 +81,8 @@ Update-spec-kb (`scripts/sd-ai-command-pack-update-spec-kb.py`):
   recorder wrapper, and issue 2 (`--json` output) removes the
   sentinel-grep that item 8's neighbor code relies on. Fix pack-side
   regardless; revisit when the issues land.
+- Upstream references recorded 2026-07-09: issue 1 was filed as
+  [mindfold-ai/Trellis#394](https://github.com/mindfold-ai/Trellis/issues/394)
+  and issue 2 was filed as
+  [mindfold-ai/Trellis#395](https://github.com/mindfold-ai/Trellis/issues/395);
+  both are currently open.

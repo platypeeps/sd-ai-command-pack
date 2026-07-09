@@ -65,7 +65,25 @@ vendored version; no duplicate issues existed for any topic):
   #396, #397 in mindfold-ai/Trellis, filed 2026-07-07).
 - [x] Issue 5 either filed upstream with a confirmed Trellis root
   cause, or re-routed to the pack with the draft updated to say so.
-- [ ] Superseded pack tasks reference the filed issue URLs.
+- [x] Superseded pack tasks reference the filed issue URLs.
+
+## Reference Evidence - 2026-07-09
+
+- `07-06-introduce-platform-registry` now references
+  [mindfold-ai/Trellis#396](https://github.com/mindfold-ai/Trellis/issues/396),
+  live state `OPEN`.
+- `07-06-housekeeping-recorder-robustness` now references
+  [mindfold-ai/Trellis#394](https://github.com/mindfold-ai/Trellis/issues/394)
+  and
+  [mindfold-ai/Trellis#395](https://github.com/mindfold-ai/Trellis/issues/395),
+  both live state `OPEN`.
+- `07-06-archive-task-metadata-backfill` now references
+  [mindfold-ai/Trellis#397](https://github.com/mindfold-ai/Trellis/issues/397),
+  live state `CLOSED`.
+- `07-06-close-fleet-refresh-loop` now references the local issue-5 reroute:
+  the pack-owned duplicate-session fix landed in
+  [sd-ai-command-pack PR #77](https://github.com/platypeeps/sd-ai-command-pack/pull/77)
+  and no upstream Trellis issue should be filed for that incident.
 
 ## Notes
 
