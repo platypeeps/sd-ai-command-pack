@@ -1041,3 +1041,42 @@ Reconciled the fleet refresh task records, fixed the session-recorder retry dupl
 ### Next Steps
 
 - None - task complete
+
+
+## Session 76: Close upstream Trellis issue references
+
+**Date**: 2026-07-09
+**Task**: Close upstream Trellis issue references
+**Branch**: `codex/file-upstream-trellis-issues`
+
+### Summary
+
+Recorded live upstream Trellis issue state in superseded pack tasks and closed the upstream-issue reference backlog task.
+
+### Main Changes
+
+- linked platform registry, housekeeping/recorder robustness, and archive metadata tasks to the filed upstream Trellis issues
+- recorded issue 5 as rerouted locally to the pack duplicate-session fix instead of filed upstream
+- marked the upstream issue reference task acceptance criteria complete
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1f24bbb` | chore: close upstream issue reference task |
+
+### Testing
+
+- [OK] gh issue view 394/395/396/397 --repo mindfold-ai/Trellis --json number,title,state,url
+- [OK] python3 ./.trellis/scripts/task.py list-archive
+- [OK] git diff --check
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
