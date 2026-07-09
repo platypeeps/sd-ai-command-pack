@@ -1080,3 +1080,47 @@ Recorded live upstream Trellis issue state in superseded pack tasks and closed t
 ### Next Steps
 
 - None - task complete
+
+
+## Session 77: Consolidate planning follow-ups into Trellis tasks
+
+**Date**: 2026-07-09
+**Task**: Consolidate planning follow-ups into Trellis tasks
+**Branch**: `codex/consolidate-roadmap-trellis-tasks`
+
+### Summary
+
+Consolidated prior planning and deferred roadmap notes into six canonical Trellis planning tasks, updated archived notes to point at those tasks, added a spec convention for canonical task tracking, created PR #79, addressed Copilot documentation feedback, and verified local full-check plus green CI.
+
+### Main Changes
+
+- Added six planning-phase Trellis tasks for conditional follow-ups that were
+  previously scattered across archived planning notes.
+- Updated archived task notes so they point at the canonical Trellis tasks
+  instead of carrying separate deferred-work instructions.
+- Added a shared workflow spec convention that deferred planning notes should
+  become normal Trellis tasks and prior notes should link to the canonical
+  task.
+- Created PR #79, addressed Copilot's documentation-formatting comment, and
+  pushed the review-fix commit.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2f0a2df` | chore: consolidate planning follow-ups into trellis tasks |
+| `3c7371b` | docs: address planning follow-up review |
+
+### Testing
+
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`
+- [OK] GitHub CI for PR #79 passed all checks, including Ubuntu Python 3.10,
+  Ubuntu Python 3.13, macOS Python 3.13, lint, security, and CI Result.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
