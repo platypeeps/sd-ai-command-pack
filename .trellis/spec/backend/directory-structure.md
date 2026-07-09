@@ -26,7 +26,12 @@ logic.
 │   ├── .opencode/commands/...
 │   └── scripts/...              # Helper scripts installed into target repos
 ├── tests/
-│   └── test_install.py         # unittest coverage for installer behavior
+│   ├── install_test_support.py # shared unittest fixtures and helpers
+│   ├── test_install_core.py    # installer CLI and file install behavior
+│   ├── test_install_audit.py   # audit, provenance, and receipt behavior
+│   ├── test_review_local.py    # local Prism/Gito review command behavior
+│   ├── test_update_spec_kb.py  # Obsidian/LLM KB export behavior
+│   └── test_*.py               # focused subsystem regression suites
 └── README.md                   # User-facing install and verify docs
 ```
 
@@ -37,8 +42,9 @@ logic.
   `manifest.json`; do not hard-code new template paths only in Python.
 - Keep platform adapters thin. The shared workflow belongs in
   the matching `templates/.agents/skills/<command>/SKILL.md` file.
-- Keep tests in `tests/test_install.py` unless test volume grows enough to
-  justify splitting by behavior.
+- Keep shared test setup in `tests/install_test_support.py` and put new
+  regression coverage in the closest focused `tests/test_*.py` subsystem
+  module.
 
 ## Naming Conventions
 
@@ -65,5 +71,8 @@ logic.
 - `install.py` owns CLI parsing, manifest loading, target validation, file
   selection, file installation, and final diff checking.
 - `manifest.json` is the source of truth for source and target paths.
-- `tests/test_install.py` exercises the CLI through subprocess calls against
-  temporary Trellis repos instead of mocking the installer internals.
+- `tests/install_test_support.py` owns the temporary Trellis repo fixtures and
+  subprocess helpers; subsystem test modules exercise the CLI through those
+  helpers instead of mocking installer internals.
+- `tests/test_install.py` is only a compatibility facade for historical
+  `unittest` node ids and is excluded from discovery to avoid duplicate runs.

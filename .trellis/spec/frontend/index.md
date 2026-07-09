@@ -79,7 +79,8 @@ Before editing templates:
 2. Read every platform adapter for the same command so wording stays aligned.
 3. Read `manifest.json` to confirm the template is installed.
 4. Read `README.md` to confirm supported adapters and install behavior.
-5. Read `tests/test_install.py` if the installed file set changes.
+5. Read `tests/test_generated_parity.py` and any affected focused test module
+   if the installed file set changes.
 
 ## Quality Check
 

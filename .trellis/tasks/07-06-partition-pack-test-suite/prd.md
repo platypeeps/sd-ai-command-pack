@@ -17,7 +17,7 @@ Partition the monolithic installer test file into subsystem-focused test files w
 - Preserve test names or comments where they encode important historical regressions.
 - Make it easier to run focused areas such as installer CLI, provenance, review-local, update-spec KB, full-check, housekeeping, and generated/platform parity.
 - Verify the collected test count is identical before and after the split
-  (293 methods as of 2026-07-06) so no test is silently dropped by
+  (360 tests as of 2026-07-09) so no test is silently dropped by
   discovery.
 - Before renaming any test, grep docs and the preflight fixtures for
   hardcoded test node ids: `sd-ai-command-pack-review-preflight.mjs`
@@ -29,13 +29,13 @@ Partition the monolithic installer test file into subsystem-focused test files w
 
 ## Acceptance Criteria
 
-- [ ] `python3 -m unittest discover -s tests` discovers and runs the full suite after partitioning.
-- [ ] The total number of meaningful assertions/regression scenarios is not reduced.
-- [ ] Subsystem files have clear names, for example `test_install_cli.py`, `test_install_provenance.py`, `test_update_spec_kb.py`, `test_review_local.py`, and `test_housekeeping.py`.
-- [ ] Shared setup helpers live in a single obvious test support location.
-- [ ] Coverage thresholds remain satisfied.
-- [ ] `git diff --check` passes.
-- [ ] Future contributors can identify where to add tests for each major pack subsystem.
+- [x] `python3 -m unittest discover -s tests` discovers and runs the full suite after partitioning.
+- [x] The total number of meaningful assertions/regression scenarios is not reduced.
+- [x] Subsystem files have clear names, for example `test_install_core.py`, `test_install_audit.py`, `test_update_spec_kb.py`, `test_review_local.py`, and `test_housekeeping.py`.
+- [x] Shared setup helpers live in a single obvious test support location.
+- [x] Coverage thresholds remain satisfied.
+- [x] `git diff --check` passes.
+- [x] Future contributors can identify where to add tests for each major pack subsystem.
 
 ## Implementation Notes
 

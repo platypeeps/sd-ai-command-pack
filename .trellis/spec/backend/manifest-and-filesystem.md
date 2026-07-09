@@ -53,9 +53,9 @@ Reference files:
 - `install.py`, `validate_manifest()`
 - `install.py`, `validate_relative_manifest_path()`
 - `install.py`, `validate_pack_source()`
-- `tests/test_install.py`, `test_manifest_rejects_unsafe_target_paths`
-- `tests/test_install.py`, `test_manifest_rejects_unsafe_anchor_paths`
-- `tests/test_install.py`, `test_manifest_rejects_unsafe_source_paths`
+- `tests/test_install_core.py`, `test_manifest_rejects_unsafe_target_paths`
+- `tests/test_install_core.py`, `test_manifest_rejects_unsafe_anchor_paths`
+- `tests/test_install_core.py`, `test_manifest_rejects_unsafe_source_paths`
 
 ## Target Validation
 
@@ -88,7 +88,8 @@ Trellis platform detection:
 Reference files:
 
 - `install.py`, `selected_files()`
-- `tests/test_install.py`, `test_installs_shared_skill_and_existing_platform_adapters`
+- `tests/test_generated_parity.py`,
+  `test_installs_shared_skill_and_existing_platform_adapters`
 
 ## Receipt Stability Across Checkouts
 
@@ -156,11 +157,15 @@ Reference files:
   `provenance_content()`, `install_provenance_file()`
 - `templates/scripts/sd-ai-command-pack-install-audit.py`, `is_gitignored()`,
   `audit_provenance()`
-- `tests/test_install.py`, `test_install_keeps_receipt_entries_for_gitignored_absent_anchor`
-- `tests/test_install.py`, `test_install_audit_downgrades_gitignored_missing_targets`
-- `tests/test_install.py`, `test_install_writes_provenance_with_hashed_targets`
-- `tests/test_install.py`, `test_install_audit_reports_installed_payload_provenance_version`
-- `tests/test_install.py`, `test_install_audit_warns_for_unlisted_gitignored_pack_files`
+- `tests/test_install_audit.py`,
+  `test_install_keeps_receipt_entries_for_gitignored_absent_anchor`
+- `tests/test_install_audit.py`,
+  `test_install_audit_downgrades_gitignored_missing_targets`
+- `tests/test_install_audit.py`, `test_install_writes_provenance_with_hashed_targets`
+- `tests/test_install_audit.py`,
+  `test_install_audit_reports_installed_payload_provenance_version`
+- `tests/test_install_audit.py`,
+  `test_install_audit_warns_for_unlisted_gitignored_pack_files`
 
 ## Remove Mode Preserve-And-Continue Contract
 
@@ -379,9 +384,9 @@ installer skips the Trellis-repo precondition.
 Reference files:
 
 - `installer/manifest.py`, `load_manifest` / `validate_manifest`
-- `tests/test_install.py`, `test_load_manifest_rejects_malformed_manifests`
-- `tests/test_install.py`, `test_validate_manifest_rejects_unknown_kind`
-- `tests/test_install.py`,
+- `tests/test_install_core.py`, `test_load_manifest_rejects_malformed_manifests`
+- `tests/test_install_core.py`, `test_validate_manifest_rejects_unknown_kind`
+- `tests/test_install_core.py`,
   `test_install_skips_trellis_requirement_when_manifest_opts_out`
 
 ## Legacy And Obsolete Artifact Advisories
@@ -416,9 +421,11 @@ Reference files:
 
 - `scripts/sd-ai-command-pack-install-audit.py`, `LEGACY_PACK_PATHS`
 - `scripts/sd-ai-command-pack-install-audit.py`, `LEGACY_PACK_REFERENCES`
-- `tests/test_install.py`, `test_install_audit_warns_about_legacy_pack_names`
-- `tests/test_install.py`, `test_install_audit_warns_about_rename_era_legacy_paths`
-- `tests/test_install.py`, `test_install_audit_legacy_advisories_cover_all_pack_scripts`
+- `tests/test_install_audit.py`, `test_install_audit_warns_about_legacy_pack_names`
+- `tests/test_install_audit.py`,
+  `test_install_audit_warns_about_rename_era_legacy_paths`
+- `tests/test_install_audit.py`,
+  `test_install_audit_legacy_advisories_cover_all_pack_scripts`
 
 ## Anti-Patterns
 
