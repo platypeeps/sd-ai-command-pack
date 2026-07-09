@@ -57,7 +57,7 @@ Each item is CONFIRMED by the review and is a small, self-contained fix:
   each fix keeps the relevant gate green (shellcheck `-S warning`, 100%
   installer coverage, scripts/templates twins byte-identical, CI parity test).
 - R2: N7 is recorded as a consumer-coordination note (no pack code change);
-  fold it into the fleet-refresh touch or raise issues on the four repos.
+  fold it into the fleet-refresh touch or raise issues on the three repos.
 - R3: Any item that proves non-trivial (e.g. N5 splitting the support module,
   or N6 if adding lanes surfaces failures) is split out into its own task
   rather than expanding this batch.
