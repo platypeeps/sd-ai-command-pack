@@ -1,2 +1,3 @@
 # The test suite uses stdlib unittest; coverage.py enforces the installer gate.
 coverage==7.6.0
+PyYAML==6.0.3

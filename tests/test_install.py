@@ -15,6 +15,8 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
+import yaml
+
 import install
 
 
@@ -3767,6 +3769,24 @@ class InstallTests(unittest.TestCase):
         self.assertIn("scripts/sd-ai-command-pack-update-spec-kb.py", update_spec)
         self.assertIn(".obsidian-kb/Dashboard - <repo>.md", update_spec)
         self.assertIn("Obsidian vault copy", update_spec)
+
+    def test_shared_skill_frontmatter_is_strict_yaml(self) -> None:
+        allowed_keys = {"name", "description", "license", "allowed-tools", "metadata"}
+        skill_paths = sorted((install.ROOT / "templates/.agents/skills").glob("*/SKILL.md"))
+
+        self.assertGreater(len(skill_paths), 0)
+        for skill_path in skill_paths:
+            with self.subTest(skill=skill_path.relative_to(install.ROOT).as_posix()):
+                content = skill_path.read_text(encoding="utf-8")
+                match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
+                self.assertIsNotNone(match, f"{skill_path}: missing YAML frontmatter")
+                frontmatter = yaml.safe_load(match.group(1))
+                self.assertIsInstance(frontmatter, dict)
+                self.assertIn("name", frontmatter)
+                self.assertIn("description", frontmatter)
+                self.assertIsInstance(frontmatter["name"], str)
+                self.assertIsInstance(frontmatter["description"], str)
+                self.assertEqual(set(frontmatter) - allowed_keys, set())
 
     def test_flat_markdown_entries_are_completion_visible(self) -> None:
         commands = [
