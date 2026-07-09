@@ -8,7 +8,7 @@ template, sync the dogfood copy, and record an upstream Trellis handoff.
 
 ## Proposal
 
-Replace the `execSync(`${PYTHON_CMD} "${scriptPath}"`)` pattern with
+Replace the ``execSync(`${PYTHON_CMD} "${scriptPath}"`)`` pattern with
 `execFileSync(PYTHON_CMD, [scriptPath], options)` or the closest existing
 `session-utils.js` helper style. Preserve timeout, encoding, and error handling
 semantics so context injection still fails soft, but remove shell parsing from

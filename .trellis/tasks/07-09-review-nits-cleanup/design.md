@@ -11,7 +11,8 @@ pack and record N7 as consumer coordination.
 Implement N1 by probing `gh auth status` or otherwise distinguishing CLI
 authentication failure from "no PR" in housekeeping messages. Implement N2 by
 making the default uv cache/tool paths per-user, preferably honoring
-`XDG_CACHE_HOME` and falling back to `${TMPDIR}/sd-ai-command-pack-$uid-*`.
+`XDG_CACHE_HOME` and falling back to a `TMPDIR` path that includes
+`$(id -u)` or bash's `$UID`.
 
 Handle N3 by applying the same symlink-hostile guard pattern already used in
 other tests, unless the suite decides symlinks are a hard prerequisite. For N4,

@@ -14,7 +14,7 @@
 ## Validation Plan
 
 Run `python3 -m unittest tests.test_full_check tests.test_housekeeping` plus
-the pre-push test file. Run `git ls-files -z '*.sh' | xargs -0 shellcheck -S warning .githooks/pre-push`
+the pre-push test file. Run `git ls-files -z '*.sh' | xargs -0 shellcheck -S warning -- .githooks/pre-push`
 and `bash -n` on changed scripts.
 
 ## Documentation And Spec Updates
