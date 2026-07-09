@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.2 - 2026-07-09
+
+- Fixed session recorder retry safety for local-only or fresh workspaces where
+  `.trellis/workspace/` is still untracked, so reruns patch the pending journal
+  entry instead of appending duplicate sessions.
+
 ## 0.8.1 - 2026-07-09
 
 - Made the session recorder retry-safe after a post-append staging or commit

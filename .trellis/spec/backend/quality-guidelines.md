@@ -125,6 +125,10 @@ its template twin, or the `sd-finish-work` flow that calls it.
 - If a previous run appended the session but failed during the pack-owned
   staging or commit step, a retry must patch and commit that pending latest
   session instead of appending another one.
+- Journal discovery must enumerate untracked files inside `.trellis/workspace/`
+  (for example with `git status --untracked-files=all`) because local-only and
+  fresh workspaces can otherwise collapse to `?? .trellis/workspace/` and hide
+  the actual `journal-*.md` file.
 - If more than one modified journal has the requested title as its latest
   session heading, fail closed with a clear error rather than guessing.
 - The patcher anchors on session headings, commit hashes, and section headings;
@@ -137,6 +141,8 @@ its template twin, or the `sd-finish-work` flow that calls it.
   pending session, and surface git output.
 - Retry after the pending-session failure -> exit `0`, reuse the pending
   session, and keep a single journal entry.
+- Retry after the pending-session failure with an untracked workspace -> same
+  result: exit `0`, reuse the pending session, and keep a single journal entry.
 - Multiple matching pending journals -> exit `1` and do not append.
 
 ### 5. Good/Base/Bad Cases
@@ -153,6 +159,8 @@ its template twin, or the `sd-finish-work` flow that calls it.
 - Fail-fast validation for unknown, duplicate, and option-like commit hashes.
 - Retry after synthetic `git add` failure proves no duplicate session is
   appended.
+- Retry coverage must include both tracked and untracked `.trellis/workspace/`
+  states.
 - Template twin byte identity.
 
 ### 7. Wrong vs Correct
@@ -160,6 +168,9 @@ its template twin, or the `sd-finish-work` flow that calls it.
 ```text
 Wrong: rerun add_session.py whenever the previous wrapper command exits nonzero
 Correct: detect a modified latest same-title journal session and patch it
+
+Wrong: rely on default git status output for a fully untracked .trellis/workspace/
+Correct: enumerate untracked workspace files so journal-*.md remains visible
 
 Wrong: search for "(see git log)" or "(Add test results)" before patching
 Correct: replace hash-keyed commit rows and section bodies by structural anchors

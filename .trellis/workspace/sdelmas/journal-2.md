@@ -1199,3 +1199,79 @@ Addressed the final Copilot review comments for PR #83, corrected the OpenCode t
 ### Next Steps
 
 - None - task complete
+
+
+## Session 80: Fix recorder retries for untracked workspaces
+
+**Date**: 2026-07-09
+**Task**: Fix recorder retries for untracked workspaces
+**Branch**: `codex/recorder-untracked-workspace`
+
+### Summary
+
+Made the session recorder retry-safe when .trellis/workspace is fully untracked, added regression coverage, and released the shipped fix as 0.8.2.
+
+### Main Changes
+
+- Updated the recorder wrapper to enumerate untracked files under .trellis/workspace so journal files remain visible in local-only and fresh workspaces.
+- Added an end-to-end retry regression that simulates a post-append git add failure with an untracked workspace and proves reruns do not append duplicate sessions.
+- Bumped the pack manifest to 0.8.2 and documented the untracked-workspace retry contract in backend quality specs.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `42ca894` | fix: handle untracked recorder workspace retries |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_record_session
+- [OK] make test
+- [OK] make lint
+- [OK] .venv/bin/python -m unittest tests.test_record_session tests.test_generated_parity
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 81: Address recorder retry review feedback
+
+**Date**: 2026-07-09
+**Task**: Address recorder retry review feedback
+**Branch**: `codex/recorder-untracked-workspace`
+
+### Summary
+
+Handled Copilot feedback on the recorder retry regression by making PATH stubbing defensive, then revalidated the PR.
+
+### Main Changes
+
+- Made both recorder retry tests build the stub PATH with os.environ.get('PATH', '') so minimal environments without PATH do not fail unrelatedly.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `135af47` | fix: address recorder retry review feedback |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_record_session tests.test_generated_parity
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+- [OK] GitHub CI for PR #84 passed on 135af47 before final journal recording.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

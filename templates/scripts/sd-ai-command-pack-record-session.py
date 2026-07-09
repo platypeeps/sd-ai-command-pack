@@ -84,7 +84,14 @@ def current_git_branch() -> str | None:
 def modified_workspace_journals() -> list[Path]:
     # -z gives NUL-delimited, unquoted paths, avoiding core.quotePath's
     # C-style escaping entirely (spaces and non-ASCII stay literal).
-    result = run_git("status", "--porcelain", "-z", "--", WORKSPACE)
+    result = run_git(
+        "status",
+        "--porcelain",
+        "-z",
+        "--untracked-files=all",
+        "--",
+        WORKSPACE,
+    )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         suffix = f": {detail}" if detail else ""

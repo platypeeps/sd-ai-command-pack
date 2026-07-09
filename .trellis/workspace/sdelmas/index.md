@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 79
+- **Total Sessions**: 81
 - **Last Active**: 2026-07-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1200 | Active |
+| `journal-2.md` | ~1275 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 81 | 2026-07-09 | Address recorder retry review feedback | `135af47` | `codex/recorder-untracked-workspace` |
+| 80 | 2026-07-09 | Fix recorder retries for untracked workspaces | `42ca894` | `codex/recorder-untracked-workspace` |
 | 79 | 2026-07-09 | Finalize PR 83 review cleanup | `b9e00d7` | `codex/add-work-designs-artifacts` |
 | 78 | 2026-07-09 | Add work-designs planning artifacts | `a91de22`, `52e7e18`, `c905aae` | `codex/add-work-designs-artifacts` |
 | 77 | 2026-07-09 | Consolidate planning follow-ups into Trellis tasks | `2f0a2df`, `3c7371b` | `codex/consolidate-roadmap-trellis-tasks` |
