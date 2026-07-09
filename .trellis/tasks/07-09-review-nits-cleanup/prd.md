@@ -43,10 +43,10 @@ Each item is CONFIRMED by the review and is a small, self-contained fix:
   two-ended matrix as intentional.
 - **N7 — consumer legacy-name references (cross-repo LOW, consumer-owned).**
   Three consumers' own files still reference `TRELLIS_REVIEW_PR_PACK.md`:
-  loadsmith `docs/repomix-map.md`; rwbp-coordinator
-  `scripts/check-review-churn.mjs`; mezmo_benchmark
-  `scripts/check-review-cycle-patterns.py`. (The former green-button-manager
-  copy was loadsmith's now-deleted duplicate clone, not a distinct consumer.)
+  loadsmith's repository map, rwbp-coordinator's review-churn checker, and
+  mezmo_benchmark's review-cycle pattern checker. (The former
+  green-button-manager copy was loadsmith's now-deleted duplicate clone, not a
+  distinct consumer.)
   These are repo-owned, not pack payload — the pack cannot fix them; this item
   is a tracked note to raise the cleanup with those repos during the next fleet
   touch, not pack work.

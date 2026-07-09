@@ -17,7 +17,7 @@ execSync(`${PYTHON_CMD} "${scriptPath}"`)
 
 `scriptPath` is derived from the repo location, so a repo path containing a
 double quote, `$`, or backtick breaks the command or injects shell syntax. The
-sibling helper `.opencode/lib/session-utils.js:120,285` already does this
+upstream OpenCode sibling helper named `session-utils.js` already does this
 correctly with `execFileSync` and array args. The call is Trellis-vendored,
 errors are swallowed, and it has a 10s timeout — but it executes on every
 OpenCode session start, so a mis-quoted path silently disables Trellis context

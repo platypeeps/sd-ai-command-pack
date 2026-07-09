@@ -1124,3 +1124,78 @@ Consolidated prior planning and deferred roadmap notes into six canonical Trelli
 ### Next Steps
 
 - None - task complete
+
+
+## Session 78: Add work-designs planning artifacts
+
+**Date**: 2026-07-09
+**Task**: Add work-designs planning artifacts
+**Branch**: `codex/add-work-designs-artifacts`
+
+### Summary
+
+Added design and implementation planning artifacts for actionable Trellis backlog tasks, refreshed the local knowledge base, opened PR #83, passed the local gate, and addressed Copilot review comments.
+
+### Main Changes
+
+- added design.md and implement.md for 18 actionable Trellis planning tasks
+- left trigger-only parked tasks untouched
+- created PR #83 and addressed local and Copilot review feedback
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a91de22` | chore(tasks): add work-designs planning artifacts |
+| `52e7e18` | fix: address local review feedback round 1 |
+| `c905aae` | fix: address remote review feedback round 1 |
+
+### Testing
+
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+- [OK] GitHub Actions CI Result passed on PR #83
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 79: Finalize PR 83 review cleanup
+
+**Date**: 2026-07-09
+**Task**: Finalize PR 83 review cleanup
+**Branch**: `codex/add-work-designs-artifacts`
+
+### Summary
+
+Addressed the final Copilot review comments for PR #83, corrected the OpenCode trellis-context task plan to reference only the current source-of-truth path, and revalidated the PR.
+
+### Main Changes
+
+- Corrected the trellis-context hardening design and implementation plan to remove references to the nonexistent templates/.opencode/lib/trellis-context.js path.
+- Updated validation guidance to run node --check against .opencode/lib/trellis-context.js and treat any future template twin as conditional.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b9e00d7` | fix: address remote review feedback round 2 |
+
+### Testing
+
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+- [OK] GitHub CI for PR #83 passed on the current head before finish-work.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
