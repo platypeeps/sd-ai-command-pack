@@ -669,3 +669,49 @@ Fixed shipped guide anchors, documented skill-only review variables, and widened
 ### Next Steps
 
 - Continue sd-work-backlog with the next actionable implementation-ready task.
+
+
+## Session 67: CI skip backstop and lint lane
+
+**Date**: 2026-07-08
+**Task**: CI skip backstop and lint lane
+**Branch**: `codex/ci-skip-backstop-lint-lane`
+
+### Summary
+
+Added CI protections for skipped tests, reproducible Ruff/JavaScript linting, and a macOS unittest leg for sd-ai-command-pack.
+
+### Main Changes
+
+- Added a CI unittest matrix with Ubuntu Python 3.10/3.13 and macOS Python 3.13 plus a skip-summary backstop that fails on skipped tests.
+- Pinned Ruff in dev dependencies, added pyproject Ruff config, and introduced a dedicated CI lint lane for Ruff and review-preflight JavaScript syntax checks.
+- Documented the local lint workflow and captured the CI contract in Trellis quality guidelines and the task PRD.
+- Addressed Copilot feedback by making the Ruff dependency test assert a pinned version pattern instead of a hard-coded exact version.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c4ea71b` | ci: add skip backstop and lint lane |
+| `0d33cba` | chore(task): confirm CI hardening checks |
+| `ffa8c5a` | test: loosen Ruff pin assertion |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_install.InstallTests.test_coverage_dependency_is_declared_and_used_by_ci
+- [OK] .venv/bin/python -m unittest discover -s tests
+- [OK] .venv/bin/python -m ruff check install.py installer scripts templates/scripts tests
+- [OK] node --check scripts/sd-ai-command-pack-review-preflight.mjs
+- [OK] node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs
+- [OK] git diff --check
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+- [OK] GitHub PR #70 CI Result, lint, security, Ubuntu unittest, and macOS unittest checks passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #70 and run housekeeping; no task-specific follow-up remains.

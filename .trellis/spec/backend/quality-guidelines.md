@@ -132,6 +132,12 @@ Run the installer tests with:
 python3 -m unittest discover -s tests
 ```
 
+CI must fail when `unittest` reports skipped tests, even though local skipped
+tests remain friendly for missing developer tools. The required CI aggregate
+also includes Ruff, pinned in `requirements-dev.txt`, over `install.py`,
+`installer/`, `scripts/`, `templates/scripts/`, and `tests/`; a macOS unittest
+leg protects BSD-tool and bash-3.2 behavior that Ubuntu cannot exercise.
+
 Add or update tests when changing:
 
 - CLI flags or argument behavior

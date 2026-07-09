@@ -1576,8 +1576,34 @@ class InstallTests(unittest.TestCase):
             PACK_ROOT / ".github/workflows/tests.yml"
         ).read_text(encoding="utf-8")
         readme = (PACK_ROOT / "README.md").read_text(encoding="utf-8")
+        pyproject = (PACK_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        gitignore = (PACK_ROOT / ".gitignore").read_text(encoding="utf-8")
 
         self.assertRegex(requirements, r"(?m)^coverage[<>=!~]")
+        self.assertRegex(requirements, r"(?m)^ruff==\d+\.\d+\.\d+$")
+        for expected in (
+            "runs-on: ${{ matrix.os }}",
+            "fail-fast: false",
+            "os: macos-latest",
+            "unittest-output.log",
+            "skipped=[1-9][0-9]*",
+            "python3 -m ruff check install.py installer scripts templates/scripts tests",
+            "node --check scripts/sd-ai-command-pack-review-preflight.mjs",
+            "node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs",
+            "needs: [unittest, lint, security]",
+            "LINT_RESULT",
+        ):
+            self.assertIn(expected, workflow)
+        for expected in (
+            "[tool.ruff]",
+            'target-version = "py310"',
+            'select = ["E4", "E7", "E9", "F"]',
+            '"install.py" = ["F401", "F403", "F405", "F811"]',
+            '"installer/*.py" = ["F401", "F403", "F405", "F811"]',
+            '".ruff_cache"',
+        ):
+            self.assertIn(expected, pyproject)
+        self.assertIn(".ruff_cache/", gitignore)
         for expected in (
             "python3 -m pip install -r requirements-dev.txt",
             'COVERAGE_PROCESS_START="$(pwd)/.coveragerc"',
@@ -1594,6 +1620,9 @@ class InstallTests(unittest.TestCase):
             self.assertIn(expected, workflow)
         for expected in (
             "python -m pip install -r requirements-dev.txt",
+            "python -m ruff check install.py installer scripts templates/scripts tests",
+            "node --check scripts/sd-ai-command-pack-review-preflight.mjs",
+            "node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             'COVERAGE_PROCESS_START="$(pwd)/.coveragerc"',
             'COVERAGE_FILE="$(pwd)/.coverage"',
             'PYTHONPATH="$(pwd)/tests/coverage_sitecustomize'
