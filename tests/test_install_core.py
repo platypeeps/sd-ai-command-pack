@@ -178,6 +178,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertTrue((root / ".agents/skills/sd-start/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-create-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-work-backlog/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-work-designs/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-local/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-local-all/SKILL.md").is_file())
@@ -204,6 +205,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/create-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/work-backlog.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/work-designs.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local-all.toml").is_file())
@@ -216,6 +218,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertFalse((root / ".claude/commands/sd/finish-work.md").exists())
         self.assertFalse((root / ".claude/commands/sd/create-pr.md").exists())
         self.assertFalse((root / ".claude/commands/sd/work-backlog.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/work-designs.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-pr.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-local.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-local-all.md").exists())
@@ -228,6 +231,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertFalse((root / ".cursor/commands/sd-finish-work.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-create-pr.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-work-backlog.md").exists())
+        self.assertFalse((root / ".cursor/commands/sd-work-designs.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-review-pr.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-review-local.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-review-local-all.md").exists())
@@ -240,6 +244,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertFalse((root / ".github/prompts/sd-finish-work.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-create-pr.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-work-backlog.prompt.md").exists())
+        self.assertFalse((root / ".github/prompts/sd-work-designs.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-review-pr.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-review-local.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-review-local-all.prompt.md").exists())
@@ -253,6 +258,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertFalse((root / ".opencode/commands/sd-finish-work.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-create-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-work-backlog.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-work-designs.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-local.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-local-all.md").exists())
@@ -1430,6 +1436,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertFalse((root / ".agents/skills/sd-review-pr/SKILL.md").exists())
         self.assertFalse((root / ".agents/skills/sd-create-pr/SKILL.md").exists())
         self.assertFalse((root / ".agents/skills/sd-work-backlog/SKILL.md").exists())
+        self.assertFalse((root / ".agents/skills/sd-work-designs/SKILL.md").exists())
         self.assertFalse((root / ".agents/skills/sd-full-check/SKILL.md").exists())
         self.assertFalse((root / ".agents/skills/sd-housekeeping/SKILL.md").exists())
         self.assertFalse((root / "scripts/sd-ai-command-pack-full-check.sh").exists())
@@ -1445,6 +1452,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-create-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-work-backlog.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-work-designs.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-full-check.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-housekeeping.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-update-spec.md").exists())
@@ -1505,9 +1513,11 @@ class InstallCoreTests(InstallTestCase):
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-create-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-work-backlog/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-work-designs/SKILL.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-pr.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-create-pr.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-work-backlog.md").is_file())
+        self.assertTrue((root / ".cursor/commands/sd-work-designs.md").is_file())
         self.assertEqual(
             trellis_log.read_text(encoding="utf-8").strip(),
             "init --yes --skip-existing --codex --cursor",
@@ -1526,12 +1536,14 @@ class InstallCoreTests(InstallTestCase):
             ".agents/skills/sd-review-pr/SKILL.md",
             ".agents/skills/sd-create-pr/SKILL.md",
             ".agents/skills/sd-work-backlog/SKILL.md",
+            ".agents/skills/sd-work-designs/SKILL.md",
             ".codex/config.toml",
             ".codex/hooks/",
             ".cursor/agents/trellis-*.md",
             ".cursor/commands/sd-review-pr.md",
             ".cursor/commands/sd-create-pr.md",
             ".cursor/commands/sd-work-backlog.md",
+            ".cursor/commands/sd-work-designs.md",
             "scripts/sd-ai-command-pack-full-check.sh",
             ".sd-ai-command-pack/",
             ".obsidian-kb/",
@@ -2111,6 +2123,17 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("follow-ups or learnings", work_backlog)
         self.assertIn("Do not create pull requests in the upstream `Trellis`", work_backlog)
 
+        work_designs = (
+            install.ROOT / "templates/.agents/skills/sd-work-designs/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("name: sd-work-designs", work_designs)
+        self.assertIn("# SD Work Designs", work_designs)
+        self.assertIn("design.md", work_designs)
+        self.assertIn("implement.md", work_designs)
+        self.assertIn("Do not run `task.py start`", work_designs)
+        self.assertIn("Parked by sd-work-designs", work_designs)
+        self.assertIn("numbered list", work_designs)
+
         review_local = (
             install.ROOT / "templates/.agents/skills/sd-review-local/SKILL.md"
         ).read_text(encoding="utf-8")
@@ -2229,6 +2252,7 @@ class InstallCoreTests(InstallTestCase):
                 "finish-work",
                 "create-pr",
                 "work-backlog",
+                "work-designs",
                 "review-pr",
                 "review-local",
                 "review-local-all",

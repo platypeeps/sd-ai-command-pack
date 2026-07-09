@@ -44,10 +44,11 @@ target repos by `scripts/sd-ai-command-pack-install-audit.py`.
 The shared skills own the workflows. Platform command and prompt files are thin
 entry points that tell the agent to load the appropriate shared skill.
 Codex exposes pack entry points as enabled skills named `sd-start`, `sd-continue`,
-`sd-finish-work`, `sd-create-pr`, `sd-work-backlog`, `sd-full-check`,
-`sd-housekeeping`, `sd-review-pr`, `sd-review-local`, `sd-review-local-all`,
-`sd-review-learnings`, and `sd-update-spec`; type `/sd` in Codex command
-completion or invoke them explicitly with `$sd-review-pr`-style skill mentions.
+`sd-finish-work`, `sd-create-pr`, `sd-work-backlog`, `sd-work-designs`,
+`sd-full-check`, `sd-housekeeping`, `sd-review-pr`, `sd-review-local`,
+`sd-review-local-all`, `sd-review-learnings`, and `sd-update-spec`; type
+`/sd` in Codex command completion or invoke them explicitly with
+`$sd-review-pr`-style skill mentions.
 User-facing command adapters live under the `sd` namespace so pack-owned
 wrappers do not collide with Trellis-owned generated `/trellis:*` commands on
 future `trellis update` runs. Command-capable adapters expose either
@@ -127,6 +128,13 @@ Processes Trellis backlog tasks sequentially: pick one implementation-ready
 task, implement it, publish through `sd-create-pr`, merge and clean up through
 `sd-housekeeping`, then address or record follow-ups before selecting another
 task.
+
+### sd-work-designs
+
+Reviews existing Trellis tasks that have real PRDs but still need `design.md`
+and/or `implement.md`, writes implementation proposals and execution guidance
+into those task artifacts, parks tasks that need user input, and reports links
+to every planning document it created or updated.
 
 ### sd-full-check
 
