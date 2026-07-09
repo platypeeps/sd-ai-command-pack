@@ -715,3 +715,43 @@ Added CI protections for skipped tests, reproducible Ruff/JavaScript linting, an
 ### Next Steps
 
 - Merge PR #70 and run housekeeping; no task-specific follow-up remains.
+
+
+## Session 68: Contributor workflow baseline
+
+**Date**: 2026-07-08
+**Task**: Contributor workflow baseline
+**Branch**: `codex/contributor-experience-baseline`
+
+### Summary
+
+Added a Makefile and CONTRIBUTING workflow, full-check hook warning, regression coverage, and shipped manifest/changelog updates for the contributor baseline task.
+
+### Main Changes
+
+- Added Makefile targets for setup, hooks, test, lint, audit, full-check, and check with Homebrew Python 3.13 preference.
+- Added CONTRIBUTING.md and README pointers for setup, verification, manifest bumping, template source-of-truth, self-sync, and spec references.
+- Updated source and shipped full-check scripts to warn when the pack source checkout has not armed .githooks.
+- Pinned the OpenCode plugin dependency and bumped the shipped manifest to 0.7.3.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eca1f9d` | chore: add contributor workflow baseline |
+
+### Testing
+
+- [OK] Focused contributor/full-check unittest coverage passed.
+- [OK] Obsidian KB refresh completed with 182 copies and no conflicts.
+- [OK] SD full-check passed with Prism and Gito disabled.
+- [OK] GitHub CI passed on PR #71.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Continue the sd-work-backlog loop with the next actionable Trellis task after housekeeping.
