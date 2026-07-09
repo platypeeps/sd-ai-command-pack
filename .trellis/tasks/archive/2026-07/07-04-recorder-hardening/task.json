@@ -2,7 +2,7 @@
   "id": "recorder-hardening",
   "name": "recorder-hardening",
   "title": "Recorder hardening for fleet Trellis variants",
-  "description": "",
+  "description": "Harden the session recorder across fleet Trellis variants: encoding, commit validation, and tolerant journal patching.",
   "status": "completed",
   "dev_type": null,
   "scope": null,

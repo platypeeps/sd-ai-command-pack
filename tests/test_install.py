@@ -5926,6 +5926,86 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("WARN untracked files changes copied", result.stdout)
         self.assertIn(".agents/skills/sd-review-pr/SKILL.md", result.stdout)
 
+    def archived_task_description_failures(
+        self, archive_root: Path, *, base_root: Path
+    ) -> list[str]:
+        missing_descriptions: list[str] = []
+
+        for task_json in sorted(archive_root.glob("**/task.json")):
+            if task_json.is_symlink() or not task_json.is_file():
+                continue
+
+            task_dir = task_json.parent
+            prd = task_dir / "prd.md"
+            if prd.is_symlink() or not prd.is_file():
+                continue
+
+            task = json.loads(task_json.read_text(encoding="utf-8"))
+            if task.get("status") != "completed":
+                continue
+
+            description = task.get("description")
+            if not isinstance(description, str) or not description.strip():
+                missing_descriptions.append(task_json.relative_to(base_root).as_posix())
+
+        return missing_descriptions
+
+    def test_archived_prd_backed_tasks_have_descriptions(self) -> None:
+        missing_descriptions = self.archived_task_description_failures(
+            PACK_ROOT / ".trellis/tasks/archive",
+            base_root=PACK_ROOT,
+        )
+
+        self.assertEqual([], missing_descriptions)
+
+    def test_archived_description_guard_skips_symlinked_task_files(self) -> None:
+        tempdir = tempfile.TemporaryDirectory(
+            prefix="sd-archive-description-symlink-"
+        )
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        archive = root / ".trellis/tasks/archive/2026-07"
+
+        missing = archive / "missing"
+        missing.mkdir(parents=True)
+        (missing / "prd.md").write_text("# Missing\n", encoding="utf-8")
+        (missing / "task.json").write_text(
+            json.dumps({"status": "completed", "description": ""}),
+            encoding="utf-8",
+        )
+
+        outside_task = root / "outside-task.json"
+        outside_task.write_text(
+            json.dumps({"status": "completed", "description": ""}),
+            encoding="utf-8",
+        )
+        symlinked_task = archive / "symlinked-task"
+        symlinked_task.mkdir()
+        (symlinked_task / "prd.md").write_text("# Symlinked task\n", encoding="utf-8")
+
+        symlinked_prd = archive / "symlinked-prd"
+        symlinked_prd.mkdir()
+        (symlinked_prd / "task.json").write_text(
+            json.dumps({"status": "completed", "description": ""}),
+            encoding="utf-8",
+        )
+        outside_prd = root / "outside-prd.md"
+        outside_prd.write_text("# Outside PRD\n", encoding="utf-8")
+
+        try:
+            (symlinked_task / "task.json").symlink_to(outside_task)
+            (symlinked_prd / "prd.md").symlink_to(outside_prd)
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"symlinks are not available: {exc}")
+
+        self.assertEqual(
+            [".trellis/tasks/archive/2026-07/missing/task.json"],
+            self.archived_task_description_failures(
+                root / ".trellis/tasks/archive",
+                base_root=root,
+            ),
+        )
+
     def test_review_preflight_script_detects_trellis_journal_drift(self) -> None:
         node = shutil.which("node")
         if node is None:

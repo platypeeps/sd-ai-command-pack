@@ -24,13 +24,13 @@ The tasks themselves are accurate, but blank descriptions reduce searchability a
 
 ## Acceptance Criteria
 
-- [ ] The three known archived tasks have non-empty descriptions that match their PRDs.
-- [ ] No archived task status or completion data is accidentally changed.
-- [ ] A future blank description is detected by the selected guard or documented in a checklist used by repo maintainers.
-- [ ] Task listing and archive listing still work.
-- [ ] `python3 ./.trellis/scripts/task.py list-archive` succeeds.
-- [ ] `python3 -m unittest discover -s tests` passes if code or tests are changed.
-- [ ] `git diff --check` passes.
+- [x] The three known archived tasks have non-empty descriptions that match their PRDs.
+- [x] No archived task status or completion data is accidentally changed.
+- [x] A future blank description is detected by the selected guard or documented in a checklist used by repo maintainers.
+- [x] Task listing and archive listing still work.
+- [x] `python3 ./.trellis/scripts/task.py list-archive` succeeds.
+- [x] `python3 -m unittest discover -s tests` passes if code or tests are changed.
+- [x] `git diff --check` passes.
 
 ## Implementation Notes
 

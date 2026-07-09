@@ -2,7 +2,7 @@
   "id": "recorder-empty-subject",
   "name": "recorder-empty-subject",
   "title": "Distinguish empty commit subjects from unknown hashes",
-  "description": "",
+  "description": "Treat valid empty commit subjects as '(empty subject)' instead of unknown hashes in session journal rows.",
   "status": "completed",
   "dev_type": null,
   "scope": null,
