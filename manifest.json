@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "sd-ai-command-pack",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "license": "MIT",
   "description": "Install project-local SD AI command workflows, Prism/Gito defaults, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
@@ -590,91 +590,91 @@
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd-start.md",
+      "source": "templates/.commands/sd-start.md",
       "target": ".opencode/commands/sd-start.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd-continue.md",
+      "source": "templates/.commands/sd-continue.md",
       "target": ".opencode/commands/sd-continue.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd-finish-work.md",
+      "source": "templates/.commands/sd-finish-work.md",
       "target": ".opencode/commands/sd-finish-work.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd-create-pr.md",
+      "source": "templates/.commands/sd-create-pr.md",
       "target": ".opencode/commands/sd-create-pr.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd-work-backlog.md",
+      "source": "templates/.commands/sd-work-backlog.md",
       "target": ".opencode/commands/sd-work-backlog.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd-work-designs.md",
+      "source": "templates/.commands/sd-work-designs.md",
       "target": ".opencode/commands/sd-work-designs.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd-review-pr.md",
+      "source": "templates/.commands/sd-review-pr.md",
       "target": ".opencode/commands/sd-review-pr.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd-review-local.md",
+      "source": "templates/.commands/sd-review-local.md",
       "target": ".opencode/commands/sd-review-local.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd-review-local-all.md",
+      "source": "templates/.commands/sd-review-local-all.md",
       "target": ".opencode/commands/sd-review-local-all.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd-review-learnings.md",
+      "source": "templates/.commands/sd-review-learnings.md",
       "target": ".opencode/commands/sd-review-learnings.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd-full-check.md",
+      "source": "templates/.commands/sd-full-check.md",
       "target": ".opencode/commands/sd-full-check.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd-housekeeping.md",
+      "source": "templates/.commands/sd-housekeeping.md",
       "target": ".opencode/commands/sd-housekeeping.md",
       "anchor": ".opencode"
     },
     {
       "platform": "opencode",
       "kind": "command",
-      "source": "templates/.opencode/commands/sd-update-spec.md",
+      "source": "templates/.commands/sd-update-spec.md",
       "target": ".opencode/commands/sd-update-spec.md",
       "anchor": ".opencode"
     },

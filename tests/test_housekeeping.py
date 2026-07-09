@@ -40,7 +40,6 @@ class HousekeepingTests(InstallTestCase):
             install.ROOT / "templates/.commands/sd-housekeeping.md",
             install.ROOT / "templates/.gemini/commands/sd/housekeeping.toml",
             install.ROOT / "templates/.github/prompts/sd-housekeeping.prompt.md",
-            install.ROOT / "templates/.opencode/commands/sd-housekeeping.md",
         ]
 
         for adapter in adapters:
@@ -128,7 +127,6 @@ class HousekeepingTests(InstallTestCase):
             install.ROOT / "templates/.commands/sd-review-pr.md",
             install.ROOT / "templates/.gemini/commands/sd/review-pr.toml",
             install.ROOT / "templates/.github/prompts/sd-review-pr.prompt.md",
-            install.ROOT / "templates/.opencode/commands/sd-review-pr.md",
         ]
 
         self.assertIn("Post-Merge Handoff", skill)

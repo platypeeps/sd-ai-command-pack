@@ -1317,3 +1317,48 @@ Hardened install.py --remove so consumer-editable receipts and provenance cannot
 ### Next Steps
 
 - None - task complete
+
+
+## Session 83: Enforce adapter command parity
+
+**Date**: 2026-07-09
+**Task**: Enforce adapter command parity
+**Branch**: `codex/adapter-parity-generation`
+
+### Summary
+
+Completed Trellis task 07-09-adapter-parity-generation and opened PR #86 to enforce adapter parity across neutral, bespoke, and OpenCode command surfaces.
+
+### Main Changes
+
+- Single-sourced OpenCode command adapters from the neutral templates and removed duplicate OpenCode template sources.
+- Added registry command fan-out metadata plus parity tests for neutral-source targets and bespoke adapter bodies.
+- Reconciled GitHub prompt drift and refreshed adapter guidance/specs for the new OpenCode source model.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `517e97c` | test: enforce adapter command parity |
+| `ba26052` | chore(task): archive 07-09-adapter-parity-generation |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_generated_parity
+- [OK] .venv/bin/python -m unittest tests.test_install_core tests.test_housekeeping tests.test_review_scope tests.test_update_spec_kb tests.test_pack_drift
+- [OK] make test
+- [OK] make lint
+- [OK] git diff --check
+- [OK] .venv/bin/python scripts/sd-ai-command-pack-update-spec-kb.py
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+- [OK] GitHub Actions on PR #86 passed
+- [OK] Copilot reviewed PR #86 at commit 517e97c with no comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #86 after final-head checks stay green, then continue the backlog loop.

@@ -29,6 +29,8 @@ class PlatformInfo:
     init_flag: str | None = None
     local_gitignore_patterns: tuple[str, ...] = ()
     trellis_local_only: tuple[str, ...] = ()
+    command_kind: str | None = None
+    command_target_pattern: str | None = None
 
 
 PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
@@ -54,6 +56,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".agent/workflows/finish-work.md",
             ".agent/skills/trellis-*/",
         ),
+        command_kind="workflow",
+        command_target_pattern=".agent/workflows/{filename}",
     ),
     "claude": PlatformInfo(
         directory=".claude",
@@ -104,6 +108,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".codebuddy/settings.json",
             ".codebuddy/skills/trellis-*/",
         ),
+        command_kind="command",
+        command_target_pattern=".codebuddy/commands/sd/{name}.md",
     ),
     "codex": PlatformInfo(
         directory=".codex",
@@ -146,6 +152,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".cursor/hooks/",
             ".cursor/skills/trellis-*/",
         ),
+        command_kind="command",
+        command_target_pattern=".cursor/commands/{filename}",
     ),
     "devin": PlatformInfo(
         directory=".devin",
@@ -167,6 +175,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".devin/workflows/trellis-*.md",
             ".devin/skills/trellis-*/",
         ),
+        command_kind="workflow",
+        command_target_pattern=".devin/workflows/{filename}",
     ),
     "droid": PlatformInfo(
         directory=".factory",
@@ -191,6 +201,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".factory/settings.json",
             ".factory/skills/trellis-*/",
         ),
+        command_kind="command",
+        command_target_pattern=".factory/commands/sd/{name}.md",
     ),
     "gemini": PlatformInfo(
         directory=".gemini",
@@ -251,6 +263,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".kilocode/workflows/finish-work.md",
             ".kilocode/skills/trellis-*/",
         ),
+        command_kind="workflow",
+        command_target_pattern=".kilocode/workflows/{filename}",
     ),
     "kiro": PlatformInfo(
         directory=".kiro",
@@ -298,6 +312,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".opencode/lib/trellis-context.js",
             ".opencode/skills/trellis-*/",
         ),
+        command_kind="command",
+        command_target_pattern=".opencode/commands/{filename}",
     ),
     "pi": PlatformInfo(
         directory=".pi",
@@ -322,6 +338,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".pi/settings.json",
             ".pi/skills/trellis-*/",
         ),
+        command_kind="prompt",
+        command_target_pattern=".pi/prompts/{filename}",
     ),
     "qoder": PlatformInfo(
         directory=".qoder",
@@ -346,6 +364,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".qoder/settings.json",
             ".qoder/skills/trellis-*/",
         ),
+        command_kind="command",
+        command_target_pattern=".qoder/commands/{filename}",
     ),
     "reasonix": PlatformInfo(
         directory=".reasonix",
@@ -396,6 +416,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".trae/hooks/",
             ".trae/skills/trellis-*/",
         ),
+        command_kind="command",
+        command_target_pattern=".trae/commands/{filename}",
     ),
     "zcode": PlatformInfo(
         directory=".zcode",
@@ -418,6 +440,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".zcode/cli/agents/trellis-*.md",
             ".zcode/commands/trellis/",
         ),
+        command_kind="command",
+        command_target_pattern=".zcode/commands/sd/{name}.md",
     ),
 }
 
@@ -450,6 +474,13 @@ TRELLIS_INIT_PLATFORM_FLAGS = {
     for platform, info in PLATFORM_REGISTRY.items()
     if info.init_flag
 }
+NEUTRAL_COMMAND_SOURCE_PLATFORMS = tuple(
+    sorted(
+        platform
+        for platform, info in PLATFORM_REGISTRY.items()
+        if info.command_kind and info.command_target_pattern
+    )
+)
 PLATFORM_LOCAL_GITIGNORE_PATTERNS = tuple(
     pattern
     for group in _LOCAL_GITIGNORE_GROUP_ORDER

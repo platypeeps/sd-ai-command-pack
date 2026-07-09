@@ -18,8 +18,7 @@ templates/
 ├── .commands/sd-<command>.md                       # Shared generic Markdown command bodies
 ├── .claude/commands/sd/<command>.md                # Claude command adapters
 ├── .gemini/commands/sd/<command>.toml              # Gemini command adapters
-├── .github/prompts/sd-<command>.prompt.md          # GitHub Copilot prompts
-└── .opencode/commands/sd-<command>.md              # OpenCode command adapters
+└── .github/prompts/sd-<command>.prompt.md          # GitHub Copilot prompts
 ```
 
 ## Module Organization
@@ -52,8 +51,6 @@ templates/
 - `templates/.gemini/commands/sd/review-pr.toml` contains a short prompt
   that tells Gemini to load the matching shared skill.
 - `templates/.commands/sd-review-pr.md` is the shared generic Markdown source
-  installed to Cursor and other generic Markdown command targets.
+  installed to Cursor, OpenCode, and other generic Markdown command targets.
 - `templates/.github/prompts/sd-review-pr.prompt.md` mirrors the same entry-point
   instructions for GitHub Copilot.
-- `templates/.opencode/commands/sd-review-pr.md` mirrors the same
-  entry-point instructions for OpenCode.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.4 - 2026-07-09
+
+- Single-sourced OpenCode command adapters from the neutral command templates
+  and added registry-derived parity coverage for thin command fan-out.
+- Reconciled GitHub prompt body drift against the neutral command source and
+  strengthened bespoke adapter body-parity tests.
+
 ## 0.8.3 - 2026-07-09
 
 - Hardened `install.py --remove` so consumer-editable receipts and provenance
