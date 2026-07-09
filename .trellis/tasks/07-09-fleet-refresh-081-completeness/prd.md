@@ -60,6 +60,15 @@ on `07-09-recorder-untracked-workspace` to be effective in local-only repos.
   each merges green and each post-merge provenance reads 0.8.1 with the
   complete target set (hoa-manager and rwbp-coordinator regain
   `.claude/commands/sd/work-backlog.md`).
+- R5: Reproduce the root cause of the broken 0.7.0 installs before (or
+  alongside) shipping the completeness check. Construct an installer test that
+  recreates the gitignored-`.claude` condition under which hoa-manager (PR #97)
+  and rwbp-coordinator (PR #98) dropped `.claude/commands/sd/work-backlog.md`
+  from disk, receipts, and provenance while sibling repos with the same
+  gitignore pattern installed it. If the mechanism is confirmed, fix it so the
+  installer cannot silently skip a selected target; if it cannot be reproduced,
+  record the negative result and rely on R3's completeness check as the
+  compensating control.
 
 ## Acceptance Criteria
 
@@ -73,6 +82,9 @@ on `07-09-recorder-untracked-workspace` to be effective in local-only repos.
       in git + receipts + provenance.
 - [ ] `07-06-close-fleet-refresh-loop` archived PRD corrected (or a
       superseding note added) to include hoa-manager.
+- [ ] Root cause of the dropped-`work-backlog.md` installs reproduced in an
+      installer test and fixed, or a documented negative result with R3
+      standing as the compensating control.
 
 ## Non-goals
 
