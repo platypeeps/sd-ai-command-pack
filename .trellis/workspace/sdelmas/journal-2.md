@@ -534,3 +534,36 @@ Added sd-work-backlog as a sequential Trellis backlog runner, shipped platform a
 ### Next Steps
 
 - None - task complete
+
+
+## Session 64: Harden review preflight entry handling
+
+**Date**: 2026-07-08
+**Task**: Harden review preflight entry handling
+**Branch**: `codex/preflight-mjs-hardening`
+
+### Summary
+
+Hardened the review-preflight Node script so symlink invocation runs checks, Node versions below 16.9 receive a clear error, copied-surface detection includes untracked files, workspace index parsing tolerates trailing whitespace, and the runtime contract is documented in specs/docs with tests.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `533c0db` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
