@@ -192,9 +192,10 @@ class RecordSessionTests(InstallTestCase):
             encoding="utf-8",
         )
         git_stub.chmod(0o755)
+        path = os.environ.get("PATH", "")
         failing_env = {
             **os.environ,
-            "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+            "PATH": f"{stub_bin}{os.pathsep}{path}" if path else str(stub_bin),
         }
 
         command = [
@@ -276,9 +277,10 @@ class RecordSessionTests(InstallTestCase):
             encoding="utf-8",
         )
         git_stub.chmod(0o755)
+        path = os.environ.get("PATH", "")
         failing_env = {
             **os.environ,
-            "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+            "PATH": f"{stub_bin}{os.pathsep}{path}" if path else str(stub_bin),
         }
 
         command = [
