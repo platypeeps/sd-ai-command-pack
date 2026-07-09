@@ -1636,6 +1636,51 @@ class InstallTests(unittest.TestCase):
         ):
             self.assertIn(expected, readme)
 
+    def test_contributor_workflow_is_documented(self) -> None:
+        readme = (PACK_ROOT / "README.md").read_text(encoding="utf-8")
+        contributing = (PACK_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+        makefile = (PACK_ROOT / "Makefile").read_text(encoding="utf-8")
+        opencode_package = (
+            PACK_ROOT / ".opencode/package.json"
+        ).read_text(encoding="utf-8")
+
+        for expected in (
+            "make setup",
+            "make check",
+            "[CONTRIBUTING.md](CONTRIBUTING.md)",
+            "git config core.hooksPath .githooks",
+        ):
+            self.assertIn(expected, readme)
+        for expected in (
+            "make setup",
+            "make test",
+            "make lint",
+            "make audit",
+            "make full-check",
+            "make check",
+            "Bump `manifest.json` whenever shipped payload changes",
+            "Treat `templates/**` as the source of truth",
+            "python3 install.py . --force",
+            ".trellis/spec/frontend/adapter-guidelines.md",
+            ".trellis/spec/backend/manifest-and-filesystem.md",
+        ):
+            self.assertIn(expected, contributing)
+        for target in (
+            "setup:",
+            "hooks:",
+            "test:",
+            "lint:",
+            "audit:",
+            "full-check:",
+            "check:",
+            "git config core.hooksPath .githooks",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0",
+        ):
+            self.assertIn(target, makefile)
+        self.assertIn('"@opencode-ai/plugin": "1.14.39"', opencode_package)
+        self.assertNotIn('"@opencode-ai/plugin": "^', opencode_package)
+
     def test_backup_path_skips_existing_numbered_backups(self) -> None:
         root = self.make_repo()
         destination = root / ".agents/skills/sd-review-pr/SKILL.md"
@@ -5208,6 +5253,53 @@ class InstallTests(unittest.TestCase):
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS", script)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS", script)
         self.assertLess(script.index(node_guard), script.index(script_loop))
+
+    def test_full_check_script_warns_when_source_hook_unarmed(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        (root / "manifest.json").write_text('{"name": "pack"}\n', encoding="utf-8")
+        (root / "install.py").write_text("# source marker\n", encoding="utf-8")
+        (root / ".githooks").mkdir()
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir()
+        shutil.copy2(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
+            scripts_dir / "sd-ai-command-pack-full-check.sh",
+        )
+
+        command = (
+            "export SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE=1; "
+            "source scripts/sd-ai-command-pack-full-check.sh; "
+            "warn_unarmed_pack_source_hook"
+        )
+        result = subprocess.run(
+            [self._bash_path, "-c", command],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "pre-push chore-scope guard is not armed; "
+            "run: git config core.hooksPath .githooks",
+            result.stdout,
+        )
+
+        self.run_git(root, "config", "core.hooksPath", ".githooks")
+        result = subprocess.run(
+            [self._bash_path, "-c", command],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("pre-push chore-scope guard is not armed", result.stdout)
 
     def test_full_check_script_runs_from_repo_root_and_uses_env_script_name(
         self,

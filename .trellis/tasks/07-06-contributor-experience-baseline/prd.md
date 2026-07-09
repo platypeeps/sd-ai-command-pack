@@ -46,11 +46,30 @@ with no Makefile or single entry point. Two sharper edges from the
 
 ## Acceptance Criteria
 
-- [ ] `make setup && make check` (or equivalent) is the complete
+- [x] `make setup && make check` (or equivalent) is the complete
   documented local flow; README Verify section updated to reference it.
-- [ ] Full-check warns on an unarmed hook (test with a scratch clone).
-- [ ] CONTRIBUTING content present and linked; hygiene items done.
-- [ ] Full battery green.
+- [x] Full-check warns on an unarmed hook (test with a scratch clone).
+- [x] CONTRIBUTING content present and linked; hygiene items done.
+- [x] Full battery green.
+
+## Implementation Notes
+
+- Added `Makefile` targets for `setup`, `hooks`, `test`, `lint`, `audit`,
+  `full-check`, and `check`; `setup` prefers Homebrew Python 3.13 and arms the
+  `.githooks` pre-push guard.
+- Added `CONTRIBUTING.md` with setup/check commands, the manifest-version-bump
+  rule, template source-of-truth guidance, self-sync instructions, and links to
+  adapter plus manifest/filesystem specs.
+- Updated `sd-ai-command-pack-full-check.sh` and its shipped template twin to
+  warn in the pack source checkout when `core.hooksPath` is not `.githooks`.
+- Pinned `.opencode/package.json` to `@opencode-ai/plugin` `1.14.39` and
+  relied on the already-landed root `.ruff_cache/` ignore from the CI hardening
+  task.
+- Bumped the manifest version to `0.7.3` and added the changelog entry because
+  the shipped full-check template changed.
+- Validation: focused contributor/full-check tests, `make setup`, `make lint`,
+  `make audit`, and `make test` using a disposable Python 3.13 venv, plus
+  `git diff --check` and SD full-check with Prism/Gito disabled all passed.
 
 ## Notes
 

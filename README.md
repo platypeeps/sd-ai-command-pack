@@ -739,6 +739,11 @@ remote CI budget.
 The installer runs `git diff --check` on installed pack paths unless
 `--skip-diff-check` is passed.
 
+For the complete maintainer workflow, run `make setup` once and then
+`make check`; see [CONTRIBUTING.md](CONTRIBUTING.md) for the target-by-target
+breakdown and release rules. The explicit commands below mirror the main test
+lane for environments without `make`.
+
 Run the pack tests with the explicit dev dependencies from
 `requirements-dev.txt`, including `coverage.py` via the `coverage` package.
 On macOS, use Homebrew Python for the local virtualenv instead of Apple/Xcode
@@ -823,6 +828,10 @@ directories. Install it once per clone:
 ```bash
 git config core.hooksPath .githooks
 ```
+
+`make setup` also arms the hook. The full-check script warns in this source
+checkout when `.githooks` is not configured, because direct-to-main chore
+commits rely on that local guard when maintainer bypass is available.
 
 For a deliberate one-shot exception, bypass the hook with
 `SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS=1 git push ...` — GitHub's own rules

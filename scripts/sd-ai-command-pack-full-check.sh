@@ -68,6 +68,18 @@ have() {
   command -v "$1" >/dev/null 2>&1
 }
 
+warn_unarmed_pack_source_hook() {
+  [ -f "$REPO_ROOT/manifest.json" ] || return 0
+  [ -f "$REPO_ROOT/install.py" ] || return 0
+  [ -d "$REPO_ROOT/.githooks" ] || return 0
+
+  local hooks_path
+  hooks_path="$(git config --get core.hooksPath 2>/dev/null || true)"
+  if [ "$hooks_path" != ".githooks" ]; then
+    warn "pre-push chore-scope guard is not armed; run: git config core.hooksPath .githooks"
+  fi
+}
+
 run() {
   section "$1"
   shift
@@ -955,6 +967,7 @@ run_review_preflight() {
 main() {
   section "SD AI command pack full check"
   git status -sb
+  warn_unarmed_pack_source_hook
 
   run "Whitespace check: unstaged diff" git diff --check
   run "Whitespace check: staged diff" git diff --cached --check
