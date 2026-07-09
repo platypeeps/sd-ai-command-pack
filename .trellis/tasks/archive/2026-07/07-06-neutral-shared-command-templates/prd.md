@@ -33,12 +33,34 @@ side already solved this correctly with a single neutral source
 
 ## Acceptance Criteria
 
-- [ ] No manifest entry sources command bodies from
+- [x] No manifest entry sources command bodies from
   `templates/.cursor/commands/`; a fresh install into a consumer
   fixture produces byte-identical installed files vs. before the move.
-- [ ] Frontend spec documents the shared command-source pattern.
-- [ ] Full battery green: unittest suite, 100% coverage on install.py,
+- [x] Frontend spec documents the shared command-source pattern.
+- [x] Full battery green: unittest suite, 100% coverage on install.py,
   full-check, shellcheck; template twins byte-identical.
+
+## Implementation Notes
+
+- Moved the twelve generic Markdown command bodies from
+  `templates/.cursor/commands/` to `templates/.commands/`.
+- Updated all Cursor and generic Markdown platform manifest entries to source
+  from `templates/.commands/` while leaving installed target paths unchanged.
+- Bumped the manifest version to `0.7.5` for the shipped payload source-layout
+  change.
+- Updated frontend and backend specs to document the neutral shared command
+  source pattern.
+- Added regression coverage that each generic Markdown platform shares the same
+  neutral command source per command.
+
+## Validation
+
+- [x] Verified all moved command bodies are byte-identical to the previous
+  Cursor command sources from `main`.
+- [x] Verified manifest sources resolve, no entry sources
+  `templates/.cursor/commands/`, and 120 entries source `templates/.commands/`.
+- [x] Focused manifest/adapter tests passed.
+- [x] Full unit suite passed: 360 tests.
 
 ## Notes
 

@@ -878,3 +878,45 @@ Extracted duplicated Bash helpers into a shipped shared helper library and align
 ### Next Steps
 
 - Merge PR #73 and continue the sd-work-backlog loop with the next actionable Trellis task.
+
+
+## Session 72: Move shared command templates to neutral source
+
+**Date**: 2026-07-09
+**Task**: Move shared command templates to neutral source
+**Branch**: `codex/neutral-shared-command-templates`
+
+### Summary
+
+Moved generic Markdown command template sources out of Cursor-owned paths and into a neutral shared template directory while preserving installed target paths.
+
+### Main Changes
+
+- Moved twelve generic Markdown command bodies from templates/.cursor/commands/ to templates/.commands/ with byte-identical content.
+- Updated Cursor and generic Markdown platform manifest entries to source from templates/.commands/ and bumped the manifest version to 0.7.5.
+- Updated frontend/backend specs and installer tests to document and enforce the neutral shared command-source pattern.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3939202` | refactor: move shared command templates to neutral source |
+
+### Testing
+
+- [OK] Full unit suite passed: 360 tests.
+- [OK] Focused manifest/adapter tests passed.
+- [OK] Verified moved command bodies are byte-identical to previous Cursor sources from main.
+- [OK] Verified no manifest entry sources templates/.cursor/commands/ and 120 entries source templates/.commands/.
+- [OK] KB refresh completed with 182 copies and no conflicts.
+- [OK] SD full-check passed with Prism and Gito disabled.
+- [OK] PR #74 CI passed and Copilot review generated no threads on the implementation commit.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #74 and continue the sd-work-backlog loop with the next actionable Trellis task.

@@ -1344,7 +1344,7 @@ class InstallTests(unittest.TestCase):
     ) -> None:
         adapters = [
             install.ROOT / "templates/.claude/commands/sd/housekeeping.md",
-            install.ROOT / "templates/.cursor/commands/sd-housekeeping.md",
+            install.ROOT / "templates/.commands/sd-housekeeping.md",
             install.ROOT / "templates/.gemini/commands/sd/housekeeping.toml",
             install.ROOT / "templates/.github/prompts/sd-housekeeping.prompt.md",
             install.ROOT / "templates/.opencode/commands/sd-housekeeping.md",
@@ -3920,14 +3920,68 @@ class InstallTests(unittest.TestCase):
             self.assertIn("description:", github_content)
             self.assertIn("mode: agent", github_content)
 
-            for platform in ("cursor", "opencode"):
-                adapter_path = (
-                    install.ROOT
-                    / f"templates/.{platform}/commands/sd-{command}.md"
+            generic_path = install.ROOT / f"templates/.commands/sd-{command}.md"
+            generic_content = generic_path.read_text(encoding="utf-8")
+            self.assertTrue(generic_content.startswith("---\n"), generic_path)
+            self.assertIn("description:", generic_content)
+
+            opencode_path = (
+                install.ROOT / f"templates/.opencode/commands/sd-{command}.md"
+            )
+            opencode_content = opencode_path.read_text(encoding="utf-8")
+            self.assertTrue(opencode_content.startswith("---\n"), opencode_path)
+            self.assertIn("description:", opencode_content)
+
+    def test_generic_markdown_platforms_share_neutral_command_sources(self) -> None:
+        _, files = install.load_manifest()
+        generic_platforms = {
+            "antigravity",
+            "codebuddy",
+            "cursor",
+            "devin",
+            "droid",
+            "kilo",
+            "pi",
+            "qoder",
+            "trae",
+            "zcode",
+        }
+        command_sources_by_platform: dict[str, dict[str, Path]] = {
+            platform: {} for platform in generic_platforms
+        }
+
+        for file in files:
+            if file.platform not in generic_platforms:
+                continue
+            if file.source.relative_to(install.ROOT).parts[:2] != ("templates", ".commands"):
+                continue
+            command_sources_by_platform[file.platform][file.source.name] = file.source
+
+        expected_sources = {
+            f"sd-{command}.md"
+            for command in [
+                "start",
+                "continue",
+                "finish-work",
+                "create-pr",
+                "work-backlog",
+                "review-pr",
+                "review-local",
+                "review-local-all",
+                "review-learnings",
+                "full-check",
+                "housekeeping",
+                "update-spec",
+            ]
+        }
+        for platform, command_sources in command_sources_by_platform.items():
+            self.assertEqual(set(command_sources), expected_sources, platform)
+            for source_name, source_path in command_sources.items():
+                self.assertEqual(
+                    source_path.relative_to(install.ROOT),
+                    Path("templates") / ".commands" / source_name,
+                    platform,
                 )
-                adapter_content = adapter_path.read_text(encoding="utf-8")
-                self.assertTrue(adapter_content.startswith("---\n"), adapter_path)
-                self.assertIn("description:", adapter_content)
 
     def test_gemini_entries_use_namespaced_toml_completion_shape(self) -> None:
         expected_descriptions = {
@@ -3995,6 +4049,7 @@ class InstallTests(unittest.TestCase):
             self.assertTrue(file.target.name.startswith("sd-"), file.target)
 
         self.assertFalse((install.ROOT / "templates/.claude/commands/trellis").exists())
+        self.assertFalse((install.ROOT / "templates/.commands/trellis").exists())
         self.assertFalse((install.ROOT / "templates/.cursor/commands/trellis").exists())
         self.assertFalse((install.ROOT / "templates/.gemini/commands/trellis").exists())
         self.assertFalse((install.ROOT / "templates/.opencode/commands/trellis").exists())
@@ -4043,7 +4098,7 @@ class InstallTests(unittest.TestCase):
 
         adapter_paths = [
             install.ROOT / "templates/.claude/commands/sd/update-spec.md",
-            install.ROOT / "templates/.cursor/commands/sd-update-spec.md",
+            install.ROOT / "templates/.commands/sd-update-spec.md",
             install.ROOT / "templates/.gemini/commands/sd/update-spec.toml",
             install.ROOT / "templates/.github/prompts/sd-update-spec.prompt.md",
             install.ROOT / "templates/.opencode/commands/sd-update-spec.md",
@@ -11449,7 +11504,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             install.ROOT / ".github/prompts/sd-review-pr.prompt.md",
             install.ROOT / ".opencode/commands/sd-review-pr.md",
             install.ROOT / "templates/.claude/commands/sd/review-pr.md",
-            install.ROOT / "templates/.cursor/commands/sd-review-pr.md",
+            install.ROOT / "templates/.commands/sd-review-pr.md",
             install.ROOT / "templates/.gemini/commands/sd/review-pr.toml",
             install.ROOT / "templates/.github/prompts/sd-review-pr.prompt.md",
             install.ROOT / "templates/.opencode/commands/sd-review-pr.md",
@@ -11850,7 +11905,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         ).read_text(encoding="utf-8")
         adapter_paths = [
             install.ROOT / "templates/.claude/commands/sd/review-pr.md",
-            install.ROOT / "templates/.cursor/commands/sd-review-pr.md",
+            install.ROOT / "templates/.commands/sd-review-pr.md",
             install.ROOT / "templates/.gemini/commands/sd/review-pr.toml",
             install.ROOT / "templates/.github/prompts/sd-review-pr.prompt.md",
             install.ROOT / "templates/.opencode/commands/sd-review-pr.md",

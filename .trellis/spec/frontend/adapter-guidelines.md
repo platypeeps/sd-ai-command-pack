@@ -21,16 +21,16 @@ Reference files:
 - `templates/.agents/skills/sd-finish-work/SKILL.md`
 - `templates/.agents/skills/sd-update-spec/SKILL.md`
 - `templates/scripts/sd-ai-command-pack-review-local.sh`
+- `templates/.commands/sd-review-local.md`
+- `templates/.commands/sd-review-local-all.md`
+- `templates/.commands/sd-work-backlog.md`
+- `templates/.commands/sd-review-pr.md`
 - `templates/.claude/commands/sd/continue.md`
 - `templates/.claude/commands/sd/finish-work.md`
 - `templates/.claude/commands/sd/work-backlog.md`
 - `templates/.claude/commands/sd/review-pr.md`
 - `templates/.claude/commands/sd/review-local.md`
 - `templates/.claude/commands/sd/review-local-all.md`
-- `templates/.cursor/commands/sd-review-local.md`
-- `templates/.cursor/commands/sd-review-local-all.md`
-- `templates/.cursor/commands/sd-work-backlog.md`
-- `templates/.cursor/commands/sd-review-pr.md`
 - `templates/.gemini/commands/sd/review-pr.toml`
 - `templates/.gemini/commands/sd/work-backlog.toml`
 - `templates/.github/prompts/sd-review-pr.prompt.md`
@@ -125,10 +125,14 @@ its matching shared skill.
 
 GitHub Copilot prompt adapters use `.github/prompts/sd-<command>.prompt.md`
 with YAML frontmatter descriptions and `mode: agent`, so prompt completion has
-explicit metadata and runs in agent mode. Cursor and OpenCode command adapters
-use flat `.cursor/commands/sd-<command>.md` and
-`.opencode/commands/sd-<command>.md` filenames because those platforms surface
-flat command names from markdown filenames in their command directories.
+explicit metadata and runs in agent mode. Cursor and the generic Markdown
+adapters for Antigravity, CodeBuddy, Devin, Droid/Factory, Kilo Code, Pi,
+Qoder, Trae, and Zed Code are installed from the neutral
+`templates/.commands/sd-<command>.md` source files. Their installed target
+paths still use each platform's native command/workflow/prompt directory, but
+the shared source must not live under a platform-owned template directory.
+OpenCode keeps its own Markdown source under `templates/.opencode/commands/`
+because its wording is platform-specific.
 
 Gemini CLI command adapters use TOML under `.gemini/commands/sd/<command>.toml`
 because Gemini derives command names from paths under `.gemini/commands/`, with

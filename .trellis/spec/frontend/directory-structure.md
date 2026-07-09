@@ -15,8 +15,8 @@ that users invoke from Claude, Cursor, Gemini, GitHub Copilot, and OpenCode.
 ```text
 templates/
 ├── .agents/skills/<command>/SKILL.md               # Shared workflows
+├── .commands/sd-<command>.md                       # Shared generic Markdown command bodies
 ├── .claude/commands/sd/<command>.md                # Claude command adapters
-├── .cursor/commands/sd-<command>.md                # Cursor command adapters
 ├── .gemini/commands/sd/<command>.toml              # Gemini command adapters
 ├── .github/prompts/sd-<command>.prompt.md          # GitHub Copilot prompts
 └── .opencode/commands/sd-<command>.md              # OpenCode command adapters
@@ -25,6 +25,8 @@ templates/
 ## Module Organization
 
 - Put reusable workflow instructions in the shared skill.
+- Put generic Markdown command bodies in `templates/.commands/` when multiple
+  platforms can install byte-identical content from one source.
 - Put only platform-specific command wrappers in platform adapter files.
 - Keep generated or local Trellis runtime files outside the pack payload unless
   they are intentionally added to `templates/` and `manifest.json`.
@@ -49,8 +51,8 @@ templates/
 
 - `templates/.gemini/commands/sd/review-pr.toml` contains a short prompt
   that tells Gemini to load the matching shared skill.
-- `templates/.cursor/commands/sd-review-pr.md` mirrors the same entry-point
-  instructions for Cursor.
+- `templates/.commands/sd-review-pr.md` is the shared generic Markdown source
+  installed to Cursor and other generic Markdown command targets.
 - `templates/.github/prompts/sd-review-pr.prompt.md` mirrors the same entry-point
   instructions for GitHub Copilot.
 - `templates/.opencode/commands/sd-review-pr.md` mirrors the same
