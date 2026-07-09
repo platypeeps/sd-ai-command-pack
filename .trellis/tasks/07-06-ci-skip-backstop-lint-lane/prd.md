@@ -44,7 +44,7 @@ Three CI gaps from the 2026-07-06 deep review:
   `skipped=[1-9][0-9]*` backstop exits nonzero for `OK (skipped=1)` and
   permits `OK` output.
 - [x] `ruff check` runs green and pinned in CI.
-- [ ] macOS leg green in CI.
+- [x] macOS leg green in CI.
 - [x] Full battery green.
 
 ## Implementation Notes
@@ -59,6 +59,9 @@ Three CI gaps from the 2026-07-06 deep review:
 - Local validation: focused CI-contract unit test, full unittest discovery,
   Ruff, JavaScript syntax checks, `git diff --check`, Obsidian KB refresh, and
   SD full-check with Prism/Gito disabled all passed.
+- GitHub CI on PR #70 passed the aggregate `CI Result`, the dedicated `lint`
+  lane, `security`, Ubuntu Python 3.10/3.13 unittest legs, and the new macOS
+  Python 3.13 unittest leg.
 
 ## Notes
 
