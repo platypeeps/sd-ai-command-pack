@@ -18,8 +18,15 @@ and fold into the six open fleet refresh PRs.
 
 ## Acceptance criteria
 
-- [ ] `git add` failure output is surfaced; happy path unchanged.
-- [ ] Full battery green: 261 tests, 100% coverage on install.py,
+- [x] `git add` failure output is surfaced; happy path unchanged.
+- [x] Full battery green: 261 tests, 100% coverage on install.py,
   full-check, shellcheck; template twin byte-identical.
-- [ ] 0.5.19 folded into the six open fleet refresh PRs (post-merge
+- [x] 0.5.19 folded into the six open fleet refresh PRs (post-merge
   step).
+
+## Reconciliation Note - 2026-07-09
+
+Reconciled by `07-06-close-fleet-refresh-loop`: Session 28 records the
+0.5.19 implementation as shipped, and the fix is folded into the current
+`0.7.0` payload that audits clean across all five actual consumer
+repositories.

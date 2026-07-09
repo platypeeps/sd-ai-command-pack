@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.1 - 2026-07-09
+
+- Made the session recorder retry-safe after a post-append staging or commit
+  failure, so rerunning finish-work patches the pending journal entry instead
+  of appending a duplicate session.
+- Reconciled the closed fleet-refresh loop, archived stale rollout acceptance
+  criteria, and the duplicate Session 29/30 journal entry.
+
 ## 0.7.3 - 2026-07-09
 
 - Added maintainer contributor workflow docs and a Makefile for setup, tests,

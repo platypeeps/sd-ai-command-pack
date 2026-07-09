@@ -18,5 +18,11 @@ dash-prefixed root would parse as a `cd` option.
 
 - [x] Three guard sites carry the terminator; shellcheck clean; twins
       identical.
-- [ ] Fleet PRs updated to 0.5.15 with loadsmith's threads resolved
+- [x] Fleet PRs updated to 0.5.15 with loadsmith's threads resolved
       (post-merge step).
+
+## Reconciliation Note - 2026-07-09
+
+Reconciled by `07-06-close-fleet-refresh-loop`: loadsmith PR #48 comments
+3522664869, 3522664879, and 3522664881 are resolved or obsolete on the merged
+PR, and the current loadsmith install audits clean at pack `0.7.0`.

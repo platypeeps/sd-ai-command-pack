@@ -39,5 +39,13 @@ six open consumer PRs.
       ignores symlink-fed entries in the merge.
 - [x] Full suite green at 100% install.py coverage; full-check clean; twins
       in sync.
-- [ ] The six consumer refresh PRs are updated to 0.5.11 and their review
+- [x] The six consumer refresh PRs are updated to 0.5.11 and their review
       threads answered against the shipped fix (post-merge step).
+
+## Reconciliation Note - 2026-07-09
+
+Reconciled by `07-06-close-fleet-refresh-loop`: all five actual consumer
+repositories found in the rollout history are now on pack `0.7.0` with install
+audit exit 0, and the historical review threads are resolved or obsolete on
+merged PRs. The older "six consumer" wording referred to rollout PR streams;
+no sixth distinct current consumer repository was found.

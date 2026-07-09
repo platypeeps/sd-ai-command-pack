@@ -47,11 +47,71 @@ record it closing:
 
 ## Acceptance Criteria
 
-- [ ] Every fleet repo: pack version 0.5.28 (or later), install audit
+- [x] Every fleet repo: pack version 0.5.28 (or later), install audit
   exit 0, evidence linked.
-- [ ] All four outstanding thread/AC items resolved with links.
-- [ ] Archived PRDs reconciled; journal duplicate resolved with root
+- [x] All four outstanding thread/AC items resolved with links.
+- [x] Archived PRDs reconciled; journal duplicate resolved with root
   cause noted.
+
+## Reconciliation Evidence - 2026-07-09
+
+Fleet inventory found five actual consumer repositories in the archived task
+evidence and rollout history. The older "six consumer" wording described the
+rollout PR stream, not a sixth distinct current repository. All five default
+branches now carry `sd-ai-command-pack` provenance version `0.7.0`, satisfying
+the `0.5.28 or later` floor:
+
+- [`platypeeps/anomaly-metric-creator`](https://github.com/platypeeps/anomaly-metric-creator/blob/main/.sd-ai-command-pack/provenance.json):
+  local install audit passed, 80 targets verified.
+- [`platypeeps/rwbp-website`](https://github.com/platypeeps/rwbp-website/blob/main/.sd-ai-command-pack/provenance.json):
+  temp default-branch clone install audit passed, 80 targets verified.
+- [`platypeeps/rwbp-coordinator`](https://github.com/platypeeps/rwbp-coordinator/blob/main/.sd-ai-command-pack/provenance.json):
+  local install audit passed, 91 targets verified; one repo-local legacy-name
+  warning remains outside the pack payload.
+- [`platypeeps/loadsmith`](https://github.com/platypeeps/loadsmith/blob/main/.sd-ai-command-pack/provenance.json):
+  local install audit passed, 80 targets verified; stale command-name warnings
+  remain in generated repo docs only.
+- [`answerbook/mezmo_benchmark`](https://github.com/answerbook/mezmo_benchmark/blob/main/.sd-ai-command-pack/provenance.json):
+  local install audit passed, 80 targets verified; one repo-local warning
+  remains in a local review-cycle checker.
+
+Named review-thread promises are resolved or obsolete on merged PRs:
+
+- mezmo PR #313 comment
+  [3522276141](https://github.com/answerbook/mezmo_benchmark/pull/313#discussion_r3522276141)
+  was replied to and the thread is resolved; PR #313 merged on
+  2026-07-04.
+- anomaly-metric-creator PR #193 comment
+  [3522597638](https://github.com/platypeeps/anomaly-metric-creator/pull/193#discussion_r3522597638)
+  is resolved/outdated with shipped-fix evidence; PR #193 merged on
+  2026-07-04.
+- rwbp-website PR #85 comment
+  [3522597484](https://github.com/platypeeps/rwbp-website/pull/85#discussion_r3522597484)
+  is resolved/outdated with shipped-fix evidence; PR #85 merged on
+  2026-07-04.
+- loadsmith PR #48 comments
+  [3522664869](https://github.com/platypeeps/loadsmith/pull/48#discussion_r3522664869),
+  [3522664879](https://github.com/platypeeps/loadsmith/pull/48#discussion_r3522664879),
+  and
+  [3522664881](https://github.com/platypeeps/loadsmith/pull/48#discussion_r3522664881)
+  are resolved/outdated with shipped-fix evidence; PR #48 merged on
+  2026-07-04.
+- mezmo PR #314 comment
+  [3522423050](https://github.com/answerbook/mezmo_benchmark/pull/314#discussion_r3522423050)
+  and rwbp-coordinator PR #75 comment
+  [3522422385](https://github.com/platypeeps/rwbp-coordinator/pull/75#discussion_r3522422385)
+  are resolved/outdated for the 0.5.12 traversal hardening follow-up; both
+  PRs merged on 2026-07-04.
+
+Duplicate Session 29/30 root cause is pack-owned, not Trellis-owned:
+`scripts/sd-ai-command-pack-record-session.py` called Trellis
+`add_session.py --no-commit`, then staged/committed the workspace itself. If
+the Trellis append succeeded but the later pack-owned `git add` or
+`git commit` failed, rerunning the wrapper called `add_session.py` again and
+appended a duplicate. The wrapper now detects a modified journal whose latest
+session heading matches the retry title and patches that existing entry before
+staging/committing. Regression coverage:
+`test_record_session_wrapper_reuses_uncommitted_retry_entry`.
 
 ## Notes
 

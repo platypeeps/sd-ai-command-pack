@@ -23,11 +23,19 @@ Close the round-2 consumer-PR findings on the vendored audit
 
 ## Acceptance Criteria
 
-- [ ] A vouched path behind a symlinked parent directory pointing outside
+- [x] A vouched path behind a symlinked parent directory pointing outside
       the repo fails with "escapes the repository root".
-- [ ] An unreadable parent directory yields "vouched target cannot be
+- [x] An unreadable parent directory yields "vouched target cannot be
       inspected" plus a structural missing-target report — no crash.
-- [ ] Existing symlink/missing/non-regular behaviors keep their messages;
+- [x] Existing symlink/missing/non-regular behaviors keep their messages;
       full suite green at 100% install.py coverage; full-check clean.
-- [ ] Six consumer PRs refreshed to 0.5.12 with threads answered
+- [x] Six consumer PRs refreshed to 0.5.12 with threads answered
       (post-merge step).
+
+## Reconciliation Note - 2026-07-09
+
+Reconciled by `07-06-close-fleet-refresh-loop`: Session 20 and the archived
+task state record the implementation as shipped, and the named 0.5.12 review
+threads in mezmo PR #314 and rwbp-coordinator PR #75 are resolved/obsolete on
+merged PRs. Current consumer installs are on pack `0.7.0` with install audit
+exit 0.

@@ -25,5 +25,11 @@ help since the cd succeeds.
 - [x] All three sites guard `[ -z "$REPO_ROOT" ] || ! cd "$REPO_ROOT"`
       with a named stderr error; shellcheck clean at warning severity.
 - [x] Full suite green at 100% install.py coverage; full-check clean.
-- [ ] Fleet refresh PRs updated to 0.5.14 with the two threads resolved
+- [x] Fleet refresh PRs updated to 0.5.14 with the two threads resolved
       (post-merge step).
+
+## Reconciliation Note - 2026-07-09
+
+Reconciled by `07-06-close-fleet-refresh-loop`: the AMC #193 and rwbp-website
+#85 comments are resolved or obsolete on merged PRs, and current default
+branch installs audit clean at pack `0.7.0`.

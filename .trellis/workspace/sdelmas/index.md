@@ -74,7 +74,7 @@
 | 33 | 2026-07-05 | Review PR 38 unsafe uninstall follow-up | `9e22a22` | `codex/installer-remove-option` |
 | 32 | 2026-07-05 | Review PR 38 installer remove follow-up | `5332841`, `629711d`, `d2b988b` | `codex/installer-remove-option` |
 | 31 | 2026-07-05 | Review PR 38 installer remove option | `df40c75`, `6667835`, `f3b0f02` | `codex/installer-remove-option` |
-| 30 | 2026-07-05 | Expand SD command pack workflows | `34ea5d8` | `codex/expand-sd-command-pack-workflows` |
+| 30 | 2026-07-05 | Duplicate entry removed | - | `codex/expand-sd-command-pack-workflows` |
 | 29 | 2026-07-05 | Expand SD command pack workflows | `34ea5d8` | `codex/expand-sd-command-pack-workflows` |
 | 28 | 2026-07-04 | Recorder git-add output surfacing (0.5.19) | `7471683` | `main` |
 | 27 | 2026-07-04 | Recorder empty-subject fix (0.5.18) | `5a63aac` | `main` |

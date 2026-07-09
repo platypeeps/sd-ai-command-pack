@@ -21,10 +21,16 @@ Two audit refinements from the 0.5.9 fleet rollout. (1) rwbp-website's repo-loca
 
 ## Acceptance Criteria
 
-- [ ] A repo with gitignored, present, unlisted claude wrappers passes the
+- [x] A repo with gitignored, present, unlisted claude wrappers passes the
       audit with a warning naming the files; a tracked unlisted pack-like
       file still fails.
-- [ ] A receipt entry written as `scripts\sd-ai-command-pack-full-check.sh`
+- [x] A receipt entry written as `scripts\sd-ai-command-pack-full-check.sh`
       audits identically to its forward-slash form.
-- [ ] Twin gate, full suite, and docs/spec updates hold; mezmo PR #313
+- [x] Twin gate, full suite, and docs/spec updates hold; mezmo PR #313
       comment 3522276141 can be pointed at the shipped fix.
+
+## Reconciliation Note - 2026-07-09
+
+Reconciled by `07-06-close-fleet-refresh-loop`: mezmo PR #313 comment
+3522276141 was replied to and resolved, and current consumer installs are on
+pack `0.7.0` with install audit exit 0.

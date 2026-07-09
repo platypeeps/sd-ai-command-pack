@@ -1183,33 +1183,33 @@ Added the sd-create-pr workflow, expanded platform distribution support, tighten
 - None - task complete
 
 
-## Session 30: Expand SD command pack workflows
+## Session 30: Duplicate entry removed
 
 **Date**: 2026-07-05
-**Task**: Expand SD command pack workflows
+**Task**: Duplicate entry removed
 **Branch**: `codex/expand-sd-command-pack-workflows`
 
 ### Summary
 
-Added the sd-create-pr workflow, expanded platform distribution support, tightened review and housekeeping guidance, and synchronized pack-owned docs/tests before PR merge.
+This session number was created by a duplicate recorder retry. The duplicate
+body matched Session 29 byte-for-byte and was replaced during the 2026-07-09
+fleet-loop reconciliation; see Session 29 for the retained work record.
 
 ### Main Changes
 
-- added sd-create-pr shared skill and platform adapters
-- expanded installer manifest, platform support, docs, and tests for distributed command-pack workflows
-- tightened Copilot, housekeeping, local-review, Obsidian KB, and Trellis-channel guidance
+- Replaced duplicate Session 30 content with this dedupe marker.
+- Recorded the root cause in task `07-06-close-fleet-refresh-loop`: the pack
+  recorder retried after a post-append staging or commit failure and called
+  Trellis `add_session.py` a second time.
 
 
 ### Git Commits
 
-| Hash | Message |
-|------|---------|
-| `34ea5d8` | feat: expand sd command pack workflows |
+(No commits - duplicate journal entry removed)
 
 ### Testing
 
-- [OK] git diff --check
-- [OK] PYTHONPYCACHEPREFIX=/private/tmp/sd-ai-command-pack-pycache python3 -m unittest discover -s tests (264 tests)
+- [OK] PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest tests.test_record_session
 
 ### Status
 
@@ -1217,7 +1217,7 @@ Added the sd-create-pr workflow, expanded platform distribution support, tighten
 
 ### Next Steps
 
-- None - task complete
+- None - duplicate resolved
 
 
 ## Session 31: Review PR 38 installer remove option

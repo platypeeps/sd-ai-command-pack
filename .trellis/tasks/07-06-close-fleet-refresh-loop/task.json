@@ -3,7 +3,7 @@
   "name": "close-fleet-refresh-loop",
   "title": "Close the fleet refresh loop and reconcile task records",
   "description": "Unchecked post-merge ACs across 0.5.11-0.5.19 tasks, 0.5.28 rollout PRs unconfirmed, duplicate journal sessions 29/30.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

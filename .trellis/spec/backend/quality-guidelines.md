@@ -101,6 +101,70 @@ Wrong: currentChangedPaths returns the first non-empty diff source
 Correct: currentChangedPaths unions staged, branch, working-tree, and untracked paths
 ```
 
+## Session Recorder Retry Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing `scripts/sd-ai-command-pack-record-session.py`,
+its template twin, or the `sd-finish-work` flow that calls it.
+
+### 2. Signatures
+
+- Command:
+  `python3 scripts/sd-ai-command-pack-record-session.py --title ... --summary ... --change ... --test ...`
+- Trellis dependency: `.trellis/scripts/add_session.py --no-commit`
+- Commit behavior: the pack wrapper, not Trellis, stages
+  `.trellis/workspace/<developer>/journal-*.md` plus sibling `index.md` and
+  commits them as `chore: record journal` unless `--no-commit` is passed.
+
+### 3. Contracts
+
+- The wrapper may call Trellis `add_session.py` only when no modified
+  workspace journal already has the requested title as its latest session
+  heading.
+- If a previous run appended the session but failed during the pack-owned
+  staging or commit step, a retry must patch and commit that pending latest
+  session instead of appending another one.
+- If more than one modified journal has the requested title as its latest
+  session heading, fail closed with a clear error rather than guessing.
+- The patcher anchors on session headings, commit hashes, and section headings;
+  it must not depend on Trellis placeholder wording.
+
+### 4. Validation & Error Matrix
+
+- Unknown or duplicate commit hash -> exit `2` before touching the journal.
+- Trellis append succeeds, later `git add` fails -> exit `1`, leave one
+  pending session, and surface git output.
+- Retry after the pending-session failure -> exit `0`, reuse the pending
+  session, and keep a single journal entry.
+- Multiple matching pending journals -> exit `1` and do not append.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a sandbox or index-lock failure after append can be rerun safely.
+- Base: a clean run appends, patches, verifies placeholders are absent, stages,
+  and commits one journal/index pair.
+- Bad: retrying a post-append failure calls `add_session.py` again and creates
+  duplicate consecutive sessions.
+
+### 6. Tests Required
+
+- End-to-end happy path against a Trellis-bootstrapped scratch repo.
+- Fail-fast validation for unknown, duplicate, and option-like commit hashes.
+- Retry after synthetic `git add` failure proves no duplicate session is
+  appended.
+- Template twin byte identity.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: rerun add_session.py whenever the previous wrapper command exits nonzero
+Correct: detect a modified latest same-title journal session and patch it
+
+Wrong: search for "(see git log)" or "(Add test results)" before patching
+Correct: replace hash-keyed commit rows and section bodies by structural anchors
+```
+
 ## Required Patterns
 
 - Use `pathlib.Path` for filesystem work.

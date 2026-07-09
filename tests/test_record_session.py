@@ -151,6 +151,86 @@ class RecordSessionTests(InstallTestCase):
         self.assertIn("journal-1.md", committed)
         self.assertNotIn("journal-0.md", committed)
 
+    def test_record_session_wrapper_reuses_uncommitted_retry_entry(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self._seed_trellis_session_tooling(root)
+
+        def run(*args: str, **kwargs: object) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                args,
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+                **kwargs,
+            )
+
+        run("git", "config", "user.email", "test@example.com")
+        run("git", "config", "user.name", "Test User")
+        run("git", "add", "-A")
+        run("git", "commit", "-q", "-m", "chore: seed trellis tooling")
+        (root / "feature.txt").write_text("hi\n", encoding="utf-8")
+        run("git", "add", "feature.txt")
+        run("git", "commit", "-q", "-m", "feat: add retry feature")
+        commit_hash = run("git", "rev-parse", "--short", "HEAD").stdout.strip()
+
+        real_git = shutil.which("git")
+        self.assertIsNotNone(real_git)
+        stub_bin = root / "stub-bin"
+        stub_bin.mkdir()
+        git_stub = stub_bin / "git"
+        git_stub.write_text(
+            "#!/bin/sh\n"
+            "if [ \"$1\" = \"add\" ]; then\n"
+            "  echo synthetic git add failure >&2\n"
+            "  exit 1\n"
+            "fi\n"
+            f"exec {real_git} \"$@\"\n",
+            encoding="utf-8",
+        )
+        git_stub.chmod(0o755)
+        failing_env = {
+            **os.environ,
+            "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+        }
+
+        command = [
+            sys.executable,
+            "scripts/sd-ai-command-pack-record-session.py",
+            "--title",
+            "Retry session",
+            "--summary",
+            "Recorded after retry.",
+            "--commit",
+            commit_hash,
+            "--change",
+            "added retry feature",
+            "--test",
+            "retry test green",
+        ]
+        failed = run(*command, env=failing_env)
+
+        self.assertEqual(failed.returncode, 1, failed.stdout)
+        self.assertIn("synthetic git add failure", failed.stdout)
+        journal = next((root / ".trellis/workspace").glob("*/journal-*.md"))
+        self.assertEqual(
+            journal.read_text(encoding="utf-8").count("## Session"), 1
+        )
+
+        retried = run(*command)
+
+        self.assertEqual(retried.returncode, 0, retried.stdout)
+        entry = journal.read_text(encoding="utf-8")
+        index = journal.with_name("index.md").read_text(encoding="utf-8")
+        self.assertEqual(entry.count("## Session"), 1)
+        self.assertEqual(entry.count("Retry session"), 2)
+        self.assertEqual(index.count("Retry session"), 1)
+        self.assertIn("feat: add retry feature", entry)
+        self.assertIn("- [OK] retry test green", entry)
+
     def test_record_session_wrapper_prefers_current_branch_over_task_metadata(
         self,
     ) -> None:

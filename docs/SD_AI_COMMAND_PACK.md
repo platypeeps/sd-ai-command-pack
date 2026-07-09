@@ -49,7 +49,9 @@ Quick links:
   recorder — wraps Trellis' `add_session.py`, resolving commit subjects
   from git (failing fast on unknown hashes), filling the Main Changes and
   Testing sections from `--change`/`--test` flags, and refusing to commit
-  an entry that still contains template placeholders.
+  an entry that still contains template placeholders. If a previous run
+  appended the entry but failed while staging or committing, a retry reuses
+  the modified latest session instead of appending a duplicate.
 - `scripts/sd-ai-command-pack-review-scope.sh`: copied/generated file scope
   preflight for mixed PRs.
 - `scripts/sd-ai-command-pack-review-preflight.mjs`: generic dependency-free

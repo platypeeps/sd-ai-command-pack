@@ -36,7 +36,9 @@ vendored version; no duplicate issues existed for any topic):
   https://github.com/mindfold-ai/Trellis/issues/397
 - `upstream-issue-5-journal-duplicate-session.md` — duplicate
   journal session bug report (verified byte-identical bodies).
-  **Not filed** pending root-cause confirmation (R2).
+  **Rerouted 2026-07-09:** root cause confirmed in the pack-owned
+  `sd-ai-command-pack-record-session.py` retry path; no upstream Trellis
+  issue needed.
 
 ## Requirements
 
@@ -61,7 +63,7 @@ vendored version; no duplicate issues existed for any topic):
 
 - [x] Issues 1-4 filed upstream with URLs recorded here (#394, #395,
   #396, #397 in mindfold-ai/Trellis, filed 2026-07-07).
-- [ ] Issue 5 either filed upstream with a confirmed Trellis root
+- [x] Issue 5 either filed upstream with a confirmed Trellis root
   cause, or re-routed to the pack with the draft updated to say so.
 - [ ] Superseded pack tasks reference the filed issue URLs.
 

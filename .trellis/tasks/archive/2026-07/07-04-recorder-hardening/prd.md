@@ -42,15 +42,22 @@ Fix the four defects the 0.5.16 fleet refresh reviews surfaced in
 
 ## Acceptance criteria
 
-- [ ] `run_git`, both remaining `subprocess.run` calls, the journal
+- [x] `run_git`, both remaining `subprocess.run` calls, the journal
   `write_text`, and the content tempfile carry explicit encoding and
   errors policies, so mezmo gate 8 passes on the folded-forward PR.
-- [ ] `--commit a,a` and `--commit=--all` exit 2 with clear messages
+- [x] `--commit a,a` and `--commit=--all` exit 2 with clear messages
   before any journal is touched.
-- [ ] The wrapper completes end-to-end against an add_session variant
+- [x] The wrapper completes end-to-end against an add_session variant
   that pre-fills commit subjects and uses the
   `- Validation not recorded for this session.` Testing default.
-- [ ] Full battery green: 258+ tests, 100% coverage on install.py,
+- [x] Full battery green: 258+ tests, 100% coverage on install.py,
   full-check (template twin byte-identical), shellcheck.
-- [ ] 0.5.17 folded into the six open fleet refresh PRs (post-merge
+- [x] 0.5.17 folded into the six open fleet refresh PRs (post-merge
   step).
+
+## Reconciliation Note - 2026-07-09
+
+Reconciled by `07-06-close-fleet-refresh-loop`: Session 26 records the
+0.5.17 implementation as shipped, and the hardening is folded into the
+current `0.7.0` payload that audits clean across all five actual consumer
+repositories.
