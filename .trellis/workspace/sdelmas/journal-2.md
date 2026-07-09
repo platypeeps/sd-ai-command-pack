@@ -597,6 +597,8 @@ Backfilled archived Trellis task descriptions and added a regression guard befor
 - Backfilled descriptions for the three archived recorder tasks with blank metadata.
 - Added a regression test requiring completed archived PRD-backed tasks to keep non-empty descriptions.
 - Archived 07-06-archive-task-metadata-backfill after PR #68 review reached clean CI and no new Copilot comments.
+- Tightened the archive-description guard to skip symlinked `task.json` and
+  `prd.md` files, with regression coverage for the symlink case.
 
 
 ### Git Commits
@@ -605,11 +607,13 @@ Backfilled archived Trellis task descriptions and added a regression guard befor
 |------|---------|
 | `5109ef2` | fix: backfill archived task descriptions |
 | `8f632a2` | chore(task): archive metadata backfill |
+| `dba44a3` | fix: skip symlinked archived task files |
 
 ### Testing
 
 - [OK] .venv/bin/python -m unittest tests.test_install.InstallTests.test_archived_prd_backed_tasks_have_descriptions
 - [OK] python3 ./.trellis/scripts/task.py list-archive
+- [OK] .venv/bin/python -m unittest tests.test_install.InstallTests.test_archived_prd_backed_tasks_have_descriptions tests.test_install.InstallTests.test_archived_description_guard_skips_symlinked_task_files
 - [OK] git diff --check
 - [OK] .venv/bin/python -m unittest discover -s tests
 - [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh

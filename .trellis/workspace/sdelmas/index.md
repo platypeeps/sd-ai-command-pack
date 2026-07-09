@@ -30,7 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 65 | 2026-07-08 | Archive task metadata backfill | `5109ef2`, `8f632a2` | `codex/archive-task-metadata-backfill` |
+| 65 | 2026-07-08 | Archive task metadata backfill | `5109ef2`, `8f632a2`, `dba44a3` | `codex/archive-task-metadata-backfill` |
 | 64 | 2026-07-08 | Harden review preflight entry handling | `533c0db` | `codex/preflight-mjs-hardening` |
 | 63 | 2026-07-08 | Add backlog work loop command | `07f6f4e` | `codex/backlog-work-loop-command` |
 | 62 | 2026-07-08 | Trellis PR consent rule | `be9249e`, `9c2b9a1` | `codex/trellis-pr-consent-rule` |
