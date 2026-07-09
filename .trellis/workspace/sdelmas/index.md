@@ -30,7 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 71 | 2026-07-09 | Deduplicate shell helpers across review scripts | `81774bb`, `63a9fa2` | `codex/dedupe-shared-shell-helpers` |
+| 71 | 2026-07-09 | Deduplicate shell helpers across review scripts | `81774bb`, `63a9fa2`, `6e00e5e` | `codex/dedupe-shared-shell-helpers` |
 | 70 | 2026-07-08 | README restructure and docs dedup | `7a934f0` | `codex/readme-restructure-dedup` |
 | 69 | 2026-07-08 | Contributor workflow review follow-up | `72b0dfa` | `codex/contributor-experience-baseline` |
 | 68 | 2026-07-08 | Contributor workflow baseline | `eca1f9d` | `codex/contributor-experience-baseline` |

@@ -850,6 +850,7 @@ Extracted duplicated Bash helpers into a shipped shared helper library and align
 - Updated full-check, review-local, and review-scope to source the helper; full-check now uses bash -c for configured preflight and shared uv setup before Gito.
 - Bumped manifest to 0.7.4 and updated docs, PR-body scope, install audit, and regression tests for the new shipped helper.
 - Addressed Copilot feedback by clarifying the helper caller contract for REPO_ROOT, warn(), and section().
+- Addressed follow-up review feedback by registering Gito temp output files with review-local cleanup when the optional cleanup array is present.
 
 
 ### Git Commits
@@ -858,6 +859,7 @@ Extracted duplicated Bash helpers into a shipped shared helper library and align
 |------|---------|
 | `81774bb` | refactor: share shell helpers across review scripts |
 | `63a9fa2` | docs: clarify shell helper caller contract |
+| `6e00e5e` | fix: register gito temp files for cleanup |
 
 ### Testing
 
@@ -867,6 +869,7 @@ Extracted duplicated Bash helpers into a shipped shared helper library and align
 - [OK] KB refresh completed with 182 copies and no conflicts.
 - [OK] SD full-check passed with Prism and Gito disabled.
 - [OK] PR #73 CI passed after review fix: lint, security, Ubuntu 3.10/3.13, macOS 3.13, and CI Result.
+- [OK] Focused temp cleanup/Gito follow-up tests passed.
 
 ### Status
 

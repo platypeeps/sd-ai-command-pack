@@ -69,6 +69,8 @@ to `templates/`), and the copies have already diverged:
 - Added regression tests for helper sourcing, installed helper coverage, the
   early-429-then-500 non-retry case in both entry points, full-check uv cache
   setup, and non-login preflight execution.
+- Addressed review feedback by registering `run_gito_command` temp output files
+  with review-local's cleanup trap when that optional array is present.
 
 ## Validation
 
@@ -76,6 +78,7 @@ to `templates/`), and the copies have already diverged:
 - [x] Full unit suite: 359 tests passed.
 - [x] Shellcheck passed for changed shell scripts and template twins.
 - [x] Final `sd-ai-command-pack-full-check.sh` gate passed after KB refresh.
+- [x] Focused temp cleanup/Gito tests passed after review follow-up.
 
 ## Notes
 
