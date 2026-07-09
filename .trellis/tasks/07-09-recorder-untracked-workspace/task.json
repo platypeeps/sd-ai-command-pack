@@ -3,7 +3,7 @@
   "name": "recorder-untracked-workspace",
   "title": "Fix session recorder for untracked workspaces",
   "description": "git status without -uall collapses untracked .trellis/workspace/, defeating the 0.8.1 retry-safety fix; each retry appends a duplicate session (reproduced)",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
