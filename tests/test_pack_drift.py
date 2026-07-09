@@ -36,7 +36,7 @@ def dogfood_manifest_files(
     dogfood_platforms = {
         platform
         for platform, info in install.PLATFORM_REGISTRY.items()
-        if (root / info.directory).exists()
+        if (root / info.directory).is_dir()
     }
     return [
         file
@@ -53,7 +53,7 @@ def missing_dogfood_targets(
     return [
         file.target.as_posix()
         for file in files
-        if not (root / file.target).is_file()
+        if (root / file.target).is_symlink() or not (root / file.target).is_file()
     ]
 
 
@@ -116,6 +116,39 @@ class PackDriftTests(InstallTestCase):
         self.assertEqual(required, [pack_file])
         self.assertEqual(
             missing_dogfood_targets(required, root),
+            [".opencode/commands/sd-review-pr.md"],
+        )
+
+    def test_dogfood_drift_gate_requires_platform_directory(self) -> None:
+        root = self.make_repo()
+        (root / ".opencode").write_text("not a directory\n", encoding="utf-8")
+        pack_file = install.PackFile(
+            platform="opencode",
+            kind="command",
+            source=install.ROOT / "templates/.commands/sd-review-pr.md",
+            target=Path(".opencode/commands/sd-review-pr.md"),
+            anchor=Path(".opencode"),
+            install="if-anchor-exists",
+        )
+
+        self.assertEqual(dogfood_manifest_files([pack_file], root), [])
+
+    def test_dogfood_drift_gate_rejects_symlink_targets(self) -> None:
+        root = self.make_repo()
+        target = root / ".opencode/commands/sd-review-pr.md"
+        target.parent.mkdir(parents=True)
+        target.symlink_to(install.ROOT / "templates/.commands/sd-review-pr.md")
+        pack_file = install.PackFile(
+            platform="opencode",
+            kind="command",
+            source=install.ROOT / "templates/.commands/sd-review-pr.md",
+            target=Path(".opencode/commands/sd-review-pr.md"),
+            anchor=Path(".opencode"),
+            install="if-anchor-exists",
+        )
+
+        self.assertEqual(
+            missing_dogfood_targets([pack_file], root),
             [".opencode/commands/sd-review-pr.md"],
         )
 
