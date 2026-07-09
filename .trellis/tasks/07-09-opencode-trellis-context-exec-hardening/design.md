@@ -3,8 +3,8 @@
 ## Overview
 
 The OpenCode `trellis-context.js` adapter builds a shell command with a repo
-derived script path. Switch it to argument-vector execution in the pack
-template, sync the dogfood copy, and record an upstream Trellis handoff.
+derived script path. Switch the current vendored copy to argument-vector
+execution and record an upstream Trellis handoff.
 
 ## Proposal
 
@@ -14,10 +14,11 @@ Replace the ``execSync(`${PYTHON_CMD} "${scriptPath}"`)`` pattern with
 semantics so context injection still fails soft, but remove shell parsing from
 the path boundary.
 
-Make the edit in `templates/.opencode/lib/trellis-context.js` if that is the
-tracked source, then update the root `.opencode/lib/trellis-context.js` via the
-installer or byte-identical copy. Add a syntax check and, if practical, a
-minimal test or manual fixture using a path with quotes or `$`.
+Make the edit in the current source-of-truth file,
+`.opencode/lib/trellis-context.js`. If the implementation introduces a shipped
+template twin later, keep that twin synchronized through the normal pack
+payload flow. Add a syntax check and, if practical, a minimal test or manual
+fixture using a path with quotes or `$`.
 
 Because the file is Trellis-vendored, include a paste-ready upstream handoff in
 the task or linked note. Do not open an upstream Trellis PR without explicit
@@ -29,7 +30,6 @@ Do not rewrite the OpenCode plugin runtime. Do not remove the vendored copy.
 
 ## Affected Files
 
-- `templates/.opencode/lib/trellis-context.js`
 - `.opencode/lib/trellis-context.js`
 - `tests/test_generated_parity.py` or OpenCode syntax lint tests
 - This task artifact for the upstream handoff/link
@@ -42,5 +42,6 @@ split by spaces.
 
 ## Validation
 
-Run `node --check` on template and root copies, pack drift, and a path quoting
-fixture if feasible.
+Run `node --check .opencode/lib/trellis-context.js`, pack drift checks, and a
+path quoting fixture if feasible. Add any future template twin to the same
+validation once it exists.

@@ -2,17 +2,18 @@
 
 ## Execution Order
 
-1. Locate the template and root `trellis-context.js` copies.
+1. Locate the current source-of-truth `.opencode/lib/trellis-context.js` copy.
 2. Replace shell-string execution with `execFileSync` and array args.
 3. Preserve timeout/stdout handling and fail-soft behavior.
-4. Sync template/root copies and run syntax checks.
+4. Run syntax checks and sync any future shipped template twin if one is
+   introduced.
 5. Add the upstream Trellis handoff text or issue link to this task.
 
 ## Validation Plan
 
-Run `node --check templates/.opencode/lib/trellis-context.js` and the root copy.
-Run pack drift/parity tests. If possible, create a temp checkout path with
-quote/`$` characters and verify the command no longer breaks.
+Run `node --check .opencode/lib/trellis-context.js`. Run pack drift/parity
+tests. If possible, create a temp checkout path with quote/`$` characters and
+verify the command no longer breaks.
 
 ## Documentation And Spec Updates
 
