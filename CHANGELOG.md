@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0 - 2026-07-08
+
+- Added the distributed `sd-work-backlog` command and shared skill for
+  sequentially selecting implementation-ready Trellis backlog tasks, completing
+  them through the normal `sd-create-pr`/`sd-housekeeping` flow, and recording
+  or addressing follow-ups before moving to the next task.
+
 ## 0.6.1 - 2026-07-08
 
 - Hardened the `sd-review-pr` wait-for-review step against a remote-review race:

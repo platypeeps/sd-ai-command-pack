@@ -496,3 +496,41 @@ Documented the maintainer rule that agents must not create upstream Trellis pull
 ### Next Steps
 
 - None - task complete
+
+
+## Session 63: Add backlog work loop command
+
+**Date**: 2026-07-08
+**Task**: Add backlog work loop command
+**Branch**: `codex/backlog-work-loop-command`
+
+### Summary
+
+Added sd-work-backlog as a sequential Trellis backlog runner, shipped platform adapters, updated docs/specs/tests, bumped the pack to 0.7.0, and validated the PR gate.
+
+### Main Changes
+
+- Added `sd-work-backlog` as a shared SD skill plus thin platform adapters.
+- Updated manifest mappings, docs, Trellis specs, and installer coverage for
+  the new command.
+- Bumped the pack manifest to `0.7.0` for the shipped command payload.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `07f6f4e` | (see git log) |
+
+### Testing
+
+- [OK] Generic skill validator for `sd-work-backlog`.
+- [OK] `python3 -m unittest discover -s tests`.
+- [OK] `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "sd-ai-command-pack",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "license": "MIT",
   "description": "Install project-local SD AI command workflows, Prism/Gito defaults, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
@@ -32,6 +32,13 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
       "target": ".agents/skills/sd-create-pr/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/SKILL.md",
+      "target": ".agents/skills/sd-work-backlog/SKILL.md",
       "install": "always"
     },
     {
@@ -219,6 +226,13 @@
     {
       "platform": "claude",
       "kind": "command",
+      "source": "templates/.claude/commands/sd/work-backlog.md",
+      "target": ".claude/commands/sd/work-backlog.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
       "source": "templates/.claude/commands/sd/review-pr.md",
       "target": ".claude/commands/sd/review-pr.md",
       "anchor": ".claude"
@@ -296,6 +310,13 @@
     {
       "platform": "cursor",
       "kind": "command",
+      "source": "templates/.cursor/commands/sd-work-backlog.md",
+      "target": ".cursor/commands/sd-work-backlog.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
       "source": "templates/.cursor/commands/sd-review-pr.md",
       "target": ".cursor/commands/sd-review-pr.md",
       "anchor": ".cursor"
@@ -368,6 +389,13 @@
       "kind": "command",
       "source": "templates/.gemini/commands/sd/create-pr.toml",
       "target": ".gemini/commands/sd/create-pr.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/work-backlog.toml",
+      "target": ".gemini/commands/sd/work-backlog.toml",
       "anchor": ".gemini"
     },
     {
@@ -464,6 +492,13 @@
     {
       "platform": "github",
       "kind": "prompt",
+      "source": "templates/.github/prompts/sd-work-backlog.prompt.md",
+      "target": ".github/prompts/sd-work-backlog.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
       "source": "templates/.github/prompts/sd-review-pr.prompt.md",
       "target": ".github/prompts/sd-review-pr.prompt.md",
       "anchor": ".github"
@@ -536,6 +571,13 @@
       "kind": "command",
       "source": "templates/.opencode/commands/sd-create-pr.md",
       "target": ".opencode/commands/sd-create-pr.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.opencode/commands/sd-work-backlog.md",
+      "target": ".opencode/commands/sd-work-backlog.md",
       "anchor": ".opencode"
     },
     {
@@ -618,6 +660,13 @@
     {
       "platform": "antigravity",
       "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-work-backlog.md",
+      "target": ".agent/workflows/sd-work-backlog.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
       "source": "templates/.cursor/commands/sd-review-pr.md",
       "target": ".agent/workflows/sd-review-pr.md",
       "anchor": ".agent"
@@ -690,6 +739,13 @@
       "kind": "command",
       "source": "templates/.cursor/commands/sd-create-pr.md",
       "target": ".codebuddy/commands/sd/create-pr.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-work-backlog.md",
+      "target": ".codebuddy/commands/sd/work-backlog.md",
       "anchor": ".codebuddy"
     },
     {
@@ -772,6 +828,13 @@
     {
       "platform": "devin",
       "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-work-backlog.md",
+      "target": ".devin/workflows/sd-work-backlog.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
       "source": "templates/.cursor/commands/sd-review-pr.md",
       "target": ".devin/workflows/sd-review-pr.md",
       "anchor": ".devin"
@@ -844,6 +907,13 @@
       "kind": "command",
       "source": "templates/.cursor/commands/sd-create-pr.md",
       "target": ".factory/commands/sd/create-pr.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-work-backlog.md",
+      "target": ".factory/commands/sd/work-backlog.md",
       "anchor": ".factory"
     },
     {
@@ -926,6 +996,13 @@
     {
       "platform": "kilo",
       "kind": "workflow",
+      "source": "templates/.cursor/commands/sd-work-backlog.md",
+      "target": ".kilocode/workflows/sd-work-backlog.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
       "source": "templates/.cursor/commands/sd-review-pr.md",
       "target": ".kilocode/workflows/sd-review-pr.md",
       "anchor": ".kilocode"
@@ -998,6 +1075,13 @@
       "kind": "prompt",
       "source": "templates/.cursor/commands/sd-create-pr.md",
       "target": ".pi/prompts/sd-create-pr.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.cursor/commands/sd-work-backlog.md",
+      "target": ".pi/prompts/sd-work-backlog.md",
       "anchor": ".pi"
     },
     {
@@ -1080,6 +1164,13 @@
     {
       "platform": "qoder",
       "kind": "command",
+      "source": "templates/.cursor/commands/sd-work-backlog.md",
+      "target": ".qoder/commands/sd-work-backlog.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
       "source": "templates/.cursor/commands/sd-review-pr.md",
       "target": ".qoder/commands/sd-review-pr.md",
       "anchor": ".qoder"
@@ -1152,6 +1243,13 @@
       "kind": "command",
       "source": "templates/.cursor/commands/sd-create-pr.md",
       "target": ".trae/commands/sd-create-pr.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.cursor/commands/sd-work-backlog.md",
+      "target": ".trae/commands/sd-work-backlog.md",
       "anchor": ".trae"
     },
     {
@@ -1234,6 +1332,13 @@
     {
       "platform": "zcode",
       "kind": "command",
+      "source": "templates/.cursor/commands/sd-work-backlog.md",
+      "target": ".zcode/commands/sd/work-backlog.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
       "source": "templates/.cursor/commands/sd-review-pr.md",
       "target": ".zcode/commands/sd/review-pr.md",
       "anchor": ".zcode"
@@ -1306,6 +1411,13 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
       "target": ".agent/skills/sd-create-pr/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/SKILL.md",
+      "target": ".agent/skills/sd-work-backlog/SKILL.md",
       "anchor": ".agent"
     },
     {
@@ -1388,6 +1500,13 @@
     {
       "platform": "codebuddy",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/SKILL.md",
+      "target": ".codebuddy/skills/sd-work-backlog/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".codebuddy/skills/sd-review-pr/SKILL.md",
       "anchor": ".codebuddy"
@@ -1460,6 +1579,13 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
       "target": ".devin/skills/sd-create-pr/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/SKILL.md",
+      "target": ".devin/skills/sd-work-backlog/SKILL.md",
       "anchor": ".devin"
     },
     {
@@ -1542,6 +1668,13 @@
     {
       "platform": "droid",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/SKILL.md",
+      "target": ".factory/skills/sd-work-backlog/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".factory/skills/sd-review-pr/SKILL.md",
       "anchor": ".factory"
@@ -1614,6 +1747,13 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
       "target": ".kilocode/skills/sd-create-pr/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/SKILL.md",
+      "target": ".kilocode/skills/sd-work-backlog/SKILL.md",
       "anchor": ".kilocode"
     },
     {
@@ -1696,6 +1836,13 @@
     {
       "platform": "kiro",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/SKILL.md",
+      "target": ".kiro/skills/sd-work-backlog/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".kiro/skills/sd-review-pr/SKILL.md",
       "anchor": ".kiro"
@@ -1768,6 +1915,13 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
       "target": ".pi/skills/sd-create-pr/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/SKILL.md",
+      "target": ".pi/skills/sd-work-backlog/SKILL.md",
       "anchor": ".pi"
     },
     {
@@ -1850,6 +2004,13 @@
     {
       "platform": "qoder",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/SKILL.md",
+      "target": ".qoder/skills/sd-work-backlog/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".qoder/skills/sd-review-pr/SKILL.md",
       "anchor": ".qoder"
@@ -1927,6 +2088,13 @@
     {
       "platform": "reasonix",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/SKILL.md",
+      "target": ".reasonix/skills/sd-work-backlog/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".reasonix/skills/sd-review-pr/SKILL.md",
       "anchor": ".reasonix"
@@ -1999,6 +2167,13 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
       "target": ".trae/skills/sd-create-pr/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/SKILL.md",
+      "target": ".trae/skills/sd-work-backlog/SKILL.md",
       "anchor": ".trae"
     },
     {
