@@ -1362,3 +1362,50 @@ Completed Trellis task 07-09-adapter-parity-generation and opened PR #86 to enfo
 ### Next Steps
 
 - Merge PR #86 after final-head checks stay green, then continue the backlog loop.
+
+
+## Session 84: Close source dogfood drift gates
+
+**Date**: 2026-07-09
+**Task**: Close source dogfood drift gates
+**Branch**: `codex/drift-gate-absence-blindness`
+
+### Summary
+
+Implemented source-checkout drift gates so shipped manifest targets for active platform directories must exist as real root copies and byte-match their templates, then refreshed the missing dogfood mirrors and addressed Copilot review feedback.
+
+### Main Changes
+
+- Added dogfood manifest completeness, template-source completeness, target byte-parity, symlink rejection, platform-directory selection, and casefold target uniqueness coverage.
+- Refreshed missing Claude, Gemini, and GitHub sd-work root mirrors from templates so the source checkout satisfies the new gate.
+- Documented the source-checkout dogfood drift contract, local install-state ignores, and platform guidance scoping.
+- Addressed Copilot feedback by requiring active platform paths to be directories and by treating symlinked dogfood targets as missing.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2fdaca5` | test: enforce source dogfood drift gates |
+| `22c4602` | fix: address dogfood drift review feedback |
+
+### Testing
+
+- [OK] make test
+- [OK] make lint
+- [OK] .venv/bin/python -m unittest tests.test_pack_drift
+- [OK] .venv/bin/python -m unittest tests.test_pack_drift tests.test_generated_parity
+- [OK] .venv/bin/python -m unittest tests.test_install_core.InstallCoreTests.test_tracked_copilot_guidance_matches_template
+- [OK] git diff --check
+- [OK] .venv/bin/python install.py . --dry-run --platform claude --platform gemini --platform github --platform opencode
+- [OK] .venv/bin/python scripts/sd-ai-command-pack-update-spec-kb.py
+- [OK] SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR=87 SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY=/private/tmp/sd-ai-command-pack-pr-drift-gate-body.md SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+- [OK] PR #87 CI green and Copilot second round reported no new comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Task complete; continue sd-work-backlog with the next actionable Trellis task after housekeeping.
