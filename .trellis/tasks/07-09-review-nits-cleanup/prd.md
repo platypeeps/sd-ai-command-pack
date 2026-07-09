@@ -42,12 +42,14 @@ Each item is CONFIRMED by the review and is a small, self-contained fix:
   the interpreter gap between the floor and the ceiling) or document the
   two-ended matrix as intentional.
 - **N7 — consumer legacy-name references (cross-repo LOW, consumer-owned).**
-  Four consumers' own files still reference `TRELLIS_REVIEW_PR_PACK.md`
-  (loadsmith/green-button-manager `docs/repomix-map.md`; rwbp-coordinator
+  Three consumers' own files still reference `TRELLIS_REVIEW_PR_PACK.md`:
+  loadsmith `docs/repomix-map.md`; rwbp-coordinator
   `scripts/check-review-churn.mjs`; mezmo_benchmark
-  `scripts/check-review-cycle-patterns.py`). These are repo-owned, not pack
-  payload — the pack cannot fix them; this item is a tracked note to raise the
-  cleanup with those repos during the next fleet touch, not pack work.
+  `scripts/check-review-cycle-patterns.py`. (The former green-button-manager
+  copy was loadsmith's now-deleted duplicate clone, not a distinct consumer.)
+  These are repo-owned, not pack payload — the pack cannot fix them; this item
+  is a tracked note to raise the cleanup with those repos during the next fleet
+  touch, not pack work.
 
 ## Requirements
 
