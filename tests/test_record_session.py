@@ -254,7 +254,14 @@ class RecordSessionTests(InstallTestCase):
         run("git", "config", "user.email", "test@example.com")
         run("git", "config", "user.name", "Test User")
         self.assertEqual(
-            run("git", "status", "--porcelain", "--", ".trellis/workspace").stdout,
+            run(
+                "git",
+                "status",
+                "--porcelain",
+                "--untracked-files=normal",
+                "--",
+                ".trellis/workspace",
+            ).stdout,
             "?? .trellis/workspace/\n",
         )
         (root / "feature.txt").write_text("hi\n", encoding="utf-8")
