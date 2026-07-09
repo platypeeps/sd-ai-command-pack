@@ -3,7 +3,7 @@
   "name": "docs-accuracy-fixes",
   "title": "Fix documentation accuracy gaps",
   "description": "SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR undocumented, two dead TOC anchors in the shipped guide, AGENTS.md missing templates-are-source-of-truth rule.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

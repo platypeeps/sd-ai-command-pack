@@ -45,11 +45,11 @@ pack's otherwise excellent drift gates (2026-07-06 deep review):
 
 ## Acceptance Criteria
 
-- [ ] Grep finds the selector var documented in both surfaces; drift
+- [x] Grep finds the selector var documented in both surfaces; drift
   gate decision recorded.
-- [ ] All docs-guide quick links resolve to existing headings
+- [x] All docs-guide quick links resolve to existing headings
   (template and installed copies identical).
-- [ ] Full battery green (drift gates pass); template twins
+- [x] Full battery green (drift gates pass); template twins
   byte-identical.
 
 ## Notes
