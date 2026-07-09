@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 77
+- **Total Sessions**: 78
 - **Last Active**: 2026-07-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1116 | Active |
+| `journal-2.md` | ~1164 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 78 | 2026-07-09 | Add work-designs planning artifacts | `a91de22`, `52e7e18`, `c905aae` | `codex/add-work-designs-artifacts` |
 | 77 | 2026-07-09 | Consolidate planning follow-ups into Trellis tasks | `2f0a2df`, `3c7371b` | `codex/consolidate-roadmap-trellis-tasks` |
 | 76 | 2026-07-09 | Close upstream Trellis issue references | `1f24bbb` | `codex/file-upstream-trellis-issues` |
 | 75 | 2026-07-09 | Close fleet refresh loop | `050237a` | `codex/close-fleet-refresh-loop` |
