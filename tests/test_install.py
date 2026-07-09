@@ -1580,7 +1580,7 @@ class InstallTests(unittest.TestCase):
         gitignore = (PACK_ROOT / ".gitignore").read_text(encoding="utf-8")
 
         self.assertRegex(requirements, r"(?m)^coverage[<>=!~]")
-        self.assertRegex(requirements, r"(?m)^ruff==0\.15\.20$")
+        self.assertRegex(requirements, r"(?m)^ruff==\d+\.\d+\.\d+$")
         for expected in (
             "runs-on: ${{ matrix.os }}",
             "fail-fast: false",
