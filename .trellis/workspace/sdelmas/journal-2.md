@@ -580,3 +580,45 @@ Hardened the review-preflight Node script so symlink invocation runs checks, Nod
 ### Next Steps
 
 - None - task complete
+
+
+## Session 65: Archive task metadata backfill
+
+**Date**: 2026-07-08
+**Task**: Archive task metadata backfill
+**Branch**: `codex/archive-task-metadata-backfill`
+
+### Summary
+
+Backfilled archived Trellis task descriptions and added a regression guard before PR #68 review.
+
+### Main Changes
+
+- Backfilled descriptions for the three archived recorder tasks with blank metadata.
+- Added a regression test requiring completed archived PRD-backed tasks to keep non-empty descriptions.
+- Archived 07-06-archive-task-metadata-backfill after PR #68 review reached clean CI and no new Copilot comments.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5109ef2` | fix: backfill archived task descriptions |
+| `8f632a2` | chore(task): archive metadata backfill |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_install.InstallTests.test_archived_prd_backed_tasks_have_descriptions
+- [OK] python3 ./.trellis/scripts/task.py list-archive
+- [OK] git diff --check
+- [OK] .venv/bin/python -m unittest discover -s tests
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+- [OK] GitHub CI passed on PR #68: security, unittest (3.10), unittest (3.13), CI Result
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Continue sd-work-backlog with the next actionable implementation-ready task.
