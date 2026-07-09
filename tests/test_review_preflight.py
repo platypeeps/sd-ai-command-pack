@@ -126,7 +126,10 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
         link = root / "scripts/check-review-preflight-link.mjs"
-        link.symlink_to("sd-ai-command-pack-review-preflight.mjs")
+        try:
+            link.symlink_to("sd-ai-command-pack-review-preflight.mjs")
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"symlinks are not available: {exc}")
 
         result = subprocess.run(
             [node, "scripts/check-review-preflight-link.mjs"],
