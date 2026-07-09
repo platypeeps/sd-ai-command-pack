@@ -5006,6 +5006,20 @@ class InstallTests(unittest.TestCase):
                 script_path,
             )
 
+        shell_lib_paths = [
+            install.ROOT / "scripts/sd-ai-command-pack-shell-lib.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
+        ]
+        for shell_lib_path in shell_lib_paths:
+            content = shell_lib_path.read_text(encoding="utf-8")
+            self.assertIn("register_sd_ai_command_pack_temp_file()", content, shell_lib_path)
+            self.assertIn('REVIEW_LOCAL_TEMP_FILES+=("$file")', content, shell_lib_path)
+            self.assertIn(
+                'register_sd_ai_command_pack_temp_file "$output_file"',
+                content,
+                shell_lib_path,
+            )
+
     def test_review_local_script_loads_gito_concurrency_env(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")

@@ -202,6 +202,17 @@ gito_output_indicates_rate_limit() {
     | grep -Eiq '(^|[^[:alnum:]])(clienterror|apierror|httperror|http status|status code|status|error|exception):?[^0-9]*429([^0-9]|$)|(^|[^[:alnum:]])429[[:space:]]+(too many requests|resource exhausted|rate[ -]?limit(ed)?|slow down)([^[:alnum:]]|$)'
 }
 
+register_sd_ai_command_pack_temp_file() {
+  local file="$1"
+  local declaration
+  declaration="$(declare -p REVIEW_LOCAL_TEMP_FILES 2>/dev/null || true)"
+  case "$declaration" in
+    declare\ -a*REVIEW_LOCAL_TEMP_FILES=*)
+      REVIEW_LOCAL_TEMP_FILES+=("$file")
+      ;;
+  esac
+}
+
 run_gito_command() {
   local label="$1"
   shift
@@ -224,6 +235,7 @@ run_gito_command() {
     fi
 
     output_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-gito.XXXXXX")"
+    register_sd_ai_command_pack_temp_file "$output_file"
     local had_errexit=0
     case "$-" in
       *e*) had_errexit=1 ;;
