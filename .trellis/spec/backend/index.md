@@ -35,7 +35,8 @@ Before editing installer behavior:
    `selected_files()`, `install_file()`, and `main()`.
 2. Read `manifest.json` and confirm the behavior belongs in manifest data,
    Python logic, or both.
-3. Read `tests/test_install.py` for the CLI-through-subprocess test style.
+3. Read `tests/install_test_support.py` and the closest focused
+   `tests/test_*.py` module for the CLI-through-subprocess test style.
 4. If template files are involved, also read the frontend/template specs.
 
 ## Quality Check

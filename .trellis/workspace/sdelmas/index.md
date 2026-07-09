@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 72
+- **Total Sessions**: 73
 - **Last Active**: 2026-07-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~916 | Active |
+| `journal-2.md` | ~959 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 73 | 2026-07-09 | Partition pack test suite by subsystem | `64c2fbe` | `codex/partition-pack-test-suite` |
 | 72 | 2026-07-09 | Move shared command templates to neutral source | `3939202` | `codex/neutral-shared-command-templates` |
 | 71 | 2026-07-09 | Deduplicate shell helpers across review scripts | `81774bb`, `63a9fa2`, `6e00e5e` | `codex/dedupe-shared-shell-helpers` |
 | 70 | 2026-07-08 | README restructure and docs dedup | `7a934f0` | `codex/readme-restructure-dedup` |
