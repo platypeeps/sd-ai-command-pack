@@ -3786,7 +3786,12 @@ class InstallTests(unittest.TestCase):
                 self.assertIn("description", frontmatter)
                 self.assertIsInstance(frontmatter["name"], str)
                 self.assertIsInstance(frontmatter["description"], str)
-                self.assertEqual(set(frontmatter) - allowed_keys, set())
+                unexpected_keys = set(frontmatter) - allowed_keys
+                self.assertEqual(
+                    unexpected_keys,
+                    set(),
+                    f"{skill_path}: unexpected frontmatter keys: {sorted(unexpected_keys)}",
+                )
 
     def test_flat_markdown_entries_are_completion_visible(self) -> None:
         commands = [
