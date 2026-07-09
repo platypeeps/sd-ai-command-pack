@@ -30,7 +30,7 @@ the review-nits matrix decision.
 ## Affected Files
 
 - `.github/workflows/tests.yml`
-- `.github/dependabot.yml`
+- a new Dependabot configuration file under the GitHub configuration directory
 - `Makefile`
 - `requirements-dev.txt` if mypy is added
 - `pyproject.toml` for mypy config if needed

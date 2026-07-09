@@ -21,9 +21,10 @@ bespoke body changes.
 
 ## Documentation And Spec Updates
 
-Update `.trellis/spec/pack/command-surface.md` or the equivalent spec if it
-describes how to add commands. The spec should say the neutral source owns
-shared body text and the registry owns thin fan-out expectations.
+Update the existing adapter guideline spec, or create a command-surface spec
+only if the implementation adds that new spec file. The spec should say the
+neutral source owns shared body text and the registry owns thin fan-out
+expectations.
 
 ## Review Notes
 

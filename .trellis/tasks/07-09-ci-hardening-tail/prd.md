@@ -25,7 +25,7 @@ these are the remaining edges.
   `F401/F403/F405/F811` ignored for `install.py` and `installer/*` (the F811
   piece is handled by `07-09-installer-import-write-hygiene`); there is no
   mypy/pyright anywhere for ~180KB of shipped Python.
-- **No dependency-update automation.** No `.github/dependabot.yml`, no
+- **No dependency-update automation.** No Dependabot configuration file, no
   renovate; requirements use strict `==` pins with no bot to bump them, so
   e.g. `coverage==7.6.0` ages silently.
 - **ruff scope excludes vendored hook `.py`** (`.codex`/`.gemini`/`.github/copilot`)
@@ -42,7 +42,7 @@ these are the remaining edges.
   from `paths-ignore`.
 - R3: Add a mypy (or pyright) lane over `installer/` at a pragmatic strictness,
   wired into CI and the Makefile `check` target; fix or baseline findings.
-- R4: Add a minimal `.github/dependabot.yml` covering the `pip` and
+- R4: Add a minimal Dependabot configuration covering the `pip` and
   `github-actions` ecosystems (the latter keeps the R1 SHAs current).
 - R5: Decide and document ruff's Python-file scope (whether pack-owned hook
   scripts under `.codex`/`.gemini`/`.github/copilot` are linted); apply the
