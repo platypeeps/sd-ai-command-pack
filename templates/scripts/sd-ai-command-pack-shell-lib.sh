@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
-# Shared helpers for shipped sd-ai-command-pack shell entry points. The caller
-# must define REPO_ROOT, section(), and warn() before sourcing this file.
+# Shared helpers for shipped sd-ai-command-pack shell entry points. Callers
+# define REPO_ROOT before sourcing; helpers that emit warnings expect warn(),
+# and run_gito_command expects section().
 
 # sd-ai-command-pack review-scan-excludes start
 REVIEW_SCAN_EXCLUDE_DIRS=(
