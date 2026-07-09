@@ -1550,15 +1550,35 @@ class InstallTests(unittest.TestCase):
         self.assertIn("This pack only works", readme)
         self.assertIn("Prerequisite: install Trellis", readme)
         self.assertIn("Quick links:", readme)
+        self.assertIn("[Overview](#overview)", readme)
+        self.assertIn("[Commands](#commands)", readme)
+        self.assertIn("[Configuration Quick Reference](#configuration-quick-reference)", readme)
         self.assertIn("[Install](#install)", readme)
-        self.assertIn("sd-ai-command-pack trellis-gitignore start", readme)
-        self.assertIn("SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START", readme)
+        for command_heading in (
+            "### sd-start",
+            "### sd-create-pr",
+            "### sd-work-backlog",
+            "### sd-review-local-all",
+            "### sd-update-spec",
+            "### sd-housekeeping",
+        ):
+            self.assertIn(command_heading, readme)
+        self.assertIn(
+            "[docs/SD_AI_COMMAND_PACK.md](docs/SD_AI_COMMAND_PACK.md#commands)",
+            readme,
+        )
+        self.assertIn("avoid duplicate README drift", readme)
+        self.assertNotIn("sd-ai-command-pack trellis-gitignore start", readme)
+        self.assertNotIn("SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START", readme)
         self.assertIn("quick smoke test", readme)
+        self.assertIn("SANDBOX_TMP", readme)
+        self.assertIn("PYTHONPYCACHEPREFIX", readme)
+        self.assertIn("UV_CACHE_DIR", readme)
+        self.assertIn("RUFF_CACHE_DIR", readme)
         self.assertIn("scripts/sd-ai-command-pack-install-audit.py", readme)
         self.assertIn("scripts/sd-ai-command-pack-update-spec-kb.py --dry-run", readme)
         self.assertIn("Normal shared installs should commit that snapshot", readme)
         self.assertIn("keeps `.sd-ai-command-pack/installed-targets.txt`", readme)
-        self.assertIn("Base-ref precedence", readme)
         for expected in (
             "python3 install.py /path/to/trellis/repo",
             "python3 install.py /path/to/repo --dry-run",
@@ -4056,7 +4076,6 @@ class InstallTests(unittest.TestCase):
 
     def test_update_spec_docs_explain_obsidian_kb_vault_copying(self) -> None:
         doc_paths = [
-            install.ROOT / "README.md",
             install.ROOT / "docs/SD_AI_COMMAND_PACK.md",
             install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md",
         ]
@@ -10196,8 +10215,16 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
     def test_docs_show_mixed_tooling_and_ci_review_pr_body_scope_example(
         self,
     ) -> None:
+        readme = (install.ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("review-scope and PR-body", readme)
+        self.assertIn(
+            "[docs/SD_AI_COMMAND_PACK.md](docs/SD_AI_COMMAND_PACK.md#updating-the-pack)",
+            readme,
+        )
+        self.assertNotIn("Tooling/generated scope:", readme)
+        self.assertNotIn("CI/review scope:", readme)
+
         for doc_path in [
-            install.ROOT / "README.md",
             install.ROOT / "docs/SD_AI_COMMAND_PACK.md",
             install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md",
         ]:
@@ -11131,8 +11158,7 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             install.ROOT / "templates/.github/prompts/sd-review-pr.prompt.md",
             install.ROOT / "templates/.opencode/commands/sd-review-pr.md",
         ]
-        doc_paths = [
-            install.ROOT / "README.md",
+        detailed_doc_paths = [
             install.ROOT / "docs/SD_AI_COMMAND_PACK.md",
             install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md",
         ]
@@ -11188,7 +11214,19 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
             self.assertNotIn("any available local review providers", adapter)
             self.assertNotIn("optional local review providers", adapter)
 
-        for doc_path in doc_paths:
+        readme = (install.ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("### sd-review-pr", readme)
+        self.assertIn("configured remote reviewer", readme)
+        self.assertIn("Prism and Gito disabled", readme)
+        self.assertIn("re-requests review after each pushed fix", readme)
+        self.assertIn("sd-review-local", readme)
+        self.assertIn("sd-review-local-all", readme)
+        self.assertIn(
+            "[docs/SD_AI_COMMAND_PACK.md](docs/SD_AI_COMMAND_PACK.md#commands)",
+            readme,
+        )
+
+        for doc_path in detailed_doc_paths:
             doc = doc_path.read_text(encoding="utf-8")
             self.assertRegex(doc, r"(?i)the\s+default remote reviewer")
             self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER", doc)

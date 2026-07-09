@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 69
+- **Total Sessions**: 70
 - **Last Active**: 2026-07-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~793 | Active |
+| `journal-2.md` | ~831 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 70 | 2026-07-08 | README restructure and docs dedup | `7a934f0` | `codex/readme-restructure-dedup` |
 | 69 | 2026-07-08 | Contributor workflow review follow-up | `72b0dfa` | `codex/contributor-experience-baseline` |
 | 68 | 2026-07-08 | Contributor workflow baseline | `eca1f9d` | `codex/contributor-experience-baseline` |
 | 67 | 2026-07-08 | CI skip backstop and lint lane | `c4ea71b`, `0d33cba`, `ffa8c5a` | `codex/ci-skip-backstop-lint-lane` |

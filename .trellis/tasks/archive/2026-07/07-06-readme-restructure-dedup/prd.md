@@ -34,13 +34,29 @@ duplication decays silently.
 
 ## Acceptance Criteria
 
-- [ ] Every README section reachable from the TOC; no unheaded
+- [x] Every README section reachable from the TOC; no unheaded
   content block over ~50 lines.
-- [ ] The gitignore block and exclusion list exist in exactly one
+- [x] The gitignore block and exclusion list exist in exactly one
   documentation surface.
-- [ ] The two drifts resolved; content spot-check confirms no
+- [x] The two drifts resolved; content spot-check confirms no
   information was lost in the dedup.
-- [ ] Full battery green (pack source drift gates unaffected).
+- [x] Full battery green (pack source drift gates unaffected).
+
+## Implementation Notes
+
+- Added a `## Overview` heading plus a `## Commands` section with one `###`
+  heading per installed command, and expanded the quick-links list to cover all
+  README H2 sections in file order.
+- Replaced the duplicated per-command detail, local-review exclusion list,
+  managed gitignore/Copilot block examples, PR-body scope example, and Obsidian
+  vault copy instructions with links to `docs/SD_AI_COMMAND_PACK.md`.
+- Reconciled the documented drift by keeping the complete architecture overview
+  candidate list in the installed guide and adding the sandbox cache environment
+  exports to the README smoke test.
+- Updated README regression coverage to assert the new command headings, guide
+  link, smoke-test exports, and absence of managed-block markers in README.
+- Validation: focused README/contributor tests, `git diff --check`, KB refresh,
+  and SD full-check with Prism/Gito disabled passed.
 
 ## Notes
 
