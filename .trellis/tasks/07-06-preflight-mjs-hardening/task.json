@@ -3,7 +3,7 @@
   "name": "preflight-mjs-hardening",
   "title": "Harden the review-preflight mjs entry and inputs",
   "description": "Symlink invocation silently no-ops with exit 0, undeclared Node 16.9 floor, untracked files missing from changed-path collection.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

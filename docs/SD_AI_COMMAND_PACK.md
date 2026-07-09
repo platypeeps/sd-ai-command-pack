@@ -348,7 +348,9 @@ skip remote AI review. Target repos can tune roots, path-reference prefixes,
 integration paths, optional paths, copied-template paths, and warning thresholds
 with `.sd-ai-command-pack/review-preflight.json`. Repos that intentionally
 document service-user paths under `/home/<user>/` can add those service users to
-`allowedLinuxHomeUsers` in that config.
+`allowedLinuxHomeUsers` in that config. The script requires Node 16.9 or newer
+and scans regular documentation files only; symlinked docs are skipped
+intentionally so local/generated links do not expand outside the repository.
 
 The review-local script is intentionally tool-stack aware. In this pack version
 its runner-owned default toolset is Prism and Gito. Its default scope is

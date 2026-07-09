@@ -38,6 +38,69 @@ nothing, CI staying green over skipped tests).
 - Bad: `return 0` out of a gate because a tool or input was missing, with no
   output.
 
+## Review Preflight Runtime Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing
+`scripts/sd-ai-command-pack-review-preflight.mjs`, its template twin, or tests
+that exercise the generic JavaScript review preflight.
+
+### 2. Signatures
+
+- Command: `node scripts/sd-ai-command-pack-review-preflight.mjs`
+- Reusable API: exported helpers such as `runReviewPreflight()` and parser
+  helpers may be imported by Node-based tests.
+
+### 3. Contracts
+
+- The executable entry check must work when the script is invoked through a
+  symlink. Compare resolved real paths before deciding whether to run.
+- The script requires Node 16.9 or newer and must print a clear version error
+  before running checks when invoked with an older supported-parser runtime.
+- Changed-path detection for copied/generated disclosure must include staged,
+  branch, working-tree, and untracked files instead of letting one source hide
+  another.
+- Documentation scans intentionally inspect regular files only; symlinked docs
+  are skipped so local or generated links do not expand outside the repo.
+
+### 4. Validation & Error Matrix
+
+- Node below 16.9 -> exit nonzero with a concise `requires Node >= 16.9.0`
+  message.
+- Symlinked script invocation -> run the same checks and print the normal
+  summary.
+- Untracked copied pack/Trellis surface -> report the copied/generated scope
+  warning just like a staged or branch diff would.
+- Malformed `.sd-ai-command-pack/review-preflight.json` -> fail the preflight
+  without wiping the failure during result-buffer reset.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `node scripts/check-review-preflight-link.mjs` points at the pack
+  preflight and still runs the checks.
+- Base: a clean repo with no changed paths reports a no-current-diff pass.
+- Bad: a symlinked invocation exits `0` with no output, or an untracked copied
+  adapter is invisible to the copied/generated disclosure check.
+
+### 6. Tests Required
+
+- Script invocation through a symlink.
+- Node-version helper coverage for below, at, and above the declared floor.
+- Untracked copied-surface detection in a real Git fixture.
+- Workspace index parsing with trailing whitespace.
+- Template twin byte identity.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: import.meta.url === pathToFileURL(process.argv[1]).href
+Correct: realpath(import.meta.url path) === realpath(process.argv[1])
+
+Wrong: currentChangedPaths returns the first non-empty diff source
+Correct: currentChangedPaths unions staged, branch, working-tree, and untracked paths
+```
+
 ## Required Patterns
 
 - Use `pathlib.Path` for filesystem work.
