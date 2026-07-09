@@ -832,3 +832,46 @@ Restructured README into navigable overview, commands, install, and verify secti
 ### Next Steps
 
 - Merge PR #72 and continue the sd-work-backlog loop with the next actionable Trellis task.
+
+
+## Session 71: Deduplicate shell helpers across review scripts
+
+**Date**: 2026-07-09
+**Task**: Deduplicate shell helpers across review scripts
+**Branch**: `codex/dedupe-shared-shell-helpers`
+
+### Summary
+
+Extracted duplicated Bash helpers into a shipped shared helper library and aligned full-check, review-local, and review-scope around the shared implementation.
+
+### Main Changes
+
+- Added scripts/sd-ai-command-pack-shell-lib.sh and template twin for shared review-scan exclusions, base-ref discovery, Gito env loading, uv cache setup, and HTTP-429 retry handling.
+- Updated full-check, review-local, and review-scope to source the helper; full-check now uses bash -c for configured preflight and shared uv setup before Gito.
+- Bumped manifest to 0.7.4 and updated docs, PR-body scope, install audit, and regression tests for the new shipped helper.
+- Addressed Copilot feedback by clarifying the helper caller contract for REPO_ROOT, warn(), and section().
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `81774bb` | refactor: share shell helpers across review scripts |
+| `63a9fa2` | docs: clarify shell helper caller contract |
+
+### Testing
+
+- [OK] Focused helper/Gito/full-check tests passed: 17 tests.
+- [OK] Full unittest suite passed: 359 tests.
+- [OK] Shellcheck passed for changed shell scripts and template twins.
+- [OK] KB refresh completed with 182 copies and no conflicts.
+- [OK] SD full-check passed with Prism and Gito disabled.
+- [OK] PR #73 CI passed after review fix: lint, security, Ubuntu 3.10/3.13, macOS 3.13, and CI Result.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #73 and continue the sd-work-backlog loop with the next actionable Trellis task.
