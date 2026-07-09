@@ -534,3 +534,49 @@ Added sd-work-backlog as a sequential Trellis backlog runner, shipped platform a
 ### Next Steps
 
 - None - task complete
+
+
+## Session 64: Harden review preflight entry handling
+
+**Date**: 2026-07-08
+**Task**: Harden review preflight entry handling
+**Branch**: `codex/preflight-mjs-hardening`
+
+### Summary
+
+Hardened the review-preflight Node script so symlink invocation runs checks, Node versions below 16.9 receive a clear error, copied-surface detection includes untracked files, workspace index parsing tolerates trailing whitespace, and the runtime contract is documented in specs/docs with tests.
+
+### Main Changes
+
+- Hardened `sd-ai-command-pack-review-preflight.mjs` so symlink invocation
+  resolves real paths and runs the preflight checks.
+- Added a clear Node 16.9 minimum-version error path and removed syntax/runtime
+  assumptions that would hide that message on older supported-parser runtimes.
+- Included untracked files in copied-surface detection, tolerated trailing
+  whitespace in workspace index rows, and documented regular-file-only docs
+  scanning.
+- Added focused tests, updated docs/specs, and bumped shipped payload metadata
+  to 0.7.1.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `533c0db` | (see git log) |
+
+### Testing
+
+- [OK] `node --check scripts/sd-ai-command-pack-review-preflight.mjs`
+- [OK] `node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs`
+- [OK] Focused review-preflight unittest cases.
+- [OK] `.venv/bin/python -m unittest discover -s tests`
+- [OK] `git diff --check`
+- [OK] `git diff --cached --check`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.1 - 2026-07-09
+
+- Hardened `sd-ai-command-pack-review-preflight.mjs`: symlink invocation now
+  runs the preflight instead of silently exiting, Node versions below 16.9 get
+  a clear error, copied-surface checks include untracked files, workspace index
+  parsing tolerates trailing whitespace, and the regular-file-only
+  documentation scan behavior is documented.
+
 ## 0.7.0 - 2026-07-08
 
 - Added the distributed `sd-work-backlog` command and shared skill for

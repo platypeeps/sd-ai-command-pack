@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 63
+- **Total Sessions**: 64
 - **Last Active**: 2026-07-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~531 | Active |
+| `journal-2.md` | ~569 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 64 | 2026-07-08 | Harden review preflight entry handling | `533c0db` | `codex/preflight-mjs-hardening` |
 | 63 | 2026-07-08 | Add backlog work loop command | `07f6f4e` | `codex/backlog-work-loop-command` |
 | 62 | 2026-07-08 | Trellis PR consent rule | `be9249e`, `9c2b9a1` | `codex/trellis-pr-consent-rule` |
 | 61 | 2026-07-08 | PR-body scope bot actor exemption | `7238a44` | `sdelmas/pr-body-scope-bot-actor-exemption` |

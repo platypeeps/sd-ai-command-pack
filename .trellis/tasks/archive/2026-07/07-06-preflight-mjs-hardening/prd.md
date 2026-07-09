@@ -48,11 +48,11 @@ symlinks deliberately).
 
 ## Acceptance Criteria
 
-- [ ] Symlink invocation runs the full check suite (verified by test).
-- [ ] Old-Node failure mode is a clear versioned error message.
-- [ ] .mjs and shell scripts agree on untracked-file visibility within
+- [x] Symlink invocation runs the full check suite (verified by test).
+- [x] Old-Node failure mode is a clear versioned error message.
+- [x] .mjs and shell scripts agree on untracked-file visibility within
   one full-check run.
-- [ ] Full battery green; template twins byte-identical.
+- [x] Full battery green; template twins byte-identical.
 
 ## Notes
 

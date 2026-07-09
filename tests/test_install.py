@@ -5802,6 +5802,7 @@ import {
   parseJournalSessionsFromText,
   parseWorkspaceIndexSessionsFromText,
   shouldCheckDocumentationPathReference,
+  unsupportedNodeVersionMessage,
   validateTrellisJournalSessions,
 } from './scripts/sd-ai-command-pack-review-preflight.mjs';
 
@@ -5842,7 +5843,11 @@ const journal = parseJournalSessionsFromText('.trellis/workspace/dev/journal-1.m
   '### Git Commits',
   '- abcdef1',
 ].join('\\n'));
-const index = parseWorkspaceIndexSessionsFromText('.trellis/workspace/dev/index.md', '| 1 | Done | Completed | 1234567 | note |\\n');
+assert.equal(unsupportedNodeVersionMessage('v16.9.0'), '');
+assert.equal(unsupportedNodeVersionMessage('v20.0.0'), '');
+assert.match(unsupportedNodeVersionMessage('v16.8.0'), /requires Node >= 16\\.9\\.0/);
+assert.match(unsupportedNodeVersionMessage('not-a-version'), /could not parse/);
+const index = parseWorkspaceIndexSessionsFromText('.trellis/workspace/dev/index.md', '| 1 | Done | Completed | 1234567 | note |  \\n');
 const validation = validateTrellisJournalSessions({
   developerRelative: '.trellis/workspace/dev',
   indexFile: '.trellis/workspace/dev/index.md',
@@ -5862,6 +5867,64 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         )
 
         self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_review_preflight_script_runs_via_symlink(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        link = root / "scripts/check-review-preflight-link.mjs"
+        link.symlink_to("sd-ai-command-pack-review-preflight.mjs")
+
+        result = subprocess.run(
+            [node, "scripts/check-review-preflight-link.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Review preflight:", result.stdout)
+        self.assertNotEqual(result.stdout.strip(), "")
+
+    def test_review_preflight_reports_untracked_copied_surfaces(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(
+            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
+        )
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "scripts/sd-ai-command-pack-review-preflight.mjs")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        copied_surface = root / ".agents/skills/sd-review-pr/SKILL.md"
+        copied_surface.parent.mkdir(parents=True, exist_ok=True)
+        copied_surface.write_text("# Review PR\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("WARN untracked files changes copied", result.stdout)
+        self.assertIn(".agents/skills/sd-review-pr/SKILL.md", result.stdout)
 
     def test_review_preflight_script_detects_trellis_journal_drift(self) -> None:
         node = shutil.which("node")

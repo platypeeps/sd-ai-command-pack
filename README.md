@@ -645,7 +645,10 @@ It is a generic dependency-free preflight for copied/generated disclosure,
 documentation path hygiene, Trellis journal consistency, npm override drift,
 and large diff warnings. Target repos can tune it with
 `.sd-ai-command-pack/review-preflight.json`, including intentional Linux
-service users through `allowedLinuxHomeUsers`.
+service users through `allowedLinuxHomeUsers`. The review-preflight script
+requires Node 16.9 or newer and scans regular documentation files only;
+symlinked docs are skipped intentionally so local/generated links do not expand
+outside the repository.
 
 The full-check script also runs `scripts/sd-ai-command-pack-install-audit.py`.
 That helper checks `.sd-ai-command-pack/installed-targets.txt` for missing
