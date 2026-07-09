@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 65
+- **Total Sessions**: 66
 - **Last Active**: 2026-07-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~619 | Active |
+| `journal-2.md` | ~665 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 66 | 2026-07-08 | Fix documentation accuracy gaps | `c3f3314`, `dea9e40` | `codex/docs-accuracy-fixes` |
 | 65 | 2026-07-08 | Archive task metadata backfill | `5109ef2`, `8f632a2`, `dba44a3` | `codex/archive-task-metadata-backfill` |
 | 64 | 2026-07-08 | Harden review preflight entry handling | `533c0db` | `codex/preflight-mjs-hardening` |
 | 63 | 2026-07-08 | Add backlog work loop command | `07f6f4e` | `codex/backlog-work-loop-command` |
