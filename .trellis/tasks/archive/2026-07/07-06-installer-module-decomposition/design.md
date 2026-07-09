@@ -64,5 +64,5 @@ the security lane.
 
 Behavioral changes of any kind; manifest schema changes (tracked separately in
 `07-09-platform-registry-manifest-sections`); moving `main` out of
-install.py (the PRD wants CLI parsing and exit handling to stay in the entry
+`install.py` (the PRD wants CLI parsing and exit handling to stay in the entry
 file).
