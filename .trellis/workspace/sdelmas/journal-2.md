@@ -417,7 +417,6 @@ Prepared the 0.6.0 release process update, added a changelog and README release 
 
 - None - task complete
 
-
 ## Session 61: PR-body scope bot actor exemption
 
 **Date**: 2026-07-08
@@ -954,6 +953,46 @@ Split the monolithic installer test suite into focused subsystem modules while p
 - [OK] .venv/bin/python -m ruff check install.py installer scripts templates/scripts tests
 - [OK] git diff --check
 - [OK] coverage gates via /private/tmp COVERAGE_FILE: installer 100%, shipped scripts 79% against 76% floor
+- [OK] python3 scripts/sd-ai-command-pack-update-spec-kb.py
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 74: Add sd-work-designs command
+
+**Date**: 2026-07-09
+**Task**: Add sd-work-designs command
+**Branch**: `codex/add-sd-work-designs`
+
+### Summary
+
+Added the sd-work-designs command and prepared the remaining backlog tasks with design and implementation artifacts.
+
+### Main Changes
+
+- Added the sd-work-designs shared skill and distributed adapters.
+- Registered the command in the manifest, docs, frontend adapter specs, and installer/parity tests.
+- Added design and implementation plans for the two remaining active backlog tasks.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `631f1f0` | feat: add sd work designs command |
+
+### Testing
+
+- [OK] PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest tests.test_generated_parity tests.test_install_core
+- [OK] PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests
+- [OK] .venv/bin/python -m ruff check install.py installer scripts templates/scripts tests
 - [OK] python3 scripts/sd-ai-command-pack-update-spec-kb.py
 - [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
 
