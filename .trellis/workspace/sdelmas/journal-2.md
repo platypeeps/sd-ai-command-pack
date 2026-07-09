@@ -1275,3 +1275,45 @@ Handled Copilot feedback on the recorder retry regression by making PATH stubbin
 ### Next Steps
 
 - None - task complete
+
+
+## Session 82: Constrain remove to pack targets
+
+**Date**: 2026-07-09
+**Task**: Constrain remove to pack targets
+**Branch**: `codex/remove-receipt-trust-boundary`
+
+### Summary
+
+Hardened install.py --remove so consumer-editable receipts and provenance cannot authorize deletion of .git internals or arbitrary non-pack repo files.
+
+### Main Changes
+
+- Added a manifest/generated-target allowlist for remove candidates and ignored .git/* or non-manifest receipt/provenance paths before delete checks.
+- Added regression coverage for tampered .git/config and tracked non-pack files across dry-run, --force, and preserved-file behavior.
+- Updated remove-mode docs, template docs, backend contract spec, changelog, and bumped the manifest to 0.8.3.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9cb8319` | fix: constrain remove to pack targets |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_remove
+- [OK] .venv/bin/python -m unittest tests.test_pack_drift.PackDriftTests.test_tracked_pack_targets_match_templates tests.test_pack_drift.PackDriftTests.test_pack_source_drift_gate_accepts_payload_with_version_bump
+- [OK] make test
+- [OK] make lint
+- [OK] git diff --check
+- [OK] .venv/bin/python scripts/sd-ai-command-pack-update-spec-kb.py
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

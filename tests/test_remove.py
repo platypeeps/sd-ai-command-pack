@@ -122,6 +122,70 @@ class RemoveTests(InstallTestCase):
         self.assertTrue(backup.is_file())
         self.assertIn("# local drift", backup.read_text(encoding="utf-8"))
 
+    def test_remove_ignores_tampered_receipts_for_git_and_non_pack_files(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        user_file = root / "USER_DATA.txt"
+        user_file.write_text("keep this user file\n", encoding="utf-8")
+        self.run_git(root, "add", "USER_DATA.txt")
+        git_config = root / ".git/config"
+
+        provenance_path = root / install.PROVENANCE_FILE
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        provenance["files"][".git/config"] = (
+            "sha256:" + hashlib.sha256(git_config.read_bytes()).hexdigest()
+        )
+        provenance["files"]["USER_DATA.txt"] = (
+            "sha256:" + hashlib.sha256(user_file.read_bytes()).hexdigest()
+        )
+        provenance_path.write_text(
+            json.dumps(provenance, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        receipt = root / install.INSTALLED_TARGETS_FILE
+        receipt.write_text(
+            receipt.read_text(encoding="utf-8")
+            + ".git/config\n"
+            + "./USER_DATA.txt\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_install(root, "--remove", "--force", "--dry-run")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "ignored        .git/config (refusing to remove .git internals)",
+            result.stdout,
+        )
+        self.assertIn(
+            "ignored        USER_DATA.txt (not a recognized sd-ai-command-pack target)",
+            result.stdout,
+        )
+        self.assertTrue(git_config.is_file())
+        self.assertTrue(user_file.is_file())
+
+        result = self.run_install(root, "--remove", "--force")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "ignored        .git/config (refusing to remove .git internals)",
+            result.stdout,
+        )
+        self.assertIn(
+            "ignored        USER_DATA.txt (not a recognized sd-ai-command-pack target)",
+            result.stdout,
+        )
+        self.assertTrue(git_config.is_file())
+        self.assertEqual(
+            user_file.read_text(encoding="utf-8"),
+            "keep this user file\n",
+        )
+
     def test_remove_pack_file_reports_backup_copy_failures_cleanly(self) -> None:
         root = self.make_repo()
         script = root / "scripts/sd-ai-command-pack-full-check.sh"

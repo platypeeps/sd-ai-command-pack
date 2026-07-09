@@ -178,12 +178,17 @@ Reference files:
    preserved and all other safe targets are processed. Preservation is a normal
    uninstall result, not a fatal CLI validation failure.
 3. Contracts: remove mode treats target-repo state as user-owned unless the
-   specific target is proven safe to delete or update. Unsafe/unreadable
-   `.sd-ai-command-pack/installed-targets.txt` or `provenance.json` state is
-   treated as absent for uninstall candidate discovery, then removal falls back
-   to manifest-selected targets plus generated state targets. Normal
-   install/update paths may remain stricter because they are establishing
-   controlled state.
+   specific target is both manifest-recognized and proven safe to delete or
+   update. Unsafe/unreadable `.sd-ai-command-pack/installed-targets.txt` or
+   `provenance.json` state is treated as absent for uninstall candidate
+   discovery, then removal falls back to manifest-selected targets plus
+   generated state targets. Normal install/update paths may remain stricter
+   because they are establishing controlled state.
+   Receipt/provenance entries are candidate discovery only; a hash match must
+   not authorize removal for a path absent from the current manifest target
+   set or generated pack state. Root `.git/` paths are never whole-file remove
+   candidates, regardless of receipts, provenance, manifest state, or
+   `--force`.
 4. Validation and error matrix: unsafe candidate path -> `preserved` with the
    validation detail; parent directory resolving outside the target repo ->
    `preserved`; unreadable target file -> `preserved`; invalid UTF-8 in a
@@ -193,7 +198,9 @@ Reference files:
    action cannot be made reversible.
 5. Good, base, and bad cases: a generated pack file with matching content is
    removed; a drifted file without `--force` is preserved; a receipt with
-   unsafe paths does not abort the run; `.git/info/exclude` with malformed
+   unsafe paths does not abort the run; a receipt/provenance entry for
+   `.git/config` or `USER_DATA.txt` is reported as ignored and preserved even
+   with a matching hash and `--force`; `.git/info/exclude` with malformed
    local-only markers remains untouched; aborting the whole uninstall because a
    single user-owned file cannot be parsed is wrong.
 6. Tests required: cover unsafe receipt/provenance fallback, unsafe regular
