@@ -3,7 +3,7 @@
   "name": "file-upstream-trellis-issues",
   "title": "File upstream Trellis issues from deep-review findings",
   "description": "Five pack-side workarounds trace to upstream Trellis gaps; file the drafted issues with the Trellis owner and link them back into the superseded pack tasks.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

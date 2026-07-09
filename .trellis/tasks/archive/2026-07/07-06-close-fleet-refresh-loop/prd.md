@@ -113,6 +113,12 @@ session heading matches the retry title and patches that existing entry before
 staging/committing. Regression coverage:
 `test_record_session_wrapper_reuses_uncommitted_retry_entry`.
 
+Upstream issue 5 was not filed. Reroute recorded 2026-07-09: the duplicate
+session root cause was fixed locally in
+[sd-ai-command-pack PR #77](https://github.com/platypeeps/sd-ai-command-pack/pull/77),
+and the issue draft remains in `07-07-file-upstream-trellis-issues` as
+historical evidence marked "do not file".
+
 ## Notes
 
 - Origin: 2026-07-06 deep review Trellis-task cross-check. Process

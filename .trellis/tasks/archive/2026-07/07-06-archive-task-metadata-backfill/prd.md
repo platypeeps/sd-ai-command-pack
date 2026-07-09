@@ -45,3 +45,6 @@ The tasks themselves are accurate, but blank descriptions reduce searchability a
   create/archive time. If Trellis adopts it, the "lightweight guard"
   requirement here can be satisfied by the upstream warning; the
   backfill of the three known blank descriptions is needed either way.
+- Upstream reference recorded 2026-07-09: issue 4 was filed as
+  [mindfold-ai/Trellis#397](https://github.com/mindfold-ai/Trellis/issues/397)
+  and is currently closed.
