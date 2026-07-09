@@ -793,3 +793,42 @@ Addressed Copilot review feedback by making the Makefile Node syntax checks opti
 ### Next Steps
 
 - Push the review fix, request a fresh Copilot review, and merge after CI and review threads are clean.
+
+
+## Session 70: README restructure and docs dedup
+
+**Date**: 2026-07-08
+**Task**: README restructure and docs dedup
+**Branch**: `codex/readme-restructure-dedup`
+
+### Summary
+
+Restructured README into navigable overview, commands, install, and verify sections while moving duplicated guide details back to the installed guide.
+
+### Main Changes
+
+- Added README Overview and Commands sections with per-command headings and complete quick links.
+- Removed duplicated managed-block examples, PR-body scope examples, local-review exclusions, Obsidian vault copy details, and helper internals from README in favor of docs/SD_AI_COMMAND_PACK.md links.
+- Added sandbox cache exports to the README smoke test and updated regression coverage for the README/docs boundary.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7a934f0` | docs: restructure readme and dedupe guide details |
+
+### Testing
+
+- [OK] Focused README/docs tests passed.
+- [OK] Full unittest suite passed: 354 tests.
+- [OK] KB refresh completed with 182 copies and no conflicts.
+- [OK] SD full-check passed with Prism and Gito disabled.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #72 and continue the sd-work-backlog loop with the next actionable Trellis task.
