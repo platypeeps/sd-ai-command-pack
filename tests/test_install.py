@@ -2,6 +2,22 @@ from __future__ import annotations
 
 import unittest
 
+_LOCAL_TEST_MODULES = {
+    "test_full_check",
+    "test_generated_parity",
+    "test_housekeeping",
+    "test_install_audit",
+    "test_install_core",
+    "test_pack_drift",
+    "test_record_session",
+    "test_remove",
+    "test_review_learnings",
+    "test_review_local",
+    "test_review_preflight",
+    "test_review_scope",
+    "test_update_spec_kb",
+}
+
 try:
     from test_full_check import FullCheckTests
     from test_generated_parity import GeneratedParityTests
@@ -16,7 +32,9 @@ try:
     from test_review_preflight import ReviewPreflightTests
     from test_review_scope import ReviewScopeTests
     from test_update_spec_kb import UpdateSpecKbTests
-except ModuleNotFoundError:
+except ModuleNotFoundError as exc:
+    if not __package__ or exc.name not in _LOCAL_TEST_MODULES:
+        raise
     from .test_full_check import FullCheckTests
     from .test_generated_parity import GeneratedParityTests
     from .test_housekeeping import HousekeepingTests
