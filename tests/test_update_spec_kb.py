@@ -663,7 +663,10 @@ class UpdateSpecKbTests(InstallTestCase):
         (root / "README.md").write_text("# Project\n", encoding="utf-8")
         legacy_link = root / ".obsidian-kb/README.md"
         legacy_link.parent.mkdir(parents=True)
-        legacy_link.symlink_to("../README.md")
+        try:
+            legacy_link.symlink_to("../README.md")
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"symlinks are not available: {exc}")
 
         result = subprocess.run(
             [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
@@ -699,11 +702,14 @@ class UpdateSpecKbTests(InstallTestCase):
 
         legacy_root = root / ".obsidian-kb"
         legacy_root.mkdir()
-        (legacy_root / "README.md").symlink_to("../README.md")
-        (legacy_root / "AGENTS.md").symlink_to("../AGENTS.md")
         legacy_spec = legacy_root / ".trellis/spec/backend/index.md"
         legacy_spec.parent.mkdir(parents=True)
-        legacy_spec.symlink_to("../../../../.trellis/spec/backend/index.md")
+        try:
+            (legacy_root / "README.md").symlink_to("../README.md")
+            (legacy_root / "AGENTS.md").symlink_to("../AGENTS.md")
+            legacy_spec.symlink_to("../../../../.trellis/spec/backend/index.md")
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"symlinks are not available: {exc}")
 
         result = subprocess.run(
             [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
