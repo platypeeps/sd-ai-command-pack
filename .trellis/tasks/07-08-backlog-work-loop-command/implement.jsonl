@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Defines the shared-skill-first adapter pattern used for the new SD command."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Defines manifest ownership and installable file conventions for shipped pack payload."}
+{"file": "README.md", "reason": "Provides user-facing command inventory and release/versioning guidance."}

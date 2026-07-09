@@ -42,8 +42,8 @@ target repos by `scripts/sd-ai-command-pack-install-audit.py`.
 The shared skills own the workflows. Platform command and prompt files are thin
 entry points that tell the agent to load the appropriate shared skill.
 Codex exposes pack entry points as enabled skills named `sd-start`, `sd-continue`,
-`sd-finish-work`, `sd-create-pr`, `sd-full-check`, `sd-housekeeping`,
-`sd-review-pr`, `sd-review-local`, `sd-review-local-all`,
+`sd-finish-work`, `sd-create-pr`, `sd-work-backlog`, `sd-full-check`,
+`sd-housekeeping`, `sd-review-pr`, `sd-review-local`, `sd-review-local-all`,
 `sd-review-learnings`, and `sd-update-spec`; type `/sd` in Codex command
 completion or invoke them explicitly with `$sd-review-pr`-style skill mentions.
 User-facing command adapters live under the `sd` namespace so pack-owned
@@ -208,6 +208,17 @@ the current feature branch, creates or reuses the branch PR, and hands off to
 does not hardcode `origin/main`, and does not run Prism or Gito directly; the
 existing `sd-review-pr` workflow remains responsible for the deterministic
 local PR gate and configured remote reviewer loop.
+
+The work-backlog command loops over existing Trellis tasks one at a time. It
+selects the highest-value task whose PRD and planning artifacts are ready,
+implements that task through the normal Trellis flow, delegates publishing and
+review to `sd-create-pr`, delegates merge/cleanup to `sd-housekeeping`, runs an
+extra housekeeping verification, then addresses or records follow-ups and
+learnings before selecting another task. If a task needs user input, it asks one
+blocking question, waits up to 15 minutes when the platform can wait, then parks
+the task with a `Parked by sd-work-backlog` PRD note and moves to the next
+actionable task. It stops when no tasks remain, all remaining tasks need input,
+or any SD/Trellis safety gate reports a blocker.
 
 The review-pr command runs a deterministic local PR gate before requesting the
 configured remote reviewer. Its command-owned full-check invocation disables
@@ -771,12 +782,12 @@ SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 \
 ```
 
 Use a conventional release commit such as
-`chore: release sd-ai-command-pack 0.6.0`, merge the PR, fast-forward `main`,
+`chore: release sd-ai-command-pack <version>`, merge the PR, fast-forward `main`,
 then tag the merge/release commit:
 
 ```bash
-git tag v0.6.0
-git push origin v0.6.0
+git tag v<version>
+git push origin v<version>
 ```
 
 After the tag is pushed, refresh the fleet with `install.py <repo> --force`,

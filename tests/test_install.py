@@ -803,6 +803,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-create-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-work-backlog/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-full-check/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-housekeeping/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-continue/SKILL.md").is_file())
@@ -838,6 +839,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".gemini/commands/sd/start.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/create-pr.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/work-backlog.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local-all.toml").is_file())
@@ -849,6 +851,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".github/prompts/sd-start.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-finish-work.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-create-pr.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-work-backlog.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-local.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-local-all.prompt.md").is_file())
@@ -865,6 +868,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".cursor/commands/sd-start.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-finish-work.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-create-pr.md").is_file())
+        self.assertTrue((root / ".cursor/commands/sd-work-backlog.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-pr.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-local.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-local-all.md").is_file())
@@ -876,6 +880,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".claude/commands/sd/start.md").exists())
         self.assertFalse((root / ".claude/commands/sd/finish-work.md").exists())
         self.assertFalse((root / ".claude/commands/sd/create-pr.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/work-backlog.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-pr.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-local.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-local-all.md").exists())
@@ -887,6 +892,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".opencode/commands/sd-start.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-finish-work.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-create-pr.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-work-backlog.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-local.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-local-all.md").exists())
@@ -951,14 +957,19 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".kiro/skills/sd-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".kiro/skills/sd-create-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".kiro/skills/sd-work-backlog/SKILL.md").is_file())
         self.assertTrue((root / ".reasonix/skills/sd-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".reasonix/skills/sd-create-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".reasonix/skills/sd-work-backlog/SKILL.md").is_file())
         self.assertTrue((root / ".trae/commands/sd-review-pr.md").is_file())
         self.assertTrue((root / ".trae/commands/sd-create-pr.md").is_file())
+        self.assertTrue((root / ".trae/commands/sd-work-backlog.md").is_file())
         self.assertTrue((root / ".trae/skills/sd-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".trae/skills/sd-create-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".trae/skills/sd-work-backlog/SKILL.md").is_file())
         self.assertTrue((root / ".zcode/commands/sd/review-pr.md").is_file())
         self.assertTrue((root / ".zcode/commands/sd/create-pr.md").is_file())
+        self.assertTrue((root / ".zcode/commands/sd/work-backlog.md").is_file())
         self.assertFalse((root / ".qoder/commands/sd-review-pr.md").exists())
         self.assert_installed_targets_snapshot_matches_selection(root)
 
@@ -970,6 +981,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".agents/skills/sd-start/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-create-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-work-backlog/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-local/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-local-all/SKILL.md").is_file())
@@ -994,6 +1006,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".gemini/commands/sd/start.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/create-pr.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/work-backlog.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local-all.toml").is_file())
@@ -1005,6 +1018,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".claude/commands/sd/start.md").exists())
         self.assertFalse((root / ".claude/commands/sd/finish-work.md").exists())
         self.assertFalse((root / ".claude/commands/sd/create-pr.md").exists())
+        self.assertFalse((root / ".claude/commands/sd/work-backlog.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-pr.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-local.md").exists())
         self.assertFalse((root / ".claude/commands/sd/review-local-all.md").exists())
@@ -1016,6 +1030,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".cursor/commands/sd-start.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-finish-work.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-create-pr.md").exists())
+        self.assertFalse((root / ".cursor/commands/sd-work-backlog.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-review-pr.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-review-local.md").exists())
         self.assertFalse((root / ".cursor/commands/sd-review-local-all.md").exists())
@@ -1027,6 +1042,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".github/prompts/sd-start.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-finish-work.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-create-pr.prompt.md").exists())
+        self.assertFalse((root / ".github/prompts/sd-work-backlog.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-review-pr.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-review-local.prompt.md").exists())
         self.assertFalse((root / ".github/prompts/sd-review-local-all.prompt.md").exists())
@@ -1039,6 +1055,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((root / ".opencode/commands/sd-start.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-finish-work.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-create-pr.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-work-backlog.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-local.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-review-local-all.md").exists())
@@ -1055,6 +1072,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".agents/skills/sd-start/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-create-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-work-backlog/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-local/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-local-all/SKILL.md").is_file())
@@ -1079,6 +1097,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".claude/commands/sd/start.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/finish-work.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/create-pr.md").is_file())
+        self.assertTrue((root / ".claude/commands/sd/work-backlog.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/review-pr.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/review-local.md").is_file())
         self.assertTrue((root / ".claude/commands/sd/review-local-all.md").is_file())
@@ -1090,6 +1109,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".cursor/commands/sd-start.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-finish-work.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-create-pr.md").is_file())
+        self.assertTrue((root / ".cursor/commands/sd-work-backlog.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-pr.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-local.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-local-all.md").is_file())
@@ -1101,6 +1121,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".gemini/commands/sd/start.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/create-pr.toml").is_file())
+        self.assertTrue((root / ".gemini/commands/sd/work-backlog.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local.toml").is_file())
         self.assertTrue((root / ".gemini/commands/sd/review-local-all.toml").is_file())
@@ -1112,6 +1133,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".github/prompts/sd-start.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-finish-work.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-create-pr.prompt.md").is_file())
+        self.assertTrue((root / ".github/prompts/sd-work-backlog.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-pr.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-local.prompt.md").is_file())
         self.assertTrue((root / ".github/prompts/sd-review-local-all.prompt.md").is_file())
@@ -1128,6 +1150,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".opencode/commands/sd-start.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-finish-work.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-create-pr.md").is_file())
+        self.assertTrue((root / ".opencode/commands/sd-work-backlog.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-review-pr.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-review-local.md").is_file())
         self.assertTrue((root / ".opencode/commands/sd-review-local-all.md").is_file())
@@ -1144,6 +1167,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         review_skill = root / ".agents/skills/sd-review-pr/SKILL.md"
         create_pr_skill = root / ".agents/skills/sd-create-pr/SKILL.md"
+        work_backlog_skill = root / ".agents/skills/sd-work-backlog/SKILL.md"
         review_local_skill = root / ".agents/skills/sd-review-local/SKILL.md"
         review_learnings_skill = root / ".agents/skills/sd-review-learnings/SKILL.md"
         full_check_skill = root / ".agents/skills/sd-full-check/SKILL.md"
@@ -1154,6 +1178,7 @@ class InstallTests(unittest.TestCase):
         housekeeping_script = root / "scripts/sd-ai-command-pack-housekeeping.sh"
         self.assertTrue(review_skill.is_file())
         self.assertTrue(create_pr_skill.is_file())
+        self.assertTrue(work_backlog_skill.is_file())
         self.assertTrue(review_local_skill.is_file())
         self.assertTrue(review_learnings_skill.is_file())
         self.assertTrue(full_check_skill.is_file())
@@ -1214,6 +1239,19 @@ class InstallTests(unittest.TestCase):
             self.assertIn("Resolve the `sd-create-pr` skill by name", content)
             self.assertIn("sd-update-spec", content)
             self.assertIn("sd-review-pr", content)
+        for adapter in [
+            root / ".claude/commands/sd/work-backlog.md",
+            root / ".cursor/commands/sd-work-backlog.md",
+            root / ".gemini/commands/sd/work-backlog.toml",
+            root / ".github/prompts/sd-work-backlog.prompt.md",
+            root / ".opencode/commands/sd-work-backlog.md",
+        ]:
+            self.assertTrue(adapter.is_file(), adapter)
+            content = adapter.read_text(encoding="utf-8")
+            self.assertIn("Resolve the `sd-work-backlog` skill by name", content)
+            self.assertIn("one task per iteration", content)
+            self.assertIn("sd-create-pr", content)
+            self.assertIn("sd-housekeeping", content)
         for adapter in [
             root / ".claude/commands/sd/review-pr.md",
             root / ".cursor/commands/sd-review-pr.md",
@@ -2819,6 +2857,7 @@ class InstallTests(unittest.TestCase):
         self.assertIn("mode: dry-run", result.stdout)
         self.assertFalse((root / ".agents/skills/sd-review-pr/SKILL.md").exists())
         self.assertFalse((root / ".agents/skills/sd-create-pr/SKILL.md").exists())
+        self.assertFalse((root / ".agents/skills/sd-work-backlog/SKILL.md").exists())
         self.assertFalse((root / ".agents/skills/sd-full-check/SKILL.md").exists())
         self.assertFalse((root / ".agents/skills/sd-housekeeping/SKILL.md").exists())
         self.assertFalse((root / "scripts/sd-ai-command-pack-full-check.sh").exists())
@@ -2833,6 +2872,7 @@ class InstallTests(unittest.TestCase):
         self.assertIn(".sd-ai-command-pack/installed-targets.txt", result.stdout)
         self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-create-pr.md").exists())
+        self.assertFalse((root / ".opencode/commands/sd-work-backlog.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-full-check.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-housekeeping.md").exists())
         self.assertFalse((root / ".opencode/commands/sd-update-spec.md").exists())
@@ -2892,8 +2932,10 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".trellis/config.yaml").is_file())
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-create-pr/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-work-backlog/SKILL.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-review-pr.md").is_file())
         self.assertTrue((root / ".cursor/commands/sd-create-pr.md").is_file())
+        self.assertTrue((root / ".cursor/commands/sd-work-backlog.md").is_file())
         self.assertEqual(
             trellis_log.read_text(encoding="utf-8").strip(),
             "init --yes --skip-existing --codex --cursor",
@@ -2911,11 +2953,13 @@ class InstallTests(unittest.TestCase):
             ".trellis/",
             ".agents/skills/sd-review-pr/SKILL.md",
             ".agents/skills/sd-create-pr/SKILL.md",
+            ".agents/skills/sd-work-backlog/SKILL.md",
             ".codex/config.toml",
             ".codex/hooks/",
             ".cursor/agents/trellis-*.md",
             ".cursor/commands/sd-review-pr.md",
             ".cursor/commands/sd-create-pr.md",
+            ".cursor/commands/sd-work-backlog.md",
             "scripts/sd-ai-command-pack-full-check.sh",
             ".sd-ai-command-pack/",
             ".obsidian-kb/",
@@ -3374,30 +3418,43 @@ class InstallTests(unittest.TestCase):
         expected_targets = {
             ".agent/workflows/sd-review-pr.md",
             ".agent/workflows/sd-create-pr.md",
+            ".agent/workflows/sd-work-backlog.md",
             ".agent/skills/sd-review-pr/SKILL.md",
             ".agent/skills/sd-create-pr/SKILL.md",
+            ".agent/skills/sd-work-backlog/SKILL.md",
             ".codebuddy/commands/sd/review-pr.md",
             ".codebuddy/commands/sd/create-pr.md",
+            ".codebuddy/commands/sd/work-backlog.md",
             ".codebuddy/skills/sd-review-pr/SKILL.md",
             ".codebuddy/skills/sd-create-pr/SKILL.md",
+            ".codebuddy/skills/sd-work-backlog/SKILL.md",
             ".devin/workflows/sd-review-pr.md",
             ".devin/workflows/sd-create-pr.md",
+            ".devin/workflows/sd-work-backlog.md",
             ".factory/commands/sd/review-pr.md",
             ".factory/commands/sd/create-pr.md",
+            ".factory/commands/sd/work-backlog.md",
             ".kilocode/workflows/sd-review-pr.md",
             ".kilocode/workflows/sd-create-pr.md",
+            ".kilocode/workflows/sd-work-backlog.md",
             ".kiro/skills/sd-review-pr/SKILL.md",
             ".kiro/skills/sd-create-pr/SKILL.md",
+            ".kiro/skills/sd-work-backlog/SKILL.md",
             ".pi/prompts/sd-review-pr.md",
             ".pi/prompts/sd-create-pr.md",
+            ".pi/prompts/sd-work-backlog.md",
             ".qoder/commands/sd-review-pr.md",
             ".qoder/commands/sd-create-pr.md",
+            ".qoder/commands/sd-work-backlog.md",
             ".reasonix/skills/sd-review-pr/SKILL.md",
             ".reasonix/skills/sd-create-pr/SKILL.md",
+            ".reasonix/skills/sd-work-backlog/SKILL.md",
             ".trae/commands/sd-review-pr.md",
             ".trae/commands/sd-create-pr.md",
+            ".trae/commands/sd-work-backlog.md",
             ".zcode/commands/sd/review-pr.md",
             ".zcode/commands/sd/create-pr.md",
+            ".zcode/commands/sd/work-backlog.md",
         }
         actual_targets = {file.target.as_posix() for file in files}
         self.assertTrue(expected_targets.issubset(actual_targets))
@@ -3541,6 +3598,11 @@ class InstallTests(unittest.TestCase):
                 self.assertIn("Resolve the `sd-create-pr` skill by name", content)
                 self.assertIn("sd-update-spec", content)
                 self.assertIn("sd-review-pr", content)
+            elif "work-backlog" in file.target.name:
+                self.assertIn("Resolve the `sd-work-backlog` skill by name", content)
+                self.assertIn("one task per iteration", content)
+                self.assertIn("sd-create-pr", content)
+                self.assertIn("sd-housekeeping", content)
             elif "full-check" in file.target.name:
                 self.assertIn("Resolve the `sd-full-check` skill by name", content)
                 self.assertIn("source of truth for the exact checks", content)
@@ -3607,6 +3669,19 @@ class InstallTests(unittest.TestCase):
         self.assertIn("git switch -c", create_pr)
         self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR", create_pr)
         self.assertIn("Do not run Prism, Gito", create_pr)
+
+        work_backlog = (
+            install.ROOT / "templates/.agents/skills/sd-work-backlog/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("name: sd-work-backlog", work_backlog)
+        self.assertIn("# SD Work Backlog", work_backlog)
+        self.assertIn("one implementation-ready task", work_backlog)
+        self.assertIn("Work exactly one backlog task per iteration", work_backlog)
+        self.assertIn("sd-create-pr", work_backlog)
+        self.assertIn("sd-housekeeping", work_backlog)
+        self.assertIn("Parked by sd-work-backlog", work_backlog)
+        self.assertIn("follow-ups or learnings", work_backlog)
+        self.assertIn("Do not create pull requests in the upstream `Trellis`", work_backlog)
 
         review_local = (
             install.ROOT / "templates/.agents/skills/sd-review-local/SKILL.md"
@@ -3699,6 +3774,7 @@ class InstallTests(unittest.TestCase):
             "continue",
             "finish-work",
             "create-pr",
+            "work-backlog",
             "review-pr",
             "review-local",
             "review-local-all",
@@ -3732,6 +3808,7 @@ class InstallTests(unittest.TestCase):
             "continue": "Resume the current Trellis task or workflow state.",
             "finish-work": "Wrap up the current Trellis coding session.",
             "create-pr": "Create or reuse a PR after SD spec refresh, commit, and push, then run the SD PR review loop.",
+            "work-backlog": "Work through the Trellis backlog one task at a time through SD PR review and housekeeping.",
             "review-pr": "Run the Software Delivery (SD) pull-request review loop.",
             "review-local": "Run the Software Delivery (SD) local review loop.",
             "review-local-all": "Run the Software Delivery (SD) full-codebase local review loop.",

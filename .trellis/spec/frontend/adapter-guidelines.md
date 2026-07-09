@@ -16,21 +16,27 @@ Reference files:
 - `templates/.agents/skills/sd-review-local-all/SKILL.md`
 - `templates/.agents/skills/sd-full-check/SKILL.md`
 - `templates/.agents/skills/sd-housekeeping/SKILL.md`
+- `templates/.agents/skills/sd-work-backlog/SKILL.md`
 - `templates/.agents/skills/sd-continue/SKILL.md`
 - `templates/.agents/skills/sd-finish-work/SKILL.md`
 - `templates/.agents/skills/sd-update-spec/SKILL.md`
 - `templates/scripts/sd-ai-command-pack-review-local.sh`
 - `templates/.claude/commands/sd/continue.md`
 - `templates/.claude/commands/sd/finish-work.md`
+- `templates/.claude/commands/sd/work-backlog.md`
 - `templates/.claude/commands/sd/review-pr.md`
 - `templates/.claude/commands/sd/review-local.md`
 - `templates/.claude/commands/sd/review-local-all.md`
 - `templates/.cursor/commands/sd-review-local.md`
 - `templates/.cursor/commands/sd-review-local-all.md`
+- `templates/.cursor/commands/sd-work-backlog.md`
 - `templates/.cursor/commands/sd-review-pr.md`
 - `templates/.gemini/commands/sd/review-pr.toml`
+- `templates/.gemini/commands/sd/work-backlog.toml`
 - `templates/.github/prompts/sd-review-pr.prompt.md`
+- `templates/.github/prompts/sd-work-backlog.prompt.md`
 - `templates/.opencode/commands/sd-review-pr.md`
+- `templates/.opencode/commands/sd-work-backlog.md`
 
 ## Shared Skill Pattern
 
@@ -103,6 +109,13 @@ The `sd-housekeeping` shared skill should continue to define the
 post-merge task list, the expected clean-state report, anomaly reporting, and
 safety rules that prevent deleting branches unless GitHub confirms the PR is
 merged and the local branch head matches that PR.
+
+The `sd-work-backlog` shared skill should compose existing task, PR, review,
+and housekeeping workflows instead of duplicating them. It must work exactly
+one Trellis backlog task per iteration, rank only implementation-ready tasks,
+delegate publish/review to `sd-create-pr`, delegate merge/cleanup to
+`sd-housekeeping`, and address or record follow-ups and learnings before
+selecting the next task.
 
 Codex does not read the platform command adapter directories for slash-command
 completion. It exposes enabled skills in the slash list, so this pack also
