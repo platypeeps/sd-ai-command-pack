@@ -223,9 +223,9 @@ python3 install.py /path/to/trellis/repo
 
 The installer requires `.trellis/config.yaml` in the target repo and will fail
 with the Trellis install link if that marker is missing. It always installs the
-shared `.agents` skills, full-check, housekeeping, record-session,
-review-scope, review-local command assets, review-preflight, install-audit,
-review-learnings, PR-body scope, and update-spec KB scripts,
+shared `.agents` skills, full-check, the shared shell helper, housekeeping,
+record-session, review-scope, review-local command assets, review-preflight,
+install-audit, review-learnings, PR-body scope, and update-spec KB scripts,
 Prism/Gito defaults, usage guide, and the
 generated `.sd-ai-command-pack/installed-targets.txt` snapshot used by the scope
 checks. Normal shared installs should commit that snapshot with the other
@@ -272,6 +272,7 @@ export UV_TOOL_DIR="${UV_TOOL_DIR:-$SANDBOX_TMP/sd-ai-command-pack-uv-tools}"
 export RUFF_CACHE_DIR="${RUFF_CACHE_DIR:-$SANDBOX_TMP/sd-ai-command-pack-ruff-cache}"
 python3 scripts/sd-ai-command-pack-install-audit.py
 bash -n scripts/sd-ai-command-pack-full-check.sh
+bash -n scripts/sd-ai-command-pack-shell-lib.sh
 bash -n scripts/sd-ai-command-pack-review-local.sh
 bash -n scripts/sd-ai-command-pack-review-scope.sh
 python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run
@@ -310,9 +311,9 @@ symlinks, directories, and user-owned policy files are preserved by default;
 add `--force` to delete drifted regular pack files too, and add `--backup` to
 keep `.bak` copies of deleted files.
 
-Platform filters always include the shared skills, full-check, housekeeping,
-review-scope, review-preflight, review-local command assets, install-audit,
-review-learnings, PR-body scope, and
+Platform filters always include the shared skills, full-check, the shared shell
+helper, housekeeping, review-scope, review-preflight, review-local command
+assets, install-audit, review-learnings, PR-body scope, and
 update-spec KB scripts, Prism/Gito defaults, usage guide, and installed-targets
 snapshot, because the review,
 full-check, housekeeping, and update-spec adapters delegate to those shared

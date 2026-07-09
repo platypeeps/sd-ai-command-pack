@@ -816,6 +816,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".agents/skills/sd-review-local-all/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-update-spec/SKILL.md").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
+        self.assertTrue((root / "scripts/sd-ai-command-pack-shell-lib.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-housekeeping.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-scope.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-preflight.mjs").is_file())
@@ -991,6 +992,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / ".agents/skills/sd-full-check/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-housekeeping/SKILL.md").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
+        self.assertTrue((root / "scripts/sd-ai-command-pack-shell-lib.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-housekeeping.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-scope.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-preflight.mjs").is_file())
@@ -4113,7 +4115,11 @@ class InstallTests(unittest.TestCase):
         self.assertIn('gito review --vs "$base_ref" --filter "$filters" --out "$out_dir"', script)
 
     def test_review_provider_scan_excludes_are_managed_in_scripts(self) -> None:
-        script_paths = [
+        lib_paths = [
+            install.ROOT / "scripts/sd-ai-command-pack-shell-lib.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
+        ]
+        runner_paths = [
             install.ROOT / "scripts/sd-ai-command-pack-full-check.sh",
             install.ROOT / "scripts/sd-ai-command-pack-review-local.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
@@ -4149,24 +4155,69 @@ class InstallTests(unittest.TestCase):
             "node_modules",
         )
 
-        for script_path in script_paths:
+        for script_path in lib_paths:
             content = script_path.read_text(encoding="utf-8")
             self.assertIn("# sd-ai-command-pack review-scan-excludes start", content)
             self.assertIn("# sd-ai-command-pack review-scan-excludes end", content)
-            self.assertIn("--exclude \"$excludes\"", content)
-            self.assertIn("--filter \"$filters\"", content)
             for dirname in expected_dirs:
                 self.assertIn(f'  "{dirname}"', content, script_path)
+
+        for script_path in runner_paths:
+            content = script_path.read_text(encoding="utf-8")
+            self.assertIn("source_sd_ai_command_pack_shell_lib", content)
+            self.assertIn("--exclude \"$excludes\"", content)
+            self.assertIn("--filter \"$filters\"", content)
+
+    def test_shell_scripts_source_shared_helper_library(self) -> None:
+        helper_functions = (
+            "positive_int_or_default",
+            "nonnegative_int_or_default",
+            "load_gito_pack_env",
+            "prepare_gito_uv_env",
+            "gito_output_indicates_rate_limit",
+            "run_gito_command",
+            "has_ref",
+            "default_review_base_ref",
+            "configured_review_base_ref",
+            "path_is_standard_review_scan_excluded",
+            "review_scan_exclude_globs_csv",
+            "join_by_comma",
+        )
+        lib_paths = [
+            install.ROOT / "scripts/sd-ai-command-pack-shell-lib.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
+        ]
+        runner_paths = [
+            install.ROOT / "scripts/sd-ai-command-pack-full-check.sh",
+            install.ROOT / "scripts/sd-ai-command-pack-review-local.sh",
+            install.ROOT / "scripts/sd-ai-command-pack-review-scope.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-local.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-scope.sh",
+        ]
+
+        for lib_path in lib_paths:
+            content = lib_path.read_text(encoding="utf-8")
+            for function_name in helper_functions:
+                self.assertIn(f"{function_name}()", content, lib_path)
+
+        for runner_path in runner_paths:
+            content = runner_path.read_text(encoding="utf-8")
+            self.assertIn("sd-ai-command-pack-shell-lib.sh", content, runner_path)
+            for function_name in helper_functions:
+                self.assertNotIn(f"{function_name}()", content, runner_path)
 
     def test_review_scripts_avoid_hardcoded_default_branch_and_regex_scope_paths(
         self,
     ) -> None:
         script_paths = [
             install.ROOT / "scripts/sd-ai-command-pack-full-check.sh",
+            install.ROOT / "scripts/sd-ai-command-pack-shell-lib.sh",
             install.ROOT / "scripts/sd-ai-command-pack-review-local.sh",
             install.ROOT / "scripts/sd-ai-command-pack-review-scope.sh",
             install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
             install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-review-local.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-review-scope.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
@@ -4175,6 +4226,14 @@ class InstallTests(unittest.TestCase):
         for script_path in script_paths:
             content = script_path.read_text(encoding="utf-8")
             self.assertNotIn("origin/main", content, script_path)
+
+        for script_path in (
+            install.ROOT / "scripts/sd-ai-command-pack-shell-lib.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
+            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
+        ):
+            content = script_path.read_text(encoding="utf-8")
             self.assertIn("origin/HEAD", content, script_path)
 
         scope_script = (
@@ -4621,7 +4680,6 @@ class InstallTests(unittest.TestCase):
             f"printf 'gito attempt %s %s\\n' \"$count\" \"$*\" >> {str(log_path)!r}\n"
             "if [ \"$count\" -eq 1 ]; then\n"
             "  printf 'ClientError: 429 Slow down\\n'\n"
-            "  printf 'Exception: provider summary 500\\n'\n"
             "  exit 1\n"
             "fi\n"
             "exit 0\n",
@@ -4652,6 +4710,61 @@ class InstallTests(unittest.TestCase):
         log = log_path.read_text(encoding="utf-8")
         self.assertEqual(log.count("gito attempt"), 2, log)
         self.assertIn("gito attempt 2 review --vs HEAD --filter app.txt", log)
+
+    def test_review_local_script_does_not_retry_gito_when_latest_status_is_not_429(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("before\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        (root / "app.txt").write_text("after\n", encoding="utf-8")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-review-local-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        gito = stub_bin / "gito"
+        gito.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'gito attempt %s\\n' \"$*\" >> {str(log_path)!r}\n"
+            "printf 'ClientError: 429 Slow down\\n'\n"
+            "printf 'Exception: provider summary 500\\n'\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        gito.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "gito"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF": "HEAD",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS": "2",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS": "0",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("Gito attempt 1/2", result.stdout)
+        self.assertNotIn("Gito appears rate-limited", result.stdout)
+        self.assertNotIn("Gito attempt 2/2", result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertEqual(log.count("gito attempt"), 1, log)
 
     def test_review_local_script_does_not_retry_gito_non_rate_limit_trace(
         self,
@@ -5242,6 +5355,7 @@ class InstallTests(unittest.TestCase):
         }
         expected_targets = {
             "scripts/sd-ai-command-pack-full-check.sh",
+            "scripts/sd-ai-command-pack-shell-lib.sh",
             "scripts/sd-ai-command-pack-housekeeping.sh",
             "scripts/sd-ai-command-pack-review-scope.sh",
             "scripts/sd-ai-command-pack-review-preflight.mjs",
@@ -5292,6 +5406,10 @@ class InstallTests(unittest.TestCase):
         shutil.copy2(
             install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
             scripts_dir / "sd-ai-command-pack-full-check.sh",
+        )
+        shutil.copy2(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
+            scripts_dir / "sd-ai-command-pack-shell-lib.sh",
         )
 
         command = (
@@ -5367,6 +5485,42 @@ class InstallTests(unittest.TestCase):
         self.assertIn("process.env.SCRIPT_NAME", script)
         self.assertNotIn("process.argv[1]", script)
 
+    def test_full_check_preflight_command_runs_without_login_shell(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        tool_log = root / "preflight-shell.log"
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-full-check.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PREFLIGHT_SHELL_LOG": str(tool_log),
+                "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND": (
+                    "case \"$-\" in *l*) printf 'login\\n' ;; *) printf 'non-login\\n' ;; esac > \"$PREFLIGHT_SHELL_LOG\""
+                ),
+                "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0",
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
+                "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_KB": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO": "0",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(tool_log.read_text(encoding="utf-8"), "non-login\n")
+
     def test_full_check_script_treats_prism_exit_code_4_as_optional_unless_required(
         self,
     ) -> None:
@@ -5379,6 +5533,10 @@ class InstallTests(unittest.TestCase):
         shutil.copyfile(
             install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
             script,
+        )
+        shutil.copyfile(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
+            root / "scripts/sd-ai-command-pack-shell-lib.sh",
         )
         stub_bin = root / "bin"
         stub_bin.mkdir()
@@ -5489,6 +5647,69 @@ class InstallTests(unittest.TestCase):
         log = log_path.read_text(encoding="utf-8")
         self.assertEqual(log.count("gito attempt"), 2, log)
         self.assertIn("gito attempt 2 review --vs HEAD --filter app.txt", log)
+
+    def test_full_check_script_does_not_retry_gito_when_latest_status_is_not_429(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.write_gito_pack_env(root)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("before\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        (root / "app.txt").write_text("after\n", encoding="utf-8")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-full-check-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        gito = stub_bin / "gito"
+        gito.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'gito attempt %s\\n' \"$*\" >> {str(log_path)!r}\n"
+            "printf 'ClientError: 429 Slow down\\n'\n"
+            "printf 'Exception: provider summary 500\\n'\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        gito.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-full-check.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT": "0",
+                "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0",
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
+                "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF": "HEAD",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS": "2",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_DELAY_SECONDS": "0",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("Gito attempt 1/2", result.stdout)
+        self.assertNotIn("Gito appears rate-limited", result.stdout)
+        self.assertNotIn("Gito attempt 2/2", result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertEqual(log.count("gito attempt"), 1, log)
 
     def test_full_check_script_skips_gito_cleanly_with_no_changed_files(self) -> None:
         # Prefer the system bash: on macOS that is 3.2, where an empty
@@ -5605,6 +5826,67 @@ class InstallTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("MAX_CONCURRENT_TASKS=4", log_path.read_text(encoding="utf-8"))
+
+    def test_full_check_script_sets_writable_uv_dirs_for_gito(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("before\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        (root / "app.txt").write_text("after\n", encoding="utf-8")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-full-check-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "tool.log"
+        gito = stub_bin / "gito"
+        gito.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'UV_CACHE_DIR=%s\\n' \"$UV_CACHE_DIR\" >> {str(log_path)!r}\n"
+            f"printf 'UV_TOOL_DIR=%s\\n' \"$UV_TOOL_DIR\" >> {str(log_path)!r}\n"
+            f"printf 'gito %s\\n' \"$*\" >> {str(log_path)!r}\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        gito.chmod(0o755)
+        temp_root = root / "tmp"
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-full-check.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "TMPDIR": str(temp_root),
+                "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT": "0",
+                "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0",
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
+                "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF": "HEAD",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertIn(f"UV_CACHE_DIR={temp_root}/sd-ai-command-pack-uv-cache", log)
+        self.assertIn(f"UV_TOOL_DIR={temp_root}/sd-ai-command-pack-uv-tools", log)
+        self.assertTrue((temp_root / "sd-ai-command-pack-uv-cache").is_dir())
+        self.assertTrue((temp_root / "sd-ai-command-pack-uv-tools").is_dir())
+        self.assertIn("gito review --vs HEAD --filter app.txt", log)
 
     def test_full_check_script_ignores_invalid_configured_base_ref(self) -> None:
         if self._bash_path is None:
