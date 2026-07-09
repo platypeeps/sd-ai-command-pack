@@ -66,5 +66,6 @@ Three CI gaps from the 2026-07-06 deep review:
 ## Notes
 
 - Origin: 2026-07-06 deep review (Testing findings 3/5/6; tooling
-  findings 3/4). actionlint remains explicitly deferred per
-  07-03-pack-shell-lint unless a concrete workflow defect appears.
+  findings 3/4).
+- Canonical follow-up: `07-09-actionlint-workflow-linting` tracks the
+  conditional `actionlint` work.

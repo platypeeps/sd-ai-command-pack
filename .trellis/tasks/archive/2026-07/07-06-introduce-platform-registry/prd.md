@@ -51,10 +51,7 @@ proof the tables evolve independently.
   directory exists but no Trellis marker for that platform matches,
   the installer prints a hint (e.g. "`.qoder/` present but no active
   Trellis qoder install detected; pass `--platform qoder` or update
-  Trellis") instead of skipping silently. This is the adopted scope of
-  the Trellis-coupling follow-up: a declared Trellis version-range
-  contract was considered and explicitly deferred (2026-07-06 session
-  decision) until a real version incompatibility motivates it.
+  Trellis") instead of skipping silently.
 
 ## Acceptance Criteria
 
@@ -62,8 +59,7 @@ proof the tables evolve independently.
   derived or consistency-tested against it. (PLATFORM_REGISTRY in
   install.py, one row per platform; all six tables derived, verified
   byte-identical to the pre-registry literals except the intended zcode
-  marker fix. The manifest-section variant was considered and deferred
-  to installer-module-decomposition since it is a schema change.)
+  marker fix.)
 - [x] Audit and review-scope recognize pack files on all 16 platforms
   (audit PACK_FILE_PATTERNS 12 to 31 entries, REFERENCE_SCAN_BASES all
   registry dirs, review-scope runtime paths extended; pinned by
@@ -72,10 +68,8 @@ proof the tables evolve independently.
 - [x] codex/zcode identifier quirks resolved and spec platform list
   current. (zcode markers now zcode-owned with a markers-under-own-dir
   invariant test; --platform codex prints an explanatory note;
-  directory-structure spec references the registry instead of a stale
-  id list. Marker-miss hints implemented per R5; Trellis version-range
-  contract stays deferred, upstream mindfold-ai/Trellis issue 396 still
-  unanswered at implementation time.)
+  directory-structure spec references the registry instead of a stale id list.
+  Marker-miss hints implemented per R5.)
 - [x] Full battery green: 309 tests, 100% install.py coverage (912
   stmts), full-check exit 0, shellcheck clean; template twins
   byte-identical.
@@ -89,12 +83,14 @@ proof the tables evolve independently.
   splits install.py into modules. Sequence or coordinate these: the
   registry extraction removes ~450 lines of constant tables and should
   inform the decomposition's module boundaries.
-- Upstream: an issue asking Trellis for a machine-readable
-  active-platform state is drafted in
-  `07-07-file-upstream-trellis-issues` (issue 3). If Trellis ships it,
-  the registry's marker tables become a thin consumer of that state —
-  do not block on it, but check the filed issue's status before
-  implementing the marker layer.
-- Upstream reference recorded 2026-07-09: issue 3 was filed as
+- Canonical follow-ups:
+  - `07-09-trellis-version-compatibility` tracks the conditional
+    Trellis version compatibility contract.
+  - `07-09-platform-registry-manifest-sections` tracks the
+    manifest-section schema variant.
+  - `07-09-upstream-platform-state` tracks future use of upstream
+    active-platform state.
+- Upstream reference recorded 2026-07-09: the active-platform-state request was
+  filed as
   [mindfold-ai/Trellis#396](https://github.com/mindfold-ai/Trellis/issues/396)
   and is currently open.

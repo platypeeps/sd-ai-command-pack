@@ -123,6 +123,12 @@ delegate publish/review to `sd-create-pr`, delegate merge/cleanup to
 `sd-housekeeping`, and address or record follow-ups and learnings before
 selecting the next task.
 
+When follow-ups, planning notes, or deferred work are recorded as Trellis
+tasks, make those tasks the canonical tracking surface. Use normal task slugs
+and descriptions such as `conditional task` rather than preserving a separate
+planning namespace, and update prior notes so they point at the canonical tasks
+instead of continuing to act as a parallel backlog.
+
 The `sd-work-designs` shared skill should compose existing Trellis planning
 artifacts instead of starting implementation. It must inventory existing
 Trellis tasks, rank tasks that have real PRDs but still need `design.md` or

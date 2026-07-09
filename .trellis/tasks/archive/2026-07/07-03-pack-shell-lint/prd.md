@@ -22,8 +22,8 @@ compensating control.
 
 - actionlint for workflows: zizmor already gates `.github/workflows/` for
   security, the workflow-pip checker covers the recurring mechanical
-  pattern, and adding a pinned actionlint binary is deferred until a
-  concrete workflow-syntax defect motivates it.
+  pattern, and the conditional `actionlint` work is tracked separately in
+  `07-09-actionlint-workflow-linting`.
 
 ## Acceptance Criteria
 
