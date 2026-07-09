@@ -33,4 +33,10 @@ briefly landing placeholder or wrong-hash content on main).
 - [x] Unknown hash exits 2 with a named error and writes no session.
 - [x] Suite green at 100% install.py coverage; full-check clean; twins
       in sync.
-- [ ] Fleet refreshed to 0.5.16 (post-merge step).
+- [x] Fleet refreshed to 0.5.16 (post-merge step).
+
+## Reconciliation Note - 2026-07-09
+
+Reconciled by `07-06-close-fleet-refresh-loop`: the recorder wrapper is folded
+into the current `0.7.0` payload, and all five actual consumer repositories
+audit clean at that version.

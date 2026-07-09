@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 74
+- **Total Sessions**: 75
 - **Last Active**: 2026-07-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1007 | Active |
+| `journal-2.md` | ~1041 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 75 | 2026-07-09 | Close fleet refresh loop | `050237a` | `codex/close-fleet-refresh-loop` |
 | 74 | 2026-07-09 | Add sd-work-designs command | `631f1f0` | `codex/add-sd-work-designs` |
 | 73 | 2026-07-09 | Partition pack test suite by subsystem | `64c2fbe` | `codex/partition-pack-test-suite` |
 | 72 | 2026-07-09 | Move shared command templates to neutral source | `3939202` | `codex/neutral-shared-command-templates` |
@@ -74,7 +75,7 @@
 | 33 | 2026-07-05 | Review PR 38 unsafe uninstall follow-up | `9e22a22` | `codex/installer-remove-option` |
 | 32 | 2026-07-05 | Review PR 38 installer remove follow-up | `5332841`, `629711d`, `d2b988b` | `codex/installer-remove-option` |
 | 31 | 2026-07-05 | Review PR 38 installer remove option | `df40c75`, `6667835`, `f3b0f02` | `codex/installer-remove-option` |
-| 30 | 2026-07-05 | Expand SD command pack workflows | `34ea5d8` | `codex/expand-sd-command-pack-workflows` |
+| 30 | 2026-07-05 | Duplicate entry removed | - | `codex/expand-sd-command-pack-workflows` |
 | 29 | 2026-07-05 | Expand SD command pack workflows | `34ea5d8` | `codex/expand-sd-command-pack-workflows` |
 | 28 | 2026-07-04 | Recorder git-add output surfacing (0.5.19) | `7471683` | `main` |
 | 27 | 2026-07-04 | Recorder empty-subject fix (0.5.18) | `5a63aac` | `main` |

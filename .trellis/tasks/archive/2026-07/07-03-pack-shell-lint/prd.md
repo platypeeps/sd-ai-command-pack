@@ -34,4 +34,10 @@ compensating control.
       under a no-`errexit` script) and SC2123 in
       `sd-ai-command-pack-housekeeping.sh` (annotated: emptying `PATH` is
       the hermetic self-test's purpose).
-- [ ] Fleet refreshed with the fixed templates (post-merge step).
+- [x] Fleet refreshed with the fixed templates (post-merge step).
+
+## Reconciliation Note - 2026-07-09
+
+Reconciled by `07-06-close-fleet-refresh-loop`: the shell lint fixes have
+been superseded into the current `0.7.0` payload, and all five actual consumer
+repositories audit clean at that version.

@@ -30,5 +30,12 @@ two of six repos surfaced it.
 
 - [x] Regression test green; full suite at 100% install.py coverage;
       full-check clean.
-- [ ] AMC #193 and website #85 branch worktrees pass the install audit
+- [x] AMC #193 and website #85 branch worktrees pass the install audit
       after re-running the fixed installer (pre-merge step).
+
+## Reconciliation Note - 2026-07-09
+
+Reconciled by `07-06-close-fleet-refresh-loop`: AMC #193 and rwbp-website #85
+merged on 2026-07-04, their provenance-fix review threads are resolved or
+obsolete, and current default-branch installs for both repos are on pack
+`0.7.0` with install audit exit 0.

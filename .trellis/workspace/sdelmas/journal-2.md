@@ -1003,3 +1003,41 @@ Added the sd-work-designs command and prepared the remaining backlog tasks with 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 75: Close fleet refresh loop
+
+**Date**: 2026-07-09
+**Task**: Close fleet refresh loop
+**Branch**: `codex/close-fleet-refresh-loop`
+
+### Summary
+
+Reconciled the fleet refresh task records, fixed the session-recorder retry duplicate path, and prepared the 0.8.1 patch release.
+
+### Main Changes
+
+- made the session recorder reuse a pending latest same-title journal entry after post-append staging or commit failures
+- reconciled fleet-refresh evidence, archived stale rollout acceptance criteria, and rerouted duplicate-session issue 5 away from upstream Trellis
+- deduplicated Session 30, documented the recorder retry contract, and bumped the pack to 0.8.1
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `050237a` | fix: make session recorder retry-safe |
+
+### Testing
+
+- [OK] PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest tests.test_record_session
+- [OK] PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

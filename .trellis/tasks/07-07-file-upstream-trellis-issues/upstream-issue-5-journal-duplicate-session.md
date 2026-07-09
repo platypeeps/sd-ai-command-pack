@@ -1,11 +1,15 @@
 # Duplicate journal session entries: identical session recorded twice under consecutive numbers
 
-> NOTE (pack-internal, remove before filing): do not file this upstream
-> until the root cause is confirmed to be in Trellis-owned code. The
-> repro below involves our recorder wrapper calling `add_session.py`;
-> the double-write could originate in the wrapper. The investigation is
-> tracked as R4 of the pack task `07-06-close-fleet-refresh-loop`. If
-> the wrapper is at fault, this becomes a pack bug instead.
+> RESOLUTION (2026-07-09): do not file this upstream. The root cause was
+> confirmed in the pack-owned recorder wrapper, not Trellis-owned
+> `add_session.py`. `scripts/sd-ai-command-pack-record-session.py` called
+> Trellis `add_session.py --no-commit`, then performed pack-owned staging and
+> commit work. If the Trellis append succeeded but the later `git add` or
+> `git commit` failed, rerunning the wrapper called `add_session.py` again and
+> appended a duplicate. The pack wrapper now detects a modified journal whose
+> latest session heading matches the retry title and reuses that pending entry
+> instead of appending another one. Covered by
+> `test_record_session_wrapper_reuses_uncommitted_retry_entry`.
 
 ## Summary
 
@@ -27,20 +31,17 @@ tooling assumptions.
 
 ## Repro status
 
-Not yet reproduced on demand. The duplicate was created during a
-session-recording flow that runs `add_session.py` once from a wrapper
-script; no second invocation appears in the shell history we have.
-Suspects: a retry path in the recording flow, or non-idempotent
-append behavior in `add_session.py` when the journal/index commit races
-with another write.
+Reproduced in the pack wrapper by forcing `git add` to fail after
+`add_session.py --no-commit` appended the journal entry. A retry without the
+fix appended a second same-title session. With the fix, the retry patches and
+commits the existing pending entry.
 
-## Ask
+## Upstream action
 
-- If `add_session.py` has any retry or partial-failure path that can
-  append twice, make the append idempotent (e.g. skip when the previous
-  session entry has identical title+date+commits+body).
-- A `--dry-run` or verbose mode printing the session number it is about
-  to write would make diagnosis of this class much easier.
+No upstream Trellis issue is needed for this duplicate-session incident. The
+pack may still benefit from the already-filed upstream structured-content issue
+for simpler long-term journal recording, but this specific double-write path is
+fixed locally.
 
 ## Environment
 

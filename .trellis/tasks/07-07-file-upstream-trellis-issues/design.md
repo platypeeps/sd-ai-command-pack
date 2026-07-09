@@ -61,7 +61,7 @@ The existing filed URLs are:
 - `.trellis/tasks/07-07-file-upstream-trellis-issues/upstream-issue-5-journal-duplicate-session.md`
 - `.trellis/tasks/archive/2026-07/07-06-introduce-platform-registry/prd.md`
 - `.trellis/tasks/archive/2026-07/07-06-housekeeping-recorder-robustness/prd.md`
-- `.trellis/tasks/07-06-close-fleet-refresh-loop/prd.md`
+- `.trellis/tasks/archive/2026-07/07-06-close-fleet-refresh-loop/prd.md`
 - `.trellis/tasks/archive/2026-07/07-06-archive-task-metadata-backfill/prd.md`
 
 ## Risks And Edge Cases
