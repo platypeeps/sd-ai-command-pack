@@ -9,7 +9,8 @@ the helper instead of duplicating platform-specific resolution snippets.
 
 ## Command Surface
 
-Ship `scripts/sd-ai-command-pack-toolchain.sh` with three subcommands:
+Ship a helper named `sd-ai-command-pack-toolchain.sh` under the repository's
+scripts directory with three subcommands:
 
 ```text
 sd-ai-command-pack-toolchain.sh doctor [--json]
@@ -59,8 +60,7 @@ Without the override, `doctor` reports candidates only:
 - exact Makefile targets such as `test`, `lint`, `audit`, `check`, and
   `preflight`;
 - exact package scripts with those names;
-- executable `scripts/preflight-pr.sh`, `scripts/test.sh`, or equivalent
-  conventional check scripts already present.
+- executable preflight or test helpers already present under `scripts/`.
 
 Discovery uses structured parsing where practical and never parses incidental
 README prose. Multiple candidates remain unresolved; the workflow reads repo
@@ -87,8 +87,9 @@ Trellis scripts, but the pack must not edit or fork Trellis-owned skills.
 
 ## Distribution And Ownership
 
-- Source of truth: `templates/scripts/sd-ai-command-pack-toolchain.sh`.
-- Root dogfood mirror: `scripts/sd-ai-command-pack-toolchain.sh` via installer.
+- Source of truth: `sd-ai-command-pack-toolchain.sh` under `templates/scripts/`.
+- Root dogfood mirror: the same filename under `scripts/`, synchronized by the
+  installer.
 - Add the helper to `manifest.json`, installed-target receipts, provenance,
   removal behavior, audit expectations, and docs.
 - Update only pack-owned SD skills/adapters whose execution/report contract
