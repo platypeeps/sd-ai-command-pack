@@ -626,12 +626,11 @@ class GeneratedParityTests(InstallTestCase):
         for expected in (
             "[tool.ruff]",
             'target-version = "py310"',
-            'select = ["E4", "E7", "E9", "F"]',
-            '"install.py" = ["F401", "F403", "F405", "F811"]',
-            '"installer/*.py" = ["F401", "F403", "F405", "F811"]',
+            'select = ["E4", "E7", "E9", "F", "I", "B"]',
             '".ruff_cache"',
         ):
             self.assertIn(expected, pyproject)
+        self.assertNotIn("[tool.ruff.lint.per-file-ignores]", pyproject)
         self.assertIn(".ruff_cache/", gitignore)
         for expected in (
             "python3 -m pip install -r requirements-dev.txt",
@@ -771,6 +770,19 @@ class GeneratedParityTests(InstallTestCase):
         ):
             self.assertIn(expected, installed)
         self.assertEqual(installed, template)
+
+    def test_installer_modules_use_explicit_public_import_surfaces(self) -> None:
+        installer_paths = [PACK_ROOT / "install.py", *sorted((PACK_ROOT / "installer").glob("*.py"))]
+        for path in installer_paths:
+            content = path.read_text(encoding="utf-8")
+            with self.subTest(path=path.relative_to(PACK_ROOT).as_posix()):
+                self.assertNotIn(" import *", content)
+                if path.name != "__init__.py":
+                    self.assertIn("__all__ = [", content)
+
+        self.assertIs(install.install_file, install.fileops.install_file)
+        self.assertIs(install.load_manifest, install.manifest.load_manifest)
+        self.assertIs(install.remove_installed_pack, install.removal.remove_installed_pack)
 
     def test_installed_targets_snapshot_lists_scope_scripts_and_guide(self) -> None:
         root = self.make_repo(".github")

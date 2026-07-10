@@ -24,7 +24,6 @@ import sys
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-
 KB_DIR = Path(".obsidian-kb")
 LEGACY_KB_DASHBOARD = Path("Dashboard.md")
 LEGACY_KB_OVERVIEW = Path("LLM-KB.md")

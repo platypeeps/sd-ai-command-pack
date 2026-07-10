@@ -2,24 +2,44 @@
 
 from __future__ import annotations
 
-import argparse
-import hashlib
-import json
-import os
-import shutil
-import subprocess
-import sys
-import tempfile
-from collections.abc import Iterable
-from dataclasses import dataclass
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
-from installer.registry import *  # noqa: F401,F403
-from installer.manifest import *  # noqa: F401,F403
-from installer.fileops import *  # noqa: F401,F403
-from installer.provenance import *  # noqa: F401,F403
-from installer.localonly import *  # noqa: F401,F403
-
+from installer.fileops import (
+    RemoveResult,
+    backup_existing_file,
+    display_path,
+    path_is_occupied,
+    prune_empty_parent_dirs,
+    read_bytes_for_remove,
+    remove_text_block_file,
+    run_diff_check,
+    selected_files,
+    sha256_file,
+    unlink_target_file,
+)
+from installer.localonly import remove_local_only_exclude
+from installer.manifest import (
+    PackFile,
+    removal_target_destination,
+    require_target_directory,
+    system_exit_detail,
+)
+from installer.provenance import (
+    read_existing_installed_targets_for_remove,
+    read_existing_provenance_files_for_remove,
+)
+from installer.registry import (
+    COPILOT_GUIDANCE_END,
+    COPILOT_GUIDANCE_START,
+    COPILOT_INSTRUCTIONS_TARGET,
+    INSTALLED_TARGETS_FILE,
+    LOCAL_ONLY_MARKER_FILE,
+    PACK_MANIFEST_FILE,
+    PROVENANCE_FILE,
+    TRELLIS_GITIGNORE_END,
+    TRELLIS_GITIGNORE_START,
+    TRELLIS_GITIGNORE_TARGET,
+)
 
 GENERATED_REMOVAL_TARGETS = frozenset(
     {
@@ -283,3 +303,17 @@ def remove_installed_pack(
         if diff_status != 0:
             return diff_status
     return 0
+
+
+__all__ = [
+    "GENERATED_REMOVAL_TARGETS",
+    "MANAGED_BLOCK_REMOVAL_TARGETS",
+    "installed_target_candidates",
+    "is_git_internal_candidate",
+    "may_remove_pack_file",
+    "normalize_removal_candidate",
+    "recognized_removal_targets",
+    "removal_candidate_rejection",
+    "remove_installed_pack",
+    "remove_pack_file",
+]

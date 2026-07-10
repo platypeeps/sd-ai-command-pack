@@ -2,17 +2,8 @@
 
 from __future__ import annotations
 
-import argparse
-import hashlib
-import json
-import os
-import shutil
-import subprocess
-import sys
-import tempfile
-from collections.abc import Iterable
 from dataclasses import dataclass
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 # The package lives one level below the pack root that hosts install.py,
 # manifest.json, and templates/.
@@ -565,3 +556,38 @@ MANAGED_BLOCK_KIND = "managed-block"
 COPILOT_INSTRUCTIONS_TARGET = Path(".github/copilot-instructions.md")
 COPILOT_GUIDANCE_START = "<!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START -->"
 COPILOT_GUIDANCE_END = "<!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:END -->"
+
+__all__ = [
+    "ACTIVE_TRELLIS_PLATFORM_MARKERS",
+    "ALWAYS_INSTALL",
+    "COPILOT_GUIDANCE_END",
+    "COPILOT_GUIDANCE_START",
+    "COPILOT_INSTRUCTIONS_TARGET",
+    "FORCE_PRESERVED_TARGETS",
+    "IF_NOT_EXISTS",
+    "INSTALLED_TARGETS_FILE",
+    "LOCAL_ENV_GITIGNORE_PATTERNS",
+    "LOCAL_ONLY_EXCLUDE_END",
+    "LOCAL_ONLY_EXCLUDE_START",
+    "LOCAL_ONLY_MARKER_FILE",
+    "LOCAL_ONLY_TRACKED_CHECK_PATHS",
+    "LOCAL_ONLY_TRELLIS_EXCLUDES",
+    "MANAGED_BLOCK_KIND",
+    "NEUTRAL_COMMAND_SOURCE_PLATFORMS",
+    "PACK_LOCAL_GITIGNORE_GROUP",
+    "PACK_MANIFEST_FILE",
+    "PLATFORM_LOCAL_GITIGNORE_PATTERNS",
+    "PLATFORM_REGISTRY",
+    "PLATFORMS",
+    "PROVENANCE_FILE",
+    "PlatformInfo",
+    "REVIEW_ARTIFACT_GITIGNORE_PATTERNS",
+    "ROOT",
+    "TRELLIS_BLANKET_GITIGNORE_ENTRIES",
+    "TRELLIS_GITIGNORE_END",
+    "TRELLIS_GITIGNORE_PATTERNS",
+    "TRELLIS_GITIGNORE_START",
+    "TRELLIS_GITIGNORE_TARGET",
+    "TRELLIS_INIT_PLATFORM_FLAGS",
+    "TRELLIS_INSTALL_DOCS_URL",
+]

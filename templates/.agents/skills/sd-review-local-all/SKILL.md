@@ -113,7 +113,10 @@ Default provider behavior:
   Override the batch size with
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE`, or set
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK=0` to disable the
-  fallback.
+  fallback. Repeated failed single-path responses stop at
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_MAX_EMPTY_CHUNK_FAILURES`
+  (default `3`). Each Prism command is bounded by
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_TIMEOUT_SECONDS` (default `300`).
 - Gito runs `gito review --all --path <repo-root>` with an include filter after
   replacing `<repo-root>` with the absolute repository root. In Gito's command,
   `--all` means full-codebase scope, not "all tools". The tool set is
@@ -129,7 +132,9 @@ Default provider behavior:
   bounded exponential backoff. Tune that with
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`,
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, and
-  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`.
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`. Each attempt
+  is bounded by `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS`
+  (default `600`). Set either provider timeout to `0` to disable it.
 
 Custom tool commands are executed as configured and do not automatically receive
 the built-in Prism/Gito exclusion flags. Add the relevant exclude arguments to

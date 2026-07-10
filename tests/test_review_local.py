@@ -32,6 +32,24 @@ InstallTestCase = _support.InstallTestCase
 class ReviewLocalTests(InstallTestCase):
     """Tests for local Prism/Gito review command behavior."""
 
+    def _make_committed_review_repo(self) -> Path:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "app.txt").write_text("codebase\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        return root
+
+    def _make_review_stub_bin(self) -> tuple[Path, Path]:
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-review-local-tools-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        return stub_bin, Path(tools_tempdir.name) / "tool.log"
+
     def test_review_local_script_runs_gito_after_prism_findings(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
@@ -726,6 +744,145 @@ class ReviewLocalTests(InstallTestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("empty chunk response after fallback splitting", result.stdout)
         self.assertNotIn("authentication or configuration", result.stdout)
+
+    def test_review_local_script_prism_api_error_does_not_trigger_empty_chunk_fallback(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self._make_committed_review_repo()
+        stub_bin, log_path = self._make_review_stub_bin()
+        prism = stub_bin / "prism"
+        prism.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'prism %s\\n' \"$*\" >> {str(log_path)!r}\n"
+            "printf 'Error: chunked review: chunk 0: API error (status 400): billing unavailable\\n'\n"
+            "exit 4\n",
+            encoding="utf-8",
+        )
+        prism.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "--all", "prism"],
+            cwd=root,
+            env={**os.environ, "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertNotIn("retrying in tracked-file batches", result.stdout)
+        self.assertEqual(log_path.read_text(encoding="utf-8").count("prism "), 1)
+
+    def test_review_local_script_labels_diff_empty_response_without_auth_claim(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self._make_committed_review_repo()
+        (root / "app.txt").write_text("changed\n", encoding="utf-8")
+        stub_bin, _ = self._make_review_stub_bin()
+        prism = stub_bin / "prism"
+        prism.write_text(
+            "#!/usr/bin/env bash\n"
+            "printf 'Error: provider review: no content in response\\n'\n"
+            "exit 4\n",
+            encoding="utf-8",
+        )
+        prism.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "prism"],
+            cwd=root,
+            env={**os.environ, "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("empty or malformed provider response", result.stdout)
+        self.assertNotIn("authentication or configuration", result.stdout)
+
+    def test_review_local_script_caps_prism_empty_chunk_leaf_failures(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self._make_committed_review_repo()
+        stub_bin, log_path = self._make_review_stub_bin()
+        prism = stub_bin / "prism"
+        prism.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'prism %s\\n' \"$*\" >> {str(log_path)!r}\n"
+            "printf 'Error: chunked review: chunk 0: no content in response\\n'\n"
+            "exit 4\n",
+            encoding="utf-8",
+        )
+        prism.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "--all", "prism"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE": "1",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_MAX_EMPTY_CHUNK_FAILURES": "2",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("reached 2 empty-response failures", result.stdout)
+        self.assertEqual(log_path.read_text(encoding="utf-8").count("prism "), 3)
+
+    def test_review_local_script_times_out_prism_and_gito_process_groups(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self._make_committed_review_repo()
+        stub_bin, log_path = self._make_review_stub_bin()
+        for name in ("prism", "gito"):
+            tool = stub_bin / name
+            tool.write_text(
+                "#!/usr/bin/env bash\n"
+                f"printf '{name} started\\n' >> {str(log_path)!r}\n"
+                "sleep 10\n",
+                encoding="utf-8",
+            )
+            tool.chmod(0o755)
+
+        result = subprocess.run(
+            [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "--all"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_TIMEOUT_SECONDS": "1",
+                "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS": "1",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=8,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(result.stdout.count("command timed out after 1s"), 2)
+        self.assertIn("Prism review: full codebase exited with status 124", result.stdout)
+        self.assertIn("Gito review: full codebase timed out after 1s", result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertIn("prism started", log)
+        self.assertIn("gito started", log)
+        self.assertEqual(log.count("gito started"), 1)
+        self.assertNotIn("Gito appears rate-limited", result.stdout)
 
     def test_review_local_script_sets_writable_uv_dirs_for_gito(self) -> None:
         if self._bash_path is None:

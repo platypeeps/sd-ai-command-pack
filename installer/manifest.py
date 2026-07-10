@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-import argparse
-import hashlib
 import json
-import os
-import shutil
-import subprocess
-import sys
-import tempfile
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
-from installer.registry import *  # noqa: F401,F403
+from installer.registry import (
+    MANAGED_BLOCK_KIND,
+    PLATFORMS,
+    ROOT,
+    TRELLIS_INSTALL_DOCS_URL,
+)
 
 MANIFEST_PATH = ROOT / "manifest.json"
 
@@ -239,3 +236,24 @@ def require_trellis_repo(target: Path) -> None:
             "(.trellis/config.yaml not found). Install Trellis and run "
             f"`trellis init` first: {TRELLIS_INSTALL_DOCS_URL}"
         )
+
+
+__all__ = [
+    "KNOWN_MANIFEST_KINDS",
+    "MANIFEST_PATH",
+    "PackFile",
+    "SUPPORTED_MANIFEST_SCHEMA_VERSION",
+    "load_manifest",
+    "manifest_cli_identity",
+    "read_text_if_exists",
+    "read_text_strict",
+    "removal_target_destination",
+    "require_target_directory",
+    "require_trellis_repo",
+    "system_exit_detail",
+    "target_destination",
+    "validate_manifest",
+    "validate_pack_source",
+    "validate_relative_manifest_path",
+    "validate_resolved_target_path",
+]

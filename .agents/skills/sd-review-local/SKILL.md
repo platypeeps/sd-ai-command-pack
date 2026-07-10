@@ -119,6 +119,10 @@ backoff. Tune that with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`,
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, and
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`.
+Prism and Gito attempts also have bounded runtimes. Tune them with
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_TIMEOUT_SECONDS` and
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS`; `0` disables the
+corresponding timeout.
 
 If `scripts/sd-ai-command-pack-review-local.sh` is missing, stop and report
 that the pack install is incomplete. Do not substitute `sd-full-check`; this

@@ -4,20 +4,12 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import os
 import shutil
-import subprocess
 import sys
-import tempfile
-from collections.abc import Iterable
-from dataclasses import dataclass
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
-
-
-from installer import (  # noqa: F401
+from installer import (
     fileops,
     localonly,
     manifest,
@@ -25,18 +17,274 @@ from installer import (  # noqa: F401
     registry,
     removal,
 )
-from installer.registry import *  # noqa: F401,F403
-from installer.registry import (  # noqa: F401
+from installer.fileops import (
+    InstallResult,
+    RemoveResult,
+    atomic_write_bytes,
+    atomic_write_text,
+    atomic_write_text_preserving_invalid_utf8,
+    backup_existing_file,
+    default_file_mode,
+    display_path,
+    has_active_trellis_platform,
+    install_file,
+    install_managed_block,
+    install_trellis_gitignore,
+    marker_pair_indexes,
+    merge_managed_block,
+    merge_trellis_gitignore_block,
+    next_backup_path,
+    normalize_managed_block_template,
+    path_is_occupied,
+    prune_empty_parent_dirs,
+    read_bytes_for_remove,
+    remove_marked_block,
+    remove_text_block_file,
+    remove_unmanaged_trellis_blanket_entries,
+    run_diff_check,
+    selected_files,
+    sha256_file,
+    source_is_executable,
+    trellis_gitignore_block,
+    unlink_target_file,
+)
+from installer.localonly import (
+    LocalOnlyResult,
+    ensure_local_only_exclude,
+    ensure_trellis_for_local_only,
+    git_info_exclude_path,
+    git_output,
+    local_only_exclude_block,
+    local_only_exclude_patterns,
+    local_only_pack_excludes,
+    local_only_tracked_check_specs,
+    merge_local_only_exclude_block,
+    optional_git_info_exclude_path,
+    reject_tracked_local_only_paths,
+    remove_local_only_exclude,
+    require_git_repo_for_local_only,
+    tracked_paths,
+    trellis_init_command,
+    trellis_init_platforms,
+    write_local_only_marker,
+)
+from installer.manifest import (
+    KNOWN_MANIFEST_KINDS,
+    MANIFEST_PATH,
+    SUPPORTED_MANIFEST_SCHEMA_VERSION,
+    PackFile,
+    load_manifest,
+    manifest_cli_identity,
+    read_text_if_exists,
+    read_text_strict,
+    removal_target_destination,
+    require_target_directory,
+    require_trellis_repo,
+    system_exit_detail,
+    target_destination,
+    validate_manifest,
+    validate_pack_source,
+    validate_relative_manifest_path,
+    validate_resolved_target_path,
+)
+from installer.provenance import (
+    PROVENANCE_EXCLUDED_KINDS,
+    install_installed_targets_file,
+    install_pack_manifest_file,
+    install_provenance_file,
+    installed_pack_manifest_content,
+    installed_targets_content,
+    is_gitignored_path,
+    never_vouched_targets,
+    preserved_receipt_targets,
+    provenance_content,
+    read_existing_installed_targets,
+    read_existing_installed_targets_for_remove,
+    read_existing_provenance_files,
+    read_existing_provenance_files_for_remove,
+)
+from installer.registry import (
     _LOCAL_GITIGNORE_GROUP_ORDER,
     _LOCAL_ONLY_GROUP_ORDER,
+    ACTIVE_TRELLIS_PLATFORM_MARKERS,
+    ALWAYS_INSTALL,
+    COPILOT_GUIDANCE_END,
+    COPILOT_GUIDANCE_START,
+    COPILOT_INSTRUCTIONS_TARGET,
+    FORCE_PRESERVED_TARGETS,
+    IF_NOT_EXISTS,
+    INSTALLED_TARGETS_FILE,
+    LOCAL_ENV_GITIGNORE_PATTERNS,
+    LOCAL_ONLY_EXCLUDE_END,
+    LOCAL_ONLY_EXCLUDE_START,
+    LOCAL_ONLY_MARKER_FILE,
+    LOCAL_ONLY_TRACKED_CHECK_PATHS,
+    LOCAL_ONLY_TRELLIS_EXCLUDES,
+    MANAGED_BLOCK_KIND,
+    NEUTRAL_COMMAND_SOURCE_PLATFORMS,
+    PACK_LOCAL_GITIGNORE_GROUP,
+    PACK_MANIFEST_FILE,
+    PLATFORM_LOCAL_GITIGNORE_PATTERNS,
+    PLATFORM_REGISTRY,
+    PLATFORMS,
+    PROVENANCE_FILE,
+    REVIEW_ARTIFACT_GITIGNORE_PATTERNS,
+    ROOT,
+    TRELLIS_BLANKET_GITIGNORE_ENTRIES,
+    TRELLIS_GITIGNORE_END,
+    TRELLIS_GITIGNORE_PATTERNS,
+    TRELLIS_GITIGNORE_START,
+    TRELLIS_GITIGNORE_TARGET,
+    TRELLIS_INIT_PLATFORM_FLAGS,
+    TRELLIS_INSTALL_DOCS_URL,
 )
-from installer.manifest import *  # noqa: F401,F403
-from installer.fileops import *  # noqa: F401,F403
-from installer.provenance import *  # noqa: F401,F403
-from installer.localonly import *  # noqa: F401,F403
-from installer.removal import *  # noqa: F401,F403
+from installer.removal import (
+    GENERATED_REMOVAL_TARGETS,
+    MANAGED_BLOCK_REMOVAL_TARGETS,
+    installed_target_candidates,
+    is_git_internal_candidate,
+    may_remove_pack_file,
+    normalize_removal_candidate,
+    recognized_removal_targets,
+    removal_candidate_rejection,
+    remove_installed_pack,
+    remove_pack_file,
+)
 
-
+__all__ = [
+    "ACTIVE_TRELLIS_PLATFORM_MARKERS",
+    "ALWAYS_INSTALL",
+    "COPILOT_GUIDANCE_END",
+    "COPILOT_GUIDANCE_START",
+    "COPILOT_INSTRUCTIONS_TARGET",
+    "FORCE_PRESERVED_TARGETS",
+    "GENERATED_REMOVAL_TARGETS",
+    "IF_NOT_EXISTS",
+    "INSTALLED_TARGETS_FILE",
+    "InstallResult",
+    "KNOWN_MANIFEST_KINDS",
+    "LOCAL_ENV_GITIGNORE_PATTERNS",
+    "LOCAL_ONLY_EXCLUDE_END",
+    "LOCAL_ONLY_EXCLUDE_START",
+    "LOCAL_ONLY_MARKER_FILE",
+    "LOCAL_ONLY_TRACKED_CHECK_PATHS",
+    "LOCAL_ONLY_TRELLIS_EXCLUDES",
+    "LocalOnlyResult",
+    "MANAGED_BLOCK_KIND",
+    "MANAGED_BLOCK_REMOVAL_TARGETS",
+    "MANIFEST_PATH",
+    "ManifestVersionAction",
+    "NEUTRAL_COMMAND_SOURCE_PLATFORMS",
+    "PACK_LOCAL_GITIGNORE_GROUP",
+    "PACK_MANIFEST_FILE",
+    "PLATFORM_LOCAL_GITIGNORE_PATTERNS",
+    "PLATFORM_REGISTRY",
+    "PLATFORMS",
+    "PROVENANCE_EXCLUDED_KINDS",
+    "PROVENANCE_FILE",
+    "PackFile",
+    "REVIEW_ARTIFACT_GITIGNORE_PATTERNS",
+    "ROOT",
+    "RemoveResult",
+    "SUPPORTED_MANIFEST_SCHEMA_VERSION",
+    "TRELLIS_BLANKET_GITIGNORE_ENTRIES",
+    "TRELLIS_GITIGNORE_END",
+    "TRELLIS_GITIGNORE_PATTERNS",
+    "TRELLIS_GITIGNORE_START",
+    "TRELLIS_GITIGNORE_TARGET",
+    "TRELLIS_INIT_PLATFORM_FLAGS",
+    "TRELLIS_INSTALL_DOCS_URL",
+    "_LOCAL_GITIGNORE_GROUP_ORDER",
+    "_LOCAL_ONLY_GROUP_ORDER",
+    "atomic_write_bytes",
+    "atomic_write_text",
+    "atomic_write_text_preserving_invalid_utf8",
+    "backup_existing_file",
+    "default_file_mode",
+    "display_path",
+    "ensure_local_only_exclude",
+    "ensure_trellis_for_local_only",
+    "fileops",
+    "git_info_exclude_path",
+    "git_output",
+    "has_active_trellis_platform",
+    "install_file",
+    "install_installed_targets_file",
+    "install_managed_block",
+    "install_pack_manifest_file",
+    "install_provenance_file",
+    "install_trellis_gitignore",
+    "installed_pack_manifest_content",
+    "installed_target_candidates",
+    "installed_targets_content",
+    "is_git_internal_candidate",
+    "is_gitignored_path",
+    "load_manifest",
+    "local_only_exclude_block",
+    "local_only_exclude_patterns",
+    "local_only_pack_excludes",
+    "local_only_tracked_check_specs",
+    "localonly",
+    "main",
+    "manifest",
+    "manifest_cli_identity",
+    "marker_pair_indexes",
+    "may_remove_pack_file",
+    "merge_local_only_exclude_block",
+    "merge_managed_block",
+    "merge_trellis_gitignore_block",
+    "never_vouched_targets",
+    "next_backup_path",
+    "normalize_managed_block_template",
+    "normalize_removal_candidate",
+    "optional_git_info_exclude_path",
+    "os",
+    "parse_args",
+    "path_is_occupied",
+    "preserved_receipt_targets",
+    "provenance",
+    "provenance_content",
+    "prune_empty_parent_dirs",
+    "read_bytes_for_remove",
+    "read_existing_installed_targets",
+    "read_existing_installed_targets_for_remove",
+    "read_existing_provenance_files",
+    "read_existing_provenance_files_for_remove",
+    "read_text_if_exists",
+    "read_text_strict",
+    "recognized_removal_targets",
+    "registry",
+    "reject_tracked_local_only_paths",
+    "removal",
+    "removal_candidate_rejection",
+    "removal_target_destination",
+    "remove_installed_pack",
+    "remove_local_only_exclude",
+    "remove_marked_block",
+    "remove_pack_file",
+    "remove_text_block_file",
+    "remove_unmanaged_trellis_blanket_entries",
+    "require_git_repo_for_local_only",
+    "require_target_directory",
+    "require_trellis_repo",
+    "run_diff_check",
+    "selected_files",
+    "sha256_file",
+    "shutil",
+    "source_is_executable",
+    "system_exit_detail",
+    "target_destination",
+    "tracked_paths",
+    "trellis_gitignore_block",
+    "trellis_init_command",
+    "trellis_init_platforms",
+    "unlink_target_file",
+    "validate_manifest",
+    "validate_pack_source",
+    "validate_relative_manifest_path",
+    "validate_resolved_target_path",
+    "write_local_only_marker",
+]
 
 class ManifestVersionAction(argparse.Action):
     def __init__(self, option_strings, dest, **kwargs):
@@ -146,12 +394,12 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("error: --skip-trellis-init requires --local-only")
 
     target = Path(args.target).resolve()
-    manifest, files = load_manifest()
+    manifest_data, files = load_manifest()
 
     validate_manifest(files)
     if args.remove:
         return remove_installed_pack(
-            manifest,
+            manifest_data,
             files,
             target,
             platforms=args.platform,
@@ -177,7 +425,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
     else:
-        if manifest.get("requiresTrellis", True):
+        if manifest_data.get("requiresTrellis", True):
             require_trellis_repo(target)
         selected, skipped = selected_files(files, target, args.platform, args.all)
     if args.local_only:
@@ -189,7 +437,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
 
-    print(f"{manifest['name']} {manifest['version']}")
+    print(f"{manifest_data['name']} {manifest_data['version']}")
     print(f"target: {target}")
     if args.dry_run:
         print("mode: dry-run")
@@ -230,7 +478,7 @@ def main(argv: list[str] | None = None) -> int:
 
     results.append(
         install_pack_manifest_file(
-            manifest,
+            manifest_data,
             target,
             dry_run=args.dry_run,
         )
@@ -252,7 +500,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     results.append(
         install_provenance_file(
-            manifest,
+            manifest_data,
             results,
             target,
             receipt_targets=receipt_target_set,

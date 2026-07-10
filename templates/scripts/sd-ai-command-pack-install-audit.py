@@ -14,7 +14,6 @@ import subprocess
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
 PROVENANCE_FILE = Path(".sd-ai-command-pack/provenance.json")
 PACK_MANIFEST_FILE = Path(".sd-ai-command-pack/manifest.json")

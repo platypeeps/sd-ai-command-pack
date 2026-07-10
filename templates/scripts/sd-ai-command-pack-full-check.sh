@@ -78,6 +78,10 @@ gito_max_retry_delay() {
   nonnegative_int_or_default "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_MAX_DELAY_SECONDS:-${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS:-120}}" 120
 }
 
+gito_command_timeout_seconds() {
+  nonnegative_int_or_default "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_TIMEOUT_SECONDS:-${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS:-600}}" 600
+}
+
 package_has_script() {
   local script_name="$1"
   have node || return 1

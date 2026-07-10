@@ -34,25 +34,32 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
         status=1
         continue
     fi
-    if ! changed=$(git diff --name-only "$remote_sha" "$local_sha" --); then
+    changed_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-pre-push.XXXXXX")"
+    if [ -z "$changed_file" ]; then
+        echo "pre-push: could not create path-list temp file; failing closed" >&2
+        status=1
+        continue
+    fi
+    if ! git diff --no-renames --name-only -z "$remote_sha" "$local_sha" -- >"$changed_file"; then
+        rm -f "$changed_file"
         # Fail closed rather than masking a diff error as "no offenders".
         echo "pre-push: could not diff $remote_sha..$local_sha; failing closed" >&2
         status=1
         continue
     fi
-    [ -n "$changed" ] || continue
-    offenders=$(printf '%s\n' "$changed" | grep -Ev '^\.trellis/(tasks|workspace)/')
-    grep_rc=$?
-    if [ "$grep_rc" -ge 2 ]; then
-        echo "pre-push: chore-scope filter failed (grep exit $grep_rc); failing closed" >&2
-        status=1
-        continue
-    fi
-    if [ -n "$offenders" ]; then
+    offenders=()
+    while IFS= read -r -d '' changed_path; do
+        case "$changed_path" in
+            .trellis/tasks/*|.trellis/workspace/*) ;;
+            *) offenders+=("$changed_path") ;;
+        esac
+    done <"$changed_file"
+    rm -f "$changed_file"
+    if [ "${#offenders[@]}" -gt 0 ]; then
         {
             echo "pre-push: direct pushes to main are Trellis chore-scope only"
             echo "pre-push: (.trellis/tasks/**, .trellis/workspace/**). Blocked paths:"
-            echo "$offenders" | head -10 | sed 's/^/  - /'
+            printf '  - %q\n' "${offenders[@]:0:10}"
             echo "pre-push: open a pull request instead, or bypass once with"
             echo "pre-push:   SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS=1 git push ..."
         } >&2

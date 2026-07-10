@@ -20,7 +20,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 DEFAULT_TARGET = Path("docs/review-learnings.md")
 MANAGED_START = "<!-- sd-review-learnings:start -->"
 MANAGED_END = "<!-- sd-review-learnings:end -->"
