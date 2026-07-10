@@ -1,4 +1,4 @@
-# Roll Out sd-ai-command-pack 0.8.5 To The Fleet Design
+# Roll Out sd-ai-command-pack 0.8.6 To The Fleet Design
 
 Use the pack's checked-in fleet manifest and preflight helper as the rollout
 ledger source. The operator loop remains PR-based in each consumer repo; this

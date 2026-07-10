@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.6 - 2026-07-09
+
+- Fixed rollout CI blockers by classifying the installed pack manifest as
+  generated SD command-pack state in review preflight and scope checks.
+- Reworded shipped Copilot guidance and remove-mode docs to avoid optional
+  directory/glob examples tripping consumer narrow-glob preflight checks.
+
 ## 0.8.5 - 2026-07-09
 
 - Added a generated installed manifest snapshot and manifest-backed audit

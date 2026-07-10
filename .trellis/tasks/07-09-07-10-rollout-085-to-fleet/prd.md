@@ -1,8 +1,8 @@
-# Roll out sd-ai-command-pack 0.8.5 to the fleet
+# Roll out sd-ai-command-pack 0.8.6 to the fleet
 
 ## Goal
 
-Use docs/fleet/consumers.json and scripts/sd-ai-command-pack-fleet-preflight.py to refresh all six consumers to 0.8.5 via PRs, verify post-install audit completeness with explicit expected platforms, confirm hoa-manager and rwbp-coordinator regain .claude/commands/sd/work-backlog.md, and add a superseding/correction note to the archived 07-06 close-fleet-refresh-loop PRD for hoa-manager.
+Use docs/fleet/consumers.json and scripts/sd-ai-command-pack-fleet-preflight.py to refresh all six consumers to 0.8.6 via PRs, verify post-install audit completeness with explicit expected platforms, confirm hoa-manager and rwbp-coordinator regain .claude/commands/sd/work-backlog.md, and add a superseding/correction note to the archived 07-06 close-fleet-refresh-loop PRD for hoa-manager.
 
 ## Requirements
 
@@ -15,7 +15,7 @@ Use docs/fleet/consumers.json and scripts/sd-ai-command-pack-fleet-preflight.py 
   `--expected-platform` from the fleet manifest.
 - R3: Do not open duplicate or empty refresh PRs for repos already at target.
   If a repo is reported `at-target`, record the evidence and skip it.
-- R4: Confirm all six consumers end on provenance version 0.8.5 and their
+- R4: Confirm all six consumers end on provenance version 0.8.6 and their
   install audits pass after merge:
   anomaly-metric-creator, hoa-manager, loadsmith, rwbp-coordinator,
   rwbp-website, and answerbook/mezmo_benchmark.
@@ -33,7 +33,7 @@ Use docs/fleet/consumers.json and scripts/sd-ai-command-pack-fleet-preflight.py 
       at-target work.
 - [ ] Six consumer PRs are created or skipped with evidence; every opened PR is
       merged green.
-- [ ] Post-merge provenance in all six consumers reads `0.8.5`.
+- [ ] Post-merge provenance in all six consumers reads `0.8.6`.
 - [ ] Post-merge audit passes in all six consumers with explicit
       `--expected-platform` arguments from `docs/fleet/consumers.json`.
 - [ ] hoa-manager and rwbp-coordinator contain the Claude work-backlog command
@@ -48,3 +48,6 @@ Use docs/fleet/consumers.json and scripts/sd-ai-command-pack-fleet-preflight.py 
 - Follow-up from archived task `07-09-fleet-refresh-081-completeness`: PR #88
   completed the pack-side manifest/preflight/audit tooling, but the actual
   fleet rollout acceptance criteria remain open here.
+- The initial rollout target was 0.8.5. Consumer CI exposed two pack-owned
+  blockers, so this task now rolls forward to 0.8.6 instead of merging the
+  flawed 0.8.5 consumer payload.

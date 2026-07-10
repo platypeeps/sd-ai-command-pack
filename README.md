@@ -324,7 +324,7 @@ symlinks, directories, and user-owned policy files are preserved by default;
 add `--force` to delete drifted regular pack files too, and add `--backup` to
 keep `.bak` copies of deleted files.
 Removal only deletes manifest-recognized pack artifacts and generated pack
-state; corrupted receipt or provenance entries for `.git/*` or arbitrary repo
+state; corrupted receipt or provenance entries under `.git/` or arbitrary repo
 files are reported as `ignored`, even with `--force`.
 
 Platform filters always include the shared skills, full-check, the shared shell
