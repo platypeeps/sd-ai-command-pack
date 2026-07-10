@@ -65,7 +65,9 @@ The `sd-review-pr` shared skill should continue to define:
   as the default reviewer
 - polling behavior that avoids fetching full comment bodies on every interval
 - thread-aware review inspection through GraphQL when using `gh`
-- CI check inspection and failed-log routing
+- CI check inspection through the stable `gh pr checks` fields `name`,
+  `workflow`, `state`, `bucket`, `link`, and `completedAt`, plus failed-log
+  routing; do not request unsupported `status` or `conclusion` fields
 - standing permission to reply to review comments and resolve addressed review
   threads without asking for separate approval
 - reply, resolve, fix, commit, and push behavior

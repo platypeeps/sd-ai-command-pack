@@ -355,7 +355,7 @@ gh api "repos/$OWNER/$REPO/issues/$PR_NUMBER/comments" --paginate
 Also check CI:
 
 ```bash
-gh pr checks "$PR_NUMBER" --json name,workflow,status,conclusion,bucket,link,completedAt
+gh pr checks "$PR_NUMBER" --json name,workflow,state,bucket,link,completedAt
 ```
 
 If checks fail, inspect failed logs with `gh run view --log-failed` or the
