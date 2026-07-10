@@ -1,4 +1,4 @@
-# Roll Out sd-ai-command-pack 0.8.5 To The Fleet Implementation Plan
+# Roll Out sd-ai-command-pack 0.8.6 To The Fleet Implementation Plan
 
 1. Run `python3 scripts/sd-ai-command-pack-fleet-preflight.py` on pack `main`
    and capture the output as the starting ledger.
