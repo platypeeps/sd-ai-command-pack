@@ -24,6 +24,7 @@ from installer.localonly import *  # noqa: F401,F403
 GENERATED_REMOVAL_TARGETS = frozenset(
     {
         INSTALLED_TARGETS_FILE.as_posix(),
+        PACK_MANIFEST_FILE.as_posix(),
         PROVENANCE_FILE.as_posix(),
         LOCAL_ONLY_MARKER_FILE.as_posix(),
     }
@@ -150,6 +151,7 @@ def remove_pack_file(
 
     generated_state = relative_path in {
         INSTALLED_TARGETS_FILE,
+        PACK_MANIFEST_FILE,
         PROVENANCE_FILE,
         LOCAL_ONLY_MARKER_FILE,
     }

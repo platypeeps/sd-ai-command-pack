@@ -55,6 +55,7 @@ class RemoveTests(InstallTestCase):
         self.assertTrue((root / ".gito/config.toml").is_file())
         self.assertTrue((root / ".gito/sd-ai-command-pack.env").is_file())
         self.assertTrue((root / install.INSTALLED_TARGETS_FILE).is_file())
+        self.assertTrue((root / install.PACK_MANIFEST_FILE).is_file())
         self.assertTrue((root / install.PROVENANCE_FILE).is_file())
         self.assertIn(
             install.COPILOT_GUIDANCE_START,
@@ -72,6 +73,7 @@ class RemoveTests(InstallTestCase):
         self.assertFalse((root / ".gito/config.toml").exists())
         self.assertFalse((root / ".gito/sd-ai-command-pack.env").exists())
         self.assertFalse((root / install.INSTALLED_TARGETS_FILE).exists())
+        self.assertFalse((root / install.PACK_MANIFEST_FILE).exists())
         self.assertFalse((root / install.PROVENANCE_FILE).exists())
         self.assertFalse((root / ".gitignore").exists())
         copilot_text = copilot_instructions.read_text(encoding="utf-8")
@@ -92,6 +94,7 @@ class RemoveTests(InstallTestCase):
         self.assertIn("would-remove", result.stdout)
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
         self.assertTrue((root / install.INSTALLED_TARGETS_FILE).is_file())
+        self.assertTrue((root / install.PACK_MANIFEST_FILE).is_file())
         self.assertTrue((root / install.PROVENANCE_FILE).is_file())
         self.assertTrue((root / ".gitignore").is_file())
 

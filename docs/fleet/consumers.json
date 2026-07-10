@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "description": "Known sd-ai-command-pack consumer repositories for operator-triggered fleet refreshes.",
+  "consumers": [
+    {
+      "name": "anomaly-metric-creator",
+      "github": "platypeeps/anomaly-metric-creator",
+      "pathHint": "~/repos/platypeeps/anomaly-metric-creator",
+      "platforms": ["claude", "gemini", "github", "opencode"]
+    },
+    {
+      "name": "hoa-manager",
+      "github": "platypeeps/hoa-manager",
+      "pathHint": "~/repos/platypeeps/hoa-manager",
+      "platforms": ["claude", "gemini", "github", "opencode"]
+    },
+    {
+      "name": "loadsmith",
+      "github": "platypeeps/loadsmith",
+      "pathHint": "~/repos/platypeeps/loadsmith",
+      "platforms": ["claude", "gemini", "github", "opencode"]
+    },
+    {
+      "name": "mezmo_benchmark",
+      "github": "answerbook/mezmo_benchmark",
+      "pathHint": "~/repos/mezmo/mezmo_benchmark",
+      "platforms": ["claude", "gemini", "github", "opencode"]
+    },
+    {
+      "name": "rwbp-coordinator",
+      "github": "platypeeps/rwbp-coordinator",
+      "pathHint": "~/repos/rwbp/rwbp-coordinator",
+      "platforms": ["claude", "cursor", "gemini", "github", "opencode"]
+    },
+    {
+      "name": "rwbp-website",
+      "github": "platypeeps/rwbp-website",
+      "pathHint": "~/repos/rwbp/rwbp-website",
+      "platforms": ["claude", "gemini", "github", "opencode"]
+    }
+  ],
+  "excludedAliases": [
+    {
+      "name": "green-button-manager",
+      "reason": "stale local clone alias for loadsmith"
+    },
+    {
+      "name": "trellis-review-pr-pack",
+      "reason": "historical predecessor; this repository is the canonical pack"
+    }
+  ]
+}

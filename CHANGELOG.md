@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.5 - 2026-07-09
+
+- Added a generated installed manifest snapshot and manifest-backed audit
+  completeness checks, including explicit `--expected-platform` support for
+  fleet refreshes.
+- Added checked-in fleet inventory and a source-owned fleet preflight helper
+  so at-target repos are skipped before opening refresh PRs.
+
 ## 0.8.4 - 2026-07-09
 
 - Single-sourced OpenCode command adapters from the neutral command templates

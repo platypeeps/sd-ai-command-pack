@@ -519,6 +519,7 @@ FORCE_PRESERVED_TARGETS = frozenset(
 )
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
 PROVENANCE_FILE = Path(".sd-ai-command-pack/provenance.json")
+PACK_MANIFEST_FILE = Path(".sd-ai-command-pack/manifest.json")
 LOCAL_ONLY_MARKER_FILE = Path(".sd-ai-command-pack/local-only.txt")
 LOCAL_ONLY_EXCLUDE_START = "# sd-ai-command-pack local-only start"
 LOCAL_ONLY_EXCLUDE_END = "# sd-ai-command-pack local-only end"

@@ -80,6 +80,7 @@ Quick links:
 - [Install](#install)
 - [Verify](#verify)
 - [Releasing](#releasing)
+- [Fleet Rollout](#fleet-rollout)
 - [Direct-to-main Chore Commits](#direct-to-main-chore-commits)
 - [Supported Adapters](#supported-adapters)
 - [License](#license)
@@ -279,6 +280,10 @@ export UV_CACHE_DIR="${UV_CACHE_DIR:-$SANDBOX_TMP/sd-ai-command-pack-uv-cache}"
 export UV_TOOL_DIR="${UV_TOOL_DIR:-$SANDBOX_TMP/sd-ai-command-pack-uv-tools}"
 export RUFF_CACHE_DIR="${RUFF_CACHE_DIR:-$SANDBOX_TMP/sd-ai-command-pack-ruff-cache}"
 python3 scripts/sd-ai-command-pack-install-audit.py
+# For fleet or scripted refreshes, pass the repo's explicit platforms too:
+python3 scripts/sd-ai-command-pack-install-audit.py \
+  --expected-platform claude --expected-platform gemini \
+  --expected-platform github --expected-platform opencode
 bash -n scripts/sd-ai-command-pack-full-check.sh
 bash -n scripts/sd-ai-command-pack-shell-lib.sh
 bash -n scripts/sd-ai-command-pack-review-local.sh
@@ -441,9 +446,26 @@ git tag v<version>
 git push origin v<version>
 ```
 
-After the tag is pushed, refresh the fleet with `install.py <repo> --force`,
-run the install audit/full-check appropriate to each target repo, and publish
-those refreshes through PRs.
+After the tag is pushed, use the fleet preflight below before opening consumer
+refresh PRs.
+
+## Fleet Rollout
+
+The checked-in fleet manifest lives at `docs/fleet/consumers.json`. It lists
+the real consumer repositories, GitHub slugs, local path hints, and explicit
+platform sets. Run the source-owned preflight from this checkout:
+
+```bash
+python3 scripts/sd-ai-command-pack-fleet-preflight.py
+```
+
+Repos reported as `at-target` should be skipped, which prevents duplicate
+empty refresh PRs. For repos that need a refresh, the preflight prints the
+exact `install.py --force --platform ...` and install-audit commands. The audit
+command passes each explicit platform through `--expected-platform`, so missing
+selected-platform files are caught even if a faulty install also omitted them
+from receipts and provenance. See [docs/FLEET_ROLLOUT.md](docs/FLEET_ROLLOUT.md)
+for the compact rollout runbook.
 
 ## Direct-to-main Chore Commits
 
