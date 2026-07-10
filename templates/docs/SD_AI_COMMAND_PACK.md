@@ -326,6 +326,12 @@ The install audit checks
 pack-like files that are not listed in the installed-targets snapshot, and warns
 when legacy pack names such as `trellis-full-check`, `trellis-housekeeping`,
 `trellis-review-pr`, or `sd-refresh-specs` still appear in target files.
+Current installs also write `.sd-ai-command-pack/manifest.json`; the audit uses
+that manifest snapshot to derive the expected installed target set for shared
+files and detected platforms. Fleet or scripted refreshes should pass explicit
+platforms, for example `--expected-platform claude --expected-platform gemini`,
+so a selected-platform file cannot disappear from disk, receipts, and
+provenance without the audit failing.
 Missing targets that are gitignored in the current checkout downgrade to
 warnings with a reinstall hint, and the installer keeps receipt entries
 (reported as `kept-in-receipt`) for platforms skipped only because their

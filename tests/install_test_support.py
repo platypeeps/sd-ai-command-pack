@@ -222,6 +222,7 @@ class InstallTestCase(unittest.TestCase):
                 selected,
                 extra_targets=[
                     install.TRELLIS_GITIGNORE_TARGET,
+                    install.PACK_MANIFEST_FILE,
                     install.PROVENANCE_FILE,
                 ],
             ),

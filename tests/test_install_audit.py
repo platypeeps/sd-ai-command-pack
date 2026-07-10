@@ -70,6 +70,28 @@ class InstallAuditTests(InstallTestCase):
             result.stdout,
         )
 
+    def test_install_audit_allows_fleet_preflight_only_in_source_repo(self) -> None:
+        audit = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            "sd_install_audit_source_only",
+        )
+        root = self.make_repo()
+        for marker in audit.SOURCE_REPO_MARKERS:
+            path = root / marker
+            if marker.suffix:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("# source marker\n", encoding="utf-8")
+            else:
+                path.mkdir(parents=True, exist_ok=True)
+        source_only = root / "scripts/sd-ai-command-pack-fleet-preflight.py"
+        source_only.parent.mkdir(parents=True, exist_ok=True)
+        source_only.write_text("# source-only fleet helper\n", encoding="utf-8")
+
+        failures, warnings = audit.audit_structural_state(root, set())
+
+        self.assertEqual(failures, [])
+        self.assertEqual(warnings, [])
+
     def test_install_audit_detects_missing_current_targets(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
@@ -92,6 +114,135 @@ class InstallAuditTests(InstallTestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
             "installed target is missing: .agents/skills/sd-review-pr/SKILL.md",
+            result.stdout,
+        )
+
+    def test_install_writes_pack_manifest_snapshot(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        manifest, _ = install.load_manifest()
+        installed_manifest = json.loads(
+            (root / install.PACK_MANIFEST_FILE).read_text(encoding="utf-8")
+        )
+        receipt_text = (root / install.INSTALLED_TARGETS_FILE).read_text(
+            encoding="utf-8"
+        )
+        provenance = json.loads(
+            (root / install.PROVENANCE_FILE).read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(installed_manifest["name"], manifest["name"])
+        self.assertEqual(installed_manifest["version"], manifest["version"])
+        self.assertIn(install.PACK_MANIFEST_FILE.as_posix(), receipt_text)
+        self.assertNotIn(install.PACK_MANIFEST_FILE.as_posix(), provenance["files"])
+
+    def test_install_pack_manifest_file_updates_existing_snapshot(self) -> None:
+        root = self.make_repo()
+        manifest = {
+            "name": "sd-ai-command-pack",
+            "version": "9.9.9",
+            "files": [],
+        }
+        destination = root / install.PACK_MANIFEST_FILE
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text('{"version": "old"}\n', encoding="utf-8")
+
+        result = install.install_pack_manifest_file(
+            manifest,
+            root,
+            dry_run=False,
+        )
+
+        self.assertEqual(result.status, "updated")
+        self.assertEqual(
+            json.loads(destination.read_text(encoding="utf-8")),
+            manifest,
+        )
+
+    def test_install_pack_manifest_file_dry_run_reports_update(self) -> None:
+        root = self.make_repo()
+        manifest = {
+            "name": "sd-ai-command-pack",
+            "version": "9.9.9",
+            "files": [],
+        }
+        destination = root / install.PACK_MANIFEST_FILE
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text('{"version": "old"}\n', encoding="utf-8")
+
+        result = install.install_pack_manifest_file(
+            manifest,
+            root,
+            dry_run=True,
+        )
+
+        self.assertEqual(result.status, "updated")
+        self.assertEqual(destination.read_text(encoding="utf-8"), '{"version": "old"}\n')
+
+    def test_install_audit_fails_when_expected_target_is_missing_from_receipt(
+        self,
+    ) -> None:
+        root = self.make_repo(".claude")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        target = ".claude/commands/sd/work-backlog.md"
+        (root / target).unlink()
+        receipt = root / install.INSTALLED_TARGETS_FILE
+        receipt.write_text(
+            "".join(
+                line
+                for line in receipt.read_text(encoding="utf-8").splitlines(
+                    keepends=True
+                )
+                if line.strip() != target
+            ),
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            f"expected installed target is missing from receipt: {target}",
+            result.stdout,
+        )
+
+    def test_install_audit_expected_platform_catches_absent_platform(self) -> None:
+        root = self.make_repo(".claude")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                "--expected-platform",
+                "cursor",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "expected installed target is missing from receipt: "
+            ".cursor/commands/sd-continue.md",
             result.stdout,
         )
 
@@ -256,6 +407,7 @@ class InstallAuditTests(InstallTestCase):
         self.assertNotIn(".prism/rules.json", files)
         self.assertNotIn(".gitignore", files)
         self.assertNotIn(".sd-ai-command-pack/installed-targets.txt", files)
+        self.assertNotIn(".sd-ai-command-pack/manifest.json", files)
         self.assertNotIn(".sd-ai-command-pack/provenance.json", files)
         self.assertIn(
             ".sd-ai-command-pack/provenance.json",
@@ -393,9 +545,11 @@ class InstallAuditTests(InstallTestCase):
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
 
-        # Old installs have no provenance: remove the file and its receipt
-        # line and the audit behaves as before 0.5.10.
+        # Old installs have no provenance or installed manifest snapshot:
+        # remove those files and receipt lines so the audit behaves as before
+        # the generated-state checks existed.
         (root / install.PROVENANCE_FILE).unlink()
+        (root / install.PACK_MANIFEST_FILE).unlink()
         receipt = root / install.INSTALLED_TARGETS_FILE
         receipt.write_text(
             "".join(
@@ -403,7 +557,7 @@ class InstallAuditTests(InstallTestCase):
                 for line in receipt.read_text(encoding="utf-8").splitlines(
                     keepends=True
                 )
-                if "provenance.json" not in line
+                if "provenance.json" not in line and "manifest.json" not in line
             ),
             encoding="utf-8",
         )

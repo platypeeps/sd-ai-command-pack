@@ -34,6 +34,7 @@ PROVENANCE_EXCLUDED_KINDS = {
     MANAGED_BLOCK_KIND,
     "generated-gitignore",
     "generated-manifest",
+    "generated-pack-manifest",
     "generated-provenance",
 }
 
@@ -82,6 +83,7 @@ def never_vouched_targets(files: list[PackFile]) -> set[str]:
             if file.kind == MANAGED_BLOCK_KIND
         ),
         INSTALLED_TARGETS_FILE.as_posix(),
+        PACK_MANIFEST_FILE.as_posix(),
         PROVENANCE_FILE.as_posix(),
         TRELLIS_GITIGNORE_TARGET.as_posix(),
     }
@@ -154,6 +156,41 @@ def install_provenance_file(
         receipt_targets=receipt_targets,
         never_vouched=never_vouched,
     )
+    if destination.exists():
+        current = read_text_strict(destination, str(file.target))
+        if current == content:
+            return InstallResult(file, "unchanged")
+        if not dry_run:
+            atomic_write_text(destination, content)
+        return InstallResult(file, "updated")
+
+    if not dry_run:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(destination, content)
+    return InstallResult(file, "created")
+
+
+def installed_pack_manifest_content(manifest: dict) -> str:
+    return json.dumps(manifest, indent=2) + "\n"
+
+
+def install_pack_manifest_file(
+    manifest: dict,
+    target: Path,
+    *,
+    dry_run: bool,
+) -> InstallResult:
+    file = PackFile(
+        platform="shared",
+        kind="generated-pack-manifest",
+        source=MANIFEST_PATH,
+        target=PACK_MANIFEST_FILE,
+        anchor=None,
+        install=ALWAYS_INSTALL,
+    )
+    destination = target_destination(target, file.target)
+
+    content = installed_pack_manifest_content(manifest)
     if destination.exists():
         current = read_text_strict(destination, str(file.target))
         if current == content:

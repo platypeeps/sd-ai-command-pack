@@ -228,6 +228,15 @@ def main(argv: list[str] | None = None) -> int:
             )
         results.append(result)
 
+    results.append(
+        install_pack_manifest_file(
+            manifest,
+            target,
+            dry_run=args.dry_run,
+        )
+    )
+    generated_targets.append(PACK_MANIFEST_FILE)
+
     kept_receipt_targets = preserved_receipt_targets(
         target, read_existing_installed_targets(target), skipped
     )

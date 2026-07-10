@@ -1,9 +1,9 @@
 {
   "id": "fleet-refresh-081-completeness",
   "name": "fleet-refresh-081-completeness",
-  "title": "Fleet refresh to 0.8.1 with install completeness verification",
-  "description": "Roll out 0.8.1 to all six consumers (incl. hoa-manager), add post-install self-check + rollout dedupe pre-check; repairs the two broken 0.7.0 installs",
-  "status": "planning",
+  "title": "Fleet refresh to 0.8.5 with install completeness verification",
+  "description": "Roll out 0.8.5 to all six consumers (incl. hoa-manager), add post-install self-check + rollout dedupe pre-check; repairs the two broken 0.7.0 installs",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
