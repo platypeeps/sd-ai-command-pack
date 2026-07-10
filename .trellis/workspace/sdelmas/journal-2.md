@@ -1409,3 +1409,42 @@ Implemented source-checkout drift gates so shipped manifest targets for active p
 ### Next Steps
 
 - Task complete; continue sd-work-backlog with the next actionable Trellis task after housekeeping.
+
+
+## Session 85: Fleet refresh completeness checks
+
+**Date**: 2026-07-09
+**Task**: Fleet refresh completeness checks
+**Branch**: `main`
+
+### Summary
+
+Added fleet refresh inventory, installed manifest snapshots, and install-audit expected-target completeness for sd-ai-command-pack 0.8.5.
+
+### Main Changes
+
+- Added source-owned fleet manifest and preflight command for known consumer refresh planning.
+- Installed .sd-ai-command-pack/manifest.json snapshots and extended install-audit to verify expected manifest targets and explicit fleet platforms.
+- Documented the rollout flow and bumped the pack to 0.8.5 with coverage for installer, audit, remove, and preflight behavior.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cefa81d` | feat: add fleet refresh completeness checks |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_install_audit tests.test_fleet_preflight
+- [OK] make lint
+- [OK] make test
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
