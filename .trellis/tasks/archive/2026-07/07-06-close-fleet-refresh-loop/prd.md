@@ -119,6 +119,21 @@ session root cause was fixed locally in
 and the issue draft remains in `07-07-file-upstream-trellis-issues` as
 historical evidence marked "do not file".
 
+## Superseding Inventory Note - 2026-07-10
+
+The 2026-07-09 reconciliation evidence above undercounted the active consumer
+fleet when it described five actual repositories. The current checked-in fleet
+manifest and the 0.8.6 rollout task confirm six active consumers:
+`platypeeps/anomaly-metric-creator`, `platypeeps/hoa-manager`,
+`platypeeps/loadsmith`, `answerbook/mezmo_benchmark`,
+`platypeeps/rwbp-coordinator`, and `platypeeps/rwbp-website`.
+
+The correction landed with the 0.8.6 fleet rollout: all six consumer PRs were
+merged green on 2026-07-10, all six post-merge install audits passed with
+explicit expected platforms, and all six local checkouts ended clean on
+`main` matching `origin/main`. Treat `hoa-manager` as a real fleet consumer in
+future reconciliation and rollout work.
+
 ## Notes
 
 - Origin: 2026-07-06 deep review Trellis-task cross-check. Process

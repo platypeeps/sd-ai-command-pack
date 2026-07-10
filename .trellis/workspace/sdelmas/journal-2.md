@@ -1448,3 +1448,40 @@ Added fleet refresh inventory, installed manifest snapshots, and install-audit e
 ### Next Steps
 
 - None - task complete
+
+
+## Session 86: Roll out sd-ai-command-pack 0.8.6 to the fleet
+
+**Date**: 2026-07-09
+**Task**: Roll out sd-ai-command-pack 0.8.6 to the fleet
+**Branch**: `main`
+
+### Summary
+
+Merged the 0.8.6 rollout across all six fleet consumers, validated post-merge audits, corrected the archived fleet inventory note, and archived the rollout task.
+
+### Main Changes
+
+- Merged fleet rollout PRs: anomaly-metric-creator #232, hoa-manager #102, loadsmith #68, mezmo_benchmark #341, rwbp-coordinator #102, and rwbp-website #114.
+- Fast-forwarded all six local checkouts to main, pruned/deleted rollout branches, and verified every install audit passes at provenance version 0.8.6.
+- Confirmed hoa-manager and rwbp-coordinator now include .claude/commands/sd/work-backlog.md on disk, in installed-targets, and in provenance.
+- Updated Trellis records: archived the rollout task, added the 2026-07-10 six-consumer correction to the older fleet task, and marked review-nits N7 coordination complete.
+
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] python3 scripts/sd-ai-command-pack-fleet-preflight.py
+- [OK] python3 scripts/sd-ai-command-pack-update-spec-kb.py
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Continue with the remaining active backlog; highest visible candidates include 07-09-review-nits-cleanup, 07-09-release-ledger-enforcement, and the two planning follow-ups created from this rollout.

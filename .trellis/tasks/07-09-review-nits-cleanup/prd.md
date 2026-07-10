@@ -42,11 +42,12 @@ Each item is CONFIRMED by the review and is a small, self-contained fix:
   the interpreter gap between the floor and the ceiling) or document the
   two-ended matrix as intentional.
 - **N7 — consumer legacy-name references (cross-repo LOW, consumer-owned).**
-  Three consumers' own files still reference `TRELLIS_REVIEW_PR_PACK.md`:
-  loadsmith's repository map, rwbp-coordinator's review-churn checker, and
-  mezmo_benchmark's review-cycle pattern checker. (The former
-  green-button-manager copy was loadsmith's now-deleted duplicate clone, not a
-  distinct consumer.)
+  Two consumers' own files still carry legacy pack references: loadsmith's
+  generated repository map reports old command names, and rwbp-coordinator's
+  review-churn checker references `TRELLIS_REVIEW_PR_PACK.md`. Mezmo's
+  review-cycle checker warning was resolved during the 0.8.6 fleet rollout in
+  PR #341. (The former green-button-manager copy was loadsmith's now-deleted
+  duplicate clone, not a distinct consumer.)
   These are repo-owned, not pack payload — the pack cannot fix them; this item
   is a tracked note to raise the cleanup with those repos during the next fleet
   touch, not pack work.
@@ -75,7 +76,10 @@ Each item is CONFIRMED by the review and is a small, self-contained fix:
 - [ ] N5: decision recorded (split now vs defer); if split, tests still green.
 - [ ] N6: 3.11/3.12 decision recorded and applied (lanes added or intent
       documented); CI green.
-- [ ] N7: consumer-coordination note filed (issues or fleet-touch checklist).
+- [x] N7: consumer-coordination note filed (issues or fleet-touch checklist).
+      Recorded in `07-09-07-10-rollout-085-to-fleet`; remaining warnings are
+      loadsmith `docs/repomix-map.md` and the rwbp-coordinator repo-owned
+      review-churn checker.
 
 ## Non-goals
 

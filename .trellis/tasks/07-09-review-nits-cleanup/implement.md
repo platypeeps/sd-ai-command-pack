@@ -7,8 +7,9 @@
 3. Guard the remaining symlink call or document the suite prerequisite.
 4. Update `make test` to fail on skipped tests like CI.
 5. Decide N5/N6; split only if implementation becomes broad.
-6. Record N7 consumer coordination in the fleet task or separate consumer
-   issues.
+6. N7 consumer coordination is recorded in
+   `07-09-07-10-rollout-085-to-fleet`; only loadsmith and rwbp-coordinator
+   still have repo-owned legacy-reference warnings after the 0.8.6 rollout.
 
 ## Validation Plan
 
@@ -28,5 +29,6 @@ needing design, split it out.
 
 ## Follow-Ups
 
-Consumer legacy references from N7 should be handled during the next fleet
-touch, not as pack-owned payload.
+Consumer legacy references from N7 are tracked in the 0.8.6 fleet ledger and
+should be handled in the consumer repos when those repo-owned files are next
+touched, not as pack-owned payload.

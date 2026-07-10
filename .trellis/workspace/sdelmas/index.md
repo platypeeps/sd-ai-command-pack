@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 85
+- **Total Sessions**: 86
 - **Last Active**: 2026-07-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1447 | Active |
+| `journal-2.md` | ~1485 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 86 | 2026-07-09 | Roll out sd-ai-command-pack 0.8.6 to the fleet | - | `main` |
 | 85 | 2026-07-09 | Fleet refresh completeness checks | `cefa81d` | `main` |
 | 84 | 2026-07-09 | Close source dogfood drift gates | `2fdaca5`, `22c4602` | `codex/drift-gate-absence-blindness` |
 | 83 | 2026-07-09 | Enforce adapter command parity | `517e97c`, `ba26052` | `codex/adapter-parity-generation` |
