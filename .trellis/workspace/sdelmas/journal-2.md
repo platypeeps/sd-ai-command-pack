@@ -1485,3 +1485,42 @@ Merged the 0.8.6 rollout across all six fleet consumers, validated post-merge au
 ### Next Steps
 
 - Continue with the remaining active backlog; highest visible candidates include 07-09-review-nits-cleanup, 07-09-release-ledger-enforcement, and the two planning follow-ups created from this rollout.
+
+
+## Session 87: Plan tool-use hardening
+
+**Date**: 2026-07-11
+**Task**: Plan tool-use hardening
+**Branch**: `codex/plan-tool-use-hardening`
+
+### Summary
+
+Published PR #91 with corrected Copilot reviewer identities, explicit review-materialization evidence requirements, and a planning-ready distributed toolchain preflight task.
+
+### Main Changes
+
+- Corrected the remote-review task to distinguish documented Copilot request and author identities from materialization evidence.
+- Created a P2 toolchain-preflight task with PRD, design, implementation plan, portability constraints, and conservative command-discovery boundaries.
+- Isolated the planning stream from PR #90 on a clean main-based branch and validated it through the SD full-check and GitHub CI.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e5722e1` | docs(tasks): plan tool-use hardening |
+| `80ac9c2` | docs(tasks): fix planned path references |
+
+### Testing
+
+- [OK] Both Trellis task directories passed task.py validate, JSON, placeholder, and whitespace checks.
+- [OK] Deterministic full-check passed with Prism and Gito disabled and Homebrew Python 3.13 first on PATH.
+- [OK] All six GitHub CI checks passed for PR #91; the @copilot request produced no observable review activity.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Review and merge PR #91; keep both tasks in planning until separately approved and started.
