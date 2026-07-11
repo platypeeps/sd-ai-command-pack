@@ -2,21 +2,29 @@
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
-import os
-import shutil
 import subprocess
-import sys
-import tempfile
 from collections.abc import Iterable
-from dataclasses import dataclass
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
-from installer.registry import *  # noqa: F401,F403
-from installer.manifest import *  # noqa: F401,F403
-from installer.fileops import *  # noqa: F401,F403
+from installer.fileops import InstallResult, atomic_write_text
+from installer.manifest import (
+    MANIFEST_PATH,
+    PackFile,
+    read_text_strict,
+    target_destination,
+)
+from installer.registry import (
+    ALWAYS_INSTALL,
+    FORCE_PRESERVED_TARGETS,
+    INSTALLED_TARGETS_FILE,
+    MANAGED_BLOCK_KIND,
+    PACK_MANIFEST_FILE,
+    PROVENANCE_FILE,
+    TRELLIS_GITIGNORE_TARGET,
+)
+
 
 def installed_targets_content(
     selected: list[PackFile],
@@ -307,3 +315,21 @@ def install_installed_targets_file(
         destination.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(destination, content)
     return InstallResult(file, "created")
+
+
+__all__ = [
+    "PROVENANCE_EXCLUDED_KINDS",
+    "install_installed_targets_file",
+    "install_pack_manifest_file",
+    "install_provenance_file",
+    "installed_pack_manifest_content",
+    "installed_targets_content",
+    "is_gitignored_path",
+    "never_vouched_targets",
+    "preserved_receipt_targets",
+    "provenance_content",
+    "read_existing_installed_targets",
+    "read_existing_installed_targets_for_remove",
+    "read_existing_provenance_files",
+    "read_existing_provenance_files_for_remove",
+]

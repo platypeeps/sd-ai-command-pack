@@ -2,22 +2,37 @@
 
 from __future__ import annotations
 
-import argparse
-import hashlib
-import json
-import os
 import shutil
 import subprocess
-import sys
-import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
-from installer.registry import *  # noqa: F401,F403
-from installer.manifest import *  # noqa: F401,F403
-from installer.fileops import *  # noqa: F401,F403
-from installer.provenance import *  # noqa: F401,F403
+from installer.fileops import (
+    RemoveResult,
+    atomic_write_text,
+    marker_pair_indexes,
+    remove_marked_block,
+)
+from installer.manifest import (
+    PackFile,
+    read_text_if_exists,
+    read_text_strict,
+    require_trellis_repo,
+    system_exit_detail,
+    validate_resolved_target_path,
+)
+from installer.registry import (
+    INSTALLED_TARGETS_FILE,
+    LOCAL_ONLY_EXCLUDE_END,
+    LOCAL_ONLY_EXCLUDE_START,
+    LOCAL_ONLY_MARKER_FILE,
+    LOCAL_ONLY_TRACKED_CHECK_PATHS,
+    LOCAL_ONLY_TRELLIS_EXCLUDES,
+    TRELLIS_INIT_PLATFORM_FLAGS,
+    TRELLIS_INSTALL_DOCS_URL,
+)
+
 
 @dataclass(frozen=True)
 class LocalOnlyResult:
@@ -342,3 +357,25 @@ def remove_local_only_exclude(target: Path, *, dry_run: bool) -> RemoveResult | 
         return RemoveResult(exclude_path, "would-update")
     atomic_write_text(exclude_path, stripped)
     return RemoveResult(exclude_path, "updated")
+
+
+__all__ = [
+    "LocalOnlyResult",
+    "ensure_local_only_exclude",
+    "ensure_trellis_for_local_only",
+    "git_info_exclude_path",
+    "git_output",
+    "local_only_exclude_block",
+    "local_only_exclude_patterns",
+    "local_only_pack_excludes",
+    "local_only_tracked_check_specs",
+    "merge_local_only_exclude_block",
+    "optional_git_info_exclude_path",
+    "reject_tracked_local_only_paths",
+    "remove_local_only_exclude",
+    "require_git_repo_for_local_only",
+    "tracked_paths",
+    "trellis_init_command",
+    "trellis_init_platforms",
+    "write_local_only_marker",
+]

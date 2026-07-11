@@ -49,7 +49,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 BODY_ENV_VARS = (
     "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY",
     "SD_AI_COMMAND_PACK_SCOPE_PR_BODY",

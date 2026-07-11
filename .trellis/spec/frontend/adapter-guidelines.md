@@ -65,7 +65,9 @@ The `sd-review-pr` shared skill should continue to define:
   as the default reviewer
 - polling behavior that avoids fetching full comment bodies on every interval
 - thread-aware review inspection through GraphQL when using `gh`
-- CI check inspection and failed-log routing
+- CI check inspection through the stable `gh pr checks` fields `name`,
+  `workflow`, `state`, `bucket`, `link`, and `completedAt`, plus failed-log
+  routing; do not request unsupported `status` or `conclusion` fields
 - standing permission to reply to review comments and resolve addressed review
   threads without asking for separate approval
 - reply, resolve, fix, commit, and push behavior
@@ -110,6 +112,97 @@ parallel except for review scope:
 - The runner must register temporary files as they are created and remove them
   through its cleanup trap, including paths created by Prism chunking, Gito
   output capture, and review path/filter generation.
+
+## Scenario: Bounded Local Review Provider Execution
+
+### 1. Scope / Trigger
+
+- Trigger: changing Prism or Gito invocation, timeout, fallback, retry, or
+  response-validation behavior in the shipped local-review runner.
+- Keep the runtime, shared skills, distributed documentation, and focused
+  tests synchronized because these settings are consumer-facing contracts.
+
+### 2. Signatures
+
+- Shared helper: `run_command_with_timeout <seconds> <command> [args...]`.
+- Prism timeout: `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_TIMEOUT_SECONDS`
+  (default `300`).
+- Gito timeout: `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS`
+  (default `600`).
+- Full-check Gito timeout:
+  `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_TIMEOUT_SECONDS`, falling back to the
+  local-review Gito timeout and then `600`.
+- Prism fallback failure budget:
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_MAX_EMPTY_CHUNK_FAILURES`
+  (default `3`).
+
+### 3. Contracts
+
+- Timeout values are nonnegative integers; `0` disables the timeout.
+- A timed-out command terminates its process group, escalates from `SIGTERM`
+  to `SIGKILL` after five seconds when needed, and exits `124`.
+- Exit `124` is terminal for both providers. In particular, Gito must not
+  interpret a timeout as a rate-limit response or retry it.
+- Prism full-codebase fallback activates only for Prism exit `4` plus a
+  recognized empty or malformed provider response. It stops after the
+  configured failed single-path request budget; `0` permits all paths.
+- Gito retries only when recent output contains an explicit error-like HTTP
+  `429` or slow-down response.
+- Distributed Prism rules must satisfy `.prism/rules.schema.json`; unknown
+  root or required-item properties are rejected.
+
+### 4. Validation & Error Matrix
+
+- Invalid timeout or fallback-budget value -> use the documented default.
+- Provider completes before timeout -> preserve its original exit status.
+- Provider exceeds timeout -> terminate the process group and return `124`.
+- Prism exit `4` with recognized empty response -> use the bounded fallback.
+- Prism exit `4` with an unrelated API error -> fail without fallback.
+- Gito exit `124` -> fail without retry.
+- Gito explicit rate-limit response within the attempt budget -> retry with
+  bounded backoff.
+
+### 5. Good / Base / Bad Cases
+
+- Good: a hung provider and its child process are terminated, and the caller
+  receives exit `124` within the configured bound.
+- Base: a successful provider keeps its output and exit `0`; no fallback or
+  retry occurs.
+- Bad: a generic provider error is labeled an empty response, a timeout starts
+  another paid request, or fallback continues through every tracked file after
+  repeated empty responses.
+
+### 6. Tests Required
+
+- Unit-test timeout defaulting, disabled timeouts, exit `124`, process-group
+  cleanup, and Gito's no-retry-on-timeout behavior.
+- Unit-test Prism's recognized empty-response fallback, unrelated-error
+  rejection, and configured failure budget.
+- Validate root and template Prism rules against the strict schema.
+- Preserve root/template byte parity for every shipped runtime, skill, doc,
+  and schema changed by this contract.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```bash
+gito review || retry_gito
+```
+
+This retries every failure, including timeouts and non-rate-limit errors.
+
+#### Correct
+
+```bash
+run_command_with_timeout "$timeout_seconds" gito review
+status=$?
+if [ "$status" -eq 124 ]; then
+  exit 124
+fi
+```
+
+Only the explicit rate-limit classifier may choose a later retry.
 
 The `sd-housekeeping` shared skill should continue to define the
 post-merge task list, the expected clean-state report, anomaly reporting, and

@@ -996,6 +996,10 @@ class ReviewScopeTests(InstallTestCase):
         schema = json.loads(schema_files[0].source.read_text(encoding="utf-8"))
         self.assertIn("$schema", schema)
         self.assertIn("severityOverrides", schema["properties"])
+        self.assertFalse(schema["additionalProperties"])
+        self.assertFalse(
+            schema["properties"]["required"]["items"]["additionalProperties"]
+        )
 
     def test_gito_config_templates_are_installed(self) -> None:
         config_files = [

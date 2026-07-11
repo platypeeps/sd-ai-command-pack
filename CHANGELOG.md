@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.7 - 2026-07-09
+
+- Bounded Prism and Gito provider calls, capped repeated Prism fallback
+  failures, and tightened empty-response detection and Prism rules validation.
+- Hardened the direct-main pre-push guard for rename and unusual-filename
+  handling with NUL-delimited Git paths and behavioral coverage.
+- Replaced installer wildcard imports with explicit public surfaces, restored
+  Ruff import checks, and enabled import-order and Bugbear lint rules.
+
 ## 0.8.6 - 2026-07-09
 
 - Fixed rollout CI blockers by classifying the installed pack manifest as

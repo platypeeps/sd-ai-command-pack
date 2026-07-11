@@ -2098,6 +2098,10 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("bash scripts/sd-ai-command-pack-full-check.sh", review_pr)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0", review_pr)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0", review_pr)
+        self.assertIn(
+            "--json name,workflow,state,bucket,link,completedAt", review_pr
+        )
+        self.assertNotIn("workflow,status,conclusion,bucket", review_pr)
 
         create_pr = (
             install.ROOT / "templates/.agents/skills/sd-create-pr/SKILL.md"

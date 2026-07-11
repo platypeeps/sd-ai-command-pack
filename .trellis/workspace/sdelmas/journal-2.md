@@ -1487,7 +1487,46 @@ Merged the 0.8.6 rollout across all six fleet consumers, validated post-merge au
 - Continue with the remaining active backlog; highest visible candidates include 07-09-review-nits-cleanup, 07-09-release-ledger-enforcement, and the two planning follow-ups created from this rollout.
 
 
-## Session 87: Plan tool-use hardening
+## Session 87: Harden local review tooling
+
+**Date**: 2026-07-10
+**Task**: Harden local review tooling
+**Branch**: `codex/harden-local-review-tooling`
+
+### Summary
+
+Published the 0.8.7 local-review hardening stream in PR #90, bounded Prism and Gito execution, tightened installer and path handling, and corrected the shipped gh checks field list discovered during the review loop.
+
+### Main Changes
+
+- Added process-group-aware provider timeouts, conservative Prism fallback limits, and terminal Gito timeout behavior.
+- Hardened pre-push path handling, Prism rule validation, installer imports, Ruff coverage, distributed docs, and regression tests.
+- Corrected sd-review-pr to query supported gh pr checks fields after the live review loop exposed the incompatible field list.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `788f321` | fix: harden local review tooling |
+| `d7e91de` | fix: use supported gh check fields |
+
+### Testing
+
+- [OK] Focused sd-review-pr skill regression test passed with Homebrew Python 3.13 through uv.
+- [OK] Deterministic sd-ai-command-pack full check passed with Prism and Gito disabled.
+- [OK] GitHub CI passed all six checks on PR #90.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #90 after review readiness is confirmed; continue the existing remote-review-materialization task for Copilot requests that produce no visible review.
+
+
+## Session 88: Plan tool-use hardening
 
 **Date**: 2026-07-11
 **Task**: Plan tool-use hardening

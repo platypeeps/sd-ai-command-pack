@@ -763,6 +763,10 @@ ephemeral tool state and do not change what the checks validate.
   retry delay after exponential backoff. Defaults to the
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS` value, then
   `120`.
+- `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_TIMEOUT_SECONDS`: maximum runtime for one
+  full-check Gito attempt. Defaults to
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS`, then `600`; set `0`
+  to disable the timeout.
 
 ### Local Review
 
@@ -783,6 +787,12 @@ ephemeral tool state and do not change what the checks validate.
   empty chunk response.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE`: tracked file
   batch size for that fallback before adaptive splitting. Defaults to `25`.
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_MAX_EMPTY_CHUNK_FAILURES`:
+  maximum failed single-path requests during full-codebase fallback before the
+  runner stops issuing more Prism requests. Defaults to `3`; set `0` to allow
+  all fallback paths.
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_TIMEOUT_SECONDS`: maximum runtime for
+  one Prism command. Defaults to `300`; set `0` to disable the timeout.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_FAIL_ON`: severity that fails the
   local Prism review. Defaults to
   `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_FAIL_ON`, then `high`.
@@ -805,6 +815,8 @@ ephemeral tool state and do not change what the checks validate.
   delay for rate limits. Defaults to `30`.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`: maximum Gito
   retry delay after exponential backoff. Defaults to `120`.
+- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS`: maximum runtime for
+  one Gito attempt. Defaults to `600`; set `0` to disable the timeout.
 - `MAX_CONCURRENT_TASKS`: Gito LLM concurrency cap. The pack runners load the
   installed `.gito/sd-ai-command-pack.env` default of `4` when this variable is
   unset.

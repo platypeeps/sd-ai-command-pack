@@ -397,6 +397,41 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("bypassed", result.stdout)
 
+        # Rename detection must not hide a deletion outside chore scope.
+        (clone / ".trellis/workspace").mkdir(parents=True, exist_ok=True)
+        result = run("git", "mv", "code.py", ".trellis/workspace/code.py")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        run("git", "commit", "-q", "-m", "chore: move code into workspace")
+        result = run("git", "push", "-q", "origin", "main")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("code.py", result.stdout)
+        result = run(
+            "git",
+            "push",
+            "-q",
+            "origin",
+            "main",
+            env={"SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS": "1"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        # NUL-delimited parsing allows unusual chore paths without ambiguity.
+        unusual_chore = clone / ".trellis/tasks/07-01-demo/line\nbreak.md"
+        unusual_chore.write_text("# unusual chore path\n", encoding="utf-8")
+        run("git", "add", "-A")
+        run("git", "commit", "-q", "-m", "chore: unusual task path")
+        result = run("git", "push", "-q", "origin", "main")
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        unusual_code = clone / "line\nbreak.py"
+        unusual_code.write_text("print('blocked')\n", encoding="utf-8")
+        run("git", "add", "-A")
+        run("git", "commit", "-q", "-m", "test: unusual code path")
+        result = run("git", "push", "-q", "origin", "main")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("line", result.stdout)
+        self.assertIn("break.py", result.stdout)
+
     def test_review_preflight_accepts_line_suffixed_doc_references(self) -> None:
         node = shutil.which("node")
         if node is None:

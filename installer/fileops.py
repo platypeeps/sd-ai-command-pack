@@ -2,20 +2,42 @@
 
 from __future__ import annotations
 
-import argparse
 import hashlib
-import json
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
-from collections.abc import Iterable
 from dataclasses import dataclass
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
-from installer.registry import *  # noqa: F401,F403
-from installer.manifest import *  # noqa: F401,F403
+from installer.manifest import (
+    MANIFEST_PATH,
+    PackFile,
+    read_text_if_exists,
+    read_text_strict,
+    removal_target_destination,
+    system_exit_detail,
+    target_destination,
+    validate_resolved_target_path,
+)
+from installer.registry import (
+    ACTIVE_TRELLIS_PLATFORM_MARKERS,
+    ALWAYS_INSTALL,
+    COPILOT_GUIDANCE_END,
+    COPILOT_GUIDANCE_START,
+    COPILOT_INSTRUCTIONS_TARGET,
+    FORCE_PRESERVED_TARGETS,
+    IF_NOT_EXISTS,
+    LOCAL_ENV_GITIGNORE_PATTERNS,
+    PLATFORM_LOCAL_GITIGNORE_PATTERNS,
+    REVIEW_ARTIFACT_GITIGNORE_PATTERNS,
+    TRELLIS_BLANKET_GITIGNORE_ENTRIES,
+    TRELLIS_GITIGNORE_END,
+    TRELLIS_GITIGNORE_PATTERNS,
+    TRELLIS_GITIGNORE_START,
+    TRELLIS_GITIGNORE_TARGET,
+)
+
 
 @dataclass(frozen=True)
 class InstallResult:
@@ -582,3 +604,36 @@ def display_path(target: Path, path: Path) -> Path:
         return path.relative_to(target)
     except ValueError:
         return path
+
+
+__all__ = [
+    "InstallResult",
+    "RemoveResult",
+    "atomic_write_bytes",
+    "atomic_write_text",
+    "atomic_write_text_preserving_invalid_utf8",
+    "backup_existing_file",
+    "default_file_mode",
+    "display_path",
+    "has_active_trellis_platform",
+    "install_file",
+    "install_managed_block",
+    "install_trellis_gitignore",
+    "marker_pair_indexes",
+    "merge_managed_block",
+    "merge_trellis_gitignore_block",
+    "next_backup_path",
+    "normalize_managed_block_template",
+    "path_is_occupied",
+    "prune_empty_parent_dirs",
+    "read_bytes_for_remove",
+    "remove_marked_block",
+    "remove_text_block_file",
+    "remove_unmanaged_trellis_blanket_entries",
+    "run_diff_check",
+    "selected_files",
+    "sha256_file",
+    "source_is_executable",
+    "trellis_gitignore_block",
+    "unlink_target_file",
+]

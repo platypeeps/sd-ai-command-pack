@@ -41,7 +41,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 ADD_SESSION = Path(".trellis/scripts/add_session.py")
 WORKSPACE = ".trellis/workspace"
 PLACEHOLDERS = ("(Add details)", "(Add test results)", "(see git log)")
@@ -176,7 +175,11 @@ def patch_last_session(
         )
         if not row_re.search(block):
             return f"missing commit table row for {commit_hash} in {journal}"
-        block = row_re.sub(lambda _match: row, block, count=1)
+        block = row_re.sub(
+            lambda _match, replacement=row: replacement,
+            block,
+            count=1,
+        )
 
     patched = replace_section(block, "### Testing", tests)
     if patched is None:
