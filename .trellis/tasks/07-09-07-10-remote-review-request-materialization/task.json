@@ -2,7 +2,7 @@
   "id": "07-10-remote-review-request-materialization",
   "name": "07-10-remote-review-request-materialization",
   "title": "Verify remote reviewer requests actually materialize",
-  "description": "PR #88 showed the direct Copilot review request API returning 422, while gh pr edit --add-reviewer returned success but no reviewRequests/latestReviews/comments appeared after polling. Harden sd-review-pr so a cleared request without review activity is reported or retried with repo-configured evidence instead of being treated as a completed remote review.",
+  "description": "Use GitHub's documented @copilot CLI and copilot-pull-request-reviewer[bot] identities, then require author-matched activity before counting a remote-review round as materialized.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
