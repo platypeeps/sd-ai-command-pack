@@ -12,8 +12,16 @@ every-edit requirement.
 The canonical implementation is:
 
 ```bash
+bash scripts/sd-ai-command-pack-toolchain.sh doctor
 bash scripts/sd-ai-command-pack-full-check.sh
 ```
+
+Run the toolchain doctor once and retain its selected Python and project-check
+report. The doctor does not execute inferred project checks. If the helper is
+missing, report that the pack should be reinstalled instead of trying raw
+interpreters in sequence. Route dependency-sensitive ad hoc Python checks
+through `bash scripts/sd-ai-command-pack-toolchain.sh run-python
+--require-module <name> -- <arguments>`.
 
 ## What It Does
 
@@ -104,7 +112,10 @@ paths, and deprecated fallbacks.
 
 Report:
 
-- Whether deterministic checks passed.
+- Project checks: configured command or reported candidates, and which project
+  checks actually ran.
+- Pack full-check: whether deterministic checks passed.
+- Optional AI review: whether Prism and Gito ran, skipped, or failed.
 - Whether repo-local review preflight ran, skipped, or failed.
 - Whether the post-install audit ran, skipped, or failed.
 - Which package-script checks ran or were skipped.

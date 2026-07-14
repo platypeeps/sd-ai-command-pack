@@ -139,6 +139,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
+        self.assertTrue((root / "scripts/sd-ai-command-pack-toolchain.sh").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
         self.assertTrue((root / "docs/SD_AI_COMMAND_PACK.md").is_file())
         self.assert_installed_targets_snapshot_matches_selection(root)
@@ -187,6 +188,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertTrue((root / ".agents/skills/sd-housekeeping/SKILL.md").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-shell-lib.sh").is_file())
+        self.assertTrue((root / "scripts/sd-ai-command-pack-toolchain.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-housekeeping.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-scope.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-preflight.mjs").is_file())
@@ -2095,7 +2097,10 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("name: sd-review-pr", review_pr)
         self.assertIn("# SD PR Review Loop", review_pr)
         self.assertIn("standing permission to reply", review_pr)
+        self.assertIn("sd-ai-command-pack-toolchain.sh doctor", review_pr)
         self.assertIn("bash scripts/sd-ai-command-pack-full-check.sh", review_pr)
+        self.assertIn("Project checks:", review_pr)
+        self.assertIn("Optional AI review:", review_pr)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0", review_pr)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0", review_pr)
         self.assertIn(
@@ -2116,6 +2121,8 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("git switch -c", create_pr)
         self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR", create_pr)
         self.assertIn("Do not run Prism, Gito", create_pr)
+        self.assertIn("sd-ai-command-pack-toolchain.sh doctor", create_pr)
+        self.assertIn("Project checks:", create_pr)
 
         work_backlog = (
             install.ROOT / "templates/.agents/skills/sd-work-backlog/SKILL.md"
@@ -2185,6 +2192,8 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("name: sd-full-check", full_check)
         self.assertIn("# SD Full Check", full_check)
         self.assertIn("bash scripts/sd-ai-command-pack-full-check.sh", full_check)
+        self.assertIn("sd-ai-command-pack-toolchain.sh doctor", full_check)
+        self.assertIn("Pack full-check:", full_check)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO", full_check)
         # The skill lists common toggles and points at the canonical docs for
         # the full env-var set (deprecated fallbacks included).
@@ -2194,6 +2203,13 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("PYTHONPYCACHEPREFIX", full_check)
         self.assertIn("UV_TOOL_DIR", full_check)
         self.assertIn("RUFF_CACHE_DIR", full_check)
+
+        finish_work = (
+            install.ROOT / "templates/.agents/skills/sd-finish-work/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("sd-ai-command-pack-toolchain.sh run-python", finish_work)
+        self.assertIn("--no-commit", finish_work)
+        self.assertIn("git add -- <exact-journal-path>", finish_work)
 
         housekeeping = (
             install.ROOT / "templates/.agents/skills/sd-housekeeping/SKILL.md"

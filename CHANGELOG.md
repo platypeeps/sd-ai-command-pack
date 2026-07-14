@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0 - 2026-07-11
+
+- Added a distributed, Bash 3.2-compatible toolchain preflight that selects and
+  verifies a supported Python once, reports project-check candidates without
+  executing them, and provides deterministic JSON diagnostics.
+- Updated SD workflow guidance to separate project checks, pack full-checks,
+  and optional AI review while avoiding nested Git writes during finish-work.
+- Reduced the default remote PR review loop from five rounds to two while
+  retaining the environment-variable override for exceptional review cycles.
+
 ## 0.8.7 - 2026-07-09
 
 - Bounded Prism and Gito provider calls, capped repeated Prism fallback

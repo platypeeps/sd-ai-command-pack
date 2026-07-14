@@ -138,6 +138,7 @@ class GeneratedParityTests(InstallTestCase):
         self.assertTrue((root / ".agents/skills/sd-update-spec/SKILL.md").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-shell-lib.sh").is_file())
+        self.assertTrue((root / "scripts/sd-ai-command-pack-toolchain.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-housekeeping.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-scope.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-preflight.mjs").is_file())
@@ -276,6 +277,7 @@ class GeneratedParityTests(InstallTestCase):
         self.assertTrue((root / ".agents/skills/sd-full-check/SKILL.md").is_file())
         self.assertTrue((root / ".agents/skills/sd-housekeeping/SKILL.md").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
+        self.assertTrue((root / "scripts/sd-ai-command-pack-toolchain.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-housekeeping.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-scope.sh").is_file())
         self.assertTrue((root / "scripts/sd-ai-command-pack-review-preflight.mjs").is_file())
@@ -692,7 +694,7 @@ class GeneratedParityTests(InstallTestCase):
             "Missing optional tools print warnings",
             "Bump `manifest.json` whenever shipped payload changes",
             "Treat `templates/**` as the source of truth",
-            "python3 install.py . --force",
+            "sd-ai-command-pack-toolchain.sh run-python -- install.py . --force",
             ".trellis/spec/frontend/adapter-guidelines.md",
             ".trellis/spec/backend/manifest-and-filesystem.md",
         ):
@@ -1022,6 +1024,52 @@ class GeneratedParityTests(InstallTestCase):
                     )
                     self.assertEqual(adapter_body, neutral_body)
 
+    def test_review_pr_remote_round_limit_defaults_to_two(self) -> None:
+        _, files = install.load_manifest()
+        review_command_sources = {
+            file.source
+            for file in files
+            if file.kind in {"command", "prompt"}
+            and "review-pr" in file.target.name
+        }
+
+        self.assertGreater(len(review_command_sources), 0)
+        for source in review_command_sources:
+            with self.subTest(source=source.relative_to(install.ROOT).as_posix()):
+                content = source.read_text(encoding="utf-8")
+                self.assertIn(
+                    "SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`, default `2`",
+                    content,
+                )
+                self.assertNotIn(
+                    "SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`, default `5`",
+                    content,
+                )
+
+        skill = (
+            install.ROOT / "templates/.agents/skills/sd-review-pr/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'REMOTE_REVIEW_ROUND_LIMIT="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT:-2}"',
+            skill,
+        )
+        self.assertIn("configured remote round limit, default two", skill)
+        self.assertNotIn("configured remote round limit, default five", skill)
+
+        readme = (install.ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "| `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote "
+            "review request/fix rounds before asking whether to continue. | `2` |",
+            readme,
+        )
+        guide = (
+            install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "The round limit defaults to\ntwo configured remote-review requests",
+            guide,
+        )
+
     def test_neutral_command_fanout_matches_registry(self) -> None:
         _, files = install.load_manifest()
         neutral_sources = {
@@ -1231,6 +1279,7 @@ class GeneratedParityTests(InstallTestCase):
         expected_targets = {
             "scripts/sd-ai-command-pack-full-check.sh",
             "scripts/sd-ai-command-pack-shell-lib.sh",
+            "scripts/sd-ai-command-pack-toolchain.sh",
             "scripts/sd-ai-command-pack-housekeeping.sh",
             "scripts/sd-ai-command-pack-review-scope.sh",
             "scripts/sd-ai-command-pack-review-preflight.mjs",

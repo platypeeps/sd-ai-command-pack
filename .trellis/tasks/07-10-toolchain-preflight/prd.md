@@ -62,23 +62,23 @@ an actionable remedy instead of running avoidable fallback commands.
 
 ## Acceptance Criteria
 
-- [ ] A deterministic helper selects the documented Python candidate order and
+- [x] A deterministic helper selects the documented Python candidate order and
       prints the selected path/version.
-- [ ] Tests cover repo `.venv`, Windows-style `.venv/Scripts/python.exe`, active
+- [x] Tests cover repo `.venv`, Windows-style `.venv/Scripts/python.exe`, active
       virtualenv, Apple Silicon and Intel Homebrew 3.13, supported PATH Python,
       unsupported Python, missing modules, and explicit override behavior.
-- [ ] A present but invalid repo `.venv` fails once with `make setup` or the
+- [x] A present but invalid repo `.venv` fails once with `make setup` or the
       repository's documented setup remedy; no extra interpreter run occurs.
-- [ ] `doctor` output distinguishes project-check candidates, selected explicit
+- [x] `doctor` output distinguishes project-check candidates, selected explicit
       project check, pack full-check, optional tools, and sandbox cache state.
-- [ ] `sd-review-pr` and `sd-create-pr` report project checks separately from
+- [x] `sd-review-pr` and `sd-create-pr` report project checks separately from
       the deterministic pack gate and use the preflight before direct Python
       validation commands.
-- [ ] Pack-owned finish-work guidance avoids nested Git writes in sandboxed
+- [x] Pack-owned finish-work guidance avoids nested Git writes in sandboxed
       sessions when a no-commit path exists.
-- [ ] No helper auto-installs tools, mutates shell startup files, guesses an
+- [x] No helper auto-installs tools, mutates shell startup files, guesses an
       ambiguous project check, or edits Trellis-owned files.
-- [ ] Installer, removal, provenance, audit, root/template parity, KB freshness,
+- [x] Installer, removal, provenance, audit, root/template parity, KB freshness,
       and full test/coverage gates pass.
 
 ## Out Of Scope

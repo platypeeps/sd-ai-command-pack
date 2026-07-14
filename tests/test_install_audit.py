@@ -392,6 +392,7 @@ class InstallAuditTests(InstallTestCase):
         self.assertEqual(provenance["version"], manifest["version"])
         files = provenance["files"]
         self.assertIn("scripts/sd-ai-command-pack-full-check.sh", files)
+        self.assertIn("scripts/sd-ai-command-pack-toolchain.sh", files)
         self.assertTrue(
             files["scripts/sd-ai-command-pack-full-check.sh"].startswith("sha256:")
         )
@@ -1250,7 +1251,11 @@ class InstallAuditTests(InstallTestCase):
             if path.is_file() and path.name.startswith("sd-ai-command-pack-")
         )
         self.assertTrue(current_scripts)
+        post_rename_scripts = {"sd-ai-command-pack-toolchain.sh"}
+        self.assertLessEqual(post_rename_scripts, set(current_scripts))
         for name in current_scripts:
+            if name in post_rename_scripts:
+                continue
             legacy = "scripts/" + name.replace(
                 "sd-ai-command-pack-", "sd-command-pack-", 1
             )

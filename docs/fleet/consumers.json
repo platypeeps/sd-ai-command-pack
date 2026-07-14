@@ -30,7 +30,7 @@
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
       "pathHint": "~/repos/rwbp/rwbp-coordinator",
-      "platforms": ["claude", "cursor", "gemini", "github", "opencode"]
+      "platforms": ["claude", "gemini", "github", "opencode"]
     },
     {
       "name": "rwbp-website",

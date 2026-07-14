@@ -176,6 +176,76 @@ Wrong: search for "(see git log)" or "(Add test results)" before patching
 Correct: replace hash-keyed commit rows and section bodies by structural anchors
 ```
 
+## Toolchain Preflight Runtime Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing the distributed toolchain helper, SD workflow
+instructions that select Python, or tests that execute dependency-sensitive
+pack commands.
+
+### 2. Signatures
+
+- `bash scripts/sd-ai-command-pack-toolchain.sh doctor [--json]`
+- `bash scripts/sd-ai-command-pack-toolchain.sh python [--require-module NAME]...`
+- `bash scripts/sd-ai-command-pack-toolchain.sh run-python [--require-module NAME]... -- ARGS...`
+
+### 3. Contracts
+
+- Resolve Python once in documented precedence order; explicit overrides and
+  an existing repo `.venv` are authoritative and never fall through after a
+  failed probe.
+- Require Python 3.10 or newer and probe requested modules before executing a
+  workload. Resolution and `doctor` must not execute project workloads.
+- `SD_AI_COMMAND_PACK_PROJECT_CHECK_COMMAND` is the only automatically selected
+  project check. Make targets, package scripts, and executable conventional
+  scripts are report-only candidates.
+- Keep the helper compatible with macOS Bash 3.2, quote paths, avoid `eval`,
+  and support both `.venv/bin/python` and `.venv/Scripts/python.exe`.
+- Report project checks, the pack full-check, and optional AI review as
+  separate verification lanes.
+
+### 4. Validation & Error Matrix
+
+- Invalid CLI or module name -> exit `2` without selecting a tool.
+- No supported Python -> exit `3` with the Homebrew Python 3.13/setup remedy.
+- Invalid selected interpreter, unsupported version, or missing module -> exit
+  `4`, identify the selected source, and do not try another interpreter.
+- Valid `run-python` request -> probe once, then execute the workload once with
+  the selected interpreter.
+- Recursive project-check candidate -> report it as recursive and never invoke
+  it from the full-check lane.
+
+### 5. Good / Base / Bad Cases
+
+- Good: a repo `.venv` lacking `coverage` produces one actionable failure and
+  no Apple/Xcode Python retry.
+- Base: `doctor --json` reports a supported interpreter and zero or more
+  project-check candidates without changing the repo.
+- Bad: trying `python3`, Homebrew Python, and `uv run` in sequence after each
+  fails, or executing an inferred `make check` that recursively calls the pack
+  full-check.
+
+### 6. Tests Required
+
+- Explicit override, repo `.venv`, active virtualenv, Homebrew, PATH fallback,
+  Windows-style virtualenv, unsupported version, and missing-module fixtures.
+- Probe/workload invocation counts and authoritative-candidate stop behavior.
+- Non-mutating Makefile, package-script, executable-script, ambiguity, and
+  recursive-candidate discovery.
+- Installer, removal, provenance, manifest, executable-mode, and root/template
+  parity coverage.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: python3 check.py || /opt/homebrew/bin/python3.13 check.py || uv run check.py
+Correct: sd-ai-command-pack-toolchain.sh run-python --require-module coverage -- check.py
+
+Wrong: infer one project check and run it during doctor
+Correct: report candidates; run only an explicitly configured or repo-documented check
+```
+
 ## Required Patterns
 
 - Use `pathlib.Path` for filesystem work.
