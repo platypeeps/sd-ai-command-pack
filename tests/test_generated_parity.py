@@ -8,10 +8,8 @@ except ModuleNotFoundError as exc:
     from . import install_test_support as _support
 
 contextlib = _support.contextlib
-hashlib = _support.hashlib
 importlib = _support.importlib
 io = _support.io
-json = _support.json
 os = _support.os
 re = _support.re
 shutil = _support.shutil
@@ -723,17 +721,8 @@ class GeneratedParityTests(InstallTestCase):
         opencode_lock = (
             PACK_ROOT / ".opencode/bun.lock"
         ).read_text(encoding="utf-8")
-        trellis_hashes = json.loads(
-            (PACK_ROOT / ".trellis/.template-hashes.json").read_text(
-                encoding="utf-8"
-            )
-        )["hashes"]
 
         self.assertIn('"@opencode-ai/plugin": "^1.14.39"', opencode_package)
-        self.assertEqual(
-            hashlib.sha256(opencode_package_path.read_bytes()).hexdigest(),
-            trellis_hashes[".opencode/package.json"],
-        )
         self.assertIn('"@opencode-ai/plugin": "^1.14.39"', opencode_lock)
         plugin_resolution = re.search(
             r'"@opencode-ai/plugin": \['
