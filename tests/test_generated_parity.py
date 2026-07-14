@@ -8,10 +8,8 @@ except ModuleNotFoundError as exc:
     from . import install_test_support as _support
 
 contextlib = _support.contextlib
-hashlib = _support.hashlib
 importlib = _support.importlib
 io = _support.io
-json = _support.json
 os = _support.os
 re = _support.re
 shutil = _support.shutil
@@ -672,9 +670,6 @@ class GeneratedParityTests(InstallTestCase):
         readme = (PACK_ROOT / "README.md").read_text(encoding="utf-8")
         contributing = (PACK_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
         makefile = (PACK_ROOT / "Makefile").read_text(encoding="utf-8")
-        opencode_package = (
-            PACK_ROOT / ".opencode/package.json"
-        ).read_text(encoding="utf-8")
 
         for expected in (
             "make setup",
@@ -695,6 +690,9 @@ class GeneratedParityTests(InstallTestCase):
             "Bump `manifest.json` whenever shipped payload changes",
             "Treat `templates/**` as the source of truth",
             "sd-ai-command-pack-toolchain.sh run-python -- install.py . --force",
+            "Keep Trellis-owned platform files in their Trellis-managed state",
+            "Track `.opencode/bun.lock`",
+            "`.claude/settings.local.json`",
             ".trellis/spec/frontend/adapter-guidelines.md",
             ".trellis/spec/backend/manifest-and-filesystem.md",
         ):
@@ -714,8 +712,28 @@ class GeneratedParityTests(InstallTestCase):
             "warning: node not found; skipping review-preflight JavaScript syntax checks.",
         ):
             self.assertIn(target, makefile)
-        self.assertIn('"@opencode-ai/plugin": "1.14.39"', opencode_package)
-        self.assertNotIn('"@opencode-ai/plugin": "^', opencode_package)
+
+    def test_opencode_dependency_uses_canonical_range_and_locked_resolution(
+        self,
+    ) -> None:
+        opencode_package_path = PACK_ROOT / ".opencode/package.json"
+        opencode_package = opencode_package_path.read_text(encoding="utf-8")
+        opencode_lock = (
+            PACK_ROOT / ".opencode/bun.lock"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('"@opencode-ai/plugin": "^1.14.39"', opencode_package)
+        self.assertIn('"@opencode-ai/plugin": "^1.14.39"', opencode_lock)
+        plugin_resolution = re.search(
+            r'"@opencode-ai/plugin": \['
+            r'"@opencode-ai/plugin@(\d+\.\d+\.\d+)",.*'
+            r'"sha512-[A-Za-z0-9+/=]+"\]',
+            opencode_lock,
+        )
+        self.assertIsNotNone(
+            plugin_resolution,
+            ".opencode/bun.lock must pin an integrity-checked plugin version",
+        )
 
     def test_repo_declares_mit_license(self) -> None:
         raw, _ = install.load_manifest()
@@ -1243,27 +1261,6 @@ class GeneratedParityTests(InstallTestCase):
         self.assertFalse((install.ROOT / "templates/.cursor/commands/trellis").exists())
         self.assertFalse((install.ROOT / "templates/.gemini/commands/trellis").exists())
         self.assertFalse((install.ROOT / "templates/.opencode/commands/trellis").exists())
-
-    def test_trellis_channel_reference_docs_do_not_use_unsupported_tag_flags(self) -> None:
-        progress_debugging = (
-            install.ROOT
-            / ".agents/skills/trellis-channel/references/progress-debugging.md"
-        ).read_text(encoding="utf-8")
-        workers = (
-            install.ROOT
-            / ".agents/skills/trellis-channel/references/workers.md"
-        ).read_text(encoding="utf-8")
-        command_reference = (
-            install.ROOT
-            / ".agents/skills/trellis-channel/references/command-reference.md"
-        ).read_text(encoding="utf-8")
-
-        self.assertNotIn("--tag", progress_debugging)
-        self.assertNotIn("--tag", workers)
-        self.assertIn("--kind interrupt_requested,interrupted", progress_debugging)
-        self.assertIn("--kind interrupt_requested,interrupted", workers)
-        self.assertIn("Question: check this when you reach the next turn.", workers)
-        self.assertIn("interrupt_requested` / `interrupted", command_reference)
 
     def test_pack_owned_scripts_use_sd_ai_command_pack_identity(self) -> None:
         raw, files = install.load_manifest()
