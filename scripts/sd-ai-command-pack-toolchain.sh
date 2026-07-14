@@ -142,6 +142,23 @@ valid_module_name() {
   return 0
 }
 
+valid_python_version() {
+  local version="$1" remainder minor patch
+  case "$version" in
+    ''|*[!0-9.]*|.*|*.) return 1 ;;
+  esac
+  remainder="${version#*.}"
+  [ "$remainder" != "$version" ] || return 1
+  minor="${remainder%%.*}"
+  [ -n "$minor" ] || return 1
+  patch="${remainder#*.}"
+  [ "$patch" != "$remainder" ] || return 1
+  case "$patch" in
+    ''|*.*) return 1 ;;
+  esac
+  return 0
+}
+
 verify_python() {
   local output status
   if [ "${#REQUIRED_MODULES[@]}" -eq 0 ]; then
@@ -157,6 +174,8 @@ verify_python() {
 
   case "$status" in
     0)
+      valid_python_version "$output" || \
+        fail "selected executable did not report a valid Python version ($PYTHON_COMMAND from $PYTHON_SOURCE): $output; run 'make setup'" 4
       PYTHON_VERSION="$output"
       ;;
     10)

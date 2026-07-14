@@ -149,6 +149,26 @@ class ToolchainPreflightTests(InstallTestCase):
         self.assertTrue(bad_log.exists())
         self.assertFalse(fallback_log.exists())
 
+    def test_zero_exit_non_python_executable_is_rejected(self) -> None:
+        root = self._repo()
+        fake_python = root / "fake-python"
+        fake_python.write_text(
+            "#!/usr/bin/env bash\n"
+            "printf 'not-python\\n'\n",
+            encoding="utf-8",
+        )
+        fake_python.chmod(0o755)
+
+        result = self._run(
+            root,
+            "python",
+            env={"SD_AI_COMMAND_PACK_PYTHON": str(fake_python)},
+        )
+
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertIn("did not report a valid Python version", result.stderr)
+        self.assertIn(str(fake_python), result.stderr)
+
     def test_homebrew_prefix_candidates_are_testable_and_ordered(self) -> None:
         root = self._repo()
         first_prefix = root / "opt-homebrew"
