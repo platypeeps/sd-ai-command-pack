@@ -52,6 +52,22 @@ Python-only contributor setups.
     scripts/sd-ai-command-pack-update-spec-kb.py
   ```
 
+## Trellis-Owned Platform Files
+
+- Keep Trellis-owned platform files in their Trellis-managed state so
+  `trellis update --dry-run --migrate` does not report avoidable local
+  overrides.
+- In particular, keep `.opencode/package.json` byte-identical to Trellis'
+  canonical dependency range. Track `.opencode/bun.lock` in this repo to pin
+  the exact resolved dependency graph, and refresh it from `.opencode/` with:
+
+  ```bash
+  bun install --lockfile-only
+  ```
+
+- Put machine-specific Claude permissions in the ignored
+  `.claude/settings.local.json`, not Trellis-owned `.claude/settings.json`.
+
 ## Specs To Read First
 
 - [Adapter guidelines](.trellis/spec/frontend/adapter-guidelines.md) for adding
