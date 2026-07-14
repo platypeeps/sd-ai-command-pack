@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.1 - 2026-07-14
+
+- Migrated the exact legacy Claude adapter ignore sequence into the managed
+  `.gitignore` block without changing later project-owned overrides.
+- Excluded generated Repomix maps from legacy-reference scans while retaining
+  scans of their source documentation.
+
 ## 0.9.0 - 2026-07-11
 
 - Added a distributed, Bash 3.2-compatible toolchain preflight that selects and

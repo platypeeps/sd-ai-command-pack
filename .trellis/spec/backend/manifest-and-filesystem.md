@@ -134,7 +134,8 @@ dry-run and real runs agree). Never vouched: `FORCE_PRESERVED_TARGETS`
 (user-tunable), managed-block targets (shared ownership), generated files
 (receipt, gitignore block, provenance itself), and conflict results.
 Entries survive for targets still recorded in the receipt so filtered runs
-do not shrink coverage. The audit fails on content drift (naming the
+do not shrink coverage. The audit ignores stale provenance claims for those
+never-vouched targets from older installs, then fails on content drift (naming the
 recorded pack version), on a vouched target that is missing while not
 gitignored (even when the receipt no longer lists it — provenance is the
 tamper-evidence of last resort), on any symlink or non-regular node at a
@@ -417,6 +418,10 @@ remain in a consumer repo:
   names, `sd-refresh-specs`, the legacy env-var prefixes, the old
   `TRELLIS_REVIEW_PR_PACK.md` guide name, and each rename-era
   `sd-command-pack-*` script filename)
+
+Generated `docs/repomix-map.md` aggregates are excluded from the reference
+scan. Their source documentation is scanned directly, so scanning the generated
+copy adds duplicate or self-referential warnings without expanding coverage.
 
 Consumers remove flagged artifacts manually; the audit keeps warning until
 they do, and the warnings never block an otherwise clean audit. Do not

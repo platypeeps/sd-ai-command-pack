@@ -70,6 +70,17 @@ SOURCE_ONLY_ALLOWED_PACK_FILES = {
     "scripts/sd-ai-command-pack-fleet-preflight.py",
 }
 
+PROVENANCE_NEVER_VOUCHED_TARGETS = {
+    ".gitignore",
+    ".gito/config.toml",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    ".github/copilot-instructions.md",
+    ".prism/rules.json",
+    INSTALLED_TARGETS_FILE.as_posix(),
+    PACK_MANIFEST_FILE.as_posix(),
+    PROVENANCE_FILE.as_posix(),
+}
+
 LEGACY_PACK_PATHS = {
     ".agents/skills/sd-refresh-specs": "use .agents/skills/sd-update-spec",
     ".agents/skills/trellis-full-check": "use .agents/skills/sd-full-check",
@@ -194,6 +205,7 @@ REFERENCE_SCAN_EXCLUDED_PARTS = {
     "__pycache__",
     "node_modules",
 }
+REFERENCE_SCAN_EXCLUDED_NAMES = {"repomix-map.md"}
 
 MAX_REFERENCE_SCAN_BYTES = 1_000_000
 
@@ -597,6 +609,8 @@ def audit_provenance(root: Path) -> tuple[list[str], str | None]:
         if is_unsafe_installed_target(target):
             failures.append(f"{PROVENANCE_FILE} contains unsafe target {raw_target!r}")
             continue
+        if target in PROVENANCE_NEVER_VOUCHED_TARGETS:
+            continue
         path = root / target
         # Per-target lstat mirrors the provenance-file gate: missing,
         # symlink, non-regular, and cannot-be-inspected are distinguished
@@ -652,6 +666,8 @@ def audit_provenance(root: Path) -> tuple[list[str], str | None]:
 
 
 def _is_excluded_scan_path(relative_path: Path) -> bool:
+    if relative_path.name in REFERENCE_SCAN_EXCLUDED_NAMES:
+        return True
     path_text = relative_path.as_posix()
     for excluded in REFERENCE_SCAN_EXCLUDED_PARTS:
         if "/" in excluded:
