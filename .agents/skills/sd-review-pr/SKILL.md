@@ -16,6 +16,9 @@ GitHub Copilot is the default remote reviewer unless a repo overrides it.
 
 - Require `gh` and an authenticated GitHub session before starting:
   `gh --version` and `gh auth status`.
+- Run the pack toolchain doctor once before dependency-sensitive work. Reuse
+  that selected Python for the command run and do not probe raw interpreters in
+  sequence after an authoritative candidate fails.
 - Resolve the pull request from the current branch unless the user supplies a
   PR number or URL. Stop if no PR is found.
 - Do not stage unrelated work. If the working tree is dirty before the first
@@ -33,7 +36,7 @@ GitHub Copilot is the default remote reviewer unless a repo overrides it.
   or the configured round limit is reached.
 - Count one remote loop as: trigger the configured remote reviewer, wait for
   completion, inspect review/CI state, address findings, and push any resulting
-  commit. After the configured remote round limit, default five, stop before
+  commit. After the configured remote round limit, default two, stop before
   starting another loop and ask the user for permission to continue.
 - Treat the configured remote reviewer and other bot comments as actionable by
   default, but verify against the current diff, project specs, and tests before
@@ -57,6 +60,7 @@ GitHub Copilot is the default remote reviewer unless a repo overrides it.
 ## Step 1: Resolve PR And Local State
 
 ```bash
+bash scripts/sd-ai-command-pack-toolchain.sh doctor
 gh --version
 gh auth status
 git status -sb
@@ -83,6 +87,11 @@ LOCAL_HEAD=$(git rev-parse HEAD)
 test -n "$PR_NUMBER" && test "$PR_NUMBER" != "null"
 gh_pr_view_checked --json number,url,isDraft,headRefName,headRefOid,baseRefName,state,reviewRequests,latestReviews,statusCheckRollup
 ```
+
+If the toolchain helper is missing, stop and report that the pack should be
+reinstalled. Route ad hoc Python validations through
+`bash scripts/sd-ai-command-pack-toolchain.sh run-python --require-module
+<name> -- <arguments>` so dependency failures are reported once.
 
 Capture:
 
@@ -162,7 +171,7 @@ REMOTE_REVIEWER="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER:-copilot-pull-re
 REMOTE_REVIEWER_LABEL="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER_LABEL:-GitHub Copilot}"
 REMOTE_REVIEW_AUTHOR_MATCH="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_AUTHOR_MATCH:-$REMOTE_REVIEWER}"
 REMOTE_REVIEW_REQUEST_COMMAND="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND:-}"
-REMOTE_REVIEW_ROUND_LIMIT="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT:-5}"
+REMOTE_REVIEW_ROUND_LIMIT="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT:-2}"
 ```
 
 Use `REMOTE_REVIEWER` as the GitHub reviewer login or slug, and
@@ -510,9 +519,12 @@ handoff.
 Report:
 
 - PR number and URL.
-- Whether deterministic local full-check passed with Prism/Gito disabled for
-  the `sd-review-pr` cycle.
-- Number of remote review rounds completed and reviewer label/slug used.
+- Project checks: configured command or reported candidates, and which project
+  checks actually ran.
+- Pack full-check: whether the deterministic local gate passed with Prism/Gito
+  disabled for the `sd-review-pr` cycle.
+- Optional AI review: number of remote rounds completed and reviewer label/slug
+  used, or why remote review was skipped.
 - Comments fixed, rebutted, or left for user decision.
 - Commits pushed during the loop.
 - Finish-work actions and any archive/journal commits pushed.

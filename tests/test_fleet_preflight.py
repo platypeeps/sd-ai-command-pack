@@ -57,10 +57,8 @@ class FleetPreflightTests(InstallTestCase):
                 "answerbook/mezmo_benchmark",
             },
         )
-        self.assertIn("cursor", by_slug["platypeeps/rwbp-coordinator"].platforms)
-        for slug, consumer in by_slug.items():
-            if slug != "platypeeps/rwbp-coordinator":
-                self.assertNotIn("cursor", consumer.platforms)
+        for consumer in by_slug.values():
+            self.assertNotIn("cursor", consumer.platforms)
             self.assertIn("claude", consumer.platforms)
             self.assertIn("gemini", consumer.platforms)
             self.assertIn("github", consumer.platforms)

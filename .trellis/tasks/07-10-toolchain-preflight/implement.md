@@ -64,11 +64,11 @@ Run ShellCheck when available and explicitly test with macOS Bash 3.2.
 
 ## Completion Checklist
 
-- [ ] All resolution and single-execution fixtures pass.
-- [ ] Project-check discovery is conservative and non-mutating.
-- [ ] Pack-owned skills use/report the helper consistently.
-- [ ] Docs use Homebrew Python 3.13 and explain `.venv` precedence.
-- [ ] Root/template helper and skill mirrors match.
-- [ ] Version, changelog, manifest, provenance, and receipt are synchronized.
-- [ ] Coverage, Ruff, ShellCheck, install audit, KB freshness, and deterministic
+- [x] All resolution and single-execution fixtures pass.
+- [x] Project-check discovery is conservative and non-mutating.
+- [x] Pack-owned skills use/report the helper consistently.
+- [x] Docs use Homebrew Python 3.13 and explain `.venv` precedence.
+- [x] Root/template helper and skill mirrors match.
+- [x] Version, changelog, manifest, provenance, and receipt are synchronized.
+- [x] Coverage, Ruff, ShellCheck, install audit, KB freshness, and deterministic
       full-check pass.

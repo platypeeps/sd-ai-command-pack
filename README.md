@@ -183,6 +183,11 @@ fast-forwarding, deleting merged refs, and reporting the final clean state.
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
+| `SD_AI_COMMAND_PACK_PYTHON` | Authoritative Python executable used by the toolchain preflight. | repo `.venv`, active virtualenv, Homebrew Python 3.13, then supported `python3` |
+| `SD_AI_COMMAND_PACK_PROJECT_CHECK_COMMAND` | Explicit trusted project-check command; discovered candidates are never auto-selected. | unset |
+| `SD_AI_COMMAND_PACK_TOOLCHAIN_PLATFORM` | Advanced/test override for toolchain platform detection. | `uname -s` |
+| `SD_AI_COMMAND_PACK_TOOLCHAIN_HOMEBREW_PREFIXES` | Advanced/test override for colon-separated Homebrew Python prefixes. | `/opt/homebrew:/usr/local` |
+| `SD_AI_COMMAND_PACK_REPO_ROOT` | Advanced/test override for the repository root inspected by the toolchain helper. | Git top-level directory |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND` | Extra repo-local preflight command for full-check. | unset |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS` | Package scripts to run when a compatible package runner is available. | `typecheck lint test:unit test:integration build test:e2e` |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS` | Boolean flag to skip all package-script checks. | unset |
@@ -213,7 +218,7 @@ fast-forwarding, deleting merged refs, and reporting the final clean state.
 | `SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR` | PR number or URL for `sd-review-pr` when it cannot resolve the pull request from the current branch. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER` | Remote reviewer login/slug for `sd-review-pr`. | `copilot-pull-request-reviewer` |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND` | Custom command for requesting a remote review. | unset |
-| `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote review request/fix rounds before asking whether to continue. | `5` |
+| `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote review request/fix rounds before asking whether to continue. | `2` |
 
 The deprecated `REVIEW_PREFLIGHT_PR_BODY` fallback remains honored and is
 documented in the installed guide for older target repos.
@@ -286,6 +291,7 @@ python3 scripts/sd-ai-command-pack-install-audit.py \
   --expected-platform github --expected-platform opencode
 bash -n scripts/sd-ai-command-pack-full-check.sh
 bash -n scripts/sd-ai-command-pack-shell-lib.sh
+bash -n scripts/sd-ai-command-pack-toolchain.sh
 bash -n scripts/sd-ai-command-pack-review-local.sh
 bash -n scripts/sd-ai-command-pack-review-scope.sh
 python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run
@@ -383,8 +389,8 @@ Python; the system Python often lacks the dev dependencies and can try to write
 bytecode caches under protected `~/Library/Caches` paths.
 
 ```bash
-BREW_PYTHON="${BREW_PYTHON:-/opt/homebrew/bin/python3}"  # Apple Silicon Homebrew
-test -x "$BREW_PYTHON" || BREW_PYTHON=/usr/local/bin/python3  # Intel Homebrew
+BREW_PYTHON="${BREW_PYTHON:-/opt/homebrew/bin/python3.13}"  # Apple Silicon Homebrew
+test -x "$BREW_PYTHON" || BREW_PYTHON=/usr/local/bin/python3.13  # Intel Homebrew
 "$BREW_PYTHON" -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements-dev.txt

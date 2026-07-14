@@ -44,6 +44,9 @@ Quick links:
 - `scripts/sd-ai-command-pack-full-check.sh`: canonical full-check script.
 - `scripts/sd-ai-command-pack-shell-lib.sh`: shared Bash helpers sourced by
   the full-check, review-local, and review-scope scripts.
+- `scripts/sd-ai-command-pack-toolchain.sh`: non-mutating toolchain doctor and
+  deterministic Python resolver used by SD workflows before dependency-sensitive
+  checks.
 - `scripts/sd-ai-command-pack-housekeeping.sh`: canonical post-merge housekeeping script.
 - `scripts/sd-ai-command-pack-record-session.py`: one-shot session journal
   recorder — wraps Trellis' `add_session.py`, resolving commit subjects
@@ -181,7 +184,7 @@ The default remote reviewer for review-pr is GitHub Copilot's
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_AUTHOR_MATCH`,
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND`, and
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`. The round limit defaults to
-five configured remote-review requests before the command asks whether to keep
+two configured remote-review requests before the command asks whether to keep
 going.
 
 The create-pr wrapper honors `SD_AI_COMMAND_PACK_CREATE_PR_BASE` for a base
@@ -666,14 +669,32 @@ Common environment variables:
 
 ### Full Check And Preflight
 
+Run the non-mutating toolchain doctor before dependency-sensitive SD workflows:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh doctor
+bash scripts/sd-ai-command-pack-toolchain.sh doctor --json
+bash scripts/sd-ai-command-pack-toolchain.sh run-python \
+  --require-module coverage -- -m coverage --version
+```
+
+The helper resolves Python once in this order: `SD_AI_COMMAND_PACK_PYTHON`,
+the repo `.venv` (POSIX or Windows layout), active `VIRTUAL_ENV`, Apple Silicon
+then Intel Homebrew Python 3.13 on macOS, and finally a supported `python3` on
+`PATH`. An explicit override or existing repo `.venv` is authoritative: if it
+is invalid or lacks a required module, the helper stops with one `make setup`
+remedy rather than silently falling through. `doctor` reports project-check
+candidates but never executes them. Only
+`SD_AI_COMMAND_PACK_PROJECT_CHECK_COMMAND` selects a project check.
+
 On macOS, prefer a Homebrew Python-backed virtualenv for repo-local Python
 checks, especially coverage runs. Apple/Xcode Python often lacks project dev
 dependencies and can try to write bytecode caches under protected
 `~/Library/Caches` paths. A portable setup is:
 
 ```bash
-BREW_PYTHON="${BREW_PYTHON:-/opt/homebrew/bin/python3}"
-test -x "$BREW_PYTHON" || BREW_PYTHON=/usr/local/bin/python3
+BREW_PYTHON="${BREW_PYTHON:-/opt/homebrew/bin/python3.13}"
+test -x "$BREW_PYTHON" || BREW_PYTHON=/usr/local/bin/python3.13
 "$BREW_PYTHON" -m venv .venv
 . .venv/bin/activate
 ```
@@ -695,6 +716,20 @@ export RUFF_CACHE_DIR="${RUFF_CACHE_DIR:-$SANDBOX_TMP/sd-ai-command-pack-ruff-ca
 These variables are safe for normal developer shells too: they only redirect
 ephemeral tool state and do not change what the checks validate.
 
+- `SD_AI_COMMAND_PACK_PYTHON`: authoritative Python executable for the
+  toolchain helper. It must be Python 3.10 or newer and include every module
+  requested with `--require-module`.
+- `SD_AI_COMMAND_PACK_PROJECT_CHECK_COMMAND`: explicit trusted project-check
+  command selected by the repo/operator. Toolchain discovery only reports
+  candidates when this is unset.
+- `SD_AI_COMMAND_PACK_TOOLCHAIN_PLATFORM`: advanced/test override for platform
+  detection; normal shells should leave it unset.
+- `SD_AI_COMMAND_PACK_TOOLCHAIN_HOMEBREW_PREFIXES`: advanced/test override for
+  the colon-separated Homebrew prefix search order; defaults to
+  `/opt/homebrew:/usr/local` on macOS.
+- `SD_AI_COMMAND_PACK_REPO_ROOT`: advanced/test override for the repository
+  root inspected by the toolchain helper; normal runs discover the Git
+  top-level directory and should leave it unset.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`: explicit base ref for branch review.
   When unset, branch-diff helpers use the discovered remote default ref, then
   the current branch upstream, then the first available remote ref.
@@ -1173,6 +1208,7 @@ export RUFF_CACHE_DIR="${RUFF_CACHE_DIR:-$SANDBOX_TMP/sd-ai-command-pack-ruff-ca
 python3 scripts/sd-ai-command-pack-install-audit.py
 bash -n scripts/sd-ai-command-pack-full-check.sh
 bash -n scripts/sd-ai-command-pack-shell-lib.sh
+bash -n scripts/sd-ai-command-pack-toolchain.sh
 bash -n scripts/sd-ai-command-pack-review-local.sh
 bash -n scripts/sd-ai-command-pack-review-scope.sh
 python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run

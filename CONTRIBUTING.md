@@ -8,6 +8,7 @@ some security scanners can lag newer Python AST changes.
 
 ```bash
 make setup
+bash scripts/sd-ai-command-pack-toolchain.sh doctor
 ```
 
 `make setup` creates `.venv`, installs `requirements-dev.txt` and
@@ -40,14 +41,15 @@ Python-only contributor setups.
 - After changing shipped payload, self-sync the dogfood install when needed:
 
   ```bash
-  python3 install.py . --force
+  bash scripts/sd-ai-command-pack-toolchain.sh run-python -- install.py . --force
   ```
 
 - Refresh the generated KB before full-check after README, docs, spec, or task
   edits:
 
   ```bash
-  python3 scripts/sd-ai-command-pack-update-spec-kb.py
+  bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+    scripts/sd-ai-command-pack-update-spec-kb.py
   ```
 
 ## Specs To Read First
