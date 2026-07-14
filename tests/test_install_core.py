@@ -69,6 +69,33 @@ class InstallCoreTests(InstallTestCase):
         self.assertEqual(content.count(install.TRELLIS_GITIGNORE_END), 1)
         self.assert_trellis_gitignore_block(content)
 
+    def test_install_migrates_legacy_claude_gitignore_sequence(self) -> None:
+        sequence = (
+            ".claude/**\n"
+            "!.claude/commands/\n"
+            "!.claude/commands/sd/\n"
+            "!.claude/commands/sd/*.md\n"
+        )
+        managed = (
+            f"{install.TRELLIS_GITIGNORE_START}\n"
+            "stale\n"
+            f"{install.TRELLIS_GITIGNORE_END}\n"
+        )
+
+        merged = install.merge_trellis_gitignore_block(sequence + managed)
+        self.assertEqual(merged.count(sequence), 1)
+        self.assertEqual(merged, install.merge_trellis_gitignore_block(merged))
+
+        appended = install.merge_trellis_gitignore_block(sequence + "dist/\n")
+        self.assertEqual(appended.count(sequence), 1)
+        self.assertTrue(appended.startswith("dist/\n\n"))
+
+        later_override = install.merge_trellis_gitignore_block(
+            sequence + managed + sequence
+        )
+        self.assertEqual(later_override.count(sequence), 2)
+        self.assertTrue(later_override.endswith(sequence))
+
     def test_install_replaces_blanket_trellis_gitignore_entry(self) -> None:
         root = self.make_repo()
         gitignore = root / ".gitignore"

@@ -618,6 +618,30 @@ class InstallAuditTests(InstallTestCase):
         self.assertNotIn(".gitignore", rebuilt)
         self.assertNotIn(".github/copilot-instructions.md", rebuilt)
 
+    def test_install_audit_ignores_stale_never_vouched_entries(self) -> None:
+        root = self.make_repo(".github")
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        provenance_path = root / install.PROVENANCE_FILE
+        payload = json.loads(provenance_path.read_text(encoding="utf-8"))
+        payload["files"][".gitignore"] = "sha256:" + "0" * 64
+        provenance_path.write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("installed target drifted", result.stdout)
+
     def test_installed_target_candidates_falls_back_when_receipts_are_unsafe(
         self,
     ) -> None:
@@ -1271,6 +1295,29 @@ class InstallAuditTests(InstallTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         (root / "README.md").write_text(
             "The my-trellis-review-pr-project name is not a command.\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("legacy pack reference remains", result.stdout)
+
+    def test_install_audit_skips_generated_repomix_map_references(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        repomix_map = root / "docs/repomix-map.md"
+        repomix_map.parent.mkdir(parents=True, exist_ok=True)
+        repomix_map.write_text(
+            "Generated copy mentioning trellis-review-pr and sd-refresh-specs.\n",
             encoding="utf-8",
         )
 

@@ -329,6 +329,10 @@ The install audit checks
 pack-like files that are not listed in the installed-targets snapshot, and warns
 when legacy pack names such as `trellis-full-check`, `trellis-housekeeping`,
 `trellis-review-pr`, or `sd-refresh-specs` still appear in target files.
+Generated `docs/repomix-map.md` aggregates are excluded from that reference
+scan because their source documents are scanned directly.
+The audit also ignores stale provenance claims for shared or generated targets
+that current installers never vouch, including the managed `.gitignore`.
 Current installs also write `.sd-ai-command-pack/manifest.json`; the audit uses
 that manifest snapshot to derive the expected installed target set for shared
 files and detected platforms. Fleet or scripted refreshes should pass explicit

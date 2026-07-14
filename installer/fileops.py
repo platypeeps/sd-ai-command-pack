@@ -38,6 +38,13 @@ from installer.registry import (
     TRELLIS_GITIGNORE_TARGET,
 )
 
+_LEGACY_CLAUDE_GITIGNORE_SEQUENCE = (
+    ".claude/**",
+    "!.claude/commands/",
+    "!.claude/commands/sd/",
+    "!.claude/commands/sd/*.md",
+)
+
 
 @dataclass(frozen=True)
 class InstallResult:
@@ -307,6 +314,26 @@ def remove_unmanaged_trellis_blanket_entries(current: str) -> tuple[str, bool]:
     return "".join(kept), removed
 
 
+def remove_legacy_claude_gitignore_sequence(current: str) -> tuple[str, bool]:
+    """Remove the exact pre-managed-block Claude policy used by older installs."""
+    lines = current.splitlines(keepends=True)
+    kept: list[str] = []
+    removed = False
+    index = 0
+    sequence_length = len(_LEGACY_CLAUDE_GITIGNORE_SEQUENCE)
+    while index < len(lines):
+        candidate = tuple(
+            line.rstrip("\r\n") for line in lines[index : index + sequence_length]
+        )
+        if candidate == _LEGACY_CLAUDE_GITIGNORE_SEQUENCE:
+            removed = True
+            index += sequence_length
+            continue
+        kept.append(lines[index])
+        index += 1
+    return "".join(kept), removed
+
+
 def merge_trellis_gitignore_block(current: str) -> str:
     block = trellis_gitignore_block()
     start_index, end_index = marker_pair_indexes(
@@ -317,12 +344,14 @@ def merge_trellis_gitignore_block(current: str) -> str:
     )
     has_start = start_index != -1
     if has_start:
+        prefix, _ = remove_legacy_claude_gitignore_sequence(current[:start_index])
         replace_end = end_index + len(TRELLIS_GITIGNORE_END)
         if replace_end < len(current) and current[replace_end] == "\n":
             replace_end += 1
-        return current[:start_index] + block + current[replace_end:]
+        return prefix + block + current[replace_end:]
 
     prefix, _ = remove_unmanaged_trellis_blanket_entries(current)
+    prefix, _ = remove_legacy_claude_gitignore_sequence(prefix)
     if not prefix.strip():
         return block
     if not prefix.endswith("\n"):
