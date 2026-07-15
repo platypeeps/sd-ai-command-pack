@@ -1,6 +1,6 @@
 # The test suite uses stdlib unittest plus PyYAML for skill frontmatter parsing.
 # coverage.py enforces coverage gates; Ruff provides the CI lint lane.
-coverage==7.6.0
+coverage==7.15.1
 PyYAML==6.0.3
 ruff==0.15.20
 mypy==2.3.0
