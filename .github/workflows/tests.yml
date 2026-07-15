@@ -45,15 +45,13 @@ jobs:
         run: python3 -m pip install -r requirements-dev.txt
 
       - name: Run tests
-        # Absolute env paths so subprocesses launched from temp cwds still
-        # load the config and write their shards where combine finds them.
+        # Shards the suite by module across workers (coverage --parallel-mode
+        # writes one data file per shard for the combine step below). The
+        # runner sets the absolute coverage env so installer subprocesses
+        # launched from temp cwds still load the config and land their shards
+        # where combine finds them.
         shell: bash
-        run: |
-          set -o pipefail
-          COVERAGE_PROCESS_START="$(pwd)/.coveragerc" \
-          COVERAGE_FILE="$(pwd)/.coverage" \
-          PYTHONPATH="$(pwd)/tests/coverage_sitecustomize${PYTHONPATH:+:$PYTHONPATH}" \
-          python3 -m coverage run --parallel-mode -m unittest discover -s tests 2>&1 | tee unittest-output.log
+        run: bash .github/scripts/run-tests.sh
 
       - name: Fail on skipped tests
         shell: bash

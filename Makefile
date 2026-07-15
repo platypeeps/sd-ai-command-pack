@@ -15,7 +15,7 @@ hooks:
 	git config core.hooksPath .githooks
 
 test:
-	@status=0; COVERAGE_PROCESS_START="$$(pwd)/.coveragerc" COVERAGE_FILE="$$(pwd)/.coverage" PYTHONPATH="$$(pwd)/tests/coverage_sitecustomize$${PYTHONPATH:+:$$PYTHONPATH}" "$(VENV_PYTHON)" -m coverage run --parallel-mode -m unittest discover -s tests > unittest-output.log 2>&1 || status=$$?; cat unittest-output.log; exit $$status
+	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/run-tests.sh
 	@if grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log; then printf '%s\n' "Tests skipped locally; install required tools or make the skip explicit."; exit 1; fi
 	"$(VENV_PYTHON)" -m coverage combine
 	"$(VENV_PYTHON)" -m coverage report --include="install.py,installer/*" --fail-under=100

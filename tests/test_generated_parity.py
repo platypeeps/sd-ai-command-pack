@@ -640,11 +640,7 @@ class GeneratedParityTests(InstallTestCase):
         self.assertIn("unittest-output.log", gitignore)
         for expected in (
             "python3 -m pip install -r requirements-dev.txt",
-            'COVERAGE_PROCESS_START="$(pwd)/.coveragerc"',
-            'COVERAGE_FILE="$(pwd)/.coverage"',
-            'PYTHONPATH="$(pwd)/tests/coverage_sitecustomize'
-            '${PYTHONPATH:+:$PYTHONPATH}"',
-            "python3 -m coverage run --parallel-mode -m unittest discover -s tests",
+            "bash .github/scripts/run-tests.sh",
             "python3 -m coverage combine",
             'python3 -m coverage report --include="install.py,installer/*"'
             " --fail-under=100",
@@ -660,11 +656,7 @@ class GeneratedParityTests(InstallTestCase):
             "node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             "bash .github/scripts/check-opencode-js.sh",
             "warning: node not found; skipping JavaScript syntax checks.",
-            'COVERAGE_PROCESS_START="$(pwd)/.coveragerc"',
-            'COVERAGE_FILE="$(pwd)/.coverage"',
-            'PYTHONPATH="$(pwd)/tests/coverage_sitecustomize'
-            '${PYTHONPATH:+:$PYTHONPATH}"',
-            "python -m coverage run --parallel-mode -m unittest discover -s tests",
+            "bash .github/scripts/run-tests.sh",
             "python -m coverage combine",
             'python -m coverage report --include="install.py,installer/*"'
             " --fail-under=100",
@@ -672,6 +664,19 @@ class GeneratedParityTests(InstallTestCase):
             ' --include="scripts/sd-ai-command-pack-*" --fail-under=76',
         ):
             self.assertIn(expected, readme)
+        # The parallel test runner owns the coverage rig contract that used to
+        # live inline in the workflow/README: the absolute coverage env plus
+        # per-module --parallel-mode sharding.
+        runner = (
+            PACK_ROOT / ".github/scripts/run-tests.sh"
+        ).read_text(encoding="utf-8")
+        for expected in (
+            'COVERAGE_PROCESS_START="$REPO_ROOT/.coveragerc"',
+            'COVERAGE_FILE="$REPO_ROOT/.coverage"',
+            "tests/coverage_sitecustomize",
+            "coverage run --parallel-mode -m unittest",
+        ):
+            self.assertIn(expected, runner)
 
     def test_opencode_javascript_syntax_gate_checks_tracked_files(self) -> None:
         script = PACK_ROOT / ".github/scripts/check-opencode-js.sh"
