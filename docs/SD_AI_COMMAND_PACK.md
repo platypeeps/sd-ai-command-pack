@@ -651,13 +651,14 @@ Remote branches: origin/HEAD, origin/<default>
 PR #<number>: merged at <timestamp>
 Open PRs: <none|summary>
 Open issues: <none|summary>
-Current Trellis task: <none|summary>
+Current Trellis task: <none active|task id + status>
 Anomalies: none
 
 Insight:
 <One short evidence-backed observation about what housekeeping proved or surfaced; omit this section when there is nothing useful beyond the final state.>
 
-No follow-up needed for this cleanup stream.
+Next Steps:
+<Always present, even on a verification-only clean run: the current Trellis task and the next high-value work. A short numbered list covering open follow-up items from the session, any in-progress Trellis task to resume, then high-value Trellis task candidates / roadmap items to start next. If the backlog is empty, write "No open or planned Trellis work — backlog is clear.">
 ```
 
 Include `Insight:` only when the script output or session context supports a
@@ -665,11 +666,14 @@ useful observation, such as the PR lifecycle being healthy, cleanup being
 verification-only because the PR was already merged, stale refs being pruned,
 the repo being ready for the next work stream, or a process improvement being
 worth tracking. Do not add filler insights that merely restate `clean`.
-If follow-up items exist, replace the final no-follow-up sentence with a
-numbered `Next Steps` list that covers: open follow-up items from the session,
-existing Trellis tasks already in progress, and high-value Trellis task
-candidates to start next. If a category has no evidence, the report should say
-that plainly instead of inventing work.
+Always end with a numbered `Next Steps` section, even on a verification-only
+clean run: the report still names the current Trellis task and the next
+high-value work. It covers open follow-up items from the session, any
+in-progress Trellis task to resume, then high-value Trellis task candidates
+or roadmap items to start next. It also states the current task in the
+final-state rows. If a category has no evidence, the report says that plainly
+instead of inventing work, and if the whole backlog is empty it says the
+backlog is clear rather than omitting the section.
 
 ## Configuration
 
