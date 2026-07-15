@@ -547,6 +547,19 @@ def _as_list(value: Any) -> list[Any]:
     return value
 
 
+def _dig(obj: Any, *keys: str) -> Any:
+    """Walk nested dict keys, returning None on any shape mismatch.
+
+    Skip-not-raise: an unexpected payload shape yields None so callers can
+    silently skip it, matching the tolerant GraphQL-descent contract.
+    """
+    for key in keys:
+        if not isinstance(obj, dict):
+            return None
+        obj = obj.get(key)
+    return obj
+
+
 def _one_line(text: str, *, limit: int = 220) -> str:
     collapsed = " ".join(text.split())
     if len(collapsed) <= limit:
@@ -657,21 +670,14 @@ query($owner:String!, $name:String!, $number:Int!) {
             ],
             repo_root,
         )
-        if not isinstance(payload, dict):
-            continue
-        data = payload.get("data")
-        if not isinstance(data, dict):
-            continue
-        repository = data.get("repository")
-        if not isinstance(repository, dict):
-            continue
-        pull_request = repository.get("pullRequest")
-        if not isinstance(pull_request, dict):
-            continue
-        threads = pull_request.get("reviewThreads")
-        if not isinstance(threads, dict):
-            continue
-        thread_nodes = threads.get("nodes")
+        thread_nodes = _dig(
+            payload,
+            "data",
+            "repository",
+            "pullRequest",
+            "reviewThreads",
+            "nodes",
+        )
         if not isinstance(thread_nodes, list):
             continue
         for thread in thread_nodes:

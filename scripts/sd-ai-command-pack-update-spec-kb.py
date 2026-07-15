@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import filecmp
+import functools
 import os
 import shlex
 import shutil
@@ -131,29 +132,9 @@ EXCLUDED_PARTS = {
 }
 
 
-def repo_root() -> Path:
+def _git_stdout(root: Path | None, *args: str) -> str | None:
     result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        text=True,
-        encoding="utf-8",
-        errors="surrogateescape",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-    if result.returncode == 0 and result.stdout.strip():
-        return Path(result.stdout.strip()).resolve()
-    print(
-        "warning: not inside a git repository; using the current directory as "
-        "the repo root.",
-        file=sys.stderr,
-    )
-    return Path.cwd().resolve()
-
-
-def git_remote_url(root: Path) -> str | None:
-    result = subprocess.run(
-        ["git", "config", "--get", "remote.origin.url"],
+        ["git", *args],
         cwd=root,
         text=True,
         encoding="utf-8",
@@ -164,8 +145,24 @@ def git_remote_url(root: Path) -> str | None:
     )
     if result.returncode != 0:
         return None
-    remote = result.stdout.strip()
-    return remote or None
+    stripped = result.stdout.strip()
+    return stripped or None
+
+
+def repo_root() -> Path:
+    toplevel = _git_stdout(None, "rev-parse", "--show-toplevel")
+    if toplevel is not None:
+        return Path(toplevel).resolve()
+    print(
+        "warning: not inside a git repository; using the current directory as "
+        "the repo root.",
+        file=sys.stderr,
+    )
+    return Path.cwd().resolve()
+
+
+def git_remote_url(root: Path) -> str | None:
+    return _git_stdout(root, "config", "--get", "remote.origin.url")
 
 
 def github_repository_url_from_remote(remote_url: str | None) -> str | None:
@@ -491,19 +488,10 @@ def ensure_ignore_file(path: Path, *, local: bool) -> str:
 
 
 def git_info_exclude_path(root: Path) -> Path | None:
-    result = subprocess.run(
-        ["git", "rev-parse", "--git-path", "info/exclude"],
-        cwd=root,
-        text=True,
-        encoding="utf-8",
-        errors="surrogateescape",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-    if result.returncode != 0 or not result.stdout.strip():
+    stdout = _git_stdout(root, "rev-parse", "--git-path", "info/exclude")
+    if stdout is None:
         return None
-    path = Path(result.stdout.strip())
+    path = Path(stdout)
     if not path.is_absolute():
         path = root / path
     return path
@@ -975,7 +963,10 @@ def kb_destination_for_source(source: Path) -> Path:
     return Path(category_folder_for_source(source)) / destination_filename_for_source(source)
 
 
-def source_destination_entries(sources: list[Path]) -> list[tuple[Path, Path]]:
+@functools.lru_cache(maxsize=None)
+def _source_destination_entries_cached(
+    sources: tuple[Path, ...],
+) -> tuple[tuple[Path, Path], ...]:
     used: set[Path] = set()
     entries: list[tuple[Path, Path]] = []
     for source in sources:
@@ -989,7 +980,14 @@ def source_destination_entries(sources: list[Path]) -> list[tuple[Path, Path]]:
             counter += 1
         used.add(candidate)
         entries.append((source, candidate))
-    return entries
+    return tuple(entries)
+
+
+def source_destination_entries(sources: list[Path]) -> list[tuple[Path, Path]]:
+    # Pure in `sources`; memoized so the dashboard/overview/copy paths that each
+    # recompute it per run share one computation. Return a fresh list so callers
+    # can never mutate the cached tuple.
+    return list(_source_destination_entries_cached(tuple(sources)))
 
 
 def source_destination_map(sources: list[Path]) -> dict[Path, Path]:

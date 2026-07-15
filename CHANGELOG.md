@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.3 - 2026-07-15
+
+- Internal consolidation of shipped helpers (no behavior change): deduplicated
+  the three inline git wrappers in the update-spec KB tool behind one helper,
+  compute the source→destination mapping once per run instead of four times, and
+  simplified the review-learnings GraphQL response walk. Byte-identical output
+  and exit codes.
+
 ## 0.10.2 - 2026-07-14
 
 - Trimmed the installed guide's verbatim per-platform `.gitignore` example to a
