@@ -37,7 +37,7 @@ class InstallCoreTests(InstallTestCase):
         gitignore = root / ".gitignore"
         gitignore.write_text("dist/\n", encoding="utf-8")
 
-        result = self.run_install(root)
+        result = self.run_install_inproc(root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
         content = gitignore.read_text(encoding="utf-8")
@@ -58,7 +58,7 @@ class InstallCoreTests(InstallTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_install(root)
+        result = self.run_install_inproc(root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
         content = gitignore.read_text(encoding="utf-8")
@@ -101,7 +101,7 @@ class InstallCoreTests(InstallTestCase):
         gitignore = root / ".gitignore"
         gitignore.write_text("dist/\n.trellis/\nlogs/\n", encoding="utf-8")
 
-        result = self.run_install(root)
+        result = self.run_install_inproc(root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
         content = gitignore.read_text(encoding="utf-8")
@@ -112,7 +112,7 @@ class InstallCoreTests(InstallTestCase):
     def test_trellis_gitignore_dry_run_does_not_write_file(self) -> None:
         root = self.make_repo()
 
-        result = self.run_install(root, "--dry-run")
+        result = self.run_install_inproc(root, "--dry-run")
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("created", result.stdout)
@@ -161,7 +161,7 @@ class InstallCoreTests(InstallTestCase):
         ):
             (root / platform_dir).mkdir()
 
-        result = self.run_install(root)
+        result = self.run_install_inproc(root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
@@ -200,7 +200,7 @@ class InstallCoreTests(InstallTestCase):
     def test_platform_filter_still_installs_shared_assets(self) -> None:
         root = self.make_repo(".claude", ".cursor", ".gemini", ".github", ".opencode")
 
-        result = self.run_install(root, "--platform", "gemini")
+        result = self.run_install_inproc(root, "--platform", "gemini")
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".agents/skills/sd-start/SKILL.md").is_file())
@@ -306,7 +306,7 @@ class InstallCoreTests(InstallTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_install(root)
+        result = self.run_install_inproc(root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
         content = copilot_instructions.read_text(encoding="utf-8")
@@ -328,7 +328,7 @@ class InstallCoreTests(InstallTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_install(root)
+        result = self.run_install_inproc(root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
         content = copilot_instructions.read_text(encoding="utf-8")
@@ -354,7 +354,7 @@ class InstallCoreTests(InstallTestCase):
         )
         copilot_instructions.write_text(existing, encoding="utf-8")
 
-        result = self.run_install(root)
+        result = self.run_install_inproc(root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
         content = copilot_instructions.read_text(encoding="utf-8")
@@ -366,7 +366,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn(".github/copilot-instructions.md", result.stdout)
 
         # A second run is now idempotent because the block is marker-tracked.
-        second = self.run_install(root)
+        second = self.run_install_inproc(root)
         self.assertEqual(second.returncode, 0, second.stdout)
         self.assertEqual(copilot_instructions.read_text(encoding="utf-8"), content)
         self.assertIn("unchanged", second.stdout)
@@ -374,7 +374,7 @@ class InstallCoreTests(InstallTestCase):
     def test_copilot_guidance_dry_run_does_not_write_instructions(self) -> None:
         root = self.make_repo(".github")
 
-        result = self.run_install(root, "--dry-run")
+        result = self.run_install_inproc(root, "--dry-run")
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("created", result.stdout)
@@ -731,7 +731,7 @@ class InstallCoreTests(InstallTestCase):
 
     def test_install_applies_umask_derived_modes_and_source_exec_bits(self) -> None:
         root = self.make_repo()
-        result = self.run_install(root)
+        result = self.run_install_inproc(root)
         self.assertEqual(result.returncode, 0, result.stdout)
 
         current_umask = os.umask(0)
@@ -751,7 +751,7 @@ class InstallCoreTests(InstallTestCase):
 
     def test_force_refresh_normalizes_downgraded_file_modes(self) -> None:
         root = self.make_repo()
-        result = self.run_install(root)
+        result = self.run_install_inproc(root)
         self.assertEqual(result.returncode, 0, result.stdout)
 
         doc = root / "docs/SD_AI_COMMAND_PACK.md"
@@ -759,7 +759,7 @@ class InstallCoreTests(InstallTestCase):
         doc.write_text("tampered\n", encoding="utf-8")
         os.chmod(doc, 0o600)
 
-        result = self.run_install(root, "--force")
+        result = self.run_install_inproc(root, "--force")
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(doc.read_text(encoding="utf-8"), original)
 
@@ -1330,7 +1330,7 @@ class InstallCoreTests(InstallTestCase):
         codex_marker.parent.mkdir(parents=True, exist_ok=True)
         codex_marker.write_text("# codex install artifact\n", encoding="utf-8")
 
-        result = self.run_install(root)
+        result = self.run_install_inproc(root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertFalse((root / ".zcode/commands/sd/start.md").exists())
         self.assertIn(
@@ -1342,7 +1342,7 @@ class InstallCoreTests(InstallTestCase):
         zcode_marker = root / ".zcode/cli/agents/trellis-check.md"
         zcode_marker.parent.mkdir(parents=True, exist_ok=True)
         zcode_marker.write_text("# zcode trellis agent\n", encoding="utf-8")
-        result = self.run_install(root)
+        result = self.run_install_inproc(root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / ".zcode/commands/sd/start.md").is_file())
 
@@ -1365,7 +1365,7 @@ class InstallCoreTests(InstallTestCase):
 
     def test_install_prints_platform_note_for_manifest_less_platform(self) -> None:
         root = self.make_repo()
-        result = self.run_install(root, "--platform", "codex")
+        result = self.run_install_inproc(root, "--platform", "codex")
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
             "note: platform codex has no dedicated manifest files; "
@@ -1425,7 +1425,7 @@ class InstallCoreTests(InstallTestCase):
         target.parent.mkdir(parents=True)
         target.write_text("local edit\n", encoding="utf-8")
 
-        result = self.run_install(root, "--force", "--backup")
+        result = self.run_install_inproc(root, "--force", "--backup")
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("backup", result.stdout)
@@ -1470,7 +1470,7 @@ class InstallCoreTests(InstallTestCase):
         target.parent.mkdir(parents=True)
         target.write_text("local edit\n", encoding="utf-8")
 
-        result = self.run_install(root, "--dry-run", "--force", "--backup")
+        result = self.run_install_inproc(root, "--dry-run", "--force", "--backup")
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("overwritten", result.stdout)
@@ -1492,7 +1492,7 @@ class InstallCoreTests(InstallTestCase):
         target.write_text("local edit\n", encoding="utf-8")
         target.with_name("SKILL.md.bak").symlink_to(outside_backup)
 
-        result = self.run_install(root, "--force", "--backup")
+        result = self.run_install_inproc(root, "--force", "--backup")
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("SKILL.md.bak1", result.stdout)
@@ -1517,7 +1517,7 @@ class InstallCoreTests(InstallTestCase):
     def test_dry_run_does_not_write_files(self) -> None:
         root = self.make_repo(".opencode")
 
-        result = self.run_install(root, "--dry-run")
+        result = self.run_install_inproc(root, "--dry-run")
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("mode: dry-run", result.stdout)

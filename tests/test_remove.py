@@ -47,7 +47,7 @@ class RemoveTests(InstallTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_install(root)
+        result = self.run_install_inproc(root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
         self.assertTrue((root / ".prism/rules.json").is_file())
@@ -62,7 +62,7 @@ class RemoveTests(InstallTestCase):
             copilot_instructions.read_text(encoding="utf-8"),
         )
 
-        result = self.run_install(root, "--remove")
+        result = self.run_install_inproc(root, "--remove")
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("mode: remove", result.stdout)
@@ -83,10 +83,10 @@ class RemoveTests(InstallTestCase):
 
     def test_remove_dry_run_does_not_delete_pack_files(self) -> None:
         root = self.make_repo()
-        result = self.run_install(root)
+        result = self.run_install_inproc(root)
         self.assertEqual(result.returncode, 0, result.stdout)
 
-        result = self.run_install(root, "--remove", "--dry-run")
+        result = self.run_install_inproc(root, "--remove", "--dry-run")
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("mode: remove", result.stdout)
@@ -100,7 +100,7 @@ class RemoveTests(InstallTestCase):
 
     def test_remove_preserves_drifted_files_unless_forced(self) -> None:
         root = self.make_repo()
-        result = self.run_install(root)
+        result = self.run_install_inproc(root)
         self.assertEqual(result.returncode, 0, result.stdout)
 
         script = root / "scripts/sd-ai-command-pack-full-check.sh"
@@ -109,14 +109,14 @@ class RemoveTests(InstallTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_install(root, "--remove")
+        result = self.run_install_inproc(root, "--remove")
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("preserved", result.stdout)
         self.assertIn("content differs from installed pack version", result.stdout)
         self.assertTrue(script.is_file())
 
-        result = self.run_install(root, "--remove", "--force", "--backup")
+        result = self.run_install_inproc(root, "--remove", "--force", "--backup")
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("backup", result.stdout)
@@ -129,7 +129,7 @@ class RemoveTests(InstallTestCase):
         self,
     ) -> None:
         root = self.make_repo()
-        result = self.run_install(root)
+        result = self.run_install_inproc(root)
         self.assertEqual(result.returncode, 0, result.stdout)
 
         user_file = root / "USER_DATA.txt"
@@ -158,7 +158,7 @@ class RemoveTests(InstallTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_install(root, "--remove", "--force", "--dry-run")
+        result = self.run_install_inproc(root, "--remove", "--force", "--dry-run")
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
@@ -172,7 +172,7 @@ class RemoveTests(InstallTestCase):
         self.assertTrue(git_config.is_file())
         self.assertTrue(user_file.is_file())
 
-        result = self.run_install(root, "--remove", "--force")
+        result = self.run_install_inproc(root, "--remove", "--force")
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
