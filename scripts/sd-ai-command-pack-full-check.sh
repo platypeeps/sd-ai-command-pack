@@ -16,10 +16,19 @@ REVIEW_LOCAL_TEMP_FILES=()
 cleanup_full_check_temp_files() {
   local status=$?
   local file
-  for file in ${REVIEW_LOCAL_TEMP_FILES[@]+"${REVIEW_LOCAL_TEMP_FILES[@]}"}; do
-    [ -n "$file" ] && rm -f -- "$file"
-  done
+  if [ "${#REVIEW_LOCAL_TEMP_FILES[@]}" -gt 0 ]; then
+    for file in "${REVIEW_LOCAL_TEMP_FILES[@]}"; do
+      [ -n "$file" ] && rm -f -- "$file"
+    done
+  fi
   return "$status"
+}
+
+full_check_mktemp() {
+  local pattern="$1"
+  local temp_dir="${TMPDIR:-/tmp}"
+  mkdir -p -- "$temp_dir"
+  mktemp "$temp_dir/$pattern"
 }
 
 trap cleanup_full_check_temp_files EXIT
@@ -133,7 +142,7 @@ collect_reviewable_changed_paths() {
   local base_ref="$1"
   local paths_file
   local merge_base_status=0
-  paths_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-review-paths.XXXXXX")"
+  paths_file="$(full_check_mktemp "sd-ai-command-pack-review-paths.XXXXXX")"
   REVIEW_LOCAL_TEMP_FILES+=("$paths_file")
   : >"$paths_file"
 
@@ -180,7 +189,7 @@ review_filter_pattern_for_path() {
 
 review_filter_csv_from_paths() {
   local patterns_file
-  patterns_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-review-filters.XXXXXX")"
+  patterns_file="$(full_check_mktemp "sd-ai-command-pack-review-filters.XXXXXX")"
   REVIEW_LOCAL_TEMP_FILES+=("$patterns_file")
   : >"$patterns_file"
 
@@ -206,7 +215,7 @@ review_filter_csv_from_paths() {
 reviewable_changed_filter_csv() {
   local base_ref="$1"
   local changed_paths_file
-  changed_paths_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-reviewable-paths.XXXXXX")"
+  changed_paths_file="$(full_check_mktemp "sd-ai-command-pack-reviewable-paths.XXXXXX")"
   REVIEW_LOCAL_TEMP_FILES+=("$changed_paths_file")
   collect_reviewable_changed_paths "$base_ref" >"$changed_paths_file"
   review_filter_csv_from_paths <"$changed_paths_file"
@@ -348,7 +357,7 @@ run_gito_review() {
   local out_dir="${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR:-.build/review/gito}"
   local filters_file
   local filters
-  filters_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-review-filter-csv.XXXXXX")"
+  filters_file="$(full_check_mktemp "sd-ai-command-pack-review-filter-csv.XXXXXX")"
   REVIEW_LOCAL_TEMP_FILES+=("$filters_file")
   reviewable_changed_filter_csv "$base_ref" >"$filters_file"
   IFS= read -r filters <"$filters_file" || true
@@ -751,7 +760,7 @@ run_ci_classification_report() {
   fi
 
   local paths_file
-  paths_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-ci-paths.XXXXXX")"
+  paths_file="$(full_check_mktemp "sd-ai-command-pack-ci-paths.XXXXXX")"
   REVIEW_LOCAL_TEMP_FILES+=("$paths_file")
   collect_current_changed_paths "$paths_file"
 

@@ -148,6 +148,10 @@ class FullCheckTests(InstallTestCase):
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE", script)
         self.assertIn("cleanup_full_check_temp_files()", script)
         self.assertIn("trap cleanup_full_check_temp_files EXIT", script)
+        self.assertIn('if [ "${#REVIEW_LOCAL_TEMP_FILES[@]}" -gt 0 ]; then', script)
+        self.assertIn('for file in "${REVIEW_LOCAL_TEMP_FILES[@]}"; do', script)
+        self.assertIn("full_check_mktemp()", script)
+        self.assertIn('mkdir -p -- "$temp_dir"', script)
         self.assertIn('trap \'exit 130\' INT', script)
         self.assertIn('REVIEW_LOCAL_TEMP_FILES+=("$paths_file")', script)
         self.assertIn('REVIEW_LOCAL_TEMP_FILES+=("$patterns_file")', script)
@@ -539,23 +543,26 @@ class FullCheckTests(InstallTestCase):
         )
         gito.chmod(0o755)
         temp_root = root / "tmp"
+        env = {
+            **os.environ,
+            "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+            "TMPDIR": str(temp_root),
+            "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT": "0",
+            "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0",
+            "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
+            "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK": "0",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS": "1",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_GITO": "1",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF": "HEAD",
+        }
+        env.pop("UV_CACHE_DIR", None)
+        env.pop("UV_TOOL_DIR", None)
 
         result = subprocess.run(
             [self._bash_path, "scripts/sd-ai-command-pack-full-check.sh"],
             cwd=root,
-            env={
-                **os.environ,
-                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
-                "TMPDIR": str(temp_root),
-                "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT": "0",
-                "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0",
-                "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
-                "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK": "0",
-                "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS": "1",
-                "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
-                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO": "1",
-                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF": "HEAD",
-            },
+            env=env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
