@@ -164,38 +164,34 @@ class InstallCoreTests(InstallTestCase):
         result = self.run_install_inproc(root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
-        self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
-        self.assertTrue((root / "scripts/sd-ai-command-pack-toolchain.sh").is_file())
-        self.assertTrue((root / ".prism/rules.json").is_file())
-        self.assertTrue((root / "docs/SD_AI_COMMAND_PACK.md").is_file())
+        self.assert_paths_are_files(
+            root,
+            [
+                ".agents/skills/sd-review-pr/SKILL.md",
+                "scripts/sd-ai-command-pack-full-check.sh",
+                "scripts/sd-ai-command-pack-toolchain.sh",
+                ".prism/rules.json",
+                "docs/SD_AI_COMMAND_PACK.md",
+            ],
+        )
         self.assert_installed_targets_snapshot_matches_selection(root)
-        self.assertFalse((root / ".claude/commands/sd/continue.md").exists())
-        self.assertFalse((root / ".cursor/commands/sd-continue.md").exists())
-        self.assertFalse((root / ".gemini/commands/sd/continue.toml").exists())
-        self.assertFalse((root / ".github/prompts/sd-review-pr.prompt.md").exists())
-        self.assertFalse((root / ".github/copilot-instructions.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
-        self.assertIn(
-            "active Trellis claude install not detected",
-            result.stdout,
+        self.assert_paths_absent(
+            root,
+            [
+                ".claude/commands/sd/continue.md",
+                ".cursor/commands/sd-continue.md",
+                ".gemini/commands/sd/continue.toml",
+                ".github/prompts/sd-review-pr.prompt.md",
+                ".github/copilot-instructions.md",
+                ".opencode/commands/sd-review-pr.md",
+            ],
         )
-        self.assertIn(
-            "active Trellis cursor install not detected",
-            result.stdout,
-        )
-        self.assertIn(
-            "active Trellis gemini install not detected",
-            result.stdout,
-        )
-        self.assertIn(
-            "active Trellis github install not detected",
-            result.stdout,
-        )
-        self.assertIn(
-            "active Trellis opencode install not detected",
-            result.stdout,
-        )
+        for platform in ("claude", "cursor", "gemini", "github", "opencode"):
+            with self.subTest(platform=platform):
+                self.assertIn(
+                    f"active Trellis {platform} install not detected",
+                    result.stdout,
+                )
 
     def test_platform_filter_still_installs_shared_assets(self) -> None:
         root = self.make_repo(".claude", ".cursor", ".gemini", ".github", ".opencode")
@@ -203,98 +199,113 @@ class InstallCoreTests(InstallTestCase):
         result = self.run_install_inproc(root, "--platform", "gemini")
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertTrue((root / ".agents/skills/sd-start/SKILL.md").is_file())
-        self.assertTrue((root / ".agents/skills/sd-create-pr/SKILL.md").is_file())
-        self.assertTrue((root / ".agents/skills/sd-work-backlog/SKILL.md").is_file())
-        self.assertTrue((root / ".agents/skills/sd-work-designs/SKILL.md").is_file())
-        self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
-        self.assertTrue((root / ".agents/skills/sd-review-local/SKILL.md").is_file())
-        self.assertTrue((root / ".agents/skills/sd-review-local-all/SKILL.md").is_file())
-        self.assertTrue((root / ".agents/skills/sd-review-learnings/SKILL.md").is_file())
-        self.assertTrue((root / ".agents/skills/sd-full-check/SKILL.md").is_file())
-        self.assertTrue((root / ".agents/skills/sd-housekeeping/SKILL.md").is_file())
-        self.assertTrue((root / "scripts/sd-ai-command-pack-full-check.sh").is_file())
-        self.assertTrue((root / "scripts/sd-ai-command-pack-shell-lib.sh").is_file())
-        self.assertTrue((root / "scripts/sd-ai-command-pack-toolchain.sh").is_file())
-        self.assertTrue((root / "scripts/sd-ai-command-pack-housekeeping.sh").is_file())
-        self.assertTrue((root / "scripts/sd-ai-command-pack-review-scope.sh").is_file())
-        self.assertTrue((root / "scripts/sd-ai-command-pack-review-preflight.mjs").is_file())
-        self.assertTrue((root / "scripts/sd-ai-command-pack-review-local.sh").is_file())
-        self.assertTrue((root / "scripts/sd-ai-command-pack-review-learnings.py").is_file())
-        self.assertTrue((root / "scripts/sd-ai-command-pack-pr-body-scope.py").is_file())
-        self.assertTrue((root / "scripts/sd-ai-command-pack-update-spec-kb.py").is_file())
-        self.assertTrue((root / ".prism/rules.json").is_file())
-        self.assertTrue((root / "docs/SD_AI_COMMAND_PACK.md").is_file())
+        self.assert_paths_are_files(
+            root,
+            [
+                ".agents/skills/sd-start/SKILL.md",
+                ".agents/skills/sd-create-pr/SKILL.md",
+                ".agents/skills/sd-work-backlog/SKILL.md",
+                ".agents/skills/sd-work-designs/SKILL.md",
+                ".agents/skills/sd-review-pr/SKILL.md",
+                ".agents/skills/sd-review-local/SKILL.md",
+                ".agents/skills/sd-review-local-all/SKILL.md",
+                ".agents/skills/sd-review-learnings/SKILL.md",
+                ".agents/skills/sd-full-check/SKILL.md",
+                ".agents/skills/sd-housekeeping/SKILL.md",
+                "scripts/sd-ai-command-pack-full-check.sh",
+                "scripts/sd-ai-command-pack-shell-lib.sh",
+                "scripts/sd-ai-command-pack-toolchain.sh",
+                "scripts/sd-ai-command-pack-housekeeping.sh",
+                "scripts/sd-ai-command-pack-review-scope.sh",
+                "scripts/sd-ai-command-pack-review-preflight.mjs",
+                "scripts/sd-ai-command-pack-review-local.sh",
+                "scripts/sd-ai-command-pack-review-learnings.py",
+                "scripts/sd-ai-command-pack-pr-body-scope.py",
+                "scripts/sd-ai-command-pack-update-spec-kb.py",
+                ".prism/rules.json",
+                "docs/SD_AI_COMMAND_PACK.md",
+            ],
+        )
         self.assert_installed_targets_snapshot_matches_selection(
             root,
             platforms=["gemini"],
         )
-        self.assertTrue((root / ".gemini/commands/sd/continue.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/sd/start.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/sd/finish-work.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/sd/create-pr.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/sd/work-backlog.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/sd/work-designs.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/sd/review-pr.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/sd/review-local.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/sd/review-local-all.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/sd/review-learnings.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/sd/full-check.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/sd/housekeeping.toml").is_file())
-        self.assertTrue((root / ".gemini/commands/sd/update-spec.toml").is_file())
-        self.assertFalse((root / ".claude/commands/sd/continue.md").exists())
-        self.assertFalse((root / ".claude/commands/sd/start.md").exists())
-        self.assertFalse((root / ".claude/commands/sd/finish-work.md").exists())
-        self.assertFalse((root / ".claude/commands/sd/create-pr.md").exists())
-        self.assertFalse((root / ".claude/commands/sd/work-backlog.md").exists())
-        self.assertFalse((root / ".claude/commands/sd/work-designs.md").exists())
-        self.assertFalse((root / ".claude/commands/sd/review-pr.md").exists())
-        self.assertFalse((root / ".claude/commands/sd/review-local.md").exists())
-        self.assertFalse((root / ".claude/commands/sd/review-local-all.md").exists())
-        self.assertFalse((root / ".claude/commands/sd/review-learnings.md").exists())
-        self.assertFalse((root / ".claude/commands/sd/full-check.md").exists())
-        self.assertFalse((root / ".claude/commands/sd/housekeeping.md").exists())
-        self.assertFalse((root / ".claude/commands/sd/update-spec.md").exists())
-        self.assertFalse((root / ".cursor/commands/sd-continue.md").exists())
-        self.assertFalse((root / ".cursor/commands/sd-start.md").exists())
-        self.assertFalse((root / ".cursor/commands/sd-finish-work.md").exists())
-        self.assertFalse((root / ".cursor/commands/sd-create-pr.md").exists())
-        self.assertFalse((root / ".cursor/commands/sd-work-backlog.md").exists())
-        self.assertFalse((root / ".cursor/commands/sd-work-designs.md").exists())
-        self.assertFalse((root / ".cursor/commands/sd-review-pr.md").exists())
-        self.assertFalse((root / ".cursor/commands/sd-review-local.md").exists())
-        self.assertFalse((root / ".cursor/commands/sd-review-local-all.md").exists())
-        self.assertFalse((root / ".cursor/commands/sd-review-learnings.md").exists())
-        self.assertFalse((root / ".cursor/commands/sd-full-check.md").exists())
-        self.assertFalse((root / ".cursor/commands/sd-housekeeping.md").exists())
-        self.assertFalse((root / ".cursor/commands/sd-update-spec.md").exists())
-        self.assertFalse((root / ".github/prompts/sd-continue.prompt.md").exists())
-        self.assertFalse((root / ".github/prompts/sd-start.prompt.md").exists())
-        self.assertFalse((root / ".github/prompts/sd-finish-work.prompt.md").exists())
-        self.assertFalse((root / ".github/prompts/sd-create-pr.prompt.md").exists())
-        self.assertFalse((root / ".github/prompts/sd-work-backlog.prompt.md").exists())
-        self.assertFalse((root / ".github/prompts/sd-work-designs.prompt.md").exists())
-        self.assertFalse((root / ".github/prompts/sd-review-pr.prompt.md").exists())
-        self.assertFalse((root / ".github/prompts/sd-review-local.prompt.md").exists())
-        self.assertFalse((root / ".github/prompts/sd-review-local-all.prompt.md").exists())
-        self.assertFalse((root / ".github/prompts/sd-review-learnings.prompt.md").exists())
-        self.assertFalse((root / ".github/prompts/sd-full-check.prompt.md").exists())
-        self.assertFalse((root / ".github/prompts/sd-housekeeping.prompt.md").exists())
-        self.assertFalse((root / ".github/prompts/sd-update-spec.prompt.md").exists())
-        self.assertFalse((root / ".github/copilot-instructions.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-continue.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-start.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-finish-work.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-create-pr.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-work-backlog.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-work-designs.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-review-local.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-review-local-all.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-review-learnings.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-full-check.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-housekeeping.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-update-spec.md").exists())
+        self.assert_paths_are_files(
+            root,
+            [
+                ".gemini/commands/sd/continue.toml",
+                ".gemini/commands/sd/start.toml",
+                ".gemini/commands/sd/finish-work.toml",
+                ".gemini/commands/sd/create-pr.toml",
+                ".gemini/commands/sd/work-backlog.toml",
+                ".gemini/commands/sd/work-designs.toml",
+                ".gemini/commands/sd/review-pr.toml",
+                ".gemini/commands/sd/review-local.toml",
+                ".gemini/commands/sd/review-local-all.toml",
+                ".gemini/commands/sd/review-learnings.toml",
+                ".gemini/commands/sd/full-check.toml",
+                ".gemini/commands/sd/housekeeping.toml",
+                ".gemini/commands/sd/update-spec.toml",
+            ],
+        )
+        self.assert_paths_absent(
+            root,
+            [
+                ".claude/commands/sd/continue.md",
+                ".claude/commands/sd/start.md",
+                ".claude/commands/sd/finish-work.md",
+                ".claude/commands/sd/create-pr.md",
+                ".claude/commands/sd/work-backlog.md",
+                ".claude/commands/sd/work-designs.md",
+                ".claude/commands/sd/review-pr.md",
+                ".claude/commands/sd/review-local.md",
+                ".claude/commands/sd/review-local-all.md",
+                ".claude/commands/sd/review-learnings.md",
+                ".claude/commands/sd/full-check.md",
+                ".claude/commands/sd/housekeeping.md",
+                ".claude/commands/sd/update-spec.md",
+                ".cursor/commands/sd-continue.md",
+                ".cursor/commands/sd-start.md",
+                ".cursor/commands/sd-finish-work.md",
+                ".cursor/commands/sd-create-pr.md",
+                ".cursor/commands/sd-work-backlog.md",
+                ".cursor/commands/sd-work-designs.md",
+                ".cursor/commands/sd-review-pr.md",
+                ".cursor/commands/sd-review-local.md",
+                ".cursor/commands/sd-review-local-all.md",
+                ".cursor/commands/sd-review-learnings.md",
+                ".cursor/commands/sd-full-check.md",
+                ".cursor/commands/sd-housekeeping.md",
+                ".cursor/commands/sd-update-spec.md",
+                ".github/prompts/sd-continue.prompt.md",
+                ".github/prompts/sd-start.prompt.md",
+                ".github/prompts/sd-finish-work.prompt.md",
+                ".github/prompts/sd-create-pr.prompt.md",
+                ".github/prompts/sd-work-backlog.prompt.md",
+                ".github/prompts/sd-work-designs.prompt.md",
+                ".github/prompts/sd-review-pr.prompt.md",
+                ".github/prompts/sd-review-local.prompt.md",
+                ".github/prompts/sd-review-local-all.prompt.md",
+                ".github/prompts/sd-review-learnings.prompt.md",
+                ".github/prompts/sd-full-check.prompt.md",
+                ".github/prompts/sd-housekeeping.prompt.md",
+                ".github/prompts/sd-update-spec.prompt.md",
+                ".github/copilot-instructions.md",
+                ".opencode/commands/sd-continue.md",
+                ".opencode/commands/sd-start.md",
+                ".opencode/commands/sd-finish-work.md",
+                ".opencode/commands/sd-create-pr.md",
+                ".opencode/commands/sd-work-backlog.md",
+                ".opencode/commands/sd-work-designs.md",
+                ".opencode/commands/sd-review-pr.md",
+                ".opencode/commands/sd-review-local.md",
+                ".opencode/commands/sd-review-local-all.md",
+                ".opencode/commands/sd-review-learnings.md",
+                ".opencode/commands/sd-full-check.md",
+                ".opencode/commands/sd-housekeeping.md",
+                ".opencode/commands/sd-update-spec.md",
+            ],
+        )
 
     def test_install_merges_copilot_guidance_preserving_existing_instructions(
         self,
@@ -1521,30 +1532,40 @@ class InstallCoreTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("mode: dry-run", result.stdout)
-        self.assertFalse((root / ".agents/skills/sd-review-pr/SKILL.md").exists())
-        self.assertFalse((root / ".agents/skills/sd-create-pr/SKILL.md").exists())
-        self.assertFalse((root / ".agents/skills/sd-work-backlog/SKILL.md").exists())
-        self.assertFalse((root / ".agents/skills/sd-work-designs/SKILL.md").exists())
-        self.assertFalse((root / ".agents/skills/sd-full-check/SKILL.md").exists())
-        self.assertFalse((root / ".agents/skills/sd-housekeeping/SKILL.md").exists())
-        self.assertFalse((root / "scripts/sd-ai-command-pack-full-check.sh").exists())
-        self.assertFalse((root / "scripts/sd-ai-command-pack-housekeeping.sh").exists())
-        self.assertFalse((root / "scripts/sd-ai-command-pack-review-scope.sh").exists())
-        self.assertFalse((root / "scripts/sd-ai-command-pack-review-preflight.mjs").exists())
-        self.assertFalse((root / "scripts/sd-ai-command-pack-pr-body-scope.py").exists())
-        self.assertFalse((root / "scripts/sd-ai-command-pack-update-spec-kb.py").exists())
-        self.assertFalse((root / ".prism/rules.json").exists())
-        self.assertFalse((root / "docs/SD_AI_COMMAND_PACK.md").exists())
+        self.assert_paths_absent(
+            root,
+            [
+                ".agents/skills/sd-review-pr/SKILL.md",
+                ".agents/skills/sd-create-pr/SKILL.md",
+                ".agents/skills/sd-work-backlog/SKILL.md",
+                ".agents/skills/sd-work-designs/SKILL.md",
+                ".agents/skills/sd-full-check/SKILL.md",
+                ".agents/skills/sd-housekeeping/SKILL.md",
+                "scripts/sd-ai-command-pack-full-check.sh",
+                "scripts/sd-ai-command-pack-housekeeping.sh",
+                "scripts/sd-ai-command-pack-review-scope.sh",
+                "scripts/sd-ai-command-pack-review-preflight.mjs",
+                "scripts/sd-ai-command-pack-pr-body-scope.py",
+                "scripts/sd-ai-command-pack-update-spec-kb.py",
+                ".prism/rules.json",
+                "docs/SD_AI_COMMAND_PACK.md",
+            ],
+        )
         self.assertFalse((root / install.INSTALLED_TARGETS_FILE).exists())
         self.assertIn(".sd-ai-command-pack/installed-targets.txt", result.stdout)
-        self.assertFalse((root / ".opencode/commands/sd-review-pr.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-create-pr.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-work-backlog.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-work-designs.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-full-check.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-housekeeping.md").exists())
-        self.assertFalse((root / ".opencode/commands/sd-update-spec.md").exists())
-        self.assertFalse((root / ".github/copilot-instructions.md").exists())
+        self.assert_paths_absent(
+            root,
+            [
+                ".opencode/commands/sd-review-pr.md",
+                ".opencode/commands/sd-create-pr.md",
+                ".opencode/commands/sd-work-backlog.md",
+                ".opencode/commands/sd-work-designs.md",
+                ".opencode/commands/sd-full-check.md",
+                ".opencode/commands/sd-housekeeping.md",
+                ".opencode/commands/sd-update-spec.md",
+                ".github/copilot-instructions.md",
+            ],
+        )
 
     def test_rejects_non_trellis_repo(self) -> None:
         tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-test-")
@@ -1597,15 +1618,20 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("initialized-trellis-local", result.stdout)
         self.assertIn("local-exclude", result.stdout)
         self.assertIn("local-only-marker-written", result.stdout)
-        self.assertTrue((root / ".trellis/config.yaml").is_file())
-        self.assertTrue((root / ".agents/skills/sd-review-pr/SKILL.md").is_file())
-        self.assertTrue((root / ".agents/skills/sd-create-pr/SKILL.md").is_file())
-        self.assertTrue((root / ".agents/skills/sd-work-backlog/SKILL.md").is_file())
-        self.assertTrue((root / ".agents/skills/sd-work-designs/SKILL.md").is_file())
-        self.assertTrue((root / ".cursor/commands/sd-review-pr.md").is_file())
-        self.assertTrue((root / ".cursor/commands/sd-create-pr.md").is_file())
-        self.assertTrue((root / ".cursor/commands/sd-work-backlog.md").is_file())
-        self.assertTrue((root / ".cursor/commands/sd-work-designs.md").is_file())
+        self.assert_paths_are_files(
+            root,
+            [
+                ".trellis/config.yaml",
+                ".agents/skills/sd-review-pr/SKILL.md",
+                ".agents/skills/sd-create-pr/SKILL.md",
+                ".agents/skills/sd-work-backlog/SKILL.md",
+                ".agents/skills/sd-work-designs/SKILL.md",
+                ".cursor/commands/sd-review-pr.md",
+                ".cursor/commands/sd-create-pr.md",
+                ".cursor/commands/sd-work-backlog.md",
+                ".cursor/commands/sd-work-designs.md",
+            ],
+        )
         self.assertEqual(
             trellis_log.read_text(encoding="utf-8").strip(),
             "init --yes --skip-existing --codex --cursor",

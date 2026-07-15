@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Iterable
 from pathlib import Path
 from unittest import mock
 
@@ -231,6 +232,26 @@ class InstallTestCase(unittest.TestCase):
                 ],
             ),
         )
+
+    def assert_paths_are_files(
+        self, root: Path, relative_paths: Iterable[str]
+    ) -> None:
+        """Assert every ``relative_path`` under ``root`` is an existing file.
+
+        Each path runs in its own ``subTest`` so a single missing file reports
+        exactly which path failed instead of aborting the rest of the run.
+        """
+        for relative_path in relative_paths:
+            with self.subTest(path=relative_path):
+                self.assertTrue((root / relative_path).is_file(), root / relative_path)
+
+    def assert_paths_absent(
+        self, root: Path, relative_paths: Iterable[str]
+    ) -> None:
+        """Assert every ``relative_path`` under ``root`` does not exist."""
+        for relative_path in relative_paths:
+            with self.subTest(path=relative_path):
+                self.assertFalse((root / relative_path).exists(), root / relative_path)
 
     def assert_shell_syntax_valid(self, script: Path) -> None:
         if self._bash_path is None:

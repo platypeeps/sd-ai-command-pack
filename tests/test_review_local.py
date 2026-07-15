@@ -32,10 +32,55 @@ InstallTestCase = _support.InstallTestCase
 class ReviewLocalTests(InstallTestCase):
     """Tests for local Prism/Gito review command behavior."""
 
-    def _make_committed_review_repo(self) -> Path:
-        root = self.make_repo()
+    # Per-class cache of the template dir holding a git repo with the pack
+    # installed. Set lazily on the concrete class and read via ``__dict__`` so a
+    # subclass never reuses a parent's template (mirrors ``_housekeeping_template``).
+    _installed_repo_template: Path | None
+
+    def _build_installed_repo_template(self, root: Path) -> None:
+        """Populate ``root`` as a git repo with the full pack installed.
+
+        Mirrors ``make_repo()`` + ``run_install(root)`` but into a class-scoped
+        template dir. ``run_install`` writes ~80 files via an installer
+        subprocess; running it once per class instead of once per test is the
+        dominant saving here (``make_repo`` alone is cheap).
+        """
+        (root / ".trellis").mkdir()
+        (root / ".trellis" / "config.yaml").write_text("# test\n", encoding="utf-8")
+        self.run_git(root, "init")
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
+
+    def make_installed_review_repo(self) -> Path:
+        """Return an isolated copy of a repo with the pack already installed.
+
+        The canonical installed repo is built once per test class into a
+        template dir; each call ``copytree``-clones it. Every clone is a fully
+        independent tree (its own working files and ``.git``), so tests that run
+        review-local.sh -- writing outputs, creating commits or branches -- never
+        observe each other's state. ``make_repo`` creates no remote, so unlike
+        ``make_housekeeping_repo`` no remote repointing is needed.
+        """
+        cls = type(self)
+        template_root = cls.__dict__.get("_installed_repo_template")
+        if template_root is None:
+            template_root = Path(
+                tempfile.mkdtemp(prefix="sd-ai-command-pack-review-local-template-")
+            )
+            self._build_installed_repo_template(template_root)
+            cls.addClassCleanup(shutil.rmtree, template_root, ignore_errors=True)
+            cls._installed_repo_template = template_root
+
+        tempdir = tempfile.TemporaryDirectory(
+            prefix="sd-ai-command-pack-review-local-test-"
+        )
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name) / "repo"
+        shutil.copytree(template_root, root)
+        return root
+
+    def _make_committed_review_repo(self) -> Path:
+        root = self.make_installed_review_repo()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "app.txt").write_text("codebase\n", encoding="utf-8")
@@ -54,9 +99,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "app.txt").write_text("before\n", encoding="utf-8")
@@ -108,9 +151,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "app.txt").write_text("before\n", encoding="utf-8")
@@ -155,9 +196,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "app.txt").write_text("base\n", encoding="utf-8")
@@ -210,9 +249,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "branch.txt").write_text("base\n", encoding="utf-8")
@@ -267,9 +304,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "app.txt").write_text("codebase\n", encoding="utf-8")
@@ -356,9 +391,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "app.txt").write_text("codebase\n", encoding="utf-8")
@@ -407,9 +440,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "keep.txt").write_text("keep\n", encoding="utf-8")
@@ -462,9 +493,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "app.txt").write_text("before\n", encoding="utf-8")
@@ -525,9 +554,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "app.txt").write_text("before\n", encoding="utf-8")
@@ -580,9 +607,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "app.txt").write_text("before\n", encoding="utf-8")
@@ -636,9 +661,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "app.txt").write_text("codebase\n", encoding="utf-8")
@@ -705,9 +728,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "app.txt").write_text("codebase\n", encoding="utf-8")
@@ -888,9 +909,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "app.txt").write_text("codebase\n", encoding="utf-8")
@@ -972,9 +991,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.write_gito_pack_env(root)
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
@@ -1016,9 +1033,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "app.txt").write_text("base\n", encoding="utf-8")
@@ -1060,9 +1075,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
 
         result = subprocess.run(
             [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh"],
@@ -1087,9 +1100,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         tool_log = root / "custom-tool.log"
 
         result = subprocess.run(
@@ -1117,9 +1128,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         tool_log = root / "custom-tool.log"
 
         result = subprocess.run(
@@ -1148,9 +1157,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         tool_log = root / "custom-tool.log"
 
         result = subprocess.run(
@@ -1181,9 +1188,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         tool_log = root / "custom-tool.log"
 
         result = subprocess.run(
@@ -1218,9 +1223,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
 
         result = subprocess.run(
             [
@@ -1242,9 +1245,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
 
         result = subprocess.run(
             [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "--help"],
@@ -1264,9 +1265,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
 
         result = subprocess.run(
             [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "unknown"],
@@ -1284,9 +1283,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
 
         result = subprocess.run(
             [
@@ -1308,9 +1305,7 @@ class ReviewLocalTests(InstallTestCase):
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         self.write_gito_pack_env(root)
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
@@ -1374,9 +1369,7 @@ class ReviewLocalTests(InstallTestCase):
         self.assertIn("gito attempt 2 review --vs HEAD --filter app.txt", log)
 
     def test_pr_body_scope_script_classifies_review_local_as_ci_review(self) -> None:
-        root = self.make_repo()
-        result = self.run_install(root)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        root = self.make_installed_review_repo()
         changed_files = root / "changed-files.txt"
         changed_files.write_text(
             "scripts/sd-ai-command-pack-review-local.sh\n"

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 99
+- **Total Sessions**: 100
 - **Last Active**: 2026-07-15
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1957 | Active |
+| `journal-2.md` | ~1992 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 100 | 2026-07-15 | Test improvements: review-local install fixture + assertion parametrization | `f0d9217` | `perf/test-improvements` |
 | 99 | 2026-07-15 | Script consolidation (deferred item 2b) | `d8e40dc` | `perf/script-consolidation` |
 | 98 | 2026-07-15 | README audience split (deferred item 2a) | `41a4306` | `docs/readme-audience-split` |
 | 97 | 2026-07-15 | Test speedups: class-scoped fixture + in-process installs (deferred item 1) | `4a481fb` | `perf/test-inprocess-fixtures` |
