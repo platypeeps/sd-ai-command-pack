@@ -14,7 +14,15 @@ cd -- "$REPO_ROOT" || exit 1
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
-if [ -z "${TEST_WORKERS:-}" ]; then
+if [ -n "${TEST_WORKERS:-}" ]; then
+  case "$TEST_WORKERS" in
+    '' | *[!0-9]* | 0)
+      printf '%s\n' \
+        "error: TEST_WORKERS must be a positive integer (got '$TEST_WORKERS')" >&2
+      exit 1
+      ;;
+  esac
+else
   cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '4')"
   case "$cores" in
     '' | *[!0-9]*) cores=4 ;;
@@ -32,8 +40,11 @@ export COVERAGE_PROCESS_START="$REPO_ROOT/.coveragerc"
 export COVERAGE_FILE="$REPO_ROOT/.coverage"
 export PYTHONPATH="$REPO_ROOT/tests/coverage_sitecustomize${PYTHONPATH:+:$PYTHONPATH}"
 
-# Start clean so combine and the skip gate only see this run's data.
-rm -f .coverage .coverage.* unittest-output.log
+# Start clean so combine and the skip gate only see this run's data. Create the
+# log up front so the skip gate and final cat always have a file to read, even
+# if a shard dies before writing any output.
+rm -f .coverage .coverage.*
+: > unittest-output.log
 
 # Largest test file first (size approximates runtime) to shorten the tail.
 # Skip tests/test_install.py: it is an empty compatibility facade
