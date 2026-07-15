@@ -14,6 +14,8 @@ No consumer-specific branch should exist in production installer code.
 The regression fixture should model a two-version refresh: first install a
 manifest without the new Claude command, then remove the active Claude marker
 and refresh with the current manifest. Preserve the installer's existing
-auto-detection semantics and prove that the explicit expected-platform audit
-fails on the resulting partial state. Fleet tooling must continue to pass the
-same explicit platform set to both installation and audit.
+auto-detection semantics and prove that current manifest completeness rejects
+the resulting partial state because older retained Claude receipt entries
+infer that platform. Also prove that the explicit expected-platform audit
+fails without depending on that inference. Fleet tooling must continue to pass
+the same explicit platform set to both installation and audit.

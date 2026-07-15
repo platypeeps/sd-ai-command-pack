@@ -125,6 +125,14 @@ load time, after the unsafe-path rejection. This does not contradict the
 state file, and preservation only refuses to destroy entries the current
 checkout cannot verify.
 
+Manifest completeness closes the newly-added-target gap during a two-version
+refresh. When older receipt entries identify a platform, the audit requires all
+current manifest targets for that platform, including targets that did not
+exist in the older receipt. `--expected-platform PLATFORM` must remain the
+fleet contract because it declares the expected platform independently of
+receipt history; it also catches a wholly absent first install or a receipt
+that has lost every entry for that platform.
+
 ## Provenance
 
 Every non-dry-run install writes `.sd-ai-command-pack/provenance.json`:

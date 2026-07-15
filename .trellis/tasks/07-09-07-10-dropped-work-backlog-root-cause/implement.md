@@ -7,8 +7,9 @@
 2. Assert the refresh reports `active Trellis claude install not detected`,
    preserves old Claude receipt entries, and omits the newly introduced target
    from disk, receipt, and provenance.
-3. Assert the ordinary provenance-based audit reproduces the historical blind
-   spot, while `--expected-platform claude` fails on the missing target.
+3. Assert the current ordinary audit catches the missing target through
+   receipt-inferred manifest completeness, while `--expected-platform claude`
+   catches it without relying on receipt inference.
 4. Keep production installer selection unchanged. The historical run reported
    the skip correctly; fleet preflight now prevents recurrence by supplying
    explicit install and audit platform sets.

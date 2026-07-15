@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Root cause confirmed 2026-07-14: the 0.7.0 fleet run used auto-detection without explicit platforms; hoa-manager and rwbp-coordinator lacked active Trellis Claude markers, so all Claude targets were skipped and only old receipt entries were preserved. Current explicit fleet platform install/audit commands are the compensating control.",
+  "notes": "Root cause confirmed and covered 2026-07-14: the 0.7.0 fleet run used auto-detection without explicit platforms; hoa-manager and rwbp-coordinator lacked active Trellis Claude markers, so all Claude targets were skipped and only old receipt entries were preserved. The focused two-version regression proves the current manifest-completeness audit catches the missing new target through retained receipt inference, while explicit fleet install/audit platform arguments remain the provenance-independent control.",
   "meta": {}
 }

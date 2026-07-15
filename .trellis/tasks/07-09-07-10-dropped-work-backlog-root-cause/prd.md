@@ -24,15 +24,15 @@ Build an installer regression around the 0.7.0 hoa-manager/rwbp-coordinator fail
 
 ## Acceptance Criteria
 
-- [ ] Focused regression test exists for the dropped Claude work-backlog
+- [x] Focused regression test exists for the dropped Claude work-backlog
       scenario or a documented negative reproduction fixture exists.
-- [ ] Any reproduced installer bug is fixed with tests that fail on the old
+- [x] Any reproduced installer bug is fixed with tests that fail on the old
       behavior.
-- [ ] If not reproduced, the task records why and references the passing 0.8.5
+- [x] If not reproduced, the task records why and references the passing 0.8.5
       manifest completeness audit as the safety net.
-- [ ] `make test` and the pack full-check pass after the change or negative
+- [x] `make test` and the pack full-check pass after the change or negative
       documentation.
-- [ ] The fleet rollout task can rely on the result when validating
+- [x] The fleet rollout task can rely on the result when validating
       hoa-manager and rwbp-coordinator.
 
 ## Root Cause Research - 2026-07-14
@@ -68,11 +68,30 @@ manifest and preflight close that gap by emitting explicit `--platform`
 arguments for installation and matching `--expected-platform` arguments for a
 provenance-independent audit. No installer selection change is recommended.
 
-One focused regression is still worthwhile: install an older manifest without
-the Claude work-backlog target, remove the active Claude marker while retaining
-the old receipt, refresh with the newer manifest, and assert that the ordinary
-audit reproduces the historical blind spot while `--expected-platform claude`
-fails. That test should pin both the root cause and the compensating control.
+The focused regression now installs an older manifest without the Claude
+work-backlog target, removes every active Claude marker while retaining the old
+receipt, and refreshes with the current manifest. It confirms that selection
+still intentionally skips the whole inactive platform, preserves older Claude
+receipt entries, and leaves the newly introduced target absent from disk,
+receipt, and provenance.
+
+The current ordinary audit does not reproduce the 0.7.0 blind spot. Since the
+0.8.5 manifest-completeness work, retained older Claude receipt entries infer
+that Claude is expected, so the audit rejects the newly missing target even
+without an explicit flag. `--expected-platform claude` rejects the same state
+without relying on receipt inference and remains the stronger fleet contract,
+especially for a first install or a damaged receipt. No production installer
+bug reproduced, so the generic selection behavior remains unchanged.
+
+## Validation Evidence - 2026-07-14
+
+- `test_refresh_detects_new_target_skipped_with_inactive_claude` models the
+  two-version refresh and verifies installer output, disk state, receipt,
+  provenance, ordinary audit failure, and explicit-platform audit failure.
+- `python -m unittest tests.test_install_audit`: 53 tests passed.
+- `make test`: passed with 100% installer coverage and 78% script coverage.
+- `make lint audit`: Ruff, mypy, Bandit, and Zizmor passed.
+- Pack full-check passed with Prism and Gito explicitly disabled.
 
 ## Notes
 

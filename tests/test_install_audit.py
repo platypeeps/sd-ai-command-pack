@@ -246,6 +246,106 @@ class InstallAuditTests(InstallTestCase):
             result.stdout,
         )
 
+    def test_refresh_detects_new_target_skipped_with_inactive_claude(self) -> None:
+        root = self.make_repo(".claude")
+        target = ".claude/commands/sd/work-backlog.md"
+
+        pack_tempdir = tempfile.TemporaryDirectory(
+            prefix="sd-ai-command-pack-legacy-fixture-"
+        )
+        self.addCleanup(pack_tempdir.cleanup)
+        legacy_pack = Path(pack_tempdir.name)
+        shutil.copytree(PACK_ROOT / "installer", legacy_pack / "installer")
+        shutil.copytree(PACK_ROOT / "templates", legacy_pack / "templates")
+        shutil.copyfile(INSTALLER, legacy_pack / "install.py")
+
+        manifest = json.loads(
+            (PACK_ROOT / "manifest.json").read_text(encoding="utf-8")
+        )
+        manifest["version"] = "0.6.99"
+        manifest["files"] = [
+            record for record in manifest["files"] if record["target"] != target
+        ]
+        (legacy_pack / "manifest.json").write_text(
+            json.dumps(manifest, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        legacy_env = os.environ.copy()
+        legacy_env.pop("COVERAGE_PROCESS_START", None)
+        legacy_env.pop("COVERAGE_FILE", None)
+
+        initial = subprocess.run(
+            [
+                sys.executable,
+                str(legacy_pack / "install.py"),
+                str(root),
+                "--skip-diff-check",
+            ],
+            cwd=legacy_pack,
+            env=legacy_env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(initial.returncode, 0, initial.stdout)
+        self.assertFalse((root / target).exists())
+
+        for marker in install.ACTIVE_TRELLIS_PLATFORM_MARKERS["claude"]:
+            (root / marker).unlink(missing_ok=True)
+
+        refresh = self.run_install(root)
+
+        self.assertEqual(refresh.returncode, 0, refresh.stdout)
+        self.assertIn(
+            f"skipped     {target} "
+            "(active Trellis claude install not detected)",
+            refresh.stdout,
+        )
+        self.assertIn(
+            "kept-in-receipt .claude/commands/sd/start.md",
+            refresh.stdout,
+        )
+        receipt = (root / install.INSTALLED_TARGETS_FILE).read_text(
+            encoding="utf-8"
+        )
+        provenance = json.loads(
+            (root / install.PROVENANCE_FILE).read_text(encoding="utf-8")
+        )
+        self.assertIn(".claude/commands/sd/start.md", receipt)
+        self.assertNotIn(target, receipt)
+        self.assertFalse((root / target).exists())
+        self.assertNotIn(target, provenance["files"])
+
+        audit_script = root / "scripts/sd-ai-command-pack-install-audit.py"
+        ordinary_audit = subprocess.run(
+            [sys.executable, str(audit_script)],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(ordinary_audit.returncode, 1, ordinary_audit.stdout)
+        self.assertIn(
+            f"expected installed target is missing from receipt: {target}",
+            ordinary_audit.stdout,
+        )
+
+        fleet_audit = subprocess.run(
+            [sys.executable, str(audit_script), "--expected-platform", "claude"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(fleet_audit.returncode, 1, fleet_audit.stdout)
+        self.assertIn(
+            f"expected installed target is missing from receipt: {target}",
+            fleet_audit.stdout,
+        )
+
     def test_install_preserves_receipt_entries_for_undetected_platform(self) -> None:
         root = self.make_repo(".claude")
         result = self.run_install(root)
