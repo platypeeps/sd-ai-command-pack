@@ -1785,3 +1785,37 @@ Cut ~240 lines of README/guide duplication from the optimization review with no 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 95: Cache pip deps in CI (optimization Batch D)
+
+**Date**: 2026-07-14
+**Task**: Cache pip deps in CI (optimization Batch D)
+**Branch**: `perf/ci-pip-cache`
+
+### Summary
+
+Final optimization batch: added cache: pip to the three actions/setup-python steps (requirements-dev.txt for the unittest matrix + lint lanes, requirements-security.txt for the security lane) so CI reuses pip's download cache instead of a cold install per job. Additive only — pinned action SHAs unchanged, zizmor clean, parity tests green; no version bump (CI tooling, not shipped payload).
+
+### Main Changes
+
+- Add cache: pip + cache-dependency-path to the 3 setup-python blocks in .github/workflows/tests.yml
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4a346bd` | ci: cache pip dependencies in the setup-python steps |
+
+### Testing
+
+- [OK] YAML valid; make audit (zizmor) no findings; test_generated_parity green (SHAs + guards intact); make full-check green; CI green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
