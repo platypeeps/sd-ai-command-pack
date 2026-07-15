@@ -44,3 +44,7 @@ Source:
 
 - Do not start this task until the trigger exists.
 - This is a parked task, not currently actionable backlog.
+- Re-evaluated 2026-07-14 after installer preflight, concurrency, and audit
+  changes. The flat manifest plus the single platform registry still represents
+  the payload without duplicated groups or unsafe maintenance overhead, so the
+  schema-change trigger remains absent.

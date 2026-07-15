@@ -80,10 +80,10 @@ def atomic_write_bytes(
             suffix=".tmp",
             delete=False,
         ) as temporary:
+            temporary_path = Path(temporary.name)
             temporary.write(content)
             temporary.flush()
             os.fsync(temporary.fileno())
-            temporary_path = Path(temporary.name)
         # NamedTemporaryFile creates 0600 files; installed files should get
         # normal umask-derived modes, executable when the caller requests it
         # (install_file passes the pack source's executable state).

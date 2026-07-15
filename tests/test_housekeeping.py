@@ -504,6 +504,9 @@ class HousekeepingTests(InstallTestCase):
             "non-clean merge state refuses",
             "draft PR refuses",
             "unresolved review threads refuse",
+            "empty middle field remains aligned",
+            "unknown default branch refuses",
+            "unauthenticated gh is reported",
         ):
             self.assertIn(f"self-test: {scenario}: ok", result.stdout)
 
@@ -619,9 +622,9 @@ class HousekeepingTests(InstallTestCase):
             graphql_body=(
                 "  args=\" $* \"\n"
                 "  if [[ \"$args\" == *\"cursor=PAGE2\"* ]]; then\n"
-                "    printf '1\\tfalse\\t\\n'\n"
+                "    printf '1\\037false\\037\\n'\n"
                 "  else\n"
-                "    printf '0\\ttrue\\tPAGE2\\n'\n"
+                "    printf '0\\037true\\037PAGE2\\n'\n"
                 "  fi\n"
             ),
         )

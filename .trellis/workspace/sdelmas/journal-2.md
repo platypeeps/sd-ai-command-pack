@@ -1563,3 +1563,40 @@ Published PR #91 with corrected Copilot reviewer identities, explicit review-mat
 ### Next Steps
 
 - Review and merge PR #91; keep both tasks in planning until separately approved and started.
+
+
+## Session 89: Complete remaining P2 task closeout
+
+**Date**: 2026-07-14
+**Task**: Complete remaining P2 task closeout
+**Branch**: `codex/address-remaining-p3-tasks`
+
+### Summary
+
+Added a two-version Claude adapter refresh regression and archived the completed dropped-backlog and release-ledger tasks.
+
+### Main Changes
+
+- Covered the historical inactive-Claude refresh state across installer output, receipt, provenance, and audit behavior.
+- Archived the completed dropped work-backlog root-cause and release-ledger enforcement records.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7bda94c` | Cover dropped Claude adapter refresh |
+
+### Testing
+
+- [OK] Focused install-audit regression and all 53 install-audit tests passed.
+- [OK] make test passed with 100% installer coverage and 78% script coverage.
+- [OK] make lint audit and the pack full-check passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Resume a parked task only when its documented trigger or upstream dependency is satisfied.

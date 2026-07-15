@@ -146,9 +146,99 @@ class FullCheckTests(InstallTestCase):
         )
         self.assertIn("run_review_preflight", script)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE", script)
+        self.assertIn("cleanup_full_check_temp_files()", script)
+        self.assertIn("trap cleanup_full_check_temp_files EXIT", script)
+        self.assertIn('if [ "${#REVIEW_LOCAL_TEMP_FILES[@]}" -gt 0 ]; then', script)
+        self.assertIn('for file in "${REVIEW_LOCAL_TEMP_FILES[@]}"; do', script)
+        self.assertIn("full_check_mktemp()", script)
+        self.assertIn('mkdir -p -- "$temp_dir"', script)
+        self.assertIn('trap \'exit 130\' INT', script)
+        self.assertIn('REVIEW_LOCAL_TEMP_FILES+=("$paths_file")', script)
+        self.assertIn('REVIEW_LOCAL_TEMP_FILES+=("$patterns_file")', script)
+        self.assertIn('REVIEW_LOCAL_TEMP_FILES+=("$changed_paths_file")', script)
+        self.assertIn('REVIEW_LOCAL_TEMP_FILES+=("$filters_file")', script)
+        self.assertNotIn('collect_reviewable_changed_paths "$base_ref" |', script)
+        self.assertNotIn('filters="$(reviewable_changed_filter_csv', script)
         self.assertIn('SCRIPT_NAME="$script_name" node -e', script)
         self.assertIn("process.env.SCRIPT_NAME", script)
         self.assertNotIn("process.argv[1]", script)
+
+    def test_full_check_disjoint_history_warns_and_uses_all_tracked_files(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "head history")
+        head_branch = self.git_output(root, "branch", "--show-current")
+
+        self.run_git(root, "switch", "--orphan", "disjoint-base")
+        (root / "base-only.txt").write_text("base\n", encoding="utf-8")
+        self.run_git(root, "add", "base-only.txt")
+        self.run_git(root, "commit", "-m", "disjoint history")
+        self.run_git(root, "switch", head_branch)
+
+        result = subprocess.run(
+            [
+                self._bash_path,
+                "-c",
+                "source scripts/sd-ai-command-pack-full-check.sh; "
+                "collect_reviewable_changed_paths disjoint-base",
+            ],
+            cwd=root,
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE": "1",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Could not find a merge base", result.stdout)
+        self.assertIn("scripts/sd-ai-command-pack-full-check.sh", result.stdout)
+
+    def test_full_check_merge_base_git_error_still_fails(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+        result = subprocess.run(
+            [
+                self._bash_path,
+                "-c",
+                "source scripts/sd-ai-command-pack-full-check.sh; "
+                "git() { if [ \"$1\" = merge-base ]; then return 2; fi; "
+                "command git \"$@\"; }; "
+                "collect_reviewable_changed_paths HEAD",
+            ],
+            cwd=root,
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE": "1",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("git merge-base failed", result.stdout)
 
     def test_full_check_preflight_command_runs_without_login_shell(self) -> None:
         if self._bash_path is None:
@@ -453,23 +543,26 @@ class FullCheckTests(InstallTestCase):
         )
         gito.chmod(0o755)
         temp_root = root / "tmp"
+        env = {
+            **os.environ,
+            "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+            "TMPDIR": str(temp_root),
+            "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT": "0",
+            "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0",
+            "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
+            "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK": "0",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS": "1",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_GITO": "1",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF": "HEAD",
+        }
+        env.pop("UV_CACHE_DIR", None)
+        env.pop("UV_TOOL_DIR", None)
 
         result = subprocess.run(
             [self._bash_path, "scripts/sd-ai-command-pack-full-check.sh"],
             cwd=root,
-            env={
-                **os.environ,
-                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
-                "TMPDIR": str(temp_root),
-                "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT": "0",
-                "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0",
-                "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
-                "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK": "0",
-                "SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS": "1",
-                "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "0",
-                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO": "1",
-                "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF": "HEAD",
-            },
+            env=env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -478,10 +571,11 @@ class FullCheckTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         log = log_path.read_text(encoding="utf-8")
-        self.assertIn(f"UV_CACHE_DIR={temp_root}/sd-ai-command-pack-uv-cache", log)
-        self.assertIn(f"UV_TOOL_DIR={temp_root}/sd-ai-command-pack-uv-tools", log)
-        self.assertTrue((temp_root / "sd-ai-command-pack-uv-cache").is_dir())
-        self.assertTrue((temp_root / "sd-ai-command-pack-uv-tools").is_dir())
+        user_root = temp_root / f"sd-ai-command-pack-{os.getuid()}"
+        self.assertIn(f"UV_CACHE_DIR={user_root}/uv-cache", log)
+        self.assertIn(f"UV_TOOL_DIR={user_root}/uv-tools", log)
+        self.assertTrue((user_root / "uv-cache").is_dir())
+        self.assertTrue((user_root / "uv-tools").is_dir())
         self.assertIn("gito review --vs HEAD --filter app.txt", log)
 
     def test_full_check_script_ignores_invalid_configured_base_ref(self) -> None:

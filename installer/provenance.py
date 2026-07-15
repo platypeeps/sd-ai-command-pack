@@ -34,8 +34,7 @@ def installed_targets_content(
     targets = {file.target.as_posix() for file in selected}
     targets.update(target.as_posix() for target in extra_targets)
     targets.add(INSTALLED_TARGETS_FILE.as_posix())
-    targets = sorted(targets)
-    return "\n".join(targets) + "\n"
+    return "\n".join(sorted(targets)) + "\n"
 
 
 PROVENANCE_EXCLUDED_KINDS = {

@@ -41,3 +41,8 @@ Source:
 
 - Do not start this task until at least one listed issue closes.
 - This is a parked task, not currently actionable backlog.
+- Live check on 2026-07-14: issues #394, #395, and #396 remain open. Issue
+  #397 closed as completed on 2026-07-09. Trellis 0.6.7 now provides
+  `task.py create --no-start`, and this checkout's generated `task.py` is
+  byte-identical to that canonical source. The pack has no #397-specific
+  workaround to shrink or remove, so no local cleanup is warranted.

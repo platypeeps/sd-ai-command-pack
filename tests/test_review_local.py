@@ -930,10 +930,11 @@ class ReviewLocalTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         log = log_path.read_text(encoding="utf-8")
-        self.assertIn(f"UV_CACHE_DIR={temp_root}/sd-ai-command-pack-uv-cache", log)
-        self.assertIn(f"UV_TOOL_DIR={temp_root}/sd-ai-command-pack-uv-tools", log)
-        self.assertTrue((temp_root / "sd-ai-command-pack-uv-cache").is_dir())
-        self.assertTrue((temp_root / "sd-ai-command-pack-uv-tools").is_dir())
+        user_root = temp_root / f"sd-ai-command-pack-{os.getuid()}"
+        self.assertIn(f"UV_CACHE_DIR={user_root}/uv-cache", log)
+        self.assertIn(f"UV_TOOL_DIR={user_root}/uv-tools", log)
+        self.assertTrue((user_root / "uv-cache").is_dir())
+        self.assertTrue((user_root / "uv-tools").is_dir())
         self.assertIn("gito review --all", log)
         self.assertIn("--filter ", log)
 

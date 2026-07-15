@@ -15,18 +15,21 @@ hooks:
 	git config core.hooksPath .githooks
 
 test:
-	COVERAGE_PROCESS_START="$$(pwd)/.coveragerc" COVERAGE_FILE="$$(pwd)/.coverage" PYTHONPATH="$$(pwd)/tests/coverage_sitecustomize$${PYTHONPATH:+:$$PYTHONPATH}" "$(VENV_PYTHON)" -m coverage run --parallel-mode -m unittest discover -s tests
+	@status=0; COVERAGE_PROCESS_START="$$(pwd)/.coveragerc" COVERAGE_FILE="$$(pwd)/.coverage" PYTHONPATH="$$(pwd)/tests/coverage_sitecustomize$${PYTHONPATH:+:$$PYTHONPATH}" "$(VENV_PYTHON)" -m coverage run --parallel-mode -m unittest discover -s tests > unittest-output.log 2>&1 || status=$$?; cat unittest-output.log; exit $$status
+	@if grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log; then printf '%s\n' "Tests skipped locally; install required tools or make the skip explicit."; exit 1; fi
 	"$(VENV_PYTHON)" -m coverage combine
 	"$(VENV_PYTHON)" -m coverage report --include="install.py,installer/*" --fail-under=100
 	"$(VENV_PYTHON)" -m coverage report --include="scripts/sd-ai-command-pack-*" --fail-under=76
 
 lint:
 	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests
+	"$(VENV_PYTHON)" -m mypy installer
 	@if command -v node >/dev/null 2>&1; then \
 		node --check scripts/sd-ai-command-pack-review-preflight.mjs; \
 		node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs; \
+		bash .github/scripts/check-opencode-js.sh; \
 	else \
-		printf '%s\n' "warning: node not found; skipping review-preflight JavaScript syntax checks."; \
+		printf '%s\n' "warning: node not found; skipping JavaScript syntax checks."; \
 	fi
 	@if command -v shellcheck >/dev/null 2>&1; then \
 		git ls-files -z '*.sh' | xargs -0 shellcheck -S warning .githooks/pre-push; \

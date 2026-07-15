@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
 PROVENANCE_FILE = Path(".sd-ai-command-pack/provenance.json")
 PACK_MANIFEST_FILE = Path(".sd-ai-command-pack/manifest.json")
+STABLE_VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 # Files unique to the sd-ai-command-pack source checkout. A consumer repo never
 # has all three (it receives shipped scripts, but not the installer, manifest, or
@@ -757,7 +758,61 @@ def parse_args() -> argparse.Namespace:
             "for fleet manifest checks."
         ),
     )
+    parser.add_argument(
+        "--upstream-manifest",
+        help=(
+            "advisory-only comparison against an upstream manifest.json or "
+            "pack checkout directory; unavailable or incomparable versions "
+            "do not change the audit exit code"
+        ),
+    )
     return parser.parse_args()
+
+
+def version_update_advisory(
+    installed_version: str | None,
+    reference: str,
+) -> str:
+    reference_path = Path(reference).expanduser()
+    if reference_path.is_dir():
+        reference_path = reference_path / "manifest.json"
+    try:
+        payload = json.loads(reference_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as error:
+        return (
+            "Pack version update check: could not determine upstream version "
+            f"from {reference_path}: {error}"
+        )
+
+    upstream_version = payload.get("version") if isinstance(payload, dict) else None
+    if not isinstance(installed_version, str) or not installed_version:
+        return "Pack version update check: could not determine installed version."
+    if not isinstance(upstream_version, str) or not upstream_version:
+        return (
+            "Pack version update check: could not determine upstream version "
+            f"from {reference_path}: missing string version"
+        )
+    if not STABLE_VERSION_PATTERN.fullmatch(installed_version) or not (
+        STABLE_VERSION_PATTERN.fullmatch(upstream_version)
+    ):
+        return (
+            "Pack version update check: could not compare installed "
+            f"{installed_version} with upstream {upstream_version}; "
+            "expected stable MAJOR.MINOR.PATCH versions."
+        )
+
+    installed_key = tuple(int(part) for part in installed_version.split("."))
+    upstream_key = tuple(int(part) for part in upstream_version.split("."))
+    if installed_key < upstream_key:
+        relation = "behind"
+    elif installed_key > upstream_key:
+        relation = "ahead of"
+    else:
+        relation = "current with"
+    return (
+        f"Pack version update check: installed {installed_version} is "
+        f"{relation} upstream {upstream_version}."
+    )
 
 
 def main() -> int:
@@ -810,6 +865,14 @@ def main() -> int:
     # debugging a failed audit is exactly who needs them.
     for warning in warnings:
         print(f"warning: {warning}")
+
+    if args.upstream_manifest:
+        installed_version = provenance_version
+        if installed_version is None and isinstance(pack_manifest, dict):
+            candidate = pack_manifest.get("version")
+            if isinstance(candidate, str):
+                installed_version = candidate
+        print(version_update_advisory(installed_version, args.upstream_manifest))
 
     if failures:
         for failure in failures:

@@ -11,6 +11,31 @@ if [ -z "$REPO_ROOT" ] || ! cd -- "$REPO_ROOT"; then
   exit 1
 fi
 
+REVIEW_LOCAL_TEMP_FILES=()
+
+cleanup_full_check_temp_files() {
+  local status=$?
+  local file
+  if [ "${#REVIEW_LOCAL_TEMP_FILES[@]}" -gt 0 ]; then
+    for file in "${REVIEW_LOCAL_TEMP_FILES[@]}"; do
+      [ -n "$file" ] && rm -f -- "$file"
+    done
+  fi
+  return "$status"
+}
+
+full_check_mktemp() {
+  local pattern="$1"
+  local temp_dir="${TMPDIR:-/tmp}"
+  mkdir -p -- "$temp_dir"
+  mktemp "$temp_dir/$pattern"
+}
+
+trap cleanup_full_check_temp_files EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 section() {
   printf '\n==> %s\n' "$*"
 }
@@ -116,11 +141,29 @@ detect_merge_base() {
 collect_reviewable_changed_paths() {
   local base_ref="$1"
   local paths_file
-  paths_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-review-paths.XXXXXX")"
+  local merge_base_status=0
+  paths_file="$(full_check_mktemp "sd-ai-command-pack-review-paths.XXXXXX")"
+  REVIEW_LOCAL_TEMP_FILES+=("$paths_file")
   : >"$paths_file"
 
   if git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null; then
-    git diff --name-only "$base_ref"...HEAD >>"$paths_file"
+    set +e
+    git merge-base "$base_ref" HEAD >/dev/null 2>&1
+    merge_base_status=$?
+    set -e
+    case "$merge_base_status" in
+      0)
+        git diff --name-only "$base_ref"...HEAD >>"$paths_file"
+        ;;
+      1)
+        warn "Could not find a merge base for $base_ref and HEAD; review filter will include all tracked files."
+        git ls-files >>"$paths_file"
+        ;;
+      *)
+        warn "git merge-base failed for $base_ref and HEAD with status $merge_base_status."
+        return "$merge_base_status"
+        ;;
+    esac
   else
     warn "Could not resolve $base_ref; Gito review filter will use local changes only."
   fi
@@ -146,7 +189,8 @@ review_filter_pattern_for_path() {
 
 review_filter_csv_from_paths() {
   local patterns_file
-  patterns_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-review-filters.XXXXXX")"
+  patterns_file="$(full_check_mktemp "sd-ai-command-pack-review-filters.XXXXXX")"
+  REVIEW_LOCAL_TEMP_FILES+=("$patterns_file")
   : >"$patterns_file"
 
   local path
@@ -170,7 +214,12 @@ review_filter_csv_from_paths() {
 
 reviewable_changed_filter_csv() {
   local base_ref="$1"
-  collect_reviewable_changed_paths "$base_ref" | review_filter_csv_from_paths
+  local changed_paths_file
+  changed_paths_file="$(full_check_mktemp "sd-ai-command-pack-reviewable-paths.XXXXXX")"
+  REVIEW_LOCAL_TEMP_FILES+=("$changed_paths_file")
+  collect_reviewable_changed_paths "$base_ref" >"$changed_paths_file"
+  review_filter_csv_from_paths <"$changed_paths_file"
+  rm -f "$changed_paths_file"
 }
 
 build_prism_args() {
@@ -306,8 +355,13 @@ run_gito_review() {
   local base_ref
   base_ref="$(full_check_gito_base_ref)"
   local out_dir="${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR:-.build/review/gito}"
+  local filters_file
   local filters
-  filters="$(reviewable_changed_filter_csv "$base_ref")"
+  filters_file="$(full_check_mktemp "sd-ai-command-pack-review-filter-csv.XXXXXX")"
+  REVIEW_LOCAL_TEMP_FILES+=("$filters_file")
+  reviewable_changed_filter_csv "$base_ref" >"$filters_file"
+  IFS= read -r filters <"$filters_file" || true
+  rm -f "$filters_file"
   if [ -z "$filters" ]; then
     warn "No changed files remain after standard review-scan exclusions; skipping Gito review."
     return 0
@@ -706,7 +760,8 @@ run_ci_classification_report() {
   fi
 
   local paths_file
-  paths_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-ci-paths.XXXXXX")"
+  paths_file="$(full_check_mktemp "sd-ai-command-pack-ci-paths.XXXXXX")"
+  REVIEW_LOCAL_TEMP_FILES+=("$paths_file")
   collect_current_changed_paths "$paths_file"
 
   local -a changed_paths=()

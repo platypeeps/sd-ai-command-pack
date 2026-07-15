@@ -38,3 +38,7 @@ Source:
 
 - Do not start this task until the trigger exists.
 - This is a parked task, not currently actionable backlog.
+- Re-evaluated 2026-07-14 against the installed Trellis runtime and canonical
+  Trellis 0.6.7 checkout. No pack behavior in this P3 sweep exposed a concrete
+  version incompatibility, so a speculative version-range gate remains
+  unwarranted.

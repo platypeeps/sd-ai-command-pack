@@ -562,7 +562,7 @@ class InstallTestCase(unittest.TestCase):
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
             "if [ \"${1:-}\" = pr ] && [ \"${2:-}\" = view ]; then\n"
-            f"  printf '6\\tMERGED\\t2026-06-27T17:00:00Z\\thttps://example.test/pr/6\\tfeature/cleanup\\t{head_oid}\\n'\n"
+            f"  printf '6\\037MERGED\\0372026-06-27T17:00:00Z\\037https://example.test/pr/6\\037feature/cleanup\\037{head_oid}\\n'\n"
             "elif [ \"${1:-}\" = pr ] && [ \"${2:-}\" = list ]; then\n"
             "  exit 0\n"
             "elif [ \"${1:-}\" = issue ] && [ \"${2:-}\" = list ]; then\n"
@@ -581,14 +581,14 @@ class InstallTestCase(unittest.TestCase):
         self,
         stub_bin: Path,
         marker: Path,
-        graphql_body: str = "  printf '0\\tfalse\\t\\n'\n",
+        graphql_body: str = "  printf '0\\037false\\037\\n'\n",
         blocking_check_count: str = "0",
         successful_check_count: str = "2",
         rollup_json: str | None = None,
     ) -> None:
         if rollup_json is None:
             readiness_branch = (
-                "    printf '6\\t%s\\tfalse\\thttps://example.test/pr/6\\tfeature/cleanup\\t%s\\tmain\\tCLEAN\\t%s\\t%s\\n' "
+                "    printf '6\\037%s\\037false\\037https://example.test/pr/6\\037feature/cleanup\\037%s\\037main\\037CLEAN\\037%s\\037%s\\n' "
                 f"\"$state\" \"$head\" {blocking_check_count!r} {successful_check_count!r}\n"
             )
         else:
@@ -630,7 +630,7 @@ class InstallTestCase(unittest.TestCase):
             "  else\n"
             "    merged_at=''\n"
             "    if [ \"$state\" = MERGED ]; then merged_at='2026-06-27T18:00:00Z'; fi\n"
-            "    printf '6\\t%s\\t%s\\thttps://example.test/pr/6\\tfeature/cleanup\\t%s\\n' \"$state\" \"$merged_at\" \"$head\"\n"
+            "    printf '6\\037%s\\037%s\\037https://example.test/pr/6\\037feature/cleanup\\037%s\\n' \"$state\" \"$merged_at\" \"$head\"\n"
             "  fi\n"
             "elif [ \"${1:-}\" = pr ] && [ \"${2:-}\" = merge ]; then\n"
             "  remote=\"$(git remote get-url origin)\"\n"

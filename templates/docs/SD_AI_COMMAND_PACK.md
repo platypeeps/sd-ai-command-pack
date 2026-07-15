@@ -177,15 +177,19 @@ loaded project command files.
    housekeeping before the final report. This does not wake inactive sessions;
    it only runs when the active agent observes the merge.
 
-The default remote reviewer for review-pr is GitHub Copilot's
-`copilot-pull-request-reviewer`. Target repos can override it with
+The default remote review request uses GitHub Copilot's documented `@copilot`
+CLI alias and matches resulting activity from
+`copilot-pull-request-reviewer[bot]`. A successful request is only an attempt;
+the loop waits for author-matched activity on the requested head before it
+counts the review as materialized. Target repos can override it with
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER`,
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER_LABEL`,
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_AUTHOR_MATCH`,
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND`, and
-`SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`. The round limit defaults to
-two configured remote-review requests before the command asks whether to keep
-going.
+`SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`. The bounded materialization
+wait uses `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_SETTLE_POLLS`. The round limit
+defaults to two configured remote-review requests before the command asks
+whether to keep going.
 
 The create-pr wrapper honors `SD_AI_COMMAND_PACK_CREATE_PR_BASE` for a base
 branch override, `SD_AI_COMMAND_PACK_CREATE_PR_COMMIT_MESSAGE` when it creates
@@ -1183,11 +1187,41 @@ Git, the installer stops because clone-local excludes cannot hide tracked files.
 Use `--dry-run` first when you want to inspect which files would change.
 Use `--backup` with `--force` if the target repo may have local edits that need
 to be preserved next to the overwritten files. Existing `.prism/rules.json` and
-`.gito/config.toml` files that differ from the pack templates are reported as
-`preserved` and are never overwritten or reported as conflicts, so repo-specific
-review rules are not replaced during a pack refresh. The pack-owned
+`.gito/config.toml` files, plus `.github/PULL_REQUEST_TEMPLATE.md`, that differ
+from the pack templates are reported as `preserved` and are never overwritten
+or reported as conflicts, so repo-specific review policy is not replaced during
+a pack refresh. The pack-owned
 `.gito/sd-ai-command-pack.env` file is updateable like scripts and docs so the
 standard Gito concurrency cap can be refreshed.
+
+Normal tracked installs use plan-before-apply conflict handling: without
+`--force`, the installer checks every selected pack target before its first
+write and exits `2` without applying a partial refresh when any target
+conflicts. Local-only Trellis bootstrap is outside this boundary because it
+invokes Trellis itself before the pack is installed.
+
+Concurrent installs are not serialized. If two completed installer runs target
+the same checkout, the last writer wins, but atomic file replacement ensures the
+final receipt and provenance remain parseable and internally consistent. Prefer
+one refresh at a time so operator output and backup ownership stay clear.
+
+Run refreshes on a branch and merge them through a PR. Before merge, discard or
+reset a failed refresh branch to roll back. After merge, revert the refresh PR
+or its merge commit, then rerun the install audit. `--backup` only preserves
+files overwritten by `--force` or removed with `--remove`; it is not a
+transaction journal.
+
+To compare a consumer's installed version with a local pack checkout without
+changing the normal audit exit code, run:
+
+```bash
+python3 scripts/sd-ai-command-pack-install-audit.py \
+  --upstream-manifest /path/to/sd-ai-command-pack
+```
+
+The advisory reports behind, current, or ahead for stable versions. Missing,
+offline, malformed, or prerelease references produce a clear "could not
+determine/compare" note and do not fail the audit.
 
 Use `--remove` to uninstall pack-owned assets. Removal deletes pack-vouched
 files, files that still match the bundled template, generated pack state under
