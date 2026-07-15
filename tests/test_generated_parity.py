@@ -752,13 +752,13 @@ class GeneratedParityTests(InstallTestCase):
         )
         self.assertEqual(
             workflow.count(
-                "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"
+                "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
             ),
             5,
         )
         self.assertEqual(
             workflow.count(
-                "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065"
+                "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
             ),
             3,
         )
