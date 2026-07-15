@@ -1853,3 +1853,37 @@ Superseded dependabot #98/#99: bumped actions/checkout to v7.0.0 (5 usages) and 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 97: Test speedups: class-scoped fixture + in-process installs (deferred item 1)
+
+**Date**: 2026-07-15
+**Task**: Test speedups: class-scoped fixture + in-process installs (deferred item 1)
+**Branch**: `perf/test-inprocess-fixtures`
+
+### Summary
+
+Addressed the deferred test-perf items conservatively: built the housekeeping git repo once per class (copytree + repoint origin per test, isolation verified) and converted 31 clearly-safe happy-path run_install subprocess calls to in-process install.main(), keeping subprocess where argv/exit-code/PATH/diff-check/symlink-exec semantics matter. Installer coverage held at 100% line+branch. Honest result: full-suite wall-clock neutral (~20s, bounded by the slowest out-of-scope shard test_review_local), but per-module times and CPU dropped (housekeeping -28%, install_core -15%, ~4.5s less CPU). Implemented by a sub-agent, independently verified.
+
+### Main Changes
+
+- Class-scoped _build_housekeeping_template + per-test copytree/remote-repoint; 31 in-process run_install conversions in test_install_core/test_remove; subprocess kept where CLI/process semantics are the point
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4a481fb` | test: class-scoped housekeeping fixture + bounded in-process installs |
+
+### Testing
+
+- [OK] make test installer 100% line+branch (1070/1070, 433/433), scripts 78%; test_housekeeping deterministic x3; no repo pollution; make lint green; CI green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
