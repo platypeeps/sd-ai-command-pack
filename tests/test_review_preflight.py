@@ -600,6 +600,30 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(disguised_rename.returncode, 1, disguised_rename.stdout)
         self.assertIn("code.py", disguised_rename.stderr)
 
+        # A pull-request merge commit (two parents) lands reviewed non-chore
+        # content on main through the sanctioned path and is accepted, even
+        # though its diff spans non-chore files.
+        current_branch = self.git_output(root, "rev-parse", "--abbrev-ref", "HEAD")
+        self.run_git(root, "checkout", "-b", "feature-branch", baseline)
+        (root / "feature.py").write_text("print('feature')\n", encoding="utf-8")
+        self.run_git(root, "add", "feature.py")
+        self.run_git(root, "commit", "-m", "feature work")
+        self.run_git(root, "checkout", current_branch)
+        merge_before = self.git_output(root, "rev-parse", "HEAD")
+        self.run_git(
+            root, "merge", "--no-ff", "-m", "Merge pull request #1", "feature-branch"
+        )
+        merge_head = self.git_output(root, "rev-parse", "HEAD")
+        merged = subprocess.run(
+            ["bash", str(script), merge_before, merge_head],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(merged.returncode, 0, merged.stderr)
+        self.assertIn("pull-request merge commit accepted", merged.stdout)
+
         missing_before = subprocess.run(
             ["bash", str(script), "0" * 40, rename_head],
             cwd=root,

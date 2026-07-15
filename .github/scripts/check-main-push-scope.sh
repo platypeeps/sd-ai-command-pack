@@ -26,6 +26,17 @@ for commit in "$before_sha" "$after_sha"; do
   fi
 done
 
+# A pull-request merge — this repo lands non-chore work through PRs merged with
+# a merge commit — is the sanctioned path for reviewed content reaching main,
+# and such a commit has a second parent. Only direct, non-merge pushes are
+# subject to the chore-only scope rule. Branch protection and review remain the
+# primary control; this guard is the keep-honest backstop against a direct
+# non-chore push, so it must not reject the merge commits it is meant to allow.
+if git rev-parse --verify --quiet "$after_sha^2" >/dev/null; then
+  printf '%s\n' "main-push scope: pull-request merge commit accepted"
+  exit 0
+fi
+
 paths_file="$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-main-push.XXXXXX")"
 cleanup() {
   local status=$?
