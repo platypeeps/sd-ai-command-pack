@@ -1887,3 +1887,37 @@ Addressed the deferred test-perf items conservatively: built the housekeeping gi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 98: README audience split (deferred item 2a)
+
+**Date**: 2026-07-15
+**Task**: README audience split (deferred item 2a)
+**Branch**: `docs/readme-audience-split`
+
+### Summary
+
+Reorganized README so consumer sections (Overview/Commands/Configuration/Install/Supported Adapters) precede the maintainer sections (Verify/Releasing/Fleet Rollout/Direct-to-main/Upstream Path), now grouped as sub-sections under one ## Maintaining umbrella; License stays last. Pure reorder: section bodies byte-identical (net +2 lines = umbrella heading + spacing), all 23 test-pinned strings preserved, review-preflight links resolve. README-only, no version bump. Verified every section appears exactly once and the sorted body is unchanged.
+
+### Main Changes
+
+- Move Verify/Releasing/Fleet Rollout/Direct-to-main/Upstream Path under a new ## Maintaining umbrella (as ###) after Supported Adapters; reorder quick-links to match
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `41a4306` | docs: group maintainer sections under a Maintaining umbrella (README) |
+
+### Testing
+
+- [OK] test_generated_parity green (pinned strings intact); review-preflight 0 failures; make test installer 100%; make lint + full-check green; content-integrity verified (each section x1, bodies identical)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
