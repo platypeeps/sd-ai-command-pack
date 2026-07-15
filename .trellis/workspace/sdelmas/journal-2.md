@@ -1955,3 +1955,38 @@ Final deferred item: behavior-preserving consolidation of shipped helpers. updat
 ### Next Steps
 
 - None - task complete
+
+
+## Session 100: Test improvements: review-local install fixture + assertion parametrization
+
+**Date**: 2026-07-15
+**Task**: Test improvements: review-local install fixture + assertion parametrization
+**Branch**: `perf/test-improvements`
+
+### Summary
+
+Class-scoped the installed-repo fixture for test_review_local (all 27 tests did the identical make_repo+run_install; build once per class, copytree per test) -> test_review_local 15.7s->13.1s and the full suite ~20s->~17s (-14%), the real CI-speed win since it was the slowest shard. Also parametrized the ~13 copy-pasted adapter assertion loops with subTest (DRY + per-case reporting). Dropped the import-shim collapse (star-import weakens F405 lint) and the cheap make_repo-only fixture (measured 0.375s, too light). Tests-only, 100% installer coverage held, no version bump. Implemented by sub-agents, independently verified.
+
+### Main Changes
+
+- test_review_local: class-scoped installed-repo template + copytree per test (27 installs -> 1); full suite ~20s -> ~17s
+- Parametrize repeated adapter/is_file assertion blocks with subTest for DRY + per-case failure reporting
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f0d9217` | test: class-scope the review-local install fixture + parametrize assertions |
+
+### Testing
+
+- [OK] make test installer 100% line+branch, scripts 79%; test_review_local deterministic ~13s across reruns; make lint green; CI green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
