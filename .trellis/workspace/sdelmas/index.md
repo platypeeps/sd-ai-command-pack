@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 88
-- **Last Active**: 2026-07-11
+- **Total Sessions**: 89
+- **Last Active**: 2026-07-14
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1565 | Active |
+| `journal-2.md` | ~1600 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 89 | 2026-07-14 | Complete remaining P2 task closeout | `7bda94c` | `codex/address-remaining-p3-tasks` |
 | 88 | 2026-07-11 | Plan tool-use hardening | `e5722e1`, `80ac9c2` | `codex/plan-tool-use-hardening` |
 | 87 | 2026-07-10 | Harden local review tooling | `788f321`, `d7e91de` | `codex/harden-local-review-tooling` |
 | 86 | 2026-07-09 | Roll out sd-ai-command-pack 0.8.6 to the fleet | - | `main` |
