@@ -33,7 +33,7 @@ def installed_targets_set(
     selected: list[PackFile],
     extra_targets: Iterable[Path] = (),
 ) -> set[str]:
-    """Posix-path set the install records as installed.
+    """Return the set of POSIX target paths the install records as installed.
 
     Shared by the receipt content and provenance coverage so the "provenance
     coverage == receipt contents" invariant is structural, not coincidental.
