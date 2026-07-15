@@ -60,7 +60,7 @@ CONFLICT_STATUSES = frozenset({"conflict", "symlink-conflict"})
 VOUCHABLE_STATUSES = frozenset({"created", "updated", "unchanged", "overwritten"})
 
 
-def _generated_pack_file(kind: str, target: Path) -> PackFile:
+def generated_pack_file(kind: str, target: Path) -> PackFile:
     """PackFile for an installer-generated file (receipt/manifest/provenance/gitignore)."""
     return PackFile(
         platform="shared",
@@ -388,7 +388,7 @@ def merge_trellis_gitignore_block(current: str) -> str:
 
 
 def install_trellis_gitignore(target: Path, *, dry_run: bool) -> InstallResult:
-    file = _generated_pack_file("generated-gitignore", TRELLIS_GITIGNORE_TARGET)
+    file = generated_pack_file("generated-gitignore", TRELLIS_GITIGNORE_TARGET)
     destination = target_destination(target, file.target)
     _require_file_destination(destination, file.target)
 

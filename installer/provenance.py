@@ -11,8 +11,8 @@ from pathlib import Path
 from installer.fileops import (
     VOUCHABLE_STATUSES,
     InstallResult,
-    _generated_pack_file,
     atomic_write_text,
+    generated_pack_file,
 )
 from installer.manifest import (
     PackFile,
@@ -192,7 +192,7 @@ def install_provenance_file(
     never_vouched: set[str],
     dry_run: bool,
 ) -> InstallResult:
-    file = _generated_pack_file("generated-provenance", PROVENANCE_FILE)
+    file = generated_pack_file("generated-provenance", PROVENANCE_FILE)
     content = provenance_content(
         manifest,
         results,
@@ -213,7 +213,7 @@ def install_pack_manifest_file(
     *,
     dry_run: bool,
 ) -> InstallResult:
-    file = _generated_pack_file("generated-pack-manifest", PACK_MANIFEST_FILE)
+    file = generated_pack_file("generated-pack-manifest", PACK_MANIFEST_FILE)
     content = installed_pack_manifest_content(manifest)
     return _install_generated_text_file(file, target, content, dry_run=dry_run)
 
@@ -297,7 +297,7 @@ def install_installed_targets_file(
     dry_run: bool,
     extra_targets: Iterable[Path] = (),
 ) -> InstallResult:
-    file = _generated_pack_file("generated-manifest", INSTALLED_TARGETS_FILE)
+    file = generated_pack_file("generated-manifest", INSTALLED_TARGETS_FILE)
     content = installed_targets_content(selected, extra_targets=extra_targets)
     return _install_generated_text_file(file, target, content, dry_run=dry_run)
 
