@@ -957,11 +957,11 @@ class GeneratedParityTests(InstallTestCase):
             "UV_TOOL_DIR",
             "RUFF_CACHE_DIR",
             "agent-facing final response",
-            "numbered `Next Steps` list",
+            "numbered `Next Steps` section",
+            "even on a verification-only",
             "open follow-up items from the session",
-            "existing Trellis tasks already in progress",
-            "high-value Trellis task",
-            "candidates to start next",
+            "high-value Trellis task candidates",
+            "roadmap items to start next",
         ):
             self.assertIn(expected, installed)
         self.assertEqual(installed, template)

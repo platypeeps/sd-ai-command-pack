@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.5 - 2026-07-15
+
+- Made the `sd-housekeeping` skill always report the current Trellis task and a
+  `Next Steps` section listing the next high-value Trellis tasks / roadmap items,
+  including on verification-only clean runs. Previously the report could end with
+  "No follow-up needed for this cleanup stream." and omit the task inventory, so
+  the end-of-run handoff format was inconsistent across repos. Documentation only
+  — no command, flag, or script behavior change.
+
 ## 0.10.4 - 2026-07-15
 
 - Internal micro-refactors of shipped helpers (no behavior change): unified the

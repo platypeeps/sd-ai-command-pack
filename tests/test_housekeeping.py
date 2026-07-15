@@ -174,13 +174,13 @@ class HousekeepingTests(InstallTestCase):
             "Insight:",
             "evidence-backed observation",
             "Do not add filler insights",
-            "No follow-up needed for this cleanup stream.",
-            "numbered `Next Steps` list",
+            "No open or planned Trellis work — backlog is clear.",
+            "Always end with the numbered `Next Steps` section",
             "open follow-up items discovered during this session",
             "existing Trellis tasks that are already `in_progress`",
             "high-value Trellis task candidates",
             "python3 ./.trellis/scripts/task.py list",
-            "Either `No follow-up needed for this cleanup stream.`",
+            "The current Trellis task (its id + status, or `none active`).",
             "--no-auto-merge",
         ]:
             self.assertIn(text, skill)
