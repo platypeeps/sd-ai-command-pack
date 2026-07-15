@@ -57,13 +57,13 @@ Quick links:
 - [Commands](#commands)
 - [Configuration Quick Reference](#configuration-quick-reference)
 - [Install](#install)
+- [Supported Adapters](#supported-adapters)
 - [Verify](#verify)
 - [Releasing](#releasing)
 - [Fleet Rollout](#fleet-rollout)
 - [Direct-to-main Chore Commits](#direct-to-main-chore-commits)
-- [Supported Adapters](#supported-adapters)
-- [License](#license)
 - [Upstream Path](#upstream-path)
+- [License](#license)
 
 ## Commands
 
@@ -338,7 +338,36 @@ scope configuration, local-review exclusions, and classifier behavior live in
 the installed guide to avoid duplicate README drift:
 [docs/SD_AI_COMMAND_PACK.md](docs/SD_AI_COMMAND_PACK.md#updating-the-pack).
 
-## Verify
+## Supported Adapters
+
+| Platform | Installed When |
+| --- | --- |
+| Shared skills, scripts, Prism/Gito defaults, usage guide | Always |
+| Codex skill completion | `.agents/skills/sd-*` installed as shared skills |
+| Antigravity | `.agent/` exists with Trellis workflow or skill markers; or `--all` / `--platform antigravity` |
+| Claude Code | `.claude/` exists with Trellis command, hook, or skill markers; or `--all` / `--platform claude` |
+| CodeBuddy | `.codebuddy/` exists with Trellis command, hook, agent, settings, or skill markers; or `--all` / `--platform codebuddy` |
+| Cursor | `.cursor/` exists with Trellis command, hook, or skill markers; or `--all` / `--platform cursor` |
+| Devin | `.devin/` exists with Trellis workflow or skill markers; or `--all` / `--platform devin` |
+| Factory Droid | `.factory/` exists with Trellis command, hook, droid, settings, or skill markers; or `--all` / `--platform droid` |
+| Gemini CLI | `.gemini/` exists with Trellis command, hook, or agent markers; or `--all` / `--platform gemini` |
+| GitHub Copilot | `.github/` exists with Trellis hook, Copilot hook, or skill markers; or `--all` / `--platform github` |
+| Kilo | `.kilocode/` exists with Trellis workflow or skill markers; or `--all` / `--platform kilo` |
+| Kiro | `.kiro/` exists with Trellis skill, hook, or agent markers; or `--all` / `--platform kiro` |
+| OpenCode | `.opencode/` exists with Trellis command, library, or skill markers; or `--all` / `--platform opencode` |
+| Pi | `.pi/` exists with Trellis prompt, extension, setting, agent, or skill markers; or `--all` / `--platform pi` |
+| Qoder | `.qoder/` exists with Trellis command, hook, settings, agent, or skill markers; or `--all` / `--platform qoder` |
+| Reasonix | `.reasonix/` exists with Trellis skill markers; or `--all` / `--platform reasonix` |
+| Trae | `.trae/` exists with Trellis command, hook, settings, agent, or skill markers; or `--all` / `--platform trae` |
+| ZCode | `.zcode/` exists with Trellis command or `.zcode/agents/` markers; or `--all` / `--platform zcode` |
+
+ZCode Trellis agents now live under `.zcode/agents/`; the installer still
+treats the legacy `.zcode/cli/agents/` path as copied Trellis surface for
+local-only excludes and review-scope classification during the transition.
+
+## Maintaining
+
+### Verify
 
 The installer runs `git diff --check` on installed pack paths unless
 `--skip-diff-check` is passed.
@@ -387,7 +416,7 @@ tracked shell script and the git hooks — consumers exempt the vendored pack
 shell from line review ("reviewed upstream"), so upstream lint rigor is the
 compensating control.
 
-## Releasing
+### Releasing
 
 Start every release from a clean, up-to-date `main`, then create a release
 branch. Bump `manifest.json` whenever the shipped payload changes: `templates/**`,
@@ -426,7 +455,7 @@ reported ledger or permissions problem; do not move or overwrite a published
 version tag. After the tag exists, use the fleet preflight below before opening
 consumer refresh PRs.
 
-## Fleet Rollout
+### Fleet Rollout
 
 The checked-in fleet manifest lives at `docs/fleet/consumers.json`. It lists
 the real consumer repositories, GitHub slugs, local path hints, and explicit
@@ -444,7 +473,7 @@ selected-platform files are caught even if a faulty install also omitted them
 from receipts and provenance. See [docs/FLEET_ROLLOUT.md](docs/FLEET_ROLLOUT.md)
 for the compact rollout runbook.
 
-## Direct-to-main Chore Commits
+### Direct-to-main Chore Commits
 
 Branch protection on `main` requires pull requests with the `CI Result`
 check, with `enforce_admins` left off deliberately: the Trellis wrap-up flow
@@ -474,38 +503,7 @@ For a deliberate one-shot exception, bypass the hook with
 `SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS=1 git push ...`. The server-side scope
 job still evaluates that push; use a pull request for non-chore changes.
 
-## Supported Adapters
-
-| Platform | Installed When |
-| --- | --- |
-| Shared skills, scripts, Prism/Gito defaults, usage guide | Always |
-| Codex skill completion | `.agents/skills/sd-*` installed as shared skills |
-| Antigravity | `.agent/` exists with Trellis workflow or skill markers; or `--all` / `--platform antigravity` |
-| Claude Code | `.claude/` exists with Trellis command, hook, or skill markers; or `--all` / `--platform claude` |
-| CodeBuddy | `.codebuddy/` exists with Trellis command, hook, agent, settings, or skill markers; or `--all` / `--platform codebuddy` |
-| Cursor | `.cursor/` exists with Trellis command, hook, or skill markers; or `--all` / `--platform cursor` |
-| Devin | `.devin/` exists with Trellis workflow or skill markers; or `--all` / `--platform devin` |
-| Factory Droid | `.factory/` exists with Trellis command, hook, droid, settings, or skill markers; or `--all` / `--platform droid` |
-| Gemini CLI | `.gemini/` exists with Trellis command, hook, or agent markers; or `--all` / `--platform gemini` |
-| GitHub Copilot | `.github/` exists with Trellis hook, Copilot hook, or skill markers; or `--all` / `--platform github` |
-| Kilo | `.kilocode/` exists with Trellis workflow or skill markers; or `--all` / `--platform kilo` |
-| Kiro | `.kiro/` exists with Trellis skill, hook, or agent markers; or `--all` / `--platform kiro` |
-| OpenCode | `.opencode/` exists with Trellis command, library, or skill markers; or `--all` / `--platform opencode` |
-| Pi | `.pi/` exists with Trellis prompt, extension, setting, agent, or skill markers; or `--all` / `--platform pi` |
-| Qoder | `.qoder/` exists with Trellis command, hook, settings, agent, or skill markers; or `--all` / `--platform qoder` |
-| Reasonix | `.reasonix/` exists with Trellis skill markers; or `--all` / `--platform reasonix` |
-| Trae | `.trae/` exists with Trellis command, hook, settings, agent, or skill markers; or `--all` / `--platform trae` |
-| ZCode | `.zcode/` exists with Trellis command or `.zcode/agents/` markers; or `--all` / `--platform zcode` |
-
-ZCode Trellis agents now live under `.zcode/agents/`; the installer still
-treats the legacy `.zcode/cli/agents/` path as copied Trellis surface for
-local-only excludes and review-scope classification during the transition.
-
-## License
-
-This repository is licensed under the [MIT License](LICENSE).
-
-## Upstream Path
+### Upstream Path
 
 This pack is intentionally shaped so pieces could move upstream later, while
 the local command namespace stays pack-owned:
@@ -526,3 +524,7 @@ the local command namespace stays pack-owned:
   keep local wrappers under the pack-owned `sd` namespace.
 - Add template distribution tests and package verification in the Trellis CLI
   repo.
+
+## License
+
+This repository is licensed under the [MIT License](LICENSE).
