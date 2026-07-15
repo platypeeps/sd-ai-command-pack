@@ -2,7 +2,7 @@
 
 ## Execution Order
 
-1. Confirm the release commits for 0.7.4, 0.7.5, and 0.8.0 with `git log`.
+1. Confirm the release commits from 0.6.1 through 0.9.1 with `git log`.
 2. Backfill `CHANGELOG.md` headings and concise bullets.
 3. Create missing tags for unambiguous release commits.
 4. Add the changelog-heading check to the pack-source drift gate.

@@ -19,8 +19,8 @@ process lapsed exactly as before:
   0.7.4 (81774bb, shell-lib dedup), 0.7.5 (3939202, neutral command
   templates), and 0.8.0 (631f1f0, the new sd-work-designs command) have no
   entries. A feature release shipped with no changelog note.
-- **Tags abandoned.** `git tag` shows only `v0.6.0`; nine releases since
-  are untagged, so the documented fleet-refresh anchor
+- **Tags abandoned.** `git tag` shows only `v0.6.0`; every release through
+  0.9.1 since then is untagged, so the documented fleet-refresh anchor
   (README "tag the release commit … then refresh the fleet") points at
   nothing, and provenance versions recorded in consumers have no git ref.
 
@@ -34,7 +34,7 @@ through green.
   (the 0.8.0 entry announces sd-work-designs), so the ledger is contiguous
   from 0.6.0 to 0.8.1.
 - R2: Backfill tags for the identifiable release commits since v0.6.0
-  (0.6.1→0.8.1) where the bump commit is unambiguous; document any gap.
+  (0.6.1→0.9.1) where the bump commit is unambiguous; document any gap.
 - R3: Extend the full-check release gate so that when the manifest version
   changes relative to the base ref, a matching top `CHANGELOG.md` heading
   for the new version is required — a bump without a changelog entry fails
@@ -46,13 +46,13 @@ through green.
 
 ## Acceptance Criteria
 
-- [ ] CHANGELOG contiguous 0.6.0→0.8.1; sd-work-designs noted under 0.8.0.
-- [ ] Tags exist for all identifiable releases since v0.6.0; `git tag`
+- [x] CHANGELOG contiguous 0.6.0→0.9.2; sd-work-designs noted under 0.8.0.
+- [x] Tags exist for all identifiable releases since v0.6.0; `git tag`
       no longer shows a lone v0.6.0.
-- [ ] A test/gate proves a manifest bump without a matching CHANGELOG
+- [x] A test/gate proves a manifest bump without a matching CHANGELOG
       heading fails full-check (mirror the existing payload-bump gate
       tests in `tests/test_pack_drift.py`).
-- [ ] Auto-tag mechanism verified (CI dry-run or documented+tested step).
+- [x] Auto-tag mechanism verified (CI dry-run or documented+tested step).
 
 ## Non-goals
 
