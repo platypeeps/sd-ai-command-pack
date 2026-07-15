@@ -414,9 +414,7 @@ if command -v node >/dev/null 2>&1; then
 else
   printf '%s\n' "warning: node not found; skipping JavaScript syntax checks."
 fi
-COVERAGE_PROCESS_START="$(pwd)/.coveragerc" COVERAGE_FILE="$(pwd)/.coverage" \
-  PYTHONPATH="$(pwd)/tests/coverage_sitecustomize${PYTHONPATH:+:$PYTHONPATH}" \
-  python -m coverage run --parallel-mode -m unittest discover -s tests
+bash .github/scripts/run-tests.sh
 python -m coverage combine
 python -m coverage report --include="install.py,installer/*" --fail-under=100
 python -m coverage report --include="scripts/sd-ai-command-pack-*" --fail-under=76
