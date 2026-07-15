@@ -1052,13 +1052,14 @@ sd-ai-command-pack-uv-tools/
 .agent/**/tmp/
 .agent/**/*.log
 # The same six local-state patterns (*.local.*, .cache/, cache/, logs/, tmp/,
-# *.log) repeat for every other active platform dir (.claude/, .codebuddy/,
-# .codex/, .cursor/, .devin/, .factory/, .gemini/, .gito/, .kiro/, .kilocode/,
+# *.log) repeat for every other active platform dir (.codebuddy/, .codex/,
+# .cursor/, .devin/, .factory/, .gemini/, .gito/, .kiro/, .kilocode/,
 # .opencode/, .pi/, .qoder/, .reasonix/, .trae/, .zcode/), with a few extras
 # (.codex/ + .opencode/ sessions/, .opencode/ state/ + node_modules/, .gemini/
-# + .claude/ settings.local.json). .claude/ ignores .claude/** while negating
-# tracked .claude/commands/sd/*.md. install.py regenerates the full
-# per-platform block on every install.
+# + .claude/ settings.local.json). .claude/ is handled differently: it ignores
+# .claude/** while negating tracked .claude/commands/sd/*.md. A normal install
+# regenerates this managed block; --local-only writes the equivalent patterns
+# to .git/info/exclude instead.
 node_modules/
 
 # Project-local personal ignores can be added below this managed block.
