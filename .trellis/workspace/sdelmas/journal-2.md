@@ -1712,3 +1712,39 @@ Behavior-preserving hardening of shipped Python helpers from the optimization re
 ### Next Steps
 
 - None - task complete
+
+
+## Session 93: Fix main-push scope guard rejecting PR merges
+
+**Date**: 2026-07-14
+**Task**: Fix main-push scope guard rejecting PR merges
+**Branch**: `fix/main-push-scope-merge-exempt`
+
+### Summary
+
+The server-side main-push scope guard (check-main-push-scope.sh, added #97) failed on every non-chore PR merge because a merge commit's diff spans the whole PR, turning main CI red since #97 and blocking auto-tag-release (v0.10.0/v0.10.1 untagged, main at 0.10.1). Fixed by exempting merge commits (second parent present) from the chore-scope rule while keeping direct non-merge pushes, rename-into-chore, and fail-closed cases enforced. Added a merge-exempt behavioral test. The workflow runs the script from the pushed commit, so the fix exempts its own merge and restores CI Result + auto-tagging on landing.
+
+### Main Changes
+
+- check-main-push-scope.sh: accept a pushed head with a second parent (PR merge) before the chore-scope check (R1); direct/rename/fail-closed paths unchanged (R2)
+- Added merge-exempt behavioral test in test_review_preflight.py (R3); no version bump (CI tooling, not shipped payload)
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `23b0559` | fix(ci): exempt PR merge commits from the main-push scope guard |
+
+### Testing
+
+- [OK] make test installer 100%, scripts 78%; guard behavioral test passes (merge accepted, direct non-chore rejected)
+- [OK] make lint (shellcheck) + make full-check green; PR CI green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
