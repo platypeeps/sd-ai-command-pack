@@ -963,7 +963,7 @@ def kb_destination_for_source(source: Path) -> Path:
     return Path(category_folder_for_source(source)) / destination_filename_for_source(source)
 
 
-@functools.lru_cache(maxsize=None)
+@functools.lru_cache(maxsize=1)
 def _source_destination_entries_cached(
     sources: tuple[Path, ...],
 ) -> tuple[tuple[Path, Path], ...]:
