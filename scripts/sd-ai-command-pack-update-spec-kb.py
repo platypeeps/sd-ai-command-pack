@@ -15,6 +15,7 @@ state stay out.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import filecmp
 import os
 import shlex
@@ -223,9 +224,7 @@ def legacy_generated_marker(path: Path) -> str | None:
 
 
 def is_managed_kb_category_path(path: Path) -> bool:
-    return bool(path.parts) and path.parts[0] in {
-        title for _, title, _ in KB_CATEGORIES
-    }
+    return bool(path.parts) and path.parts[0] in KB_CATEGORY_TITLES
 
 
 def is_legacy_source_parent(path: Path, legacy_sources: set[Path]) -> bool:
@@ -571,7 +570,27 @@ def legacy_generated_symlink_count(root: Path) -> int:
     return count
 
 
-def collect_copy_state(root: Path, sources: list[Path]) -> tuple[int, int, list[str]]:
+# KB copy-state deviation kinds. `dry-run` previews surface only `conflict`
+# entries — refresh cannot auto-resolve user-owned symlinks, wrong link
+# targets, or occupied non-files — while it would bring missing/stale/legacy
+# entries current on its own; `--check` reports every kind. Classifying by
+# `kind` instead of matching the human-readable message suffix keeps the
+# displayed text free to change without silently shifting classification.
+ISSUE_CONFLICT = "conflict"
+ISSUE_MISSING = "missing"
+ISSUE_STALE = "stale"
+ISSUE_LEGACY_SYMLINK = "legacy_symlink"
+
+
+@dataclasses.dataclass(frozen=True)
+class CopyIssue:
+    kind: str
+    message: str
+
+
+def collect_copy_state(
+    root: Path, sources: list[Path]
+) -> tuple[int, int, list[CopyIssue]]:
     kb_root = root / KB_DIR
     entries = source_destination_entries(sources)
     wanted = {destination for _, destination in entries}
@@ -579,7 +598,7 @@ def collect_copy_state(root: Path, sources: list[Path]) -> tuple[int, int, list[
     generated = generated_kb_files(root)
     present = 0
     stale = 0
-    issues: list[str] = []
+    issues: list[CopyIssue] = []
 
     if kb_root.exists():
         for candidate in sorted(kb_root.rglob("*"), reverse=True):
@@ -600,24 +619,52 @@ def collect_copy_state(root: Path, sources: list[Path]) -> tuple[int, int, list[
         if copy.is_symlink():
             current = os.readlink(copy)
             if os.path.isabs(current) or not is_within(copy.parent / current, root):
-                issues.append(f"{relative_destination.as_posix()} has a user-owned symlink")
+                issues.append(
+                    CopyIssue(
+                        ISSUE_CONFLICT,
+                        f"{relative_destination.as_posix()} has a user-owned symlink",
+                    )
+                )
                 continue
             target = expected_link_target(root, relative_source, relative_destination)
             if current == target:
                 issues.append(
-                    f"{relative_destination.as_posix()} is a legacy generated symlink"
+                    CopyIssue(
+                        ISSUE_LEGACY_SYMLINK,
+                        f"{relative_destination.as_posix()} is a legacy generated symlink",
+                    )
                 )
             else:
-                issues.append(f"{relative_destination.as_posix()} points at {current!r}")
+                issues.append(
+                    CopyIssue(
+                        ISSUE_CONFLICT,
+                        f"{relative_destination.as_posix()} points at {current!r}",
+                    )
+                )
         elif copy.exists():
             if not copy.is_file():
-                issues.append(f"{relative_destination.as_posix()} is occupied by a non-file")
+                issues.append(
+                    CopyIssue(
+                        ISSUE_CONFLICT,
+                        f"{relative_destination.as_posix()} is occupied by a non-file",
+                    )
+                )
             elif filecmp.cmp(source, copy, shallow=False):
                 present += 1
             else:
-                issues.append(f"{relative_destination.as_posix()} is not current")
+                issues.append(
+                    CopyIssue(
+                        ISSUE_STALE,
+                        f"{relative_destination.as_posix()} is not current",
+                    )
+                )
         else:
-            issues.append(f"{relative_destination.as_posix()} is missing")
+            issues.append(
+                CopyIssue(
+                    ISSUE_MISSING,
+                    f"{relative_destination.as_posix()} is missing",
+                )
+            )
 
     return present, stale, issues
 
@@ -794,6 +841,7 @@ KB_CATEGORY_BY_KEY = {
     key: (title, description) for key, title, description in KB_CATEGORIES
 }
 KB_CATEGORY_ORDER = {key: index for index, (key, _, _) in enumerate(KB_CATEGORIES)}
+KB_CATEGORY_TITLES = frozenset(title for _, title, _ in KB_CATEGORIES)
 PLATFORM_DESTINATION_PREFIXES = {
     ".agent": "antigravity",
     ".agents": "codex",
@@ -1308,11 +1356,7 @@ def dry_run(root: Path) -> int:
         sources,
     )
     conflicts = [
-        issue
-        for issue in copy_issues
-        if not issue.endswith(" is missing")
-        and not issue.endswith(" is not current")
-        and not issue.endswith(" is a legacy generated symlink")
+        issue.message for issue in copy_issues if issue.kind == ISSUE_CONFLICT
     ]
     if dashboard_conflict is not None:
         conflicts.append(dashboard_conflict)
@@ -1350,7 +1394,7 @@ def check_current(root: Path) -> int:
         sources,
     )
 
-    conflicts = list(copy_issues)
+    conflicts = [issue.message for issue in copy_issues]
     if dashboard_conflict is not None:
         conflicts.append(dashboard_conflict)
     if overview_conflict is not None:

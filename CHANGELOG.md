@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.1 - 2026-07-14
+
+- Replaced the update-spec KB dry-run/`--check` conflict classification — which
+  matched human-readable message suffixes — with structured issue kinds, so
+  editing a display string can no longer silently change which entries count as
+  conflicts. Emitted text and exit codes are unchanged.
+- Micro-efficiency in shipped helpers (no behavior change): hoisted the KB
+  category-title lookup out of the directory-walk loop, removed a duplicate
+  `git status` on the session recorder's no-new-journal fallback, and made the
+  review-learnings shell-shebang probe split once and cache its verdict per path.
+
 ## 0.10.0 - 2026-07-14
 
 - Made remote PR review rounds use GitHub's documented Copilot request identity
