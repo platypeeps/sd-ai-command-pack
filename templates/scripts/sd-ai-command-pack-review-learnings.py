@@ -420,7 +420,13 @@ def extract_findings(
     return findings
 
 
-def _run_git(args: list[str], repo_root: Path, *, accept_one: bool = False) -> str:
+def _run_git(
+    args: list[str],
+    repo_root: Path,
+    *,
+    check: bool = True,
+    accept_one: bool = False,
+) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         ["git", *args],
         cwd=repo_root,
@@ -431,40 +437,29 @@ def _run_git(args: list[str], repo_root: Path, *, accept_one: bool = False) -> s
         errors="replace",
         timeout=60,
     )
-    allowed = {0, 1} if accept_one else {0}
-    if result.returncode not in allowed:
-        raise RuntimeError(result.stderr.strip() or "git command failed")
-    return result.stdout
+    if check:
+        allowed = {0, 1} if accept_one else {0}
+        if result.returncode not in allowed:
+            raise RuntimeError(result.stderr.strip() or "git command failed")
+    return result
 
 
 def _git_diff(base_ref: str, repo_root: Path) -> str:
-    return _run_git(["diff", "--no-ext-diff", f"{base_ref}...HEAD"], repo_root)
+    return _run_git(["diff", "--no-ext-diff", f"{base_ref}...HEAD"], repo_root).stdout
 
 
 def _run_git_optional(args: list[str], repo_root: Path) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=repo_root,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=60,
-    )
+    result = _run_git(args, repo_root, check=False)
     if result.returncode != 0:
         return ""
     return result.stdout.strip()
 
 
 def _git_ref_exists(ref: str, repo_root: Path) -> bool:
-    result = subprocess.run(
-        ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
-        cwd=repo_root,
+    result = _run_git(
+        ["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+        repo_root,
         check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=60,
     )
     return result.returncode == 0
 
@@ -508,8 +503,8 @@ def _git_untracked_paths(repo_root: Path) -> list[str]:
 
 def _git_working_tree_diff(repo_root: Path) -> str:
     chunks = [
-        _run_git(["diff", "--no-ext-diff", "--cached"], repo_root),
-        _run_git(["diff", "--no-ext-diff"], repo_root),
+        _run_git(["diff", "--no-ext-diff", "--cached"], repo_root).stdout,
+        _run_git(["diff", "--no-ext-diff"], repo_root).stdout,
     ]
     for path in _git_untracked_paths(repo_root):
         target = repo_root / path
@@ -520,7 +515,7 @@ def _git_working_tree_diff(repo_root: Path) -> str:
                 ["diff", "--no-ext-diff", "--no-index", "--", os.devnull, path],
                 repo_root,
                 accept_one=True,
-            )
+            ).stdout
         )
     return "\n".join(chunk for chunk in chunks if chunk)
 

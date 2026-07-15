@@ -443,6 +443,112 @@ def _print_conflicts(conflicts: list[InstallResult]) -> None:
     print("Re-run with --force to overwrite these files.")
 
 
+def _install_receipt_files(
+    manifest_data: dict,
+    files: list[PackFile],
+    target: Path,
+    *,
+    selected: list[PackFile],
+    skipped: list[tuple[PackFile, str]],
+    results: list[InstallResult],
+    generated_targets: list[Path],
+    dry_run: bool,
+) -> list[tuple[Path, str]]:
+    """Write the pack-manifest, provenance, and installed-targets receipts.
+
+    Appends each receipt's result to ``results`` in order (provenance vouches
+    for the results collected so far, so the ordering is load-bearing) and
+    returns the receipt entries preserved for platforms skipped only in this
+    checkout.
+    """
+    results.append(
+        install_pack_manifest_file(
+            manifest_data,
+            target,
+            dry_run=dry_run,
+        )
+    )
+    generated_targets.append(PACK_MANIFEST_FILE)
+
+    kept_receipt_targets = preserved_receipt_targets(
+        target, read_existing_installed_targets(target), skipped
+    )
+    receipt_extra_targets = [
+        *generated_targets,
+        PROVENANCE_FILE,
+        *(kept_target for kept_target, _ in kept_receipt_targets),
+    ]
+    receipt_target_set = installed_targets_set(selected, receipt_extra_targets)
+    results.append(
+        install_provenance_file(
+            manifest_data,
+            results,
+            target,
+            receipt_targets=receipt_target_set,
+            never_vouched=never_vouched_targets(files),
+            dry_run=dry_run,
+        )
+    )
+    results.append(
+        install_installed_targets_file(
+            selected,
+            target,
+            dry_run=dry_run,
+            extra_targets=receipt_extra_targets,
+        )
+    )
+    return kept_receipt_targets
+
+
+def _print_install_summary(
+    target: Path,
+    *,
+    results: list[InstallResult],
+    local_only_results: list[LocalOnlyResult],
+    local_only_results_printed: int,
+    skipped: list[tuple[PackFile, str]],
+    files: list[PackFile],
+    platforms_requested: list[str] | None,
+    kept_receipt_targets: list[tuple[Path, str]],
+) -> None:
+    """Print installed results, local-only results, skips, hints, and notes."""
+    for result in results:
+        print(f"{result.status:11} {result.file.target}")
+        if result.backup:
+            print(f"{'backup':11} {result.backup.relative_to(target)}")
+    for result in local_only_results[local_only_results_printed:]:
+        suffix = f" ({result.detail})" if result.detail else ""
+        print(f"{result.status:29} {display_path(target, result.target)}{suffix}")
+    for file, reason in skipped:
+        print(f"skipped     {file.target} ({reason})")
+    marker_missed_platforms = sorted(
+        {
+            file.platform
+            for file, reason in skipped
+            if reason.endswith("install not detected")
+        }
+    )
+    for platform in marker_missed_platforms:
+        directory = PLATFORM_REGISTRY[platform].directory
+        print(
+            f"hint: {directory}/ exists but no active Trellis {platform} "
+            f"install was detected; pass --platform {platform} or update "
+            "Trellis if that platform should be active here"
+        )
+    for platform in sorted(set(platforms_requested or [])):
+        if not any(file.platform == platform for file in files):
+            print(
+                f"note: platform {platform} has no dedicated manifest files; "
+                "its commands are provided by the shared .agents skills"
+            )
+    for kept_target, kept_platform in kept_receipt_targets:
+        print(
+            f"kept-in-receipt {kept_target} "
+            f"({kept_platform} adapter not selected in this checkout; "
+            "file may be local-only)"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     if args.backup and not args.force and not args.remove:
@@ -533,82 +639,31 @@ def main(argv: list[str] | None = None) -> int:
         backup=args.backup,
     )
 
-    results.append(
-        install_pack_manifest_file(
-            manifest_data,
-            target,
-            dry_run=args.dry_run,
-        )
-    )
-    generated_targets.append(PACK_MANIFEST_FILE)
-
-    kept_receipt_targets = preserved_receipt_targets(
-        target, read_existing_installed_targets(target), skipped
-    )
-    receipt_extra_targets = [
-        *generated_targets,
-        PROVENANCE_FILE,
-        *(kept_target for kept_target, _ in kept_receipt_targets),
-    ]
-    receipt_target_set = installed_targets_set(selected, receipt_extra_targets)
-    results.append(
-        install_provenance_file(
-            manifest_data,
-            results,
-            target,
-            receipt_targets=receipt_target_set,
-            never_vouched=never_vouched_targets(files),
-            dry_run=args.dry_run,
-        )
-    )
-    results.append(
-        install_installed_targets_file(
-            selected,
-            target,
-            dry_run=args.dry_run,
-            extra_targets=receipt_extra_targets,
-        )
+    kept_receipt_targets = _install_receipt_files(
+        manifest_data,
+        files,
+        target,
+        selected=selected,
+        skipped=skipped,
+        results=results,
+        generated_targets=generated_targets,
+        dry_run=args.dry_run,
     )
     if args.local_only:
         local_only_results.append(
             write_local_only_marker(target, dry_run=args.dry_run)
         )
 
-    for result in results:
-        print(f"{result.status:11} {result.file.target}")
-        if result.backup:
-            print(f"{'backup':11} {result.backup.relative_to(target)}")
-    for result in local_only_results[local_only_results_printed:]:
-        suffix = f" ({result.detail})" if result.detail else ""
-        print(f"{result.status:29} {display_path(target, result.target)}{suffix}")
-    for file, reason in skipped:
-        print(f"skipped     {file.target} ({reason})")
-    marker_missed_platforms = sorted(
-        {
-            file.platform
-            for file, reason in skipped
-            if reason.endswith("install not detected")
-        }
+    _print_install_summary(
+        target,
+        results=results,
+        local_only_results=local_only_results,
+        local_only_results_printed=local_only_results_printed,
+        skipped=skipped,
+        files=files,
+        platforms_requested=args.platform,
+        kept_receipt_targets=kept_receipt_targets,
     )
-    for platform in marker_missed_platforms:
-        directory = PLATFORM_REGISTRY[platform].directory
-        print(
-            f"hint: {directory}/ exists but no active Trellis {platform} "
-            f"install was detected; pass --platform {platform} or update "
-            "Trellis if that platform should be active here"
-        )
-    for platform in sorted(set(args.platform or [])):
-        if not any(file.platform == platform for file in files):
-            print(
-                f"note: platform {platform} has no dedicated manifest files; "
-                "its commands are provided by the shared .agents skills"
-            )
-    for kept_target, kept_platform in kept_receipt_targets:
-        print(
-            f"kept-in-receipt {kept_target} "
-            f"({kept_platform} adapter not selected in this checkout; "
-            "file may be local-only)"
-        )
 
     conflict_results = _conflict_results(results)
     if conflict_results:
