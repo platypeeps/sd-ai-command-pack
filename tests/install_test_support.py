@@ -677,6 +677,7 @@ class InstallTestCase(unittest.TestCase):
         for dirname in ("templates", "scripts", "docs"):
             shutil.copytree(PACK_ROOT / dirname, root / dirname)
         shutil.copyfile(PACK_ROOT / "manifest.json", root / "manifest.json")
+        shutil.copyfile(PACK_ROOT / "CHANGELOG.md", root / "CHANGELOG.md")
         (root / "install.py").write_text("# source repo marker\n", encoding="utf-8")
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")

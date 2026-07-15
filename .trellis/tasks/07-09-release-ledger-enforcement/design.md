@@ -10,7 +10,7 @@ the ledger and make future omissions fail locally and in CI.
 
 Backfill `CHANGELOG.md` for 0.7.4, 0.7.5, and 0.8.0 using the known release
 commits from the PRD, then create tags for unambiguous manifest-version bump
-commits from 0.6.1 through 0.8.1.
+commits from 0.6.1 through 0.9.1.
 
 Extend the pack-source drift gate in `scripts/sd-ai-command-pack-full-check.sh`
 and its template twin so a manifest version change relative to the base ref

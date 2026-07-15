@@ -156,3 +156,30 @@ jobs:
             echo "A required lane did not succeed."
             exit 1
           fi
+
+  auto-tag-release:
+    name: Auto-tag release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: ci-result
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci-result.result == 'success'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Create manifest version tag
+        env:
+          BASE_SHA: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.sha }}
+        run: >-
+          python3 .github/scripts/create-release-tag.py
+          --base "$BASE_SHA"
+          --head "$HEAD_SHA"
+          --repository "$GITHUB_REPOSITORY"

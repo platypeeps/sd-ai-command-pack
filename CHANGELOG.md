@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.2 - 2026-07-14
+
+- Backfilled the missing release ledger and historical version tags since
+  `v0.6.0`.
+- Required every manifest version bump to add a matching top changelog release
+  heading, and added post-CI automation that creates the corresponding tag on
+  `main`.
+
 ## 0.9.1 - 2026-07-14
 
 - Migrated the exact legacy Claude adapter ignore sequence into the managed
@@ -68,6 +76,22 @@
   of appending a duplicate session.
 - Reconciled the closed fleet-refresh loop, archived stale rollout acceptance
   criteria, and the duplicate Session 29/30 journal entry.
+
+## 0.8.0 - 2026-07-09
+
+- Added the distributed `sd-work-designs` command and shared skill for working
+  through Trellis tasks that still need `design.md` or `implement.md` planning
+  artifacts.
+
+## 0.7.5 - 2026-07-09
+
+- Moved shared command adapter bodies to neutral templates and generated the
+  OpenCode command surface from those sources.
+
+## 0.7.4 - 2026-07-08
+
+- Consolidated common shell helpers used by the local review runners while
+  preserving the shipped script interfaces.
 
 ## 0.7.3 - 2026-07-09
 

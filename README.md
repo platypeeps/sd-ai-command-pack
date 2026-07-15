@@ -427,7 +427,9 @@ compensating control.
 Start every release from a clean, up-to-date `main`, then create a release
 branch. Bump `manifest.json` whenever the shipped payload changes: `templates/**`,
 `docs/SD_AI_COMMAND_PACK.md`, or the manifest itself. The full-check pack-source
-drift gate fails when those files change without a manifest version bump.
+drift gate fails when those files change without a manifest version bump. Every
+version bump must also add the matching top `CHANGELOG.md` heading in the form
+`## <version> - YYYY-MM-DD`; the same gate rejects missing or stale headings.
 
 For docs, spec, README, or PRD edits, refresh the local KB before full-check:
 
@@ -444,16 +446,20 @@ SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 \
 ```
 
 Use a conventional release commit such as
-`chore: release sd-ai-command-pack <version>`, merge the PR, fast-forward `main`,
-then tag the merge/release commit:
+`chore: release sd-ai-command-pack <version>` and merge the PR. After the
+required test lanes pass on `main`, the `Auto-tag release` CI job creates the
+lightweight `v<version>` tag at the merged commit. The job is idempotent and
+fails instead of moving an existing tag. Verify the same plan locally without
+writing a tag:
 
 ```bash
-git tag v<version>
-git push origin v<version>
+python3 .github/scripts/create-release-tag.py --base HEAD^ --head HEAD --dry-run
 ```
 
-After the tag is pushed, use the fleet preflight below before opening consumer
-refresh PRs.
+If the post-merge tag job fails, rerun the failed workflow after correcting the
+reported ledger or permissions problem; do not move or overwrite a published
+version tag. After the tag exists, use the fleet preflight below before opening
+consumer refresh PRs.
 
 ## Fleet Rollout
 

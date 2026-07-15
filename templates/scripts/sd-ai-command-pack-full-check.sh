@@ -414,7 +414,7 @@ run_pack_source_drift_gates() {
     return 0
   fi
 
-  section "Pack source drift gates: template twins, release version, and env-var docs"
+  section "Pack source drift gates: template twins, release ledger, and env-var docs"
   local release_base_ref
   release_base_ref="$(full_check_base_ref)"
   SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF="${SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF:-$release_base_ref}" python3 - <<'PACK_SOURCE_DRIFT_GATES'
@@ -564,6 +564,38 @@ if payload_changed:
         )
 else:
     print("release version gate: no shipped payload changes detected")
+
+if version_bumped:
+    changelog_path = Path("CHANGELOG.md")
+    top_release_heading = None
+    if changelog_path.is_file():
+        top_release_heading = next(
+            (
+                line.strip()
+                for line in changelog_path.read_text(encoding="utf-8").splitlines()
+                if line.startswith("## ")
+            ),
+            None,
+        )
+    expected_heading = re.compile(
+        rf"^## {re.escape(current_version)} - \d{{4}}-\d{{2}}-\d{{2}}$"
+    )
+    if not current_version or not top_release_heading or not expected_heading.fullmatch(
+        top_release_heading
+    ):
+        found = repr(top_release_heading) if top_release_heading else "no release heading"
+        errors.append(
+            "release changelog drift: manifest version bump to "
+            f"{current_version!r} requires the top CHANGELOG.md release heading "
+            f"'## {current_version} - YYYY-MM-DD'; found {found}"
+        )
+    else:
+        print(
+            "release changelog gate: manifest version bump has matching top heading "
+            f"{top_release_heading!r}"
+        )
+else:
+    print("release changelog gate: manifest version unchanged")
 
 var_re = re.compile(r"SD_AI_COMMAND_PACK_[A-Z0-9_]+")
 exempt = {

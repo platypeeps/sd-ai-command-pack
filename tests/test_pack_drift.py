@@ -283,12 +283,54 @@ class PackDriftTests(InstallTestCase):
             json.dumps(manifest, indent=2) + "\n",
             encoding="utf-8",
         )
+        changelog_path = root / "CHANGELOG.md"
+        changelog_path.write_text(
+            changelog_path.read_text(encoding="utf-8").replace(
+                "# Changelog\n",
+                "# Changelog\n\n## 99.0.0 - 2099-01-01\n\n"
+                "- Release gate fixture.\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
 
         result = self.run_pack_source_drift_gates(root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
             "release version gate: shipped payload changed; manifest version",
+            result.stdout,
+        )
+        self.assertIn(
+            "release changelog gate: manifest version bump has matching top heading",
+            result.stdout,
+        )
+
+    def test_pack_source_drift_gate_rejects_version_bump_without_top_changelog_heading(
+        self,
+    ) -> None:
+        root = self.make_pack_source_fixture()
+        manifest_path = root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["version"] = "99.0.0"
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        changelog_path = root / "CHANGELOG.md"
+        changelog_path.write_text(
+            changelog_path.read_text(encoding="utf-8")
+            + "\n## 99.0.0 - 2099-01-01\n\n- Too late in the ledger.\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_pack_source_drift_gates(root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("release changelog drift", result.stdout)
+        self.assertIn(
+            "requires the top CHANGELOG.md release heading "
+            "'## 99.0.0 - YYYY-MM-DD'",
             result.stdout,
         )
 
