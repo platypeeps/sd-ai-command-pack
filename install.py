@@ -18,6 +18,8 @@ from installer import (
     removal,
 )
 from installer.fileops import (
+    CONFLICT_STATUSES,
+    VOUCHABLE_STATUSES,
     InstallResult,
     RemoveResult,
     atomic_write_bytes,
@@ -94,6 +96,7 @@ from installer.provenance import (
     install_provenance_file,
     installed_pack_manifest_content,
     installed_targets_content,
+    installed_targets_set,
     is_gitignored_path,
     never_vouched_targets,
     preserved_receipt_targets,
@@ -154,6 +157,7 @@ from installer.removal import (
 __all__ = [
     "ACTIVE_TRELLIS_PLATFORM_MARKERS",
     "ALWAYS_INSTALL",
+    "CONFLICT_STATUSES",
     "COPILOT_GUIDANCE_END",
     "COPILOT_GUIDANCE_START",
     "COPILOT_INSTRUCTIONS_TARGET",
@@ -194,6 +198,7 @@ __all__ = [
     "TRELLIS_GITIGNORE_TARGET",
     "TRELLIS_INIT_PLATFORM_FLAGS",
     "TRELLIS_INSTALL_DOCS_URL",
+    "VOUCHABLE_STATUSES",
     "_LOCAL_GITIGNORE_GROUP_ORDER",
     "_LOCAL_ONLY_GROUP_ORDER",
     "atomic_write_bytes",
@@ -217,6 +222,7 @@ __all__ = [
     "installed_pack_manifest_content",
     "installed_target_candidates",
     "installed_targets_content",
+    "installed_targets_set",
     "is_git_internal_candidate",
     "is_gitignored_path",
     "load_manifest",
@@ -420,11 +426,7 @@ def _install_payload(
 
 
 def _conflict_results(results: list[InstallResult]) -> list[InstallResult]:
-    return [
-        result
-        for result in results
-        if result.status in {"conflict", "symlink-conflict"}
-    ]
+    return [result for result in results if result.status in CONFLICT_STATUSES]
 
 
 def _print_conflicts(conflicts: list[InstallResult]) -> None:
@@ -548,11 +550,7 @@ def main(argv: list[str] | None = None) -> int:
         PROVENANCE_FILE,
         *(kept_target for kept_target, _ in kept_receipt_targets),
     ]
-    receipt_target_set = {
-        *(file.target.as_posix() for file in selected),
-        *(path.as_posix() for path in receipt_extra_targets),
-        INSTALLED_TARGETS_FILE.as_posix(),
-    }
+    receipt_target_set = installed_targets_set(selected, receipt_extra_targets)
     results.append(
         install_provenance_file(
             manifest_data,
@@ -618,10 +616,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if not args.dry_run and not args.skip_diff_check:
+        # Skip diff-checking any target this run did not write: conflicts and
+        # preserved files are left byte-for-byte untouched.
+        unwritten_statuses = CONFLICT_STATUSES | {"preserved"}
         diff_paths = [
             result.file.target
             for result in results
-            if result.status not in {"conflict", "symlink-conflict", "preserved"}
+            if result.status not in unwritten_statuses
         ]
         diff_status = run_diff_check(target, diff_paths)
         if diff_status != 0:

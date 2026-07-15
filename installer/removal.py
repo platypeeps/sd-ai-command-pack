@@ -93,15 +93,22 @@ def installed_target_candidates(
     *,
     platforms: list[str] | None,
     install_all: bool,
+    provenance_files: dict[str, str] | None = None,
 ) -> set[str]:
     receipt_targets = {
         normalize_removal_candidate(path)
         for path in read_existing_installed_targets_for_remove(target)
     }
-    provenance_targets = {
-        normalize_removal_candidate(path)
-        for path in read_existing_provenance_files_for_remove(target).keys()
-    }
+    # remove_installed_pack parses provenance.json once and threads the
+    # normalized dict in; standalone callers pass nothing and we read it here.
+    if provenance_files is None:
+        provenance_files = {
+            normalize_removal_candidate(path): digest
+            for path, digest in read_existing_provenance_files_for_remove(
+                target
+            ).items()
+        }
+    provenance_targets = set(provenance_files)
     if receipt_targets or provenance_targets:
         candidates = {*receipt_targets, *provenance_targets}
     else:
@@ -261,6 +268,7 @@ def remove_installed_pack(
             target,
             platforms=platforms,
             install_all=install_all,
+            provenance_files=provenance_files,
         )
         - block_targets
     ):

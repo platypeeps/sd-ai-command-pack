@@ -53,6 +53,25 @@ class InstallResult:
     backup: Path | None = None
 
 
+# InstallResult.status stays a str (it is printed with width specifiers like
+# f"{result.status:11}"), so centralize the membership sets here: a typo at a
+# comparison site becomes a NameError instead of a silent membership miss.
+CONFLICT_STATUSES = frozenset({"conflict", "symlink-conflict"})
+VOUCHABLE_STATUSES = frozenset({"created", "updated", "unchanged", "overwritten"})
+
+
+def generated_pack_file(kind: str, target: Path) -> PackFile:
+    """PackFile for an installer-generated file (receipt/manifest/provenance/gitignore)."""
+    return PackFile(
+        platform="shared",
+        kind=kind,
+        source=MANIFEST_PATH,
+        target=target,
+        anchor=None,
+        install=ALWAYS_INSTALL,
+    )
+
+
 def default_file_mode(*, executable: bool = False) -> int:
     current_umask = os.umask(0)
     try:
@@ -172,6 +191,14 @@ def path_is_occupied(path: Path) -> bool:
     return path.exists() or path.is_symlink()
 
 
+def _require_file_destination(destination: Path, relative_target: Path) -> None:
+    """Fail cleanly when the target path is occupied by a non-file node."""
+    if path_is_occupied(destination) and not destination.is_file():
+        raise SystemExit(
+            f"error: target exists and is not a file: {relative_target}"
+        )
+
+
 def next_backup_path(target: Path, destination: Path) -> Path:
     candidate = destination.with_name(f"{destination.name}.bak")
     if not path_is_occupied(candidate):
@@ -197,8 +224,7 @@ def install_file(
 ) -> InstallResult:
     source = file.source
     destination = target_destination(target, file.target)
-    if path_is_occupied(destination) and not destination.is_file():
-        raise SystemExit(f"error: target exists and is not a file: {file.target}")
+    _require_file_destination(destination, file.target)
     new_content = source.read_bytes()
     executable = source_is_executable(source)
     if destination.is_symlink():
@@ -362,17 +388,9 @@ def merge_trellis_gitignore_block(current: str) -> str:
 
 
 def install_trellis_gitignore(target: Path, *, dry_run: bool) -> InstallResult:
-    file = PackFile(
-        platform="shared",
-        kind="generated-gitignore",
-        source=MANIFEST_PATH,
-        target=TRELLIS_GITIGNORE_TARGET,
-        anchor=None,
-        install=ALWAYS_INSTALL,
-    )
+    file = generated_pack_file("generated-gitignore", TRELLIS_GITIGNORE_TARGET)
     destination = target_destination(target, file.target)
-    if path_is_occupied(destination) and not destination.is_file():
-        raise SystemExit(f"error: target exists and is not a file: {file.target}")
+    _require_file_destination(destination, file.target)
 
     existed = destination.exists()
     current = read_text_if_exists(destination, str(file.target))
@@ -395,8 +413,7 @@ def install_managed_block(
         raise SystemExit(f"error: unsupported managed block target: {file.target}")
 
     destination = target_destination(target, file.target)
-    if path_is_occupied(destination) and not destination.is_file():
-        raise SystemExit(f"error: target exists and is not a file: {file.target}")
+    _require_file_destination(destination, file.target)
 
     block = normalize_managed_block_template(file)
     if destination.exists():
@@ -636,8 +653,10 @@ def display_path(target: Path, path: Path) -> Path:
 
 
 __all__ = [
+    "CONFLICT_STATUSES",
     "InstallResult",
     "RemoveResult",
+    "VOUCHABLE_STATUSES",
     "atomic_write_bytes",
     "atomic_write_text",
     "atomic_write_text_preserving_invalid_utf8",
