@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.4 - 2026-07-15
+
+- Internal micro-refactors of shipped helpers (no behavior change): unified the
+  review-learnings git-command wrappers behind one runner, and precompute the
+  PR-body scope rule's normalized glob patterns at rule-build time instead of
+  re-normalizing them on every path match. Byte-identical output and exit codes.
+
 ## 0.10.3 - 2026-07-15
 
 - Internal consolidation of shipped helpers (no behavior change): deduplicated

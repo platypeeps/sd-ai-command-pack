@@ -45,7 +45,7 @@ import os
 import re
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -66,12 +66,32 @@ DEFAULT_CONFIG_PATH = Path(".sd-ai-command-pack/pr-body-scope.json")
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
 
 
+def _normalize_path(path: str) -> str:
+    return _remove_dot_slash(path.replace("\\", "/"))
+
+
+def _remove_dot_slash(path: str) -> str:
+    return path[2:] if path.startswith("./") else path
+
+
 @dataclass(frozen=True)
 class ScopeRule:
     label: str
     headings: tuple[str, ...]
     patterns: tuple[str, ...]
     include_installed_targets: bool = False
+    normalized_patterns: tuple[str, ...] = field(init=False, compare=False, repr=False)
+
+    def __post_init__(self) -> None:
+        # Precompute the normalized match globs once per rule so the
+        # path x rule x pattern classify loop never re-normalizes a static
+        # pattern. Rebuilt automatically whenever patterns change (merge,
+        # installed-target injection), since every construction runs this.
+        object.__setattr__(
+            self,
+            "normalized_patterns",
+            tuple(_normalize_path(pattern) for pattern in self.patterns),
+        )
 
 
 DEFAULT_RULES = (
@@ -218,14 +238,6 @@ DEFAULT_RULES = (
 )
 
 
-def _normalize_path(path: str) -> str:
-    return _remove_dot_slash(path.replace("\\", "/"))
-
-
-def _remove_dot_slash(path: str) -> str:
-    return path[2:] if path.startswith("./") else path
-
-
 def _split_changed_files(text: str) -> list[str]:
     paths: list[str] = []
     seen: set[str] = set()
@@ -308,7 +320,11 @@ def _load_body(body_file: Path | None) -> tuple[str | None, str | None]:
 
 def _matches_pattern(normalized_path: str, pattern: str) -> bool:
     """Match a normalized repository path against a PR-body scope glob."""
-    normalized_pattern = _remove_dot_slash(pattern.replace("\\", "/"))
+    return _matches_normalized_pattern(normalized_path, _normalize_path(pattern))
+
+
+def _matches_normalized_pattern(normalized_path: str, normalized_pattern: str) -> bool:
+    """Match a normalized path against an already-normalized scope glob."""
     if normalized_pattern.endswith("/**"):
         # fnmatch expands glob characters in the base (e.g. sd-*), and its
         # "*" crosses "/" so f"{base}/*" covers arbitrary depth under it.
@@ -471,7 +487,10 @@ def _classify(paths: list[str], rules: tuple[ScopeRule, ...]) -> dict[ScopeRule,
     matches: dict[ScopeRule, list[str]] = {}
     for path in paths:
         for rule in rules:
-            if any(_matches_pattern(path, pattern) for pattern in rule.patterns):
+            if any(
+                _matches_normalized_pattern(path, pattern)
+                for pattern in rule.normalized_patterns
+            ):
                 matches.setdefault(rule, []).append(path)
     return matches
 

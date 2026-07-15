@@ -180,7 +180,9 @@ def validate_pack_source(source: Path) -> None:
         raise SystemExit(f"error: unsafe source path in manifest: {source}") from None
     validate_relative_manifest_path("source", relative_source)
     try:
-        source.resolve(strict=False).relative_to(ROOT.resolve())
+        # ROOT is Path(__file__).resolve().parent.parent, i.e. already
+        # symlink-resolved and absolute; ROOT.resolve() would be a no-op.
+        source.resolve(strict=False).relative_to(ROOT)
     except (OSError, RuntimeError) as error:
         raise SystemExit(
             f"error: cannot resolve source path in manifest: {source} ({error})"
