@@ -1600,3 +1600,42 @@ Added a two-version Claude adapter refresh regression and archived the completed
 ### Next Steps
 
 - Resume a parked task only when its documented trigger or upstream dependency is satisfied.
+
+
+## Session 90: Parallelize the test suite by module
+
+**Date**: 2026-07-14
+**Task**: Parallelize the test suite by module
+**Branch**: `perf/test-parallelization`
+
+### Summary
+
+Sharded the unittest suite across workers via a shared runner script (.github/scripts/run-tests.sh) called by both the Makefile and CI; coverage --parallel-mode already writes per-shard data for combine, so only the runner was serial. Local wall-clock ~84s -> ~20s; installer line+branch coverage held at 100%. Updated README and the self-pinning parity test to the runner-based contract, and hardened the mktemp -d call after Copilot review.
+
+### Main Changes
+
+- Add .github/scripts/run-tests.sh: bash 3.2-safe, shellcheck-clean, largest-file-first sharding, shard logs in a temp dir, excludes the empty test_install.py facade, guards mktemp -d
+- Makefile test target and CI unittest lane both call the runner (removed the duplicated inline command + coverage env); README Verify block updated
+- Updated test_generated_parity to pin the runner and its coverage-rig contract instead of the old inline 'coverage run ... discover' command
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `16b57f8` | perf(tests): parallelize the suite by module via a shared runner |
+| `a3405e4` | perf(tests): handle mktemp -d failure in the test runner |
+
+### Testing
+
+- [OK] make test: ~20s (was ~84s), installer coverage 100% (1076/1076 lines, 451/451 branches), scripts 78% >= 76%
+- [OK] make lint (ruff + mypy + shellcheck) and make full-check green
+- [OK] CI green on all runners (macos-3.13, ubuntu-3.10, ubuntu-3.13, lint, security)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
