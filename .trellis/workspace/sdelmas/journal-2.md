@@ -1676,3 +1676,39 @@ Behavior-preserving installer cleanup from the optimization review: collapsed th
 ### Next Steps
 
 - None - task complete
+
+
+## Session 92: Script hardening (optimization Batch B)
+
+**Date**: 2026-07-14
+**Task**: Script hardening (optimization Batch B)
+**Branch**: `perf/script-hardening`
+
+### Summary
+
+Behavior-preserving hardening of shipped Python helpers from the optimization review: replaced update-spec-kb's suffix-matching dry-run/--check conflict classification with a CopyIssue(kind,message) vocabulary (proven byte-identical output), hoisted a KB category frozenset out of a walk loop, removed a duplicate git status in the session recorder fallback, and made the review-learnings shebang probe split-once + cache per path. Applied to both scripts/ and templates/scripts/ twins; bumped manifest to 0.10.1 with a CHANGELOG entry for the shipped-payload change. Implemented by a trellis-implement sub-agent, independently verified.
+
+### Main Changes
+
+- update-spec-kb: structured CopyIssue kinds replace suffix-matched dry-run/--check conflict filter (R1); hoist KB_CATEGORY_TITLES frozenset (R2)
+- record-session: single git status on no-new-journal fallback (R3); review-learnings: split-once + per-path shell-verdict cache (R4); manifest 0.10.0 -> 0.10.1 + CHANGELOG
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1860270` | refactor(scripts): structured KB conflict classification + micro-efficiency (0.10.1) |
+
+### Testing
+
+- [OK] make test: installer 100%, scripts 78% >= 76% (no per-file coverage drop)
+- [OK] R1 differential harness byte-identical for --check and --dry-run; make lint + full-check green; CI green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
