@@ -1921,3 +1921,37 @@ Reorganized README so consumer sections (Overview/Commands/Configuration/Install
 ### Next Steps
 
 - None - task complete
+
+
+## Session 99: Script consolidation (deferred item 2b)
+
+**Date**: 2026-07-15
+**Task**: Script consolidation (deferred item 2b)
+**Branch**: `perf/script-consolidation`
+
+### Summary
+
+Final deferred item: behavior-preserving consolidation of shipped helpers. update-spec-kb: one _git_stdout() behind the three inline git wrappers, and lru_cache so source_destination_entries is computed once per run not four times. review-learnings: a _dig() helper collapsing the deep GraphQL walk, leaving the inner raise-boundary intact. Excluded the risky write/plan mirror-merge. Twins byte-identical; installer 100%, scripts 79%; bumped to 0.10.3 with CHANGELOG. Implemented by a sub-agent, independently verified.
+
+### Main Changes
+
+- update-spec-kb: _git_stdout dedup (R1) + lru_cache compute-once for source_destination_entries (R2); review-learnings: _dig GraphQL walk (R3); manifest 0.10.2 -> 0.10.3 + CHANGELOG
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d8e40dc` | refactor(scripts): consolidate update-spec-kb + review-learnings helpers (0.10.3) |
+
+### Testing
+
+- [OK] make test installer 100%, scripts 79% >= 76% (no per-file drop); twins byte-identical; make lint + full-check green; CI green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
