@@ -354,9 +354,8 @@ def main(argv: list[str]) -> int:
         finally:
             content_file.unlink(missing_ok=True)
 
-        journals = [j for j in modified_workspace_journals() if j not in before] or (
-            modified_workspace_journals()
-        )
+        after = modified_workspace_journals()
+        journals = [j for j in after if j not in before] or after
     if len(journals) != 1:
         # A journal dirtied before the run makes the before/after set
         # ambiguous; the entry we just wrote is the one carrying the title.

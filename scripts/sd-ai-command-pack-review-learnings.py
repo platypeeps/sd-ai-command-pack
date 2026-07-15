@@ -170,7 +170,7 @@ def _is_shell_like(path: str, repo_root: Path) -> bool:
     if not path.startswith(("scripts/", "benchmarks/", ".github/actions/")):
         return False
     text = _read_text(repo_root, path)
-    first_line = text.splitlines()[0] if text.splitlines() else ""
+    first_line = next(iter(text.splitlines()), "")
     return "bash" in first_line or " sh" in first_line or first_line.endswith("/sh")
 
 
@@ -216,9 +216,12 @@ def _scan_shell_and_workflow_lines(
 ) -> list[Finding]:
     findings: list[Finding] = []
     file_text_cache: dict[str, str] = {}
+    shell_like_cache: dict[str, bool] = {}
 
     for line in added_lines:
-        shell_like = _is_shell_like(line.path, repo_root)
+        if line.path not in shell_like_cache:
+            shell_like_cache[line.path] = _is_shell_like(line.path, repo_root)
+        shell_like = shell_like_cache[line.path]
         workflow = _is_workflow(line.path)
         if not shell_like and not workflow:
             continue
