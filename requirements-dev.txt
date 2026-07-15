@@ -2,5 +2,5 @@
 # coverage.py enforces coverage gates; Ruff provides the CI lint lane.
 coverage==7.6.0
 PyYAML==6.0.3
-ruff==0.15.20
+ruff==0.15.21
 mypy==2.3.0
