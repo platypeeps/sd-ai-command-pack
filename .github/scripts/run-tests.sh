@@ -52,9 +52,12 @@ if [ "${#modules[@]}" -eq 0 ]; then
   exit 1
 fi
 
-work_dir="$(mktemp -d)"
-mod_file="$work_dir/modules"
+work_dir="$(mktemp -d)" || {
+  printf '%s\n' "error: cannot create a temporary directory for test shards" >&2
+  exit 1
+}
 trap 'rm -rf "$work_dir"' EXIT
+mod_file="$work_dir/modules"
 printf '%s\n' "${modules[@]}" > "$mod_file"
 
 # One `coverage run` per module, up to TEST_WORKERS at a time. Each shard's
