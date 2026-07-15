@@ -1,16 +1,16 @@
 # Dropped Claude Work-Backlog Install Root Cause Implementation Plan
 
-1. Inspect installer selection, anchor detection, force overwrite, receipt, and
-   provenance code paths for conditions that can skip one selected Claude
-   command while installing siblings.
-2. Add a focused test fixture with `.claude/` gitignore/local-state behavior and
-   explicit Claude platform selection.
-3. Attempt to reproduce the historical symptom by forcing or simulating the
-   suspected skip condition.
-4. If reproduced, fix the generic skip/recording path and assert the target
-   appears on disk, in receipt, and in provenance.
-5. If not reproduced, add a short negative-result note to the PRD and verify the
-   manifest completeness audit fails when the target is removed from disk and
-   receipt.
-6. Run focused tests, `make test`, and the pack full-check with Prism/Gito
-   disabled.
+1. Add a focused two-version fixture: install with the Claude work-backlog
+   manifest entry removed, retain the old receipt, remove all active Trellis
+   Claude markers while keeping the `.claude/` anchor, then refresh with the
+   current manifest.
+2. Assert the refresh reports `active Trellis claude install not detected`,
+   preserves old Claude receipt entries, and omits the newly introduced target
+   from disk, receipt, and provenance.
+3. Assert the ordinary provenance-based audit reproduces the historical blind
+   spot, while `--expected-platform claude` fails on the missing target.
+4. Keep production installer selection unchanged. The historical run reported
+   the skip correctly; fleet preflight now prevents recurrence by supplying
+   explicit install and audit platform sets.
+5. Update task acceptance evidence and run focused tests, `make test`, and the
+   pack full-check with Prism/Gito disabled.
