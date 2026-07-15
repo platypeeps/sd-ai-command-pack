@@ -43,7 +43,7 @@ rules out a file-write race or a `.gitignore` exception bug.
 - All six 0.7.0 consumers were refreshed with the same command shape:
   `python3 install.py <repo> --force`, without explicit `--platform` options.
 - anomaly-metric-creator, loadsmith, rwbp-website, and mezmo_benchmark reported
-  `created .claude/commands/sd/work-backlog.md`.
+  that the Claude work-backlog command was created.
 - hoa-manager and rwbp-coordinator reported every Claude adapter as skipped
   because `active Trellis claude install not detected`, including the new
   work-backlog command. The installer also printed the existing hint to pass
