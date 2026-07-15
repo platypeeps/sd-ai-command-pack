@@ -41,36 +41,15 @@ The current Trellis-focused pack installs:
 The exact installed file set is defined by `manifest.json` and validated in
 target repos by `scripts/sd-ai-command-pack-install-audit.py`.
 
-The shared skills own the workflows. Platform command and prompt files are thin
-entry points that tell the agent to load the appropriate shared skill.
-Codex exposes pack entry points as enabled skills named `sd-start`, `sd-continue`,
-`sd-finish-work`, `sd-create-pr`, `sd-work-backlog`, `sd-work-designs`,
-`sd-full-check`, `sd-housekeeping`, `sd-review-pr`, `sd-review-local`,
-`sd-review-local-all`, `sd-review-learnings`, and `sd-update-spec`; type
-`/sd` in Codex command completion or invoke them explicitly with
-`$sd-review-pr`-style skill mentions.
-User-facing command adapters live under the `sd` namespace so pack-owned
-wrappers do not collide with Trellis-owned generated `/trellis:*` commands on
-future `trellis update` runs. Command-capable adapters expose either
-namespaced `sd/<command>` files or flat `sd-<command>` files, matching the
-platform convention Trellis uses for that tool. Skill-only adapters install the
-same `sd-*` skills into the platform's native skill root.
-The update-spec workflow runs the Trellis-provided `trellis-update-spec` skill
-as-is, refreshes repo-owned repospec artifacts through existing maintenance
-infrastructure when available, then adds an explicit architectural-overview
-check and rebuilds a repo-local `.obsidian-kb` folder of copied
-repository-knowledge files.
-The start, continue, and finish-work wrappers similarly delegate to
-Trellis-provided `trellis-start`, `trellis-continue`, and
-`trellis-finish-work` skills without changing their behavior.
-On Claude Code — where Trellis ships a SessionStart hook instead of a
-`trellis-start` skill — the start wrapper derives the same session context
-from `.trellis/scripts/get_context.py` directly, and the continue and
-finish-work wrappers accept the installed `trellis:continue` and
-`trellis:finish-work` command names as valid resolutions.
-The installed `docs/SD_AI_COMMAND_PACK.md` file gives humans and agents a
-repo-local usage guide for the commands, script, environment variables, local
-review-provider behavior when available, and troubleshooting steps.
+The shared skills own the workflows; the platform command and prompt files are
+thin entry points that load the matching shared skill. Wrappers live under the
+`sd` namespace (not `trellis`) so they never collide with Trellis' generated
+`/trellis:*` commands, and they delegate to Trellis' own start, continue,
+finish-work, and update-spec skills without changing behavior — including on
+Claude Code, where the start wrapper reads SessionStart context from
+`.trellis/scripts/get_context.py`. Codex exposes them as `sd-*` skills. See the
+installed guide's [What is installed](docs/SD_AI_COMMAND_PACK.md#what-is-installed)
+for the full Codex skill list, per-platform command shapes, and adapter details.
 
 Quick links:
 
@@ -248,16 +227,9 @@ checks. Normal shared installs should commit that snapshot with the other
 pack-owned files so audit and review-scope helpers can compare the intended
 installed footprint. For normal shared installs, it also maintains a managed
 `sd-ai-command-pack trellis-gitignore` block in the repo root `.gitignore` that
-ignores Trellis local/runtime files such as `.trellis/.developer`,
-`.trellis/.runtime/`, `.trellis/.cache/`, `.trellis/.backup-*`,
-`.trellis/worktrees/`, and `.trellis/.template-hashes.json` without
-blanket-ignoring shareable `.trellis` workflow, spec, task, and script files.
-It also keeps shared Claude SD commands trackable while ignoring the rest of
-`.claude/` as local Claude Code state. Other AI-tool local state such as tool
-caches, logs, sessions, tmp folders, Gito report/temp artifacts,
-`.opencode/node_modules/`, and root `node_modules/` are ignored without
-blanket-ignoring shareable `.codex/`, `.gemini/`, `.gito/`, or `.opencode/`
-platform adapter directories.
+ignores Trellis and AI-tool local/runtime state (caches, logs, sessions, tmp,
+Gito artifacts, `node_modules/`) while keeping shareable `.trellis` and platform
+adapter files — plus tracked Claude SD commands — committed.
 It installs platform adapters only when the target repo has the corresponding
 platform directory and a Trellis-owned marker for that platform, such as a
 Trellis command, hook, skill, or Copilot hook file. A plain `.github` directory
@@ -315,35 +287,17 @@ by Git, because `.git/info/exclude` cannot hide changes to tracked files. Remove
 existing Trellis or pack-generated files from Git tracking first, or use the
 normal tracked install when the repository should share one setup.
 
-By default, existing files with different content are reported as conflicts and
-left untouched. The installer preflights normal tracked refreshes, so one
-conflict exits before any selected pack file is written. Use `--force` to
-overwrite conflicts. The exceptions are an existing
-`.prism/rules.json`, `.gito/config.toml`, and `.github/PULL_REQUEST_TEMPLATE.md`:
-once one differs from the pack template, it is reported as `preserved` and is
-never overwritten or reported as a conflict. Add `--backup` with `--force` to save a `.bak` copy of every
-overwritten file next to the original before it is changed. The pack-owned
-`.gito/sd-ai-command-pack.env` file is updateable like scripts and docs so the
-standard Gito concurrency cap can be refreshed.
+By default, conflicting files are left untouched and the tracked refresh exits
+before writing anything; add `--force` to overwrite and `--backup` (with
+`--force`) to keep a `.bak` of each overwritten file. Customized
+`.prism/rules.json`, `.gito/config.toml`, and `.github/PULL_REQUEST_TEMPLATE.md`
+are reported as `preserved` and never overwritten.
 
-For an advisory installed-versus-upstream version check against a local pack
-checkout, run:
-
-```bash
-python3 scripts/sd-ai-command-pack-install-audit.py \
-  --upstream-manifest /path/to/sd-ai-command-pack
-```
-
-Use `--remove` to uninstall the pack from a target checkout. Removal deletes
-pack-vouched files, files that still match the bundled template, generated pack
-state under `.sd-ai-command-pack/`, and the pack-managed blocks in `.gitignore`,
-`.git/info/exclude`, and `.github/copilot-instructions.md`. Drifted files,
-symlinks, directories, and user-owned policy files are preserved by default;
-add `--force` to delete drifted regular pack files too, and add `--backup` to
-keep `.bak` copies of deleted files.
-Removal only deletes manifest-recognized pack artifacts and generated pack
-state; corrupted receipt or provenance entries under `.git/` or arbitrary repo
-files are reported as `ignored`, even with `--force`.
+Use `--remove` to uninstall the pack. It deletes only manifest-recognized
+pack-vouched or template-matching files, generated `.sd-ai-command-pack/` state,
+and the pack-managed `.gitignore`, `.git/info/exclude`, and
+`.github/copilot-instructions.md` blocks; drifted, symlinked, or user-owned
+files are kept unless you add `--force`.
 
 Platform filters always include the shared skills, full-check, the shared shell
 helper, housekeeping, review-scope, review-preflight, review-local command

@@ -1748,3 +1748,40 @@ The server-side main-push scope guard (check-main-push-scope.sh, added #97) fail
 ### Next Steps
 
 - None - task complete
+
+
+## Session 94: Docs concision (optimization Batch C)
+
+**Date**: 2026-07-14
+**Task**: Docs concision (optimization Batch C)
+**Branch**: `perf/docs-concision`
+
+### Summary
+
+Cut ~240 lines of README/guide duplication from the optimization review with no information loss: trimmed the guide's ~148-line verbatim per-platform .gitignore example to one representative block plus an accurate regeneration note, and removed README prose duplicating the guide's Updating-the-pack and What-is-installed sections. Kept the SANDBOX_TMP block (pinned by 7 parity assertions). Applied to both docs/ and templates/docs/ twins; bumped to 0.10.2 with CHANGELOG. Implemented by a sub-agent, independently verified, and one Copilot accuracy nit on the new note fixed.
+
+### Main Changes
+
+- Guide: replace verbatim per-platform gitignore block with one example + regeneration note (local-only writes .git/info/exclude); README: drop prose duplicating the guide, deferring via existing pointers
+- Twins byte-identical; manifest 0.10.1 -> 0.10.2 + CHANGELOG; fixed Copilot note accuracy (.claude/ special-casing, local-only mode)
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `49ee93e` | docs: tighten the trimmed .gitignore example note |
+| `4391779` | docs: cut ~240 lines of README/guide duplication (0.10.2) |
+
+### Testing
+
+- [OK] make test installer 100%, scripts 78%; test_generated_parity green (no pinned string broken); twin diff empty
+- [OK] review-preflight 0 failures; make lint + full-check green; CI green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.2 - 2026-07-14
+
+- Trimmed the installed guide's verbatim per-platform `.gitignore` example to a
+  single representative block plus a note that the installer regenerates the
+  full per-platform set, and removed README prose that duplicated the guide's
+  "Updating the pack" and "What is installed" sections. Documentation only — no
+  command, flag, or behavior change; ~240 fewer lines across README and the guide.
+
 ## 0.10.1 - 2026-07-14
 
 - Replaced the update-spec KB dry-run/`--check` conflict classification — which
