@@ -988,6 +988,10 @@ class InstallCoreTests(InstallTestCase):
                 output = stdout.getvalue() + stderr.getvalue()
                 for expected in expected_texts:
                     self.assertIn(expected, output)
+                if args == ["--help"]:
+                    for target in install.FORCE_PRESERVED_TARGETS:
+                        self.assertIn(target.as_posix(), output)
+                    self.assertIn("Codex by default", output)
                 if args == ["--version"]:
                     self.assertIn(
                         f"{manifest['name']} {manifest['version']}",
@@ -1123,6 +1127,27 @@ class InstallCoreTests(InstallTestCase):
             with mock.patch.object(Path, "unlink", side_effect=FileNotFoundError):
                 with self.assertRaisesRegex(SystemExit, "cannot write"):
                     install.atomic_write_bytes(destination, b"content\n")
+
+    def test_atomic_write_cleans_temp_file_when_write_fails(self) -> None:
+        root = self.make_repo()
+        destination = root / "out.txt"
+        temporary_path = root / ".out.txt.injected.tmp"
+        temporary_path.write_bytes(b"partial")
+        temporary = mock.MagicMock()
+        temporary.name = str(temporary_path)
+        temporary.write.side_effect = OSError("ENOSPC")
+        context = mock.MagicMock()
+        context.__enter__.return_value = temporary
+        context.__exit__.return_value = False
+
+        with mock.patch(
+            "installer.fileops.tempfile.NamedTemporaryFile",
+            return_value=context,
+        ):
+            with self.assertRaisesRegex(SystemExit, "cannot write"):
+                install.atomic_write_bytes(destination, b"content\n")
+
+        self.assertFalse(temporary_path.exists())
 
     def test_managed_block_rejects_duplicate_markers(self) -> None:
         block = (
@@ -1362,6 +1387,37 @@ class InstallCoreTests(InstallTestCase):
         forced = self.run_install(root, "--force")
         self.assertEqual(forced.returncode, 0, forced.stdout)
         self.assertIn("SD PR Review Loop", target.read_text(encoding="utf-8"))
+
+    def test_conflict_preflight_writes_no_pack_files(self) -> None:
+        root = self.make_repo()
+        conflict = root / ".agents/skills/sd-review-pr/SKILL.md"
+        conflict.parent.mkdir(parents=True)
+        conflict.write_text("local edit\n", encoding="utf-8")
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("conflict", result.stdout)
+        self.assertEqual(conflict.read_text(encoding="utf-8"), "local edit\n")
+        self.assertFalse((root / ".gitignore").exists())
+        self.assertFalse((root / install.INSTALLED_TARGETS_FILE).exists())
+        self.assertFalse((root / "scripts/sd-ai-command-pack-full-check.sh").exists())
+
+    def test_local_only_conflict_is_reported_after_bootstrap_boundary(self) -> None:
+        root = self.make_repo()
+        conflict = root / ".agents/skills/sd-review-pr/SKILL.md"
+        conflict.parent.mkdir(parents=True)
+        conflict.write_text("local edit\n", encoding="utf-8")
+
+        result = self.run_install(
+            root,
+            "--local-only",
+            "--skip-trellis-init",
+        )
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("conflict", result.stdout)
+        self.assertEqual(conflict.read_text(encoding="utf-8"), "local edit\n")
 
     def test_force_backup_preserves_overwritten_file(self) -> None:
         root = self.make_repo(".gemini")
@@ -2513,6 +2569,48 @@ class InstallCoreTests(InstallTestCase):
         )
         self.assertEqual(audit.returncode, 0, audit.stdout)
         self.assertNotIn("drifted from pack", audit.stdout)
+
+    def test_concurrent_installers_leave_consistent_receipts(self) -> None:
+        root = self.make_repo()
+        command = [
+            sys.executable,
+            str(INSTALLER),
+            str(root),
+            "--skip-diff-check",
+        ]
+        processes = [
+            subprocess.Popen(
+                command,
+                cwd=PACK_ROOT,
+                env=self.installer_subprocess_env(),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            for _ in range(2)
+        ]
+        outputs = [process.communicate(timeout=60)[0] for process in processes]
+
+        for process, output in zip(processes, outputs, strict=True):
+            self.assertEqual(process.returncode, 0, output)
+
+        receipt = {
+            line
+            for line in (root / install.INSTALLED_TARGETS_FILE)
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line
+        }
+        provenance = json.loads(
+            (root / install.PROVENANCE_FILE).read_text(encoding="utf-8")
+        )
+        self.assertTrue(provenance["files"])
+        self.assertTrue(set(provenance["files"]).issubset(receipt))
+        for relative_path, recorded_digest in provenance["files"].items():
+            installed = root / relative_path
+            self.assertTrue(installed.is_file(), relative_path)
+            actual_digest = "sha256:" + hashlib.sha256(installed.read_bytes()).hexdigest()
+            self.assertEqual(actual_digest, recorded_digest, relative_path)
 
     def test_fresh_gitignore_reports_created_status(self) -> None:
         root = self.make_repo()

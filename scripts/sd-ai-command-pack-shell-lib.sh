@@ -4,7 +4,9 @@
 # define REPO_ROOT before sourcing; helpers that emit warnings expect warn(),
 # and run_gito_command expects section(), gito_max_attempts(),
 # gito_initial_retry_delay(), gito_max_retry_delay(), and
-# gito_command_timeout_seconds().
+# gito_command_timeout_seconds(). Callers that define the optional
+# REVIEW_LOCAL_TEMP_FILES array must install an EXIT/INT/TERM cleanup trap;
+# run_gito_command registers each temporary output file in that array.
 
 # sd-ai-command-pack review-scan-excludes start
 REVIEW_SCAN_EXCLUDE_DIRS=(
@@ -152,11 +154,17 @@ load_gito_pack_env() {
 
 prepare_gito_uv_env() {
   local default_tmp="${TMPDIR:-/tmp}"
+  local cache_root="${XDG_CACHE_HOME:-}"
+  if [ -n "$cache_root" ]; then
+    cache_root="${cache_root%/}/sd-ai-command-pack"
+  else
+    cache_root="${default_tmp%/}/sd-ai-command-pack-${UID:-unknown}"
+  fi
   if [ -z "${UV_CACHE_DIR:-}" ]; then
-    export UV_CACHE_DIR="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_UV_CACHE_DIR:-${default_tmp%/}/sd-ai-command-pack-uv-cache}"
+    export UV_CACHE_DIR="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_UV_CACHE_DIR:-$cache_root/uv-cache}"
   fi
   if [ -z "${UV_TOOL_DIR:-}" ]; then
-    export UV_TOOL_DIR="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_UV_TOOL_DIR:-${default_tmp%/}/sd-ai-command-pack-uv-tools}"
+    export UV_TOOL_DIR="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_UV_TOOL_DIR:-$cache_root/uv-tools}"
   fi
   mkdir -p "$UV_CACHE_DIR" "$UV_TOOL_DIR"
 }

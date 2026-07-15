@@ -1079,7 +1079,7 @@ class ReviewScopeTests(InstallTestCase):
             self.assertNotIn("any available local review providers", skill)
             self.assertNotIn("optional local review providers", skill)
             self.assertIn(
-                'REMOTE_REVIEWER="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER:-copilot-pull-request-reviewer}"',
+                'REMOTE_REVIEWER="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER:-@copilot}"',
                 skill,
             )
             self.assertIn(
@@ -1089,6 +1089,11 @@ class ReviewScopeTests(InstallTestCase):
             self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_AUTHOR_MATCH", skill)
             self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND", skill)
             self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT", skill)
+            self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_SETTLE_POLLS", skill)
+            self.assertIn(
+                'REMOTE_REVIEW_AUTHOR_MATCH="copilot-pull-request-reviewer[bot]"',
+                skill,
+            )
             self.assertIn("after every pushed review-fix commit", skill)
             self.assertIn(
                 "before each configured remote-review request",
@@ -1101,6 +1106,17 @@ class ReviewScopeTests(InstallTestCase):
             self.assertIn('-f reviewers[]="$REMOTE_REVIEWER"', skill)
             self.assertIn(
                 'gh pr edit "$PR_NUMBER" --add-reviewer "$REMOTE_REVIEWER"',
+                skill,
+            )
+            self.assertIn(
+                'gh pr edit "$PR_NUMBER" --add-reviewer @copilot',
+                skill,
+            )
+            self.assertIn("Only **review materialized** completes", skill)
+            self.assertIn("cleared reviewer request is a polling", skill)
+            self.assertIn("accepted request with no observable activity", skill)
+            self.assertNotIn(
+                "the review request disappears and remains absent through two polling",
                 skill,
             )
             self.assertNotIn("-f reviewers[]=copilot-pull-request-reviewer", skill)
@@ -1133,7 +1149,7 @@ class ReviewScopeTests(InstallTestCase):
 
         for doc_path in detailed_doc_paths:
             doc = doc_path.read_text(encoding="utf-8")
-            self.assertRegex(doc, r"(?i)the\s+default remote reviewer")
+            self.assertRegex(doc, r"(?i)the\s+default remote review request")
             self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER", doc)
             self.assertIn("review-fix commit made", doc)
             self.assertRegex(

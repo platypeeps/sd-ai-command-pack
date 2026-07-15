@@ -610,6 +610,7 @@ class GeneratedParityTests(InstallTestCase):
 
         self.assertRegex(requirements, r"(?m)^coverage[<>=!~]")
         self.assertRegex(requirements, r"(?m)^ruff==\d+\.\d+\.\d+$")
+        self.assertRegex(requirements, r"(?m)^mypy==\d+\.\d+\.\d+$")
         for expected in (
             "runs-on: ${{ matrix.os }}",
             "fail-fast: false",
@@ -619,19 +620,24 @@ class GeneratedParityTests(InstallTestCase):
             "python3 -m ruff check install.py installer scripts templates/scripts tests",
             "node --check scripts/sd-ai-command-pack-review-preflight.mjs",
             "node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs",
-            "needs: [unittest, lint, security]",
+            "bash .github/scripts/check-opencode-js.sh",
+            "python3 -m mypy installer",
+            "needs: [unittest, lint, security, main-push-scope]",
             "LINT_RESULT",
         ):
             self.assertIn(expected, workflow)
         for expected in (
             "[tool.ruff]",
+            "[tool.mypy]",
             'target-version = "py310"',
+            'python_version = "3.10"',
             'select = ["E4", "E7", "E9", "F", "I", "B"]',
             '".ruff_cache"',
         ):
             self.assertIn(expected, pyproject)
         self.assertNotIn("[tool.ruff.lint.per-file-ignores]", pyproject)
         self.assertIn(".ruff_cache/", gitignore)
+        self.assertIn("unittest-output.log", gitignore)
         for expected in (
             "python3 -m pip install -r requirements-dev.txt",
             'COVERAGE_PROCESS_START="$(pwd)/.coveragerc"',
@@ -652,7 +658,8 @@ class GeneratedParityTests(InstallTestCase):
             "command -v node >/dev/null 2>&1",
             "node --check scripts/sd-ai-command-pack-review-preflight.mjs",
             "node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs",
-            "warning: node not found; skipping review-preflight JavaScript syntax checks.",
+            "bash .github/scripts/check-opencode-js.sh",
+            "warning: node not found; skipping JavaScript syntax checks.",
             'COVERAGE_PROCESS_START="$(pwd)/.coveragerc"',
             'COVERAGE_FILE="$(pwd)/.coverage"',
             'PYTHONPATH="$(pwd)/tests/coverage_sitecustomize'
@@ -665,6 +672,104 @@ class GeneratedParityTests(InstallTestCase):
             ' --include="scripts/sd-ai-command-pack-*" --fail-under=76',
         ):
             self.assertIn(expected, readme)
+
+    def test_opencode_javascript_syntax_gate_checks_tracked_files(self) -> None:
+        script = PACK_ROOT / ".github/scripts/check-opencode-js.sh"
+        current = subprocess.run(
+            ["bash", str(script)],
+            cwd=PACK_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(current.returncode, 0, current.stderr)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            copied_script = root / ".github/scripts/check-opencode-js.sh"
+            copied_script.parent.mkdir(parents=True)
+            shutil.copy2(script, copied_script)
+            bad_js = root / ".opencode/lib/bad.js"
+            bad_js.parent.mkdir(parents=True)
+            bad_js.write_text("const = ;\n", encoding="utf-8")
+            (bad_js.parent / "valid name.js").write_text(
+                "export const valid = true;\n", encoding="utf-8"
+            )
+            subprocess.run(
+                ["git", "init", "-q"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "add", "-f", "."],
+                cwd=root,
+                check=True,
+                capture_output=True,
+            )
+            tracked = subprocess.run(
+                ["git", "ls-files", "--", "*.js"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn(".opencode/lib/bad.js", tracked.stdout)
+
+            invalid = subprocess.run(
+                ["bash", str(copied_script)],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(
+                invalid.returncode,
+                0,
+                f"stdout={invalid.stdout!r} stderr={invalid.stderr!r}",
+            )
+            self.assertIn("bad.js", invalid.stderr)
+
+    def test_ci_dependency_and_main_push_guards_are_bounded(self) -> None:
+        workflow = (PACK_ROOT / ".github/workflows/tests.yml").read_text(
+            encoding="utf-8"
+        )
+        dependabot = yaml.safe_load(
+            (PACK_ROOT / ".github/dependabot.yml").read_text(encoding="utf-8")
+        )
+        main_push_guard = (
+            PACK_ROOT / ".github/scripts/check-main-push-scope.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotRegex(
+            workflow,
+            r"uses: actions/(?:checkout|setup-python)@v\d+",
+        )
+        self.assertEqual(
+            workflow.count(
+                "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"
+            ),
+            5,
+        )
+        self.assertEqual(
+            workflow.count(
+                "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065"
+            ),
+            3,
+        )
+        self.assertIn("main-push-scope:", workflow)
+        self.assertIn('"${{ github.event.before }}" "${{ github.sha }}"', workflow)
+        self.assertIn("git diff --no-renames --name-only -z", main_push_guard)
+        self.assertIn(".trellis/tasks/*|.trellis/workspace/*", main_push_guard)
+
+        updates = dependabot["updates"]
+        self.assertEqual(
+            {entry["package-ecosystem"] for entry in updates},
+            {"pip", "github-actions"},
+        )
+        for entry in updates:
+            self.assertEqual(entry["schedule"]["interval"], "monthly")
+            self.assertEqual(entry["open-pull-requests-limit"], 2)
 
     def test_contributor_workflow_is_documented(self) -> None:
         readme = (PACK_ROOT / "README.md").read_text(encoding="utf-8")
@@ -685,7 +790,7 @@ class GeneratedParityTests(InstallTestCase):
             "make audit",
             "make full-check",
             "make check",
-            "review-preflight JavaScript syntax checks when Node is available",
+            "pack JavaScript syntax checks when Node is available",
             "Missing optional tools print warnings",
             "Bump `manifest.json` whenever shipped payload changes",
             "Treat `templates/**` as the source of truth",
@@ -709,7 +814,9 @@ class GeneratedParityTests(InstallTestCase):
             "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0",
             "SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0",
             "command -v node >/dev/null 2>&1",
-            "warning: node not found; skipping review-preflight JavaScript syntax checks.",
+            "warning: node not found; skipping JavaScript syntax checks.",
+            'skipped=[1-9][0-9]*',
+            '"$(VENV_PYTHON)" -m mypy installer',
         ):
             self.assertIn(target, makefile)
 
@@ -1084,7 +1191,7 @@ class GeneratedParityTests(InstallTestCase):
             install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            "The round limit defaults to\ntwo configured remote-review requests",
+            "The round limit\ndefaults to two configured remote-review requests",
             guide,
         )
 

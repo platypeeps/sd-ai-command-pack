@@ -41,3 +41,7 @@ Source:
 
 - Do not start this task until one of the upstream triggers exists.
 - This is a parked task, not currently actionable backlog.
+- Live check on 2026-07-14: [mindfold-ai/Trellis#394](https://github.com/mindfold-ai/Trellis/issues/394)
+  and [#395](https://github.com/mindfold-ai/Trellis/issues/395) remain open.
+  Keep the recorder and housekeeping wrappers unchanged until released
+  structured-content and JSON-output contracts replace their workarounds.

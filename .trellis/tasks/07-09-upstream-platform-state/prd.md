@@ -41,3 +41,6 @@ Source:
 
 - Do not start this task until the upstream trigger exists.
 - This is a parked task, not currently actionable backlog.
+- Live check on 2026-07-14: [mindfold-ai/Trellis#396](https://github.com/mindfold-ai/Trellis/issues/396)
+  remains open. Continue using the tested pack-owned marker inference until a
+  released machine-readable upstream contract exists.

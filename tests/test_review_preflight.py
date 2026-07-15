@@ -544,6 +544,72 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("tests/test_missing.py", result.stdout)
 
+    def test_main_push_scope_allows_only_trellis_chore_paths(self) -> None:
+        script = PACK_ROOT / ".github/scripts/check-main-push-scope.sh"
+        root = self.make_git_repo_without_trellis()
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+
+        (root / "README.md").write_text("baseline\n", encoding="utf-8")
+        self.run_git(root, "add", "README.md")
+        self.run_git(root, "commit", "-m", "baseline")
+        baseline = self.git_output(root, "rev-parse", "HEAD")
+
+        task = root / ".trellis/tasks/example/task.json"
+        task.parent.mkdir(parents=True)
+        task.write_text('{"status": "planning"}\n', encoding="utf-8")
+        self.run_git(root, "add", str(task.relative_to(root)))
+        self.run_git(root, "commit", "-m", "record task")
+        chore_head = self.git_output(root, "rev-parse", "HEAD")
+        allowed = subprocess.run(
+            ["bash", str(script), baseline, chore_head],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        self.assertIn("chore-only diff accepted", allowed.stdout)
+
+        (root / "code.py").write_text("print('changed')\n", encoding="utf-8")
+        self.run_git(root, "add", "code.py")
+        self.run_git(root, "commit", "-m", "add source")
+        source_head = self.git_output(root, "rev-parse", "HEAD")
+        rejected = subprocess.run(
+            ["bash", str(script), chore_head, source_head],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(rejected.returncode, 1, rejected.stdout)
+        self.assertIn("code.py", rejected.stderr)
+
+        workspace = root / ".trellis/workspace"
+        workspace.mkdir(parents=True)
+        self.run_git(root, "mv", "code.py", ".trellis/workspace/code.py")
+        self.run_git(root, "commit", "-m", "move source into chore path")
+        rename_head = self.git_output(root, "rev-parse", "HEAD")
+        disguised_rename = subprocess.run(
+            ["bash", str(script), source_head, rename_head],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(disguised_rename.returncode, 1, disguised_rename.stdout)
+        self.assertIn("code.py", disguised_rename.stderr)
+
+        missing_before = subprocess.run(
+            ["bash", str(script), "0" * 40, rename_head],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(missing_before.returncode, 1, missing_before.stdout)
+        self.assertIn("failing closed", missing_before.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

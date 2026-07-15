@@ -364,7 +364,10 @@ class PackDriftTests(InstallTestCase):
         self.addCleanup(tools_tempdir.cleanup)
         stub_bin = Path(tools_tempdir.name) / "bin"
         stub_bin.mkdir()
-        (stub_bin / "python3").symlink_to(Path(sys.executable))
+        try:
+            (stub_bin / "python3").symlink_to(Path(sys.executable))
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"symlinks are not available: {exc}")
 
         result = self.run_pack_source_drift_gates(
             root,

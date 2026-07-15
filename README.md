@@ -12,8 +12,8 @@ Install reusable AI workflow helpers into
 [Trellis-managed repositories](https://trytrellis.app/). The current pack is
 focused on Trellis enrichment: start, continue, finish-work, local review, PR
 creation/review, full-codebase local review, review learnings, full-check,
-post-merge housekeeping, and update-spec workflows. The repository and `sd`
-command namespace are intentionally
+post-merge housekeeping, update-spec, backlog implementation, and backlog
+design workflows. The repository and `sd` command namespace are intentionally
 broader than that initial scope, so future skills, commands, scripts, docs, or
 rules may cover adjacent AI workflow support that is not strictly
 Trellis-specific.
@@ -216,9 +216,11 @@ fast-forwarding, deleting merged refs, and reporting the final clean state.
 | `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY` | PR body override consumed specifically by `sd-ai-command-pack-pr-body-scope.py`; unset falls back to `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`. | unset |
 | `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_ACTOR` | PR author login (or `--actor`) for `sd-ai-command-pack-pr-body-scope.py`; a `[bot]`-suffixed login (e.g. `dependabot[bot]`) is exempt from strict validation so automated PRs are not blocked. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR` | PR number or URL for `sd-review-pr` when it cannot resolve the pull request from the current branch. | unset |
-| `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER` | Remote reviewer login/slug for `sd-review-pr`. | `copilot-pull-request-reviewer` |
+| `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER` | Remote reviewer request identity for `sd-review-pr`. | `@copilot` |
+| `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_AUTHOR_MATCH` | Review/comment author matched after a remote request; defaults to the configured reviewer except for Copilot. | `copilot-pull-request-reviewer[bot]` |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND` | Custom command for requesting a remote review. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote review request/fix rounds before asking whether to continue. | `2` |
+| `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_SETTLE_POLLS` | Maximum 30-second polls before an accepted request without author-matched activity stops as ambiguous. | `40` |
 
 The deprecated `REVIEW_PREFLIGHT_PR_BODY` fallback remains honored and is
 documented in the installed guide for older target repos.
@@ -314,13 +316,23 @@ existing Trellis or pack-generated files from Git tracking first, or use the
 normal tracked install when the repository should share one setup.
 
 By default, existing files with different content are reported as conflicts and
-left untouched. Use `--force` to overwrite them. The exceptions are an existing
+left untouched. The installer preflights normal tracked refreshes, so one
+conflict exits before any selected pack file is written. Use `--force` to
+overwrite conflicts. The exceptions are an existing
 `.prism/rules.json`, `.gito/config.toml`, and `.github/PULL_REQUEST_TEMPLATE.md`:
 once one differs from the pack template, it is reported as `preserved` and is
 never overwritten or reported as a conflict. Add `--backup` with `--force` to save a `.bak` copy of every
 overwritten file next to the original before it is changed. The pack-owned
 `.gito/sd-ai-command-pack.env` file is updateable like scripts and docs so the
 standard Gito concurrency cap can be refreshed.
+
+For an advisory installed-versus-upstream version check against a local pack
+checkout, run:
+
+```bash
+python3 scripts/sd-ai-command-pack-install-audit.py \
+  --upstream-manifest /path/to/sd-ai-command-pack
+```
 
 Use `--remove` to uninstall the pack from a target checkout. Removal deletes
 pack-vouched files, files that still match the bundled template, generated pack
@@ -398,8 +410,9 @@ python -m ruff check install.py installer scripts templates/scripts tests
 if command -v node >/dev/null 2>&1; then
   node --check scripts/sd-ai-command-pack-review-preflight.mjs
   node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs
+  bash .github/scripts/check-opencode-js.sh
 else
-  printf '%s\n' "warning: node not found; skipping review-preflight JavaScript syntax checks."
+  printf '%s\n' "warning: node not found; skipping JavaScript syntax checks."
 fi
 COVERAGE_PROCESS_START="$(pwd)/.coveragerc" COVERAGE_FILE="$(pwd)/.coverage" \
   PYTHONPATH="$(pwd)/tests/coverage_sitecustomize${PYTHONPATH:+:$PYTHONPATH}" \
@@ -499,9 +512,15 @@ git config core.hooksPath .githooks
 checkout when `.githooks` is not configured, because direct-to-main chore
 commits rely on that local guard when maintainer bypass is available.
 
+The `Main push scope` CI job applies the same path policy to every push on
+`main` and feeds the result into `CI Result`. It is a server-side detective
+backstop for an unarmed or bypassed local hook: an accidental non-chore push is
+reported with its offending paths, but the pushed commit still needs an
+explicit revert because CI cannot retract an accepted push.
+
 For a deliberate one-shot exception, bypass the hook with
-`SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS=1 git push ...` — GitHub's own rules
-still apply on the remote.
+`SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS=1 git push ...`. The server-side scope
+job still evaluates that push; use a pull request for non-chore changes.
 
 ## Supported Adapters
 

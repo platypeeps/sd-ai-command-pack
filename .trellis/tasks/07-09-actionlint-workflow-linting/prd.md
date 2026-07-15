@@ -37,3 +37,7 @@ Source: `.trellis/tasks/archive/2026-07/07-03-pack-shell-lint/prd.md` and
 
 - Do not start this task until the trigger exists.
 - This is a parked task, not currently actionable backlog.
+- Re-evaluated 2026-07-14 while adding the main-push workflow lane: no concrete
+  workflow-syntax defect occurred, and existing YAML/parity/zizmor checks caught
+  no gap. The trigger still does not exist; adding another pinned binary would
+  create cost without defect evidence.

@@ -26,10 +26,28 @@ make check
 ```
 
 `make check` runs the full local maintainer battery: coverage-gated tests,
-Ruff, review-preflight JavaScript syntax checks when Node is available,
+Ruff, mypy over the installer package, pack JavaScript syntax checks when Node is available,
 optional ShellCheck, optional Bandit/Zizmor, and the SD full-check gate with
 Prism/Gito disabled. Missing optional tools print warnings instead of blocking
 Python-only contributor setups.
+
+Ruff covers pack-owned Python in `install.py`, `installer/`, `scripts/`,
+`templates/scripts/`, and `tests/`. Trellis-owned platform runtime is excluded;
+tracked OpenCode JavaScript receives syntax-only validation with `node --check`.
+
+## Main Branch Policy
+
+Only task and workspace bookkeeping under `.trellis/tasks/**` and
+`.trellis/workspace/**` may be pushed directly to `main`. The tracked pre-push
+hook prevents other paths locally, and the `Main push scope` CI job detects the
+same violation after any accepted push. Use a pull request for every non-chore
+change; CI cannot undo an accidental direct push.
+
+CI intentionally tests the supported Python floor (3.10) and current project
+runtime (3.13), plus macOS on 3.13. Intermediate 3.11/3.12 jobs would duplicate
+the same compatibility interval while increasing Actions cost; add one only
+when a version-specific defect provides evidence that endpoint coverage is
+insufficient.
 
 ## Release And Payload Rules
 

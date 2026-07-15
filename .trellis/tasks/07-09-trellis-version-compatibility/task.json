@@ -7,7 +7,7 @@
   "dev_type": null,
   "scope": null,
   "package": null,
-  "priority": "P3",
+  "priority": null,
   "creator": "sdelmas",
   "assignee": "sdelmas",
   "createdAt": "2026-07-09",
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "Parked until a real Trellis version incompatibility is observed.",
   "meta": {}
 }

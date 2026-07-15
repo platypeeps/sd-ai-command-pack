@@ -343,8 +343,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help=(
             "Overwrite existing files that differ from the pack templates "
-            "(except .prism/rules.json and .gito/config.toml). Add --backup "
-            "to save .bak copies before overwriting."
+            "(except .prism/rules.json, .gito/config.toml, and "
+            ".github/PULL_REQUEST_TEMPLATE.md). Add --backup to save .bak "
+            "copies before overwriting."
         ),
     )
     parser.add_argument(
@@ -361,7 +362,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Set up Trellis and this pack for only the current checkout. "
             "When Trellis is missing, run `trellis init --yes --skip-existing` "
-            "first, then add generated Trellis and pack paths to "
+            "with the requested platform flags (Codex by default), then add "
+            "generated Trellis and pack paths to "
             ".git/info/exclude instead of changing tracked ignore files."
         ),
     )
@@ -384,6 +386,59 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Skip the final git diff --check validation.",
     )
     return parser.parse_args(argv)
+
+
+def _install_payload(
+    selected: list[PackFile],
+    target: Path,
+    *,
+    local_only: bool,
+    force: bool,
+    dry_run: bool,
+    backup: bool,
+) -> tuple[list[InstallResult], list[Path]]:
+    results: list[InstallResult] = []
+    generated_targets: list[Path] = []
+    if not local_only:
+        results.append(install_trellis_gitignore(target, dry_run=dry_run))
+        generated_targets.append(TRELLIS_GITIGNORE_TARGET)
+
+    for file in selected:
+        if file.kind == MANAGED_BLOCK_KIND:
+            result = install_managed_block(file, target, dry_run=dry_run)
+        else:
+            result = install_file(
+                file,
+                target,
+                force=force,
+                dry_run=dry_run,
+                backup=backup,
+            )
+        results.append(result)
+
+    return results, generated_targets
+
+
+def _conflict_results(results: list[InstallResult]) -> list[InstallResult]:
+    return [
+        result
+        for result in results
+        if result.status in {"conflict", "symlink-conflict"}
+    ]
+
+
+def _print_conflicts(conflicts: list[InstallResult]) -> None:
+    print("")
+    print("Conflicts:")
+    for result in conflicts:
+        if result.status == "symlink-conflict":
+            print(
+                f"- {result.file.target} "
+                "(target is a symlink; the pack installs regular files only)"
+            )
+        else:
+            print(f"- {result.file.target}")
+    print("Re-run with --force to overwrite these files.")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -448,33 +503,33 @@ def main(argv: list[str] | None = None) -> int:
         suffix = f" ({result.detail})" if result.detail else ""
         print(f"{result.status:29} {display_path(target, result.target)}{suffix}")
 
-    results: list[InstallResult] = []
-    generated_targets: list[Path] = []
-    if not args.local_only:
-        results.append(
-            install_trellis_gitignore(
-                target,
-                dry_run=args.dry_run,
-            )
+    # A normal refresh is plan-before-apply: detect every selected-file
+    # conflict before the first pack-owned write. Local-only Trellis bootstrap
+    # remains outside this boundary because it invokes an external installer.
+    if not args.local_only and not args.force and not args.dry_run:
+        preflight_results, _ = _install_payload(
+            selected,
+            target,
+            local_only=False,
+            force=False,
+            dry_run=True,
+            backup=False,
         )
-        generated_targets.append(TRELLIS_GITIGNORE_TARGET)
+        preflight_conflicts = _conflict_results(preflight_results)
+        if preflight_conflicts:
+            for result in preflight_conflicts:
+                print(f"{result.status:11} {result.file.target}")
+            _print_conflicts(preflight_conflicts)
+            return 2
 
-    for file in selected:
-        if file.kind == MANAGED_BLOCK_KIND:
-            result = install_managed_block(
-                file,
-                target,
-                dry_run=args.dry_run,
-            )
-        else:
-            result = install_file(
-                file,
-                target,
-                force=args.force,
-                dry_run=args.dry_run,
-                backup=args.backup,
-            )
-        results.append(result)
+    results, generated_targets = _install_payload(
+        selected,
+        target,
+        local_only=args.local_only,
+        force=args.force,
+        dry_run=args.dry_run,
+        backup=args.backup,
+    )
 
     results.append(
         install_pack_manifest_file(
@@ -557,23 +612,9 @@ def main(argv: list[str] | None = None) -> int:
             "file may be local-only)"
         )
 
-    conflict_results = [
-        result
-        for result in results
-        if result.status in {"conflict", "symlink-conflict"}
-    ]
+    conflict_results = _conflict_results(results)
     if conflict_results:
-        print("")
-        print("Conflicts:")
-        for result in conflict_results:
-            if result.status == "symlink-conflict":
-                print(
-                    f"- {result.file.target} "
-                    "(target is a symlink; the pack installs regular files only)"
-                )
-            else:
-                print(f"- {result.file.target}")
-        print("Re-run with --force to overwrite these files.")
+        _print_conflicts(conflict_results)
         return 2
 
     if not args.dry_run and not args.skip_diff_check:

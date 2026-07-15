@@ -31,3 +31,12 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
   checkout are byte-verified mirrors; when changing a shipped script, skill,
   prompt, command, or guide, update the template side first and keep the
   installed copy synchronized.
+
+## Contributor Entry Points
+
+- Read [CONTRIBUTING.md](CONTRIBUTING.md), then run `make check` before
+  publishing a change.
+- Read `.trellis/spec/frontend/adapter-guidelines.md` before changing commands,
+  prompts, skills, or platform adapters.
+- Read `.trellis/spec/backend/manifest-and-filesystem.md` before changing the
+  installer, manifest, provenance, audit, or filesystem behavior.

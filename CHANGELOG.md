@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.0 - 2026-07-14
+
+- Made remote PR review rounds use GitHub's documented Copilot request identity
+  and require author-matched review activity before counting a request as
+  materialized.
+- Added plan-before-apply installer conflict handling, concurrent-run coverage,
+  rollback guidance, and an optional fail-soft consumer version comparison.
+- Hardened CI with SHA-pinned actions, bounded dependency updates, installer
+  mypy coverage, OpenCode syntax checks, and a server-side direct-main scope
+  backstop.
+- Closed shell and housekeeping reliability gaps around disjoint histories,
+  interrupt cleanup, delimiter parsing, default-branch detection, and per-user
+  review-tool caches; refreshed contributor and security documentation.
+
 ## 0.9.2 - 2026-07-14
 
 - Backfilled the missing release ledger and historical version tags since

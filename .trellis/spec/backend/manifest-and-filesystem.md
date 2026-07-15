@@ -21,15 +21,15 @@ template files into that target repo.
 - optional `anchor`
 - optional `install`
 
-`install.py` converts each manifest entry into a frozen `PackFile` in
-`load_manifest()`. When adding a file, update `manifest.json` first and keep
+`installer/manifest.py` converts each manifest entry into a frozen `PackFile`
+in `load_manifest()`. When adding a file, update `manifest.json` first and keep
 Python logic generic unless the install semantics really change.
 
 Reference files:
 
 - `manifest.json`
-- `install.py`, `PackFile`
-- `install.py`, `load_manifest()`
+- `installer/manifest.py`, `PackFile`
+- `installer/manifest.py`, `load_manifest()`
 
 ## Manifest Path Safety
 
@@ -50,9 +50,9 @@ fail before target validation, selection, backups, or file copies.
 
 Reference files:
 
-- `install.py`, `validate_manifest()`
-- `install.py`, `validate_relative_manifest_path()`
-- `install.py`, `validate_pack_source()`
+- `installer/manifest.py`, `validate_manifest()`
+- `installer/manifest.py`, `validate_relative_manifest_path()`
+- `installer/manifest.py`, `validate_pack_source()`
 - `tests/test_install_core.py`, `test_manifest_rejects_unsafe_target_paths`
 - `tests/test_install_core.py`, `test_manifest_rejects_unsafe_anchor_paths`
 - `tests/test_install_core.py`, `test_manifest_rejects_unsafe_source_paths`
@@ -65,7 +65,7 @@ copying files. Keep that validation early in `main()` through
 
 Reference file:
 
-- `install.py`, `require_trellis_repo()`
+- `installer/manifest.py`, `require_trellis_repo()`
 
 ## Selection Rules
 
@@ -87,7 +87,7 @@ Trellis platform detection:
 
 Reference files:
 
-- `install.py`, `selected_files()`
+- `installer/fileops.py`, `selected_files()`
 - `tests/test_generated_parity.py`,
   `test_installs_shared_skill_and_existing_platform_adapters`
 
@@ -162,7 +162,7 @@ did not change installed payload bytes.
 
 Reference files:
 
-- `install.py`, `preserved_receipt_targets()`, `is_gitignored_path()`,
+- `installer/provenance.py`, `preserved_receipt_targets()`, `is_gitignored_path()`,
   `provenance_content()`, `install_provenance_file()`
 - `templates/scripts/sd-ai-command-pack-install-audit.py`, `is_gitignored()`,
   `audit_provenance()`
@@ -258,6 +258,21 @@ Use `install_file()` for copy behavior:
   directory.
 - In `--dry-run` mode, report the planned status without creating files.
 
+## Plan-Before-Apply And Concurrency
+
+For a normal tracked install without `--force` or `--dry-run`, run the selected
+payload once in dry-run mode before the first pack-owned write. If any selected
+target conflicts, report every conflict and exit `2` without partially applying
+the refresh. Local-only Trellis bootstrap is outside this boundary because it
+invokes the external Trellis installer before pack files exist.
+
+Installer runs are not serialized. Atomic file replacement must keep each
+individual file parseable, while the last completed writer determines the
+final receipt and provenance. Tests must exercise two concurrent installer
+processes and verify that both state files parse and that every vouched hash
+matches the final installed content. Operators should still run one refresh at
+a time because output, backups, and selected-platform intent are not merged.
+
 ## Diff Checks
 
 Run the final `git diff --check` only against manifest-selected target paths.
@@ -289,9 +304,10 @@ tracked `.gitignore`.
    reports, or AI-tool local-state ignore rules.
 2. Entry points and data: `manifest.json` owns `.prism/rules.json`,
    `.gito/config.toml`, `.gito/sd-ai-command-pack.env`, and review scripts.
-   `install.py` owns `FORCE_PRESERVED_TARGETS`,
+   `installer/registry.py` owns `FORCE_PRESERVED_TARGETS`,
    `REVIEW_ARTIFACT_GITIGNORE_PATTERNS`,
-   `PLATFORM_LOCAL_GITIGNORE_PATTERNS`, and `trellis_gitignore_block()`.
+   and `PLATFORM_LOCAL_GITIGNORE_PATTERNS`; `installer/fileops.py` owns
+   `trellis_gitignore_block()`.
 3. Contracts: preserve existing `.prism/rules.json` and `.gito/config.toml`
    files even with `--force`; install or update `.gito/sd-ai-command-pack.env`
    from the pack. Never ignore the whole `.gito/`, `.prism/`, `.claude/`,

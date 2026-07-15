@@ -568,6 +568,61 @@ class InstallAuditTests(InstallTestCase):
             result.stdout,
         )
 
+    def test_install_audit_advises_on_upstream_pack_version(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        manifest, _ = install.load_manifest()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "manifest.json"
+            cases = (
+                ("99.0.0", "is behind upstream 99.0.0"),
+                (manifest["version"], f"is current with upstream {manifest['version']}"),
+                ("0.0.1", "is ahead of upstream 0.0.1"),
+                ("next", "could not compare"),
+            )
+            for version, expected in cases:
+                with self.subTest(version=version):
+                    reference.write_text(
+                        json.dumps({"version": version}) + "\n",
+                        encoding="utf-8",
+                    )
+                    audit = subprocess.run(
+                        [
+                            sys.executable,
+                            str(
+                                PACK_ROOT
+                                / "scripts/sd-ai-command-pack-install-audit.py"
+                            ),
+                            "--upstream-manifest",
+                            str(reference),
+                        ],
+                        cwd=root,
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        check=False,
+                    )
+                    self.assertEqual(audit.returncode, 0, audit.stdout)
+                    self.assertIn(expected, audit.stdout)
+
+            missing = subprocess.run(
+                [
+                    sys.executable,
+                    str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                    "--upstream-manifest",
+                    str(Path(temp_dir) / "missing.json"),
+                ],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(missing.returncode, 0, missing.stdout)
+            self.assertIn("could not determine upstream version", missing.stdout)
+
     def test_install_audit_ignores_user_tuned_preserved_files(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
