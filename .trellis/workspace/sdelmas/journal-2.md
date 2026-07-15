@@ -1819,3 +1819,37 @@ Final optimization batch: added cache: pip to the three actions/setup-python ste
 ### Next Steps
 
 - None - task complete
+
+
+## Session 96: Bump CI actions to checkout v7 + setup-python v6
+
+**Date**: 2026-07-15
+**Task**: Bump CI actions to checkout v7 + setup-python v6
+**Branch**: `chore/bump-ci-actions`
+
+### Summary
+
+Superseded dependabot #98/#99: bumped actions/checkout to v7.0.0 (5 usages) and actions/setup-python to v6.3.0 (3 usages), SHA-pinned, and updated the parity test's pinned SHAs in the same change (dependabot can't touch the test, so its action-bump PRs always fail the SHA-count assertion). zizmor clean; cache: pip works under setup-python v6; CI validated the major bumps green end-to-end. Also merged the two green dev-dep bumps (#100 coverage 7.15.1, #101 ruff 0.15.21) and backfilled the orphaned v0.10.0/v0.10.1 tags.
+
+### Main Changes
+
+- checkout v4->v7.0.0 (x5) + setup-python v5->v6.3.0 (x3) SHA-pinned in tests.yml; parity test pinned SHAs updated (counts + no-unpinned-tag assertions intact)
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `035636b` | ci: bump checkout to v7.0.0 and setup-python to v6.3.0 (supersedes #98/#99) |
+
+### Testing
+
+- [OK] test_generated_parity green; zizmor no findings; make full-check green; CI green on all lanes incl. unittest under the new actions
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
