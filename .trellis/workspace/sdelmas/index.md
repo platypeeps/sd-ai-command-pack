@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 90
+- **Total Sessions**: 91
 - **Last Active**: 2026-07-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1639 | Active |
+| `journal-2.md` | ~1677 | Active |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 91 | 2026-07-14 | Installer simplifications (optimization Batch A) | `ace99b5`, `1866db6` | `perf/installer-simplifications` |
 | 90 | 2026-07-14 | Parallelize the test suite by module | `16b57f8`, `a3405e4` | `perf/test-parallelization` |
 | 89 | 2026-07-14 | Complete remaining P2 task closeout | `7bda94c` | `codex/address-remaining-p3-tasks` |
 | 88 | 2026-07-11 | Plan tool-use hardening | `e5722e1`, `80ac9c2` | `codex/plan-tool-use-hardening` |

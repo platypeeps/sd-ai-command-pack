@@ -1639,3 +1639,40 @@ Sharded the unittest suite across workers via a shared runner script (.github/sc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 91: Installer simplifications (optimization Batch A)
+
+**Date**: 2026-07-14
+**Task**: Installer simplifications (optimization Batch A)
+**Branch**: `perf/installer-simplifications`
+
+### Summary
+
+Behavior-preserving installer cleanup from the optimization review: collapsed the three generated-file installers into one delegate + a PackFile factory, memoized per-source hashing in provenance_content, unified installed_targets_set across the receipt writer and provenance coverage, made --remove parse provenance once, centralized status frozensets, and extracted the occupied-non-file guard. Installer coverage held at 100% line+branch throughout. Implemented by a trellis-implement sub-agent, independently verified, and one Copilot docstring nit fixed.
+
+### Main Changes
+
+- Collapse generated-file installer trio + PackFile factory (R1); memoize provenance digests 343->~83 (R2); unify installed_targets_set (R3)
+- Parse provenance.json once per --remove (R4); centralize CONFLICT_STATUSES/VOUCHABLE_STATUSES frozensets (R5); extract occupied-non-file guard (R6)
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ace99b5` | docs(installer): fix installed_targets_set docstring grammar |
+| `1866db6` | refactor(installer): collapse duplicated generated-file installers, dedupe IO |
+
+### Testing
+
+- [OK] make test: installer 100% line+branch (1070/1070, 433/433), scripts 78% >= 76%
+- [OK] make lint + make full-check green; CI green on all runners
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
