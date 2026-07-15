@@ -60,6 +60,11 @@ class InstallTestCase(unittest.TestCase):
 
     _manifest_files: list[install.PackFile]
 
+    # Per-class cache of (template_root, head_oid) for make_housekeeping_repo.
+    # Set lazily on the concrete subclass; read via __dict__ so subclasses do
+    # not share a parent's template.
+    _housekeeping_template: tuple[Path, str] | None
+
     @classmethod
     def setUpClass(cls) -> None:
         cls._bash_path = shutil.which("bash")
@@ -520,10 +525,14 @@ class InstallTestCase(unittest.TestCase):
         ):
             self.assertNotIn(platform_dir, content.splitlines())
 
-    def make_housekeeping_repo(self) -> tuple[Path, Path, Path, str]:
-        tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-housekeeping-test-")
-        self.addCleanup(tempdir.cleanup)
-        root = Path(tempdir.name)
+    def _build_housekeeping_template(self, root: Path) -> str:
+        """Populate ``root`` with the canonical housekeeping layout.
+
+        Creates ``work/`` (feature/cleanup checked out, origin tracking set up),
+        the bare ``origin.git/`` remote, and an empty ``bin/`` stub dir. Returns
+        the feature/cleanup HEAD oid. This is the ~15-git-subprocess body that
+        used to run per test; it now runs once per class into a template dir.
+        """
         repo = root / "work"
         remote = root / "origin.git"
         stub_bin = root / "bin"
@@ -554,7 +563,40 @@ class InstallTestCase(unittest.TestCase):
         self.run_git(repo, "add", "feature.txt")
         self.run_git(repo, "commit", "-m", "feature")
         self.run_git(repo, "push", "-u", "origin", "feature/cleanup")
-        head_oid = self.git_output(repo, "rev-parse", "HEAD")
+        return self.git_output(repo, "rev-parse", "HEAD")
+
+    def make_housekeeping_repo(self) -> tuple[Path, Path, Path, str]:
+        """Return an isolated ``(repo, remote, stub_bin, head_oid)`` tuple.
+
+        The canonical repo is built once per test class into a template dir; each
+        call ``copytree``-clones that template and only repoints ``work``'s
+        origin remote at this copy's bare remote. A copy plus one git command is
+        far cheaper than the ~15 git subprocesses of a full rebuild. Every clone
+        is a fully independent tree (its own ``work/`` and ``origin.git/``), so
+        tests that merge PRs or delete branches never observe each other's state.
+        """
+        cls = type(self)
+        cached = cls.__dict__.get("_housekeeping_template")
+        if cached is None:
+            template_root = Path(
+                tempfile.mkdtemp(prefix="sd-ai-command-pack-housekeeping-template-")
+            )
+            head_oid = self._build_housekeeping_template(template_root)
+            cls.addClassCleanup(shutil.rmtree, template_root, ignore_errors=True)
+            cached = (template_root, head_oid)
+            cls._housekeeping_template = cached
+        template_root, head_oid = cached
+
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-housekeeping-test-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name) / "repo"
+        shutil.copytree(template_root, root)
+        repo = root / "work"
+        remote = root / "origin.git"
+        stub_bin = root / "bin"
+        # The cloned work tree still points origin at the template's bare remote;
+        # repoint it at this copy so every test's pushes/merges stay isolated.
+        self.run_git(repo, "remote", "set-url", "origin", str(remote))
         return repo, remote, stub_bin, head_oid
 
     def write_housekeeping_gh_stub(self, stub_bin: Path, head_oid: str) -> None:
@@ -670,6 +712,35 @@ class InstallTestCase(unittest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=False,
+        )
+
+    def run_install_inproc(
+        self,
+        root: Path,
+        *args: str,
+        skip_diff_check: bool = True,
+    ) -> subprocess.CompletedProcess[str]:
+        """In-process ``install.main`` twin of :meth:`run_install`.
+
+        Returns a ``CompletedProcess`` with the same ``returncode``/``stdout``
+        shape (stdout and stderr merged, matching ``run_install``'s
+        ``stderr=STDOUT``) so happy-path callers can swap the two without
+        touching their assertions, while skipping interpreter + subprocess
+        coverage startup.
+
+        Use only for tests that install then inspect the filesystem/return code.
+        Tests that depend on process semantics — argv/CLI parsing, ``os.environ``
+        / PATH isolation, ``SystemExit`` as process exit status, or the
+        symlink-exec entry — must keep :meth:`run_install`.
+        """
+        argv = [str(root), *args]
+        if skip_diff_check:
+            argv.append("--skip-diff-check")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            returncode = install.main(argv)
+        return subprocess.CompletedProcess(
+            args=argv, returncode=returncode, stdout=output.getvalue()
         )
 
     def make_pack_source_fixture(self) -> Path:
