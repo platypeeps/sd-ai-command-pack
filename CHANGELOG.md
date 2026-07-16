@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.4 - 2026-07-16
+
+- Route every shared SD skill invocation of a pack-owned Python helper through
+  the shipped toolchain selector, preventing older system `python3` binaries
+  from failing on the pack's Python 3.10+ syntax.
+- Add regression coverage that rejects direct
+  `python3 scripts/sd-ai-command-pack-*` invocations in shared skill templates.
+
 ## 0.15.3 - 2026-07-16
 
 - Convert shared Git/GitHub helper `CommandError` failures in the shipped

@@ -52,7 +52,8 @@ variables; every tuning knob is an argument.
 1. Preflight first. From the pack checkout, run:
 
    ```bash
-   python3 scripts/sd-ai-command-pack-fleet-preflight.py
+   bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+     scripts/sd-ai-command-pack-fleet-preflight.py
    ```
 
    Append `--consumer <name>` for each entry in the `consumer=` filter. The

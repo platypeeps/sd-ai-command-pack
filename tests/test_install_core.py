@@ -3061,6 +3061,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("name: sd-review-learnings", review_learnings)
         self.assertIn("# SD Review Learnings", review_learnings)
         self.assertIn("scripts/sd-ai-command-pack-review-learnings.py", review_learnings)
+        self.assertIn("sd-ai-command-pack-toolchain.sh run-python", review_learnings)
 
         full_check = (
             install.ROOT / "templates/.agents/skills/sd-full-check/SKILL.md"
@@ -3087,6 +3088,12 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("--no-commit", finish_work)
         self.assertIn("git add -- <exact-journal-path>", finish_work)
 
+        retro = (
+            install.ROOT / "templates/.agents/skills/sd-retro/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("sd-ai-command-pack-toolchain.sh run-python", retro)
+        self.assertIn("scripts/sd-ai-command-pack-record-session.py", retro)
+
         housekeeping = (
             install.ROOT / "templates/.agents/skills/sd-housekeeping/SKILL.md"
         ).read_text(encoding="utf-8")
@@ -3100,19 +3107,31 @@ class InstallCoreTests(InstallTestCase):
         update_spec = (
             install.ROOT / "templates/.agents/skills/sd-update-spec/SKILL.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("do not rebuild", update_spec)
+        self.assertRegex(update_spec, r"do\s+not rebuild")
         self.assertIn("`.obsidian-kb/` manually", update_spec)
         self.assertIn("helper as the source of truth for `.obsidian-kb/`", update_spec)
+        self.assertIn("sd-ai-command-pack-toolchain.sh run-python", update_spec)
         self.assertNotIn("Ensure `.obsidian-kb/`", update_spec)
         self.assertNotIn("Link every relevant existing repo-knowledge file", update_spec)
         self.assertNotIn("perform the remaining bullets manually", update_spec)
 
-        update_spec = (
-            install.ROOT / "templates/.agents/skills/sd-update-spec/SKILL.md"
-        ).read_text(encoding="utf-8")
         self.assertIn("repospec artifact", update_spec)
         self.assertIn("docs/repomix-map.md", update_spec)
         self.assertIn("Architectural overview", update_spec)
+
+        fleet_refresh = (
+            install.ROOT / "templates/.agents/skills/sd-fleet-refresh/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("sd-ai-command-pack-toolchain.sh run-python", fleet_refresh)
+
+        for skill_path in (install.ROOT / "templates/.agents/skills").glob(
+            "sd-*/SKILL.md"
+        ):
+            self.assertNotIn(
+                "python3 scripts/sd-ai-command-pack-",
+                skill_path.read_text(encoding="utf-8"),
+                skill_path.as_posix(),
+            )
         self.assertIn(".obsidian-kb", update_spec)
         self.assertIn("scripts/sd-ai-command-pack-update-spec-kb.py", update_spec)
         self.assertIn(".obsidian-kb/Dashboard - <repo>.md", update_spec)
