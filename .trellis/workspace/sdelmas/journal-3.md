@@ -781,3 +781,39 @@ Made sd-fleet-refresh source-checkout-only, released the consumer manifest contr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 121: Option-safe fleet review cleanup
+
+**Date**: 2026-07-16
+**Task**: Option-safe fleet review cleanup
+**Branch**: `codex/option-safe-temp-cleanup`
+
+### Summary
+
+Made shipped shell temp-file cleanup option-safe, added a regression guard, and prepared release 0.15.2 after AMC fleet review.
+
+### Main Changes
+
+- Updated all variable-path cleanup in shipped full-check, local-review, and shell-library scripts to use rm -f --.
+- Added a pack drift regression test and bumped the release ledger to 0.15.2.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `15a1711` | fix: make temp cleanup option-safe |
+
+### Testing
+
+- [OK] 73 focused unittest cases passed.
+- [OK] make check passed, including coverage, lint, types, security, audit, parity, KB freshness, and release gates.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 120
+- **Total Sessions**: 121
 - **Last Active**: 2026-07-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~781 | Active |
+| `journal-3.md` | ~818 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 121 | 2026-07-16 | Option-safe fleet review cleanup | `15a1711` | `codex/option-safe-temp-cleanup` |
 | 120 | 2026-07-16 | Source-only fleet refresh prerequisite | `2b34a70` | `codex/source-only-fleet-refresh-command` |
 | 119 | 2026-07-16 | Guard historical Trellis journal sessions | `9a5cad7`, `5daa604`, `6624148`, `58096ca` | `codex/trellis-journal-history-guard` |
 | 118 | 2026-07-16 | Record audit follow-up PR | `a589679` | `codex/audit-follow-up` |
