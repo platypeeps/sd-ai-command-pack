@@ -254,8 +254,9 @@ fast-forwarding, deleting merged refs, and reporting the final clean state.
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote review request/fix rounds before asking whether to continue. | `5` |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_SETTLE_POLLS` | Maximum 30-second polls before an accepted request without author-matched activity stops as ambiguous. | `40` |
 
-The deprecated `REVIEW_PREFLIGHT_PR_BODY` fallback remains honored and is
-documented in the installed guide for older target repos.
+The deprecated `REVIEW_PREFLIGHT_PR_BODY` fallback remains honored through
+`0.15.x` and is scheduled for removal in `0.16.0`; use
+`SD_AI_COMMAND_PACK_SCOPE_PR_BODY` for new wiring.
 
 ## Install
 
@@ -465,11 +466,13 @@ Set each per-file floor at or just below the current measured helper coverage
 and ratchet it upward when focused tests improve a script. CI fails when
 `unittest` reports any skipped tests, runs the test suite on Ubuntu and macOS,
 and runs Ruff over pack Python plus `node --check` over the review-preflight
-JavaScript twins when Node is available locally. The shipped shell scripts are
-exercised by behavioral tests rather than a coverage number; CI also runs
-`shellcheck -S warning` over every tracked shell script and the git hooks —
-consumers exempt the vendored pack shell from line review ("reviewed
-upstream"), so upstream lint rigor is the compensating control.
+JavaScript twins when Node is available locally. The shipped shell scripts,
+GitHub workflow YAML, and `.github/scripts/*` automation are exercised by
+behavioral tests and syntax/lint gates rather than a coverage.py number; CI
+also runs `shellcheck -S warning` over every tracked shell script and the git
+hooks. Consumers exempt the vendored pack shell from line review ("reviewed
+upstream"), so upstream lint rigor and focused subprocess tests are the
+compensating controls.
 
 ### Releasing
 

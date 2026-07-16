@@ -342,6 +342,7 @@ def _install_payload(
     force: bool,
     dry_run: bool,
     backup: bool,
+    planned_results: dict[Path, InstallResult] | None = None,
 ) -> tuple[list[InstallResult], list[Path]]:
     results: list[InstallResult] = []
     generated_targets: list[Path] = []
@@ -359,6 +360,9 @@ def _install_payload(
                 force=force,
                 dry_run=dry_run,
                 backup=backup,
+                planned_result=(
+                    planned_results.get(file.target) if planned_results else None
+                ),
             )
         results.append(result)
 
@@ -578,6 +582,13 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{conflict.status:11} {conflict.file.target}")
             _print_conflicts(preflight_conflicts)
             return 2
+        planned_results = {
+            result.file.target: result
+            for result in preflight_results
+            if result.source_content is not None
+        }
+    else:
+        planned_results = None
 
     results, generated_targets = _install_payload(
         selected,
@@ -586,6 +597,7 @@ def main(argv: list[str] | None = None) -> int:
         force=args.force,
         dry_run=args.dry_run,
         backup=args.backup,
+        planned_results=planned_results,
     )
 
     # Retired-target cleanup must run before the receipt files are rewritten:

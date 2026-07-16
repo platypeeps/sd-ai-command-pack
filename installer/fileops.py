@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from installer.manifest import (
-    MANIFEST_PATH,
     PackFile,
     read_text_if_exists,
     read_text_strict,
@@ -60,6 +59,9 @@ class InstallResult:
     file: PackFile
     status: InstallStatus
     backup: Path | None = None
+    source_digest: str | None = None
+    source_content: bytes | None = None
+    source_executable: bool | None = None
 
 
 def generated_pack_file(kind: str, target: Path) -> PackFile:
@@ -67,7 +69,7 @@ def generated_pack_file(kind: str, target: Path) -> PackFile:
     return PackFile(
         platform="shared",
         kind=kind,
-        source=MANIFEST_PATH,
+        source=None,
         target=target,
         anchor=None,
         install=ALWAYS_INSTALL,
@@ -85,6 +87,10 @@ def default_file_mode(*, executable: bool = False) -> int:
 
 def source_is_executable(source: Path) -> bool:
     return bool(source.stat().st_mode & 0o111)
+
+
+def source_digest(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
 
 
 def atomic_write_bytes(
@@ -232,6 +238,23 @@ def next_backup_path(target: Path, destination: Path) -> Path:
         index += 1
 
 
+def planned_result_matches_destination(
+    destination: Path,
+    status: InstallStatus,
+    new_content: bytes,
+) -> bool:
+    """Return whether a preflight result is still safe to reuse at apply time."""
+    if status is InstallStatus.CREATED:
+        return not path_is_occupied(destination)
+    if destination.is_symlink():
+        return False
+    if status is InstallStatus.UNCHANGED:
+        return destination.exists() and destination.read_bytes() == new_content
+    if status is InstallStatus.PRESERVED:
+        return destination.exists()
+    return False
+
+
 def install_file(
     file: PackFile,
     target: Path,
@@ -239,20 +262,80 @@ def install_file(
     force: bool,
     dry_run: bool,
     backup: bool,
+    planned_result: InstallResult | None = None,
 ) -> InstallResult:
     source = file.source
+    if source is None:
+        raise SystemExit(
+            f"error: generated file cannot be installed as a template: {file.target}"
+        )
     destination = target_destination(target, file.target)
     _require_file_destination(destination, file.target)
+    if (
+        planned_result is not None
+        and planned_result.file == file
+        and planned_result.source_content is not None
+        and planned_result.source_executable is not None
+        and planned_result.status in {
+            InstallStatus.CREATED,
+            InstallStatus.UNCHANGED,
+            InstallStatus.PRESERVED,
+        }
+    ):
+        new_content = planned_result.source_content
+        digest = planned_result.source_digest or source_digest(new_content)
+        executable = planned_result.source_executable
+        if planned_result_matches_destination(
+            destination,
+            planned_result.status,
+            new_content,
+        ):
+            if planned_result.status is InstallStatus.CREATED:
+                if not dry_run:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    atomic_write_bytes(
+                        destination,
+                        new_content,
+                        executable=executable,
+                    )
+                return InstallResult(
+                    file,
+                    InstallStatus.CREATED,
+                    source_digest=digest,
+                    source_content=new_content,
+                    source_executable=executable,
+                )
+            return InstallResult(
+                file,
+                planned_result.status,
+                source_digest=digest,
+                source_content=new_content,
+                source_executable=executable,
+            )
+
     new_content = source.read_bytes()
+    digest = source_digest(new_content)
     executable = source_is_executable(source)
     if destination.is_symlink():
         # Provenance and the install audit vouch plain regular files only
         # (lstat-based), so a symlinked target must never report
         # "unchanged"/vouchable even when the linked content is identical.
         if file.install == IF_NOT_EXISTS or file.target in FORCE_PRESERVED_TARGETS:
-            return InstallResult(file, InstallStatus.PRESERVED)
+            return InstallResult(
+                file,
+                InstallStatus.PRESERVED,
+                source_digest=digest,
+                source_content=new_content,
+                source_executable=executable,
+            )
         if not force:
-            return InstallResult(file, InstallStatus.SYMLINK_CONFLICT)
+            return InstallResult(
+                file,
+                InstallStatus.SYMLINK_CONFLICT,
+                source_digest=digest,
+                source_content=new_content,
+                source_executable=executable,
+            )
         backup_path = None
         if not dry_run:
             backup_path = backup_existing_file(
@@ -262,15 +345,40 @@ def install_file(
                 dry_run=dry_run,
             )
             atomic_write_bytes(destination, new_content, executable=executable)
-        return InstallResult(file, InstallStatus.OVERWRITTEN, backup_path)
+        return InstallResult(
+            file,
+            InstallStatus.OVERWRITTEN,
+            backup_path,
+            source_digest=digest,
+            source_content=new_content,
+            source_executable=executable,
+        )
     if destination.exists():
         current = destination.read_bytes()
         if current == new_content:
-            return InstallResult(file, InstallStatus.UNCHANGED)
+            return InstallResult(
+                file,
+                InstallStatus.UNCHANGED,
+                source_digest=digest,
+                source_content=new_content,
+                source_executable=executable,
+            )
         if file.install == IF_NOT_EXISTS or file.target in FORCE_PRESERVED_TARGETS:
-            return InstallResult(file, InstallStatus.PRESERVED)
+            return InstallResult(
+                file,
+                InstallStatus.PRESERVED,
+                source_digest=digest,
+                source_content=new_content,
+                source_executable=executable,
+            )
         if not force:
-            return InstallResult(file, InstallStatus.CONFLICT)
+            return InstallResult(
+                file,
+                InstallStatus.CONFLICT,
+                source_digest=digest,
+                source_content=new_content,
+                source_executable=executable,
+            )
         backup_path = None
         if not dry_run:
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -281,15 +389,30 @@ def install_file(
                 dry_run=dry_run,
             )
             atomic_write_bytes(destination, new_content, executable=executable)
-        return InstallResult(file, InstallStatus.OVERWRITTEN, backup_path)
+        return InstallResult(
+            file,
+            InstallStatus.OVERWRITTEN,
+            backup_path,
+            source_digest=digest,
+            source_content=new_content,
+            source_executable=executable,
+        )
 
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_bytes(destination, new_content, executable=executable)
-    return InstallResult(file, InstallStatus.CREATED)
+    return InstallResult(
+        file,
+        InstallStatus.CREATED,
+        source_digest=digest,
+        source_content=new_content,
+        source_executable=executable,
+    )
 
 
 def normalize_managed_block_template(file: PackFile) -> str:
+    if file.source is None:
+        raise SystemExit(f"error: managed block has no source: {file.target}")
     block = read_text_strict(
         file.source,
         f"managed block template {file.source}",

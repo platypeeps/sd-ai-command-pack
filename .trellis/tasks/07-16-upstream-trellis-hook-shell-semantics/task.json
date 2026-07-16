@@ -1,0 +1,31 @@
+{
+  "id": "upstream-trellis-hook-shell-semantics",
+  "name": "upstream-trellis-hook-shell-semantics",
+  "title": "Park upstream Trellis lifecycle hook shell semantics",
+  "description": "Parked upstream-owned A-027 follow-up: Trellis lifecycle hooks run trusted repo config commands through shell=True; do not implement in sd-ai-command-pack or open a Trellis PR without explicit user consent.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P3",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-16",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "07-16-audit-roadmap-cleanup",
+  "relatedFiles": [
+    ".trellis/audit/ledger.md",
+    ".trellis/scripts/common/task_utils.py",
+    ".trellis/scripts/common/config.py",
+    ".trellis/tasks/07-16-audit-roadmap-cleanup/prd.md"
+  ],
+  "notes": "Parked upstream Trellis-owned A-027 follow-up; do not implement in this pack or open an upstream Trellis PR without explicit user consent.",
+  "meta": {}
+}

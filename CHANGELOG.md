@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.2 - 2026-07-16
+
+- Resolved audit-roadmap cleanup items: generated install receipts no longer
+  pretend to have a manifest template source, installer apply can reuse
+  preflight source bytes/digests, provenance prefers install-result digests,
+  and review-scope fallback docs now name the `0.16.0` removal target.
+- Documented coverage.py exemptions for shell/GitHub automation and corrected
+  historical 0.7.1-0.7.4 changelog dates against the release tags.
+
 ## 0.14.1 - 2026-07-16
 
 - Added a shipped `sd_ai_command_pack_lib.py` helper for common Python script
@@ -243,12 +252,12 @@
 - Moved shared command adapter bodies to neutral templates and generated the
   OpenCode command surface from those sources.
 
-## 0.7.4 - 2026-07-08
+## 0.7.4 - 2026-07-09
 
 - Consolidated common shell helpers used by the local review runners while
   preserving the shipped script interfaces.
 
-## 0.7.3 - 2026-07-09
+## 0.7.3 - 2026-07-08
 
 - Added maintainer contributor workflow docs and a Makefile for setup, tests,
   linting, audits, and the SD full-check gate.
@@ -256,7 +265,7 @@
   `.githooks` pre-push guard is not armed.
 - Pinned the OpenCode plugin dependency used by the dogfood platform files.
 
-## 0.7.2 - 2026-07-09
+## 0.7.2 - 2026-07-08
 
 - Fixed installed-guide quick links, documented
   `SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR`, and made the pack-source full-check
@@ -265,7 +274,7 @@
   of truth and replaced stale-prone README per-command platform lists with
   references to the supported adapter mapping.
 
-## 0.7.1 - 2026-07-09
+## 0.7.1 - 2026-07-08
 
 - Hardened `sd-ai-command-pack-review-preflight.mjs`: symlink invocation now
   runs the preflight instead of silently exiting, Node versions below 16.9 get

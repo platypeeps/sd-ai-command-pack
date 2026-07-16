@@ -57,15 +57,6 @@ def installed_targets_content(
     return "\n".join(sorted(targets)) + "\n"
 
 
-PROVENANCE_EXCLUDED_KINDS = {
-    MANAGED_BLOCK_KIND,
-    "generated-gitignore",
-    "generated-manifest",
-    "generated-pack-manifest",
-    "generated-provenance",
-}
-
-
 def read_existing_provenance_files(target: Path) -> dict[str, str]:
     provenance = target_destination(target, PROVENANCE_FILE)
     # A symlinked provenance is never trusted (mirrors the audit contract);
@@ -134,14 +125,12 @@ def provenance_content(
         for key, value in existing_files.items()
         if key in receipt_targets and key not in never_vouched
     }
-    # One manifest source can back many targets (a shared skill installs to
-    # ~11 platform paths), so hash each distinct source once per call instead
-    # of re-reading it for every target that shares it.
+    # Prefer the source digest captured during planning/apply. The fallback
+    # keeps provenance_content usable in narrow unit tests that construct
+    # legacy-style InstallResult objects without source metadata.
     source_digests: dict[Path, str] = {}
     for result in results:
         file = result.file
-        if file.kind in PROVENANCE_EXCLUDED_KINDS:
-            continue
         # Every status that ends with the target byte-equal to the template
         # is vouchable — including "overwritten" (--force over drifted
         # content), which single-pass refreshes produce for every changed
@@ -150,6 +139,11 @@ def provenance_content(
         if result.status not in VOUCHABLE_STATUSES:
             continue
         if file.target.as_posix() in never_vouched:
+            continue
+        if result.source_digest is not None:
+            files[file.target.as_posix()] = f"sha256:{result.source_digest}"
+            continue
+        if file.source is None:
             continue
         digest = source_digests.get(file.source)
         if digest is None:
@@ -311,7 +305,6 @@ def install_installed_targets_file(
 
 
 __all__ = [
-    "PROVENANCE_EXCLUDED_KINDS",
     "install_installed_targets_file",
     "install_pack_manifest_file",
     "install_provenance_file",
