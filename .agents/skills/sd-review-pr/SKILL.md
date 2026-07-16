@@ -36,7 +36,7 @@ GitHub Copilot is the default remote reviewer unless a repo overrides it.
   or the configured round limit is reached.
 - Count one remote loop as: trigger the configured remote reviewer, wait for
   completion, inspect review/CI state, address findings, and push any resulting
-  commit. After the configured remote round limit, default two, stop before
+  commit. After the configured remote round limit, default five, stop before
   starting another loop and ask the user for permission to continue.
 - Treat the configured remote reviewer and other bot comments as actionable by
   default, but verify against the current diff, project specs, and tests before
@@ -171,7 +171,7 @@ REMOTE_REVIEWER="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER:-@copilot}"
 REMOTE_REVIEWER_LABEL="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER_LABEL:-GitHub Copilot}"
 REMOTE_REVIEW_AUTHOR_MATCH="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_AUTHOR_MATCH:-}"
 REMOTE_REVIEW_REQUEST_COMMAND="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND:-}"
-REMOTE_REVIEW_ROUND_LIMIT="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT:-2}"
+REMOTE_REVIEW_ROUND_LIMIT="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT:-5}"
 REMOTE_REVIEW_SETTLE_POLLS="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_SETTLE_POLLS:-40}"
 
 if [ -z "$REMOTE_REVIEW_AUTHOR_MATCH" ]; then
@@ -554,8 +554,10 @@ Report:
   checks actually ran.
 - Pack full-check: whether the deterministic local gate passed with Prism/Gito
   disabled for the `sd-review-pr` cycle.
-- Optional AI review: number of remote rounds completed and reviewer label/slug
-  used, or why remote review was skipped.
+- Remote review rounds used: <n> of <limit> — mandatory in every report;
+  write `0 of <limit>` with the skip reason when no remote review ran.
+- Optional AI review: reviewer label/slug used, or why remote review was
+  skipped.
 - Comments fixed, rebutted, or left for user decision.
 - Commits pushed during the loop.
 - Finish-work actions and any archive/journal commits pushed.

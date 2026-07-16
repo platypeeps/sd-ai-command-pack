@@ -206,7 +206,7 @@ counts the review as materialized. Target repos can override it with
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND`, and
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`. The bounded materialization
 wait uses `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_SETTLE_POLLS`. The round limit
-defaults to two configured remote-review requests before the command asks
+defaults to five configured remote-review requests before the command asks
 whether to keep going.
 
 The create-pr wrapper honors `SD_AI_COMMAND_PACK_CREATE_PR_BASE` for a base
@@ -685,6 +685,7 @@ PR #<number>: merged at <timestamp>
 Open PRs: <none|summary>
 Open issues: <none|summary>
 Current Trellis task: <none active|task id + status>
+PR review rounds: <n submitted reviewer review(s)|n/a — no PR in this run>
 Anomalies: none
 
 Insight:
@@ -1054,7 +1055,7 @@ ephemeral tool state and do not change what the checks validate.
   GitHub reviewer request. Unset by default.
 - `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`: maximum remote review
   request/fix rounds before `sd-review-pr` asks whether to continue. Defaults
-  to `2`.
+  to `5`.
 - `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_SETTLE_POLLS`: maximum 30-second polls
   before an accepted remote request without author-matched activity stops as
   ambiguous. Defaults to `40`.

@@ -181,6 +181,7 @@ class HousekeepingTests(InstallTestCase):
             "high-value Trellis task candidates",
             "python3 ./.trellis/scripts/task.py list",
             "The current Trellis task (its id + status, or `none active`).",
+            "PR review rounds:",
             "--no-auto-merge",
         ]:
             self.assertIn(text, skill)

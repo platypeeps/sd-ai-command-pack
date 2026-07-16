@@ -123,6 +123,7 @@ PR #<number>: merged at <timestamp>
 Open PRs: <none|summary>
 Open issues: <none|summary>
 Current Trellis task: <none active|task id + status>
+PR review rounds: <n submitted reviewer review(s)|n/a — no PR in this run>
 Anomalies: none
 
 Insight:
@@ -147,7 +148,11 @@ during this session, any Trellis task already `in_progress` (the current task)
 to resume, and the next high-value Trellis task candidates / roadmap items that
 are not started yet (planning tasks assigned to the current developer first,
 then other clearly high-value repo-local tasks). Also state the current task in
-the final-state rows (`Current Trellis task: <none active|id + status>`). Do not
+the final-state rows (`Current Trellis task: <none active|id + status>`), and
+the review-cycle cost: when this run merged or confirmed a PR, count its
+submitted reviewer reviews (one `gh api .../pulls/<n>/reviews` read) and fill
+`PR review rounds:`; on verification-only runs write `n/a — no PR in this
+run`. Do not
 include speculative work: if a category has no evidence, say so plainly, and if
 the whole backlog is empty, write that the backlog is clear rather than dropping
 the section. When there are multiple items in a category, order them by urgency
@@ -203,6 +208,8 @@ Report:
   beyond the final-state rows.
 - Whether follow-up manual action is needed.
 - The current Trellis task (its id + status, or `none active`).
+- PR review rounds for the merged/confirmed PR (submitted reviewer review
+  count), or `n/a` when the run had no PR.
 - A final numbered `Next Steps` section — always present, including on a
   verification-only clean run — covering, in order: open session follow-ups, any
   in-progress Trellis task to resume, and the next high-value Trellis task

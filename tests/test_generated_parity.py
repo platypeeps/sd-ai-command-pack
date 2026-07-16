@@ -1756,7 +1756,7 @@ class GeneratedParityTests(InstallTestCase):
                     )
                     self.assertEqual(adapter_body, neutral_body)
 
-    def test_review_pr_remote_round_limit_defaults_to_two(self) -> None:
+    def test_review_pr_remote_round_limit_defaults_to_five(self) -> None:
         _, files = install.load_manifest()
         review_command_sources = {
             file.source
@@ -1770,11 +1770,11 @@ class GeneratedParityTests(InstallTestCase):
             with self.subTest(source=source.relative_to(install.ROOT).as_posix()):
                 content = source.read_text(encoding="utf-8")
                 self.assertIn(
-                    "SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`, default `2`",
+                    "SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`, default `5`",
                     content,
                 )
                 self.assertNotIn(
-                    "SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`, default `5`",
+                    "SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`, default `2`",
                     content,
                 )
 
@@ -1782,23 +1782,23 @@ class GeneratedParityTests(InstallTestCase):
             install.ROOT / "templates/.agents/skills/sd-review-pr/SKILL.md"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            'REMOTE_REVIEW_ROUND_LIMIT="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT:-2}"',
+            'REMOTE_REVIEW_ROUND_LIMIT="${SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT:-5}"',
             skill,
         )
-        self.assertIn("configured remote round limit, default two", skill)
-        self.assertNotIn("configured remote round limit, default five", skill)
+        self.assertIn("configured remote round limit, default five", skill)
+        self.assertNotIn("configured remote round limit, default two", skill)
 
         readme = (install.ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn(
             "| `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote "
-            "review request/fix rounds before asking whether to continue. | `2` |",
+            "review request/fix rounds before asking whether to continue. | `5` |",
             readme,
         )
         guide = (
             install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            "The round limit\ndefaults to two configured remote-review requests",
+            "The round limit\ndefaults to five configured remote-review requests",
             guide,
         )
 
