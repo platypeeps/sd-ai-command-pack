@@ -20,7 +20,8 @@
   "subtasks": [],
   "children": [
     "07-16-source-only-fleet-refresh-command",
-    "07-16-option-safe-temp-cleanup"
+    "07-16-option-safe-temp-cleanup",
+    "07-16-review-learnings-command-errors"
   ],
   "parent": null,
   "relatedFiles": [],

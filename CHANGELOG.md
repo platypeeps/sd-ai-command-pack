@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.3 - 2026-07-16
+
+- Convert shared Git/GitHub helper `CommandError` failures in the shipped
+  review-learnings command into its existing phase-tagged diagnostics and exit
+  code `2` instead of leaking Python tracebacks.
+- Add focused regression coverage for both local Git scanning and GitHub
+  comment collection failures.
+
 ## 0.15.2 - 2026-07-16
 
 - Make all variable-path cleanup in the shipped shell review and full-check
