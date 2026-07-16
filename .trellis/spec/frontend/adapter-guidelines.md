@@ -43,6 +43,10 @@ Reference files:
 
 OpenCode command targets use the neutral `templates/.commands/sd-*.md` files
 as their source; do not add platform-owned OpenCode command source copies.
+The pack repo should not carry an OpenCode package manifest or Bun lockfile
+unless its checked-in OpenCode plugins or tools import external npm packages.
+The current dogfood plugins use Node builtins and sibling helpers only, so the
+local OpenCode surface remains dependency-free.
 
 ## Shared Skill Pattern
 

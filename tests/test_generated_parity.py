@@ -1104,7 +1104,7 @@ class GeneratedParityTests(InstallTestCase):
             "Treat `templates/**` as the source of truth",
             "sd-ai-command-pack-toolchain.sh run-python -- install.py . --force",
             "Keep Trellis-owned platform files in their Trellis-managed state",
-            "Track `.opencode/bun.lock`",
+            "Do not track `.opencode/package.json` or `.opencode/bun.lock`",
             "`.claude/settings.local.json`",
             ".trellis/spec/frontend/adapter-guidelines.md",
             ".trellis/spec/backend/manifest-and-filesystem.md",
@@ -1128,27 +1128,43 @@ class GeneratedParityTests(InstallTestCase):
         ):
             self.assertIn(target, makefile)
 
-    def test_opencode_dependency_uses_canonical_range_and_locked_resolution(
+    def test_opencode_plugins_do_not_require_local_dependency_manifest(
         self,
     ) -> None:
         opencode_package_path = PACK_ROOT / ".opencode/package.json"
-        opencode_package = opencode_package_path.read_text(encoding="utf-8")
-        opencode_lock = (
-            PACK_ROOT / ".opencode/bun.lock"
-        ).read_text(encoding="utf-8")
+        opencode_lock_path = PACK_ROOT / ".opencode/bun.lock"
 
-        self.assertIn('"@opencode-ai/plugin": "^1.14.39"', opencode_package)
-        self.assertIn('"@opencode-ai/plugin": "^1.14.39"', opencode_lock)
-        plugin_resolution = re.search(
-            r'"@opencode-ai/plugin": \['
-            r'"@opencode-ai/plugin@(\d+\.\d+\.\d+)",.*'
-            r'"sha512-[A-Za-z0-9+/=]+"\]',
-            opencode_lock,
+        self.assertFalse(
+            opencode_package_path.exists(),
+            ".opencode/package.json is only needed when plugins import packages",
         )
-        self.assertIsNotNone(
-            plugin_resolution,
-            ".opencode/bun.lock must pin an integrity-checked plugin version",
+        self.assertFalse(
+            opencode_lock_path.exists(),
+            ".opencode/bun.lock should not be tracked without package deps",
         )
+
+        external_imports: list[str] = []
+        for source in sorted((PACK_ROOT / ".opencode").glob("**/*.js")):
+            text = source.read_text(encoding="utf-8")
+            for match in re.finditer(
+                r'^import .* from ["\']([^"\']+)["\']',
+                text,
+                re.MULTILINE,
+            ):
+                imported = match.group(1)
+                if not imported.startswith((".", "node:")) and imported not in {
+                    "child_process",
+                    "crypto",
+                    "fs",
+                    "os",
+                    "path",
+                    "process",
+                }:
+                    external_imports.append(
+                        f"{source.relative_to(PACK_ROOT)} imports {imported}"
+                    )
+
+        self.assertEqual([], external_imports)
 
     def test_repo_declares_mit_license(self) -> None:
         raw, _ = install.load_manifest()
