@@ -21,7 +21,7 @@ Pin the shipped install audit upstream-manifest read to UTF-8 strict decoding, a
 - [x] Malformed UTF-8 produces the existing non-fatal advisory result and no
   traceback.
 - [x] Pack drift, parity, focused tests, and the full local check pass.
-- [ ] Version `0.15.5` is merged and tagged at the release commit.
+- [x] Version `0.15.5` is merged and tagged at the release commit.
 
 ## Notes
 
