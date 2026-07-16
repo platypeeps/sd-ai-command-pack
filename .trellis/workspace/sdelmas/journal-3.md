@@ -40,3 +40,47 @@ Final deferred tail: behavior-preserving micro-refactors. review-learnings git w
 ### Next Steps
 
 - None - task complete
+
+
+## Session 102: Ship sd-audit-repo formal multi-agent audit command (0.11.0)
+
+**Date**: 2026-07-15
+**Task**: Ship sd-audit-repo formal multi-agent audit command (0.11.0)
+**Branch**: `main`
+
+### Summary
+
+Designed, planned (prd/design/implement), and shipped the distributed sd-audit-repo command: orchestrator skill + 15 reviewer charters, fixed pipeline with adversarial verification and Trellis reconciliation, committed findings ledger with follow-up mode, ~55 manifest entries, format-drift tests, guide/README docs. Ran the first dogfood audit (depth=quick, 13 reviewers): 34 findings (1 P1, 14 P2, 19 P3), created the initial ledger and 10 consented follow-up planning tasks. Merged PR #115 via the gated flow.
+
+### Main Changes
+
+- Added sd-audit-repo skill + charters/ (first multi-file skill), neutral command + Claude/Gemini/GitHub adapters, manifest wiring; charters ship single-copy under shared .agents/
+- Made report and ledger formats mandatory and scannable (bulleted evidence, two-line why/fix caps) after dogfood format review
+- Review preflight: .trellis/audit/ledger.md registered as optional documented path so consumer repos pass doc-path checks pre-first-audit
+- tests/test_audit_repo.py format-drift suite; parity/core extensions for the new fan-out; bump 0.10.5 -> 0.11.0 with CHANGELOG
+- Dogfood audit artifacts: .trellis/audit/ledger.md (34 findings, 18 task-tracked) + 10 PRD-only planning tasks covering the P1/P2 set
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7110078` | Merge pull request #115 from platypeeps/feat/sd-audit-repo-command |
+| `57e832d` | Add sd-audit-repo formal multi-agent repo audit command (0.11.0) |
+| `1199cde` | Record first dogfood audit: ledger + 10 follow-up planning tasks |
+
+### Testing
+
+- [OK] make test green (438 tests incl. 7 new audit-format tests)
+- [OK] make full-check green (release gate at 0.11.0, install-audit 103 targets, twins byte-identical)
+- [OK] dogfood acceptance: quick-depth audit produced well-formed report + ledger; maintainer approved format
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Work 07-15-ci-release-gate-job (P1) and the other 9 audit follow-up tasks
+- P3 polish batch task pending maintainer confirmation (interrupted instruction)
+- Fleet rollout carrying 0.10.5 + 0.11.0 to consumer repos when requested

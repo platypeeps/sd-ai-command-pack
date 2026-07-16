@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 101
+- **Total Sessions**: 102
 - **Last Active**: 2026-07-15
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~42 | Active |
+| `journal-3.md` | ~82 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 102 | 2026-07-15 | Ship sd-audit-repo formal multi-agent audit command (0.11.0) | `7110078`, `57e832d`, `1199cde` | `main` |
 | 101 | 2026-07-15 | Micro-refactors: scripts + installer cleanups (0.10.4) | `6649846` | `perf/micro-refactors` |
 | 100 | 2026-07-15 | Test improvements: review-local install fixture + assertion parametrization | `f0d9217` | `perf/test-improvements` |
 | 99 | 2026-07-15 | Script consolidation (deferred item 2b) | `d8e40dc` | `perf/script-consolidation` |
