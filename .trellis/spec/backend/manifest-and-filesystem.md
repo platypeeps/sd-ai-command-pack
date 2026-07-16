@@ -31,6 +31,23 @@ Reference files:
 - `installer/manifest.py`, `PackFile`
 - `installer/manifest.py`, `load_manifest()`
 
+## Release Payload Gate
+
+Any pull request that changes shipped payload must carry the release ledger
+with it. Shipped payload means `templates/**`, `docs/SD_AI_COMMAND_PACK.md`, or
+`manifest.json`. The local full-check and the CI `Release payload gate` both
+run the same pack-source drift gate against the PR base:
+
+- payload changes require a `manifest.json` version bump;
+- a version bump requires the top `CHANGELOG.md` heading to match
+  `## <version> - YYYY-MM-DD`;
+- non-payload changes must pass without a release bump.
+
+Wire any future release-gate changes through the shared
+`run_pack_source_drift_gates` implementation in
+`scripts/sd-ai-command-pack-full-check.sh` and its template twin. Do not create
+a separate CI-only interpretation of shipped-payload paths.
+
 ## Manifest Path Safety
 
 Validate manifest paths before any target-repo writes:

@@ -915,7 +915,8 @@ class GeneratedParityTests(InstallTestCase):
             "node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             "bash .github/scripts/check-opencode-js.sh",
             "python3 -m mypy installer",
-            "needs: [unittest, lint, security, main-push-scope]",
+            "needs: [unittest, lint, security, release-payload-gate, main-push-scope]",
+            "RELEASE_PAYLOAD_GATE_RESULT",
             "LINT_RESULT",
         ):
             self.assertIn(expected, workflow)
@@ -1047,7 +1048,7 @@ class GeneratedParityTests(InstallTestCase):
             workflow.count(
                 "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
             ),
-            5,
+            6,
         )
         self.assertEqual(
             workflow.count(
@@ -1056,6 +1057,9 @@ class GeneratedParityTests(InstallTestCase):
             3,
         )
         self.assertIn("main-push-scope:", workflow)
+        self.assertIn("release-payload-gate:", workflow)
+        self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF", workflow)
+        self.assertIn("run_pack_source_drift_gates", workflow)
         self.assertIn('"${{ github.event.before }}" "${{ github.sha }}"', workflow)
         self.assertIn("git diff --no-renames --name-only -z", main_push_guard)
         self.assertIn(

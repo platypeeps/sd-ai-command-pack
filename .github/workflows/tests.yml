@@ -146,6 +146,34 @@ jobs:
       - name: Shellcheck (pack shell and hooks)
         run: git ls-files -z '*.sh' | xargs -0 shellcheck -S warning .githooks/pre-push
 
+  release-payload-gate:
+    name: Release payload gate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out pull request
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch pull request base
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: >-
+          git fetch --no-tags --prune --depth=1 origin
+          "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+
+      - name: Run release payload gate
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE=1 \
+          SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF="origin/${BASE_REF}" \
+          bash -c 'source scripts/sd-ai-command-pack-full-check.sh; run_pack_source_drift_gates'
+
   main-push-scope:
     name: Main push scope
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -171,7 +199,7 @@ jobs:
     name: CI Result
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [unittest, lint, security, main-push-scope]
+    needs: [unittest, lint, security, release-payload-gate, main-push-scope]
     if: always()
 
     steps:
@@ -180,11 +208,16 @@ jobs:
           UNITTEST_RESULT: ${{ needs.unittest.result }}
           LINT_RESULT: ${{ needs.lint.result }}
           SECURITY_RESULT: ${{ needs.security.result }}
+          RELEASE_PAYLOAD_GATE_RESULT: ${{ needs.release-payload-gate.result }}
           MAIN_PUSH_SCOPE_RESULT: ${{ needs.main-push-scope.result }}
         run: |
-          echo "unittest=$UNITTEST_RESULT lint=$LINT_RESULT security=$SECURITY_RESULT main_push_scope=$MAIN_PUSH_SCOPE_RESULT"
+          echo "unittest=$UNITTEST_RESULT lint=$LINT_RESULT security=$SECURITY_RESULT release_payload_gate=$RELEASE_PAYLOAD_GATE_RESULT main_push_scope=$MAIN_PUSH_SCOPE_RESULT"
           if [ "$UNITTEST_RESULT" != "success" ] || [ "$LINT_RESULT" != "success" ] || [ "$SECURITY_RESULT" != "success" ]; then
             echo "A required lane did not succeed."
+            exit 1
+          fi
+          if [ "$RELEASE_PAYLOAD_GATE_RESULT" != "success" ] && [ "$RELEASE_PAYLOAD_GATE_RESULT" != "skipped" ]; then
+            echo "The release payload gate failed."
             exit 1
           fi
           if [ "$MAIN_PUSH_SCOPE_RESULT" != "success" ] && [ "$MAIN_PUSH_SCOPE_RESULT" != "skipped" ]; then
