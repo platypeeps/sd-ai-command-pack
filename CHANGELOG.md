@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.2 - 2026-07-16
+
+- Make all variable-path cleanup in the shipped shell review and full-check
+  tooling option-safe with `rm -f --`, including every temp-file path surfaced
+  by fleet PR review.
+- Add a regression guard that rejects unguarded variable-path `rm -f` cleanup
+  in shipped shell templates.
+
 ## 0.15.1 - 2026-07-16
 
 - Made `sd-fleet-refresh` a source-checkout-only operator command because it
