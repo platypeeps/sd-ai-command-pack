@@ -59,6 +59,7 @@ from installer.registry import (  # noqa: E402
     COMMAND_NAMES,
     NEUTRAL_COMMAND_SOURCE_PLATFORMS,
     PLATFORM_REGISTRY,
+    SOURCE_ONLY_COMMAND_NAMES,
 )
 
 # The neutral-body preamble line that platform-agnostic adapters keep but the
@@ -412,6 +413,7 @@ def generate_manifest_text() -> str:
     derived = [
         entry
         for name, short in COMMAND_NAMES
+        if name not in SOURCE_ONLY_COMMAND_NAMES
         for entry in derived_manifest_entries(name, short)
     ]
     files = static + derived

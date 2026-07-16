@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.1 - 2026-07-16
+
+- Made `sd-fleet-refresh` a source-checkout-only operator command because it
+  depends on the pack's installer, fleet registry, and rollout procedure.
+  Consumer refreshes now retire vouched copies shipped by earlier releases,
+  while the pack source checkout keeps its generated command surfaces.
+
 ## 0.15.0 - 2026-07-16
 
 - Added a distributed review-preflight guard that treats Trellis journal

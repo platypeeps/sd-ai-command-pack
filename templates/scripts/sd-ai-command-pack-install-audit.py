@@ -72,6 +72,31 @@ LOCAL_ALLOWED_PACK_FILES = {
 }
 
 SOURCE_ONLY_ALLOWED_PACK_FILES = {
+    ".agent/skills/sd-fleet-refresh/SKILL.md",
+    ".agent/workflows/sd-fleet-refresh.md",
+    ".agents/skills/sd-fleet-refresh/SKILL.md",
+    ".claude/commands/sd/fleet-refresh.md",
+    ".codebuddy/commands/sd/fleet-refresh.md",
+    ".codebuddy/skills/sd-fleet-refresh/SKILL.md",
+    ".cursor/commands/sd-fleet-refresh.md",
+    ".devin/skills/sd-fleet-refresh/SKILL.md",
+    ".devin/workflows/sd-fleet-refresh.md",
+    ".factory/commands/sd/fleet-refresh.md",
+    ".factory/skills/sd-fleet-refresh/SKILL.md",
+    ".gemini/commands/sd/fleet-refresh.toml",
+    ".github/prompts/sd-fleet-refresh.prompt.md",
+    ".kilocode/skills/sd-fleet-refresh/SKILL.md",
+    ".kilocode/workflows/sd-fleet-refresh.md",
+    ".kiro/skills/sd-fleet-refresh/SKILL.md",
+    ".opencode/commands/sd-fleet-refresh.md",
+    ".pi/prompts/sd-fleet-refresh.md",
+    ".pi/skills/sd-fleet-refresh/SKILL.md",
+    ".qoder/commands/sd-fleet-refresh.md",
+    ".qoder/skills/sd-fleet-refresh/SKILL.md",
+    ".reasonix/skills/sd-fleet-refresh/SKILL.md",
+    ".trae/commands/sd-fleet-refresh.md",
+    ".trae/skills/sd-fleet-refresh/SKILL.md",
+    ".zcode/commands/sd/fleet-refresh.md",
     "scripts/sd-ai-command-pack-fleet-preflight.py",
 }
 

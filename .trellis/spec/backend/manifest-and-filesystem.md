@@ -528,12 +528,14 @@ Reference files:
 
 ## Legacy And Obsolete Artifact Advisories
 
-Since pack 0.4.0 the installer performs no legacy or obsolete cleanup: the
-`legacy-conflict` and `obsolete-conflict` install statuses no longer exist,
-and `install.py` never removes, renames, or conflict-reports old pack
-artifacts. Cleanup responsibility lives in the install audit, which emits
-advisory warnings (never failures) when known legacy or obsolete artifacts
-remain in a consumer repo:
+Since pack 0.4.0 the installer performs no broad or heuristic legacy cleanup:
+the `legacy-conflict` and `obsolete-conflict` install statuses no longer exist,
+and install-time retirement is limited to the explicit `RETIRED_TARGETS`
+footprints in `installer/removal.py`. Those targets are removed only when
+provenance vouches for their current bytes (or the user passes `--force`);
+drifted or unvouched files are preserved. Other cleanup responsibility lives in
+the install audit, which emits advisory warnings (never failures) when known
+legacy or obsolete artifacts remain in a consumer repo:
 
 - legacy `trellis-*` and `sd-refresh-specs` adapter, skill, and script names
   replaced by their `sd-*` equivalents
@@ -552,11 +554,10 @@ Generated `docs/repomix-map.md` aggregates are excluded from the reference
 scan. Their source documentation is scanned directly, so scanning the generated
 copy adds duplicate or self-referential warnings without expanding coverage.
 
-Consumers remove flagged artifacts manually; the audit keeps warning until
-they do, and the warnings never block an otherwise clean audit. Do not
-reintroduce install-time cleanup in `install.py`; if automatic removal is ever
-needed again, design it as manifest-driven data (old path plus known template
-hashes), not hardcoded paths.
+Consumers remove advisory-only artifacts manually; the audit keeps warning
+until they do, and the warnings never block an otherwise clean audit. Add an
+automatic retirement only for a bounded, enumerated former pack footprint and
+cover its provenance, force, dry-run, source-checkout, and removal behavior.
 
 Reference files:
 
@@ -567,6 +568,76 @@ Reference files:
   `test_install_audit_warns_about_rename_era_legacy_paths`
 - `tests/test_install_audit.py`,
   `test_install_audit_legacy_advisories_cover_all_pack_scripts`
+
+## Scenario: Source-Checkout-Only Commands
+
+### 1. Scope / Trigger
+
+Use this contract when a command is useful to pack maintainers but depends on
+operator files that are intentionally absent from consumer repositories.
+
+### 2. Signatures
+
+- `COMMAND_NAMES: tuple[tuple[str, str], ...]` remains the complete source
+  command catalog used by command-surface generation.
+- `SOURCE_ONLY_COMMAND_NAMES: frozenset[str]` declares the catalog names that
+  must not be added to the consumer manifest.
+- `SOURCE_ONLY_COMMAND_TARGETS: tuple[str, ...]` enumerates the former consumer
+  footprint that refreshes may retire.
+
+### 3. Contracts
+
+- `make generate` writes source templates/adapters for every `COMMAND_NAMES`
+  row, but adds derived manifest entries only when the name is not source-only.
+- Command-shape recognition still covers every catalog row so regeneration
+  removes stale manifest entries for newly source-only commands.
+- Consumer refreshes retire vouched source-only target copies. Drifted or
+  unvouched copies remain preserved unless `--force` is explicit.
+- A self-install whose target resolves to `ROOT` skips source-only retirement,
+  preserving the pack checkout's generated command surfaces.
+- The install audit allows those target paths only when all
+  `SOURCE_REPO_MARKERS` prove the checkout is the pack source repository.
+
+### 4. Validation & Error Matrix
+
+- Source-only name absent from `COMMAND_NAMES` -> import-time `RuntimeError`
+  from `validate_source_only_command_names()` naming the unknown command.
+- Source-only target present in a consumer manifest -> parity/drift test
+  failure.
+- Vouched former target in a consumer -> `retired` during refresh.
+- Drifted former target without force -> `retired-preserved`.
+- Source-only root copy in the pack checkout -> preserved and accepted by the
+  source audit.
+- Any other unlisted pack-like source file -> install-audit failure.
+
+### 5. Good / Base / Bad Cases
+
+- Good: `sd-fleet-refresh` remains invocable in this checkout and disappears
+  from a refreshed consumer's receipts, provenance, and filesystem.
+- Base: a fresh consumer install never receives the command.
+- Bad: filtering `COMMAND_NAMES` itself, which would stop source adapter
+  generation and leave the operator command stale.
+
+### 6. Tests Required
+
+- Generator/parity: source templates and root surfaces exist while all
+  source-only targets are absent from `manifest.json`.
+- Retirement: exact former footprints are unique, consumer copies retire, and
+  source-root copies remain.
+- Drift/audit: tracked templates equal manifest sources plus declared
+  source-only templates; source-only audit allowances equal the retirement
+  footprint and apply only in a verified source checkout.
+- Documentation: consumer command inventories omit the source-only command and
+  the operator section labels it source-checkout-only.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: ship the sd-fleet-refresh skill while omitting docs/FLEET_ROLLOUT.md
+Wrong: delete sd-fleet-refresh from COMMAND_NAMES and hand-maintain root copies
+Correct: generate it from COMMAND_NAMES, exclude it via SOURCE_ONLY_COMMAND_NAMES,
+         retire vouched consumer copies, and preserve the verified source checkout
+```
 
 ## Source Checkout Dogfood Drift Gates
 
@@ -584,8 +655,9 @@ Keep these checks in the pack-source drift tests:
 - Missing dogfood targets fail before comparison, so adding a command to
   `templates/` plus `manifest.json` requires refreshing the root installed copy
   with `install.py . --force --platform <platform>`.
-- `git ls-files templates` must equal manifest sources so orphaned template
-  files and manifest entries without tracked source files both fail locally.
+- `git ls-files templates` must equal manifest sources plus the templates for
+  registry-declared source-only commands. No other orphaned template files are
+  allowed, and every manifest source must remain tracked.
 - Manifest targets must be unique under `casefold()` to avoid collisions on
   case-insensitive filesystems.
 - Source-checkout install state such as `.sd-ai-command-pack/provenance.json`

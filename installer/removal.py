@@ -36,6 +36,7 @@ from installer.registry import (
     LOCAL_ONLY_MARKER_FILE,
     PACK_MANIFEST_FILE,
     PROVENANCE_FILE,
+    ROOT,
     TRELLIS_GITIGNORE_END,
     TRELLIS_GITIGNORE_START,
     TRELLIS_GITIGNORE_TARGET,
@@ -62,7 +63,7 @@ MANAGED_BLOCK_REMOVAL_TARGETS = frozenset(
 # manifest that shipped the command listed for it; a normal install/refresh
 # deletes vouched leftovers (retire_stale_targets) so consumer repos do not
 # fail the install audit on orphaned pack-like files.
-RETIRED_TARGETS: tuple[str, ...] = (
+RETIRED_REVIEW_LOCAL_ALL_TARGETS: tuple[str, ...] = (
     ".agents/skills/sd-review-local-all/SKILL.md",
     ".claude/commands/sd/review-local-all.md",
     ".cursor/commands/sd-review-local-all.md",
@@ -88,6 +89,42 @@ RETIRED_TARGETS: tuple[str, ...] = (
     ".qoder/skills/sd-review-local-all/SKILL.md",
     ".reasonix/skills/sd-review-local-all/SKILL.md",
     ".trae/skills/sd-review-local-all/SKILL.md",
+)
+
+# sd-fleet-refresh is an operator workflow for the pack source checkout. It
+# was consumer-shipped through 0.15.0, so refreshes retire its vouched footprint
+# while the source checkout keeps its generated dogfood copies.
+SOURCE_ONLY_COMMAND_TARGETS: tuple[str, ...] = (
+    ".agents/skills/sd-fleet-refresh/SKILL.md",
+    ".claude/commands/sd/fleet-refresh.md",
+    ".cursor/commands/sd-fleet-refresh.md",
+    ".gemini/commands/sd/fleet-refresh.toml",
+    ".github/prompts/sd-fleet-refresh.prompt.md",
+    ".opencode/commands/sd-fleet-refresh.md",
+    ".agent/workflows/sd-fleet-refresh.md",
+    ".codebuddy/commands/sd/fleet-refresh.md",
+    ".devin/workflows/sd-fleet-refresh.md",
+    ".factory/commands/sd/fleet-refresh.md",
+    ".kilocode/workflows/sd-fleet-refresh.md",
+    ".pi/prompts/sd-fleet-refresh.md",
+    ".qoder/commands/sd-fleet-refresh.md",
+    ".trae/commands/sd-fleet-refresh.md",
+    ".zcode/commands/sd/fleet-refresh.md",
+    ".agent/skills/sd-fleet-refresh/SKILL.md",
+    ".codebuddy/skills/sd-fleet-refresh/SKILL.md",
+    ".devin/skills/sd-fleet-refresh/SKILL.md",
+    ".factory/skills/sd-fleet-refresh/SKILL.md",
+    ".kilocode/skills/sd-fleet-refresh/SKILL.md",
+    ".kiro/skills/sd-fleet-refresh/SKILL.md",
+    ".pi/skills/sd-fleet-refresh/SKILL.md",
+    ".qoder/skills/sd-fleet-refresh/SKILL.md",
+    ".reasonix/skills/sd-fleet-refresh/SKILL.md",
+    ".trae/skills/sd-fleet-refresh/SKILL.md",
+)
+
+RETIRED_TARGETS = (
+    *RETIRED_REVIEW_LOCAL_ALL_TARGETS,
+    *SOURCE_ONLY_COMMAND_TARGETS,
 )
 
 # remove_pack_file statuses renamed so the install summary reads as
@@ -287,7 +324,10 @@ def retire_stale_targets(
         for path, digest in read_existing_provenance_files_for_remove(target).items()
     }
     results: list[RemoveResult] = []
+    source_checkout = target.resolve() == ROOT.resolve()
     for candidate in RETIRED_TARGETS:
+        if source_checkout and candidate in SOURCE_ONLY_COMMAND_TARGETS:
+            continue
         result = remove_pack_file(
             target,
             Path(candidate),
@@ -421,7 +461,9 @@ def remove_installed_pack(
 __all__ = [
     "GENERATED_REMOVAL_TARGETS",
     "MANAGED_BLOCK_REMOVAL_TARGETS",
+    "RETIRED_REVIEW_LOCAL_ALL_TARGETS",
     "RETIRED_TARGETS",
+    "SOURCE_ONLY_COMMAND_TARGETS",
     "installed_target_candidates",
     "is_git_internal_candidate",
     "may_remove_pack_file",

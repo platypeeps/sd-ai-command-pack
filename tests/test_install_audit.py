@@ -70,7 +70,7 @@ class InstallAuditTests(InstallTestCase):
             result.stdout,
         )
 
-    def test_install_audit_allows_fleet_preflight_only_in_source_repo(self) -> None:
+    def test_install_audit_allows_source_only_fleet_files_in_source_repo(self) -> None:
         audit = self.load_module_from_path(
             install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
             "sd_install_audit_source_only",
@@ -83,14 +83,20 @@ class InstallAuditTests(InstallTestCase):
                 path.write_text("# source marker\n", encoding="utf-8")
             else:
                 path.mkdir(parents=True, exist_ok=True)
-        source_only = root / "scripts/sd-ai-command-pack-fleet-preflight.py"
-        source_only.parent.mkdir(parents=True, exist_ok=True)
-        source_only.write_text("# source-only fleet helper\n", encoding="utf-8")
+        for relative_path in audit.SOURCE_ONLY_ALLOWED_PACK_FILES:
+            source_only = root / relative_path
+            source_only.parent.mkdir(parents=True, exist_ok=True)
+            source_only.write_text("# source-only fleet file\n", encoding="utf-8")
 
         failures, warnings = audit.audit_structural_state(root, set())
 
         self.assertEqual(failures, [])
         self.assertEqual(warnings, [])
+        self.assertEqual(
+            audit.SOURCE_ONLY_ALLOWED_PACK_FILES
+            - {"scripts/sd-ai-command-pack-fleet-preflight.py"},
+            set(install.SOURCE_ONLY_COMMAND_TARGETS),
+        )
 
     def test_install_audit_detects_missing_current_targets(self) -> None:
         root = self.make_repo()

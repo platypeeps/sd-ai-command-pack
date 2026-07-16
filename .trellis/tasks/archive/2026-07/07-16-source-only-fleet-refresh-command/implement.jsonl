@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Manifest ownership, retirement safety, receipts, provenance, and source drift contracts."}
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Shared command registry, generated adapter, and platform fanout conventions."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Keep registry, generator, manifest, retirement, docs, and tests aligned across boundaries."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Maintain one command catalog and one source-only policy declaration."}

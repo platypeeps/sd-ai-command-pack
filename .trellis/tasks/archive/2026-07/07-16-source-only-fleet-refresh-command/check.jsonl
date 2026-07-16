@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Focused and full validation expectations for installer and generated payload changes."}
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Verify generated manifest, retirement, provenance, and dogfood behavior against the owned contracts."}

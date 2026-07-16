@@ -14,6 +14,7 @@ sys = _support.sys
 unittest = _support.unittest
 Path = _support.Path
 install = _support.install
+mock = _support.mock
 PACK_ROOT = _support.PACK_ROOT
 InstallTestCase = _support.InstallTestCase
 
@@ -69,21 +70,46 @@ class RetiredTargetsTests(InstallTestCase):
             check=False,
         )
 
-    def test_retired_targets_pin_review_local_all_footprint(self) -> None:
-        self.assertEqual(len(install.RETIRED_TARGETS), 25)
+    def test_retired_targets_pin_known_command_footprints(self) -> None:
+        self.assertEqual(len(install.RETIRED_REVIEW_LOCAL_ALL_TARGETS), 25)
+        self.assertEqual(len(install.SOURCE_ONLY_COMMAND_TARGETS), 25)
+        self.assertEqual(len(install.RETIRED_TARGETS), 50)
         self.assertEqual(
             len(set(install.RETIRED_TARGETS)),
             len(install.RETIRED_TARGETS),
         )
-        for target in install.RETIRED_TARGETS:
+        for target in install.RETIRED_REVIEW_LOCAL_ALL_TARGETS:
             with self.subTest(target=target):
                 self.assertIn("review-local-all", target)
+        for target in install.SOURCE_ONLY_COMMAND_TARGETS:
+            with self.subTest(target=target):
+                self.assertIn("fleet-refresh", target)
         # A retired path must never come back as a live manifest target.
         manifest_targets = {file.target.as_posix() for file in self._manifest_files}
         self.assertEqual(
             manifest_targets.intersection(install.RETIRED_TARGETS),
             set(),
         )
+
+    def test_source_checkout_preserves_source_only_command_targets(self) -> None:
+        root = self.make_repo()
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        stale = self.seed_stale_target(
+            root,
+            install.SOURCE_ONLY_COMMAND_TARGETS[0],
+        )
+
+        with mock.patch("installer.removal.ROOT", root):
+            results = install.retire_stale_targets(
+                root,
+                force=True,
+                dry_run=False,
+                backup=False,
+            )
+
+        self.assertEqual(results, [])
+        self.assertTrue(stale.is_file())
 
     def test_refresh_deletes_vouched_stale_target_and_prunes_parent(self) -> None:
         root = self.make_repo()

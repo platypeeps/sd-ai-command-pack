@@ -158,6 +158,19 @@ class SdlcCommandsTests(InstallTestCase):
         guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")
         for name, (short, _pins, _apins) in COMMANDS.items():
             with self.subTest(command=name):
+                if name in install.SOURCE_ONLY_COMMAND_NAMES:
+                    self.assertNotIn(
+                        f"`.agents/skills/{name}/SKILL.md`",
+                        guide,
+                    )
+                    self.assertNotIn(f"/sd:{short}", guide)
+                    self.assertNotIn(f"/sd-{short}", guide)
+                    self.assertIn(
+                        f"The `{name}` command is an operator workflow "
+                        "available only",
+                        guide,
+                    )
+                    continue
                 self.assertIn(f"`.agents/skills/{name}/SKILL.md`", guide)
                 self.assertIn(f"/sd:{short}", guide)
                 self.assertIn(f"/sd-{short}", guide)
