@@ -385,6 +385,67 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertIn("[sd-review-learnings:github]", stderr.getvalue())
         self.assertIn("expected list in review learnings payload", stderr.getvalue())
 
+    def test_review_learnings_main_reports_git_command_error_without_traceback(
+        self,
+    ) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_git_command_error_test",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-test-")
+        self.addCleanup(tempdir.cleanup)
+
+        with mock.patch.object(
+            module,
+            "run_git_command",
+            side_effect=module.CommandError("git timed out after 60s"),
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                result = module.main(["--repo-root", tempdir.name])
+
+        self.assertEqual(result, 2)
+        self.assertIn("[sd-review-learnings:findings]", stderr.getvalue())
+        self.assertIn("git timed out after 60s", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_review_learnings_main_reports_gh_command_error_without_traceback(
+        self,
+    ) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_gh_command_error_test",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-test-")
+        self.addCleanup(tempdir.cleanup)
+        diff_file = Path(tempdir.name) / "empty.diff"
+        diff_file.write_text("", encoding="utf-8")
+
+        with mock.patch.object(
+            module,
+            "run_gh_command",
+            side_effect=module.CommandError("gh timed out after 120s"),
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                result = module.main(
+                    [
+                        "--repo-root",
+                        tempdir.name,
+                        "--diff-from",
+                        str(diff_file),
+                        "--github-days",
+                        "1",
+                        "--github-repo",
+                        "owner/repo",
+                    ]
+                )
+
+        self.assertEqual(result, 2)
+        self.assertIn("[sd-review-learnings:github]", stderr.getvalue())
+        self.assertIn("gh timed out after 120s", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
     def test_review_learnings_script_rejects_invalid_managed_marker_order(
         self,
     ) -> None:
