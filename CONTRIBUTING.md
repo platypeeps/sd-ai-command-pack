@@ -34,6 +34,13 @@ contributor setups. Run `STRICT=1 make lint` to turn those missing-tool
 skips into hard errors for parity with CI, which always runs the Node and
 ShellCheck lanes.
 
+The shipped-script coverage lane has two thresholds: the aggregate
+`scripts/sd-ai-command-pack-*.py` floor remains 76%, and
+`.github/scripts/check-shipped-script-coverage.sh` lists an explicit per-file
+floor for each shipped Python helper. Set per-file floors at or just below the
+current measured coverage and ratchet them upward when focused tests improve a
+script; do not let a single helper regress behind a healthy aggregate total.
+
 Ruff covers pack-owned Python in `install.py`, `installer/`, `scripts/`,
 `templates/scripts/`, and `tests/`. Trellis-owned platform runtime is excluded;
 tracked OpenCode JavaScript receives syntax-only validation with `node --check`.

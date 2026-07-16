@@ -69,8 +69,8 @@ jobs:
       - name: Report installer coverage (gate 100%)
         run: python3 -m coverage report --include="install.py,installer/*" --fail-under=100
 
-      - name: Report shipped-scripts coverage (gate 76%)
-        run: python3 -m coverage report --include="scripts/sd-ai-command-pack-*" --fail-under=76
+      - name: Report shipped-scripts coverage
+        run: bash .github/scripts/check-shipped-script-coverage.sh
 
   lint:
     runs-on: ubuntu-latest

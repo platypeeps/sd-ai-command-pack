@@ -453,21 +453,23 @@ fi
 bash .github/scripts/run-tests.sh
 python -m coverage combine
 python -m coverage report --include="install.py,installer/*" --fail-under=100
-python -m coverage report --include="scripts/sd-ai-command-pack-*" --fail-under=76
+PYTHON_BIN=python bash .github/scripts/check-shipped-script-coverage.sh
 ```
 
 Two coverage gates run: the `--fail-under=100` gate measures the installer
 (`install.py` plus the `installer/` package, lines and branches; this is also
 the default scope of a bare `coverage report`), and a second gate measures the
-shipped Python helpers under `scripts/` with a provisional 76% floor that
-ratchets up as helper tests grow. CI fails when `unittest` reports any skipped
-tests, runs the test suite on Ubuntu and macOS, and runs Ruff over pack Python
-plus `node --check` over the review-preflight JavaScript twins when Node is
-available locally. The shipped shell scripts are exercised by behavioral tests
-rather than a coverage number; CI also runs `shellcheck -S warning` over every
-tracked shell script and the git hooks — consumers exempt the vendored pack
-shell from line review ("reviewed upstream"), so upstream lint rigor is the
-compensating control.
+shipped Python helpers under `scripts/`: an aggregate 76% floor plus a
+per-file floor listed in `.github/scripts/check-shipped-script-coverage.sh`.
+Set each per-file floor at or just below the current measured helper coverage
+and ratchet it upward when focused tests improve a script. CI fails when
+`unittest` reports any skipped tests, runs the test suite on Ubuntu and macOS,
+and runs Ruff over pack Python plus `node --check` over the review-preflight
+JavaScript twins when Node is available locally. The shipped shell scripts are
+exercised by behavioral tests rather than a coverage number; CI also runs
+`shellcheck -S warning` over every tracked shell script and the git hooks —
+consumers exempt the vendored pack shell from line review ("reviewed
+upstream"), so upstream lint rigor is the compensating control.
 
 ### Releasing
 

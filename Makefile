@@ -32,7 +32,7 @@ test:
 	@if grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log; then printf '%s\n' "Tests skipped locally; install required tools or make the skip explicit."; exit 1; fi
 	"$(VENV_PYTHON)" -m coverage combine
 	"$(VENV_PYTHON)" -m coverage report --include="install.py,installer/*" --fail-under=100
-	"$(VENV_PYTHON)" -m coverage report --include="scripts/sd-ai-command-pack-*" --fail-under=76
+	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/check-shipped-script-coverage.sh
 
 # Pass STRICT=1 to turn missing-tool skips below into hard errors (CI
 # parity: the CI lint/security jobs always run the Node and ShellCheck

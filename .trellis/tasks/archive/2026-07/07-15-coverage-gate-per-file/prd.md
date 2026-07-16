@@ -31,8 +31,22 @@ CLI surface that automation keys on is exercised.
 
 ## Acceptance Criteria
 
-- [ ] CI fails if any single shipped script drops below its floor.
-- [ ] fleet-preflight CLI paths covered; its per-file number rises above
+- [x] CI fails if any single shipped script drops below its floor.
+- [x] fleet-preflight CLI paths covered; its per-file number rises above
       the old 62%.
-- [ ] Documented floor policy (aggregate + per-file) in the workflow or
+- [x] Documented floor policy (aggregate + per-file) in the workflow or
       CONTRIBUTING.
+
+## Implementation Notes
+
+- Added `.github/scripts/check-shipped-script-coverage.sh` as the shared
+  local/CI gate for the aggregate shipped-script floor plus explicit per-file
+  floors. The helper honors `PYTHON_BIN`, then `.venv/bin/python`, then
+  `python3` so local runs avoid Apple/Xcode Python when a repo venv exists.
+- Wired the shared gate into `.github/workflows/tests.yml` and `make test` so
+  CI and local verification enforce the same policy.
+- Added fleet-preflight `main()` and subprocess tests for JSON output, text
+  output, unknown-consumer failure, and `--fail-on-refresh-needed`.
+- Added drift coverage to ensure every shipped Python helper has a listed
+  per-file floor and the shared gate stays connected to the local and CI
+  runners.
