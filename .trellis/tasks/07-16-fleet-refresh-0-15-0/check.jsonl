@@ -1,0 +1,2 @@
+{"file":"docs/FLEET_ROLLOUT.md","reason":"Check every consumer outcome against the documented audit, PR, merge, and post-merge requirements."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply the pack's validation and review-preflight expectations while evaluating rollout evidence."}

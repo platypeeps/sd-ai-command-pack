@@ -1,0 +1,3 @@
+{"file":"docs/FLEET_ROLLOUT.md","reason":"Authoritative sequential fleet rollout procedure and safety boundaries."}
+{"file":"docs/fleet/consumers.json","reason":"Canonical six-consumer inventory, local path hints, and selected platforms."}
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Installer, manifest, provenance, and managed filesystem contracts."}
