@@ -271,6 +271,9 @@ unittest coverage lane.
 - Every tracked `scripts/sd-ai-command-pack-*.py` helper must appear exactly
   once in `.github/scripts/check-shipped-script-coverage.sh` with an integer
   floor.
+- The helper must resolve and `cd` to the repository root before choosing a
+  Python interpreter or checking helper paths, matching other `.github/scripts`
+  entry points.
 - Floors should be set at or just below current measured coverage and ratcheted
   upward when focused tests improve a helper. Do not lower a floor to hide a
   real regression.

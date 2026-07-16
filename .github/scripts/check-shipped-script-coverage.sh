@@ -2,6 +2,9 @@
 # Enforce aggregate and per-file coverage floors for shipped Python helpers.
 set -euo pipefail
 
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd -- "$REPO_ROOT" || exit 1
+
 if [ -z "${PYTHON_BIN:-}" ]; then
   if [ -x ".venv/bin/python" ]; then
     PYTHON_BIN=".venv/bin/python"
