@@ -409,32 +409,54 @@ function checkTrellisJournalRecords() {
   }
 
   const baselineRef = journalBaselineRef();
-  const developerDirs = readdirSync(workspaceRoot, { withFileTypes: true })
+  const currentDeveloperDirs = readdirSync(workspaceRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => resolve(workspaceRoot, entry.name))
-    .sort();
+    .map((entry) => resolve(workspaceRoot, entry.name));
+  const baselineJournalFiles = baselineRef
+    ? gitFilesAtRef(baselineRef, '.trellis/workspace').filter((file) =>
+        /^\.trellis\/workspace\/[^/]+\/journal-\d+\.md$/.test(file),
+      )
+    : [];
+  const developerRelatives = [...new Set([
+    ...currentDeveloperDirs.map(absoluteToRelative),
+    ...baselineJournalFiles.map((file) => dirname(file)),
+  ])].sort();
   let completedSessions = 0;
   let comparedSessions = 0;
   let baselineSessionsCompared = 0;
 
-  for (const developerDir of developerDirs) {
-    const developerRelative = absoluteToRelative(developerDir);
+  for (const developerRelative of developerRelatives) {
+    const developerDir = resolve(rootDir, developerRelative);
     const indexFile = `${developerRelative}/index.md`;
-    const journalFiles = readdirSync(developerDir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && /^journal-\d+\.md$/.test(entry.name))
-      .map((entry) => `${developerRelative}/${entry.name}`)
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const journalFiles = exists(developerRelative)
+      ? readdirSync(developerDir, { withFileTypes: true })
+          .filter((entry) => entry.isFile() && /^journal-\d+\.md$/.test(entry.name))
+          .map((entry) => `${developerRelative}/${entry.name}`)
+          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      : [];
     const journalSessions = [];
     const baselineJournalSessions = [];
 
     for (const journalFile of journalFiles) {
       journalSessions.push(...parseJournalSessions(journalFile));
-      if (baselineRef) {
-        const baselineText = gitFileAtRef(baselineRef, journalFile);
-        if (baselineText !== null) {
-          baselineJournalSessions.push(...parseJournalSessionsFromText(journalFile, baselineText));
-        }
-      }
+    }
+
+    for (const journalFile of baselineJournalFiles.filter((file) => dirname(file) === developerRelative)) {
+      baselineJournalSessions.push(
+        ...parseJournalSessionsFromText(journalFile, gitFileAtRef(baselineRef, journalFile)),
+      );
+    }
+
+    baselineSessionsCompared += baselineJournalSessions.length;
+    for (const issue of findHistoricalTrellisJournalSessionEdits(
+      baselineJournalSessions,
+      journalSessions,
+    )) {
+      const action = issue.kind === 'removed' ? 'removes' : 'modifies';
+      fail(
+        `${issue.session.file}:${issue.session.startLine} ${action} historical Session ${issue.session.number} from ${baselineRef}; ` +
+          'Trellis journal history is append-only. Restore that session and edit the intended current session by heading.',
+      );
     }
 
     if (journalSessions.length === 0) {
@@ -462,16 +484,6 @@ function checkTrellisJournalRecords() {
       fail(message);
     }
 
-    baselineSessionsCompared += baselineJournalSessions.length;
-    for (const session of findHistoricalTrellisJournalSessionEdits(
-      baselineJournalSessions,
-      journalSessions,
-    )) {
-      fail(
-        `${session.file}:${session.startLine} modifies historical Session ${session.number} from ${baselineRef}; ` +
-          'Trellis journal history is append-only. Restore that session and edit the intended current session by heading.',
-      );
-    }
   }
 
   if (failures.length > failureStart) {
@@ -861,7 +873,20 @@ function gitStdout(args) {
 
 function gitFileAtRef(ref, file) {
   const result = runGit(['show', `${ref}:${file}`]);
-  return result.status === 0 ? result.stdout : null;
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout).trim() || `exit status ${result.status}`;
+    throw new GitCommandError(`git show ${ref}:${file} failed: ${detail}`);
+  }
+  return result.stdout;
+}
+
+function gitFilesAtRef(ref, directory) {
+  const result = runGit(['ls-tree', '-r', '--name-only', '-z', ref, '--', directory]);
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout).trim() || `exit status ${result.status}`;
+    throw new GitCommandError(`git ls-tree ${ref} -- ${directory} failed: ${detail}`);
+  }
+  return result.stdout.split('\0').filter(Boolean);
 }
 
 function gitRefExists(ref) {
@@ -1138,7 +1163,7 @@ export function parseJournalSessionsFromText(file, text) {
 }
 
 export function findHistoricalTrellisJournalSessionEdits(baselineSessions, currentSessions) {
-  if (baselineSessions.length === 0 || currentSessions.length === 0) {
+  if (baselineSessions.length === 0) {
     return [];
   }
 
@@ -1149,26 +1174,34 @@ export function findHistoricalTrellisJournalSessionEdits(baselineSessions, curre
     }
   }
 
-  const newestCurrentSession = Math.max(...currentByNumber.keys());
-  const edits = [];
+  const newestCurrentSession = currentByNumber.size > 0
+    ? Math.max(...currentByNumber.keys())
+    : Number.NEGATIVE_INFINITY;
+  const issues = [];
 
   for (const baselineSession of baselineSessions) {
     const currentSession = currentByNumber.get(baselineSession.number);
-    if (
-      currentSession &&
+    if (!currentSession) {
+      issues.push({ kind: 'removed', session: baselineSession });
+    } else if (
       currentSession.number < newestCurrentSession &&
       normalizeJournalSessionContent(currentSession.content) !==
         normalizeJournalSessionContent(baselineSession.content)
     ) {
-      edits.push(currentSession);
+      issues.push({ kind: 'modified', session: currentSession });
     }
   }
 
-  return edits;
+  return issues;
 }
 
 function normalizeJournalSessionContent(content) {
-  return content.replace(/\r\n?/g, '\n').trimEnd();
+  return content
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .trimEnd();
 }
 
 function parseWorkspaceIndexSessions(file) {

@@ -63,8 +63,8 @@ that exercise the generic JavaScript review preflight.
   another.
 - Trellis journal sessions present at the review base and older than the newest
   current session are append-only. Compare normalized session blocks against
-  the base and fail when an older block changes; newly appended/current
-  sessions remain editable.
+  the base and fail when an older block changes, disappears, or is renumbered;
+  newly appended/current sessions remain editable.
 - Documentation scans intentionally inspect regular files only; symlinked docs
   are skipped so local or generated links do not expand outside the repo.
 
@@ -81,6 +81,8 @@ that exercise the generic JavaScript review preflight.
 - Older Trellis journal session differs from the review base -> fail with the
   session number and direct the author to restore history and edit the intended
   current session by heading.
+- Review-base Trellis journal session is deleted or renumbered -> fail as a
+  historical-session removal, including when its whole journal file disappears.
 
 ### 5. Good/Base/Bad Cases
 
@@ -99,7 +101,8 @@ that exercise the generic JavaScript review preflight.
 - Untracked copied-surface detection in a real Git fixture.
 - Workspace index parsing with trailing whitespace.
 - Historical-session comparison in a real Git fixture, including an appended
-  session that leaves prior history unchanged.
+  session that leaves prior history unchanged, per-line trailing whitespace,
+  renumbering, and deletion of a baseline journal file.
 - Template twin byte identity.
 
 ### 7. Wrong vs Correct

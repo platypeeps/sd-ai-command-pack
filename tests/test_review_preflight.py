@@ -119,8 +119,8 @@ const currentJournal = parseJournalSessionsFromText('.trellis/workspace/dev/jour
   '- Intended current change.',
 ].join('\\n'));
 assert.deepEqual(
-  findHistoricalTrellisJournalSessionEdits(journal, currentJournal).map((session) => session.number),
-  [1],
+  findHistoricalTrellisJournalSessionEdits(journal, currentJournal).map((issue) => [issue.kind, issue.session.number]),
+  [['modified', 1]],
 );
 assert.deepEqual(
   findHistoricalTrellisJournalSessionEdits(
@@ -132,6 +132,11 @@ assert.deepEqual(
     ].join('\\n')),
   ),
   [],
+);
+assert.deepEqual(
+  findHistoricalTrellisJournalSessionEdits(journal, currentJournal.slice(1))
+    .map((issue) => [issue.kind, issue.session.number]),
+  [['removed', 1]],
 );
 """,
             ],
@@ -496,6 +501,40 @@ assert.deepEqual(
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("1 baseline session(s) for historical edits", result.stdout)
+
+        whitespace_only_history = original_session.replace(
+            "- Original historical change.",
+            "- Original historical change.   ",
+        )
+        journal.write_text(
+            f"{whitespace_only_history}\n\n{current_session}\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        journal.unlink()
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("removes historical Session 1 from HEAD", result.stdout)
 
     def test_review_preflight_allows_configured_linux_service_users(self) -> None:
         node = shutil.which("node")
