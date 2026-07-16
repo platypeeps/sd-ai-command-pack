@@ -60,6 +60,22 @@ def missing_dogfood_targets(
 class PackDriftTests(InstallTestCase):
     """Tests for source/template drift gates, shipped env vars, and release guards."""
 
+    def test_shipped_shell_cleanup_is_option_safe(self) -> None:
+        unsafe_cleanup = re.compile(r'\brm\s+-f\s+"\$')
+        violations: list[str] = []
+
+        for script_path in sorted((install.ROOT / "templates/scripts").glob("*.sh")):
+            for line_number, line in enumerate(
+                script_path.read_text(encoding="utf-8").splitlines(),
+                start=1,
+            ):
+                if unsafe_cleanup.search(line):
+                    violations.append(
+                        f"{script_path.relative_to(install.ROOT)}:{line_number}: {line.strip()}"
+                    )
+
+        self.assertEqual(violations, [])
+
     def test_shared_script_templates_are_syntax_valid(self) -> None:
         script_files = self.shared_manifest_files("script")
 
