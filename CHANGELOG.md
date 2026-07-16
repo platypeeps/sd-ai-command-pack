@@ -7,6 +7,8 @@
   edits, removals, and renumbering of older sessions while allowing the newly
   appended/current session to be completed, preventing broad repeated-text
   replacements from corrupting historical records before remote review.
+- Review-learning summaries now truncate at word boundaries while honoring
+  their configured length limit.
 
 ## 0.14.2 - 2026-07-16
 

@@ -522,6 +522,34 @@ assert.deepEqual(
 
         self.assertEqual(result.returncode, 0, result.stdout)
 
+        renumbered_history = original_session.replace(
+            "## Session 1: Historical fixture",
+            "## Session 3: Historical fixture",
+        )
+        journal.write_text(
+            f"{renumbered_history}\n\n{current_session}\n",
+            encoding="utf-8",
+        )
+        index.write_text(
+            "| Session | Title | Status | Commits | Notes |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| 2 | Current fixture | Completed | 1234567 | done |\n"
+            "| 3 | Historical fixture | Completed | abcdef1 | done |\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("removes historical Session 1 from HEAD", result.stdout)
+
         journal.unlink()
         result = subprocess.run(
             [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
