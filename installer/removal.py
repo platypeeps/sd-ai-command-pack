@@ -1,4 +1,4 @@
-"""Part of the sd-ai-command-pack installer package."""
+"""Pack removal: vouch-gated deletion, managed-block and retired-target cleanup."""
 
 from __future__ import annotations
 
@@ -313,6 +313,9 @@ def remove_installed_pack(
     backup: bool,
     skip_diff_check: bool,
 ) -> int:
+    """Run the remove entry point: strip managed blocks, delete vouched pack
+    files (honoring force/dry-run/backup), drop the local-only exclude, then
+    report per-file results and return the diff-check exit code."""
     require_target_directory(target)
     files_by_target = {file.target.as_posix(): file for file in files}
     provenance_files = {

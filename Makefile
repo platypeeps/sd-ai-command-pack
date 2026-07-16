@@ -4,7 +4,7 @@ VENV ?= .venv
 VENV_PYTHON = $(VENV)/bin/python
 VENV_BIN = $(VENV)/bin
 
-.PHONY: setup hooks generate test lint audit full-check check
+.PHONY: setup hooks generate sync test lint audit full-check check
 
 setup:
 	"$(PYTHON)" -m venv "$(VENV)"
@@ -21,6 +21,12 @@ generate:
 		"$(PYTHON)" .github/scripts/generate-command-surfaces.py; \
 	fi
 
+# Self-sync after payload or doc/spec/task edits: refresh the dogfood
+# install from templates/, then regenerate the spec knowledge base.
+sync:
+	"$(VENV_PYTHON)" install.py . --force
+	"$(VENV_PYTHON)" scripts/sd-ai-command-pack-update-spec-kb.py
+
 test:
 	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/run-tests.sh
 	@if grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log; then printf '%s\n' "Tests skipped locally; install required tools or make the skip explicit."; exit 1; fi
@@ -28,18 +34,29 @@ test:
 	"$(VENV_PYTHON)" -m coverage report --include="install.py,installer/*" --fail-under=100
 	"$(VENV_PYTHON)" -m coverage report --include="scripts/sd-ai-command-pack-*" --fail-under=76
 
+# Pass STRICT=1 to turn missing-tool skips below into hard errors (CI
+# parity: the CI lint/security jobs always run the Node and ShellCheck
+# lanes). Mypy covers installer/, the install.py facade, and shipped
+# scripts/*.py; templates/scripts/ twins are byte-identical mirrors kept
+# out of the run so duplicate script names cannot collide.
 lint:
 	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests
-	"$(VENV_PYTHON)" -m mypy installer
+	"$(VENV_PYTHON)" -m mypy installer install.py scripts
 	@if command -v node >/dev/null 2>&1; then \
 		node --check scripts/sd-ai-command-pack-review-preflight.mjs; \
 		node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs; \
 		bash .github/scripts/check-opencode-js.sh; \
+	elif [ "$(STRICT)" = "1" ]; then \
+		printf '%s\n' "error: node not found and STRICT=1; JavaScript syntax checks are required." >&2; \
+		exit 1; \
 	else \
 		printf '%s\n' "warning: node not found; skipping JavaScript syntax checks."; \
 	fi
 	@if command -v shellcheck >/dev/null 2>&1; then \
 		git ls-files -z '*.sh' | xargs -0 shellcheck -S warning .githooks/pre-push; \
+	elif [ "$(STRICT)" = "1" ]; then \
+		printf '%s\n' "error: shellcheck not found and STRICT=1; shell lint is required." >&2; \
+		exit 1; \
 	else \
 		printf '%s\n' "warning: shellcheck not found; skipping shell lint."; \
 	fi

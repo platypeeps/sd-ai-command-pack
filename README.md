@@ -248,6 +248,7 @@ fast-forwarding, deleting merged refs, and reporting the final clean state.
 | `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_ACTOR` | PR author login (or `--actor`) for `sd-ai-command-pack-pr-body-scope.py`; a `[bot]`-suffixed login (e.g. `dependabot[bot]`) is exempt from strict validation so automated PRs are not blocked. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR` | PR number or URL for `sd-review-pr` when it cannot resolve the pull request from the current branch. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER` | Remote reviewer request identity for `sd-review-pr`. | `@copilot` |
+| `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER_LABEL` | Human-readable remote reviewer name used in `sd-review-pr` status output and reports. | `GitHub Copilot` |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_AUTHOR_MATCH` | Review/comment author matched after a remote request; defaults to the configured reviewer except for Copilot. | `copilot-pull-request-reviewer[bot]` |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND` | Custom command for requesting a remote review. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote review request/fix rounds before asking whether to continue. | `2` |

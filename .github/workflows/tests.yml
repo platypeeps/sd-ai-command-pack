@@ -95,8 +95,12 @@ jobs:
       - name: Ruff (pack Python)
         run: python3 -m ruff check install.py installer scripts templates/scripts tests
 
-      - name: Mypy (installer package)
-        run: python3 -m mypy installer
+      # Mirrors the Makefile lint target's mypy scope: installer/, the
+      # install.py facade, and shipped scripts/*.py. templates/scripts/
+      # twins stay excluded (byte-identical mirrors; duplicate script
+      # names would collide in one mypy run).
+      - name: Mypy (pack Python)
+        run: python3 -m mypy installer install.py scripts
 
       - name: Review preflight JavaScript syntax
         run: |

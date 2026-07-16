@@ -11,9 +11,19 @@ let failures = [];
 let warnings = [];
 let passes = [];
 let installedTargetsCache;
+let documentationGuardFilesCache;
+const readTextCache = new Map();
 
 const URI_SCHEME_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 const MIN_NODE_VERSION = { major: 16, minor: 9, label: '16.9.0' };
+// Git output ceiling for spawnSync calls that read diffs; Node's 1 MiB
+// default truncates large diffs and surfaces as a spawn error.
+const GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+
+// Declared before the module-level main run below: unlike function
+// declarations, class bindings are not hoisted out of the temporal dead
+// zone, and runCheck consults this class while checks execute.
+class GitCommandError extends Error {}
 
 export function runReviewPreflight(options = {}) {
   rootDir = resolve(options.rootDir || defaultRootDir);
@@ -21,6 +31,8 @@ export function runReviewPreflight(options = {}) {
   warnings = [];
   passes = [];
   installedTargetsCache = undefined;
+  documentationGuardFilesCache = undefined;
+  readTextCache.clear();
   // Load config only after the result buffers are reset so a malformed config
   // file's fail() entry is reported instead of being wiped by the reset.
   config = loadConfig(rootDir, options.configPath);
@@ -237,6 +249,13 @@ function runCheck(label, check) {
   try {
     check();
   } catch (error) {
+    if (error instanceof GitCommandError) {
+      // A git invocation that could not run (missing binary, spawn or
+      // buffer failure) must fail the preflight instead of letting the
+      // check proceed with an empty diff.
+      fail(`${label}: ${error.message}`);
+      return;
+    }
     const reason = error instanceof Error ? error.message : String(error);
     fail(`${label} check crashed: ${reason}`);
   }
@@ -757,6 +776,10 @@ function resolveDocumentationReference(file, target, kind, options = {}) {
 }
 
 function documentationGuardFiles() {
+  if (documentationGuardFilesCache !== undefined) {
+    return documentationGuardFilesCache;
+  }
+
   const files = [];
 
   for (const root of config.documentationRoots) {
@@ -773,16 +796,40 @@ function documentationGuardFiles() {
     }
   }
 
-  return [...new Set(files)].sort();
+  documentationGuardFilesCache = [...new Set(files)].sort();
+  return documentationGuardFilesCache;
 }
 
-function gitStdout(args) {
+// Runs git with an explicit output ceiling. A nonzero exit status is the
+// caller's decision (many call sites legitimately tolerate absent refs or
+// diffs), but result.error means git never ran or its output was cut off,
+// so tolerating it would silently degrade to an empty diff — throw instead
+// and let runCheck turn it into a hard failure.
+function runGit(args) {
   const result = spawnSync('git', args, {
     cwd: rootDir,
     encoding: 'utf8',
+    maxBuffer: GIT_MAX_BUFFER_BYTES,
   });
 
-  if (result.error || result.status !== 0) {
+  if (result.error) {
+    throw new GitCommandError(`git ${args.join(' ')} could not run: ${result.error.message}`);
+  }
+
+  if (result.signal || result.status === null) {
+    const reason = result.signal
+      ? `terminated by signal ${result.signal}`
+      : 'exited without a status';
+    throw new GitCommandError(`git ${args.join(' ')} did not complete: ${reason}`);
+  }
+
+  return result;
+}
+
+function gitStdout(args) {
+  const result = runGit(args);
+
+  if (result.status !== 0) {
     return '';
   }
 
@@ -855,12 +902,9 @@ function currentDiffStats() {
   const sources = currentDiffSources('--numstat', '-z');
 
   for (const source of sources) {
-    const result = spawnSync('git', source.args, {
-      cwd: rootDir,
-      encoding: 'utf8',
-    });
+    const result = runGit(source.args);
 
-    if (result.error || result.status !== 0) {
+    if (result.status !== 0) {
       continue;
     }
 
@@ -884,12 +928,9 @@ function currentChangedPaths() {
   let inspected = false;
 
   for (const source of sources) {
-    const result = spawnSync('git', source.args, {
-      cwd: rootDir,
-      encoding: 'utf8',
-    });
+    const result = runGit(source.args);
 
-    if (result.error || result.status !== 0) {
+    if (result.status !== 0) {
       continue;
     }
 
@@ -1198,7 +1239,15 @@ function readJson(file) {
 }
 
 function readText(file) {
-  return readFileSync(resolve(rootDir, file), 'utf8');
+  const path = resolve(rootDir, file);
+  const cached = readTextCache.get(path);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const text = readFileSync(path, 'utf8');
+  readTextCache.set(path, text);
+  return text;
 }
 
 function absoluteToRelative(file) {

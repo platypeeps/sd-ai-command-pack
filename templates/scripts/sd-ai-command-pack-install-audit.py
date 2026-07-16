@@ -720,8 +720,8 @@ def audit_migration_advisories(root: Path, targets: set[str]) -> list[str]:
                 f"legacy pack target remains: {relative_path}; {replacement}"
             )
 
-    for relative_path in _iter_reference_scan_files(root, targets):
-        path = root / relative_path
+    for scan_path in _iter_reference_scan_files(root, targets):
+        path = root / scan_path
         try:
             if path.stat().st_size > MAX_REFERENCE_SCAN_BYTES:
                 continue
@@ -732,7 +732,7 @@ def audit_migration_advisories(root: Path, targets: set[str]) -> list[str]:
             if LEGACY_PACK_REFERENCE_PATTERNS[needle].search(text):
                 warnings.append(
                     "legacy pack reference remains: "
-                    f"{relative_path.as_posix()} contains {needle!r}; "
+                    f"{scan_path.as_posix()} contains {needle!r}; "
                     f"prefer {replacement}"
                 )
 

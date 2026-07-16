@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.13.1 - 2026-07-16
+
+- P3 polish batch from the 2026-07-15 audit (nine items). Shipped-payload
+  changes: the review preflight's git subprocess calls now set an explicit
+  64 MiB buffer and fail hard when git cannot run instead of proceeding with
+  an empty diff; the preflight also caches its documentation file list and
+  file reads per run; typing-only fixes in the session recorder and install
+  audit. Repo-side: the install.py facade drops 42 unused re-exports, the
+  installer modules gain responsibility docstrings, the REVIEW_PR_REMOTE_*
+  variables are documented in the configuration references, review-learnings
+  gains git-failure and untracked-diff tests, `make sync` wraps the dogfood
+  install and KB refresh, `STRICT=1 make lint` turns missing-tool skips into
+  errors, and mypy now covers install.py and the shipped scripts.
+
 ## 0.13.0 - 2026-07-16
 
 - Generated the bespoke Claude/Gemini/GitHub command adapters and all derived

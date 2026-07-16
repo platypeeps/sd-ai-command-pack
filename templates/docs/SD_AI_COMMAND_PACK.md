@@ -1040,6 +1040,24 @@ ephemeral tool state and do not change what the checks validate.
   `REVIEW_PREFLIGHT_PR_BODY`.
 - `SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR`: PR number or URL for `sd-review-pr`
   when the command cannot resolve the pull request from the current branch.
+- `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER`: remote reviewer request
+  identity for `sd-review-pr`. Defaults to `@copilot`.
+- `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER_LABEL`: human-readable remote
+  reviewer name used in `sd-review-pr` status output and reports. Defaults to
+  `GitHub Copilot`.
+- `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_AUTHOR_MATCH`: review/comment author
+  matched after a remote review request. Defaults to
+  `copilot-pull-request-reviewer[bot]` when the configured reviewer is
+  `@copilot`, and to the configured reviewer otherwise.
+- `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND`: custom command for
+  requesting a remote review when the provider is not triggered by a standard
+  GitHub reviewer request. Unset by default.
+- `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`: maximum remote review
+  request/fix rounds before `sd-review-pr` asks whether to continue. Defaults
+  to `2`.
+- `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_SETTLE_POLLS`: maximum 30-second polls
+  before an accepted remote request without author-matched activity stops as
+  ambiguous. Defaults to `40`.
 - `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH`: explicit feature branch name for
   `sd-create-pr` when it starts on the repository default branch. When unset,
   `sd-create-pr` derives a `codex/<slug>` branch from
