@@ -3115,9 +3115,6 @@ class InstallCoreTests(InstallTestCase):
         self.assertNotIn("Link every relevant existing repo-knowledge file", update_spec)
         self.assertNotIn("perform the remaining bullets manually", update_spec)
 
-        update_spec = (
-            install.ROOT / "templates/.agents/skills/sd-update-spec/SKILL.md"
-        ).read_text(encoding="utf-8")
         self.assertIn("repospec artifact", update_spec)
         self.assertIn("docs/repomix-map.md", update_spec)
         self.assertIn("Architectural overview", update_spec)
