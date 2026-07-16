@@ -24,7 +24,7 @@
     ".trellis/audit/ledger.md",
     ".trellis/scripts/common/task_utils.py",
     ".trellis/scripts/common/config.py",
-    ".trellis/tasks/07-16-audit-roadmap-cleanup/prd.md"
+    ".trellis/tasks/archive/2026-07/07-16-audit-roadmap-cleanup/prd.md"
   ],
   "notes": "Parked upstream Trellis-owned A-027 follow-up; do not implement in this pack or open an upstream Trellis PR without explicit user consent.",
   "meta": {}

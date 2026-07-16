@@ -485,7 +485,7 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: security
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-16 @ 7d0172e
+- last-seen: 2026-07-16 @ 772bf2a
 - evidence:
   - .trellis/scripts/common/task_utils.py:262-271 subprocess.run(cmd,
     shell=True, ...)
@@ -505,6 +505,9 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   change hook config to argv-list execution. This was found from
   sd-ai-command-pack audit A-027 and intentionally left upstream-owned."
   Parked as `.trellis/tasks/07-16-upstream-trellis-hook-shell-semantics/`.
+  Follow-up 2026-07-16 @ 772bf2a: still open; evidence remains present in
+  Trellis-owned runtime and the parked task remains the accurate tracking
+  record.
 
 ## A-028 — review-learnings git error/edge branches are untested (script at 69%)
 - status: fixed
