@@ -3,7 +3,7 @@
   "name": "docs-accuracy-batch",
   "title": "Docs accuracy batch: backend spec split + versioning policy",
   "description": "Fix backend spec installer split and document versioning policy (audit A-006, A-007).",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
