@@ -281,8 +281,9 @@ Generated text writers follow the same safety model:
   `.sd-ai-command-pack/manifest.json`, `.sd-ai-command-pack/provenance.json`,
   and `.sd-ai-command-pack/installed-targets.txt` are regular-file targets. If
   the final path is an in-repo symlink, report `symlink-conflict` and leave the
-  link plus its target untouched. Symlinks that resolve outside the target repo
-  still fail target-path validation before any write.
+  link plus its target untouched. If the final path is another non-file node,
+  report `conflict` and leave it untouched. Symlinks that resolve outside the
+  target repo still fail target-path validation before any write.
 - Use temp-file + `os.replace` writes for generated text and shipped helper
   rewrites of user-facing files. A failed replace, ENOSPC, or interrupted write
   must leave the previous complete file in place and clean up the temporary
