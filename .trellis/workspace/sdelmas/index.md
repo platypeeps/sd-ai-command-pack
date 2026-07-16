@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 116
+- **Total Sessions**: 117
 - **Last Active**: 2026-07-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~621 | Active |
+| `journal-3.md` | ~662 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 117 | 2026-07-16 | Audit roadmap cleanup | `f6f7e13`, `b4d69d5`, `21353b0` | `main` |
 | 116 | 2026-07-16 | Harden pack runtime scripts | `561c05d`, `08c31d4` | `codex/p2-hardening-batch` |
 | 115 | 2026-07-16 | Fix auto-tag transitive-skip regression + backfill tags | `1376dde` | `main` |
 | 114 | 2026-07-16 | Restore 5 review rounds + cycle counters (0.14.0) | `e1a2f1f` | `main` |

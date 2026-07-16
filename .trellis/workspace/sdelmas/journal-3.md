@@ -622,3 +622,46 @@ Added the shipped Python helper library, hardened subprocess timeout handling, r
 ### Next Steps
 
 - None - task complete
+
+
+## Session 117: Audit roadmap cleanup
+
+**Date**: 2026-07-16
+**Task**: Audit roadmap cleanup
+**Branch**: `main`
+
+### Summary
+
+Resolved local sd-audit-repo roadmap findings, hardened generated installer metadata/provenance handling, addressed Copilot review feedback, and parked the remaining upstream Trellis-owned hook finding as a planning task.
+
+### Main Changes
+
+- Represented installer-generated pack files as source-less and reused preflight source metadata for source-backed installs/provenance.
+- Revalidated destination state before reusing planned install results so symlink/content/existence drift falls through to normal conflict handling.
+- Updated docs, changelog, audit ledger, specs, templates, and task records; parked A-027 as a separate upstream Trellis follow-up.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f6f7e13` | fix: resolve audit roadmap cleanup |
+| `b4d69d5` | test: cover generated installer metadata edges |
+| `21353b0` | fix: revalidate planned install results |
+
+### Testing
+
+- [OK] make lint
+- [OK] PYTHON_BIN=.venv/bin/python TEST_WORKERS=4 bash .github/scripts/run-tests.sh
+- [OK] .venv/bin/python -m coverage report --include=install.py,installer/* --fail-under=100
+- [OK] PYTHON_BIN=.venv/bin/python bash .github/scripts/check-shipped-script-coverage.sh
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+- [OK] GitHub Actions PR #131: CI Result success
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Parked upstream Trellis lifecycle hook shell-semantics follow-up remains open as 07-16-upstream-trellis-hook-shell-semantics; do not open an upstream Trellis PR without explicit user approval.
