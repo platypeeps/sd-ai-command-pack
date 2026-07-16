@@ -2,7 +2,7 @@
   "id": "sd-audit-repo-command",
   "name": "sd-audit-repo-command",
   "title": "Add sd-audit-repo formal multi-agent repo audit command",
-  "description": "",
+  "description": "Ship the distributed sd-audit-repo formal multi-agent repository audit command (skill, 15 charters, adapters, committed findings ledger) — released as 0.11.0.",
   "status": "completed",
   "dev_type": null,
   "scope": null,

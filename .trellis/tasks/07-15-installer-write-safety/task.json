@@ -2,7 +2,7 @@
   "id": "installer-write-safety",
   "name": "installer-write-safety",
   "title": "Installer write-safety: atomic script writes + symlink guards",
-  "description": "",
+  "description": "Atomic script writes and symlink guards for pack text writers (audit A-002, A-010).",
   "status": "planning",
   "dev_type": null,
   "scope": null,

@@ -2,7 +2,7 @@
   "id": "opencode-plugin-dependency-review",
   "name": "opencode-plugin-dependency-review",
   "title": "Verify or remove the @opencode-ai/plugin dependency",
-  "description": "",
+  "description": "Verify or remove the unused @opencode-ai/plugin dependency (audit A-004, A-018, A-019).",
   "status": "planning",
   "dev_type": null,
   "scope": null,

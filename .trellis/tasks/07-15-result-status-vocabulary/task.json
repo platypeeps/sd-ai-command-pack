@@ -2,7 +2,7 @@
   "id": "result-status-vocabulary",
   "name": "result-status-vocabulary",
   "title": "Typed result-status vocabulary for installer results",
-  "description": "",
+  "description": "Typed status vocabulary for installer result objects (audit A-011).",
   "status": "planning",
   "dev_type": null,
   "scope": null,

@@ -2,7 +2,7 @@
   "id": "shared-python-script-lib",
   "name": "shared-python-script-lib",
   "title": "Shared Python script library (sd_ai_command_pack_lib)",
-  "description": "",
+  "description": "Ship a shared Python helper lib for shipped scripts (audit A-013; reopens a July 2026 decision).",
   "status": "planning",
   "dev_type": null,
   "scope": null,
