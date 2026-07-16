@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.11.0 - 2026-07-15
+
+- Added the distributed `sd-audit-repo` command and shared skill: a formal
+  multi-dimension repository audit that dispatches one read-only reviewer per
+  charter (12 always-on dimensions plus fingerprint-selected consumer-impact,
+  observability, and accessibility-i18n), adversarially verifies findings,
+  reconciles them against the Trellis backlog, and produces a canonical report
+  with mandatory sections backed by a committed findings ledger at
+  `.trellis/audit/ledger.md`. Supports `dimensions=` filtering,
+  `depth=quick|standard|deep`, and a `follow-up` mode that re-verifies open
+  ledger items instead of re-sweeping the repository. The review preflight
+  treats `.trellis/audit/ledger.md` as an optional documented path so repos
+  that have not yet run their first audit pass the documentation path check.
+
 ## 0.10.5 - 2026-07-15
 
 - Made the `sd-housekeeping` skill always report the current Trellis task and a

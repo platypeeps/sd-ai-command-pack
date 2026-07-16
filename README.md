@@ -145,6 +145,15 @@ complete Prism/Gito exclusion and retry behavior lives in the installed guide's
 Scans local diffs and optional recent GitHub review comments for repeated review
 patterns, then updates a managed learning block when requested.
 
+### sd-audit-repo
+
+Runs the formal multi-dimension repository audit: one read-only reviewer per
+charter dimension, adversarial verification of findings, Trellis backlog
+reconciliation, and a canonical report backed by the committed findings ledger
+at `.trellis/audit/ledger.md`. Supports `dimensions=`, `depth=`, and
+`follow-up` arguments; details live in the installed guide's
+[Commands](docs/SD_AI_COMMAND_PACK.md#commands) section.
+
 ### sd-update-spec
 
 Runs the existing Trellis `trellis-update-spec` skill, refreshes repo-owned

@@ -112,6 +112,7 @@ function defaultConfig() {
       '.sd-ai-command-pack/review-preflight.json',
       '.trellis/.developer',
       '.trellis/.template-hashes.json',
+      '.trellis/audit/ledger.md',
       'ARCHITECTURE.md',
       'ARCHITECTURE_OVERVIEW.md',
       'docs/ARCHITECTURE.md',

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "sd-ai-command-pack",
-  "version": "0.10.5",
+  "version": "0.11.0",
   "license": "MIT",
   "description": "Install project-local SD AI command workflows, Prism/Gito defaults, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
@@ -46,6 +46,118 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
       "target": ".agents/skills/sd-work-designs/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
+      "target": ".agents/skills/sd-audit-repo/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/charters/architecture.md",
+      "target": ".agents/skills/sd-audit-repo/charters/architecture.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/charters/design.md",
+      "target": ".agents/skills/sd-audit-repo/charters/design.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/charters/correctness.md",
+      "target": ".agents/skills/sd-audit-repo/charters/correctness.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/charters/security.md",
+      "target": ".agents/skills/sd-audit-repo/charters/security.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/charters/testing.md",
+      "target": ".agents/skills/sd-audit-repo/charters/testing.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/charters/documentation.md",
+      "target": ".agents/skills/sd-audit-repo/charters/documentation.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/charters/bloat.md",
+      "target": ".agents/skills/sd-audit-repo/charters/bloat.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/charters/performance.md",
+      "target": ".agents/skills/sd-audit-repo/charters/performance.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/charters/dependencies.md",
+      "target": ".agents/skills/sd-audit-repo/charters/dependencies.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/charters/tooling.md",
+      "target": ".agents/skills/sd-audit-repo/charters/tooling.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/charters/release-hygiene.md",
+      "target": ".agents/skills/sd-audit-repo/charters/release-hygiene.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/charters/improvements.md",
+      "target": ".agents/skills/sd-audit-repo/charters/improvements.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/charters/consumer-impact.md",
+      "target": ".agents/skills/sd-audit-repo/charters/consumer-impact.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/charters/observability.md",
+      "target": ".agents/skills/sd-audit-repo/charters/observability.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/charters/accessibility-i18n.md",
+      "target": ".agents/skills/sd-audit-repo/charters/accessibility-i18n.md",
       "install": "always"
     },
     {
@@ -261,6 +373,13 @@
     {
       "platform": "claude",
       "kind": "command",
+      "source": "templates/.claude/commands/sd/audit-repo.md",
+      "target": ".claude/commands/sd/audit-repo.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
       "source": "templates/.claude/commands/sd/review-pr.md",
       "target": ".claude/commands/sd/review-pr.md",
       "anchor": ".claude"
@@ -352,6 +471,13 @@
     {
       "platform": "cursor",
       "kind": "command",
+      "source": "templates/.commands/sd-audit-repo.md",
+      "target": ".cursor/commands/sd-audit-repo.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
       "source": "templates/.commands/sd-review-pr.md",
       "target": ".cursor/commands/sd-review-pr.md",
       "anchor": ".cursor"
@@ -438,6 +564,13 @@
       "kind": "command",
       "source": "templates/.gemini/commands/sd/work-designs.toml",
       "target": ".gemini/commands/sd/work-designs.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/audit-repo.toml",
+      "target": ".gemini/commands/sd/audit-repo.toml",
       "anchor": ".gemini"
     },
     {
@@ -548,6 +681,13 @@
     {
       "platform": "github",
       "kind": "prompt",
+      "source": "templates/.github/prompts/sd-audit-repo.prompt.md",
+      "target": ".github/prompts/sd-audit-repo.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
       "source": "templates/.github/prompts/sd-review-pr.prompt.md",
       "target": ".github/prompts/sd-review-pr.prompt.md",
       "anchor": ".github"
@@ -634,6 +774,13 @@
       "kind": "command",
       "source": "templates/.commands/sd-work-designs.md",
       "target": ".opencode/commands/sd-work-designs.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.commands/sd-audit-repo.md",
+      "target": ".opencode/commands/sd-audit-repo.md",
       "anchor": ".opencode"
     },
     {
@@ -730,6 +877,13 @@
     {
       "platform": "antigravity",
       "kind": "workflow",
+      "source": "templates/.commands/sd-audit-repo.md",
+      "target": ".agent/workflows/sd-audit-repo.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
       "source": "templates/.commands/sd-review-pr.md",
       "target": ".agent/workflows/sd-review-pr.md",
       "anchor": ".agent"
@@ -816,6 +970,13 @@
       "kind": "command",
       "source": "templates/.commands/sd-work-designs.md",
       "target": ".codebuddy/commands/sd/work-designs.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.commands/sd-audit-repo.md",
+      "target": ".codebuddy/commands/sd/audit-repo.md",
       "anchor": ".codebuddy"
     },
     {
@@ -912,6 +1073,13 @@
     {
       "platform": "devin",
       "kind": "workflow",
+      "source": "templates/.commands/sd-audit-repo.md",
+      "target": ".devin/workflows/sd-audit-repo.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
       "source": "templates/.commands/sd-review-pr.md",
       "target": ".devin/workflows/sd-review-pr.md",
       "anchor": ".devin"
@@ -998,6 +1166,13 @@
       "kind": "command",
       "source": "templates/.commands/sd-work-designs.md",
       "target": ".factory/commands/sd/work-designs.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.commands/sd-audit-repo.md",
+      "target": ".factory/commands/sd/audit-repo.md",
       "anchor": ".factory"
     },
     {
@@ -1094,6 +1269,13 @@
     {
       "platform": "kilo",
       "kind": "workflow",
+      "source": "templates/.commands/sd-audit-repo.md",
+      "target": ".kilocode/workflows/sd-audit-repo.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
       "source": "templates/.commands/sd-review-pr.md",
       "target": ".kilocode/workflows/sd-review-pr.md",
       "anchor": ".kilocode"
@@ -1180,6 +1362,13 @@
       "kind": "prompt",
       "source": "templates/.commands/sd-work-designs.md",
       "target": ".pi/prompts/sd-work-designs.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.commands/sd-audit-repo.md",
+      "target": ".pi/prompts/sd-audit-repo.md",
       "anchor": ".pi"
     },
     {
@@ -1276,6 +1465,13 @@
     {
       "platform": "qoder",
       "kind": "command",
+      "source": "templates/.commands/sd-audit-repo.md",
+      "target": ".qoder/commands/sd-audit-repo.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
       "source": "templates/.commands/sd-review-pr.md",
       "target": ".qoder/commands/sd-review-pr.md",
       "anchor": ".qoder"
@@ -1362,6 +1558,13 @@
       "kind": "command",
       "source": "templates/.commands/sd-work-designs.md",
       "target": ".trae/commands/sd-work-designs.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.commands/sd-audit-repo.md",
+      "target": ".trae/commands/sd-audit-repo.md",
       "anchor": ".trae"
     },
     {
@@ -1458,6 +1661,13 @@
     {
       "platform": "zcode",
       "kind": "command",
+      "source": "templates/.commands/sd-audit-repo.md",
+      "target": ".zcode/commands/sd/audit-repo.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
       "source": "templates/.commands/sd-review-pr.md",
       "target": ".zcode/commands/sd/review-pr.md",
       "anchor": ".zcode"
@@ -1544,6 +1754,13 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
       "target": ".agent/skills/sd-work-designs/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
+      "target": ".agent/skills/sd-audit-repo/SKILL.md",
       "anchor": ".agent"
     },
     {
@@ -1640,6 +1857,13 @@
     {
       "platform": "codebuddy",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
+      "target": ".codebuddy/skills/sd-audit-repo/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".codebuddy/skills/sd-review-pr/SKILL.md",
       "anchor": ".codebuddy"
@@ -1726,6 +1950,13 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
       "target": ".devin/skills/sd-work-designs/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
+      "target": ".devin/skills/sd-audit-repo/SKILL.md",
       "anchor": ".devin"
     },
     {
@@ -1822,6 +2053,13 @@
     {
       "platform": "droid",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
+      "target": ".factory/skills/sd-audit-repo/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".factory/skills/sd-review-pr/SKILL.md",
       "anchor": ".factory"
@@ -1908,6 +2146,13 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
       "target": ".kilocode/skills/sd-work-designs/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
+      "target": ".kilocode/skills/sd-audit-repo/SKILL.md",
       "anchor": ".kilocode"
     },
     {
@@ -2004,6 +2249,13 @@
     {
       "platform": "kiro",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
+      "target": ".kiro/skills/sd-audit-repo/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".kiro/skills/sd-review-pr/SKILL.md",
       "anchor": ".kiro"
@@ -2090,6 +2342,13 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
       "target": ".pi/skills/sd-work-designs/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
+      "target": ".pi/skills/sd-audit-repo/SKILL.md",
       "anchor": ".pi"
     },
     {
@@ -2186,6 +2445,13 @@
     {
       "platform": "qoder",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
+      "target": ".qoder/skills/sd-audit-repo/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".qoder/skills/sd-review-pr/SKILL.md",
       "anchor": ".qoder"
@@ -2277,6 +2543,13 @@
     {
       "platform": "reasonix",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
+      "target": ".reasonix/skills/sd-audit-repo/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".reasonix/skills/sd-review-pr/SKILL.md",
       "anchor": ".reasonix"
@@ -2363,6 +2636,13 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
       "target": ".trae/skills/sd-work-designs/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
+      "target": ".trae/skills/sd-audit-repo/SKILL.md",
       "anchor": ".trae"
     },
     {
