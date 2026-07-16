@@ -50,6 +50,44 @@ GITHUB_UNTRUSTED_PR_NOTE = _surface_generator.GITHUB_UNTRUSTED_PR_NOTE
 CLAUDE_COMMAND_ALIAS_REWRITES = _surface_generator.CLAUDE_COMMAND_ALIAS_REWRITES
 BESPOKE_BODY_PARITY_EXEMPTIONS = _surface_generator.OVERRIDE_BODIES
 
+NODE_BUILTIN_MODULES = {
+    "assert",
+    "buffer",
+    "child_process",
+    "crypto",
+    "events",
+    "fs",
+    "fs/promises",
+    "os",
+    "path",
+    "process",
+    "stream",
+    "timers",
+    "url",
+    "util",
+}
+
+
+def strip_js_comments(content: str) -> str:
+    without_block_comments = re.sub(r"/\*.*?\*/", "", content, flags=re.DOTALL)
+    return "\n".join(
+        line.split("//", 1)[0] for line in without_block_comments.splitlines()
+    )
+
+
+def find_js_module_specifiers(content: str) -> list[str]:
+    stripped = strip_js_comments(content)
+    patterns = (
+        r'^\s*import\s+(?:[^"\']+\s+from\s+)?["\']([^"\']+)["\']',
+        r'^\s*export\s+[^"\']+\s+from\s+["\']([^"\']+)["\']',
+        r'\brequire\s*\(\s*["\']([^"\']+)["\']\s*\)',
+        r'\bimport\s*\(\s*["\']([^"\']+)["\']\s*\)',
+    )
+    specifiers: list[str] = []
+    for pattern in patterns:
+        specifiers.extend(re.findall(pattern, stripped, re.MULTILINE))
+    return specifiers
+
 
 def strip_yaml_frontmatter(content: str) -> str:
     if not content.startswith("---\n"):
@@ -1147,25 +1185,42 @@ class GeneratedParityTests(InstallTestCase):
         external_imports: list[str] = []
         for source in sorted((PACK_ROOT / ".opencode").glob("**/*.js")):
             text = source.read_text(encoding="utf-8")
-            for match in re.finditer(
-                r'^import .* from ["\']([^"\']+)["\']',
-                text,
-                re.MULTILINE,
-            ):
-                imported = match.group(1)
-                if not imported.startswith((".", "node:")) and imported not in {
-                    "child_process",
-                    "crypto",
-                    "fs",
-                    "os",
-                    "path",
-                    "process",
-                }:
+            for imported in find_js_module_specifiers(text):
+                if (
+                    not imported.startswith((".", "/", "node:"))
+                    and imported not in NODE_BUILTIN_MODULES
+                ):
                     external_imports.append(
                         f"{source.relative_to(PACK_ROOT)} imports {imported}"
                     )
 
         self.assertEqual([], external_imports)
+
+    def test_opencode_dependency_scan_covers_common_module_forms(self) -> None:
+        specifiers = find_js_module_specifiers(
+            """
+            import fs from "fs"
+            import sibling from "./sibling.js"
+            import "external-side-effect"
+            export { value } from "external-reexport"
+            const required = require("external-require")
+            const dynamic = await import("external-dynamic")
+            // require("ignored-comment")
+            /* import "ignored-block-comment" */
+            """
+        )
+
+        self.assertEqual(
+            [
+                "fs",
+                "./sibling.js",
+                "external-side-effect",
+                "external-reexport",
+                "external-require",
+                "external-dynamic",
+            ],
+            specifiers,
+        )
 
     def test_repo_declares_mit_license(self) -> None:
         raw, _ = install.load_manifest()
