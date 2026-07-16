@@ -164,3 +164,43 @@ Shipped the command-infrastructure streamline: surface generation (make generate
 
 - Decide whether to archive platform-registry-manifest-sections as superseded
 - Fleet rollout 0.10.5..0.13.0 via sd-fleet-refresh when requested
+
+
+## Session 105: P3 polish batch (0.13.1)
+
+**Date**: 2026-07-15
+**Task**: P3 polish batch (0.13.1)
+**Branch**: `main`
+
+### Summary
+
+Implemented nine safe P3 audit findings in one batch: preflight git hard-fail (incl. Copilot-caught signal/null-status case) + 64MiB buffer + doc-read memoization, install.py facade trim (42 dead re-exports, reached set re-derived), REVIEW_PR_REMOTE_* documentation, installer docstrings, make sync, STRICT=1 lint mode, review-learnings error-branch tests, mypy over install.py + scripts. Six P3s deliberately excluded with reasons, staying open in the ledger. Merged PR #119 as 0.13.1.
+
+### Main Changes
+
+- Preflight runGit: explicit maxBuffer, hard-fail on result.error and on signal/null-status (Copilot round-2 fix a3cd02a) with self-killing-shim regression tests
+- Facade: 42 dead forwards removed (kept RemoveResult/read_existing_provenance_files per re-derivation); mypy scope now installer+install.py+scripts with trivial typing fixes
+- make sync + STRICT=1; env-var docs; installer docstrings; review-learnings coverage 51%->57%
+- Ledger: nine fixed-in-0.13.1 breadcrumbs; A-020/A-027/A-031/A-032/A-033 stay open by decision
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `85976ca` | Merge pull request #119 from platypeeps/chore/p3-polish-batch |
+
+### Testing
+
+- [OK] make test green (installer 100%, scripts 80%>=76)
+- [OK] make full-check green at 0.13.1
+- [OK] Copilot round 2 clean after signal fix; thread replied + resolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Fleet rollout 0.10.5..0.13.1 via sd-fleet-refresh when requested
+- Backlog: 07-15-ci-release-gate-job (P1) next highest value

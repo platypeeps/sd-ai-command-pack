@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 104
+- **Total Sessions**: 105
 - **Last Active**: 2026-07-15
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~163 | Active |
+| `journal-3.md` | ~203 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 105 | 2026-07-15 | P3 polish batch (0.13.1) | `85976ca` | `main` |
 | 104 | 2026-07-15 | Streamline command infrastructure (0.13.0) | `aa6c906` | `main` |
 | 103 | 2026-07-15 | Ship six SDLC edge-loop commands (0.12.0) | `bb2e8a2` | `main` |
 | 102 | 2026-07-15 | Ship sd-audit-repo formal multi-agent audit command (0.11.0) | `7110078`, `57e832d`, `1199cde` | `main` |
