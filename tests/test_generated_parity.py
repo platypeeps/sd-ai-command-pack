@@ -77,14 +77,39 @@ def strip_js_comments(content: str) -> str:
 
 def find_js_module_specifiers(content: str) -> list[str]:
     stripped = strip_js_comments(content)
-    patterns = (
-        r'^\s*import\s+(?:[^"\']+\s+from\s+)?["\']([^"\']+)["\']',
-        r'^\s*export\s+[^"\']+\s+from\s+["\']([^"\']+)["\']',
+    specifiers: list[str] = []
+    lines = stripped.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        statement = line
+        stripped_line = line.lstrip()
+
+        side_effect_import = re.match(
+            r'^\s*import\s+["\']([^"\']+)["\']',
+            line,
+        )
+        if side_effect_import:
+            specifiers.append(side_effect_import.group(1))
+            index += 1
+            continue
+
+        if stripped_line.startswith(("import ", "export ")):
+            from_match = re.search(r'\bfrom\s+["\']([^"\']+)["\']', statement)
+            while from_match is None and index + 1 < len(lines):
+                index += 1
+                statement = f"{statement}\n{lines[index]}"
+                from_match = re.search(r'\bfrom\s+["\']([^"\']+)["\']', statement)
+            if from_match:
+                specifiers.append(from_match.group(1))
+
+        index += 1
+
+    call_patterns = (
         r'\brequire\s*\(\s*["\']([^"\']+)["\']\s*\)',
         r'\bimport\s*\(\s*["\']([^"\']+)["\']\s*\)',
     )
-    specifiers: list[str] = []
-    for pattern in patterns:
+    for pattern in call_patterns:
         specifiers.extend(re.findall(pattern, stripped, re.MULTILINE))
     return specifiers
 
@@ -1206,8 +1231,14 @@ class GeneratedParityTests(InstallTestCase):
             """
             import fs from "fs"
             import sibling from "./sibling.js"
+            import {
+                value,
+            } from "external-multiline"
             import "external-side-effect"
             export { value } from "external-reexport"
+            export {
+                value,
+            } from "external-reexport-multiline"
             const required = require("external-require")
             const dynamic = await import("external-dynamic")
             // require("ignored-comment")
@@ -1219,8 +1250,10 @@ class GeneratedParityTests(InstallTestCase):
             [
                 "fs",
                 "./sibling.js",
+                "external-multiline",
                 "external-side-effect",
                 "external-reexport",
+                "external-reexport-multiline",
                 "external-require",
                 "external-dynamic",
             ],
