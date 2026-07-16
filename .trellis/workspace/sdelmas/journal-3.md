@@ -204,3 +204,37 @@ Implemented nine safe P3 audit findings in one batch: preflight git hard-fail (i
 
 - Fleet rollout 0.10.5..0.13.1 via sd-fleet-refresh when requested
 - Backlog: 07-15-ci-release-gate-job (P1) next highest value
+
+
+## Session 106: Add release payload CI gate
+
+**Date**: 2026-07-15
+**Task**: Add release payload CI gate
+**Branch**: `codex/ci-release-gate-job`
+
+### Summary
+
+Added the PR-only release payload gate, wired it into CI Result, documented the release enforcement contract, and adjusted the gate to use the PR base SHA after Copilot review.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `edddcc3` | (see git log) |
+| `9357f99` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
