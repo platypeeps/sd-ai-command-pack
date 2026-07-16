@@ -582,3 +582,43 @@ Diagnosed why v0.13.2/v0.13.3/v0.14.0 never tagged: the PR-only release-payload-
 
 - Verify auto-tag fires on the next version bump
 - Fleet rollout 0.10.5..0.14.0 when requested
+
+
+## Session 116: Harden pack runtime scripts
+
+**Date**: 2026-07-16
+**Task**: Harden pack runtime scripts
+**Branch**: `codex/p2-hardening-batch`
+
+### Summary
+
+Added the shipped Python helper library, hardened subprocess timeout handling, reconciled scanner coverage with the manifest, addressed Copilot review feedback, and archived the three completed P2 tasks.
+
+### Main Changes
+
+- Added scripts/sd_ai_command_pack_lib.py with shared command, git, gh, and repo-root helpers.
+- Migrated shipped scripts and installer paths to bounded subprocess calls with clearer timeout diagnostics.
+- Added scanner/manifest reconciliation coverage, shipped-helper coverage gates, task designs, release ledger updates, and spec documentation.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `561c05d` | feat: harden pack runtime scripts |
+| `08c31d4` | docs: align helper spec with implementation |
+
+### Testing
+
+- [OK] make lint
+- [OK] make test
+- [OK] make audit
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
