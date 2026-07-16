@@ -82,7 +82,8 @@ that exercise the generic JavaScript review preflight.
   session number and direct the author to restore history and edit the intended
   current session by heading.
 - Review-base Trellis journal session is deleted or renumbered -> fail as a
-  historical-session removal, including when its whole journal file disappears.
+  historical-session removal, including when its journal file or the entire
+  current workspace disappears.
 
 ### 5. Good/Base/Bad Cases
 

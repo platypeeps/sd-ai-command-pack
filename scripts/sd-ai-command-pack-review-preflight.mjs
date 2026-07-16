@@ -402,20 +402,23 @@ function checkDocumentationPathHygiene() {
 function checkTrellisJournalRecords() {
   const failureStart = failures.length;
   const workspaceRoot = resolve(rootDir, '.trellis/workspace');
-
-  if (!exists('.trellis/workspace')) {
-    pass('.trellis/workspace is not present; Trellis journal checks skipped.');
-    return;
-  }
-
   const baselineRef = journalBaselineRef();
-  const currentDeveloperDirs = readdirSync(workspaceRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => resolve(workspaceRoot, entry.name));
   const baselineJournalFiles = baselineRef
     ? gitFilesAtRef(baselineRef, '.trellis/workspace').filter((file) =>
         /^\.trellis\/workspace\/[^/]+\/journal-\d+\.md$/.test(file),
       )
+    : [];
+  const workspacePresent = exists('.trellis/workspace');
+
+  if (!workspacePresent && baselineJournalFiles.length === 0) {
+    pass('.trellis/workspace is not present in the working tree or review base; Trellis journal checks skipped.');
+    return;
+  }
+
+  const currentDeveloperDirs = workspacePresent
+    ? readdirSync(workspaceRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => resolve(workspaceRoot, entry.name))
     : [];
   const developerRelatives = [...new Set([
     ...currentDeveloperDirs.map(absoluteToRelative),

@@ -564,6 +564,20 @@ assert.deepEqual(
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("removes historical Session 1 from HEAD", result.stdout)
 
+        shutil.rmtree(root / ".trellis/workspace")
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("removes historical Session 1 from HEAD", result.stdout)
+
     def test_review_preflight_allows_configured_linux_service_users(self) -> None:
         node = shutil.which("node")
         if node is None:

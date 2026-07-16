@@ -6,7 +6,8 @@
   history as append-only relative to the review base. It rejects accidental
   edits, removals, and renumbering of older sessions while allowing the newly
   appended/current session to be completed, preventing broad repeated-text
-  replacements from corrupting historical records before remote review.
+  replacements or whole-workspace deletion from corrupting historical records
+  before remote review.
 - Review-learning summaries now truncate at word boundaries while honoring
   their configured length limit.
 
