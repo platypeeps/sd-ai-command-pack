@@ -22,8 +22,12 @@ template files into that target repo.
 - optional `install`
 
 `installer/manifest.py` converts each manifest entry into a frozen `PackFile`
-in `load_manifest()`. When adding a file, update `manifest.json` first and keep
-Python logic generic unless the install semantics really change.
+in `load_manifest()`. Manifest-loaded entries always require a real `source`
+inside the pack root. Installer-generated entries such as receipt, provenance,
+and managed gitignore files may use `source=None`; do not point generated files
+at `manifest.json` or another fake template source just to satisfy the type.
+When adding a file, update `manifest.json` first and keep Python logic generic
+unless the install semantics really change.
 
 Reference files:
 
@@ -154,8 +158,12 @@ that has lost every entry for that platform.
 
 Every non-dry-run install writes `.sd-ai-command-pack/provenance.json`:
 pack name, version, and a sorted map of vouched targets to `sha256:` hashes
-of the installed content (hashes are computed from the template source, so
-dry-run and real runs agree). Never vouched: `FORCE_PRESERVED_TARGETS`
+of the installed content. For normal source-backed files, `install_file()`
+records `source_digest`, `source_content`, and `source_executable` on
+`InstallResult`; provenance must prefer that carried digest instead of
+re-reading the source file. Legacy/narrow tests that construct results without
+a digest may still fall back to hashing `file.source`, but source-less
+generated files are skipped by shape. Never vouched: `FORCE_PRESERVED_TARGETS`
 (user-tunable), managed-block targets (shared ownership), generated files
 (receipt, gitignore block, provenance itself), and conflict results.
 Entries survive for targets still recorded in the receipt so filtered runs
@@ -352,6 +360,12 @@ payload once in dry-run mode before the first pack-owned write. If any selected
 target conflicts, report every conflict and exit `2` without partially applying
 the refresh. Local-only Trellis bootstrap is outside this boundary because it
 invokes the external Trellis installer before pack files exist.
+
+When that preflight succeeds, thread the preflight `InstallResult`s into the
+apply pass for unchanged, created, and preserved source-backed files. The apply
+pass should reuse the planned source bytes, executable bit, and digest instead
+of re-reading the pack source. Do not reuse preflight results for force
+overwrites, conflicts, generated files, or a mismatched `PackFile`.
 
 Installer runs are not serialized. Atomic file replacement must keep each
 individual file parseable, while the last completed writer determines the

@@ -182,7 +182,7 @@ def may_remove_pack_file(
             return False, detail
         if recorded_hash == digest:
             return True, None
-    if file:
+    if file and file.source is not None:
         destination_content, detail = read_bytes_for_remove(destination, "target")
         if detail is not None:
             return False, detail

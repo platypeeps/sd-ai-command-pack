@@ -21,7 +21,7 @@ MANIFEST_PATH = ROOT / "manifest.json"
 class PackFile:
     platform: str
     kind: str
-    source: Path
+    source: Path | None
     target: Path
     anchor: Path | None
     install: str
@@ -121,6 +121,8 @@ def validate_manifest(files: list[PackFile]) -> None:
                 f"{file.target} (known install modes: "
                 f"{', '.join(sorted(KNOWN_INSTALL_MODES))})"
             )
+        if file.source is None:
+            raise SystemExit(f"error: manifest file has no source: {file.target}")
         validate_pack_source(file.source)
         validate_relative_manifest_path("target", file.target)
         if file.anchor is not None:

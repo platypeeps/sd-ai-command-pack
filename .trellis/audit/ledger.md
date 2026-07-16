@@ -2,11 +2,11 @@
 Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit notes: lines.
 
 ## A-001 — Release version-bump/CHANGELOG gate is never enforced against a real PR diff in CI
-- status: open
+- status: fixed
 - severity: P1 · effort: M · confidence: Plausible
 - dimension: tooling
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - .github/workflows/tests.yml:18-217 (no job runs the gate)
   - gate only in scripts/sd-ai-command-pack-full-check.sh:609 via main() :852
@@ -23,11 +23,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - notes: tracked → .trellis/tasks/07-15-ci-release-gate-job
 
 ## A-002 — Managed-block/gitignore/receipt writers silently clobber symlinked targets
-- status: open
+- status: fixed
 - severity: P2 · effort: S · confidence: Plausible
 - dimension: correctness
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - installer/fileops.py:390 install_trellis_gitignore, :406
     install_managed_block, installer/provenance.py:163
@@ -43,11 +43,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - notes: tracked → .trellis/tasks/07-15-installer-write-safety
 
 ## A-003 — External subprocess calls have no timeout; a hung trellis init or git blocks the run unbounded
-- status: open
+- status: fixed
 - severity: P2 · effort: S · confidence: Plausible
 - dimension: correctness
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - installer/localonly.py:163 (trellis init), :51, :224
   - installer/fileops.py:608, :634
@@ -67,11 +67,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - notes: tracked → .trellis/tasks/07-15-subprocess-timeout-hardening
 
 ## A-004 — @opencode-ai/plugin is declared but apparently never imported, dragging in a heavy unused tree
-- status: open
+- status: fixed
 - severity: P2 · effort: S · confidence: Plausible
 - dimension: dependencies
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - .opencode/package.json:3 declares ^1.14.39
   - no imports found (.opencode/plugins/*.js + lib/*.js use Node builtins only)
@@ -88,11 +88,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   still templates the dependency; the task captures a consent-gated handoff.
 
 ## A-005 — PackFile.install policy is an unvalidated open string; a typo silently changes install selection
-- status: open
+- status: fixed
 - severity: P2 · effort: S · confidence: Plausible
 - dimension: design
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - installer/manifest.py:85 accepts any string
   - validate_manifest (manifest.py:101-110) checks platform/kind but never
@@ -107,11 +107,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - notes: tracked → .trellis/tasks/07-15-manifest-validation-tightening
 
 ## A-006 — Backend directory-structure spec predates the installer/ package split and misdirects contributors
-- status: open
+- status: fixed
 - severity: P2 · effort: S · confidence: Plausible
 - dimension: documentation
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - .trellis/spec/backend/directory-structure.md:62 says PLATFORM_REGISTRY
     lives in install.py (:40, :71 similar
@@ -126,11 +126,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - notes: tracked → .trellis/tasks/07-15-docs-accuracy-batch
 
 ## A-007 — Versioning scheme and public-surface stability boundary are undocumented
-- status: open
+- status: fixed
 - severity: P2 · effort: S · confidence: Plausible
 - dimension: release-hygiene
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - CONTRIBUTING.md:52-63 documents only when to bump, never what
     major/minor/patch mean
@@ -144,11 +144,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - notes: tracked → .trellis/tasks/07-15-docs-accuracy-batch
 
 ## A-008 — Shipped-scripts coverage floor is aggregate-only; individual scripts sit far below the nominal 76%
-- status: open
+- status: fixed
 - severity: P2 · effort: S · confidence: Plausible
 - dimension: testing
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - .github/workflows/tests.yml:73 (--fail-under=76 on pooled TOTAL)
   - per-file reality: fleet-preflight.py 62%, review-learnings.py 69%, record-
@@ -160,11 +160,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - notes: tracked → .trellis/tasks/07-15-coverage-gate-per-file
 
 ## A-009 — Platform path layout re-encoded in 5+ components, reconciled only at directory granularity
-- status: open
+- status: fixed
 - severity: P2 · effort: M · confidence: Plausible
 - dimension: architecture
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - installer/registry.py:27 PLATFORM_REGISTRY (dev-side authority) vs hand-
     copies in shipped scanners: install-audit.py:31 PACK_FILE_PATTERNS + :173
@@ -179,11 +179,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - notes: tracked → .trellis/tasks/07-15-scanner-manifest-reconciliation
 
 ## A-010 — Sibling scripts rewrite pre-existing files with non-atomic write_text, truncating data if the write fails midway
-- status: open
+- status: fixed
 - severity: P2 · effort: M · confidence: Plausible
 - dimension: correctness
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - record-session.py:200 rewrites the entire journal (all history in text)
   - update-spec-kb.py:486 rewrites the user's .gitignore/.git/info/exclude,
@@ -198,11 +198,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - notes: tracked → .trellis/tasks/07-15-installer-write-safety
 
 ## A-011 — Result status is a stringly-typed ad-hoc enum shared across module boundaries
-- status: open
+- status: fixed
 - severity: P2 · effort: M · confidence: Plausible
 - dimension: design
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - installer/fileops.py:50-60 keeps status: str with membership frozensets
   - producers emit bare literals (fileops.py:237-271, removal.py, localonly.py)
@@ -215,11 +215,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - notes: tracked → .trellis/tasks/07-15-result-status-vocabulary
 
 ## A-012 — Adding a platform requires editing three parallel structures synced only by convention
-- status: open
+- status: fixed
 - severity: P2 · effort: M · confidence: Plausible
 - dimension: design
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - installer/registry.py:452-453
     _LOCAL_GITIGNORE_GROUP_ORDER/_LOCAL_ONLY_GROUP_ORDER hand-list platforms
@@ -232,11 +232,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - notes: tracked → .trellis/tasks/07-15-manifest-validation-tightening
 
 ## A-013 — Shipped Python scripts have no shared helper module, unlike the shell scripts' shell-lib.sh
-- status: open
+- status: fixed
 - severity: P2 · effort: M · confidence: Plausible
 - dimension: improvements
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - git shim re-implemented in record-session.py:50, pr-body- scope.py:255,
     review-learnings.py:423, update-spec-kb.py:135
@@ -253,11 +253,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - notes: tracked → .trellis/tasks/07-15-shared-python-script-lib
 
 ## A-014 — install-audit spawns one git check-ignore per absent/unrecorded target instead of batching
-- status: open
+- status: fixed
 - severity: P2 · effort: M · confidence: Plausible
 - dimension: performance
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - scripts/sd-ai-command-pack-install-audit.py:507-516 is_gitignored
     subprocess, called per-item at :535, :552, :627
@@ -272,11 +272,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   (reopened by maintainer 2026-07-16 after prior July 2026 decline)
 
 ## A-015 — fleet-preflight CLI entrypoint has zero coverage
-- status: open
+- status: fixed
 - severity: P2 · effort: M · confidence: Plausible
 - dimension: testing
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - scripts/sd-ai-command-pack-fleet-preflight.py:190-282 missing in coverage
   - tests/test_fleet_preflight.py calls helpers only, never main() or the
@@ -289,11 +289,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - notes: tracked → .trellis/tasks/07-15-coverage-gate-per-file
 
 ## A-016 — install.py re-export facade carries 42 dead forwards to a test-only seam
-- status: open
+- status: fixed
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: bloat
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - install.py:12-155 imports 135 names, :157-293 re-exports all via __all__
     (incl. private tuples and os/shutil)
@@ -309,11 +309,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   facade trim (42 dead forwards removed; reached set re-derived) (status flip owned by the next audit run)
 
 ## A-017 — review-preflight.mjs spawnSync default 1MiB maxBuffer silently under-reports large diffs
-- status: open
+- status: fixed
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: correctness
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - scripts/sd-ai-command-pack-review-preflight.mjs:780 gitStdout, :858
     currentDiffStats, :887 currentChangedPaths pass no maxBuffer
@@ -326,11 +326,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   preflight spawnSync maxBuffer + hard-fail on result.error (status flip owned by the next audit run)
 
 ## A-018 — Dependabot does not monitor the .opencode npm/bun ecosystem
-- status: open
+- status: fixed
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: dependencies
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - .github/dependabot.yml:3-17 covers only pip (:4) and github-actions (:11)
   - no npm entry for /.opencode
@@ -342,11 +342,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   moot after removing the .opencode dependency manifest and lockfile.
 
 ## A-019 — .opencode manifest pins a loose caret while the lockfile drifted a minor ahead
-- status: open
+- status: fixed
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: dependencies
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - .opencode/package.json:3 ^1.14.39 vs bun.lock resolving 1.18.0
   - nothing enforces --frozen-lockfile
@@ -358,11 +358,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   moot after removing the .opencode dependency manifest and lockfile.
 
 ## A-020 — generated_pack_file overloads PackFile.source with MANIFEST_PATH for template-less files
-- status: open
+- status: fixed
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: design
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - installer/fileops.py:63-72 sets source=MANIFEST_PATH for generated targets
   - installer/provenance.py:56-62 + :139 must maintain
@@ -371,14 +371,16 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   relies on remembering an exclusion set.
 - fix: Make source Optional[Path] (None for generated) or split a GeneratedFile
   type.
-- notes:
+- notes: fixed in .trellis/tasks/07-16-audit-roadmap-cleanup — generated
+  pack files now use source=None and provenance skips source-less generated
+  results by shape instead of by a generated-kind exclusion list.
 
 ## A-021 — SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER_LABEL missing from all structured config references
-- status: open
+- status: fixed
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: documentation
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - Consumed at .agents/skills/sd-review-pr/SKILL.md:171
   - present once in guide prose (:192) but absent from the guide Configuration
@@ -393,11 +395,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   REVIEW_PR_REMOTE_* family documented in guide config + README (status flip owned by the next audit run)
 
 ## A-022 — Core installer entry points and every installer/ module lack meaningful docstrings
-- status: open
+- status: fixed
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: documentation
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - installer/manifest.py:43 load_manifest, :101 validate_manifest,
     installer/fileops.py:154 selected_files have no docstrings
@@ -411,11 +413,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   installer module + entry-point docstrings (status flip owned by the next audit run)
 
 ## A-023 — Post-payload dogfood-sync and KB-refresh steps are manual with no wrapping make target
-- status: open
+- status: fixed
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: improvements
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - CONTRIBUTING.md:59-71 instructs manual install.py --force + update- spec-
     kb.py runs
@@ -428,11 +430,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   make sync target wrapping dogfood install + KB refresh (status flip owned by the next audit run)
 
 ## A-024 — review-preflight recomputes the documentation file list and re-reads docs across checks
-- status: open
+- status: fixed
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: performance
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - review-preflight.mjs:759-777 documentationGuardFiles() walks per call (:327
     and :352)
@@ -445,11 +447,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   preflight guard-file list + readText memoized (status flip owned by the next audit run)
 
 ## A-025 — Backfilled changelog release dates disagree with tag dates and are internally out of order
-- status: open
+- status: fixed
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: release-hygiene
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - CHANGELOG.md:162 (0.7.4 - 2026-07-08) sits above :167 (0.7.3 - 2026-07-09)
   - git tag creatordates invert this
@@ -457,14 +459,15 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - why: A reader reconstructing the release timeline gets contradictory dates
   and an impossible ordering.
 - fix: Correct the 0.7.1-0.7.4 heading dates to the tag creation dates.
-- notes: tracked → .trellis/tasks/07-15-docs-accuracy-batch (optional fold)
+- notes: fixed in .trellis/tasks/07-16-audit-roadmap-cleanup — corrected
+  0.7.1-0.7.3 to 2026-07-08 and 0.7.4 to 2026-07-09 to match tag dates.
 
 ## A-026 — Deprecated env var REVIEW_PREFLIGHT_PR_BODY names no removal version or window
-- status: open
+- status: fixed
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: release-hygiene
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - scripts/sd-ai-command-pack-review-scope.sh:186 warn
   - README.md:213
@@ -473,14 +476,16 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   the shim accumulates indefinitely.
 - fix: State a removal target next to the deprecation, or declare it
   permanently supported.
-- notes: tracked → .trellis/tasks/07-15-docs-accuracy-batch (optional fold)
+- notes: fixed in .trellis/tasks/07-16-audit-roadmap-cleanup — docs and
+  warnings state the fallback is honored through 0.15.x and scheduled for
+  removal in 0.16.0.
 
 ## A-027 — Trellis lifecycle hooks execute config-sourced commands via shell=True (upstream-owned)
 - status: open
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: security
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - .trellis/scripts/common/task_utils.py:262-271 subprocess.run(cmd,
     shell=True, ...)
@@ -491,14 +496,22 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   scripts trust model, hence P3. Trellis-owned runtime — upstream concern.
 - fix: Upstream: document full-shell semantics as trusted repo config and/or
   first-use opt-in gate.
-- notes:
+- notes: upstream-owned; do not edit `.trellis/scripts/**` in this pack or open
+  an upstream Trellis PR without explicit user approval. Handoff:
+  "Trellis task-command lifecycle hooks run config-sourced hook commands with
+  `subprocess.run(..., shell=True, ...)` in
+  `.trellis/scripts/common/task_utils.py`. Please decide whether to document
+  full-shell semantics as trusted repo config, add a first-use opt-in gate, or
+  change hook config to argv-list execution. This was found from
+  sd-ai-command-pack audit A-027 and intentionally left upstream-owned."
+  Parked as `.trellis/tasks/07-16-upstream-trellis-hook-shell-semantics/`.
 
 ## A-028 — review-learnings git error/edge branches are untested (script at 69%)
-- status: open
+- status: fixed
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: testing
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - scripts/sd-ai-command-pack-review-learnings.py:497-501 returncode!=0 raise
     + untracked-diff path ~503-520 in coverage Missing
@@ -511,11 +524,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   review-learnings error-branch tests (coverage 51%->57%) (status flip owned by the next audit run)
 
 ## A-029 — Green local make check does not predict green CI: node and shellcheck lanes silently skip when tools are absent
-- status: open
+- status: fixed
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: tooling
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - Makefile:27-33 (node skip), :34-38 (shellcheck skip)
   - make setup (Makefile:9-12) installs neither
@@ -528,11 +541,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   STRICT=1 make mode for node/shellcheck parity (status flip owned by the next audit run)
 
 ## A-030 — Type-check gate covers only installer/; shipped Python scripts get no mypy
-- status: open
+- status: fixed
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: tooling
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - tests.yml:98-99 and Makefile:26 run mypy installer only
   - install.py and scripts/*.py (update-spec-kb ~47KB, review-learnings ~31KB,
@@ -543,11 +556,11 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   mypy extended to install.py + scripts (trivial typing fixes) (status flip owned by the next audit run)
 
 ## A-031 — Default install re-reads and re-hashes every source and destination in preflight then apply
-- status: open
+- status: fixed
 - severity: P3 · effort: M · confidence: Plausible
 - dimension: performance
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - install.py:617-640 (dry-run pass :618, apply :633)
   - installer/fileops.py:228 + :249 read both sides in each pass across 384
@@ -555,28 +568,32 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - why: Doubled read I/O on every default install, growing with payload size.
 - fix: Have preflight return per-file conflict decisions (and bytes) threaded
   into apply.
-- notes:
+- notes: fixed in .trellis/tasks/07-16-audit-roadmap-cleanup — default
+  non-force installs now pass preflight InstallResult source bytes/digests
+  into apply.
 
 ## A-032 — Provenance hashing re-reads sources the apply pass just read
-- status: open
+- status: fixed
 - severity: P3 · effort: M · confidence: Plausible
 - dimension: performance
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - installer/provenance.py:150-153 sha256(file.source.read_bytes()) after
     fileops.py:228 read the same bytes
   - memoized per-source but still a third full read
 - why: Redundant I/O over the distinct pack sources on every install.
 - fix: Carry source bytes or their sha256 from install_file into InstallResult.
-- notes:
+- notes: fixed in .trellis/tasks/07-16-audit-roadmap-cleanup — InstallResult
+  carries source_digest/source_content/source_executable and provenance
+  prefers the digest captured during install.
 
 ## A-033 — Coverage gate omits all shipped shell (~90KB incl. destructive housekeeping) and .github/scripts release automation
-- status: open
+- status: fixed
 - severity: P3 · effort: M · confidence: Plausible
 - dimension: testing
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - .coveragerc:6-10 includes Python only
   - housekeeping.sh (33KB), full- check.sh (27KB), review-local.sh, create-
@@ -585,14 +602,17 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   measurement of which branches its subprocess tests reach.
 - fix: Add kcov/bashcov with a floor, or document the exemption and add
   targeted error-branch subprocess tests.
-- notes:
+- notes: fixed in .trellis/tasks/07-16-audit-roadmap-cleanup — CONTRIBUTING
+  and README document shell/GitHub automation as coverage.py-exempt with
+  compensating subprocess tests, syntax checks, ShellCheck, workflow
+  assertions, and live CI.
 
 ## A-034 — Command adapters use two divergent authoring models; transform rules live in a test rather than a generator
-- status: open
+- status: fixed
 - severity: P3 · effort: L · confidence: Plausible
 - dimension: architecture
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-15 @ f6f3932
+- last-seen: 2026-07-16 @ 7d0172e
 - evidence:
   - 11 platforms fan from templates/.commands/*
   - claude/gemini/github hand-authored with materially different bodies

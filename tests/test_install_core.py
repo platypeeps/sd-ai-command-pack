@@ -818,6 +818,88 @@ class InstallCoreTests(InstallTestCase):
             overwritten.backup.read_text(encoding="utf-8"), "local edit\n"
         )
 
+    def test_generated_pack_files_have_no_template_source(self) -> None:
+        generated = install.fileops.generated_pack_file(
+            "generated-test", Path(".sd-ai-command-pack/generated.txt")
+        )
+
+        self.assertIsNone(generated.source)
+
+    def test_payload_apply_reuses_preflight_source_bytes(self) -> None:
+        root = self.make_repo()
+        source = root / "source.md"
+        source.write_text("pack template v1\n", encoding="utf-8")
+        file = self.valid_pack_file(source=source, target=Path("docs/example.md"))
+
+        preflight_results, _ = install._install_payload(
+            [file],
+            root,
+            local_only=False,
+            force=False,
+            dry_run=True,
+            backup=False,
+        )
+        source.write_text("pack template v2\n", encoding="utf-8")
+        results, _ = install._install_payload(
+            [file],
+            root,
+            local_only=False,
+            force=False,
+            dry_run=False,
+            backup=False,
+            planned_results={
+                result.file.target: result
+                for result in preflight_results
+                if result.source_content is not None
+            },
+        )
+
+        payload_result = next(
+            result for result in results if result.file.target == file.target
+        )
+        expected_content = b"pack template v1\n"
+        self.assertEqual(payload_result.status, "created")
+        self.assertEqual(
+            (root / "docs/example.md").read_bytes(),
+            expected_content,
+        )
+        self.assertEqual(
+            payload_result.source_digest,
+            hashlib.sha256(expected_content).hexdigest(),
+        )
+
+    def test_provenance_uses_install_result_digest_without_source_read(self) -> None:
+        root = self.make_repo()
+        source = root / "source.md"
+        source.write_text("pack template\n", encoding="utf-8")
+        file = self.valid_pack_file(source=source, target=Path("docs/example.md"))
+        digest = hashlib.sha256(b"pack template\n").hexdigest()
+        source.unlink()
+
+        result = install.install_provenance_file(
+            {"name": "sd-ai-command-pack", "version": "0.0.1"},
+            [
+                install.InstallResult(
+                    file,
+                    install.InstallStatus.CREATED,
+                    source_digest=digest,
+                )
+            ],
+            root,
+            receipt_targets={file.target.as_posix()},
+            never_vouched=set(),
+            dry_run=False,
+        )
+
+        self.assertEqual(result.status, "created")
+        provenance = json.loads(
+            (root / install.PROVENANCE_FILE).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            provenance["files"][file.target.as_posix()],
+            f"sha256:{digest}",
+        )
+
     def test_result_status_enums_preserve_public_strings(self) -> None:
         self.assertEqual(install.InstallStatus.SYMLINK_CONFLICT, "symlink-conflict")
         self.assertEqual(install.RemoveStatus.WOULD_REMOVE, "would-remove")

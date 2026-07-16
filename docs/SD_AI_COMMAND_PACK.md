@@ -1038,7 +1038,8 @@ ephemeral tool state and do not change what the checks validate.
   branch-diff sequence above.
 - `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`: explicit PR body text for tooling/generated
   scope checks when `gh pr view` should not be used. Deprecated fallback:
-  `REVIEW_PREFLIGHT_PR_BODY`.
+  `REVIEW_PREFLIGHT_PR_BODY`, honored through `0.15.x` and scheduled for
+  removal in `0.16.0`.
 - `SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR`: PR number or URL for `sd-review-pr`
   when the command cannot resolve the pull request from the current branch.
 - `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER`: remote reviewer request
@@ -1076,7 +1077,8 @@ ephemeral tool state and do not change what the checks validate.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`: explicit PR body text for
   configurable PR-body scope checks. Falls back to
   `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`, then the deprecated
-  `REVIEW_PREFLIGHT_PR_BODY`.
+  `REVIEW_PREFLIGHT_PR_BODY`, honored through `0.15.x` and scheduled for
+  removal in `0.16.0`.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHANGED_FILES`: explicit newline- or
   NUL-delimited changed path list for configurable PR-body scope checks.
 - `SD_AI_COMMAND_PACK_CHANGED_FILES`: fallback changed-path list for the

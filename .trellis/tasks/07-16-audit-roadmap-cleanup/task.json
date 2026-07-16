@@ -1,0 +1,28 @@
+{
+  "id": "audit-roadmap-cleanup",
+  "name": "audit-roadmap-cleanup",
+  "title": "Resolve audit roadmap cleanup",
+  "description": "Resolve the remaining local sd-audit-repo roadmap findings from the audit ledger, reconcile the ledger, and document any upstream-only Trellis follow-up without modifying Trellis-owned runtime files.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P3",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-16",
+  "completedAt": null,
+  "branch": "codex/audit-roadmap-cleanup",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-16-upstream-trellis-hook-shell-semantics"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
