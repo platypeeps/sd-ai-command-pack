@@ -1142,7 +1142,7 @@ class GeneratedParityTests(InstallTestCase):
             "Treat `templates/**` as the source of truth",
             "sd-ai-command-pack-toolchain.sh run-python -- install.py . --force",
             "Keep Trellis-owned platform files in their Trellis-managed state",
-            "Do not track `.opencode/package.json` or `.opencode/bun.lock`",
+            "Do not track `.opencode/package.json` or any `.opencode` Bun lockfile",
             "cd .opencode",
             "`.claude/settings.local.json`",
             ".trellis/spec/frontend/adapter-guidelines.md",
@@ -1171,16 +1171,21 @@ class GeneratedParityTests(InstallTestCase):
         self,
     ) -> None:
         opencode_package_path = PACK_ROOT / ".opencode/package.json"
-        opencode_lock_path = PACK_ROOT / ".opencode/bun.lock"
+        opencode_lock_paths = (
+            PACK_ROOT / ".opencode/bun.lock",
+            PACK_ROOT / ".opencode/bun.lockb",
+        )
 
         self.assertFalse(
             opencode_package_path.exists(),
             ".opencode/package.json is only needed when plugins import packages",
         )
-        self.assertFalse(
-            opencode_lock_path.exists(),
-            ".opencode/bun.lock should not be tracked without package deps",
-        )
+        for lock_path in opencode_lock_paths:
+            self.assertFalse(
+                lock_path.exists(),
+                f"{lock_path.relative_to(PACK_ROOT)} should not be tracked "
+                "without package deps",
+            )
 
         external_imports: list[str] = []
         for source in sorted((PACK_ROOT / ".opencode").glob("**/*.js")):
