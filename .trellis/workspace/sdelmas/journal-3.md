@@ -124,3 +124,43 @@ Planned (parent + six PRD-backed children), implemented via four parallel sub-ag
 
 - Confirm v0.12.0 auto-tag; archive parent + six child tasks
 - Fleet rollout (0.10.5 + 0.11.0 + 0.12.0) via the new sd-fleet-refresh when requested
+
+
+## Session 104: Streamline command infrastructure (0.13.0)
+
+**Date**: 2026-07-15
+**Task**: Streamline command infrastructure (0.13.0)
+**Branch**: `main`
+
+### Summary
+
+Shipped the command-infrastructure streamline: surface generation (make generate renders bespoke adapters + derived manifest entries from COMMAND_NAMES with a drift test; adding a command is now skill + neutral + one list entry), merged sd-review-local-all into sd-review-local behind the all argument with a new retire_stale_targets installer mechanism cleaning orphaned consumer files on refresh (installer coverage kept at 100%), and added the sd-ship composite orchestrator (until=pr|review|merge, no new gate logic). Merged PR #118 via the gated flow as 0.13.0.
+
+### Main Changes
+
+- generate-command-surfaces.py + COMMAND_NAMES + make generate + drift test; transform rules single-sourced out of parity tests; one-time canonical manifest reorder (entry set unchanged, 534)
+- sd-review-local absorbs full-codebase mode as all; -all command retired across all surfaces; retire_stale_targets deletes vouched orphans on refresh, preserves drifted copies unless --force
+- sd-ship skill + neutral shipped entirely via the generator; stage chain defers to per-stage gates
+- Ledger A-034 annotated implemented; parked platform-registry-manifest-sections task carries a supersession note (maintainer decision pending)
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `aa6c906` | Merge pull request #118 from platypeeps/feat/command-infra-streamline |
+
+### Testing
+
+- [OK] make test green (installer 100% line+branch incl. new retired-targets suite; generation drift suite; re-pinned parity/scope/core)
+- [OK] make full-check green (release gate at 0.13.0; make generate idempotent: 60 surfaces, 0 written on rerun)
+- [OK] /sd:ship registered live in the authoring session post-install
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Decide whether to archive platform-registry-manifest-sections as superseded
+- Fleet rollout 0.10.5..0.13.0 via sd-fleet-refresh when requested
