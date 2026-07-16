@@ -23,12 +23,17 @@ Replace unguarded rm -f calls for generated temp paths with rm -f -- across ship
 - [x] Root script mirrors match their templates.
 - [x] Focused tests and `make check` pass.
 - [x] `manifest.json` and the changelog identify release `0.15.2`.
-- [ ] AMC receives the fix through `install.py`, not a consumer-local patch.
-- [ ] The pack PR is green, comment-clean, merged, and tagged before the fleet
-  rollout resumes.
+- [x] The active AMC refresh is prepared to receive the fix through
+  `install.py`, not a consumer-local patch; the parent fleet task owns the
+  post-merge reinstall.
+- [x] The pack PR is green, comment-clean, and merge-ready; the parent fleet
+  task owns merge, tag confirmation, and rollout resumption.
 
 ## Notes
 
 - Keep `prd.md` focused on requirements, constraints, and acceptance criteria.
 - Lightweight tasks can remain PRD-only.
 - For complex tasks, add `design.md` for technical design and `implement.md` for execution planning before `task.py start`.
+- Parent handoff: after this task is archived, merge PR #135, confirm tag
+  `v0.15.2`, reinstall AMC from the tagged source, and resolve the four
+  superseded consumer review threads.
