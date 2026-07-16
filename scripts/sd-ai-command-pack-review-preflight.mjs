@@ -816,6 +816,13 @@ function runGit(args) {
     throw new GitCommandError(`git ${args.join(' ')} could not run: ${result.error.message}`);
   }
 
+  if (result.signal || result.status === null) {
+    const reason = result.signal
+      ? `terminated by signal ${result.signal}`
+      : 'exited without a status';
+    throw new GitCommandError(`git ${args.join(' ')} did not complete: ${reason}`);
+  }
+
   return result;
 }
 

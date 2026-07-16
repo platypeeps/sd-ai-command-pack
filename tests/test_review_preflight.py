@@ -222,6 +222,53 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertRegex(result.stdout, r"FAIL .*: git .+ could not run: ")
 
+    def test_review_preflight_fails_hard_when_git_is_killed(self) -> None:
+        # Regression: a git child terminated by a signal returns
+        # {signal, status: null} without result.error; that must FAIL the
+        # preflight instead of degrading to an empty diff.
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(
+            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
+        )
+        shim_bin = root / "shim-bin"
+        shim_bin.mkdir()
+        git_shim = shim_bin / "git"
+        git_shim.write_text("#!/bin/sh\nkill -9 $$\n", encoding="utf-8")
+        git_shim.chmod(0o755)
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key
+            not in (
+                "SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF",
+            )
+        }
+        env["PATH"] = str(shim_bin)
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertRegex(
+            result.stdout,
+            r"FAIL .*: git .+ did not complete: terminated by signal ",
+        )
+
     def test_archived_prd_backed_tasks_have_descriptions(self) -> None:
         missing_descriptions = self.archived_task_description_failures(
             PACK_ROOT / ".trellis/tasks/archive",
