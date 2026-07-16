@@ -1,0 +1,33 @@
+{
+  "id": "sdlc-skill-expansion",
+  "name": "sdlc-skill-expansion",
+  "title": "SDLC skill expansion: six new distributed commands (0.12.0)",
+  "description": "Parent: ship six SDLC edge-loop commands (watch-pr, fix-ci, update-deps, fleet-refresh, test-gaps, retro) as one 0.12.0 release.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-15",
+  "completedAt": null,
+  "branch": "feat/sdlc-skill-expansion",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-15-skill-watch-pr",
+    "07-15-skill-fix-ci",
+    "07-15-skill-update-deps",
+    "07-15-skill-fleet-refresh",
+    "07-15-skill-test-gaps",
+    "07-15-skill-retro"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

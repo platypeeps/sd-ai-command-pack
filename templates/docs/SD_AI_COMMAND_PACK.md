@@ -42,6 +42,15 @@ Quick links:
 - `.agents/skills/sd-audit-repo/charters/`: fifteen per-dimension reviewer
   charters the audit dispatches; a single shared copy used by every platform
   copy of the skill.
+- `.agents/skills/sd-watch-pr/SKILL.md`: PR settle watcher with gated
+  housekeeping handoff.
+- `.agents/skills/sd-fix-ci/SKILL.md`: red-CI triage and fix loop.
+- `.agents/skills/sd-update-deps/SKILL.md`: dependency PR batch triage
+  workflow.
+- `.agents/skills/sd-fleet-refresh/SKILL.md`: consumer fleet rollout loop.
+- `.agents/skills/sd-test-gaps/SKILL.md`: coverage-driven test authoring
+  loop.
+- `.agents/skills/sd-retro/SKILL.md`: debug retrospective capture workflow.
 - `.agents/skills/sd-full-check/SKILL.md`: full local verification workflow.
 - `.agents/skills/sd-housekeeping/SKILL.md`: post-merge cleanup workflow.
 - `.agents/skills/sd-update-spec/SKILL.md`: Trellis update-spec workflow plus
@@ -105,8 +114,9 @@ and then performs the architecture-overview check.
 Codex exposes the pack entry points as skills named `sd-start`, `sd-continue`,
 `sd-finish-work`, `sd-create-pr`, `sd-work-backlog`, `sd-work-designs`,
 `sd-full-check`, `sd-housekeeping`, `sd-review-pr`, `sd-review-local`,
-`sd-review-local-all`, `sd-review-learnings`, `sd-audit-repo`, and
-`sd-update-spec`; type
+`sd-review-local-all`, `sd-review-learnings`, `sd-audit-repo`,
+`sd-watch-pr`, `sd-fix-ci`, `sd-update-deps`, `sd-fleet-refresh`,
+`sd-test-gaps`, `sd-retro`, and `sd-update-spec`; type
 `/sd` in Codex command completion or invoke them with
 `$sd-review-pr`-style skill mentions.
 The start, continue, and finish-work wrappers run Trellis' existing
@@ -244,6 +254,12 @@ Claude Code and Gemini CLI:
 /sd:review-local-all
 /sd:review-learnings
 /sd:audit-repo
+/sd:watch-pr
+/sd:fix-ci
+/sd:update-deps
+/sd:fleet-refresh
+/sd:test-gaps
+/sd:retro
 /sd:update-spec
 ```
 
@@ -264,6 +280,12 @@ Qoder commands, Trae commands, Pi prompts, workflow adapters, and Codex skills:
 /sd-review-local-all
 /sd-review-learnings
 /sd-audit-repo
+/sd-watch-pr
+/sd-fix-ci
+/sd-update-deps
+/sd-fleet-refresh
+/sd-test-gaps
+/sd-retro
 /sd-update-spec
 ```
 
@@ -712,6 +734,65 @@ become prd-ready task proposals that wait for explicit user consent.
 `sd-audit-repo` complements `sd-review-local-all` (provider loop),
 `sd-review-pr` (PR loop), and `sd-full-check` (gate); it is the periodic
 formal audit, not a per-change review loop.
+
+The `sd-watch-pr` command watches the current branch's open pull request
+until it settles — no pending checks, the requested reviewer has reviewed
+(or a short grace period passes), and review threads are counted — inside a
+bounded polling loop (default 30 minutes; `timeout-minutes=N` overrides).
+On a settled, green, comment-clean PR it hands off to the `sd-housekeeping`
+flow, whose gate remains the only merge authority; with `no-merge` it stops
+after reporting readiness. On blockers it reports failing checks by name
+and unresolved threads by path, pointing at `sd-fix-ci` or `sd-review-pr`
+as follow-ups. It never merges directly.
+
+The `sd-fix-ci` command triages a red CI run back toward green. It targets
+the current branch's PR checks by default, or the default branch's latest
+failing run with `main`. Each failing job is classified as real-code,
+flake, infra, or stale-baseline: real-code failures on a PR branch are
+reproduced locally, fixed, gated, and pushed; real-code failures on the
+default branch always go through a fix branch and pull request; flakes are
+re-run boundedly (`max-reruns=N`, default 1) with the evidence reported;
+infra failures are reported only. It never force-pushes, never bypasses
+guards, and never deletes, skips, or weakens tests to get green.
+
+The `sd-update-deps` command batch-triages open dependency-bot pull
+requests. Each PR is classified by ecosystem, semver delta, and security
+linkage. The auto-merge class — patch/minor dev-dependency updates, GitHub
+Actions pin bumps, and security patches (runtime minors only with
+`include-runtime-minor`) — merges strictly sequentially under the
+housekeeping gate criteria, re-verifying heads after every prior merge and
+confirming the default branch stays green between merges. Majors are
+always manual. Everything else is parked with a one-line recommendation,
+and `dry-run` reports classifications without merging.
+
+The `sd-fleet-refresh` command rolls the current pack release across
+consumer repositories, following the pack source repository's
+`docs/FLEET_ROLLOUT.md` procedure with
+`scripts/sd-ai-command-pack-fleet-preflight.py` deciding which consumers
+are stale. It processes one consumer at a time: verify a clean tree (dirty
+trees are skipped and reported, never touched), branch, install the
+release, run the consumer's full-check, open the consumer PR, watch it to
+settled, and merge through the consumer's housekeeping gate (`no-merge`
+stops before merging; `consumer=a,b` filters; `dry-run` reports preflight
+only). The report is a per-consumer status table plus a fleet version
+summary.
+
+The `sd-test-gaps` command closes the worst coverage gaps with targeted
+tests. It runs the repository's coverage flow as a baseline (aborting if
+the baseline itself fails), ranks shipped files by per-file coverage
+ascending (`file=<path>` targets one file), and for the top `max-gaps=N`
+files (default 3) authors focused tests through the normal implement/check
+flow, then re-runs coverage and reports per-file before/after numbers. It
+writes test files and fixtures only — never product code — and never
+lowers configured coverage floors.
+
+The `sd-retro` command captures a structured retrospective after a
+debugging stream or incident: what broke, the root cause, why existing
+gates and tests missed it, and what limited the blast radius. It records
+the retrospective as a journal entry through the session recorder
+(`Retro: <topic>`), then derives prevention candidates and presents them
+as Trellis task proposals that wait for explicit user consent — it never
+auto-creates tasks and makes no code changes.
 
 ## Configuration
 

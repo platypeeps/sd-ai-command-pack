@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "sd-ai-command-pack",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "license": "MIT",
   "description": "Install project-local SD AI command workflows, Prism/Gito defaults, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
@@ -158,6 +158,48 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-audit-repo/charters/accessibility-i18n.md",
       "target": ".agents/skills/sd-audit-repo/charters/accessibility-i18n.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
+      "target": ".agents/skills/sd-watch-pr/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fix-ci/SKILL.md",
+      "target": ".agents/skills/sd-fix-ci/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-deps/SKILL.md",
+      "target": ".agents/skills/sd-update-deps/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fleet-refresh/SKILL.md",
+      "target": ".agents/skills/sd-fleet-refresh/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-test-gaps/SKILL.md",
+      "target": ".agents/skills/sd-test-gaps/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-retro/SKILL.md",
+      "target": ".agents/skills/sd-retro/SKILL.md",
       "install": "always"
     },
     {
@@ -380,6 +422,48 @@
     {
       "platform": "claude",
       "kind": "command",
+      "source": "templates/.claude/commands/sd/watch-pr.md",
+      "target": ".claude/commands/sd/watch-pr.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
+      "source": "templates/.claude/commands/sd/fix-ci.md",
+      "target": ".claude/commands/sd/fix-ci.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
+      "source": "templates/.claude/commands/sd/update-deps.md",
+      "target": ".claude/commands/sd/update-deps.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
+      "source": "templates/.claude/commands/sd/fleet-refresh.md",
+      "target": ".claude/commands/sd/fleet-refresh.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
+      "source": "templates/.claude/commands/sd/test-gaps.md",
+      "target": ".claude/commands/sd/test-gaps.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
+      "source": "templates/.claude/commands/sd/retro.md",
+      "target": ".claude/commands/sd/retro.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
       "source": "templates/.claude/commands/sd/review-pr.md",
       "target": ".claude/commands/sd/review-pr.md",
       "anchor": ".claude"
@@ -478,6 +562,48 @@
     {
       "platform": "cursor",
       "kind": "command",
+      "source": "templates/.commands/sd-watch-pr.md",
+      "target": ".cursor/commands/sd-watch-pr.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
+      "source": "templates/.commands/sd-fix-ci.md",
+      "target": ".cursor/commands/sd-fix-ci.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
+      "source": "templates/.commands/sd-update-deps.md",
+      "target": ".cursor/commands/sd-update-deps.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
+      "source": "templates/.commands/sd-fleet-refresh.md",
+      "target": ".cursor/commands/sd-fleet-refresh.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
+      "source": "templates/.commands/sd-test-gaps.md",
+      "target": ".cursor/commands/sd-test-gaps.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
+      "source": "templates/.commands/sd-retro.md",
+      "target": ".cursor/commands/sd-retro.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
       "source": "templates/.commands/sd-review-pr.md",
       "target": ".cursor/commands/sd-review-pr.md",
       "anchor": ".cursor"
@@ -571,6 +697,48 @@
       "kind": "command",
       "source": "templates/.gemini/commands/sd/audit-repo.toml",
       "target": ".gemini/commands/sd/audit-repo.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/watch-pr.toml",
+      "target": ".gemini/commands/sd/watch-pr.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/fix-ci.toml",
+      "target": ".gemini/commands/sd/fix-ci.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/update-deps.toml",
+      "target": ".gemini/commands/sd/update-deps.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/fleet-refresh.toml",
+      "target": ".gemini/commands/sd/fleet-refresh.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/test-gaps.toml",
+      "target": ".gemini/commands/sd/test-gaps.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/retro.toml",
+      "target": ".gemini/commands/sd/retro.toml",
       "anchor": ".gemini"
     },
     {
@@ -688,6 +856,48 @@
     {
       "platform": "github",
       "kind": "prompt",
+      "source": "templates/.github/prompts/sd-watch-pr.prompt.md",
+      "target": ".github/prompts/sd-watch-pr.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
+      "source": "templates/.github/prompts/sd-fix-ci.prompt.md",
+      "target": ".github/prompts/sd-fix-ci.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
+      "source": "templates/.github/prompts/sd-update-deps.prompt.md",
+      "target": ".github/prompts/sd-update-deps.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
+      "source": "templates/.github/prompts/sd-fleet-refresh.prompt.md",
+      "target": ".github/prompts/sd-fleet-refresh.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
+      "source": "templates/.github/prompts/sd-test-gaps.prompt.md",
+      "target": ".github/prompts/sd-test-gaps.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
+      "source": "templates/.github/prompts/sd-retro.prompt.md",
+      "target": ".github/prompts/sd-retro.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
       "source": "templates/.github/prompts/sd-review-pr.prompt.md",
       "target": ".github/prompts/sd-review-pr.prompt.md",
       "anchor": ".github"
@@ -781,6 +991,48 @@
       "kind": "command",
       "source": "templates/.commands/sd-audit-repo.md",
       "target": ".opencode/commands/sd-audit-repo.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.commands/sd-watch-pr.md",
+      "target": ".opencode/commands/sd-watch-pr.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.commands/sd-fix-ci.md",
+      "target": ".opencode/commands/sd-fix-ci.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.commands/sd-update-deps.md",
+      "target": ".opencode/commands/sd-update-deps.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.commands/sd-fleet-refresh.md",
+      "target": ".opencode/commands/sd-fleet-refresh.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.commands/sd-test-gaps.md",
+      "target": ".opencode/commands/sd-test-gaps.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.commands/sd-retro.md",
+      "target": ".opencode/commands/sd-retro.md",
       "anchor": ".opencode"
     },
     {
@@ -884,6 +1136,48 @@
     {
       "platform": "antigravity",
       "kind": "workflow",
+      "source": "templates/.commands/sd-watch-pr.md",
+      "target": ".agent/workflows/sd-watch-pr.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-fix-ci.md",
+      "target": ".agent/workflows/sd-fix-ci.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-update-deps.md",
+      "target": ".agent/workflows/sd-update-deps.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-fleet-refresh.md",
+      "target": ".agent/workflows/sd-fleet-refresh.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-test-gaps.md",
+      "target": ".agent/workflows/sd-test-gaps.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-retro.md",
+      "target": ".agent/workflows/sd-retro.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
       "source": "templates/.commands/sd-review-pr.md",
       "target": ".agent/workflows/sd-review-pr.md",
       "anchor": ".agent"
@@ -977,6 +1271,48 @@
       "kind": "command",
       "source": "templates/.commands/sd-audit-repo.md",
       "target": ".codebuddy/commands/sd/audit-repo.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.commands/sd-watch-pr.md",
+      "target": ".codebuddy/commands/sd/watch-pr.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.commands/sd-fix-ci.md",
+      "target": ".codebuddy/commands/sd/fix-ci.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.commands/sd-update-deps.md",
+      "target": ".codebuddy/commands/sd/update-deps.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.commands/sd-fleet-refresh.md",
+      "target": ".codebuddy/commands/sd/fleet-refresh.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.commands/sd-test-gaps.md",
+      "target": ".codebuddy/commands/sd/test-gaps.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.commands/sd-retro.md",
+      "target": ".codebuddy/commands/sd/retro.md",
       "anchor": ".codebuddy"
     },
     {
@@ -1080,6 +1416,48 @@
     {
       "platform": "devin",
       "kind": "workflow",
+      "source": "templates/.commands/sd-watch-pr.md",
+      "target": ".devin/workflows/sd-watch-pr.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-fix-ci.md",
+      "target": ".devin/workflows/sd-fix-ci.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-update-deps.md",
+      "target": ".devin/workflows/sd-update-deps.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-fleet-refresh.md",
+      "target": ".devin/workflows/sd-fleet-refresh.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-test-gaps.md",
+      "target": ".devin/workflows/sd-test-gaps.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-retro.md",
+      "target": ".devin/workflows/sd-retro.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
       "source": "templates/.commands/sd-review-pr.md",
       "target": ".devin/workflows/sd-review-pr.md",
       "anchor": ".devin"
@@ -1173,6 +1551,48 @@
       "kind": "command",
       "source": "templates/.commands/sd-audit-repo.md",
       "target": ".factory/commands/sd/audit-repo.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.commands/sd-watch-pr.md",
+      "target": ".factory/commands/sd/watch-pr.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.commands/sd-fix-ci.md",
+      "target": ".factory/commands/sd/fix-ci.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.commands/sd-update-deps.md",
+      "target": ".factory/commands/sd/update-deps.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.commands/sd-fleet-refresh.md",
+      "target": ".factory/commands/sd/fleet-refresh.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.commands/sd-test-gaps.md",
+      "target": ".factory/commands/sd/test-gaps.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.commands/sd-retro.md",
+      "target": ".factory/commands/sd/retro.md",
       "anchor": ".factory"
     },
     {
@@ -1276,6 +1696,48 @@
     {
       "platform": "kilo",
       "kind": "workflow",
+      "source": "templates/.commands/sd-watch-pr.md",
+      "target": ".kilocode/workflows/sd-watch-pr.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-fix-ci.md",
+      "target": ".kilocode/workflows/sd-fix-ci.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-update-deps.md",
+      "target": ".kilocode/workflows/sd-update-deps.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-fleet-refresh.md",
+      "target": ".kilocode/workflows/sd-fleet-refresh.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-test-gaps.md",
+      "target": ".kilocode/workflows/sd-test-gaps.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-retro.md",
+      "target": ".kilocode/workflows/sd-retro.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
       "source": "templates/.commands/sd-review-pr.md",
       "target": ".kilocode/workflows/sd-review-pr.md",
       "anchor": ".kilocode"
@@ -1369,6 +1831,48 @@
       "kind": "prompt",
       "source": "templates/.commands/sd-audit-repo.md",
       "target": ".pi/prompts/sd-audit-repo.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.commands/sd-watch-pr.md",
+      "target": ".pi/prompts/sd-watch-pr.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.commands/sd-fix-ci.md",
+      "target": ".pi/prompts/sd-fix-ci.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.commands/sd-update-deps.md",
+      "target": ".pi/prompts/sd-update-deps.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.commands/sd-fleet-refresh.md",
+      "target": ".pi/prompts/sd-fleet-refresh.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.commands/sd-test-gaps.md",
+      "target": ".pi/prompts/sd-test-gaps.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.commands/sd-retro.md",
+      "target": ".pi/prompts/sd-retro.md",
       "anchor": ".pi"
     },
     {
@@ -1472,6 +1976,48 @@
     {
       "platform": "qoder",
       "kind": "command",
+      "source": "templates/.commands/sd-watch-pr.md",
+      "target": ".qoder/commands/sd-watch-pr.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.commands/sd-fix-ci.md",
+      "target": ".qoder/commands/sd-fix-ci.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.commands/sd-update-deps.md",
+      "target": ".qoder/commands/sd-update-deps.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.commands/sd-fleet-refresh.md",
+      "target": ".qoder/commands/sd-fleet-refresh.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.commands/sd-test-gaps.md",
+      "target": ".qoder/commands/sd-test-gaps.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.commands/sd-retro.md",
+      "target": ".qoder/commands/sd-retro.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
       "source": "templates/.commands/sd-review-pr.md",
       "target": ".qoder/commands/sd-review-pr.md",
       "anchor": ".qoder"
@@ -1565,6 +2111,48 @@
       "kind": "command",
       "source": "templates/.commands/sd-audit-repo.md",
       "target": ".trae/commands/sd-audit-repo.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.commands/sd-watch-pr.md",
+      "target": ".trae/commands/sd-watch-pr.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.commands/sd-fix-ci.md",
+      "target": ".trae/commands/sd-fix-ci.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.commands/sd-update-deps.md",
+      "target": ".trae/commands/sd-update-deps.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.commands/sd-fleet-refresh.md",
+      "target": ".trae/commands/sd-fleet-refresh.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.commands/sd-test-gaps.md",
+      "target": ".trae/commands/sd-test-gaps.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.commands/sd-retro.md",
+      "target": ".trae/commands/sd-retro.md",
       "anchor": ".trae"
     },
     {
@@ -1668,6 +2256,48 @@
     {
       "platform": "zcode",
       "kind": "command",
+      "source": "templates/.commands/sd-watch-pr.md",
+      "target": ".zcode/commands/sd/watch-pr.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.commands/sd-fix-ci.md",
+      "target": ".zcode/commands/sd/fix-ci.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.commands/sd-update-deps.md",
+      "target": ".zcode/commands/sd/update-deps.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.commands/sd-fleet-refresh.md",
+      "target": ".zcode/commands/sd/fleet-refresh.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.commands/sd-test-gaps.md",
+      "target": ".zcode/commands/sd/test-gaps.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.commands/sd-retro.md",
+      "target": ".zcode/commands/sd/retro.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
       "source": "templates/.commands/sd-review-pr.md",
       "target": ".zcode/commands/sd/review-pr.md",
       "anchor": ".zcode"
@@ -1761,6 +2391,48 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
       "target": ".agent/skills/sd-audit-repo/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
+      "target": ".agent/skills/sd-watch-pr/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fix-ci/SKILL.md",
+      "target": ".agent/skills/sd-fix-ci/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-deps/SKILL.md",
+      "target": ".agent/skills/sd-update-deps/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fleet-refresh/SKILL.md",
+      "target": ".agent/skills/sd-fleet-refresh/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-test-gaps/SKILL.md",
+      "target": ".agent/skills/sd-test-gaps/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-retro/SKILL.md",
+      "target": ".agent/skills/sd-retro/SKILL.md",
       "anchor": ".agent"
     },
     {
@@ -1864,6 +2536,48 @@
     {
       "platform": "codebuddy",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
+      "target": ".codebuddy/skills/sd-watch-pr/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fix-ci/SKILL.md",
+      "target": ".codebuddy/skills/sd-fix-ci/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-deps/SKILL.md",
+      "target": ".codebuddy/skills/sd-update-deps/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fleet-refresh/SKILL.md",
+      "target": ".codebuddy/skills/sd-fleet-refresh/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-test-gaps/SKILL.md",
+      "target": ".codebuddy/skills/sd-test-gaps/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-retro/SKILL.md",
+      "target": ".codebuddy/skills/sd-retro/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".codebuddy/skills/sd-review-pr/SKILL.md",
       "anchor": ".codebuddy"
@@ -1957,6 +2671,48 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
       "target": ".devin/skills/sd-audit-repo/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
+      "target": ".devin/skills/sd-watch-pr/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fix-ci/SKILL.md",
+      "target": ".devin/skills/sd-fix-ci/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-deps/SKILL.md",
+      "target": ".devin/skills/sd-update-deps/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fleet-refresh/SKILL.md",
+      "target": ".devin/skills/sd-fleet-refresh/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-test-gaps/SKILL.md",
+      "target": ".devin/skills/sd-test-gaps/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-retro/SKILL.md",
+      "target": ".devin/skills/sd-retro/SKILL.md",
       "anchor": ".devin"
     },
     {
@@ -2060,6 +2816,48 @@
     {
       "platform": "droid",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
+      "target": ".factory/skills/sd-watch-pr/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fix-ci/SKILL.md",
+      "target": ".factory/skills/sd-fix-ci/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-deps/SKILL.md",
+      "target": ".factory/skills/sd-update-deps/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fleet-refresh/SKILL.md",
+      "target": ".factory/skills/sd-fleet-refresh/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-test-gaps/SKILL.md",
+      "target": ".factory/skills/sd-test-gaps/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-retro/SKILL.md",
+      "target": ".factory/skills/sd-retro/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".factory/skills/sd-review-pr/SKILL.md",
       "anchor": ".factory"
@@ -2153,6 +2951,48 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
       "target": ".kilocode/skills/sd-audit-repo/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
+      "target": ".kilocode/skills/sd-watch-pr/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fix-ci/SKILL.md",
+      "target": ".kilocode/skills/sd-fix-ci/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-deps/SKILL.md",
+      "target": ".kilocode/skills/sd-update-deps/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fleet-refresh/SKILL.md",
+      "target": ".kilocode/skills/sd-fleet-refresh/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-test-gaps/SKILL.md",
+      "target": ".kilocode/skills/sd-test-gaps/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-retro/SKILL.md",
+      "target": ".kilocode/skills/sd-retro/SKILL.md",
       "anchor": ".kilocode"
     },
     {
@@ -2256,6 +3096,48 @@
     {
       "platform": "kiro",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
+      "target": ".kiro/skills/sd-watch-pr/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fix-ci/SKILL.md",
+      "target": ".kiro/skills/sd-fix-ci/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-deps/SKILL.md",
+      "target": ".kiro/skills/sd-update-deps/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fleet-refresh/SKILL.md",
+      "target": ".kiro/skills/sd-fleet-refresh/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-test-gaps/SKILL.md",
+      "target": ".kiro/skills/sd-test-gaps/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-retro/SKILL.md",
+      "target": ".kiro/skills/sd-retro/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".kiro/skills/sd-review-pr/SKILL.md",
       "anchor": ".kiro"
@@ -2349,6 +3231,48 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
       "target": ".pi/skills/sd-audit-repo/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
+      "target": ".pi/skills/sd-watch-pr/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fix-ci/SKILL.md",
+      "target": ".pi/skills/sd-fix-ci/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-deps/SKILL.md",
+      "target": ".pi/skills/sd-update-deps/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fleet-refresh/SKILL.md",
+      "target": ".pi/skills/sd-fleet-refresh/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-test-gaps/SKILL.md",
+      "target": ".pi/skills/sd-test-gaps/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-retro/SKILL.md",
+      "target": ".pi/skills/sd-retro/SKILL.md",
       "anchor": ".pi"
     },
     {
@@ -2452,6 +3376,48 @@
     {
       "platform": "qoder",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
+      "target": ".qoder/skills/sd-watch-pr/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fix-ci/SKILL.md",
+      "target": ".qoder/skills/sd-fix-ci/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-deps/SKILL.md",
+      "target": ".qoder/skills/sd-update-deps/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fleet-refresh/SKILL.md",
+      "target": ".qoder/skills/sd-fleet-refresh/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-test-gaps/SKILL.md",
+      "target": ".qoder/skills/sd-test-gaps/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-retro/SKILL.md",
+      "target": ".qoder/skills/sd-retro/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".qoder/skills/sd-review-pr/SKILL.md",
       "anchor": ".qoder"
@@ -2550,6 +3516,48 @@
     {
       "platform": "reasonix",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
+      "target": ".reasonix/skills/sd-watch-pr/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fix-ci/SKILL.md",
+      "target": ".reasonix/skills/sd-fix-ci/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-deps/SKILL.md",
+      "target": ".reasonix/skills/sd-update-deps/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fleet-refresh/SKILL.md",
+      "target": ".reasonix/skills/sd-fleet-refresh/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-test-gaps/SKILL.md",
+      "target": ".reasonix/skills/sd-test-gaps/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-retro/SKILL.md",
+      "target": ".reasonix/skills/sd-retro/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".reasonix/skills/sd-review-pr/SKILL.md",
       "anchor": ".reasonix"
@@ -2643,6 +3651,48 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
       "target": ".trae/skills/sd-audit-repo/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
+      "target": ".trae/skills/sd-watch-pr/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fix-ci/SKILL.md",
+      "target": ".trae/skills/sd-fix-ci/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-deps/SKILL.md",
+      "target": ".trae/skills/sd-update-deps/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fleet-refresh/SKILL.md",
+      "target": ".trae/skills/sd-fleet-refresh/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-test-gaps/SKILL.md",
+      "target": ".trae/skills/sd-test-gaps/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-retro/SKILL.md",
+      "target": ".trae/skills/sd-retro/SKILL.md",
       "anchor": ".trae"
     },
     {

@@ -176,7 +176,7 @@ class AuditRepoTests(InstallTestCase):
             "periodic\nformal audit, not a per-change review loop",
             "/sd:audit-repo",
             "/sd-audit-repo",
-            "`sd-audit-repo`, and",
+            "`sd-audit-repo`,",
         ]:
             self.assertIn(text, guide)
 

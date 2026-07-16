@@ -154,6 +154,46 @@ at `.trellis/audit/ledger.md`. Supports `dimensions=`, `depth=`, and
 `follow-up` arguments; details live in the installed guide's
 [Commands](docs/SD_AI_COMMAND_PACK.md#commands) section.
 
+### sd-watch-pr
+
+Watches the current branch's open PR inside a bounded polling loop until
+checks, the requested reviewer, and review threads settle, then hands off to
+the `sd-housekeeping` gate (or reports blockers with `no-merge`). Never merges
+outside that gate.
+
+### sd-fix-ci
+
+Triages a red CI run: classifies each failing job as real-code, flake, infra,
+or stale-baseline; fixes real failures through the gated flow (main fixes via
+a PR, never a direct push); reruns flakes boundedly; never weakens tests to
+get green.
+
+### sd-update-deps
+
+Batch-triages dependency-bot PRs: merges the safe class (patch/minor dev
+deps, Actions pin bumps, security patches) sequentially under the
+housekeeping gate criteria, keeps majors manual, and parks the rest with
+recommendations. `dry-run` reports classifications only.
+
+### sd-fleet-refresh
+
+Rolls the pack release across consumer repos per `docs/FLEET_ROLLOUT.md`:
+fleet preflight, then one consumer at a time — clean-tree check, install,
+consumer full-check, PR, watch, gated merge — ending with a per-consumer
+status table.
+
+### sd-test-gaps
+
+Ranks shipped files by per-file coverage, authors targeted tests for the
+worst `max-gaps=` files through the normal implement/check flow, and reports
+before/after numbers. Writes test files and fixtures only.
+
+### sd-retro
+
+Captures a structured debug retrospective (what broke, root cause, why gates
+missed it) as a journal entry via the session recorder, and proposes
+consent-gated prevention tasks. Makes no code changes.
+
 ### sd-update-spec
 
 Runs the existing Trellis `trellis-update-spec` skill, refreshes repo-owned
