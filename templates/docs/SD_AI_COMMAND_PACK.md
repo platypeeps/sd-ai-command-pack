@@ -45,7 +45,6 @@ Quick links:
 - `.agents/skills/sd-fix-ci/SKILL.md`: red-CI triage and fix loop.
 - `.agents/skills/sd-update-deps/SKILL.md`: dependency PR batch triage
   workflow.
-- `.agents/skills/sd-fleet-refresh/SKILL.md`: consumer fleet rollout loop.
 - `.agents/skills/sd-test-gaps/SKILL.md`: coverage-driven test authoring
   loop.
 - `.agents/skills/sd-retro/SKILL.md`: debug retrospective capture workflow.
@@ -116,7 +115,7 @@ Codex exposes the pack entry points as skills named `sd-start`, `sd-continue`,
 `sd-finish-work`, `sd-create-pr`, `sd-work-backlog`, `sd-work-designs`,
 `sd-full-check`, `sd-housekeeping`, `sd-review-pr`, `sd-review-local`,
 `sd-review-learnings`, `sd-audit-repo`, `sd-ship`,
-`sd-watch-pr`, `sd-fix-ci`, `sd-update-deps`, `sd-fleet-refresh`,
+`sd-watch-pr`, `sd-fix-ci`, `sd-update-deps`,
 `sd-test-gaps`, `sd-retro`, and `sd-update-spec`; type
 `/sd` in Codex command completion or invoke them with
 `$sd-review-pr`-style skill mentions.
@@ -259,7 +258,6 @@ Claude Code and Gemini CLI:
 /sd:watch-pr
 /sd:fix-ci
 /sd:update-deps
-/sd:fleet-refresh
 /sd:test-gaps
 /sd:retro
 /sd:update-spec
@@ -285,7 +283,6 @@ Qoder commands, Trae commands, Pi prompts, workflow adapters, and Codex skills:
 /sd-watch-pr
 /sd-fix-ci
 /sd-update-deps
-/sd-fleet-refresh
 /sd-test-gaps
 /sd-retro
 /sd-update-spec
@@ -773,11 +770,15 @@ confirming the default branch stays green between merges. Majors are
 always manual. Everything else is parked with a one-line recommendation,
 and `dry-run` reports classifications without merging.
 
-The `sd-fleet-refresh` command rolls the current pack release across
-consumer repositories, following the pack source repository's
-`docs/FLEET_ROLLOUT.md` procedure with
-`scripts/sd-ai-command-pack-fleet-preflight.py` deciding which consumers
-are stale. It processes one consumer at a time: verify a clean tree (dirty
+The `sd-fleet-refresh` command is an operator workflow available only in the
+`sd-ai-command-pack` source checkout; it is not installed into consumer
+repositories because it depends on source-only release and fleet metadata.
+It rolls the current pack release across consumer repositories, following the
+pack source repository's
+[fleet rollout procedure](https://github.com/platypeeps/sd-ai-command-pack/blob/main/docs/FLEET_ROLLOUT.md)
+with the
+[fleet preflight helper](https://github.com/platypeeps/sd-ai-command-pack/blob/main/scripts/sd-ai-command-pack-fleet-preflight.py)
+deciding which consumers are stale. It processes one consumer at a time: verify a clean tree (dirty
 trees are skipped and reported, never touched), branch, install the
 release, run the consumer's full-check, open the consumer PR, watch it to
 settled, and merge through the consumer's housekeeping gate (`no-merge`

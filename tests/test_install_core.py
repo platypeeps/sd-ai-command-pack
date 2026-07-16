@@ -212,7 +212,6 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-ship/SKILL.md",
                 ".agents/skills/sd-fix-ci/SKILL.md",
                 ".agents/skills/sd-update-deps/SKILL.md",
-                ".agents/skills/sd-fleet-refresh/SKILL.md",
                 ".agents/skills/sd-test-gaps/SKILL.md",
                 ".agents/skills/sd-retro/SKILL.md",
                 ".agents/skills/sd-review-pr/SKILL.md",
@@ -253,7 +252,6 @@ class InstallCoreTests(InstallTestCase):
                 ".gemini/commands/sd/ship.toml",
                 ".gemini/commands/sd/fix-ci.toml",
                 ".gemini/commands/sd/update-deps.toml",
-                ".gemini/commands/sd/fleet-refresh.toml",
                 ".gemini/commands/sd/test-gaps.toml",
                 ".gemini/commands/sd/retro.toml",
                 ".gemini/commands/sd/review-pr.toml",
@@ -1918,6 +1916,16 @@ class InstallCoreTests(InstallTestCase):
                 local_only_expected,
             )
 
+    def test_source_only_command_validation_fails_loudly(self) -> None:
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"SOURCE_ONLY_COMMAND_NAMES contains unknown command\(s\): unknown",
+        ):
+            install.validate_source_only_command_names(
+                (("known", "known"),),
+                frozenset({"unknown"}),
+            )
+
     def test_platform_registry_dirs_covered_by_shipped_scanners(self) -> None:
         audit = self.load_module_from_path(
             install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
@@ -2182,7 +2190,6 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-ship/SKILL.md",
                 ".agents/skills/sd-fix-ci/SKILL.md",
                 ".agents/skills/sd-update-deps/SKILL.md",
-                ".agents/skills/sd-fleet-refresh/SKILL.md",
                 ".agents/skills/sd-test-gaps/SKILL.md",
                 ".agents/skills/sd-retro/SKILL.md",
                 ".agents/skills/sd-full-check/SKILL.md",
@@ -2286,7 +2293,6 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-ship/SKILL.md",
                 ".agents/skills/sd-fix-ci/SKILL.md",
                 ".agents/skills/sd-update-deps/SKILL.md",
-                ".agents/skills/sd-fleet-refresh/SKILL.md",
                 ".agents/skills/sd-test-gaps/SKILL.md",
                 ".agents/skills/sd-retro/SKILL.md",
                 ".cursor/commands/sd-review-pr.md",
@@ -2298,7 +2304,6 @@ class InstallCoreTests(InstallTestCase):
                 ".cursor/commands/sd-ship.md",
                 ".cursor/commands/sd-fix-ci.md",
                 ".cursor/commands/sd-update-deps.md",
-                ".cursor/commands/sd-fleet-refresh.md",
                 ".cursor/commands/sd-test-gaps.md",
                 ".cursor/commands/sd-retro.md",
             ],
@@ -2327,7 +2332,6 @@ class InstallCoreTests(InstallTestCase):
             ".agents/skills/sd-ship/SKILL.md",
             ".agents/skills/sd-fix-ci/SKILL.md",
             ".agents/skills/sd-update-deps/SKILL.md",
-            ".agents/skills/sd-fleet-refresh/SKILL.md",
             ".agents/skills/sd-test-gaps/SKILL.md",
             ".agents/skills/sd-retro/SKILL.md",
             ".codex/config.toml",
@@ -2342,7 +2346,6 @@ class InstallCoreTests(InstallTestCase):
             ".cursor/commands/sd-ship.md",
             ".cursor/commands/sd-fix-ci.md",
             ".cursor/commands/sd-update-deps.md",
-            ".cursor/commands/sd-fleet-refresh.md",
             ".cursor/commands/sd-test-gaps.md",
             ".cursor/commands/sd-retro.md",
             "scripts/sd-ai-command-pack-full-check.sh",
@@ -3155,7 +3158,6 @@ class InstallCoreTests(InstallTestCase):
                 "ship",
                 "fix-ci",
                 "update-deps",
-                "fleet-refresh",
                 "test-gaps",
                 "retro",
                 "review-pr",

@@ -18,7 +18,9 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [],
+  "children": [
+    "07-16-source-only-fleet-refresh-command"
+  ],
   "parent": null,
   "relatedFiles": [],
   "notes": "",

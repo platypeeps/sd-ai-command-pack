@@ -230,7 +230,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-ship/SKILL.md",
                 ".agents/skills/sd-fix-ci/SKILL.md",
                 ".agents/skills/sd-update-deps/SKILL.md",
-                ".agents/skills/sd-fleet-refresh/SKILL.md",
                 ".agents/skills/sd-test-gaps/SKILL.md",
                 ".agents/skills/sd-retro/SKILL.md",
                 ".agents/skills/sd-full-check/SKILL.md",
@@ -282,7 +281,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".gemini/commands/sd/ship.toml",
                 ".gemini/commands/sd/fix-ci.toml",
                 ".gemini/commands/sd/update-deps.toml",
-                ".gemini/commands/sd/fleet-refresh.toml",
                 ".gemini/commands/sd/test-gaps.toml",
                 ".gemini/commands/sd/retro.toml",
                 ".gemini/commands/sd/review-pr.toml",
@@ -302,7 +300,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".github/prompts/sd-ship.prompt.md",
                 ".github/prompts/sd-fix-ci.prompt.md",
                 ".github/prompts/sd-update-deps.prompt.md",
-                ".github/prompts/sd-fleet-refresh.prompt.md",
                 ".github/prompts/sd-test-gaps.prompt.md",
                 ".github/prompts/sd-retro.prompt.md",
                 ".github/prompts/sd-review-pr.prompt.md",
@@ -332,7 +329,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".cursor/commands/sd-ship.md",
                 ".cursor/commands/sd-fix-ci.md",
                 ".cursor/commands/sd-update-deps.md",
-                ".cursor/commands/sd-fleet-refresh.md",
                 ".cursor/commands/sd-test-gaps.md",
                 ".cursor/commands/sd-retro.md",
                 ".cursor/commands/sd-review-pr.md",
@@ -407,7 +403,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".kiro/skills/sd-ship/SKILL.md",
                 ".kiro/skills/sd-fix-ci/SKILL.md",
                 ".kiro/skills/sd-update-deps/SKILL.md",
-                ".kiro/skills/sd-fleet-refresh/SKILL.md",
                 ".kiro/skills/sd-test-gaps/SKILL.md",
                 ".kiro/skills/sd-retro/SKILL.md",
                 ".reasonix/skills/sd-review-pr/SKILL.md",
@@ -419,7 +414,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".reasonix/skills/sd-ship/SKILL.md",
                 ".reasonix/skills/sd-fix-ci/SKILL.md",
                 ".reasonix/skills/sd-update-deps/SKILL.md",
-                ".reasonix/skills/sd-fleet-refresh/SKILL.md",
                 ".reasonix/skills/sd-test-gaps/SKILL.md",
                 ".reasonix/skills/sd-retro/SKILL.md",
                 ".trae/commands/sd-review-pr.md",
@@ -431,7 +425,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".trae/commands/sd-ship.md",
                 ".trae/commands/sd-fix-ci.md",
                 ".trae/commands/sd-update-deps.md",
-                ".trae/commands/sd-fleet-refresh.md",
                 ".trae/commands/sd-test-gaps.md",
                 ".trae/commands/sd-retro.md",
                 ".trae/skills/sd-review-pr/SKILL.md",
@@ -443,7 +436,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".trae/skills/sd-ship/SKILL.md",
                 ".trae/skills/sd-fix-ci/SKILL.md",
                 ".trae/skills/sd-update-deps/SKILL.md",
-                ".trae/skills/sd-fleet-refresh/SKILL.md",
                 ".trae/skills/sd-test-gaps/SKILL.md",
                 ".trae/skills/sd-retro/SKILL.md",
                 ".zcode/commands/sd/review-pr.md",
@@ -455,7 +447,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".zcode/commands/sd/ship.md",
                 ".zcode/commands/sd/fix-ci.md",
                 ".zcode/commands/sd/update-deps.md",
-                ".zcode/commands/sd/fleet-refresh.md",
                 ".zcode/commands/sd/test-gaps.md",
                 ".zcode/commands/sd/retro.md",
             ],
@@ -481,7 +472,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-ship/SKILL.md",
                 ".agents/skills/sd-fix-ci/SKILL.md",
                 ".agents/skills/sd-update-deps/SKILL.md",
-                ".agents/skills/sd-fleet-refresh/SKILL.md",
                 ".agents/skills/sd-test-gaps/SKILL.md",
                 ".agents/skills/sd-retro/SKILL.md",
                 ".agents/skills/sd-review-pr/SKILL.md",
@@ -521,7 +511,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".claude/commands/sd/ship.md",
                 ".claude/commands/sd/fix-ci.md",
                 ".claude/commands/sd/update-deps.md",
-                ".claude/commands/sd/fleet-refresh.md",
                 ".claude/commands/sd/test-gaps.md",
                 ".claude/commands/sd/retro.md",
                 ".claude/commands/sd/review-pr.md",
@@ -541,7 +530,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".cursor/commands/sd-ship.md",
                 ".cursor/commands/sd-fix-ci.md",
                 ".cursor/commands/sd-update-deps.md",
-                ".cursor/commands/sd-fleet-refresh.md",
                 ".cursor/commands/sd-test-gaps.md",
                 ".cursor/commands/sd-retro.md",
                 ".cursor/commands/sd-review-pr.md",
@@ -561,7 +549,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".gemini/commands/sd/ship.toml",
                 ".gemini/commands/sd/fix-ci.toml",
                 ".gemini/commands/sd/update-deps.toml",
-                ".gemini/commands/sd/fleet-refresh.toml",
                 ".gemini/commands/sd/test-gaps.toml",
                 ".gemini/commands/sd/retro.toml",
                 ".gemini/commands/sd/review-pr.toml",
@@ -581,7 +568,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".github/prompts/sd-ship.prompt.md",
                 ".github/prompts/sd-fix-ci.prompt.md",
                 ".github/prompts/sd-update-deps.prompt.md",
-                ".github/prompts/sd-fleet-refresh.prompt.md",
                 ".github/prompts/sd-test-gaps.prompt.md",
                 ".github/prompts/sd-retro.prompt.md",
                 ".github/prompts/sd-review-pr.prompt.md",
@@ -611,7 +597,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".opencode/commands/sd-ship.md",
                 ".opencode/commands/sd-fix-ci.md",
                 ".opencode/commands/sd-update-deps.md",
-                ".opencode/commands/sd-fleet-refresh.md",
                 ".opencode/commands/sd-test-gaps.md",
                 ".opencode/commands/sd-retro.md",
                 ".opencode/commands/sd-review-pr.md",
@@ -641,7 +626,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-ship/SKILL.md",
                 ".agents/skills/sd-fix-ci/SKILL.md",
                 ".agents/skills/sd-update-deps/SKILL.md",
-                ".agents/skills/sd-fleet-refresh/SKILL.md",
                 ".agents/skills/sd-test-gaps/SKILL.md",
                 ".agents/skills/sd-retro/SKILL.md",
                 ".agents/skills/sd-review-local/SKILL.md",
@@ -794,20 +778,6 @@ class GeneratedParityTests(InstallTestCase):
                 [
                     "Resolve the `sd-update-deps` skill by name",
                     "Majors are always manual",
-                ],
-                [],
-            ),
-            (
-                [
-                    root / ".claude/commands/sd/fleet-refresh.md",
-                    root / ".cursor/commands/sd-fleet-refresh.md",
-                    root / ".gemini/commands/sd/fleet-refresh.toml",
-                    root / ".github/prompts/sd-fleet-refresh.prompt.md",
-                    root / ".opencode/commands/sd-fleet-refresh.md",
-                ],
-                [
-                    "Resolve the `sd-fleet-refresh` skill by name",
-                    "one consumer at a time",
                 ],
                 [],
             ),
@@ -1448,6 +1418,33 @@ class GeneratedParityTests(InstallTestCase):
         for file in files:
             self.assertTrue(file.source.is_file(), file.source)
 
+    def test_source_only_command_is_generated_but_not_consumer_shipped(
+        self,
+    ) -> None:
+        self.assertEqual(
+            install.SOURCE_ONLY_COMMAND_NAMES,
+            frozenset({"sd-fleet-refresh"}),
+        )
+        _, files = install.load_manifest()
+        manifest_targets = {file.target.as_posix() for file in files}
+
+        self.assertTrue(
+            set(install.SOURCE_ONLY_COMMAND_TARGETS).isdisjoint(manifest_targets)
+        )
+        for path in (
+            "templates/.agents/skills/sd-fleet-refresh/SKILL.md",
+            "templates/.commands/sd-fleet-refresh.md",
+            "templates/.claude/commands/sd/fleet-refresh.md",
+            "templates/.gemini/commands/sd/fleet-refresh.toml",
+            "templates/.github/prompts/sd-fleet-refresh.prompt.md",
+            ".agents/skills/sd-fleet-refresh/SKILL.md",
+            ".claude/commands/sd/fleet-refresh.md",
+            ".gemini/commands/sd/fleet-refresh.toml",
+            ".github/prompts/sd-fleet-refresh.prompt.md",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue((install.ROOT / path).is_file(), path)
+
     def test_manifest_declares_current_trellis_platform_adapters(self) -> None:
         _, files = install.load_manifest()
         platforms_with_manifest_entries = {file.platform for file in files}
@@ -1494,7 +1491,6 @@ class GeneratedParityTests(InstallTestCase):
             ".agent/workflows/sd-ship.md",
             ".agent/workflows/sd-fix-ci.md",
             ".agent/workflows/sd-update-deps.md",
-            ".agent/workflows/sd-fleet-refresh.md",
             ".agent/workflows/sd-test-gaps.md",
             ".agent/workflows/sd-retro.md",
             ".agent/skills/sd-review-pr/SKILL.md",
@@ -1506,7 +1502,6 @@ class GeneratedParityTests(InstallTestCase):
             ".agent/skills/sd-ship/SKILL.md",
             ".agent/skills/sd-fix-ci/SKILL.md",
             ".agent/skills/sd-update-deps/SKILL.md",
-            ".agent/skills/sd-fleet-refresh/SKILL.md",
             ".agent/skills/sd-test-gaps/SKILL.md",
             ".agent/skills/sd-retro/SKILL.md",
             ".codebuddy/commands/sd/review-pr.md",
@@ -1518,7 +1513,6 @@ class GeneratedParityTests(InstallTestCase):
             ".codebuddy/commands/sd/ship.md",
             ".codebuddy/commands/sd/fix-ci.md",
             ".codebuddy/commands/sd/update-deps.md",
-            ".codebuddy/commands/sd/fleet-refresh.md",
             ".codebuddy/commands/sd/test-gaps.md",
             ".codebuddy/commands/sd/retro.md",
             ".codebuddy/skills/sd-review-pr/SKILL.md",
@@ -1530,7 +1524,6 @@ class GeneratedParityTests(InstallTestCase):
             ".codebuddy/skills/sd-ship/SKILL.md",
             ".codebuddy/skills/sd-fix-ci/SKILL.md",
             ".codebuddy/skills/sd-update-deps/SKILL.md",
-            ".codebuddy/skills/sd-fleet-refresh/SKILL.md",
             ".codebuddy/skills/sd-test-gaps/SKILL.md",
             ".codebuddy/skills/sd-retro/SKILL.md",
             ".devin/workflows/sd-review-pr.md",
@@ -1542,7 +1535,6 @@ class GeneratedParityTests(InstallTestCase):
             ".devin/workflows/sd-ship.md",
             ".devin/workflows/sd-fix-ci.md",
             ".devin/workflows/sd-update-deps.md",
-            ".devin/workflows/sd-fleet-refresh.md",
             ".devin/workflows/sd-test-gaps.md",
             ".devin/workflows/sd-retro.md",
             ".factory/commands/sd/review-pr.md",
@@ -1554,7 +1546,6 @@ class GeneratedParityTests(InstallTestCase):
             ".factory/commands/sd/ship.md",
             ".factory/commands/sd/fix-ci.md",
             ".factory/commands/sd/update-deps.md",
-            ".factory/commands/sd/fleet-refresh.md",
             ".factory/commands/sd/test-gaps.md",
             ".factory/commands/sd/retro.md",
             ".kilocode/workflows/sd-review-pr.md",
@@ -1566,7 +1557,6 @@ class GeneratedParityTests(InstallTestCase):
             ".kilocode/workflows/sd-ship.md",
             ".kilocode/workflows/sd-fix-ci.md",
             ".kilocode/workflows/sd-update-deps.md",
-            ".kilocode/workflows/sd-fleet-refresh.md",
             ".kilocode/workflows/sd-test-gaps.md",
             ".kilocode/workflows/sd-retro.md",
             ".kiro/skills/sd-review-pr/SKILL.md",
@@ -1578,7 +1568,6 @@ class GeneratedParityTests(InstallTestCase):
             ".kiro/skills/sd-ship/SKILL.md",
             ".kiro/skills/sd-fix-ci/SKILL.md",
             ".kiro/skills/sd-update-deps/SKILL.md",
-            ".kiro/skills/sd-fleet-refresh/SKILL.md",
             ".kiro/skills/sd-test-gaps/SKILL.md",
             ".kiro/skills/sd-retro/SKILL.md",
             ".pi/prompts/sd-review-pr.md",
@@ -1590,7 +1579,6 @@ class GeneratedParityTests(InstallTestCase):
             ".pi/prompts/sd-ship.md",
             ".pi/prompts/sd-fix-ci.md",
             ".pi/prompts/sd-update-deps.md",
-            ".pi/prompts/sd-fleet-refresh.md",
             ".pi/prompts/sd-test-gaps.md",
             ".pi/prompts/sd-retro.md",
             ".qoder/commands/sd-review-pr.md",
@@ -1602,7 +1590,6 @@ class GeneratedParityTests(InstallTestCase):
             ".qoder/commands/sd-ship.md",
             ".qoder/commands/sd-fix-ci.md",
             ".qoder/commands/sd-update-deps.md",
-            ".qoder/commands/sd-fleet-refresh.md",
             ".qoder/commands/sd-test-gaps.md",
             ".qoder/commands/sd-retro.md",
             ".reasonix/skills/sd-review-pr/SKILL.md",
@@ -1614,7 +1601,6 @@ class GeneratedParityTests(InstallTestCase):
             ".reasonix/skills/sd-ship/SKILL.md",
             ".reasonix/skills/sd-fix-ci/SKILL.md",
             ".reasonix/skills/sd-update-deps/SKILL.md",
-            ".reasonix/skills/sd-fleet-refresh/SKILL.md",
             ".reasonix/skills/sd-test-gaps/SKILL.md",
             ".reasonix/skills/sd-retro/SKILL.md",
             ".trae/commands/sd-review-pr.md",
@@ -1626,7 +1612,6 @@ class GeneratedParityTests(InstallTestCase):
             ".trae/commands/sd-ship.md",
             ".trae/commands/sd-fix-ci.md",
             ".trae/commands/sd-update-deps.md",
-            ".trae/commands/sd-fleet-refresh.md",
             ".trae/commands/sd-test-gaps.md",
             ".trae/commands/sd-retro.md",
             ".zcode/commands/sd/review-pr.md",
@@ -1638,7 +1623,6 @@ class GeneratedParityTests(InstallTestCase):
             ".zcode/commands/sd/ship.md",
             ".zcode/commands/sd/fix-ci.md",
             ".zcode/commands/sd/update-deps.md",
-            ".zcode/commands/sd/fleet-refresh.md",
             ".zcode/commands/sd/test-gaps.md",
             ".zcode/commands/sd/retro.md",
         }
@@ -1688,9 +1672,6 @@ class GeneratedParityTests(InstallTestCase):
             elif "update-deps" in file.target.name:
                 self.assertIn("Resolve the `sd-update-deps` skill by name", content)
                 self.assertIn("Majors are always manual", content)
-            elif "fleet-refresh" in file.target.name:
-                self.assertIn("Resolve the `sd-fleet-refresh` skill by name", content)
-                self.assertIn("one consumer at a time", content)
             elif "test-gaps" in file.target.name:
                 self.assertIn("Resolve the `sd-test-gaps` skill by name", content)
                 self.assertIn("test files and fixtures only", content)
@@ -1814,6 +1795,7 @@ class GeneratedParityTests(InstallTestCase):
         neutral_sources = {
             source.name: source.relative_to(install.ROOT).as_posix()
             for source in neutral_command_sources()
+            if source.stem not in install.SOURCE_ONLY_COMMAND_NAMES
         }
         expected_entries = set()
 
@@ -1890,7 +1872,6 @@ class GeneratedParityTests(InstallTestCase):
             "ship",
             "fix-ci",
             "update-deps",
-            "fleet-refresh",
             "test-gaps",
             "retro",
             "review-pr",
@@ -1930,7 +1911,6 @@ class GeneratedParityTests(InstallTestCase):
             "watch-pr": "Watch the current branch's open pull request until it settles, then hand off to the housekeeping merge gate or report the blockers.",
             "fix-ci": "Triage failing CI runs, classify each failure, and drive the run back to green without weakening tests or bypassing guards.",
             "update-deps": "Batch-triage open dependency-bot pull requests, merging the safe classes sequentially through the housekeeping gate criteria and parking the rest.",
-            "fleet-refresh": "Roll the pack release across consumer repositories one at a time using the documented fleet rollout procedure.",
             "test-gaps": "Close the worst per-file coverage gaps by authoring focused tests for the lowest-covered shipped files.",
             "retro": "Capture a structured retrospective for a debugging stream or incident, record it in the journal, and propose consent-gated prevention tasks.",
             "review-pr": "Run the Software Delivery (SD) pull-request review loop.",

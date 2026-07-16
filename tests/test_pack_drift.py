@@ -169,8 +169,37 @@ class PackDriftTests(InstallTestCase):
         }
         _, files = install.load_manifest()
         manifest_sources = {file.source.resolve() for file in files}
+        source_only_template_sources = {
+            (
+                install.ROOT
+                / f"templates/.agents/skills/{name}/SKILL.md"
+            ).resolve()
+            for name in install.SOURCE_ONLY_COMMAND_NAMES
+        }
+        for name in install.SOURCE_ONLY_COMMAND_NAMES:
+            short = name.removeprefix("sd-")
+            source_only_template_sources.update(
+                {
+                    (install.ROOT / f"templates/.commands/{name}.md").resolve(),
+                    (
+                        install.ROOT
+                        / f"templates/.claude/commands/sd/{short}.md"
+                    ).resolve(),
+                    (
+                        install.ROOT
+                        / f"templates/.gemini/commands/sd/{short}.toml"
+                    ).resolve(),
+                    (
+                        install.ROOT
+                        / f"templates/.github/prompts/{name}.prompt.md"
+                    ).resolve(),
+                }
+            )
 
-        self.assertEqual(tracked_template_sources, manifest_sources)
+        self.assertEqual(
+            tracked_template_sources,
+            manifest_sources | source_only_template_sources,
+        )
 
     def test_manifest_targets_are_casefold_unique(self) -> None:
         _, files = install.load_manifest()

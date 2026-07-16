@@ -466,6 +466,26 @@ COMMAND_NAMES: tuple[tuple[str, str], ...] = (
     ("sd-update-spec", "update-spec"),
 )
 
+# Commands in this set are generated and available from the pack source
+# checkout, but are not included in consumer manifests. Their workflows depend
+# on source-only operator files such as the fleet registry and install entrypoint.
+SOURCE_ONLY_COMMAND_NAMES = frozenset({"sd-fleet-refresh"})
+
+
+def validate_source_only_command_names(
+    command_names: tuple[tuple[str, str], ...],
+    source_only_names: frozenset[str],
+) -> None:
+    unknown = source_only_names - {name for name, _short in command_names}
+    if unknown:
+        raise RuntimeError(
+            "SOURCE_ONLY_COMMAND_NAMES contains unknown command(s): "
+            + ", ".join(sorted(unknown))
+        )
+
+
+validate_source_only_command_names(COMMAND_NAMES, SOURCE_ONLY_COMMAND_NAMES)
+
 # Pack-owned .gito defaults are not a platform but share the local-gitignore
 # grouping; kept here so the managed block order below stays byte-stable.
 PACK_LOCAL_GITIGNORE_GROUP_NAME = "__pack__"
@@ -687,6 +707,7 @@ __all__ = [
     "PlatformInfo",
     "REVIEW_ARTIFACT_GITIGNORE_PATTERNS",
     "ROOT",
+    "SOURCE_ONLY_COMMAND_NAMES",
     "TRELLIS_BLANKET_GITIGNORE_ENTRIES",
     "TRELLIS_GITIGNORE_END",
     "TRELLIS_GITIGNORE_PATTERNS",
@@ -698,4 +719,5 @@ __all__ = [
     "_ordered_platform_groups_with_local_only",
     "_validate_registry_group_order",
     "_validate_registry_group_orders",
+    "validate_source_only_command_names",
 ]

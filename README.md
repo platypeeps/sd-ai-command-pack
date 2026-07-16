@@ -175,7 +175,10 @@ recommendations. `dry-run` reports classifications only.
 
 ### sd-fleet-refresh
 
-Rolls the pack release across consumer repos per `docs/FLEET_ROLLOUT.md`:
+Source-checkout-only operator command; it is not installed into consumer
+repositories because it depends on this repository's installer, fleet
+registry, and rollout procedure. It rolls the pack release across consumer
+repos per `docs/FLEET_ROLLOUT.md`:
 fleet preflight, then one consumer at a time — clean-tree check, install,
 consumer full-check, PR, watch, gated merge — ending with a per-consumer
 status table.
