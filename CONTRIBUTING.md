@@ -113,6 +113,7 @@ behavior changes and the patch number for compatible fixes or documentation.
   it from `.opencode/` with:
 
   ```bash
+  cd .opencode
   bun install --lockfile-only
   ```
 

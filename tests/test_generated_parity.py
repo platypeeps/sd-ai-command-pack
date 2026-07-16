@@ -1105,6 +1105,7 @@ class GeneratedParityTests(InstallTestCase):
             "sd-ai-command-pack-toolchain.sh run-python -- install.py . --force",
             "Keep Trellis-owned platform files in their Trellis-managed state",
             "Do not track `.opencode/package.json` or `.opencode/bun.lock`",
+            "cd .opencode",
             "`.claude/settings.local.json`",
             ".trellis/spec/frontend/adapter-guidelines.md",
             ".trellis/spec/backend/manifest-and-filesystem.md",
