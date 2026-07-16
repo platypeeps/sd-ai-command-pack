@@ -50,7 +50,7 @@ Counts: P0 0 · P1 0 · P2 0 · P3 1 still-open.
 - Verification scope:
   - Rechecked every open/regressed ledger item; only A-027 was open.
   - Ran a quick touched-area sweep from `7d0172e..772bf2a`.
-  - Confirmed PR #131 CI was green and the current working tree was clean before ledger/report edits.
+  - Confirmed prior PR #131 CI was green and the current working tree was clean before ledger/report edits.
 - Regression sweep result:
   - No new P0-P2 findings.
   - No new P3 findings worth adding to the ledger.

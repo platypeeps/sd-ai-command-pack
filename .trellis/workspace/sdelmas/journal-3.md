@@ -263,9 +263,7 @@ Batched install-audit gitignore checks with git check-ignore --stdin -z, preserv
 
 ### Main Changes
 
-- Added the `sd-audit-repo` follow-up report for A-027.
-- Updated the audit ledger with the new `last-seen` commit and follow-up note.
-- Corrected the parked A-027 task metadata to point at the archived parent task.
+- Detailed change bullets were not supplied; see the summary above.
 
 ### Git Commits
 
@@ -275,9 +273,7 @@ Batched install-audit gitignore checks with git check-ignore --stdin -z, preserv
 
 ### Testing
 
-- Refreshed `.obsidian-kb` through `scripts/sd-ai-command-pack-update-spec-kb.py`.
-- Ran `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
-- Confirmed PR #132 CI and Copilot review completed cleanly.
+- Validation was not recorded for this session.
 
 ### Status
 
@@ -300,7 +296,9 @@ Updated backend directory documentation for the installer package split, documen
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Added the `sd-audit-repo` follow-up report for A-027.
+- Updated the audit ledger with the new `last-seen` commit and follow-up note.
+- Corrected the parked A-027 task metadata to point at the archived parent task.
 
 ### Git Commits
 
@@ -310,7 +308,9 @@ Updated backend directory documentation for the installer package split, documen
 
 ### Testing
 
-- Validation was not recorded for this session.
+- Refreshed `.obsidian-kb` through `scripts/sd-ai-command-pack-update-spec-kb.py`.
+- Ran `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+- Confirmed PR #132 CI and Copilot review completed cleanly.
 
 ### Status
 
@@ -683,7 +683,9 @@ Created PR #132 for the sd-audit-repo follow-up artifacts: updated the audit led
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Added the `sd-audit-repo` follow-up report for A-027.
+- Updated the audit ledger with the new `last-seen` commit and follow-up note.
+- Corrected the parked A-027 task metadata to point at the archived parent task.
 
 ### Git Commits
 
@@ -693,7 +695,9 @@ Created PR #132 for the sd-audit-repo follow-up artifacts: updated the audit led
 
 ### Testing
 
-- Validation was not recorded for this session.
+- Refreshed `.obsidian-kb` through `scripts/sd-ai-command-pack-update-spec-kb.py`.
+- Ran `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+- Confirmed PR #132 CI and Copilot review completed cleanly.
 
 ### Status
 
