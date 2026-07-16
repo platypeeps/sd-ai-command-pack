@@ -26,8 +26,19 @@ type; a renamed status is a type/lint error, not a silent behavior change.
 
 ## Acceptance Criteria
 
-- [ ] No bare status literal comparisons remain outside the enum
+- [x] No bare status literal comparisons remain outside the enum
       definitions (grep check).
-- [ ] Output and exit codes unchanged (existing tests pass untouched
+- [x] Output and exit codes unchanged (existing tests pass untouched
       except imports).
-- [ ] Installer coverage stays 100% line+branch; mypy clean.
+- [x] Installer coverage stays 100% line+branch; mypy clean.
+
+## Implementation Notes
+
+- Added `installer/status.py` with Python 3.10-compatible `str, Enum`
+  status types for install, remove, and local-only results. This preserves
+  CLI formatting while making producer/consumer status references named and
+  mypy-visible.
+- Updated installer producers and consumers to use enum members and shared
+  status sets instead of raw string comparisons.
+- Added tests that prove enum members compare/format like the prior strings
+  and that installer source files do not compare `status` to raw literals.

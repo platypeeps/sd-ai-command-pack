@@ -348,3 +348,46 @@ Added explicit install-mode validation and import-time registry group-order chec
 ### Next Steps
 
 - None - task complete
+
+
+## Session 110: Type installer result statuses
+
+**Date**: 2026-07-16
+**Task**: Type installer result statuses
+**Branch**: `codex/result-status-vocabulary`
+
+### Summary
+
+Added a typed status vocabulary for installer result objects, replaced raw status comparisons with enum members/shared sets, and verified output-compatible behavior with regression coverage.
+
+### Main Changes
+
+- Added `installer/status.py` with Python 3.10-compatible string enum
+  vocabularies for install, remove, and local-only results.
+- Converted installer result producers and consumers to use enum members and
+  shared status sets while preserving existing CLI output strings.
+- Added regression coverage for enum formatting/equality and for preventing
+  raw result-status literal comparisons from returning.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4a66561` | (see git log) |
+
+### Testing
+
+- `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- -m unittest tests.test_install_core`
+- `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- -m unittest tests.test_generated_parity tests.test_pack_drift`
+- `make lint`
+- `make test`
+- `python3 scripts/sd-ai-command-pack-update-spec-kb.py`
+- `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -628,7 +628,9 @@ class InstallCoreTests(InstallTestCase):
         created = install.install_file(
             file, root, force=False, dry_run=False, backup=False
         )
+        self.assertIs(created.status, install.InstallStatus.CREATED)
         self.assertEqual(created.status, "created")
+        self.assertEqual(f"{created.status:11}", "created    ")
         self.assertEqual(destination.read_text(encoding="utf-8"), "pack template\n")
 
         unchanged = install.install_file(
@@ -652,6 +654,57 @@ class InstallCoreTests(InstallTestCase):
         self.assertEqual(
             overwritten.backup.read_text(encoding="utf-8"), "local edit\n"
         )
+
+    def test_result_status_enums_preserve_public_strings(self) -> None:
+        self.assertEqual(install.InstallStatus.SYMLINK_CONFLICT, "symlink-conflict")
+        self.assertEqual(install.RemoveStatus.WOULD_REMOVE, "would-remove")
+        self.assertEqual(
+            install.LocalOnlyStatus.WOULD_INIT_TRELLIS_LOCAL,
+            "would-init-trellis-local",
+        )
+        self.assertEqual(
+            install.CONFLICT_STATUSES,
+            frozenset(
+                {
+                    install.InstallStatus.CONFLICT,
+                    install.InstallStatus.SYMLINK_CONFLICT,
+                }
+            ),
+        )
+        self.assertEqual(
+            install.WRITTEN_REMOVE_STATUSES,
+            frozenset(
+                {
+                    install.RemoveStatus.REMOVED,
+                    install.RemoveStatus.UPDATED,
+                }
+            ),
+        )
+
+    def test_result_status_literal_comparisons_stay_centralized(self) -> None:
+        status_values = {
+            *(status.value for status in install.InstallStatus),
+            *(status.value for status in install.RemoveStatus),
+            *(status.value for status in install.LocalOnlyStatus),
+        }
+        literal_values = "|".join(re.escape(value) for value in sorted(status_values))
+        raw_status_comparison = re.compile(
+            rf"(?:\bstatus\b|\.\s*status)\s*"
+            rf"(?:==|!=|in|not\s+in)[^\n#]*[\"'](?:{literal_values})[\"']"
+        )
+        for relative_path in (
+            "install.py",
+            "installer/fileops.py",
+            "installer/localonly.py",
+            "installer/provenance.py",
+            "installer/removal.py",
+        ):
+            with self.subTest(path=relative_path):
+                source = (PACK_ROOT / relative_path).read_text(encoding="utf-8")
+                self.assertIsNone(
+                    raw_status_comparison.search(source),
+                    f"{relative_path} compares result.status to a raw string",
+                )
 
     def test_branch_edges_in_block_merges(self) -> None:
         start = install.COPILOT_GUIDANCE_START

@@ -18,7 +18,9 @@ from installer import (
 from installer.fileops import (
     CONFLICT_STATUSES,
     InstallResult,
+    InstallStatus,
     RemoveResult,
+    RemoveStatus,
     atomic_write_bytes,
     display_path,
     install_file,
@@ -36,6 +38,7 @@ from installer.fileops import (
 )
 from installer.localonly import (
     LocalOnlyResult,
+    LocalOnlyStatus,
     ensure_local_only_exclude,
     ensure_trellis_for_local_only,
     git_info_exclude_path,
@@ -119,6 +122,7 @@ from installer.removal import (
     remove_pack_file,
     retire_stale_targets,
 )
+from installer.status import WRITTEN_REMOVE_STATUSES
 
 __all__ = [
     "ACTIVE_TRELLIS_PLATFORM_MARKERS",
@@ -133,12 +137,14 @@ __all__ = [
     "INSTALLED_TARGETS_FILE",
     "KNOWN_INSTALL_MODES",
     "InstallResult",
+    "InstallStatus",
     "LOCAL_ENV_GITIGNORE_PATTERNS",
     "LOCAL_ONLY_EXCLUDE_END",
     "LOCAL_ONLY_EXCLUDE_START",
     "LOCAL_ONLY_MARKER_FILE",
     "LOCAL_ONLY_TRACKED_CHECK_PATHS",
     "LocalOnlyResult",
+    "LocalOnlyStatus",
     "MANAGED_BLOCK_KIND",
     "ManifestVersionAction",
     "NEUTRAL_COMMAND_SOURCE_PLATFORMS",
@@ -152,12 +158,14 @@ __all__ = [
     "REVIEW_ARTIFACT_GITIGNORE_PATTERNS",
     "ROOT",
     "RemoveResult",
+    "RemoveStatus",
     "TRELLIS_GITIGNORE_END",
     "TRELLIS_GITIGNORE_PATTERNS",
     "TRELLIS_GITIGNORE_START",
     "TRELLIS_GITIGNORE_TARGET",
     "TRELLIS_INIT_PLATFORM_FLAGS",
     "TRELLIS_INSTALL_DOCS_URL",
+    "WRITTEN_REMOVE_STATUSES",
     "_LOCAL_GITIGNORE_GROUP_ORDER",
     "_LOCAL_ONLY_GROUP_ORDER",
     "_ordered_platform_groups_with_local_gitignore",
@@ -365,7 +373,7 @@ def _print_conflicts(conflicts: list[InstallResult]) -> None:
     print("")
     print("Conflicts:")
     for result in conflicts:
-        if result.status == "symlink-conflict":
+        if result.status is InstallStatus.SYMLINK_CONFLICT:
             print(
                 f"- {result.file.target} "
                 "(target is a symlink; the pack installs regular files only)"
@@ -626,7 +634,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.dry_run and not args.skip_diff_check:
         # Skip diff-checking any target this run did not write: conflicts and
         # preserved files are left byte-for-byte untouched.
-        unwritten_statuses = CONFLICT_STATUSES | {"preserved"}
+        unwritten_statuses = CONFLICT_STATUSES | {InstallStatus.PRESERVED}
         diff_paths = [
             result.file.target
             for result in results
