@@ -50,6 +50,112 @@ GITHUB_UNTRUSTED_PR_NOTE = _surface_generator.GITHUB_UNTRUSTED_PR_NOTE
 CLAUDE_COMMAND_ALIAS_REWRITES = _surface_generator.CLAUDE_COMMAND_ALIAS_REWRITES
 BESPOKE_BODY_PARITY_EXEMPTIONS = _surface_generator.OVERRIDE_BODIES
 
+NODE_BUILTIN_MODULES = {
+    "assert",
+    "buffer",
+    "child_process",
+    "crypto",
+    "events",
+    "fs",
+    "fs/promises",
+    "os",
+    "path",
+    "process",
+    "stream",
+    "timers",
+    "url",
+    "util",
+}
+OPENCODE_MODULE_EXTENSIONS = (".js", ".mjs", ".cjs")
+
+
+def strip_js_comments(content: str) -> str:
+    without_block_comments = re.sub(r"/\*.*?\*/", "", content, flags=re.DOTALL)
+    return "\n".join(
+        line.split("//", 1)[0] for line in without_block_comments.splitlines()
+    )
+
+
+def collect_js_from_specifier(lines: list[str], index: int, *, stop_at_brace: bool) -> tuple[str | None, int]:
+    statement = lines[index]
+    from_match = re.search(r'\bfrom\s+["\']([^"\']+)["\']', statement)
+    while from_match is None and index + 1 < len(lines):
+        if stop_at_brace and "}" in statement:
+            break
+        index += 1
+        statement = f"{statement}\n{lines[index]}"
+        from_match = re.search(r'\bfrom\s+["\']([^"\']+)["\']', statement)
+    if from_match:
+        return from_match.group(1), index
+    return None, index
+
+
+def find_js_module_specifiers(content: str) -> list[str]:
+    stripped = strip_js_comments(content)
+    specifiers: list[str] = []
+    lines = stripped.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped_line = line.lstrip()
+
+        side_effect_import = re.match(
+            r'^\s*import\s+["\']([^"\']+)["\']',
+            line,
+        )
+        if side_effect_import:
+            specifiers.append(side_effect_import.group(1))
+            index += 1
+            continue
+
+        if stripped_line.startswith("import "):
+            imported, index = collect_js_from_specifier(
+                lines,
+                index,
+                stop_at_brace=False,
+            )
+            if imported:
+                specifiers.append(imported)
+        elif stripped_line.startswith("export *"):
+            imported, index = collect_js_from_specifier(
+                lines,
+                index,
+                stop_at_brace=False,
+            )
+            if imported:
+                specifiers.append(imported)
+        elif stripped_line.startswith("export {"):
+            imported, index = collect_js_from_specifier(
+                lines,
+                index,
+                stop_at_brace=True,
+            )
+            if imported:
+                specifiers.append(imported)
+
+        index += 1
+
+    call_patterns = (
+        r'\brequire\s*\(\s*["\']([^"\']+)["\']\s*\)',
+        r'\bimport\s*\(\s*["\']([^"\']+)["\']\s*\)',
+    )
+    for pattern in call_patterns:
+        specifiers.extend(re.findall(pattern, stripped, re.MULTILINE))
+    return specifiers
+
+
+def is_node_builtin_module(imported: str) -> bool:
+    module_root = imported.split("/", 1)[0]
+    return imported in NODE_BUILTIN_MODULES or module_root in NODE_BUILTIN_MODULES
+
+
+def opencode_module_sources(root: Path) -> list[Path]:
+    opencode_root = root / ".opencode"
+    sources: list[Path] = []
+    for suffix in OPENCODE_MODULE_EXTENSIONS:
+        sources.extend(opencode_root.glob(f"**/*{suffix}"))
+    return sorted(sources)
+
 
 def strip_yaml_frontmatter(content: str) -> str:
     if not content.startswith("---\n"):
@@ -1104,7 +1210,8 @@ class GeneratedParityTests(InstallTestCase):
             "Treat `templates/**` as the source of truth",
             "sd-ai-command-pack-toolchain.sh run-python -- install.py . --force",
             "Keep Trellis-owned platform files in their Trellis-managed state",
-            "Track `.opencode/bun.lock`",
+            "Do not track `.opencode/package.json` or any `.opencode` Bun lockfile",
+            "cd .opencode",
             "`.claude/settings.local.json`",
             ".trellis/spec/frontend/adapter-guidelines.md",
             ".trellis/spec/backend/manifest-and-filesystem.md",
@@ -1128,27 +1235,95 @@ class GeneratedParityTests(InstallTestCase):
         ):
             self.assertIn(target, makefile)
 
-    def test_opencode_dependency_uses_canonical_range_and_locked_resolution(
+    def test_opencode_plugins_do_not_require_local_dependency_manifest(
         self,
     ) -> None:
         opencode_package_path = PACK_ROOT / ".opencode/package.json"
-        opencode_package = opencode_package_path.read_text(encoding="utf-8")
-        opencode_lock = (
-            PACK_ROOT / ".opencode/bun.lock"
-        ).read_text(encoding="utf-8")
+        opencode_lock_paths = (
+            PACK_ROOT / ".opencode/bun.lock",
+            PACK_ROOT / ".opencode/bun.lockb",
+        )
 
-        self.assertIn('"@opencode-ai/plugin": "^1.14.39"', opencode_package)
-        self.assertIn('"@opencode-ai/plugin": "^1.14.39"', opencode_lock)
-        plugin_resolution = re.search(
-            r'"@opencode-ai/plugin": \['
-            r'"@opencode-ai/plugin@(\d+\.\d+\.\d+)",.*'
-            r'"sha512-[A-Za-z0-9+/=]+"\]',
-            opencode_lock,
+        self.assertFalse(
+            opencode_package_path.exists(),
+            ".opencode/package.json is only needed when plugins import packages",
         )
-        self.assertIsNotNone(
-            plugin_resolution,
-            ".opencode/bun.lock must pin an integrity-checked plugin version",
+        for lock_path in opencode_lock_paths:
+            self.assertFalse(
+                lock_path.exists(),
+                f"{lock_path.relative_to(PACK_ROOT)} should not be tracked "
+                "without package deps",
+            )
+
+        external_imports: list[str] = []
+        for source in opencode_module_sources(PACK_ROOT):
+            text = source.read_text(encoding="utf-8")
+            for imported in find_js_module_specifiers(text):
+                if not imported.startswith((".", "/", "node:")) and not is_node_builtin_module(
+                    imported
+                ):
+                    external_imports.append(
+                        f"{source.relative_to(PACK_ROOT)} imports {imported}"
+                    )
+
+        self.assertEqual([], external_imports)
+
+    def test_opencode_dependency_scan_covers_common_module_forms(self) -> None:
+        specifiers = find_js_module_specifiers(
+            """
+            import fs from "fs"
+            import sibling from "./sibling.js"
+            import {
+                value,
+            } from "external-multiline"
+            import "external-side-effect"
+            export { value } from "external-reexport"
+            export {
+                value,
+            } from "external-reexport-multiline"
+            export default function plugin() {}
+            import later from "external-after-default"
+            export { localValue }
+            import afterLocalExport from "external-after-local-export"
+            const required = require("external-require")
+            const dynamic = await import("external-dynamic")
+            // require("ignored-comment")
+            /* import "ignored-block-comment" */
+            """
         )
+
+        self.assertEqual(
+            [
+                "fs",
+                "./sibling.js",
+                "external-multiline",
+                "external-side-effect",
+                "external-reexport",
+                "external-reexport-multiline",
+                "external-after-default",
+                "external-after-local-export",
+                "external-require",
+                "external-dynamic",
+            ],
+            specifiers,
+        )
+
+    def test_opencode_dependency_scan_covers_module_extensions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            opencode_root = root / ".opencode"
+            opencode_root.mkdir()
+            for filename in ("plugin.js", "tool.mjs", "helper.cjs", "ignored.ts"):
+                (opencode_root / filename).write_text("", encoding="utf-8")
+
+            self.assertEqual(
+                [
+                    opencode_root / "helper.cjs",
+                    opencode_root / "plugin.js",
+                    opencode_root / "tool.mjs",
+                ],
+                opencode_module_sources(root),
+            )
 
     def test_repo_declares_mit_license(self) -> None:
         raw, _ = install.load_manifest()

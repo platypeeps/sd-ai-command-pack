@@ -107,11 +107,13 @@ behavior changes and the patch number for compatible fixes or documentation.
 - Keep Trellis-owned platform files in their Trellis-managed state so
   `trellis update --dry-run --migrate` does not report avoidable local
   overrides.
-- In particular, keep `.opencode/package.json` byte-identical to Trellis'
-  canonical dependency range. Track `.opencode/bun.lock` in this repo to pin
-  the exact resolved dependency graph, and refresh it from `.opencode/` with:
+- Do not track `.opencode/package.json` or any `.opencode` Bun lockfile in this
+  repo unless the checked-in OpenCode plugins or tools import external npm
+  packages. If that changes, keep the manifest minimal, commit the lockfile,
+  and refresh it from `.opencode/` with:
 
   ```bash
+  cd .opencode
   bun install --lockfile-only
   ```
 

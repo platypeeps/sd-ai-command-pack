@@ -82,7 +82,10 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   plugin loader may require the SDK to be resolvable — verify before removing.
 - fix: Verify the loader requirement; remove the dep + lockfile, or document
   the intentional declaration in package.json.
-- notes: tracked → .trellis/tasks/07-15-opencode-plugin-dependency-review
+- notes: resolved by .trellis/tasks/07-15-opencode-plugin-dependency-review;
+  local OpenCode plugins do not import external packages, so
+  .opencode/package.json and .opencode/bun.lock were removed. Upstream Trellis
+  still templates the dependency; the task captures a consent-gated handoff.
 
 ## A-005 — PackFile.install policy is an unvalidated open string; a typo silently changes install selection
 - status: open
@@ -335,7 +338,8 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   prerelease) has zero automated CVE/freshness monitoring.
 - fix: Add an npm-ecosystem entry for /.opencode (moot if the dependency is
   removed).
-- notes: tracked → .trellis/tasks/07-15-opencode-plugin-dependency-review (folded)
+- notes: folded into .trellis/tasks/07-15-opencode-plugin-dependency-review;
+  moot after removing the .opencode dependency manifest and lockfile.
 
 ## A-019 — .opencode manifest pins a loose caret while the lockfile drifted a minor ahead
 - status: open
@@ -350,7 +354,8 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   than the manifest.
 - fix: Pin the exact version or raise the caret floor; enforce frozen lockfile
   (moot if removed).
-- notes: tracked → .trellis/tasks/07-15-opencode-plugin-dependency-review (folded)
+- notes: folded into .trellis/tasks/07-15-opencode-plugin-dependency-review;
+  moot after removing the .opencode dependency manifest and lockfile.
 
 ## A-020 — generated_pack_file overloads PackFile.source with MANIFEST_PATH for template-less files
 - status: open
@@ -602,4 +607,3 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - notes: tracked → .trellis/tasks/07-15-surface-generation (implemented in
   0.13.0: make generate + drift test; transform rules moved from parity tests
   into the generator)
-
