@@ -2,7 +2,7 @@
   "id": "sd-retro-toolchain-routing",
   "name": "sd-retro-toolchain-routing",
   "title": "Route sd-retro recorder through pack toolchain",
-  "description": "",
+  "description": "Route shared sd-retro Python helper calls through the shipped pack toolchain selector.",
   "status": "completed",
   "dev_type": null,
   "scope": null,

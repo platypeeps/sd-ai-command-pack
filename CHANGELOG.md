@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.5 - 2026-07-16
+
+- Make the install audit's optional upstream-manifest read explicitly use
+  strict UTF-8 decoding, preserving its existing advisory-only failure path
+  while satisfying repository encoding-policy checks.
+- Add regression coverage for malformed UTF-8 upstream manifests.
+
 ## 0.15.4 - 2026-07-16
 
 - Route every shared SD skill invocation of a pack-owned Python helper through

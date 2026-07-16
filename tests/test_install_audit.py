@@ -804,6 +804,24 @@ class InstallAuditTests(InstallTestCase):
             self.assertEqual(missing.returncode, 0, missing.stdout)
             self.assertIn("could not determine upstream version", missing.stdout)
 
+            invalid_utf8 = Path(temp_dir) / "invalid-utf8.json"
+            invalid_utf8.write_bytes(b'\xff{"version": "99.0.0"}\n')
+            malformed = subprocess.run(
+                [
+                    sys.executable,
+                    str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                    "--upstream-manifest",
+                    str(invalid_utf8),
+                ],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(malformed.returncode, 0, malformed.stdout)
+            self.assertIn("could not determine upstream version", malformed.stdout)
+
     def test_install_audit_ignores_user_tuned_preserved_files(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
