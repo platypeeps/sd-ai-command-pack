@@ -508,3 +508,39 @@ Removed the unused OpenCode plugin dependency footprint, documented the dependen
 ### Next Steps
 
 - None - task complete
+
+
+## Session 114: Restore 5 review rounds + cycle counters (0.14.0)
+
+**Date**: 2026-07-16
+**Task**: Restore 5 review rounds + cycle counters (0.14.0)
+**Branch**: `main`
+
+### Summary
+
+Restored the remote review round-limit default to five (cut to two in 0.9.0) across skill/adapters/docs/tests, and added mandatory review-cycle counters: sd-review-pr reports rounds used of limit, housekeeping's final state reports the merged PR's submitted reviewer review count. Adapters regenerated via make generate. Merged PR #128 as 0.14.0; bumped from 0.13.3 (parallel maintainer sessions shipped 0.13.2/0.13.3).
+
+### Main Changes
+
+- REMOTE_ROUND_LIMIT default 2 -> 5 (env override unchanged); dedicated parity test renamed and flipped
+- sd-review-pr Final Report: mandatory Remote review rounds used row; housekeeping: mandatory PR review rounds row + gh reviews read guidance
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e1a2f1f` | Merge pull request #128 from platypeeps/feat/review-rounds-counter |
+
+### Testing
+
+- [OK] make test + make full-check green at 0.14.0
+- [OK] Copilot review clean (1 round used of 5)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Fleet rollout 0.10.5..0.14.0 via sd-fleet-refresh when requested
