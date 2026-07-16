@@ -66,6 +66,7 @@ NODE_BUILTIN_MODULES = {
     "url",
     "util",
 }
+OPENCODE_MODULE_EXTENSIONS = (".js", ".mjs", ".cjs")
 
 
 def strip_js_comments(content: str) -> str:
@@ -75,6 +76,20 @@ def strip_js_comments(content: str) -> str:
     )
 
 
+def collect_js_from_specifier(lines: list[str], index: int, *, stop_at_brace: bool) -> tuple[str | None, int]:
+    statement = lines[index]
+    from_match = re.search(r'\bfrom\s+["\']([^"\']+)["\']', statement)
+    while from_match is None and index + 1 < len(lines):
+        if stop_at_brace and "}" in statement:
+            break
+        index += 1
+        statement = f"{statement}\n{lines[index]}"
+        from_match = re.search(r'\bfrom\s+["\']([^"\']+)["\']', statement)
+    if from_match:
+        return from_match.group(1), index
+    return None, index
+
+
 def find_js_module_specifiers(content: str) -> list[str]:
     stripped = strip_js_comments(content)
     specifiers: list[str] = []
@@ -82,7 +97,6 @@ def find_js_module_specifiers(content: str) -> list[str]:
     index = 0
     while index < len(lines):
         line = lines[index]
-        statement = line
         stripped_line = line.lstrip()
 
         side_effect_import = re.match(
@@ -94,14 +108,30 @@ def find_js_module_specifiers(content: str) -> list[str]:
             index += 1
             continue
 
-        if stripped_line.startswith(("import ", "export ")):
-            from_match = re.search(r'\bfrom\s+["\']([^"\']+)["\']', statement)
-            while from_match is None and index + 1 < len(lines):
-                index += 1
-                statement = f"{statement}\n{lines[index]}"
-                from_match = re.search(r'\bfrom\s+["\']([^"\']+)["\']', statement)
-            if from_match:
-                specifiers.append(from_match.group(1))
+        if stripped_line.startswith("import "):
+            imported, index = collect_js_from_specifier(
+                lines,
+                index,
+                stop_at_brace=False,
+            )
+            if imported:
+                specifiers.append(imported)
+        elif stripped_line.startswith("export *"):
+            imported, index = collect_js_from_specifier(
+                lines,
+                index,
+                stop_at_brace=False,
+            )
+            if imported:
+                specifiers.append(imported)
+        elif stripped_line.startswith("export {"):
+            imported, index = collect_js_from_specifier(
+                lines,
+                index,
+                stop_at_brace=True,
+            )
+            if imported:
+                specifiers.append(imported)
 
         index += 1
 
@@ -112,6 +142,19 @@ def find_js_module_specifiers(content: str) -> list[str]:
     for pattern in call_patterns:
         specifiers.extend(re.findall(pattern, stripped, re.MULTILINE))
     return specifiers
+
+
+def is_node_builtin_module(imported: str) -> bool:
+    module_root = imported.split("/", 1)[0]
+    return imported in NODE_BUILTIN_MODULES or module_root in NODE_BUILTIN_MODULES
+
+
+def opencode_module_sources(root: Path) -> list[Path]:
+    opencode_root = root / ".opencode"
+    sources: list[Path] = []
+    for suffix in OPENCODE_MODULE_EXTENSIONS:
+        sources.extend(opencode_root.glob(f"**/*{suffix}"))
+    return sorted(sources)
 
 
 def strip_yaml_frontmatter(content: str) -> str:
@@ -1213,12 +1256,11 @@ class GeneratedParityTests(InstallTestCase):
             )
 
         external_imports: list[str] = []
-        for source in sorted((PACK_ROOT / ".opencode").glob("**/*.js")):
+        for source in opencode_module_sources(PACK_ROOT):
             text = source.read_text(encoding="utf-8")
             for imported in find_js_module_specifiers(text):
-                if (
-                    not imported.startswith((".", "/", "node:"))
-                    and imported not in NODE_BUILTIN_MODULES
+                if not imported.startswith((".", "/", "node:")) and not is_node_builtin_module(
+                    imported
                 ):
                     external_imports.append(
                         f"{source.relative_to(PACK_ROOT)} imports {imported}"
@@ -1239,6 +1281,10 @@ class GeneratedParityTests(InstallTestCase):
             export {
                 value,
             } from "external-reexport-multiline"
+            export default function plugin() {}
+            import later from "external-after-default"
+            export { localValue }
+            import afterLocalExport from "external-after-local-export"
             const required = require("external-require")
             const dynamic = await import("external-dynamic")
             // require("ignored-comment")
@@ -1254,11 +1300,30 @@ class GeneratedParityTests(InstallTestCase):
                 "external-side-effect",
                 "external-reexport",
                 "external-reexport-multiline",
+                "external-after-default",
+                "external-after-local-export",
                 "external-require",
                 "external-dynamic",
             ],
             specifiers,
         )
+
+    def test_opencode_dependency_scan_covers_module_extensions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            opencode_root = root / ".opencode"
+            opencode_root.mkdir()
+            for filename in ("plugin.js", "tool.mjs", "helper.cjs", "ignored.ts"):
+                (opencode_root / filename).write_text("", encoding="utf-8")
+
+            self.assertEqual(
+                [
+                    opencode_root / "helper.cjs",
+                    opencode_root / "plugin.js",
+                    opencode_root / "tool.mjs",
+                ],
+                opencode_module_sources(root),
+            )
 
     def test_repo_declares_mit_license(self) -> None:
         raw, _ = install.load_manifest()
