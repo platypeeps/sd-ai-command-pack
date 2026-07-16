@@ -159,19 +159,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Fetch pull request base
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: >-
-          git fetch --no-tags --prune --depth=1 origin
-          "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-
       - name: Run release payload gate
         env:
-          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
+          git cat-file -e "${BASE_SHA}^{commit}"
           SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE=1 \
-          SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF="origin/${BASE_REF}" \
+          SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF="${BASE_SHA}" \
           bash -c 'source scripts/sd-ai-command-pack-full-check.sh; run_pack_source_drift_gates'
 
   main-push-scope:

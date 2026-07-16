@@ -223,12 +223,15 @@ class ReleaseLedgerTests(InstallTestCase):
         self.assertIn("github.event_name == 'pull_request'", job["if"])
         checkout_step = job["steps"][0]
         self.assertEqual(checkout_step["with"]["fetch-depth"], "0")
-        fetch_step = job["steps"][1]
-        self.assertIn("refs/remotes/origin/${BASE_REF}", fetch_step["run"])
-        run_step = job["steps"][2]
+        run_step = job["steps"][1]
+        self.assertEqual(
+            run_step["env"]["BASE_SHA"],
+            "${{ github.event.pull_request.base.sha }}",
+        )
+        self.assertIn('git cat-file -e "${BASE_SHA}^{commit}"', run_step["run"])
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE=1", run_step["run"])
         self.assertIn(
-            'SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF="origin/${BASE_REF}"',
+            'SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF="${BASE_SHA}"',
             run_step["run"],
         )
         self.assertIn("run_pack_source_drift_gates", run_step["run"])
