@@ -32,11 +32,12 @@ from installer.registry import (
     TRELLIS_INIT_PLATFORM_FLAGS,
     TRELLIS_INSTALL_DOCS_URL,
 )
+from installer.status import LocalOnlyStatus, RemoveStatus
 
 
 @dataclass(frozen=True)
 class LocalOnlyResult:
-    status: str
+    status: LocalOnlyStatus
     target: Path
     detail: str | None = None
 
@@ -142,14 +143,17 @@ def ensure_trellis_for_local_only(
     skip_trellis_init: bool,
 ) -> LocalOnlyResult:
     if (target / ".trellis" / "config.yaml").is_file():
-        return LocalOnlyResult("trellis-present", Path(".trellis/config.yaml"))
+        return LocalOnlyResult(
+            LocalOnlyStatus.TRELLIS_PRESENT,
+            Path(".trellis/config.yaml"),
+        )
     if skip_trellis_init:
         require_trellis_repo(target)
 
     command = trellis_init_command(platforms, install_all)
     if dry_run:
         return LocalOnlyResult(
-            "would-init-trellis-local",
+            LocalOnlyStatus.WOULD_INIT_TRELLIS_LOCAL,
             Path(".trellis/config.yaml"),
             " ".join(command),
         )
@@ -178,7 +182,7 @@ def ensure_trellis_for_local_only(
             "error: trellis init completed but .trellis/config.yaml is missing"
         )
     return LocalOnlyResult(
-        "initialized-trellis-local",
+        LocalOnlyStatus.INITIALIZED_TRELLIS_LOCAL,
         Path(".trellis/config.yaml"),
         " ".join(command),
     )
@@ -296,12 +300,19 @@ def ensure_local_only_exclude(
     block = local_only_exclude_block(local_only_exclude_patterns(selected))
     merged = merge_local_only_exclude_block(current, block)
     if merged == current:
-        return LocalOnlyResult("local-exclude-unchanged", exclude_path)
+        return LocalOnlyResult(LocalOnlyStatus.LOCAL_EXCLUDE_UNCHANGED, exclude_path)
     if dry_run:
-        return LocalOnlyResult("would-update-local-exclude", exclude_path)
+        return LocalOnlyResult(
+            LocalOnlyStatus.WOULD_UPDATE_LOCAL_EXCLUDE,
+            exclude_path,
+        )
     exclude_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(exclude_path, merged)
-    status = "local-exclude-updated" if current else "local-exclude-created"
+    status = (
+        LocalOnlyStatus.LOCAL_EXCLUDE_UPDATED
+        if current
+        else LocalOnlyStatus.LOCAL_EXCLUDE_CREATED
+    )
     return LocalOnlyResult(status, exclude_path)
 
 
@@ -313,12 +324,21 @@ def write_local_only_marker(target: Path, *, dry_run: bool) -> LocalOnlyResult:
         ".git/info/exclude for this local clone.\n"
     )
     if marker.exists() and read_text_strict(marker, str(LOCAL_ONLY_MARKER_FILE)) == content:
-        return LocalOnlyResult("local-only-marker-unchanged", LOCAL_ONLY_MARKER_FILE)
+        return LocalOnlyResult(
+            LocalOnlyStatus.LOCAL_ONLY_MARKER_UNCHANGED,
+            LOCAL_ONLY_MARKER_FILE,
+        )
     if dry_run:
-        return LocalOnlyResult("would-write-local-only-marker", LOCAL_ONLY_MARKER_FILE)
+        return LocalOnlyResult(
+            LocalOnlyStatus.WOULD_WRITE_LOCAL_ONLY_MARKER,
+            LOCAL_ONLY_MARKER_FILE,
+        )
     marker.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(marker, content)
-    return LocalOnlyResult("local-only-marker-written", LOCAL_ONLY_MARKER_FILE)
+    return LocalOnlyResult(
+        LocalOnlyStatus.LOCAL_ONLY_MARKER_WRITTEN,
+        LOCAL_ONLY_MARKER_FILE,
+    )
 
 
 def optional_git_info_exclude_path(target: Path) -> Path | None:
@@ -348,19 +368,20 @@ def remove_local_only_exclude(target: Path, *, dry_run: bool) -> RemoveResult | 
     except SystemExit as error:
         return RemoveResult(
             exclude_path,
-            "preserved",
+            RemoveStatus.PRESERVED,
             detail=system_exit_detail(error),
         )
     if stripped == current:
         return None
     if dry_run:
-        return RemoveResult(exclude_path, "would-update")
+        return RemoveResult(exclude_path, RemoveStatus.WOULD_UPDATE)
     atomic_write_text(exclude_path, stripped)
-    return RemoveResult(exclude_path, "updated")
+    return RemoveResult(exclude_path, RemoveStatus.UPDATED)
 
 
 __all__ = [
     "LocalOnlyResult",
+    "LocalOnlyStatus",
     "ensure_local_only_exclude",
     "ensure_trellis_for_local_only",
     "git_info_exclude_path",

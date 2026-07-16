@@ -38,6 +38,12 @@ from installer.registry import (
     TRELLIS_GITIGNORE_START,
     TRELLIS_GITIGNORE_TARGET,
 )
+from installer.status import (
+    CONFLICT_STATUSES,
+    VOUCHABLE_STATUSES,
+    InstallStatus,
+    RemoveStatus,
+)
 
 _LEGACY_CLAUDE_GITIGNORE_SEQUENCE = (
     ".claude/**",
@@ -50,15 +56,8 @@ _LEGACY_CLAUDE_GITIGNORE_SEQUENCE = (
 @dataclass(frozen=True)
 class InstallResult:
     file: PackFile
-    status: str
+    status: InstallStatus
     backup: Path | None = None
-
-
-# InstallResult.status stays a str (it is printed with width specifiers like
-# f"{result.status:11}"), so centralize the membership sets here: a typo at a
-# comparison site becomes a NameError instead of a silent membership miss.
-CONFLICT_STATUSES = frozenset({"conflict", "symlink-conflict"})
-VOUCHABLE_STATUSES = frozenset({"created", "updated", "unchanged", "overwritten"})
 
 
 def generated_pack_file(kind: str, target: Path) -> PackFile:
@@ -240,9 +239,9 @@ def install_file(
         # (lstat-based), so a symlinked target must never report
         # "unchanged"/vouchable even when the linked content is identical.
         if file.install == IF_NOT_EXISTS or file.target in FORCE_PRESERVED_TARGETS:
-            return InstallResult(file, "preserved")
+            return InstallResult(file, InstallStatus.PRESERVED)
         if not force:
-            return InstallResult(file, "symlink-conflict")
+            return InstallResult(file, InstallStatus.SYMLINK_CONFLICT)
         backup_path = None
         if not dry_run:
             backup_path = backup_existing_file(
@@ -252,15 +251,15 @@ def install_file(
                 dry_run=dry_run,
             )
             atomic_write_bytes(destination, new_content, executable=executable)
-        return InstallResult(file, "overwritten", backup_path)
+        return InstallResult(file, InstallStatus.OVERWRITTEN, backup_path)
     if destination.exists():
         current = destination.read_bytes()
         if current == new_content:
-            return InstallResult(file, "unchanged")
+            return InstallResult(file, InstallStatus.UNCHANGED)
         if file.install == IF_NOT_EXISTS or file.target in FORCE_PRESERVED_TARGETS:
-            return InstallResult(file, "preserved")
+            return InstallResult(file, InstallStatus.PRESERVED)
         if not force:
-            return InstallResult(file, "conflict")
+            return InstallResult(file, InstallStatus.CONFLICT)
         backup_path = None
         if not dry_run:
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -271,12 +270,12 @@ def install_file(
                 dry_run=dry_run,
             )
             atomic_write_bytes(destination, new_content, executable=executable)
-        return InstallResult(file, "overwritten", backup_path)
+        return InstallResult(file, InstallStatus.OVERWRITTEN, backup_path)
 
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_bytes(destination, new_content, executable=executable)
-    return InstallResult(file, "created")
+    return InstallResult(file, InstallStatus.CREATED)
 
 
 def normalize_managed_block_template(file: PackFile) -> str:
@@ -404,11 +403,14 @@ def install_trellis_gitignore(target: Path, *, dry_run: bool) -> InstallResult:
     current = read_text_if_exists(destination, str(file.target))
     merged = merge_trellis_gitignore_block(current)
     if merged == current:
-        return InstallResult(file, "unchanged")
+        return InstallResult(file, InstallStatus.UNCHANGED)
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(destination, merged)
-    return InstallResult(file, "updated" if existed else "created")
+    return InstallResult(
+        file,
+        InstallStatus.UPDATED if existed else InstallStatus.CREATED,
+    )
 
 
 def install_managed_block(
@@ -431,15 +433,15 @@ def install_managed_block(
         )
         merged = merge_managed_block(current, block)
         if merged == current:
-            return InstallResult(file, "unchanged")
+            return InstallResult(file, InstallStatus.UNCHANGED)
         if not dry_run:
             atomic_write_text_preserving_invalid_utf8(destination, merged)
-        return InstallResult(file, "updated")
+        return InstallResult(file, InstallStatus.UPDATED)
 
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(destination, block)
-    return InstallResult(file, "created")
+    return InstallResult(file, InstallStatus.CREATED)
 
 
 def remove_marked_block(
@@ -533,18 +535,22 @@ def remove_text_block_file(
     except SystemExit as error:
         return RemoveResult(
             relative_path,
-            "preserved",
+            RemoveStatus.PRESERVED,
             detail=system_exit_detail(error),
         )
     if not path_is_occupied(destination):
-        return RemoveResult(relative_path, "missing")
+        return RemoveResult(relative_path, RemoveStatus.MISSING)
     if destination.is_symlink() or not destination.is_file():
-        return RemoveResult(relative_path, "preserved", detail="target is not a regular file")
+        return RemoveResult(
+            relative_path,
+            RemoveStatus.PRESERVED,
+            detail="target is not a regular file",
+        )
 
     if preserve_invalid_utf8:
         content, detail = read_bytes_for_remove(destination, "target")
         if detail is not None:
-            return RemoveResult(relative_path, "preserved", detail=detail)
+            return RemoveResult(relative_path, RemoveStatus.PRESERVED, detail=detail)
         assert content is not None
         current = content.decode(
             "utf-8",
@@ -556,7 +562,7 @@ def remove_text_block_file(
         except SystemExit as error:
             return RemoveResult(
                 relative_path,
-                "preserved",
+                RemoveStatus.PRESERVED,
                 detail=system_exit_detail(error),
             )
     try:
@@ -569,17 +575,25 @@ def remove_text_block_file(
     except SystemExit as error:
         return RemoveResult(
             relative_path,
-            "preserved",
+            RemoveStatus.PRESERVED,
             detail=system_exit_detail(error),
         )
     if stripped == current:
-        return RemoveResult(relative_path, "unchanged", detail="managed block not present")
+        return RemoveResult(
+            relative_path,
+            RemoveStatus.UNCHANGED,
+            detail="managed block not present",
+        )
 
-    status = "removed" if not stripped.strip() else "updated"
+    status = RemoveStatus.REMOVED if not stripped.strip() else RemoveStatus.UPDATED
     if dry_run:
         return RemoveResult(
             relative_path,
-            "would-remove" if status == "removed" else "would-update",
+            (
+                RemoveStatus.WOULD_REMOVE
+                if status is RemoveStatus.REMOVED
+                else RemoveStatus.WOULD_UPDATE
+            ),
         )
 
     backup_path = backup_existing_file(
@@ -588,7 +602,7 @@ def remove_text_block_file(
         backup=backup,
         dry_run=dry_run,
     )
-    if status == "removed":
+    if status is RemoveStatus.REMOVED:
         unlink_target_file(target, destination)
         prune_empty_parent_dirs(target, destination)
     elif preserve_invalid_utf8:
@@ -603,7 +617,7 @@ def remove_text_block_file(
 @dataclass(frozen=True)
 class RemoveResult:
     target: Path
-    status: str
+    status: RemoveStatus
     backup: Path | None = None
     detail: str | None = None
 
@@ -663,7 +677,9 @@ def display_path(target: Path, path: Path) -> Path:
 __all__ = [
     "CONFLICT_STATUSES",
     "InstallResult",
+    "InstallStatus",
     "RemoveResult",
+    "RemoveStatus",
     "VOUCHABLE_STATUSES",
     "atomic_write_bytes",
     "atomic_write_text",

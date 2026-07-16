@@ -11,6 +11,7 @@ from pathlib import Path
 from installer.fileops import (
     VOUCHABLE_STATUSES,
     InstallResult,
+    InstallStatus,
     atomic_write_text,
     generated_pack_file,
 )
@@ -172,15 +173,15 @@ def _install_generated_text_file(
     if destination.exists():
         current = read_text_strict(destination, str(file.target))
         if current == content:
-            return InstallResult(file, "unchanged")
+            return InstallResult(file, InstallStatus.UNCHANGED)
         if not dry_run:
             atomic_write_text(destination, content)
-        return InstallResult(file, "updated")
+        return InstallResult(file, InstallStatus.UPDATED)
 
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(destination, content)
-    return InstallResult(file, "created")
+    return InstallResult(file, InstallStatus.CREATED)
 
 
 def install_provenance_file(

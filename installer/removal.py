@@ -40,6 +40,7 @@ from installer.registry import (
     TRELLIS_GITIGNORE_START,
     TRELLIS_GITIGNORE_TARGET,
 )
+from installer.status import WRITTEN_REMOVE_STATUSES, RemoveStatus
 
 GENERATED_REMOVAL_TARGETS = frozenset(
     {
@@ -93,9 +94,9 @@ RETIRED_TARGETS: tuple[str, ...] = (
 # retirement, not pack removal ("missing" is excluded on purpose: absent
 # retired targets are skipped without a result).
 _RETIRED_STATUSES = {
-    "removed": "retired",
-    "preserved": "retired-preserved",
-    "would-remove": "would-retire",
+    RemoveStatus.REMOVED: RemoveStatus.RETIRED,
+    RemoveStatus.PRESERVED: RemoveStatus.RETIRED_PRESERVED,
+    RemoveStatus.WOULD_REMOVE: RemoveStatus.WOULD_RETIRE,
 }
 
 
@@ -211,16 +212,24 @@ def remove_pack_file(
     except SystemExit as error:
         return RemoveResult(
             relative_path,
-            "preserved",
+            RemoveStatus.PRESERVED,
             detail=system_exit_detail(error),
         )
     if not path_is_occupied(destination):
-        return RemoveResult(relative_path, "missing")
+        return RemoveResult(relative_path, RemoveStatus.MISSING)
     if destination.is_symlink():
         if not force:
-            return RemoveResult(relative_path, "preserved", detail="target is a symlink")
+            return RemoveResult(
+                relative_path,
+                RemoveStatus.PRESERVED,
+                detail="target is a symlink",
+            )
     elif not destination.is_file():
-        return RemoveResult(relative_path, "preserved", detail="target is not a regular file")
+        return RemoveResult(
+            relative_path,
+            RemoveStatus.PRESERVED,
+            detail="target is not a regular file",
+        )
 
     generated_state = relative_path in {
         INSTALLED_TARGETS_FILE,
@@ -239,9 +248,9 @@ def remove_pack_file(
             force=force,
         )
     if not removable:
-        return RemoveResult(relative_path, "preserved", detail=detail)
+        return RemoveResult(relative_path, RemoveStatus.PRESERVED, detail=detail)
     if dry_run:
-        return RemoveResult(relative_path, "would-remove")
+        return RemoveResult(relative_path, RemoveStatus.WOULD_REMOVE)
 
     backup_path = None
     if not destination.is_symlink():
@@ -253,7 +262,7 @@ def remove_pack_file(
         )
     unlink_target_file(target, destination)
     prune_empty_parent_dirs(target, destination)
-    return RemoveResult(relative_path, "removed", backup_path)
+    return RemoveResult(relative_path, RemoveStatus.REMOVED, backup_path)
 
 
 def retire_stale_targets(
@@ -288,7 +297,7 @@ def retire_stale_targets(
             dry_run=dry_run,
             backup=backup,
         )
-        if result.status == "missing":
+        if result.status is RemoveStatus.MISSING:
             continue
         results.append(
             RemoveResult(
@@ -368,7 +377,9 @@ def remove_installed_pack(
     ):
         rejection = removal_candidate_rejection(candidate, recognized_targets)
         if rejection is not None:
-            results.append(RemoveResult(Path(candidate), "ignored", detail=rejection))
+            results.append(
+                RemoveResult(Path(candidate), RemoveStatus.IGNORED, detail=rejection)
+            )
             continue
         relative_path = Path(candidate)
         file = files_by_target.get(relative_path.as_posix())
@@ -397,7 +408,7 @@ def remove_installed_pack(
     changed_paths = [
         result.target
         for result in results
-        if result.status in {"removed", "updated"}
+        if result.status in WRITTEN_REMOVE_STATUSES
         and not result.target.is_absolute()
     ]
     if not dry_run and not skip_diff_check:
@@ -419,5 +430,6 @@ __all__ = [
     "removal_candidate_rejection",
     "remove_installed_pack",
     "remove_pack_file",
+    "RemoveStatus",
     "retire_stale_targets",
 ]
