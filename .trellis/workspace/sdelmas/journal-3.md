@@ -391,3 +391,47 @@ Added a typed status vocabulary for installer result objects, replaced raw statu
 ### Next Steps
 
 - None - task complete
+
+
+## Session 111: Per-file script coverage gate
+
+**Date**: 2026-07-16
+**Task**: Per-file script coverage gate
+**Branch**: `codex/coverage-gate-per-file`
+
+### Summary
+
+Added per-file coverage floors for shipped Python helpers and expanded fleet-preflight CLI coverage.
+
+### Main Changes
+
+- Added a shared shipped-script coverage helper with aggregate and per-file floors, wired into CI and make test.
+- Expanded fleet-preflight CLI tests for JSON output, text subprocess output, unknown consumers, and fail-on-refresh-needed.
+- Documented the coverage policy in README, CONTRIBUTING, task notes, and backend quality specs.
+- Addressed two Copilot review findings: duplicate floor detection and repo-root resolution in the helper.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `670969f` | Add per-file script coverage gate |
+| `e7eb9c2` | Address coverage gate review feedback |
+| `29de32b` | Harden shipped script coverage helper |
+
+### Testing
+
+- [OK] bash scripts/sd-ai-command-pack-toolchain.sh run-python -- -m unittest tests.test_fleet_preflight tests.test_pack_drift tests.test_generated_parity.GeneratedParityTests.test_coverage_dependency_is_declared_and_used_by_ci
+- [OK] make test
+- [OK] make lint
+- [OK] make audit
+- [OK] bash /Users/sven/repos/platypeeps/sd-ai-command-pack/.github/scripts/check-shipped-script-coverage.sh (from /private/tmp)
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #125 after finish-work commits are pushed and the merge guard remains clean.
