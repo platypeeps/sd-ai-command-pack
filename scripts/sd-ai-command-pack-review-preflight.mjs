@@ -408,12 +408,14 @@ function checkTrellisJournalRecords() {
     return;
   }
 
+  const baselineRef = journalBaselineRef();
   const developerDirs = readdirSync(workspaceRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => resolve(workspaceRoot, entry.name))
     .sort();
   let completedSessions = 0;
   let comparedSessions = 0;
+  let baselineSessionsCompared = 0;
 
   for (const developerDir of developerDirs) {
     const developerRelative = absoluteToRelative(developerDir);
@@ -423,9 +425,16 @@ function checkTrellisJournalRecords() {
       .map((entry) => `${developerRelative}/${entry.name}`)
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     const journalSessions = [];
+    const baselineJournalSessions = [];
 
     for (const journalFile of journalFiles) {
       journalSessions.push(...parseJournalSessions(journalFile));
+      if (baselineRef) {
+        const baselineText = gitFileAtRef(baselineRef, journalFile);
+        if (baselineText !== null) {
+          baselineJournalSessions.push(...parseJournalSessionsFromText(journalFile, baselineText));
+        }
+      }
     }
 
     if (journalSessions.length === 0) {
@@ -452,13 +461,27 @@ function checkTrellisJournalRecords() {
     for (const message of validation.failures) {
       fail(message);
     }
+
+    baselineSessionsCompared += baselineJournalSessions.length;
+    for (const session of findHistoricalTrellisJournalSessionEdits(
+      baselineJournalSessions,
+      journalSessions,
+    )) {
+      fail(
+        `${session.file}:${session.startLine} modifies historical Session ${session.number} from ${baselineRef}; ` +
+          'Trellis journal history is append-only. Restore that session and edit the intended current session by heading.',
+      );
+    }
   }
 
   if (failures.length > failureStart) {
     return;
   }
 
-  pass(`checked ${completedSessions} completed Trellis journal session(s) for placeholders and ${comparedSessions} journal/index commit list(s).`);
+  pass(
+    `checked ${completedSessions} completed Trellis journal session(s) for placeholders, ` +
+      `${comparedSessions} journal/index commit list(s), and ${baselineSessionsCompared} baseline session(s) for historical edits.`,
+  );
 }
 
 function checkDiffSize() {
@@ -836,6 +859,11 @@ function gitStdout(args) {
   return result.stdout.trim();
 }
 
+function gitFileAtRef(ref, file) {
+  const result = runGit(['show', `${ref}:${file}`]);
+  return result.status === 0 ? result.stdout : null;
+}
+
 function gitRefExists(ref) {
   if (!ref || ref.startsWith('-')) {
     return false;
@@ -882,6 +910,14 @@ function defaultReviewBaseRef() {
     .sort();
 
   return remoteRefs[0] || '';
+}
+
+function journalBaselineRef() {
+  const baseRef = defaultReviewBaseRef();
+  if (baseRef) {
+    return baseRef;
+  }
+  return gitRefExists('HEAD') ? 'HEAD' : '';
 }
 
 function currentDiffSources(...kindArgs) {
@@ -1099,6 +1135,40 @@ export function parseJournalSessionsFromText(file, text) {
       commits: extractCommitHashes(extractMarkdownSection(content, 'Git Commits')),
     };
   });
+}
+
+export function findHistoricalTrellisJournalSessionEdits(baselineSessions, currentSessions) {
+  if (baselineSessions.length === 0 || currentSessions.length === 0) {
+    return [];
+  }
+
+  const currentByNumber = new Map();
+  for (const session of currentSessions) {
+    if (!currentByNumber.has(session.number)) {
+      currentByNumber.set(session.number, session);
+    }
+  }
+
+  const newestCurrentSession = Math.max(...currentByNumber.keys());
+  const edits = [];
+
+  for (const baselineSession of baselineSessions) {
+    const currentSession = currentByNumber.get(baselineSession.number);
+    if (
+      currentSession &&
+      currentSession.number < newestCurrentSession &&
+      normalizeJournalSessionContent(currentSession.content) !==
+        normalizeJournalSessionContent(baselineSession.content)
+    ) {
+      edits.push(currentSession);
+    }
+  }
+
+  return edits;
+}
+
+function normalizeJournalSessionContent(content) {
+  return content.replace(/\r\n?/g, '\n').trimEnd();
 }
 
 function parseWorkspaceIndexSessions(file) {

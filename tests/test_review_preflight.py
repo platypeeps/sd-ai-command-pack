@@ -47,6 +47,7 @@ import assert from 'node:assert/strict';
 import {
   copiedTemplateKind,
   extractDocumentationPathReferences,
+  findHistoricalTrellisJournalSessionEdits,
   parseNumstat,
   parseJournalSessionsFromText,
   parseWorkspaceIndexSessionsFromText,
@@ -109,6 +110,29 @@ const validation = validateTrellisJournalSessions({
 assert.equal(validation.completedSessions, 1);
 assert.ok(validation.failures.some((failure) => failure.includes('(Add details)')));
 assert.ok(validation.failures.some((failure) => failure.includes('commits `1234567` do not match')));
+const currentJournal = parseJournalSessionsFromText('.trellis/workspace/dev/journal-1.md', [
+  '## Session 1: Done',
+  '### Main Changes',
+  '- Accidentally replaced history.',
+  '## Session 2: Current',
+  '### Main Changes',
+  '- Intended current change.',
+].join('\\n'));
+assert.deepEqual(
+  findHistoricalTrellisJournalSessionEdits(journal, currentJournal).map((session) => session.number),
+  [1],
+);
+assert.deepEqual(
+  findHistoricalTrellisJournalSessionEdits(
+    journal,
+    parseJournalSessionsFromText('.trellis/workspace/dev/journal-1.md', [
+      '## Session 1: Current correction',
+      '### Main Changes',
+      '- Explicitly corrected current session.',
+    ].join('\\n')),
+  ),
+  [],
+);
 """,
             ],
             cwd=PACK_ROOT,
@@ -371,6 +395,107 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("completed Session 1 still contains placeholder (Add details)", result.stdout)
         self.assertIn("completed Session 1 still contains placeholder (Add test results)", result.stdout)
         self.assertIn("commits `1234567` do not match", result.stdout)
+
+    def test_review_preflight_rejects_historical_trellis_journal_edits(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        workspace = root / ".trellis/workspace/dev"
+        workspace.mkdir(parents=True)
+        journal = workspace / "journal-1.md"
+        index = workspace / "index.md"
+        original_session = "\n".join(
+            [
+                "## Session 1: Historical fixture",
+                "### Status",
+                "- [OK] **Completed**",
+                "### Main Changes",
+                "- Original historical change.",
+                "### Testing",
+                "- Original historical validation.",
+                "### Git Commits",
+                "- abcdef1",
+            ]
+        )
+        journal.write_text(f"{original_session}\n", encoding="utf-8")
+        index.write_text(
+            "| Session | Title | Status | Commits | Notes |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| 1 | Historical fixture | Completed | abcdef1 | done |\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        current_session = "\n".join(
+            [
+                "## Session 2: Current fixture",
+                "### Status",
+                "- [OK] **Completed**",
+                "### Main Changes",
+                "- Intended current change.",
+                "### Testing",
+                "- Current validation.",
+                "### Git Commits",
+                "- 1234567",
+            ]
+        )
+        changed_history = original_session.replace(
+            "- Original historical change.",
+            "- Accidentally replaced history.",
+        )
+        journal.write_text(
+            f"{changed_history}\n\n{current_session}\n",
+            encoding="utf-8",
+        )
+        index.write_text(
+            "| Session | Title | Status | Commits | Notes |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| 1 | Historical fixture | Completed | abcdef1 | done |\n"
+            "| 2 | Current fixture | Completed | 1234567 | done |\n",
+            encoding="utf-8",
+        )
+        env = {
+            **os.environ,
+            "SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF": "HEAD",
+        }
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("modifies historical Session 1 from HEAD", result.stdout)
+        self.assertIn("edit the intended current session by heading", result.stdout)
+
+        journal.write_text(
+            f"{original_session}\n\n{current_session}\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("1 baseline session(s) for historical edits", result.stdout)
 
     def test_review_preflight_allows_configured_linux_service_users(self) -> None:
         node = shutil.which("node")
