@@ -181,6 +181,47 @@ assert.ok(validation.failures.some((failure) => failure.includes('commits `12345
         self.assertIn("WARN untracked files changes copied", result.stdout)
         self.assertIn(".agents/skills/sd-review-pr/SKILL.md", result.stdout)
 
+    def test_review_preflight_fails_hard_when_git_cannot_run(self) -> None:
+        # Regression: a git spawn failure (missing binary, buffer overflow)
+        # must FAIL the preflight naming the git command, not silently pass
+        # the diff-driven checks against an empty diff.
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(
+            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
+        )
+        empty_bin = root / "empty-bin"
+        empty_bin.mkdir()
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key
+            not in (
+                "SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF",
+            )
+        }
+        env["PATH"] = str(empty_bin)
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertRegex(result.stdout, r"FAIL .*: git .+ could not run: ")
+
     def test_archived_prd_backed_tasks_have_descriptions(self) -> None:
         missing_descriptions = self.archived_task_description_failures(
             PACK_ROOT / ".trellis/tasks/archive",

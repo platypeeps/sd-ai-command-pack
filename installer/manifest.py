@@ -1,4 +1,4 @@
-"""Part of the sd-ai-command-pack installer package."""
+"""Manifest loading and validation: PackFile entries and safe path resolution."""
 
 from __future__ import annotations
 
@@ -41,6 +41,9 @@ KNOWN_MANIFEST_KINDS = frozenset(
 
 
 def load_manifest() -> tuple[dict, list[PackFile]]:
+    """Parse manifest.json into its raw dict plus PackFile entries, aborting
+    with SystemExit on invalid JSON, an unsupported schemaVersion, or a
+    malformed files array."""
     try:
         raw = json.loads(read_text_strict(MANIFEST_PATH, "manifest"))
     except json.JSONDecodeError as error:
@@ -99,6 +102,8 @@ def load_manifest() -> tuple[dict, list[PackFile]]:
 
 
 def validate_manifest(files: list[PackFile]) -> None:
+    """Reject unknown platforms or kinds, unsafe or duplicate paths, and
+    missing pack templates, aborting with SystemExit on the first violation."""
     seen_targets: set[Path] = set()
     for file in files:
         if file.platform not in PLATFORMS:

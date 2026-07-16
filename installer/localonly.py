@@ -1,4 +1,4 @@
-"""Part of the sd-ai-command-pack installer package."""
+"""Local-only install mode: git info/exclude wiring and Trellis bootstrap."""
 
 from __future__ import annotations
 

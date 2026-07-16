@@ -1,4 +1,4 @@
-"""Part of the sd-ai-command-pack installer package."""
+"""Source of truth for platform adapters, command names, and pack-wide constants."""
 
 from __future__ import annotations
 

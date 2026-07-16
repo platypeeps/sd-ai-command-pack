@@ -175,11 +175,14 @@ def patch_last_session(
         )
         if not row_re.search(block):
             return f"missing commit table row for {commit_hash} in {journal}"
-        block = row_re.sub(
-            lambda _match, replacement=row: replacement,
-            block,
-            count=1,
-        )
+
+        def _row_replacement(_match: re.Match[str], replacement: str = row) -> str:
+            # A callable replacement keeps backslashes in the resolved
+            # subject literal instead of letting re.sub expand them as
+            # escapes; the default argument binds this iteration's row.
+            return replacement
+
+        block = row_re.sub(_row_replacement, block, count=1)
 
     patched = replace_section(block, "### Testing", tests)
     if patched is None:

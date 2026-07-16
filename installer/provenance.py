@@ -1,4 +1,4 @@
-"""Part of the sd-ai-command-pack installer package."""
+"""Install receipts: provenance hashes for vouching and the installed-targets record."""
 
 from __future__ import annotations
 

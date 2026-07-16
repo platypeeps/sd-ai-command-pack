@@ -513,6 +513,68 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertEqual(code, 2)
         self.assertIn("[sd-review-learnings:github]", stderr.getvalue())
 
+    def test_review_learnings_untracked_listing_failure_raises_runtime_error(
+        self,
+    ) -> None:
+        # A nonzero `git ls-files` exit must surface as RuntimeError carrying
+        # git's stderr, with a stable fallback message when stderr is blank.
+        module = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_untracked_failure",
+        )
+        fake_subprocess = mock.Mock()
+        fake_subprocess.run.return_value = subprocess.CompletedProcess(
+            args=["git"],
+            returncode=128,
+            stdout=b"",
+            stderr=b"fatal: not a git repository\n",
+        )
+
+        with mock.patch.object(module, "subprocess", fake_subprocess):
+            with self.assertRaisesRegex(RuntimeError, "not a git repository"):
+                module._git_untracked_paths(Path("."))
+
+        fake_subprocess.run.return_value = subprocess.CompletedProcess(
+            args=["git"],
+            returncode=1,
+            stdout=b"",
+            stderr=b"  \n",
+        )
+
+        with mock.patch.object(module, "subprocess", fake_subprocess):
+            with self.assertRaisesRegex(RuntimeError, "git ls-files failed"):
+                module._git_untracked_paths(Path("."))
+
+    def test_review_learnings_working_tree_diff_includes_untracked_files(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_untracked_diff",
+        )
+        root = Path(tempfile.mkdtemp(prefix="sd-learnings-untracked-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        self.run_git(root, "init", "--quiet")
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "README.md").write_text("# base\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "--quiet", "-m", "seed")
+
+        (root / "README.md").write_text(
+            "# base\ntracked-change-line\n", encoding="utf-8"
+        )
+        untracked = root / "notes" / "untracked.md"
+        untracked.parent.mkdir()
+        untracked.write_text("untracked-learning-line\n", encoding="utf-8")
+        # Untracked-but-not-a-regular-file entries must be skipped, not diffed.
+        (root / "dangling-link").symlink_to("missing-target")
+
+        diff_text = module.build_local_diff(root, base=None, include_working_tree=True)
+
+        self.assertIn("+tracked-change-line", diff_text)
+        self.assertIn("notes/untracked.md", diff_text)
+        self.assertIn("+untracked-learning-line", diff_text)
+        self.assertNotIn("dangling-link", diff_text)
+
 
 if __name__ == "__main__":
     unittest.main()

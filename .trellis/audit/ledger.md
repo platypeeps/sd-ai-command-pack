@@ -302,7 +302,8 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   same facade.
 - fix: Delete the 42 unreferenced names from the import block and __all__, or
   narrow the facade to the test-reached symbols.
-- notes:
+- notes: fixed in 0.13.1 via .trellis/tasks/07-15-p3-polish-batch —
+  facade trim (42 dead forwards removed; reached set re-derived) (status flip owned by the next audit run)
 
 ## A-017 — review-preflight.mjs spawnSync default 1MiB maxBuffer silently under-reports large diffs
 - status: open
@@ -318,7 +319,8 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   clean/empty: a failure that reports success.
 - fix: Pass an explicit larger maxBuffer and treat result.error as a hard
   failure.
-- notes:
+- notes: fixed in 0.13.1 via .trellis/tasks/07-15-p3-polish-batch —
+  preflight spawnSync maxBuffer + hard-fail on result.error (status flip owned by the next audit run)
 
 ## A-018 — Dependabot does not monitor the .opencode npm/bun ecosystem
 - status: open
@@ -382,7 +384,8 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   files.
 - fix: Add a README table row and a guide Configuration bullet for the
   REVIEW_PR_REMOTE_* family.
-- notes:
+- notes: fixed in 0.13.1 via .trellis/tasks/07-15-p3-polish-batch —
+  REVIEW_PR_REMOTE_* family documented in guide config + README (status flip owned by the next audit run)
 
 ## A-022 — Core installer entry points and every installer/ module lack meaningful docstrings
 - status: open
@@ -399,7 +402,8 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   bodies.
 - fix: One-line responsibility docstring per module; short docstrings on the
   primary public functions.
-- notes:
+- notes: fixed in 0.13.1 via .trellis/tasks/07-15-p3-polish-batch —
+  installer module + entry-point docstrings (status flip owned by the next audit run)
 
 ## A-023 — Post-payload dogfood-sync and KB-refresh steps are manual with no wrapping make target
 - status: open
@@ -415,7 +419,8 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - why: Exactly the steps maintainers forget, causing late-failing gate round-
   trips (this audit's own branch hit both, twice).
 - fix: Add a make sync target running the dogfood install and KB refresh.
-- notes:
+- notes: fixed in 0.13.1 via .trellis/tasks/07-15-p3-polish-batch —
+  make sync target wrapping dogfood install + KB refresh (status flip owned by the next audit run)
 
 ## A-024 — review-preflight recomputes the documentation file list and re-reads docs across checks
 - status: open
@@ -431,7 +436,8 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - why: The doc-tree walk runs twice and every doc file is read multiple times
   per preflight run.
 - fix: Compute the file list once; memoize readText with a Map.
-- notes:
+- notes: fixed in 0.13.1 via .trellis/tasks/07-15-p3-polish-batch —
+  preflight guard-file list + readText memoized (status flip owned by the next audit run)
 
 ## A-025 — Backfilled changelog release dates disagree with tag dates and are internally out of order
 - status: open
@@ -496,7 +502,8 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   silently.
 - fix: Add tests forcing git failures (stubbed git on PATH) and one staging an
   untracked file.
-- notes:
+- notes: fixed in 0.13.1 via .trellis/tasks/07-15-p3-polish-batch —
+  review-learnings error-branch tests (coverage 51%->57%) (status flip owned by the next audit run)
 
 ## A-029 — Green local make check does not predict green CI: node and shellcheck lanes silently skip when tools are absent
 - status: open
@@ -512,7 +519,8 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   lines of shell plus the .mjs preflight.
 - fix: Make shellcheck+node hard setup prerequisites, or a STRICT=1 mode
   turning skips into errors.
-- notes:
+- notes: fixed in 0.13.1 via .trellis/tasks/07-15-p3-polish-batch —
+  STRICT=1 make mode for node/shellcheck parity (status flip owned by the next audit run)
 
 ## A-030 — Type-check gate covers only installer/; shipped Python scripts get no mypy
 - status: open
@@ -526,7 +534,8 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
     install-audit ~32KB, pr-body-scope ~25KB) are ruff-only
 - why: The type gate leaves most of the shipped Python payload uncovered.
 - fix: Extend mypy to install.py and scripts/, or document the exclusion.
-- notes:
+- notes: fixed in 0.13.1 via .trellis/tasks/07-15-p3-polish-batch —
+  mypy extended to install.py + scripts (trivial typing fixes) (status flip owned by the next audit run)
 
 ## A-031 — Default install re-reads and re-hashes every source and destination in preflight then apply
 - status: open

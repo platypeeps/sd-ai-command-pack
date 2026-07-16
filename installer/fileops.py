@@ -1,4 +1,4 @@
-"""Part of the sd-ai-command-pack installer package."""
+"""Payload file operations: selection, atomic writes, backups, managed text blocks."""
 
 from __future__ import annotations
 
@@ -157,6 +157,9 @@ def selected_files(
     platforms: list[str] | None,
     install_all: bool,
 ) -> tuple[list[PackFile], list[tuple[PackFile, str]]]:
+    """Split manifest files into (selected, skipped-with-reason) for one run,
+    honoring always/if-not-exists policies, the platform filter or --all
+    override, and anchor plus active-Trellis-platform detection."""
     selected: list[PackFile] = []
     skipped: list[tuple[PackFile, str]] = []
     platform_filter = set(platforms or [])

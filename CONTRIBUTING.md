@@ -26,10 +26,13 @@ make check
 ```
 
 `make check` runs the full local maintainer battery: coverage-gated tests,
-Ruff, mypy over the installer package, pack JavaScript syntax checks when Node is available,
-optional ShellCheck, optional Bandit/Zizmor, and the SD full-check gate with
-Prism/Gito disabled. Missing optional tools print warnings instead of blocking
-Python-only contributor setups.
+Ruff, mypy over `installer/`, `install.py`, and shipped `scripts/`,
+pack JavaScript syntax checks when Node is available, optional ShellCheck,
+optional Bandit/Zizmor, and the SD full-check gate with Prism/Gito disabled.
+Missing optional tools print warnings instead of blocking Python-only
+contributor setups. Run `STRICT=1 make lint` to turn those missing-tool
+skips into hard errors for parity with CI, which always runs the Node and
+ShellCheck lanes.
 
 Ruff covers pack-owned Python in `install.py`, `installer/`, `scripts/`,
 `templates/scripts/`, and `tests/`. Trellis-owned platform runtime is excluded;
@@ -56,16 +59,14 @@ insufficient.
 - Treat `templates/**` as the source of truth for shipped files. Root-level
   copies under `.agents/`, `.opencode/`, `scripts/`, and similar dogfood paths
   are mirrors.
-- After changing shipped payload, self-sync the dogfood install when needed:
+- After changing shipped payload, and before full-check after README, docs,
+  spec, or task edits, run `make sync`: it self-syncs the dogfood install
+  (`install.py . --force`) and refreshes the generated spec KB
+  (`scripts/sd-ai-command-pack-update-spec-kb.py`) in one step.
+- Without make, the same two steps are:
 
   ```bash
   bash scripts/sd-ai-command-pack-toolchain.sh run-python -- install.py . --force
-  ```
-
-- Refresh the generated KB before full-check after README, docs, spec, or task
-  edits:
-
-  ```bash
   bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
     scripts/sd-ai-command-pack-update-spec-kb.py
   ```
