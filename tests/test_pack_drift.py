@@ -266,19 +266,23 @@ class PackDriftTests(InstallTestCase):
     def test_shipped_script_coverage_gate_lists_every_python_helper(self) -> None:
         gate = install.ROOT / ".github/scripts/check-shipped-script-coverage.sh"
         gate_text = gate.read_text(encoding="utf-8")
-        configured = {
-            script: int(floor)
-            for script, floor in re.findall(
-                r"^(scripts/sd-ai-command-pack-[^\s]+\.py)\s+([0-9]+)$",
-                gate_text,
-                flags=re.MULTILINE,
-            )
-        }
+        matches = re.findall(
+            r"^(scripts/sd-ai-command-pack-[^\s]+\.py)\s+([0-9]+)$",
+            gate_text,
+            flags=re.MULTILINE,
+        )
+        configured: dict[str, int] = {}
+        duplicates: list[str] = []
+        for script, floor in matches:
+            if script in configured:
+                duplicates.append(script)
+            configured[script] = int(floor)
         helpers = {
             path.relative_to(install.ROOT).as_posix()
             for path in (install.ROOT / "scripts").glob("sd-ai-command-pack-*.py")
         }
 
+        self.assertEqual(duplicates, [])
         self.assertEqual(set(configured), helpers)
         self.assertTrue(all(1 <= floor <= 100 for floor in configured.values()))
         self.assertIn('--include="scripts/sd-ai-command-pack-*.py"', gate_text)
