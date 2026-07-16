@@ -31,8 +31,19 @@ time instead of degrading silently.
 
 ## Acceptance Criteria
 
-- [ ] A manifest entry with an unknown `install` value fails validation
+- [x] A manifest entry with an unknown `install` value fails validation
       with a named-value error (test added).
-- [ ] Removing a platform from an order tuple (or adding a registry row
+- [x] Removing a platform from an order tuple (or adding a registry row
       without order membership) fails loudly at import/test time.
-- [ ] Installer coverage stays 100% line+branch.
+- [x] Installer coverage stays 100% line+branch.
+
+## Implementation Notes
+
+- `installer.registry` now defines `IF_ANCHOR_EXISTS`,
+  `KNOWN_INSTALL_MODES`, and import-time order validation for the
+  byte-stable registry group tuples.
+- `installer.manifest.validate_manifest` rejects unknown install modes with
+  the known values listed in the error, and `selected_files` defensively
+  rejects unknown modes when called directly.
+- Focused coverage in `tests/test_install_core.py` exercises invalid
+  install modes and missing, unexpected, and duplicate order groups.

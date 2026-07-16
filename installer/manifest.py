@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
 from installer.registry import (
+    IF_ANCHOR_EXISTS,
+    KNOWN_INSTALL_MODES,
     MANAGED_BLOCK_KIND,
     PLATFORMS,
     ROOT,
@@ -85,7 +87,7 @@ def load_manifest() -> tuple[dict, list[PackFile]]:
                     source=ROOT / str(item["source"]),
                     target=Path(str(item["target"])),
                     anchor=Path(str(item["anchor"])) if item.get("anchor") else None,
-                    install=str(item.get("install", "if-anchor-exists")),
+                    install=str(item.get("install", IF_ANCHOR_EXISTS)),
                 )
             )
         except KeyError as error:
@@ -112,6 +114,12 @@ def validate_manifest(files: list[PackFile]) -> None:
             raise SystemExit(
                 f"error: unknown kind {file.kind!r} in manifest for {file.target} "
                 f"(known kinds: {', '.join(sorted(KNOWN_MANIFEST_KINDS))})"
+            )
+        if file.install not in KNOWN_INSTALL_MODES:
+            raise SystemExit(
+                f"error: unknown install mode {file.install!r} in manifest for "
+                f"{file.target} (known install modes: "
+                f"{', '.join(sorted(KNOWN_INSTALL_MODES))})"
             )
         validate_pack_source(file.source)
         validate_relative_manifest_path("target", file.target)
@@ -246,7 +254,9 @@ def require_trellis_repo(target: Path) -> None:
 
 
 __all__ = [
+    "IF_ANCHOR_EXISTS",
     "KNOWN_MANIFEST_KINDS",
+    "KNOWN_INSTALL_MODES",
     "MANIFEST_PATH",
     "PackFile",
     "SUPPORTED_MANIFEST_SCHEMA_VERSION",
