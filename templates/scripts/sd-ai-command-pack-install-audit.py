@@ -413,17 +413,36 @@ def audit_expected_targets(
     for target in sorted(expected - targets):
         failures.append(f"expected installed target is missing from receipt: {target}")
 
+    target_events: list[tuple[str, str]] = []
     for target in sorted(expected):
         target_state = inspect_target_presence(root, Path(target))
         if target_state == "present":
             continue
         if target_state != "missing":
-            failures.append(
-                f"expected installed target cannot be inspected: {target} "
-                f"({target_state})"
+            target_events.append(
+                (
+                    "failure",
+                    (
+                        f"expected installed target cannot be inspected: {target} "
+                        f"({target_state})"
+                    ),
+                )
             )
             continue
-        if is_gitignored(root, target):
+        target_events.append(("missing", target))
+
+    ignored_targets = gitignored_paths(
+        root,
+        (
+            target
+            for event_type, target in target_events
+            if event_type == "missing"
+        ),
+    )
+    for event_type, target in target_events:
+        if event_type == "failure":
+            failures.append(target)
+        elif target in ignored_targets:
             warnings.append(
                 "expected installed target is gitignored and absent in this "
                 f"checkout: {target}; re-run the pack installer here to "
@@ -498,48 +517,61 @@ def collect_pack_like_files(root: Path) -> list[str]:
     return sorted(set(pack_like))
 
 
-def is_gitignored(root: Path, relative_path: str) -> bool:
-    """True when git confirms the path is ignored; False otherwise.
+def gitignored_paths(root: Path, relative_paths: Iterable[str]) -> set[str]:
+    """Return paths git confirms as ignored, using one check-ignore process.
 
-    Missing git, a non-repo root, and git errors all return False, so the
-    caller keeps the fail-closed error behavior for those cases.
+    Missing git, a non-repo root, and git errors all return an empty set, so
+    callers keep the fail-closed error behavior for those cases.
     """
+    candidates = sorted(set(relative_paths))
+    if not candidates:
+        return set()
+    input_payload = b"".join(os.fsencode(path) + b"\0" for path in candidates)
     try:
         result = subprocess.run(
-            ["git", "-C", str(root), "check-ignore", "-q", "--", relative_path],
-            stdout=subprocess.DEVNULL,
+            ["git", "-C", str(root), "check-ignore", "--stdin", "-z"],
+            input=input_payload,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             check=False,
         )
     except OSError:
-        return False
-    return result.returncode == 0
+        return set()
+    if result.returncode not in {0, 1}:
+        return set()
+    return {
+        os.fsdecode(raw_path)
+        for raw_path in result.stdout.split(b"\0")
+        if raw_path
+    }
+
+
+def is_gitignored(root: Path, relative_path: str) -> bool:
+    """True when git confirms the path is ignored; False otherwise."""
+    return relative_path in gitignored_paths(root, [relative_path])
 
 
 def audit_structural_state(root: Path, targets: set[str]) -> tuple[list[str], list[str]]:
     failures: list[str] = []
     warnings: list[str] = []
+    target_events: list[tuple[str, str]] = []
 
     for target in sorted(targets):
         target_state = inspect_target_presence(root, Path(target))
         if target_state == "present":
             continue
         if target_state != "missing":
-            failures.append(
-                f"installed target cannot be inspected: {target} ({target_state})"
+            target_events.append(
+                (
+                    "failure",
+                    f"installed target cannot be inspected: {target} ({target_state})",
+                )
             )
             continue
         # Platform adapters may be recorded by a checkout that has them
         # while being gitignored (e.g. repos ignoring .claude/): absence
         # here is a local-only gap, not receipt drift.
-        if is_gitignored(root, target):
-            warnings.append(
-                "installed target is gitignored and absent in this "
-                f"checkout: {target}; re-run the pack installer here to "
-                "materialize local-only adapters"
-            )
-        else:
-            failures.append(f"installed target is missing: {target}")
+        target_events.append(("missing-target", target))
 
     allowed = set(targets) | LOCAL_ALLOWED_PACK_FILES
     if is_pack_source_checkout(root):
@@ -549,16 +581,38 @@ def audit_structural_state(root: Path, targets: set[str]) -> tuple[list[str], li
             continue
         # Repos may deliberately keep gitignored local-only adapters out of
         # the tracked receipt (the exclude-and-warn policy); tolerate that.
-        if is_gitignored(root, relative_path):
+        target_events.append(("unlisted-pack-like", relative_path))
+
+    ignored_targets = gitignored_paths(
+        root,
+        (
+            target
+            for event_type, target in target_events
+            if event_type != "failure"
+        ),
+    )
+    for event_type, target in target_events:
+        if event_type == "failure":
+            failures.append(target)
+        elif event_type == "missing-target":
+            if target in ignored_targets:
+                warnings.append(
+                    "installed target is gitignored and absent in this "
+                    f"checkout: {target}; re-run the pack installer here to "
+                    "materialize local-only adapters"
+                )
+            else:
+                failures.append(f"installed target is missing: {target}")
+        elif target in ignored_targets:
             warnings.append(
                 "local-only pack-like file is not recorded in installed "
-                f"targets: {relative_path} (gitignored; repo receipt policy "
+                f"targets: {target} (gitignored; repo receipt policy "
                 "may exclude local-only adapters)"
             )
         else:
             failures.append(
                 "pack-like file is not listed in installed targets: "
-                f"{relative_path}"
+                f"{target}"
             )
 
     return failures, warnings
@@ -600,15 +654,19 @@ def audit_provenance(root: Path) -> tuple[list[str], str | None]:
     if not files:
         return [f"{PROVENANCE_FILE} has an empty files map"], None
 
-    failures: list[str] = []
+    provenance_events: list[tuple[str, str]] = []
     root_real = os.path.realpath(root)
     for raw_target, expected in sorted(files.items()):
         if not isinstance(raw_target, str) or not isinstance(expected, str):
-            failures.append(f"{PROVENANCE_FILE} has a malformed entry: {raw_target!r}")
+            provenance_events.append(
+                ("failure", f"{PROVENANCE_FILE} has a malformed entry: {raw_target!r}")
+            )
             continue
         target = raw_target.replace("\\", "/")
         if is_unsafe_installed_target(target):
-            failures.append(f"{PROVENANCE_FILE} contains unsafe target {raw_target!r}")
+            provenance_events.append(
+                ("failure", f"{PROVENANCE_FILE} contains unsafe target {raw_target!r}")
+            )
             continue
         if target in PROVENANCE_NEVER_VOUCHED_TARGETS:
             continue
@@ -624,19 +682,20 @@ def audit_provenance(root: Path) -> tuple[list[str], str | None]:
             # Local-only adapters may be legitimately absent (gitignored);
             # anything else vouched-but-gone is tampering even when the
             # receipt no longer lists it.
-            if not is_gitignored(root, target):
-                failures.append(f"vouched target is missing: {target}")
+            provenance_events.append(("missing", target))
             continue
         except OSError as exc:
-            failures.append(
-                f"vouched target cannot be inspected: {target}: {exc}"
+            provenance_events.append(
+                ("failure", f"vouched target cannot be inspected: {target}: {exc}")
             )
             continue
         if not stat.S_ISREG(target_mode):
             # Provenance vouches plain regular files; a symlink (even to a
             # matching file), directory, or other node at a vouched path is
             # tampering, not absence.
-            failures.append(f"vouched target is not a regular file: {target}")
+            provenance_events.append(
+                ("failure", f"vouched target is not a regular file: {target}")
+            )
             continue
         # Symlinked parent directories could route the hash check outside
         # the repository; fail closed when the real path escapes root.
@@ -648,21 +707,44 @@ def audit_provenance(root: Path) -> tuple[list[str], str | None]:
         except ValueError:
             inside = False
         if not inside:
-            failures.append(
-                f"vouched target escapes the repository root: {target}"
+            provenance_events.append(
+                (
+                    "failure",
+                    f"vouched target escapes the repository root: {target}",
+                )
             )
             continue
         try:
             content = path.read_bytes()
         except OSError as exc:
-            failures.append(f"vouched target is unreadable: {target}: {exc}")
+            provenance_events.append(
+                ("failure", f"vouched target is unreadable: {target}: {exc}")
+            )
             continue
         digest = "sha256:" + hashlib.sha256(content).hexdigest()
         if digest != expected:
-            failures.append(
-                f"installed target drifted from pack {version} content: "
-                f"{target} (re-run the pack installer or review the local edit)"
+            provenance_events.append(
+                (
+                    "failure",
+                    f"installed target drifted from pack {version} content: "
+                    f"{target} (re-run the pack installer or review the local edit)",
+                )
             )
+
+    ignored_targets = gitignored_paths(
+        root,
+        (
+            target
+            for event_type, target in provenance_events
+            if event_type == "missing"
+        ),
+    )
+    failures: list[str] = []
+    for event_type, target in provenance_events:
+        if event_type == "failure":
+            failures.append(target)
+        elif target not in ignored_targets:
+            failures.append(f"vouched target is missing: {target}")
     return failures, version
 
 

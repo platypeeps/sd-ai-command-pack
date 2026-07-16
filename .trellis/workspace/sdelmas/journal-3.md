@@ -238,3 +238,36 @@ Added the PR-only release payload gate, wired it into CI Result, documented the 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 107: Batch install-audit gitignore checks
+
+**Date**: 2026-07-15
+**Task**: Batch install-audit gitignore checks
+**Branch**: `codex/install-audit-checkignore-batching`
+
+### Summary
+
+Batched install-audit gitignore checks with git check-ignore --stdin -z, preserved fail-closed behavior, added focused batching regressions, and bumped the pack release ledger to 0.13.2.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `acf6674` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
