@@ -56,7 +56,7 @@ fi
 offenders=()
 while IFS= read -r -d '' path; do
   case "$path" in
-    .trellis/tasks/*|.trellis/workspace/*)
+    .trellis/tasks/*|.trellis/workspace/*|.trellis/audit/*)
       ;;
     *)
       offenders+=("$path")
@@ -69,7 +69,7 @@ if [ "${#offenders[@]}" -eq 0 ]; then
   exit 0
 fi
 
-printf '%s\n' "main-push scope: direct pushes to main may only change .trellis/tasks/** or .trellis/workspace/**" >&2
+printf '%s\n' "main-push scope: direct pushes to main may only change .trellis/tasks/**, .trellis/workspace/**, or .trellis/audit/**" >&2
 printf '%s\n' "Offending paths:" >&2
 for path in "${offenders[@]}"; do
   printf '  %q\n' "$path" >&2

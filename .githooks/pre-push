@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Chore-scope guard: direct pushes to main may only touch Trellis chore
-# paths (.trellis/tasks/**, .trellis/workspace/**). Everything else goes
+# paths (.trellis/tasks/**, .trellis/workspace/**, .trellis/audit/**).
+# Everything else goes
 # through a pull request, matching the repository's branch-protection
 # policy (admin pushes bypass GitHub's PR requirement, so this hook is
 # the guardrail that keeps the bypass honest).
@@ -50,7 +51,7 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
     offenders=()
     while IFS= read -r -d '' changed_path; do
         case "$changed_path" in
-            .trellis/tasks/*|.trellis/workspace/*) ;;
+            .trellis/tasks/*|.trellis/workspace/*|.trellis/audit/*) ;;
             *) offenders+=("$changed_path") ;;
         esac
     done <"$changed_file"
@@ -58,7 +59,7 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
     if [ "${#offenders[@]}" -gt 0 ]; then
         {
             echo "pre-push: direct pushes to main are Trellis chore-scope only"
-            echo "pre-push: (.trellis/tasks/**, .trellis/workspace/**). Blocked paths:"
+            echo "pre-push: (.trellis/tasks/**, .trellis/workspace/**, .trellis/audit/**). Blocked paths:"
             printf '  - %q\n' "${offenders[@]:0:10}"
             echo "pre-push: open a pull request instead, or bypass once with"
             echo "pre-push:   SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS=1 git push ..."

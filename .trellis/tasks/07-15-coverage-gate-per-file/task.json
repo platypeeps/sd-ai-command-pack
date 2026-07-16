@@ -2,7 +2,7 @@
   "id": "coverage-gate-per-file",
   "name": "coverage-gate-per-file",
   "title": "Per-file coverage floors + fleet-preflight CLI tests",
-  "description": "",
+  "description": "Per-file coverage floors and fleet-preflight CLI tests (audit A-008, A-015).",
   "status": "planning",
   "dev_type": null,
   "scope": null,

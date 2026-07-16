@@ -862,7 +862,10 @@ class GeneratedParityTests(InstallTestCase):
         self.assertIn("main-push-scope:", workflow)
         self.assertIn('"${{ github.event.before }}" "${{ github.sha }}"', workflow)
         self.assertIn("git diff --no-renames --name-only -z", main_push_guard)
-        self.assertIn(".trellis/tasks/*|.trellis/workspace/*", main_push_guard)
+        self.assertIn(
+            ".trellis/tasks/*|.trellis/workspace/*|.trellis/audit/*",
+            main_push_guard,
+        )
 
         updates = dependabot["updates"]
         self.assertEqual(

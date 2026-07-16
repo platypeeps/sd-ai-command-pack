@@ -2,7 +2,7 @@
   "id": "ci-release-gate-job",
   "name": "ci-release-gate-job",
   "title": "Wire the release/drift gate into CI as a PR job",
-  "description": "",
+  "description": "Run the release version-bump/CHANGELOG gate against real PR diffs in CI (audit A-001, P1).",
   "status": "planning",
   "dev_type": null,
   "scope": null,

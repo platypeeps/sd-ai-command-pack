@@ -265,7 +265,8 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   deliberately declined as risky/low-gain; reopening requires a user decision.
 - fix: Batch into a single git check-ignore --stdin -z call with set-membership
   lookup.
-- notes:
+- notes: tracked → .trellis/tasks/07-15-install-audit-checkignore-batching
+  (reopened by maintainer 2026-07-16 after prior July 2026 decline)
 
 ## A-015 — fleet-preflight CLI entrypoint has zero coverage
 - status: open
