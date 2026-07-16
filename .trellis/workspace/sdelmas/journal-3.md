@@ -263,7 +263,9 @@ Batched install-audit gitignore checks with git check-ignore --stdin -z, preserv
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Added the `sd-audit-repo` follow-up report for A-027.
+- Updated the audit ledger with the new `last-seen` commit and follow-up note.
+- Corrected the parked A-027 task metadata to point at the archived parent task.
 
 ### Git Commits
 
@@ -273,7 +275,9 @@ Batched install-audit gitignore checks with git check-ignore --stdin -z, preserv
 
 ### Testing
 
-- Validation was not recorded for this session.
+- Refreshed `.obsidian-kb` through `scripts/sd-ai-command-pack-update-spec-kb.py`.
+- Ran `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`.
+- Confirmed PR #132 CI and Copilot review completed cleanly.
 
 ### Status
 
@@ -665,3 +669,36 @@ Resolved local sd-audit-repo roadmap findings, hardened generated installer meta
 ### Next Steps
 
 - Parked upstream Trellis lifecycle hook shell-semantics follow-up remains open as 07-16-upstream-trellis-hook-shell-semantics; do not open an upstream Trellis PR without explicit user approval.
+
+
+## Session 118: Record audit follow-up PR
+
+**Date**: 2026-07-16
+**Task**: Record audit follow-up PR
+**Branch**: `codex/audit-follow-up`
+
+### Summary
+
+Created PR #132 for the sd-audit-repo follow-up artifacts: updated the audit ledger, added the follow-up report, and corrected the parked A-027 task metadata.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a589679` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
