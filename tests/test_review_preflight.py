@@ -79,6 +79,7 @@ assert.equal(shouldCheckDocumentationPathReference('.sd-ai-command-pack/pr-body-
 assert.equal(shouldCheckDocumentationPathReference('.sd-ai-command-pack/review-preflight.json'), false);
 assert.equal(shouldCheckDocumentationPathReference('.trellis/.developer'), false);
 assert.equal(shouldCheckDocumentationPathReference('.trellis/.template-hashes.json'), false);
+assert.equal(shouldCheckDocumentationPathReference('.trellis/audit/ledger.md'), false);
 assert.equal(shouldCheckDocumentationPathReference('docs/TRELLIS_REVIEW_PR_PACK.md'), false);
 assert.equal(shouldCheckDocumentationPathReference('docs/repomix-map.md'), false);
 assert.equal(shouldCheckDocumentationPathReference('docs/review-learnings.md'), false);

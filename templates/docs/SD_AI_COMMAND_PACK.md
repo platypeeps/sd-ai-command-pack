@@ -37,6 +37,11 @@ Quick links:
   provider fix loop.
 - `.agents/skills/sd-review-learnings/SKILL.md`: review feedback learning
   capture workflow.
+- `.agents/skills/sd-audit-repo/SKILL.md`: formal multi-dimension repository
+  audit orchestration workflow.
+- `.agents/skills/sd-audit-repo/charters/`: fifteen per-dimension reviewer
+  charters the audit dispatches; a single shared copy used by every platform
+  copy of the skill.
 - `.agents/skills/sd-full-check/SKILL.md`: full local verification workflow.
 - `.agents/skills/sd-housekeeping/SKILL.md`: post-merge cleanup workflow.
 - `.agents/skills/sd-update-spec/SKILL.md`: Trellis update-spec workflow plus
@@ -100,7 +105,8 @@ and then performs the architecture-overview check.
 Codex exposes the pack entry points as skills named `sd-start`, `sd-continue`,
 `sd-finish-work`, `sd-create-pr`, `sd-work-backlog`, `sd-work-designs`,
 `sd-full-check`, `sd-housekeeping`, `sd-review-pr`, `sd-review-local`,
-`sd-review-local-all`, `sd-review-learnings`, and `sd-update-spec`; type
+`sd-review-local-all`, `sd-review-learnings`, `sd-audit-repo`, and
+`sd-update-spec`; type
 `/sd` in Codex command completion or invoke them with
 `$sd-review-pr`-style skill mentions.
 The start, continue, and finish-work wrappers run Trellis' existing
@@ -237,6 +243,7 @@ Claude Code and Gemini CLI:
 /sd:review-local
 /sd:review-local-all
 /sd:review-learnings
+/sd:audit-repo
 /sd:update-spec
 ```
 
@@ -256,6 +263,7 @@ Qoder commands, Trae commands, Pi prompts, workflow adapters, and Codex skills:
 /sd-review-local
 /sd-review-local-all
 /sd-review-learnings
+/sd-audit-repo
 /sd-update-spec
 ```
 
@@ -674,6 +682,36 @@ or roadmap items to start next. It also states the current task in the
 final-state rows. If a category has no evidence, the report says that plainly
 instead of inventing work, and if the whole backlog is empty it says the
 backlog is clear rather than omitting the section.
+
+The `sd-audit-repo` command runs the formal multi-dimension repository audit.
+It is charter-driven: one read-only reviewer per dimension, with the charters
+installed at `.agents/skills/sd-audit-repo/charters/` (12 always-on
+dimensions plus consumer-impact, observability, and accessibility-i18n when
+the fingerprint stage selects them). The pipeline is fixed and ordered:
+fingerprint → dimension reviews → adversarial verification → synthesis → Trellis reconciliation → report + ledger.
+
+Arguments: `dimensions=<a,b,c>` restricts the run to the named charters
+(unknown names are an error, not a silent skip); `depth=quick|standard|deep`
+controls verification (quick skips it, standard refutes P0/P1 findings, deep
+refutes P0–P2 with 2-of-3 votes on P0); `follow-up` re-verifies open ledger
+items against the current tree instead of sweeping the whole repository.
+
+Every audit report contains six mandatory sections — Verdict, Findings,
+Trellis reconciliation, Prioritized actions, Ledger delta, and
+Coverage & limits — and empty sections state their emptiness explicitly
+instead of disappearing. Findings carry fixed scores: severity P0–P3, effort
+S/M/L, confidence Verified or Plausible.
+
+Audit findings persist in the committed ledger at `.trellis/audit/ledger.md`.
+The orchestrator assigns monotonic `A-NNN` finding IDs that are never reused,
+keeps `fixed` entries as history, marks a reappearing fixed finding
+`regressed` under the same ID, and preserves human-edited `notes:` lines.
+The audit never creates Trellis tasks on its own: untracked P0–P2 findings
+become prd-ready task proposals that wait for explicit user consent.
+
+`sd-audit-repo` complements `sd-review-local-all` (provider loop),
+`sd-review-pr` (PR loop), and `sd-full-check` (gate); it is the periodic
+formal audit, not a per-change review loop.
 
 ## Configuration
 
