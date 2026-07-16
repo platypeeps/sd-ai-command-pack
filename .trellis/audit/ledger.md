@@ -590,5 +590,7 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   enforceable.
 - fix: Promote the rewrite rules into an adapter-generation step; the test then
   verifies generator output.
-- notes:
+- notes: tracked → .trellis/tasks/07-15-surface-generation (implemented in
+  0.13.0: make generate + drift test; transform rules moved from parity tests
+  into the generator)
 

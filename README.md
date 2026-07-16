@@ -132,12 +132,10 @@ re-requests review after each pushed fix up to the configured round limit.
 ### sd-review-local
 
 Runs configured local review providers against local changes, or against the
-current branch when no local changes exist, then enters a user-selected fix loop.
-
-### sd-review-local-all
-
-Uses the same local-review fix loop against the full checked-out repository. The
-complete Prism/Gito exclusion and retry behavior lives in the installed guide's
+current branch when no local changes exist, then enters a user-selected fix
+loop. With the `all` argument it reviews the full checked-out repository (the
+former `sd-review-local-all` command, folded in as of 0.13.0); exclusion and
+retry behavior lives in the installed guide's
 [Local Review](docs/SD_AI_COMMAND_PACK.md#local-review) section.
 
 ### sd-review-learnings
@@ -188,6 +186,12 @@ Ranks shipped files by per-file coverage, authors targeted tests for the
 worst `max-gaps=` files through the normal implement/check flow, and reports
 before/after numbers. Writes test files and fixtures only.
 
+### sd-ship
+
+Sequences the publish-to-merge endgame — create-pr, review-pr, watch-pr, then
+the housekeeping merge gate — with `until=pr|review|merge` stop-points. Adds
+no gate logic of its own; every stage's gates remain authoritative.
+
 ### sd-retro
 
 Captures a structured debug retrospective (what broke, root cause, why gates
@@ -230,11 +234,10 @@ fast-forwarding, deleting merged refs, and reporting the final clean state.
 | `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH_SLUG` | Slug source used to derive `codex/<slug>` when `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH` is unset. | unset |
 | `SD_AI_COMMAND_PACK_CREATE_PR_COMMIT_MESSAGE` | Commit message used by `sd-create-pr` when it creates a commit and the user did not provide a message. | `chore: prepare pull request` |
 | `SD_AI_COMMAND_PACK_CREATE_PR_DRAFT` | Create the PR as draft when set to `1`, unless the user explicitly asks for ready. | unset |
-| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS` | Local review tool set for `sd-review-local` or `sd-review-local-all`; unset uses the runner default. | unset |
+| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS` | Local review tool set for `sd-review-local` (any scope); unset uses the runner default. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND` | Custom command for a named local review provider. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND` | Full-codebase custom command for a named provider; unset falls back to the non-`ALL` command. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_SEMGREP_COMMAND` | Example Semgrep custom-provider command for `sd-review-local`; follows the generic `<TOOL>` command naming pattern. | unset |
-| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_SEMGREP_COMMAND` | Example Semgrep custom-provider command for `sd-review-local-all`; falls back to the non-`ALL` Semgrep command when unset. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS` | Max Gito attempts for HTTP 429 provider rate limits. | `2` |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS` | Initial Gito retry delay. | `30` |
 | `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS` | Maximum Gito retry delay after backoff. | `120` |

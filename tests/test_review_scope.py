@@ -1075,7 +1075,7 @@ class ReviewScopeTests(InstallTestCase):
             self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0", skill)
             self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0", skill)
             self.assertIn("sd-review-local", skill)
-            self.assertIn("sd-review-local-all", skill)
+            self.assertIn("optionally with `all`", skill)
             self.assertNotIn("any available local review providers", skill)
             self.assertNotIn("optional local review providers", skill)
             self.assertIn(
@@ -1141,7 +1141,7 @@ class ReviewScopeTests(InstallTestCase):
         self.assertIn("Prism and Gito disabled", readme)
         self.assertIn("re-requests review after each pushed fix", readme)
         self.assertIn("sd-review-local", readme)
-        self.assertIn("sd-review-local-all", readme)
+        self.assertIn("With the `all` argument", readme)
         self.assertIn(
             "[docs/SD_AI_COMMAND_PACK.md](docs/SD_AI_COMMAND_PACK.md#commands)",
             readme,
@@ -1157,7 +1157,7 @@ class ReviewScopeTests(InstallTestCase):
                 r"disables\s+Prism(?:\s+and\s+Gito|[\s\S]*disables\s+Gito)",
             )
             self.assertIn("sd-review-local", doc)
-            self.assertIn("sd-review-local-all", doc)
+            self.assertIn("`all`", doc)
 
 
 if __name__ == "__main__":

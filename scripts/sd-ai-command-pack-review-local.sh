@@ -174,7 +174,7 @@ normalize_review_scope() {
 
 review_command_name() {
   if [ "${REVIEW_LOCAL_SCOPE:-diff}" = "all" ]; then
-    printf 'sd-review-local-all'
+    printf 'sd-review-local all'
   else
     printf 'sd-review-local'
   fi

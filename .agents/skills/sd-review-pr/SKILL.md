@@ -27,7 +27,7 @@ GitHub Copilot is the default remote reviewer unless a repo overrides it.
 - Run the deterministic local full-check before requesting a paid/remote
   review. Disable Prism and Gito for this command-owned gate; those local
   review tools run only when the user explicitly invokes `sd-full-check`,
-  `sd-review-local`, or `sd-review-local-all`.
+  or `sd-review-local` (optionally with `all`).
 - Treat `sd-review-pr` as a bounded remote-review convergence loop by default.
   Unless the user explicitly asks for local-only review, request the configured
   remote reviewer after the local gate passes and again after each pushed

@@ -1,0 +1,30 @@
+{
+  "id": "command-infra-streamline",
+  "name": "command-infra-streamline",
+  "title": "Command infrastructure streamline (0.13.0)",
+  "description": "Parent: surface generation from registry, review-local merge, and sd-ship orchestrator as one 0.13.0 release.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-15",
+  "completedAt": null,
+  "branch": "feat/command-infra-streamline",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-15-surface-generation",
+    "07-15-review-local-merge",
+    "07-15-ship-command"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

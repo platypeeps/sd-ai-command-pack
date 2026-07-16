@@ -77,6 +77,17 @@ COMMANDS = {
         ],
         ["test files and fixtures only"],
     ),
+    "sd-ship": (
+        "ship",
+        [
+            "until=pr|review|merge",
+            "adds no new gate logic; every stage's own gates remain "
+            "authoritative",
+            "stage · outcome",
+            "timeout-minutes=",
+        ],
+        ["only merge authority"],
+    ),
     "sd-retro": (
         "retro",
         [

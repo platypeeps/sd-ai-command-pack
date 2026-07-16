@@ -21,7 +21,7 @@ large development stream, on a recurring schedule, or when taking over an
 unfamiliar repository. Run it with `follow-up` to re-verify previously
 recorded findings instead of sweeping the whole repository.
 
-It complements `sd-review-local-all` (provider loop), `sd-review-pr` (PR
+It complements `sd-review-local` (provider loop), `sd-review-pr` (PR
 loop), and `sd-full-check` (gate). It replaces none of them and is not a
 per-change review loop.
 
@@ -217,7 +217,7 @@ clause, and `why:`/`fix:` capped at two lines — never paragraph blobs.
   let unevidenced claims into the report or the ledger.
 - Unknown `dimensions=` names stop the run before any reviewer dispatch.
 - Do not stage, commit, push, or open pull requests.
-- Positioning: this command complements `sd-review-local-all` (provider
+- Positioning: this command complements `sd-review-local` (provider
   loop), `sd-review-pr` (PR loop), and `sd-full-check` (gate). It is the
   periodic formal audit, not a replacement for any of them.
 

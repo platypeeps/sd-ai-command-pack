@@ -31,7 +31,7 @@ review loop.
   loops, CI handling, and final finish-work behavior.
 - Do not run Prism, Gito, or other local review providers directly from this
   command. Those tools run only when the user explicitly invokes
-  `sd-full-check`, `sd-review-local`, or `sd-review-local-all`; `sd-review-pr`
+  `sd-full-check` or `sd-review-local` (optionally with `all`); `sd-review-pr`
   disables Prism and Gito for its command-owned local gate.
 - Do not create a PR from the repository default branch. If the current branch
   is the default branch, create a feature branch before continuing. Prefer
