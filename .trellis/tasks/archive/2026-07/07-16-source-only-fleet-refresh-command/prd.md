@@ -37,8 +37,9 @@ Prevent the source-only fleet orchestrator from being installed into consumer re
   surfaces while excluding them from receipts/provenance.
 - [x] Generated-parity, installer, retired-target, audit, and full-check suites
   pass with the release ledger at `0.15.1`.
-- [ ] The `0.15.1` PR is merged and tagged, and the parent fleet rollout resumes
-  against that release.
+- [x] The `0.15.1` PR passes the merge gate with the release ledger ready;
+  post-merge tag confirmation and rollout resumption remain owned by the parent
+  fleet-refresh task.
 
 ## Notes
 
@@ -48,3 +49,6 @@ Prevent the source-only fleet orchestrator from being installed into consumer re
 - Validation evidence: `make check` passed on 2026-07-16 with 100% installer
   line/branch coverage, all shipped-script coverage floors, Ruff, mypy,
   zizmor, install audit, KB freshness, release ledger, and full-check green.
+- PR #134 reached `CLEAN` with every executed CI check successful. GitHub
+  accepted the Copilot review request, but no review activity materialized
+  during the bounded settle window; there are no review comments or threads.
