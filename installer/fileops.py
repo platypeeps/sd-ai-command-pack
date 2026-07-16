@@ -238,6 +238,23 @@ def next_backup_path(target: Path, destination: Path) -> Path:
         index += 1
 
 
+def planned_result_matches_destination(
+    destination: Path,
+    status: InstallStatus,
+    new_content: bytes,
+) -> bool:
+    """Return whether a preflight result is still safe to reuse at apply time."""
+    if status is InstallStatus.CREATED:
+        return not path_is_occupied(destination)
+    if destination.is_symlink():
+        return False
+    if status is InstallStatus.UNCHANGED:
+        return destination.exists() and destination.read_bytes() == new_content
+    if status is InstallStatus.PRESERVED:
+        return destination.exists()
+    return False
+
+
 def install_file(
     file: PackFile,
     target: Path,
@@ -268,24 +285,33 @@ def install_file(
         new_content = planned_result.source_content
         digest = planned_result.source_digest or source_digest(new_content)
         executable = planned_result.source_executable
-        if planned_result.status is InstallStatus.CREATED:
-            if not dry_run:
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                atomic_write_bytes(destination, new_content, executable=executable)
+        if planned_result_matches_destination(
+            destination,
+            planned_result.status,
+            new_content,
+        ):
+            if planned_result.status is InstallStatus.CREATED:
+                if not dry_run:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    atomic_write_bytes(
+                        destination,
+                        new_content,
+                        executable=executable,
+                    )
+                return InstallResult(
+                    file,
+                    InstallStatus.CREATED,
+                    source_digest=digest,
+                    source_content=new_content,
+                    source_executable=executable,
+                )
             return InstallResult(
                 file,
-                InstallStatus.CREATED,
+                planned_result.status,
                 source_digest=digest,
                 source_content=new_content,
                 source_executable=executable,
             )
-        return InstallResult(
-            file,
-            planned_result.status,
-            source_digest=digest,
-            source_content=new_content,
-            source_executable=executable,
-        )
 
     new_content = source.read_bytes()
     digest = source_digest(new_content)

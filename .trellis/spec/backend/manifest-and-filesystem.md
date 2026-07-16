@@ -364,8 +364,12 @@ invokes the external Trellis installer before pack files exist.
 When that preflight succeeds, thread the preflight `InstallResult`s into the
 apply pass for unchanged, created, and preserved source-backed files. The apply
 pass should reuse the planned source bytes, executable bit, and digest instead
-of re-reading the pack source. Do not reuse preflight results for force
-overwrites, conflicts, generated files, or a mismatched `PackFile`.
+of re-reading the pack source, but only after revalidating that the destination
+still matches the planned status. If the destination appeared, disappeared,
+changed content, or became a symlink between preflight and apply, fall through
+to the normal install path so conflict and symlink-conflict handling remains
+authoritative. Do not reuse preflight results for force overwrites, conflicts,
+generated files, or a mismatched `PackFile`.
 
 Installer runs are not serialized. Atomic file replacement must keep each
 individual file parseable, while the last completed writer determines the

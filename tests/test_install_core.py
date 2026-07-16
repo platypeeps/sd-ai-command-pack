@@ -929,6 +929,131 @@ class InstallCoreTests(InstallTestCase):
         self.assertFalse((root / "docs/example.md").exists())
         self.assertEqual(payload_result.source_content, b"pack template v1\n")
 
+    def test_payload_apply_revalidates_planned_created_destination(self) -> None:
+        root = self.make_repo()
+        source = root / "source.md"
+        source.write_text("pack template\n", encoding="utf-8")
+        file = self.valid_pack_file(source=source, target=Path("docs/example.md"))
+
+        preflight_results, _ = install._install_payload(
+            [file],
+            root,
+            local_only=False,
+            force=False,
+            dry_run=True,
+            backup=False,
+        )
+        destination = root / "docs/example.md"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination_real = root / "docs/example.real.md"
+        destination_real.write_text("pack template\n", encoding="utf-8")
+        destination.symlink_to(destination_real.name)
+
+        results, _ = install._install_payload(
+            [file],
+            root,
+            local_only=False,
+            force=False,
+            dry_run=False,
+            backup=False,
+            planned_results={
+                result.file.target: result
+                for result in preflight_results
+                if result.source_content is not None
+            },
+        )
+
+        payload_result = next(
+            result for result in results if result.file.target == file.target
+        )
+        self.assertEqual(payload_result.status, "symlink-conflict")
+        self.assertTrue(destination.is_symlink())
+
+    def test_planned_result_reuse_checks_destination_state(self) -> None:
+        root = self.make_repo()
+        destination = root / "docs/example.md"
+        content = b"pack template\n"
+
+        self.assertTrue(
+            install.fileops.planned_result_matches_destination(
+                destination,
+                install.InstallStatus.CREATED,
+                content,
+            )
+        )
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+        self.assertFalse(
+            install.fileops.planned_result_matches_destination(
+                destination,
+                install.InstallStatus.CREATED,
+                content,
+            )
+        )
+        self.assertTrue(
+            install.fileops.planned_result_matches_destination(
+                destination,
+                install.InstallStatus.UNCHANGED,
+                content,
+            )
+        )
+        self.assertFalse(
+            install.fileops.planned_result_matches_destination(
+                destination,
+                install.InstallStatus.UNCHANGED,
+                b"different\n",
+            )
+        )
+        self.assertTrue(
+            install.fileops.planned_result_matches_destination(
+                destination,
+                install.InstallStatus.PRESERVED,
+                content,
+            )
+        )
+        self.assertFalse(
+            install.fileops.planned_result_matches_destination(
+                destination,
+                install.InstallStatus.CONFLICT,
+                content,
+            )
+        )
+
+        destination.unlink()
+        self.assertFalse(
+            install.fileops.planned_result_matches_destination(
+                destination,
+                install.InstallStatus.UNCHANGED,
+                content,
+            )
+        )
+        self.assertFalse(
+            install.fileops.planned_result_matches_destination(
+                destination,
+                install.InstallStatus.PRESERVED,
+                content,
+            )
+        )
+
+        destination_real = root / "docs/example.real.md"
+        destination_real.write_bytes(content)
+        destination.symlink_to(destination_real.name)
+        self.assertFalse(
+            install.fileops.planned_result_matches_destination(
+                destination,
+                install.InstallStatus.UNCHANGED,
+                content,
+            )
+        )
+        self.assertFalse(
+            install.fileops.planned_result_matches_destination(
+                destination,
+                install.InstallStatus.PRESERVED,
+                content,
+            )
+        )
+
     def test_provenance_uses_install_result_digest_without_source_read(self) -> None:
         root = self.make_repo()
         source = root / "source.md"
