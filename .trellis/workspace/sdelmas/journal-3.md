@@ -702,3 +702,44 @@ Created PR #132 for the sd-audit-repo follow-up artifacts: updated the audit led
 ### Next Steps
 
 - None - task complete
+
+
+## Session 119: Guard historical Trellis journal sessions
+
+**Date**: 2026-07-16
+**Task**: Guard historical Trellis journal sessions
+**Branch**: `codex/trellis-journal-history-guard`
+
+### Summary
+
+Added and hardened a distributed preflight guard that keeps review-base Trellis journal history append-only, plus clearer generated review-learning summaries.
+
+### Main Changes
+
+- Added the shipped review-preflight guard for edited, deleted, renumbered, and whole-workspace-removed historical Trellis sessions.
+- Normalized journal comparison whitespace and generated review-learning truncation while keeping template and dogfood copies synchronized.
+- Bumped the pack to 0.15.0 and refreshed changelog, guidance, managed review learnings, and KB output.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9a5cad7` | feat: guard historical Trellis journal entries |
+| `5daa604` | fix: address journal guard review feedback |
+| `6624148` | fix: address review feedback round 2 |
+| `58096ca` | fix: guard deleted Trellis workspaces |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_review_preflight tests.test_review_learnings
+- [OK] SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+- [OK] GitHub CI passed on PR #133 (Ubuntu 3.10/3.13, macOS 3.13, lint, security, release payload)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

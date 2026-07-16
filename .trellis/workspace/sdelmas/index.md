@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 118
+- **Total Sessions**: 119
 - **Last Active**: 2026-07-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~700 | Active |
+| `journal-3.md` | ~743 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 119 | 2026-07-16 | Guard historical Trellis journal sessions | `9a5cad7`, `5daa604`, `6624148`, `58096ca` | `codex/trellis-journal-history-guard` |
 | 118 | 2026-07-16 | Record audit follow-up PR | `a589679` | `codex/audit-follow-up` |
 | 117 | 2026-07-16 | Audit roadmap cleanup | `f6f7e13`, `b4d69d5`, `21353b0` | `main` |
 | 116 | 2026-07-16 | Harden pack runtime scripts | `561c05d`, `08c31d4` | `codex/p2-hardening-batch` |
