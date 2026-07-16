@@ -251,7 +251,7 @@ fast-forwarding, deleting merged refs, and reporting the final clean state.
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER_LABEL` | Human-readable remote reviewer name used in `sd-review-pr` status output and reports. | `GitHub Copilot` |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_AUTHOR_MATCH` | Review/comment author matched after a remote request; defaults to the configured reviewer except for Copilot. | `copilot-pull-request-reviewer[bot]` |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND` | Custom command for requesting a remote review. | unset |
-| `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote review request/fix rounds before asking whether to continue. | `2` |
+| `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote review request/fix rounds before asking whether to continue. | `5` |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_SETTLE_POLLS` | Maximum 30-second polls before an accepted request without author-matched activity stops as ambiguous. | `40` |
 
 The deprecated `REVIEW_PREFLIGHT_PR_BODY` fallback remains honored and is

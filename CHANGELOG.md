@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.14.0 - 2026-07-16
+
+- Restored the remote PR review round limit default to five
+  (`SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`; it was reduced to two in
+  0.9.0 — the env var still overrides).
+- Added review-cycle counters to the reports: `sd-review-pr` now reports
+  `Remote review rounds used: <n> of <limit>` as a mandatory row, and the
+  `sd-housekeeping` final state gains a mandatory `PR review rounds:` row
+  (submitted reviewer review count for the merged/confirmed PR, or `n/a` on
+  verification-only runs).
+
 ## 0.13.3 - 2026-07-16
 
 - Hardened pack text writes: generated installer text files now report
