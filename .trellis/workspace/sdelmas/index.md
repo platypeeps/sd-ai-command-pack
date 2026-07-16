@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 109
+- **Total Sessions**: 110
 - **Last Active**: 2026-07-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~339 | Active |
+| `journal-3.md` | ~383 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 110 | 2026-07-16 | Type installer result statuses | `4a66561` | `codex/result-status-vocabulary` |
 | 109 | 2026-07-16 | Harden installer manifest validation | `ee87db8` | `codex/manifest-validation-tightening` |
 | 108 | 2026-07-16 | Update installer layout docs and versioning policy | `723a00a` | `codex/docs-accuracy-batch` |
 | 107 | 2026-07-15 | Batch install-audit gitignore checks | `acf6674` | `codex/install-audit-checkignore-batching` |
