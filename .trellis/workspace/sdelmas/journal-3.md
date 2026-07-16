@@ -84,3 +84,43 @@ Designed, planned (prd/design/implement), and shipped the distributed sd-audit-r
 - Work 07-15-ci-release-gate-job (P1) and the other 9 audit follow-up tasks
 - P3 polish batch task pending maintainer confirmation (interrupted instruction)
 - Fleet rollout carrying 0.10.5 + 0.11.0 to consumer repos when requested
+
+
+## Session 103: Ship six SDLC edge-loop commands (0.12.0)
+
+**Date**: 2026-07-15
+**Task**: Ship six SDLC edge-loop commands (0.12.0)
+**Branch**: `main`
+
+### Summary
+
+Planned (parent + six PRD-backed children), implemented via four parallel sub-agents, and shipped the SDLC skill expansion: sd-watch-pr, sd-fix-ci, sd-update-deps, sd-fleet-refresh, sd-test-gaps, sd-retro. Six skills, 24 adapter surfaces, 150 manifest entries (384->534), guide/README docs, parameterized format-drift tests plus parity extensions. Merged PR #117 via the gated flow as 0.12.0.
+
+### Main Changes
+
+- Six new skills with argument-only tuning (zero new env vars) and housekeeping-gate-deferential merge behavior
+- 24 adapters with byte-identical step bodies per command; manifest 384->534 entries
+- tests/test_sdlc_commands.py parameterized suite + parity/core sibling extensions, adapter tuples, dispatch branches, gemini descriptions
+- Guide + README documentation for all six commands
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bb2e8a2` | Merge pull request #117 from platypeeps/feat/sdlc-skill-expansion |
+
+### Testing
+
+- [OK] make test green (444 tests)
+- [OK] make full-check green (release gate at 0.12.0)
+- [OK] all six commands registered as invocable /sd:* skills in the authoring session post-install
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Confirm v0.12.0 auto-tag; archive parent + six child tasks
+- Fleet rollout (0.10.5 + 0.11.0 + 0.12.0) via the new sd-fleet-refresh when requested
