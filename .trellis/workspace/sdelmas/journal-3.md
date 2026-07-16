@@ -743,3 +743,41 @@ Added and hardened a distributed preflight guard that keeps review-base Trellis 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 120: Source-only fleet refresh prerequisite
+
+**Date**: 2026-07-16
+**Task**: Source-only fleet refresh prerequisite
+**Branch**: `codex/source-only-fleet-refresh-command`
+
+### Summary
+
+Made sd-fleet-refresh source-checkout-only, released the consumer manifest contract at 0.15.1, and prepared the fleet rollout to resume after merge.
+
+### Main Changes
+
+- Kept fleet command generation in the pack source while excluding its surfaces from consumer manifests.
+- Added provenance-vouched retirement for previously shipped fleet command targets with source-checkout preservation.
+- Updated distributed docs, install audit allowances, Trellis specs, and regression coverage for the source-only contract.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2b34a70` | fix: keep fleet refresh command source-only |
+
+### Testing
+
+- [OK] make check
+- [OK] focused SDLC, pack-drift, install-audit, retirement, and generated-parity tests
+- [OK] deterministic full-check with Prism and Gito disabled
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
