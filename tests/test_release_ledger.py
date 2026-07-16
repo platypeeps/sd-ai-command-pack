@@ -207,6 +207,11 @@ class ReleaseLedgerTests(InstallTestCase):
         self.assertEqual(job["permissions"]["contents"], "write")
         self.assertIn("github.event_name == 'push'", job["if"])
         self.assertIn("github.ref == 'refs/heads/main'", job["if"])
+        # Regression guard for the transitive-skip trap: without !cancelled()
+        # the implicit success() sees the PR-only release-payload-gate as
+        # skipped on main pushes and silently skips auto-tagging.
+        self.assertIn("!cancelled()", job["if"])
+        self.assertIn("needs.ci-result.result == 'success'", job["if"])
         run_step = job["steps"][1]
         self.assertIn(".github/scripts/create-release-tag.py", run_step["run"])
         self.assertEqual(run_step["env"]["BASE_SHA"], "${{ github.event.before }}")

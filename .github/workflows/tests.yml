@@ -224,7 +224,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: ci-result
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci-result.result == 'success'
+    # !cancelled() suppresses the implicit success() status check, which
+    # evaluates over the TRANSITIVE needs chain: release-payload-gate is
+    # PR-only, so it is skipped on every main push, and implicit success()
+    # then silently skips this job (v0.13.2-v0.14.0 shipped untagged before
+    # this guard). ci-result (if: always()) already validates every lane.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci-result.result == 'success' }}
     permissions:
       contents: write
 
