@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.12.0 - 2026-07-16
+
+- Added six distributed SDLC edge-loop commands, each with the full adapter
+  surface and format-drift tests: `sd-watch-pr` (bounded PR settle watcher
+  handing off to the housekeeping merge gate), `sd-fix-ci` (red-CI triage that
+  classifies real/flake/infra failures and never weakens tests), `sd-update-deps`
+  (sequential gated triage of dependency-bot PRs; majors always manual),
+  `sd-fleet-refresh` (consumer fleet rollout per the documented procedure, one
+  consumer at a time), `sd-test-gaps` (coverage-driven test authoring, test
+  files only), and `sd-retro` (structured debug retrospectives recorded to the
+  journal with consent-gated prevention proposals). All tuning is via command
+  arguments — no new environment variables — and merge-affecting behavior
+  defers to the existing housekeeping gate criteria.
+
 ## 0.11.0 - 2026-07-15
 
 - Added the distributed `sd-audit-repo` command and shared skill: a formal
