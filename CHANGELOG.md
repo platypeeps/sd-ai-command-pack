@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.3 - 2026-07-16
+
+- Hardened pack text writes: generated installer text files now report
+  symlink conflicts instead of replacing in-repo symlinks, and the shipped
+  recorder, review-learnings, and update-spec KB helpers write user-facing
+  markdown/ignore files through temp-file + `os.replace` atomic writes. The KB
+  refresh reports symlinked ignore files as partial refresh conflicts instead
+  of silently writing through or replacing them.
+
 ## 0.13.2 - 2026-07-16
 
 - Batched install-audit `git check-ignore` probes so each audit phase resolves

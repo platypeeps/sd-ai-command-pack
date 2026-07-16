@@ -116,6 +116,47 @@ class UpdateSpecKbTests(InstallTestCase):
         self.assertIn(".sd-ai-command-pack/installed-targets.txt", gitignore)
         self.assertIn(".sd-ai-command-pack/local-only.txt", gitignore)
 
+    def test_update_spec_kb_ignore_write_uses_atomic_write(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py",
+            "sd_ai_command_pack_update_spec_kb_atomic_write",
+        )
+        root = self.make_repo()
+        gitignore = root / ".gitignore"
+        original = "dist/\n"
+        gitignore.write_text(original, encoding="utf-8")
+
+        with mock.patch.object(module.os, "replace", side_effect=OSError("blocked")):
+            with self.assertRaisesRegex(OSError, "blocked"):
+                module.ensure_ignore_file(gitignore, local=False)
+
+        self.assertEqual(gitignore.read_text(encoding="utf-8"), original)
+        self.assertEqual(list(root.glob(".*.tmp")), [])
+
+    def test_update_spec_kb_reports_gitignore_symlink_conflict(self) -> None:
+        root = self.make_repo()
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        real_gitignore = root / ".gitignore.real"
+        real_gitignore.write_text("dist/\n", encoding="utf-8")
+        gitignore = root / ".gitignore"
+        gitignore.symlink_to(real_gitignore.name)
+        script = install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+
+        result = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 3, result.stdout)
+        self.assertIn("gitignore: conflict: .gitignore is a symlink", result.stdout)
+        self.assertIn("ignore entry could not be updated", result.stdout)
+        self.assertTrue(gitignore.is_symlink())
+        self.assertEqual(real_gitignore.read_text(encoding="utf-8"), "dist/\n")
+
     def test_update_spec_kb_refresh_exits_three_on_conflicts(self) -> None:
         root = self.make_repo()
         (root / "README.md").write_text("# Project\n", encoding="utf-8")

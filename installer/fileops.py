@@ -206,6 +206,15 @@ def _require_file_destination(destination: Path, relative_target: Path) -> None:
         )
 
 
+def generated_text_file_status(destination: Path) -> InstallStatus | None:
+    """Return the non-writing status for a generated text destination, if any."""
+    if destination.is_symlink():
+        return InstallStatus.SYMLINK_CONFLICT
+    if destination.exists() and not destination.is_file():
+        return InstallStatus.CONFLICT
+    return None
+
+
 def next_backup_path(target: Path, destination: Path) -> Path:
     candidate = destination.with_name(f"{destination.name}.bak")
     if not path_is_occupied(candidate):
@@ -397,6 +406,9 @@ def merge_trellis_gitignore_block(current: str) -> str:
 def install_trellis_gitignore(target: Path, *, dry_run: bool) -> InstallResult:
     file = generated_pack_file("generated-gitignore", TRELLIS_GITIGNORE_TARGET)
     destination = target_destination(target, file.target)
+    status = generated_text_file_status(destination)
+    if status is not None:
+        return InstallResult(file, status)
     _require_file_destination(destination, file.target)
 
     existed = destination.exists()
@@ -423,6 +435,9 @@ def install_managed_block(
         raise SystemExit(f"error: unsupported managed block target: {file.target}")
 
     destination = target_destination(target, file.target)
+    status = generated_text_file_status(destination)
+    if status is not None:
+        return InstallResult(file, status)
     _require_file_destination(destination, file.target)
 
     block = normalize_managed_block_template(file)
@@ -687,6 +702,7 @@ __all__ = [
     "backup_existing_file",
     "default_file_mode",
     "display_path",
+    "generated_text_file_status",
     "has_active_trellis_platform",
     "install_file",
     "install_managed_block",

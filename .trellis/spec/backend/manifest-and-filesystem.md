@@ -275,6 +275,23 @@ Use `install_file()` for copy behavior:
   directory.
 - In `--dry-run` mode, report the planned status without creating files.
 
+Generated text writers follow the same safety model:
+
+- `.gitignore`, `.github/copilot-instructions.md`,
+  `.sd-ai-command-pack/manifest.json`, `.sd-ai-command-pack/provenance.json`,
+  and `.sd-ai-command-pack/installed-targets.txt` are regular-file targets. If
+  the final path is an in-repo symlink, report `symlink-conflict` and leave the
+  link plus its target untouched. If the final path is another non-file node,
+  report `conflict` and leave it untouched. Symlinks that resolve outside the
+  target repo still fail target-path validation before any write.
+- Use temp-file + `os.replace` writes for generated text and shipped helper
+  rewrites of user-facing files. A failed replace, ENOSPC, or interrupted write
+  must leave the previous complete file in place and clean up the temporary
+  file.
+- Standalone shipped scripts cannot import the installer package in consumer
+  repos, so they may carry a small local atomic text writer until a shared
+  shipped script library exists.
+
 ## Plan-Before-Apply And Concurrency
 
 For a normal tracked install without `--force` or `--dry-run`, run the selected

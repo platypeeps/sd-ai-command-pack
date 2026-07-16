@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 111
+- **Total Sessions**: 112
 - **Last Active**: 2026-07-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~432 | Active |
+| `journal-3.md` | ~471 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 112 | 2026-07-16 | Harden installer generated text writes | `3812dca`, `96cca3b` | `codex/installer-write-safety` |
 | 111 | 2026-07-16 | Per-file script coverage gate | `670969f`, `e7eb9c2`, `29de32b` | `codex/coverage-gate-per-file` |
 | 110 | 2026-07-16 | Type installer result statuses | `4a66561` | `codex/result-status-vocabulary` |
 | 109 | 2026-07-16 | Harden installer manifest validation | `ee87db8` | `codex/manifest-validation-tightening` |

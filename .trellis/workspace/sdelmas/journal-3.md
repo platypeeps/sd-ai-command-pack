@@ -435,3 +435,37 @@ Added per-file coverage floors for shipped Python helpers and expanded fleet-pre
 ### Next Steps
 
 - Merge PR #125 after finish-work commits are pushed and the merge guard remains clean.
+
+
+## Session 112: Harden installer generated text writes
+
+**Date**: 2026-07-16
+**Task**: Harden installer generated text writes
+**Branch**: `codex/installer-write-safety`
+
+### Summary
+
+Completed installer write-safety task: generated text destinations now report symlink-conflict or conflict instead of overwriting links or raising raw file errors, shipped helper rewrites use atomic temp-file replacement, and review feedback added regression coverage for broken symlinks, symlinked directories, and non-file generated targets.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3812dca` | (see git log) |
+| `96cca3b` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

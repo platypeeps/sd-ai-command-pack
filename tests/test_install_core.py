@@ -145,8 +145,9 @@ class InstallCoreTests(InstallTestCase):
         root = self.make_repo()
         (root / ".gitignore").mkdir()
 
-        with self.assertRaisesRegex(SystemExit, "target exists and is not a file"):
-            install.install_trellis_gitignore(root, dry_run=False)
+        result = install.install_trellis_gitignore(root, dry_run=False)
+
+        self.assertEqual(result.status, "conflict")
 
     def test_default_install_skips_plain_framework_dirs_without_trellis_markers(
         self,
@@ -565,8 +566,8 @@ class InstallCoreTests(InstallTestCase):
 
         destination = root / ".github/copilot-instructions.md"
         destination.mkdir()
-        with self.assertRaisesRegex(SystemExit, "target exists and is not a file"):
-            install.install_managed_block(directory_target, root, dry_run=False)
+        result = install.install_managed_block(directory_target, root, dry_run=False)
+        self.assertEqual(result.status, "conflict")
 
     def test_merge_managed_block_inserts_for_empty_and_newline_variants(self) -> None:
         block = (
@@ -615,6 +616,167 @@ class InstallCoreTests(InstallTestCase):
         content = destination.read_bytes()
         self.assertIn(b"Repo-specific bytes: \xff\n", content)
         self.assertIn(install.COPILOT_GUIDANCE_START.encode("utf-8"), content)
+
+    def test_generated_and_managed_text_writers_conflict_on_symlinks(self) -> None:
+        root = self.make_repo(".github")
+
+        gitignore_real = root / ".gitignore.real"
+        gitignore_real.write_text("dist/\n", encoding="utf-8")
+        gitignore = root / ".gitignore"
+        gitignore.symlink_to(gitignore_real.name)
+        gitignore_result = install.install_trellis_gitignore(root, dry_run=False)
+        self.assertEqual(gitignore_result.status, "symlink-conflict")
+        self.assertTrue(gitignore.is_symlink())
+        self.assertEqual(gitignore_real.read_text(encoding="utf-8"), "dist/\n")
+
+        gitignore.unlink()
+        gitignore.symlink_to("missing-gitignore")
+        broken_gitignore_result = install.install_trellis_gitignore(
+            root,
+            dry_run=False,
+        )
+        self.assertEqual(broken_gitignore_result.status, "symlink-conflict")
+        self.assertTrue(gitignore.is_symlink())
+
+        gitignore.unlink()
+        gitignore_directory = root / ".gitignore-dir"
+        gitignore_directory.mkdir()
+        gitignore.symlink_to(gitignore_directory.name, target_is_directory=True)
+        directory_gitignore_result = install.install_trellis_gitignore(
+            root,
+            dry_run=False,
+        )
+        self.assertEqual(directory_gitignore_result.status, "symlink-conflict")
+        self.assertTrue(gitignore.is_symlink())
+
+        managed_file = next(
+            file
+            for file in self._manifest_files
+            if file.kind == install.MANAGED_BLOCK_KIND
+        )
+        copilot_real = root / ".github/copilot-instructions.real.md"
+        copilot_real.write_text("# Repo guidance\n", encoding="utf-8")
+        copilot = root / managed_file.target
+        copilot.symlink_to(copilot_real.name)
+        copilot_result = install.install_managed_block(
+            managed_file,
+            root,
+            dry_run=False,
+        )
+        self.assertEqual(copilot_result.status, "symlink-conflict")
+        self.assertTrue(copilot.is_symlink())
+        self.assertEqual(
+            copilot_real.read_text(encoding="utf-8"),
+            "# Repo guidance\n",
+        )
+
+        copilot.unlink()
+        copilot.symlink_to("missing-copilot-instructions.md")
+        broken_copilot_result = install.install_managed_block(
+            managed_file,
+            root,
+            dry_run=False,
+        )
+        self.assertEqual(broken_copilot_result.status, "symlink-conflict")
+        self.assertTrue(copilot.is_symlink())
+
+        copilot.unlink()
+        copilot_directory = root / ".github/copilot-instructions-dir"
+        copilot_directory.mkdir()
+        copilot.symlink_to(
+            copilot_directory.name,
+            target_is_directory=True,
+        )
+        directory_copilot_result = install.install_managed_block(
+            managed_file,
+            root,
+            dry_run=False,
+        )
+        self.assertEqual(directory_copilot_result.status, "symlink-conflict")
+        self.assertTrue(copilot.is_symlink())
+
+        manifest_real = root / ".sd-ai-command-pack/manifest.real.json"
+        manifest_real.parent.mkdir(parents=True, exist_ok=True)
+        manifest_real.write_text("{}\n", encoding="utf-8")
+        pack_manifest = root / install.PACK_MANIFEST_FILE
+        pack_manifest.symlink_to(manifest_real.name)
+        manifest_result = install.install_pack_manifest_file(
+            {"name": "sd-ai-command-pack", "version": "0.0.1", "files": []},
+            root,
+            dry_run=False,
+        )
+        self.assertEqual(manifest_result.status, "symlink-conflict")
+        self.assertTrue(pack_manifest.is_symlink())
+        self.assertEqual(manifest_real.read_text(encoding="utf-8"), "{}\n")
+
+        receipt_real = root / ".sd-ai-command-pack/installed-targets.real.txt"
+        receipt_real.write_text("old\n", encoding="utf-8")
+        receipt = root / install.INSTALLED_TARGETS_FILE
+        receipt.symlink_to(receipt_real.name)
+        receipt_result = install.install_installed_targets_file(
+            [],
+            root,
+            dry_run=False,
+        )
+        self.assertEqual(receipt_result.status, "symlink-conflict")
+        self.assertTrue(receipt.is_symlink())
+        self.assertEqual(receipt_real.read_text(encoding="utf-8"), "old\n")
+
+        provenance_real = root / ".sd-ai-command-pack/provenance.real.json"
+        provenance_real.write_text('{"files": {}}\n', encoding="utf-8")
+        provenance = root / install.PROVENANCE_FILE
+        provenance.symlink_to(provenance_real.name)
+        provenance_result = install.install_provenance_file(
+            {"name": "sd-ai-command-pack", "version": "0.0.1"},
+            [],
+            root,
+            receipt_targets=set(),
+            never_vouched=set(),
+            dry_run=False,
+        )
+        self.assertEqual(provenance_result.status, "symlink-conflict")
+        self.assertTrue(provenance.is_symlink())
+        self.assertEqual(
+            provenance_real.read_text(encoding="utf-8"),
+            '{"files": {}}\n',
+        )
+
+    def test_generated_text_writers_conflict_on_non_file_destinations(self) -> None:
+        root = self.make_repo()
+
+        pack_manifest = root / install.PACK_MANIFEST_FILE
+        pack_manifest.parent.mkdir(parents=True, exist_ok=True)
+        pack_manifest.mkdir()
+        manifest_result = install.install_pack_manifest_file(
+            {"name": "sd-ai-command-pack", "version": "0.0.1", "files": []},
+            root,
+            dry_run=False,
+        )
+        self.assertEqual(manifest_result.status, "conflict")
+        self.assertTrue(pack_manifest.is_dir())
+
+        receipt = root / install.INSTALLED_TARGETS_FILE
+        receipt.mkdir()
+        receipt_result = install.install_installed_targets_file(
+            [],
+            root,
+            dry_run=False,
+        )
+        self.assertEqual(receipt_result.status, "conflict")
+        self.assertTrue(receipt.is_dir())
+
+        provenance = root / install.PROVENANCE_FILE
+        provenance.mkdir()
+        provenance_result = install.install_provenance_file(
+            {"name": "sd-ai-command-pack", "version": "0.0.1"},
+            [],
+            root,
+            receipt_targets=set(),
+            never_vouched=set(),
+            dry_run=False,
+        )
+        self.assertEqual(provenance_result.status, "conflict")
+        self.assertTrue(provenance.is_dir())
 
     def test_install_file_unit_covers_core_status_branches(self) -> None:
         # Exercise the write/conflict/overwrite engine directly so its coverage
