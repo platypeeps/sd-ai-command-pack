@@ -271,3 +271,36 @@ Batched install-audit gitignore checks with git check-ignore --stdin -z, preserv
 ### Next Steps
 
 - None - task complete
+
+
+## Session 108: Update installer layout docs and versioning policy
+
+**Date**: 2026-07-16
+**Task**: Update installer layout docs and versioning policy
+**Branch**: `codex/docs-accuracy-batch`
+
+### Summary
+
+Updated backend directory documentation for the installer package split, documented installer registry ownership, added the pack versioning/stability policy, and validated generated-parity plus full-check.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `723a00a` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
