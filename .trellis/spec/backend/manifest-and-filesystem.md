@@ -304,8 +304,12 @@ Generated text writers follow the same safety model:
    `CommandError`, `DEFAULT_COMMAND_TIMEOUT`, `DEFAULT_GIT_TIMEOUT`,
    `DEFAULT_GH_TIMEOUT`, `DEFAULT_TRELLIS_TIMEOUT`, `command_display(args)`,
    `command_detail(process, fallback)`, `run_command(args, *, timeout,
-   context, check, cwd, env, capture_output, text)`, `run_git(args, ...)`,
-   `run_gh(args, ...)`, `git_stdout(args, ...)`, and `repo_root(start)`.
+   context, check, cwd, allowed_returncodes, capture_output, stdout, stderr,
+   text, encoding, errors)`, `run_git(args, *, cwd, timeout, check,
+   allowed_returncodes, errors, context)`, `run_gh(args, *, cwd, timeout,
+   check, allowed_returncodes, errors, context)`, `git_stdout(args, *, cwd,
+   timeout, errors, context, required)`, and
+   `repo_root(*, fallback_to_cwd=False)`.
 3. Contracts: the helper is copied from `templates/scripts/` into the same
    installed `scripts/` directory as its consumers, so scripts import it by
    module name and must not mutate `sys.path` at runtime. The helper must remain
@@ -313,8 +317,7 @@ Generated text writers follow the same safety model:
    replacement decoding for captured output, and must apply bounded subprocess
    execution by default: 60 seconds for generic/git commands and 120 seconds
    for GitHub or Trellis operations unless a caller supplies a narrower
-   timeout. A timeout value of `None` is permitted only when the caller has a
-   documented reason.
+   timeout.
 4. Validation and error matrix: empty command -> `CommandError`; missing binary
    -> `CommandError` naming the command and context; timeout ->
    `CommandError` naming the command, context, and timeout seconds; checked
