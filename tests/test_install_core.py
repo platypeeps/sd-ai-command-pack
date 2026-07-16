@@ -550,9 +550,19 @@ class InstallCoreTests(InstallTestCase):
             anchor=Path(".github"),
             install="if-anchor-exists",
         )
+        generated_block = install.PackFile(
+            platform="github",
+            kind=install.MANAGED_BLOCK_KIND,
+            source=None,
+            target=Path(".github/copilot-instructions.md"),
+            anchor=Path(".github"),
+            install="if-anchor-exists",
+        )
 
         with self.assertRaisesRegex(SystemExit, "missing markers"):
             install.normalize_managed_block_template(invalid_file)
+        with self.assertRaisesRegex(SystemExit, "managed block has no source"):
+            install.normalize_managed_block_template(generated_block)
         with self.assertRaisesRegex(SystemExit, "incomplete"):
             install.merge_managed_block(
                 f"{install.COPILOT_GUIDANCE_START}\npartial\n",
@@ -825,6 +835,21 @@ class InstallCoreTests(InstallTestCase):
 
         self.assertIsNone(generated.source)
 
+    def test_generated_pack_file_cannot_be_installed_as_template(self) -> None:
+        root = self.make_repo()
+        generated = install.fileops.generated_pack_file(
+            "generated-test", Path(".sd-ai-command-pack/generated.txt")
+        )
+
+        with self.assertRaisesRegex(SystemExit, "generated file cannot be installed"):
+            install.install_file(
+                generated,
+                root,
+                force=False,
+                dry_run=False,
+                backup=False,
+            )
+
     def test_payload_apply_reuses_preflight_source_bytes(self) -> None:
         root = self.make_repo()
         source = root / "source.md"
@@ -868,6 +893,42 @@ class InstallCoreTests(InstallTestCase):
             hashlib.sha256(expected_content).hexdigest(),
         )
 
+    def test_payload_apply_reuses_preflight_source_bytes_in_dry_run(self) -> None:
+        root = self.make_repo()
+        source = root / "source.md"
+        source.write_text("pack template v1\n", encoding="utf-8")
+        file = self.valid_pack_file(source=source, target=Path("docs/example.md"))
+
+        preflight_results, _ = install._install_payload(
+            [file],
+            root,
+            local_only=False,
+            force=False,
+            dry_run=True,
+            backup=False,
+        )
+        source.write_text("pack template v2\n", encoding="utf-8")
+        results, _ = install._install_payload(
+            [file],
+            root,
+            local_only=False,
+            force=False,
+            dry_run=True,
+            backup=False,
+            planned_results={
+                result.file.target: result
+                for result in preflight_results
+                if result.source_content is not None
+            },
+        )
+
+        payload_result = next(
+            result for result in results if result.file.target == file.target
+        )
+        self.assertEqual(payload_result.status, "created")
+        self.assertFalse((root / "docs/example.md").exists())
+        self.assertEqual(payload_result.source_content, b"pack template v1\n")
+
     def test_provenance_uses_install_result_digest_without_source_read(self) -> None:
         root = self.make_repo()
         source = root / "source.md"
@@ -899,6 +960,43 @@ class InstallCoreTests(InstallTestCase):
             provenance["files"][file.target.as_posix()],
             f"sha256:{digest}",
         )
+
+    def test_provenance_falls_back_to_source_digest_and_skips_sourceless(self) -> None:
+        root = self.make_repo()
+        source = root / "source.md"
+        source.write_text("pack template\n", encoding="utf-8")
+        first = self.valid_pack_file(source=source, target=Path("docs/first.md"))
+        second = self.valid_pack_file(source=source, target=Path("docs/second.md"))
+        generated = install.fileops.generated_pack_file(
+            "generated-test", Path(".sd-ai-command-pack/generated.txt")
+        )
+
+        result = install.install_provenance_file(
+            {"name": "sd-ai-command-pack", "version": "0.0.1"},
+            [
+                install.InstallResult(first, install.InstallStatus.CREATED),
+                install.InstallResult(second, install.InstallStatus.CREATED),
+                install.InstallResult(generated, install.InstallStatus.CREATED),
+            ],
+            root,
+            receipt_targets={
+                first.target.as_posix(),
+                second.target.as_posix(),
+                generated.target.as_posix(),
+            },
+            never_vouched=set(),
+            dry_run=False,
+        )
+
+        self.assertEqual(result.status, "created")
+        provenance = json.loads(
+            (root / install.PROVENANCE_FILE).read_text(encoding="utf-8")
+        )
+        expected_digest = hashlib.sha256(b"pack template\n").hexdigest()
+        digest = f"sha256:{expected_digest}"
+        self.assertEqual(provenance["files"][first.target.as_posix()], digest)
+        self.assertEqual(provenance["files"][second.target.as_posix()], digest)
+        self.assertNotIn(generated.target.as_posix(), provenance["files"])
 
     def test_result_status_enums_preserve_public_strings(self) -> None:
         self.assertEqual(install.InstallStatus.SYMLINK_CONFLICT, "symlink-conflict")
@@ -2616,11 +2714,21 @@ class InstallCoreTests(InstallTestCase):
         duplicate_a = self.valid_pack_file()
         duplicate_b = self.valid_pack_file()
         missing_source = self.valid_pack_file(source=install.ROOT / "missing.md")
+        source_less = install.PackFile(
+            platform="shared",
+            kind="skill",
+            source=None,
+            target=Path(".agents/skills/generated/SKILL.md"),
+            anchor=None,
+            install="always",
+        )
 
         with self.assertRaisesRegex(SystemExit, "unknown platform"):
             install.validate_manifest([unknown_platform])
         with self.assertRaisesRegex(SystemExit, "duplicate target"):
             install.validate_manifest([duplicate_a, duplicate_b])
+        with self.assertRaisesRegex(SystemExit, "manifest file has no source"):
+            install.validate_manifest([source_less])
         with self.assertRaisesRegex(SystemExit, "missing pack template"):
             install.validate_manifest([missing_source])
 
