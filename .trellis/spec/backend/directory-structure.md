@@ -7,15 +7,16 @@
 ## Overview
 
 This repository is a small Python extension-pack installer, not a service app.
-Keep the root layout flat unless a new feature clearly needs more structure.
-The backend surface is the installer CLI plus its manifest-driven file-copy
-logic.
+Keep the backend layout compact unless a feature clearly needs more structure.
+The backend surface is the `install.py` CLI facade plus the `installer/`
+package that owns manifest-driven file-copy logic.
 
 ## Directory Layout
 
 ```text
 .
-├── install.py                  # Python CLI and installer implementation
+├── install.py                  # Thin Python CLI facade and compatibility entry point
+├── installer/                  # Installer package: manifest, registry, fileops, provenance
 ├── manifest.json               # Pack metadata and installable file manifest
 ├── scripts/                     # Dogfooded pack-owned helper scripts
 ├── templates/                  # Files copied into target Trellis repos
@@ -37,7 +38,13 @@ logic.
 
 ## Module Organization
 
-- Keep installer behavior in `install.py` while the project stays this small.
+- Keep `install.py` thin: it parses/dispatches the public CLI while reusable
+  behavior lives in `installer/`.
+- Put installer implementation in the focused `installer/` modules:
+  `manifest.py` for manifest loading and validation, `registry.py` for
+  platform metadata, `fileops.py` for selection/writes/managed blocks,
+  `localonly.py` for local-only setup, `provenance.py` for vouching, and
+  `removal.py` for remove mode.
 - Keep installable payloads under `templates/` and describe them in
   `manifest.json`; do not hard-code new template paths only in Python.
 - Keep platform adapters thin. The shared workflow belongs in
@@ -59,17 +66,19 @@ logic.
   older `sd-command-pack`, `SD_COMMAND_PACK_*`, and `sd_command_pack_*` forms as
   legacy installer cleanup aliases only.
 - Platform identifiers in manifests and CLI arguments are lowercase strings.
-  The single source of truth is `PLATFORM_REGISTRY` in `install.py` (one row
-  per platform: anchor directory, Trellis markers, init flag, local-gitignore
-  group, and Trellis-owned local-only paths); every per-platform table is
-  derived from it, so adding a platform means adding one registry row plus
-  manifest records. Do not enumerate platform ids in prose that can go stale —
-  reference the registry.
+  The single source of truth is `PLATFORM_REGISTRY` in
+  `installer/registry.py` (one row per platform: anchor directory, Trellis
+  markers, init flag, local-gitignore group, and Trellis-owned local-only
+  paths). Every per-platform table is derived from it, so adding a platform
+  means adding one registry row plus manifest records. Do not enumerate
+  platform ids in prose that can go stale — reference the registry.
 
 ## Examples
 
-- `install.py` owns CLI parsing, manifest loading, target validation, file
-  selection, file installation, and final diff checking.
+- `install.py` owns the CLI entry point and delegates manifest loading, target
+  validation, file selection, file installation, provenance, removal, and final
+  diff checking to `installer/` modules.
+- `installer/registry.py` owns `PLATFORM_REGISTRY` and derived platform tables.
 - `manifest.json` is the source of truth for source and target paths.
 - `tests/install_test_support.py` owns the temporary Trellis repo fixtures and
   subprocess helpers; subsystem test modules exercise the CLI through those

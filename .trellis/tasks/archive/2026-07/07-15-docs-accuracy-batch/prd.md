@@ -34,7 +34,21 @@ about upgrade safety from a documented versioning policy.
 
 ## Acceptance Criteria
 
-- [ ] Spec references resolve to real modules; no install.py-owns-registry
+- [x] Spec references resolve to real modules; no install.py-owns-registry
       claims remain.
-- [ ] CONTRIBUTING has the versioning + stability-boundary section.
-- [ ] Doc-path preflight and full-check pass.
+- [x] CONTRIBUTING has the versioning + stability-boundary section.
+- [x] Doc-path preflight and full-check pass.
+
+## Implementation Notes
+
+- Updated `.trellis/spec/backend/directory-structure.md` to describe
+  `install.py` as the CLI facade and `installer/` as the implementation
+  package, including the real `installer/registry.py` owner of
+  `PLATFORM_REGISTRY`.
+- Added a `CONTRIBUTING.md` versioning section for the `0.x` policy and the
+  stable public surface: commands, arguments, shipped script paths and CLIs,
+  documented `SD_AI_COMMAND_PACK_*` environment variables, managed-block names,
+  manifest target paths, and generated state file names.
+- Left optional A-025/A-026 cleanup out of scope because this task's required
+  docs fixes are self-contained and do not require changing deprecated
+  fallback behavior.

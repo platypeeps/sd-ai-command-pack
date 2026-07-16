@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 107
-- **Last Active**: 2026-07-15
+- **Total Sessions**: 108
+- **Last Active**: 2026-07-16
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~273 | Active |
+| `journal-3.md` | ~306 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 108 | 2026-07-16 | Update installer layout docs and versioning policy | `723a00a` | `codex/docs-accuracy-batch` |
 | 107 | 2026-07-15 | Batch install-audit gitignore checks | `acf6674` | `codex/install-audit-checkignore-batching` |
 | 106 | 2026-07-15 | Add release payload CI gate | `edddcc3`, `9357f99` | `codex/ci-release-gate-job` |
 | 105 | 2026-07-15 | P3 polish batch (0.13.1) | `85976ca` | `main` |

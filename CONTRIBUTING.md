@@ -74,6 +74,27 @@ insufficient.
     scripts/sd-ai-command-pack-update-spec-kb.py
   ```
 
+## Versioning
+
+The pack is still in `0.x`, so use the minor number for meaningful consumer
+behavior changes and the patch number for compatible fixes or documentation.
+
+- Bump the minor version for new distributed commands, new shipped files,
+  changed command semantics, new required installer behavior, or additions to
+  the stable public surface.
+- Bump the patch version for compatible bug fixes, performance improvements,
+  test-only improvements, doc corrections, provenance/hash refreshes, or
+  internal refactors that keep installed behavior stable.
+- Treat command names, command arguments, shipped script paths and CLIs,
+  documented `SD_AI_COMMAND_PACK_*` environment variables, managed-block names,
+  manifest target paths, and generated state file names as stable public
+  surface.
+- Treat private Python helper functions, shell helper internals, test fixtures,
+  local implementation structure, and undocumented temporary files as internal
+  unless a consumer-facing doc names them.
+- Keep deprecated public aliases documented until the removal release that
+  intentionally drops them, and note the removal in `CHANGELOG.md`.
+
 ## Trellis-Owned Platform Files
 
 - Keep Trellis-owned platform files in their Trellis-managed state so
