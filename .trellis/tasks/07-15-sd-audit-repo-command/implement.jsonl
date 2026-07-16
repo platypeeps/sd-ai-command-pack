@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/07-15-sd-audit-repo-command/prd.md", "reason": "Requirements, constraints, acceptance criteria"}
+{"file": ".trellis/tasks/07-15-sd-audit-repo-command/design.md", "reason": "Component layout, SKILL/charter/report/ledger contracts, tradeoffs"}
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Platform adapter conventions for the new command surfaces"}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Manifest entry semantics for new shipped files incl. shared/always"}
