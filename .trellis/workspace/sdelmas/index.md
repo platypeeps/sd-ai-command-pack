@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 114
+- **Total Sessions**: 115
 - **Last Active**: 2026-07-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~545 | Active |
+| `journal-3.md` | ~582 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 115 | 2026-07-16 | Fix auto-tag transitive-skip regression + backfill tags | `1376dde` | `main` |
 | 114 | 2026-07-16 | Restore 5 review rounds + cycle counters (0.14.0) | `e1a2f1f` | `main` |
 | 113 | 2026-07-16 | OpenCode dependency review | `438f42c`, `004c0f3`, `0157917`, `1eb0d10`, `6eafc42`, `3ba01d0`, `89dae22` | `codex/opencode-plugin-dependency-review` |
 | 112 | 2026-07-16 | Harden installer generated text writes | `3812dca`, `96cca3b` | `codex/installer-write-safety` |

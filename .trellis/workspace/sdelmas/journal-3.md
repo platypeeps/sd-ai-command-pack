@@ -544,3 +544,41 @@ Restored the remote review round-limit default to five (cut to two in 0.9.0) acr
 ### Next Steps
 
 - Fleet rollout 0.10.5..0.14.0 via sd-fleet-refresh when requested
+
+
+## Session 115: Fix auto-tag transitive-skip regression + backfill tags
+
+**Date**: 2026-07-16
+**Task**: Fix auto-tag transitive-skip regression + backfill tags
+**Branch**: `main`
+
+### Summary
+
+Diagnosed why v0.13.2/v0.13.3/v0.14.0 never tagged: the PR-only release-payload-gate job made the auto-tag job's implicit success() (no status function in its if:) see a skipped transitive ancestor on every main push, silently disabling tagging since v0.13.1. Backfilled the three tags at their merge commits, added !cancelled() to the condition with a regression pin in test_release_ledger, merged PR #129 (1 review round of 5). CI-only change, no bump.
+
+### Main Changes
+
+- auto-tag-release if: now starts with !cancelled(); explanatory comment in workflow
+- test_release_ledger pins !cancelled() and the ci-result result check
+- Tags v0.13.2 (634d63b), v0.13.3 (4f7bf18), v0.14.0 (e1a2f1f) backfilled
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1376dde` | Merge pull request #129 from platypeeps/fix/auto-tag-transitive-skip |
+
+### Testing
+
+- [OK] tests.test_release_ledger green; PR #129 CI green (9 lanes)
+- [OK] Real-world validation pending: next release push must auto-tag (v0.14.1+)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Verify auto-tag fires on the next version bump
+- Fleet rollout 0.10.5..0.14.0 when requested
