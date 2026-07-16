@@ -267,7 +267,7 @@ class PackDriftTests(InstallTestCase):
         gate = install.ROOT / ".github/scripts/check-shipped-script-coverage.sh"
         gate_text = gate.read_text(encoding="utf-8")
         matches = re.findall(
-            r"^(scripts/sd-ai-command-pack-[^\s]+\.py)\s+([0-9]+)$",
+            r"^(scripts/(?:sd-ai-command-pack-[^\s]+|sd_ai_command_pack_lib)\.py)\s+([0-9]+)$",
             gate_text,
             flags=re.MULTILINE,
         )
@@ -281,11 +281,15 @@ class PackDriftTests(InstallTestCase):
             path.relative_to(install.ROOT).as_posix()
             for path in (install.ROOT / "scripts").glob("sd-ai-command-pack-*.py")
         }
+        helpers.add("scripts/sd_ai_command_pack_lib.py")
 
         self.assertEqual(duplicates, [])
         self.assertEqual(set(configured), helpers)
         self.assertTrue(all(1 <= floor <= 100 for floor in configured.values()))
-        self.assertIn('--include="scripts/sd-ai-command-pack-*.py"', gate_text)
+        self.assertIn(
+            '--include="scripts/sd-ai-command-pack-*.py,scripts/sd_ai_command_pack_lib.py"',
+            gate_text,
+        )
         self.assertIn("--fail-under=76", gate_text)
         self.assertIn(
             'REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"',

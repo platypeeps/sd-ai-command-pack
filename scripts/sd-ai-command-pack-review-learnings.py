@@ -15,11 +15,18 @@ import functools
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from subprocess import CompletedProcess
 from typing import Any
+
+from sd_ai_command_pack_lib import (
+    run_gh as run_gh_command,
+)
+from sd_ai_command_pack_lib import (
+    run_git as run_git_command,
+)
 
 DEFAULT_TARGET = Path("docs/review-learnings.md")
 MANAGED_START = "<!-- sd-review-learnings:start -->"
@@ -468,16 +475,11 @@ def _run_git(
     *,
     check: bool = True,
     accept_one: bool = False,
-) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(
-        ["git", *args],
+) -> CompletedProcess[str]:
+    result = run_git_command(
+        args,
         cwd=repo_root,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=60,
+        context=f"run git {' '.join(args)}",
     )
     if check:
         allowed = {0, 1} if accept_one else {0}
@@ -529,18 +531,14 @@ def default_base_ref(repo_root: Path) -> str:
 
 
 def _git_untracked_paths(repo_root: Path) -> list[str]:
-    result = subprocess.run(
-        ["git", "ls-files", "--others", "--exclude-standard", "-z"],
+    result = run_git_command(
+        ["ls-files", "--others", "--exclude-standard", "-z"],
         cwd=repo_root,
-        check=False,
-        capture_output=True,
-        timeout=60,
+        context="run git ls-files for untracked paths",
     )
     if result.returncode != 0:
-        stderr = result.stderr.decode("utf-8", errors="replace")
-        raise RuntimeError(stderr.strip() or "git ls-files failed")
-    decoded = result.stdout.decode("utf-8", errors="replace")
-    return [path for path in decoded.split("\0") if path]
+        raise RuntimeError(result.stderr.strip() or "git ls-files failed")
+    return [path for path in result.stdout.split("\0") if path]
 
 
 def _git_working_tree_diff(repo_root: Path) -> str:
@@ -605,15 +603,10 @@ def _one_line(text: str, *, limit: int = 220) -> str:
 
 
 def _run_gh_stdout(args: list[str], repo_root: Path) -> str:
-    result = subprocess.run(
-        ["gh", *args],
+    result = run_gh_command(
+        args,
         cwd=repo_root,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=120,
+        context=f"run gh {' '.join(args)}",
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "gh command failed")
@@ -896,7 +889,6 @@ def main(argv: list[str] | None = None) -> int:
     except (
         OSError,
         RuntimeError,
-        subprocess.TimeoutExpired,
         json.JSONDecodeError,
     ) as exc:
         print(f"[sd-review-learnings:findings] {exc}", file=sys.stderr)
@@ -917,7 +909,6 @@ def main(argv: list[str] | None = None) -> int:
         OSError,
         RuntimeError,
         TypeError,
-        subprocess.TimeoutExpired,
         json.JSONDecodeError,
     ) as exc:
         print(f"[sd-review-learnings:github] {exc}", file=sys.stderr)

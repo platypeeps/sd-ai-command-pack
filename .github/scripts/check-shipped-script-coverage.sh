@@ -17,7 +17,7 @@ run_coverage_report() {
   "$PYTHON_BIN" -m coverage report "$@"
 }
 
-run_coverage_report --include="scripts/sd-ai-command-pack-*.py" --fail-under=76
+run_coverage_report --include="scripts/sd-ai-command-pack-*.py,scripts/sd_ai_command_pack_lib.py" --fail-under=76
 
 while read -r script floor; do
   case "$script" in
@@ -36,4 +36,5 @@ scripts/sd-ai-command-pack-pr-body-scope.py 78
 scripts/sd-ai-command-pack-record-session.py 79
 scripts/sd-ai-command-pack-review-learnings.py 73
 scripts/sd-ai-command-pack-update-spec-kb.py 83
+scripts/sd_ai_command_pack_lib.py 88
 EOF

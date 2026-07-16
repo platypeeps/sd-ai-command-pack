@@ -43,10 +43,6 @@ is_required() {
   esac
 }
 
-have() {
-  command -v "$1" >/dev/null 2>&1
-}
-
 scope_base_ref() {
   if configured_review_base_ref SD_AI_COMMAND_PACK_SCOPE_BASE_REF; then
     return

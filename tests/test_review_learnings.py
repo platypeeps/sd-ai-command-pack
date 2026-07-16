@@ -503,7 +503,7 @@ class ReviewLearningsTests(InstallTestCase):
         with mock.patch.object(
             module,
             "build_local_diff",
-            side_effect=module.subprocess.TimeoutExpired("git", 120),
+            side_effect=RuntimeError("git timed out after 120s"),
         ):
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
@@ -516,7 +516,7 @@ class ReviewLearningsTests(InstallTestCase):
         with mock.patch.object(
             module,
             "fetch_recent_copilot_comments",
-            side_effect=module.subprocess.TimeoutExpired("gh", 60),
+            side_effect=RuntimeError("gh timed out after 60s"),
         ):
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
@@ -542,26 +542,25 @@ class ReviewLearningsTests(InstallTestCase):
             install.ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_untracked_failure",
         )
-        fake_subprocess = mock.Mock()
-        fake_subprocess.run.return_value = subprocess.CompletedProcess(
+        failed_result = subprocess.CompletedProcess(
             args=["git"],
             returncode=128,
-            stdout=b"",
-            stderr=b"fatal: not a git repository\n",
+            stdout="",
+            stderr="fatal: not a git repository\n",
         )
 
-        with mock.patch.object(module, "subprocess", fake_subprocess):
+        with mock.patch.object(module, "run_git_command", return_value=failed_result):
             with self.assertRaisesRegex(RuntimeError, "not a git repository"):
                 module._git_untracked_paths(Path("."))
 
-        fake_subprocess.run.return_value = subprocess.CompletedProcess(
+        blank_result = subprocess.CompletedProcess(
             args=["git"],
             returncode=1,
-            stdout=b"",
-            stderr=b"  \n",
+            stdout="",
+            stderr="  \n",
         )
 
-        with mock.patch.object(module, "subprocess", fake_subprocess):
+        with mock.patch.object(module, "run_git_command", return_value=blank_result):
             with self.assertRaisesRegex(RuntimeError, "git ls-files failed"):
                 module._git_untracked_paths(Path("."))
 

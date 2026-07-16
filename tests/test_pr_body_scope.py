@@ -25,7 +25,15 @@ def _load_script():
     # Registered in sys.modules so the module-level @dataclass can resolve its
     # own module during class creation.
     sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    script_dir = str(SCRIPT.parent)
+    inserted = script_dir not in sys.path
+    if inserted:
+        sys.path.insert(0, script_dir)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if inserted:
+            sys.path.remove(script_dir)
     return module
 
 

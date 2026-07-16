@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
 PROVENANCE_FILE = Path(".sd-ai-command-pack/provenance.json")
 PACK_MANIFEST_FILE = Path(".sd-ai-command-pack/manifest.json")
+GIT_TIMEOUT_SECONDS = 60
 STABLE_VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 # Files unique to the sd-ai-command-pack source checkout. A consumer repo never
@@ -54,12 +55,15 @@ PACK_FILE_PATTERNS = [
     ".trae/commands/sd-*",
     ".trae/skills/sd-*/*",
     ".zcode/commands/sd/*",
+    ".github/PULL_REQUEST_TEMPLATE.md",
     ".gito/config.toml",
     ".gito/sd-ai-command-pack.env",
     ".prism/rules.json",
+    ".prism/rules.schema.json",
     ".sd-ai-command-pack/*",
     "docs/SD_AI_COMMAND_PACK.md",
     "scripts/sd-ai-command-pack-*",
+    "scripts/sd_ai_command_pack_lib.py",
 ]
 
 LOCAL_ALLOWED_PACK_FILES = {
@@ -534,8 +538,9 @@ def gitignored_paths(root: Path, relative_paths: Iterable[str]) -> set[str]:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=GIT_TIMEOUT_SECONDS,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return set()
     if result.returncode not in {0, 1}:
         return set()

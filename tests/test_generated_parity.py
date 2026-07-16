@@ -244,6 +244,7 @@ class GeneratedParityTests(InstallTestCase):
                 "scripts/sd-ai-command-pack-full-check.sh",
                 "scripts/sd-ai-command-pack-shell-lib.sh",
                 "scripts/sd-ai-command-pack-toolchain.sh",
+                "scripts/sd_ai_command_pack_lib.py",
                 "scripts/sd-ai-command-pack-housekeeping.sh",
                 "scripts/sd-ai-command-pack-review-scope.sh",
                 "scripts/sd-ai-command-pack-review-preflight.mjs",
@@ -490,6 +491,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-housekeeping/SKILL.md",
                 "scripts/sd-ai-command-pack-full-check.sh",
                 "scripts/sd-ai-command-pack-toolchain.sh",
+                "scripts/sd_ai_command_pack_lib.py",
                 "scripts/sd-ai-command-pack-housekeeping.sh",
                 "scripts/sd-ai-command-pack-review-scope.sh",
                 "scripts/sd-ai-command-pack-review-preflight.mjs",
@@ -648,6 +650,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-housekeeping/SKILL.md",
                 "scripts/sd-ai-command-pack-review-local.sh",
                 "scripts/sd-ai-command-pack-review-learnings.py",
+                "scripts/sd_ai_command_pack_lib.py",
                 "scripts/sd-ai-command-pack-full-check.sh",
                 "scripts/sd-ai-command-pack-housekeeping.sh",
             ],
@@ -1065,7 +1068,10 @@ class GeneratedParityTests(InstallTestCase):
         coverage_gate = (
             PACK_ROOT / ".github/scripts/check-shipped-script-coverage.sh"
         ).read_text(encoding="utf-8")
-        self.assertIn('--include="scripts/sd-ai-command-pack-*.py"', coverage_gate)
+        self.assertIn(
+            '--include="scripts/sd-ai-command-pack-*.py,scripts/sd_ai_command_pack_lib.py"',
+            coverage_gate,
+        )
         self.assertIn("--fail-under=76", coverage_gate)
         # The parallel test runner owns the coverage rig contract that used to
         # live inline in the workflow/README: the absolute coverage env plus
@@ -1410,6 +1416,7 @@ class GeneratedParityTests(InstallTestCase):
             "scripts/sd-ai-command-pack-review-learnings.py",
             "scripts/sd-ai-command-pack-pr-body-scope.py",
             "scripts/sd-ai-command-pack-update-spec-kb.py",
+            "scripts/sd_ai_command_pack_lib.py",
             "docs/SD_AI_COMMAND_PACK.md",
         ):
             self.assertIn(expected, snapshot)
@@ -2005,6 +2012,7 @@ class GeneratedParityTests(InstallTestCase):
             "scripts/sd-ai-command-pack-full-check.sh",
             "scripts/sd-ai-command-pack-shell-lib.sh",
             "scripts/sd-ai-command-pack-toolchain.sh",
+            "scripts/sd_ai_command_pack_lib.py",
             "scripts/sd-ai-command-pack-housekeeping.sh",
             "scripts/sd-ai-command-pack-review-scope.sh",
             "scripts/sd-ai-command-pack-review-preflight.mjs",

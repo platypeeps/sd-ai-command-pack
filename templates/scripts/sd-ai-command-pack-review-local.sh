@@ -51,10 +51,6 @@ source_sd_ai_command_pack_shell_lib() {
 
 source_sd_ai_command_pack_shell_lib
 
-have() {
-  command -v "$1" >/dev/null 2>&1
-}
-
 is_disabled() {
   case "${1:-}" in
     0|false|FALSE|no|NO|skip|none) return 0 ;;

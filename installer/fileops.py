@@ -45,6 +45,8 @@ from installer.status import (
     RemoveStatus,
 )
 
+GIT_TIMEOUT_SECONDS = 60
+
 _LEGACY_CLAUDE_GITIGNORE_SEQUENCE = (
     ".claude/**",
     "!.claude/commands/",
@@ -649,9 +651,16 @@ def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=False,
+            timeout=GIT_TIMEOUT_SECONDS,
         )
     except FileNotFoundError:
         print("warning: git not found; skipped git diff --check")
+        return 0
+    except subprocess.TimeoutExpired:
+        print(
+            "warning: git rev-parse timed out while checking target repo; "
+            "skipped whitespace validation"
+        )
         return 0
     if work_tree_probe.returncode != 0 or work_tree_probe.stdout.strip() != "true":
         # The Trellis target is not a git work tree (e.g. a tarball
@@ -668,14 +677,19 @@ def run_diff_check(target: Path, paths: list[Path] | None = None) -> int:
     if paths:
         command.extend(["--", *(str(path) for path in paths)])
 
-    result = subprocess.run(
-        command,
-        cwd=target,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            cwd=target,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"error: git diff --check timed out after {GIT_TIMEOUT_SECONDS}s")
+        return 1
 
     if result.stdout:
         print(result.stdout.rstrip())

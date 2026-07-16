@@ -257,6 +257,52 @@ class ReviewScopeTests(InstallTestCase):
             module._matches_pattern(".claude/skillsX/sd-a/file.md", wildcard_base_pattern)
         )
 
+    def test_static_scanner_patterns_cover_manifest_targets_at_subpath_granularity(
+        self,
+    ) -> None:
+        pr_body_scope = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            "sd_pr_body_scope_manifest_coverage",
+        )
+        install_audit = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            "sd_install_audit_manifest_coverage",
+        )
+        _, files = install.load_manifest()
+        targets = sorted(
+            file.target.as_posix()
+            for file in files
+            if file.kind != install.MANAGED_BLOCK_KIND
+        )
+
+        pr_body_unmatched = [
+            target
+            for target in targets
+            if not any(
+                pr_body_scope._matches_pattern(target, pattern)
+                for rule in pr_body_scope.DEFAULT_RULES
+                for pattern in rule.patterns
+            )
+        ]
+        audit_unmatched = [
+            target
+            for target in targets
+            if not install_audit.matches_pack_file(target)
+        ]
+
+        self.assertEqual(
+            pr_body_unmatched,
+            [],
+            "PR-body scope scanner patterns must cover manifest targets by "
+            "full target path so command/config subpath changes cannot drift.",
+        )
+        self.assertEqual(
+            audit_unmatched,
+            [],
+            "Install-audit pack-file patterns must cover manifest targets by "
+            "full target path so command/config subpath changes cannot drift.",
+        )
+
     def test_pr_body_scope_script_detects_wildcard_base_skill_paths(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)

@@ -7,7 +7,9 @@ include =
     install.py
     installer/*
     scripts/sd-ai-command-pack-*.py
+    scripts/sd_ai_command_pack_lib.py
     */scripts/sd-ai-command-pack-*.py
+    */scripts/sd_ai_command_pack_lib.py
 parallel = True
 branch = True
 

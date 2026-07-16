@@ -69,10 +69,6 @@ is_disabled() {
   esac
 }
 
-have() {
-  command -v "$1" >/dev/null 2>&1
-}
-
 warn_unarmed_pack_source_hook() {
   [ -f "$REPO_ROOT/manifest.json" ] || return 0
   [ -f "$REPO_ROOT/install.py" ] || return 0
@@ -503,7 +499,13 @@ def git_output(args, *, allow_fail=False):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            timeout=60,
         )
+    except subprocess.TimeoutExpired:
+        if allow_fail:
+            return None
+        errors.append(f"git command timed out after 60s: git {' '.join(args)}")
+        return None
     except OSError as exc:
         if allow_fail:
             return None
@@ -535,6 +537,12 @@ def git_ref_status(ref):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        return False, (
+            f"release version gate cannot resolve base ref {ref!r}: "
+            "git timed out after 60s"
         )
     except OSError as exc:
         return False, (
