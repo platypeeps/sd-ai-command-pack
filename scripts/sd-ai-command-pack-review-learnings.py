@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,47 @@ _CLASSIFY_WITH_DELIMITER_RE = re.compile(
 )
 _ALL_ZERO_GREP_RE = re.compile(r"grep\b[^#\n]*-qv\b[^#\n]*\^0\*\$")
 _LONG_OPTION_CASE_RE = re.compile(r"^\s*(--[a-z][a-z0-9-]*)\)")
+
+
+def default_text_file_mode(destination: Path) -> int:
+    if destination.exists():
+        return destination.stat().st_mode & 0o777
+    current_umask = os.umask(0)
+    try:
+        return 0o666 & ~current_umask
+    finally:
+        os.umask(current_umask)
+
+
+def atomic_write_text(
+    destination: Path,
+    content: str,
+    *,
+    errors: str = "strict",
+) -> None:
+    if destination.is_symlink():
+        raise OSError("target is a symlink")
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(content.encode("utf-8", errors=errors))
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.chmod(temporary_path, default_text_file_mode(destination))
+        os.replace(temporary_path, destination)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
 
 
 @dataclasses.dataclass(frozen=True)
@@ -770,7 +812,7 @@ def update_target(target: Path, block: str, *, dry_run: bool) -> str:
     if dry_run:
         return updated
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(updated, encoding="utf-8", errors="strict")
+    atomic_write_text(target, updated, errors="strict")
     return updated
 
 

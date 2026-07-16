@@ -47,6 +47,47 @@ PLACEHOLDERS = ("(Add details)", "(Add test results)", "(see git log)")
 SESSION_HEADING_RE = re.compile(r"^## Session \d+: (.+)$", re.MULTILINE)
 
 
+def default_text_file_mode(destination: Path) -> int:
+    if destination.exists():
+        return destination.stat().st_mode & 0o777
+    current_umask = os.umask(0)
+    try:
+        return 0o666 & ~current_umask
+    finally:
+        os.umask(current_umask)
+
+
+def atomic_write_text(
+    destination: Path,
+    content: str,
+    *,
+    errors: str = "strict",
+) -> None:
+    if destination.is_symlink():
+        raise OSError("target is a symlink")
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(content.encode("utf-8", errors=errors))
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.chmod(temporary_path, default_text_file_mode(destination))
+        os.replace(temporary_path, destination)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
 def run_git(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", *args],
@@ -200,9 +241,7 @@ def patch_last_session(
         return f"placeholders remain after patching {journal}: {', '.join(remaining)}"
 
     try:
-        journal.write_text(
-            text[:block_start] + block, encoding="utf-8", errors="strict"
-        )
+        atomic_write_text(journal, text[:block_start] + block, errors="strict")
     except OSError as exc:
         return f"cannot write {journal}: {exc}"
     return None

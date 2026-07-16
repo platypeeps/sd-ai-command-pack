@@ -151,6 +151,47 @@ class RecordSessionTests(InstallTestCase):
         self.assertIn("journal-1.md", committed)
         self.assertNotIn("journal-0.md", committed)
 
+    def test_record_session_patch_uses_atomic_write(self) -> None:
+        recorder = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-record-session.py",
+            "sd_record_session_atomic_write",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-recorder-atomic-")
+        self.addCleanup(tempdir.cleanup)
+        journal = Path(tempdir.name) / "journal-1.md"
+        original = (
+            "# Journal\n"
+            "\n"
+            "## Session 1: Atomic session\n"
+            "\n"
+            "### Summary\n"
+            "Started.\n"
+            "\n"
+            "### Main Changes\n"
+            "- recorded work\n"
+            "\n"
+            "### Commits\n"
+            "| Commit | Subject |\n"
+            "| `abc123` | (see git log) |\n"
+            "\n"
+            "### Testing\n"
+            "- [OK] (Add test results)\n"
+        )
+        journal.write_text(original, encoding="utf-8")
+
+        with mock.patch.object(recorder.os, "replace", side_effect=OSError("blocked")):
+            error = recorder.patch_last_session(
+                journal,
+                "Atomic session",
+                {"abc123": "feat: atomic journal"},
+                ["- [OK] unit tests"],
+                [],
+            )
+
+        self.assertEqual(error, f"cannot write {journal}: blocked")
+        self.assertEqual(journal.read_text(encoding="utf-8"), original)
+        self.assertEqual(list(journal.parent.glob(".*.tmp")), [])
+
     def test_record_session_wrapper_reuses_uncommitted_retry_entry(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)

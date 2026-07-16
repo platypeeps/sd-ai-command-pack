@@ -306,6 +306,26 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertIn("<!-- sd-review-learnings:start -->", content)
         self.assertIn("No local review-cycle findings detected", content)
 
+    def test_review_learnings_update_uses_atomic_write(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_atomic_write",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-atomic-")
+        self.addCleanup(tempdir.cleanup)
+        target = Path(tempdir.name) / "docs/review-learnings.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        original = "# Review Learnings\n\nHuman notes stay.\n"
+        target.write_text(original, encoding="utf-8")
+        block = module.render_managed_block([], [])
+
+        with mock.patch.object(module.os, "replace", side_effect=OSError("blocked")):
+            with self.assertRaisesRegex(OSError, "blocked"):
+                module.update_target(target, block, dry_run=False)
+
+        self.assertEqual(target.read_text(encoding="utf-8"), original)
+        self.assertEqual(list(target.parent.glob(".*.tmp")), [])
+
     def test_review_learnings_script_rejects_malformed_payload_helpers(self) -> None:
         module = self.load_module_from_path(
             install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",

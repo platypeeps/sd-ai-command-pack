@@ -36,7 +36,19 @@ writer silently replaces a symlink with a regular file.
 
 ## Acceptance Criteria
 
-- [ ] Journal, KB-gitignore, and learnings writes are atomic (temp+replace).
-- [ ] Symlinked gitignore/copilot-instructions targets produce a conflict or
+- [x] Journal, KB-gitignore, and learnings writes are atomic (temp+replace).
+- [x] Symlinked gitignore/copilot-instructions targets produce a conflict or
       are preserved — never silently replaced-through.
-- [ ] New tests cover both behaviors; coverage floors hold.
+- [x] New tests cover both behaviors; coverage floors hold.
+
+## Implementation Notes
+
+- Added local atomic text writers to the shipped recorder, review-learnings,
+  and update-spec KB helpers, mirrored in `templates/scripts/`.
+- Added symlink-conflict handling for generated installer text files, including
+  `.gitignore`, Copilot guidance, pack manifest, provenance, and installed
+  targets receipts.
+- Updated the update-spec KB helper so a symlinked ignore file reports a
+  partial refresh conflict rather than writing through or replacing the link.
+- Captured the generated-text write contract in
+  `.trellis/spec/backend/manifest-and-filesystem.md`.

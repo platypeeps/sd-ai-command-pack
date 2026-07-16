@@ -1266,15 +1266,13 @@ class InstallAuditTests(InstallTestCase):
         self.assertIn("cannot be read", result.stdout)
         self.assertIn("cannot be inspected", result.stdout)
 
-    def test_install_ignores_symlinked_provenance(self) -> None:
+    def test_install_conflicts_on_symlinked_provenance(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
 
         provenance = root / install.PROVENANCE_FILE
-        real = json.loads(provenance.read_text(encoding="utf-8"))
         target_key = "scripts/sd-ai-command-pack-full-check.sh"
-        real_hash = real["files"][target_key]
 
         bogus = root / ".sd-ai-command-pack/bogus.json"
         bogus.write_text(
@@ -1286,10 +1284,13 @@ class InstallAuditTests(InstallTestCase):
 
         result = self.run_install(root)
 
-        self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertFalse(provenance.is_symlink())
-        rebuilt = json.loads(provenance.read_text(encoding="utf-8"))
-        self.assertEqual(rebuilt["files"][target_key], real_hash)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("symlink-conflict .sd-ai-command-pack/provenance.json", result.stdout)
+        self.assertTrue(provenance.is_symlink())
+        self.assertEqual(
+            json.loads(bogus.read_text(encoding="utf-8"))["files"][target_key],
+            "sha256:" + "0" * 64,
+        )
 
     def test_install_recovers_from_malformed_provenance(self) -> None:
         root = self.make_repo()

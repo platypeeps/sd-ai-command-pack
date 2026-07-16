@@ -14,6 +14,7 @@ from installer.fileops import (
     InstallStatus,
     atomic_write_text,
     generated_pack_file,
+    generated_text_file_status,
 )
 from installer.manifest import (
     PackFile,
@@ -66,8 +67,8 @@ PROVENANCE_EXCLUDED_KINDS = {
 def read_existing_provenance_files(target: Path) -> dict[str, str]:
     provenance = target_destination(target, PROVENANCE_FILE)
     # A symlinked provenance is never trusted (mirrors the audit contract);
-    # ignoring it here means the atomic rewrite below replaces the symlink
-    # with a regular file instead of following it.
+    # generated-file installation reports a symlink conflict instead of
+    # following or replacing the link.
     if provenance.is_symlink() or not provenance.is_file():
         return {}
     try:
@@ -170,6 +171,9 @@ def _install_generated_text_file(
 ) -> InstallResult:
     """Write a generated pack file: unchanged / updated / created (dry-run safe)."""
     destination = target_destination(target, file.target)
+    status = generated_text_file_status(destination)
+    if status is not None:
+        return InstallResult(file, status)
     if destination.exists():
         current = read_text_strict(destination, str(file.target))
         if current == content:
