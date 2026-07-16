@@ -479,6 +479,180 @@ class InstallAuditTests(InstallTestCase):
             result.stdout,
         )
 
+    def test_install_audit_batches_structural_gitignore_candidates(self) -> None:
+        audit = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            "sd_install_audit_structural_batch",
+        )
+        root = self.make_repo()
+        missing_target = ".claude/commands/sd/start.md"
+        unlisted_pack_file = "scripts/sd-ai-command-pack-extra.py"
+        extra_path = root / unlisted_pack_file
+        extra_path.parent.mkdir(parents=True, exist_ok=True)
+        extra_path.write_text("# local-only helper\n", encoding="utf-8")
+        calls: list[bytes] = []
+
+        def fake_check_ignore(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+            self.assertEqual(args[:4], ["git", "-C", str(root), "check-ignore"])
+            input_payload = kwargs["input"]
+            self.assertIsInstance(input_payload, bytes)
+            calls.append(input_payload)
+            ignored = f"{missing_target}\0{unlisted_pack_file}\0".encode()
+            return subprocess.CompletedProcess(args, 0, stdout=ignored)
+
+        with mock.patch.object(audit.subprocess, "run", side_effect=fake_check_ignore):
+            failures, warnings = audit.audit_structural_state(root, {missing_target})
+
+        self.assertEqual(failures, [])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            set(calls[0].decode().strip("\0").split("\0")),
+            {missing_target, unlisted_pack_file},
+        )
+        self.assertIn(
+            "installed target is gitignored and absent in this checkout: "
+            f"{missing_target}",
+            "\n".join(warnings),
+        )
+        self.assertIn(
+            "local-only pack-like file is not recorded in installed targets: "
+            f"{unlisted_pack_file}",
+            "\n".join(warnings),
+        )
+
+    def test_install_audit_check_ignore_exit_one_means_no_matches(self) -> None:
+        audit = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            "sd_install_audit_check_ignore_none",
+        )
+        root = self.make_repo()
+        missing_target = ".claude/commands/sd/start.md"
+        unlisted_pack_file = "scripts/sd-ai-command-pack-extra.py"
+        extra_path = root / unlisted_pack_file
+        extra_path.parent.mkdir(parents=True, exist_ok=True)
+        extra_path.write_text("# tracked helper\n", encoding="utf-8")
+        calls = 0
+
+        def fake_check_ignore(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+            nonlocal calls
+            calls += 1
+            return subprocess.CompletedProcess(args, 1, stdout=b"")
+
+        with mock.patch.object(audit.subprocess, "run", side_effect=fake_check_ignore):
+            failures, warnings = audit.audit_structural_state(root, {missing_target})
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(calls, 1)
+        self.assertIn(f"installed target is missing: {missing_target}", failures)
+        self.assertIn(
+            f"pack-like file is not listed in installed targets: {unlisted_pack_file}",
+            failures,
+        )
+
+    def test_install_audit_batches_expected_target_gitignore_candidates(self) -> None:
+        audit = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            "sd_install_audit_expected_batch",
+        )
+        root = self.make_repo()
+        ignored_target = ".claude/commands/sd/start.md"
+        missing_target = ".gemini/commands/sd/start.toml"
+        manifest = {
+            "files": [
+                {"platform": "shared", "target": ignored_target},
+                {"platform": "shared", "target": missing_target},
+            ]
+        }
+        calls: list[bytes] = []
+
+        def fake_check_ignore(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+            input_payload = kwargs["input"]
+            self.assertIsInstance(input_payload, bytes)
+            calls.append(input_payload)
+            return subprocess.CompletedProcess(args, 0, stdout=f"{ignored_target}\0".encode())
+
+        with mock.patch.object(audit.subprocess, "run", side_effect=fake_check_ignore):
+            failures, warnings, expected_count, selected_platforms = (
+                audit.audit_expected_targets(
+                    root,
+                    set(),
+                    manifest,
+                    explicit_platforms=[],
+                )
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            set(calls[0].decode().strip("\0").split("\0")),
+            {
+                ignored_target,
+                missing_target,
+                install.INSTALLED_TARGETS_FILE.as_posix(),
+                install.PACK_MANIFEST_FILE.as_posix(),
+                install.PROVENANCE_FILE.as_posix(),
+            },
+        )
+        self.assertEqual(expected_count, 5)
+        self.assertEqual(selected_platforms, set())
+        self.assertIn(
+            f"expected installed target is missing from receipt: {ignored_target}",
+            failures,
+        )
+        self.assertIn(
+            f"expected installed target is missing: {missing_target}",
+            failures,
+        )
+        self.assertIn(
+            "expected installed target is gitignored and absent in this checkout: "
+            f"{ignored_target}",
+            "\n".join(warnings),
+        )
+
+    def test_install_audit_batches_provenance_missing_targets(self) -> None:
+        audit = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            "sd_install_audit_provenance_batch",
+        )
+        root = self.make_repo()
+        ignored_target = ".claude/commands/sd/start.md"
+        missing_target = ".gemini/commands/sd/start.toml"
+        provenance = root / install.PROVENANCE_FILE
+        provenance.parent.mkdir(parents=True, exist_ok=True)
+        provenance.write_text(
+            json.dumps(
+                {
+                    "version": "9.9.9",
+                    "files": {
+                        ignored_target: "sha256:" + "0" * 64,
+                        missing_target: "sha256:" + "1" * 64,
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        calls: list[bytes] = []
+
+        def fake_check_ignore(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+            input_payload = kwargs["input"]
+            self.assertIsInstance(input_payload, bytes)
+            calls.append(input_payload)
+            return subprocess.CompletedProcess(args, 0, stdout=f"{ignored_target}\0".encode())
+
+        with mock.patch.object(audit.subprocess, "run", side_effect=fake_check_ignore):
+            failures, version = audit.audit_provenance(root)
+
+        self.assertEqual(version, "9.9.9")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            set(calls[0].decode().strip("\0").split("\0")),
+            {ignored_target, missing_target},
+        )
+        self.assertEqual(
+            failures,
+            [f"vouched target is missing: {missing_target}"],
+        )
+
     def test_install_writes_provenance_with_hashed_targets(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.2 - 2026-07-16
+
+- Batched install-audit `git check-ignore` probes so each audit phase resolves
+  candidate ignored paths with one `git check-ignore --stdin -z` subprocess
+  instead of one subprocess per missing or unlisted pack-shaped path. Existing
+  fail-closed behavior is preserved for missing git, non-repo roots, git
+  errors, and the `check-ignore` exit-code-1 no-match case.
+
 ## 0.13.1 - 2026-07-16
 
 - P3 polish batch from the 2026-07-15 audit (nine items). Shipped-payload

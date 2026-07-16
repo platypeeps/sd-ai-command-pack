@@ -41,9 +41,24 @@ target count, with byte-identical audit output and exit codes.
 
 ## Acceptance Criteria
 
-- [ ] One check-ignore subprocess per pass (or per run) — verified by a test
+- [x] One check-ignore subprocess per pass (or per run) — verified by a test
       counting subprocess invocations via a stubbed git.
-- [ ] Byte-identical audit output and exit codes on the existing test matrix.
-- [ ] Exit-code-1 (no matches) and missing-git paths covered by tests.
-- [ ] Coverage floors hold; ledger A-014 can be marked fixed by the next
+- [x] Byte-identical audit output and exit codes on the existing test matrix.
+- [x] Exit-code-1 (no matches) and missing-git paths covered by tests.
+- [x] Coverage floors hold; ledger A-014 can be marked fixed by the next
       follow-up audit.
+
+## Implementation Notes
+
+- Added `gitignored_paths()` to the shipped install-audit script and template
+  twin, using `git check-ignore --stdin -z` to resolve each audit phase's
+  candidate paths in one subprocess.
+- Reworked expected-target, structural, and provenance checks to collect
+  candidate paths before classification, then replay the existing
+  warning/failure wording and ordering.
+- Added focused regression tests for structural, expected-target, and
+  provenance batching plus the exit-code-1 no-match behavior. The existing
+  missing-git CLI test continues to cover fail-closed behavior when git is
+  unavailable.
+- Bumped the pack manifest to `0.13.2` and recorded the shipped-payload change
+  in `CHANGELOG.md`.
