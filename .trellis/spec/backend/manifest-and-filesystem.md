@@ -289,8 +289,61 @@ Generated text writers follow the same safety model:
   must leave the previous complete file in place and clean up the temporary
   file.
 - Standalone shipped scripts cannot import the installer package in consumer
-  repos, so they may carry a small local atomic text writer until a shared
-  shipped script library exists.
+  repos. Shared Python behavior for consumer-shipped scripts belongs in
+  `scripts/sd_ai_command_pack_lib.py` and its `templates/scripts/` twin; keep
+  that module stdlib-only and manifest-installed with the scripts that import
+  it.
+
+## Shipped Python Helper Library
+
+1. Scope and trigger: use this contract when adding or changing shared Python
+   helpers consumed by installed `scripts/sd-ai-command-pack-*.py` files, or
+   when moving repeated subprocess, git, gh, path, or error-formatting behavior
+   out of individual scripts.
+2. Signatures: `scripts/sd_ai_command_pack_lib.py` exposes
+   `CommandError`, `DEFAULT_COMMAND_TIMEOUT`, `DEFAULT_GIT_TIMEOUT`,
+   `DEFAULT_GH_TIMEOUT`, `DEFAULT_TRELLIS_TIMEOUT`, `command_display(args)`,
+   `command_detail(process, fallback)`, `run_command(args, *, timeout,
+   context, check, cwd, allowed_returncodes, capture_output, stdout, stderr,
+   text, encoding, errors)`, `run_git(args, *, cwd, timeout, check,
+   allowed_returncodes, errors, context)`, `run_gh(args, *, cwd, timeout,
+   check, allowed_returncodes, errors, context)`, `git_stdout(args, *, cwd,
+   timeout, errors, context, required)`, and
+   `repo_root(*, fallback_to_cwd=False)`.
+3. Contracts: the helper is copied from `templates/scripts/` into the same
+   installed `scripts/` directory as its consumers, so scripts import it by
+   module name and must not mutate `sys.path` at runtime. The helper must remain
+   dependency-free, must not import `installer.*`, must preserve UTF-8
+   replacement decoding for captured output, and must apply bounded subprocess
+   execution by default: 60 seconds for generic/git commands and 120 seconds
+   for GitHub or Trellis operations unless a caller supplies a narrower
+   timeout.
+4. Validation and error matrix: empty command -> `CommandError`; missing binary
+   -> `CommandError` naming the command and context; timeout ->
+   `CommandError` naming the command, context, and timeout seconds; checked
+   nonzero exit -> `CommandError` with stderr/stdout detail; unchecked nonzero
+   exit -> returned `CompletedProcess`; repository-root lookup outside git ->
+   `CommandError`.
+5. Good, base, and bad cases: good scripts call `run_git(["status"], context=...)`
+   or `run_gh(["pr", "view"], context=...)` and report the helper's
+   user-facing error; a base successful command returns the original completed
+   process; a bad script reimplements `subprocess.run(..., timeout=...)` with
+   different messages or imports installer modules that do not exist in
+   consumer repos.
+6. Tests required: add focused helper tests for success, empty command, missing
+   binary, timeout, checked failure, git/gh timeout defaults, stdout stripping,
+   and repo-root failure. Any migrated script must keep focused tests for its
+   previous CLI behavior plus root/template byte parity, manifest selection,
+   install-audit provenance, and shipped-script coverage floor updates.
+7. Wrong vs correct:
+
+   ```text
+   Wrong: subprocess.run(["git", "rev-parse"], check=True)
+   Correct: run_git(["rev-parse", "--show-toplevel"], context="resolve repository root")
+
+   Wrong: from installer.fileops import run_diff_check
+   Correct: from sd_ai_command_pack_lib import run_command
+   ```
 
 ## Plan-Before-Apply And Concurrency
 

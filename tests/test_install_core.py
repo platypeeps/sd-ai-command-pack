@@ -223,6 +223,7 @@ class InstallCoreTests(InstallTestCase):
                 "scripts/sd-ai-command-pack-full-check.sh",
                 "scripts/sd-ai-command-pack-shell-lib.sh",
                 "scripts/sd-ai-command-pack-toolchain.sh",
+                "scripts/sd_ai_command_pack_lib.py",
                 "scripts/sd-ai-command-pack-housekeeping.sh",
                 "scripts/sd-ai-command-pack-review-scope.sh",
                 "scripts/sd-ai-command-pack-review-preflight.mjs",
@@ -1484,6 +1485,8 @@ class InstallCoreTests(InstallTestCase):
         coveragerc = (PACK_ROOT / ".coveragerc").read_text(encoding="utf-8")
         self.assertIn("parallel = True", coveragerc)
         self.assertIn("fail_under = 100", coveragerc)
+        self.assertIn("scripts/sd_ai_command_pack_lib.py", coveragerc)
+        self.assertIn("*/scripts/sd_ai_command_pack_lib.py", coveragerc)
 
     def test_main_diff_check_excludes_preserved_targets(self) -> None:
         root = self.make_repo()
@@ -1880,6 +1883,7 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-full-check/SKILL.md",
                 ".agents/skills/sd-housekeeping/SKILL.md",
                 "scripts/sd-ai-command-pack-full-check.sh",
+                "scripts/sd_ai_command_pack_lib.py",
                 "scripts/sd-ai-command-pack-housekeeping.sh",
                 "scripts/sd-ai-command-pack-review-scope.sh",
                 "scripts/sd-ai-command-pack-review-preflight.mjs",
@@ -2226,6 +2230,20 @@ class InstallCoreTests(InstallTestCase):
         with mock.patch.object(subprocess, "run", return_value=failed_git):
             self.assertIsNone(install.git_output(root, "status"))
 
+        with mock.patch.object(
+            install.localonly.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(["git", "status"], timeout=60),
+        ):
+            self.assertIsNone(install.git_output(root, "status"))
+            with self.assertRaisesRegex(SystemExit, "git timed out after 60s"):
+                install.git_output(
+                    root,
+                    "status",
+                    required=True,
+                    context="check status",
+                )
+
         with mock.patch.object(install.localonly, "git_output", return_value=None):
             with self.assertRaisesRegex(SystemExit, "requires the target to be a Git repo"):
                 install.require_git_repo_for_local_only(root)
@@ -2247,6 +2265,13 @@ class InstallCoreTests(InstallTestCase):
         )
         with mock.patch.object(subprocess, "run", return_value=failed):
             with self.assertRaisesRegex(SystemExit, "git ls-files failed"):
+                install.tracked_paths(root, ["bad"])
+        with mock.patch.object(
+            install.localonly.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(["git", "ls-files"], timeout=60),
+        ):
+            with self.assertRaisesRegex(SystemExit, "git ls-files timed out after 60s"):
                 install.tracked_paths(root, ["bad"])
 
     def test_local_only_trellis_init_error_paths(self) -> None:
@@ -2275,6 +2300,24 @@ class InstallCoreTests(InstallTestCase):
                             skip_trellis_init=False,
                         )
                 self.assertEqual(output.getvalue(), "trellis exploded\n")
+
+        with mock.patch.object(shutil, "which", return_value="/bin/trellis"):
+            with mock.patch.object(
+                install.localonly.subprocess,
+                "run",
+                side_effect=subprocess.TimeoutExpired(["trellis", "init"], timeout=120),
+            ):
+                with self.assertRaisesRegex(
+                    SystemExit,
+                    "trellis init timed out after 120s",
+                ):
+                    install.ensure_trellis_for_local_only(
+                        root,
+                        platforms=[],
+                        install_all=False,
+                        dry_run=False,
+                        skip_trellis_init=False,
+                    )
 
         succeeded_without_config = subprocess.CompletedProcess(
             ["trellis", "init"],
@@ -2432,6 +2475,37 @@ class InstallCoreTests(InstallTestCase):
 
         self.assertNotEqual(bad_result, 0)
         self.assertEqual(missing_result, 0)
+
+    def test_diff_check_timeout_paths_report_clear_status(self) -> None:
+        root = self.make_repo()
+        inside_work_tree = subprocess.CompletedProcess(
+            ["git"],
+            0,
+            stdout="true\n",
+        )
+
+        output = io.StringIO()
+        with mock.patch.object(
+            install.fileops.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(["git", "rev-parse"], timeout=60),
+        ):
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(install.run_diff_check(root), 0)
+        self.assertIn("git rev-parse timed out", output.getvalue())
+
+        output = io.StringIO()
+        with mock.patch.object(
+            install.fileops.subprocess,
+            "run",
+            side_effect=[
+                inside_work_tree,
+                subprocess.TimeoutExpired(["git", "diff"], timeout=60),
+            ],
+        ):
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(install.run_diff_check(root), 1)
+        self.assertIn("git diff --check timed out after 60s", output.getvalue())
 
     def test_empty_scoped_diff_check_does_not_run_repo_wide(self) -> None:
         root = self.make_repo()

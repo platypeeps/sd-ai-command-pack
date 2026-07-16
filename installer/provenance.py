@@ -30,6 +30,8 @@ from installer.registry import (
     TRELLIS_GITIGNORE_TARGET,
 )
 
+GIT_TIMEOUT_SECONDS = 60
+
 
 def installed_targets_set(
     selected: list[PackFile],
@@ -260,8 +262,9 @@ def is_gitignored_path(target: Path, relative_path: str) -> bool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=GIT_TIMEOUT_SECONDS,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return False
     return result.returncode == 0
 

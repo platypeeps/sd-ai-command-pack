@@ -43,11 +43,13 @@ import fnmatch
 import json
 import os
 import re
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from sd_ai_command_pack_lib import CommandError
+from sd_ai_command_pack_lib import run_git as run_git_command
 
 BODY_ENV_VARS = (
     "SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY",
@@ -113,6 +115,8 @@ DEFAULT_RULES = (
             ".github/prompts/**",
             ".github/skills/trellis-*/**",
             ".github/skills/sd-*/**",
+            ".gito/**",
+            ".prism/**",
             ".agent/skills/trellis-*/**",
             ".agent/skills/sd-*/**",
             ".agent/workflows/start.md",
@@ -180,6 +184,8 @@ DEFAULT_RULES = (
             "docs/repomix-map.md",
             "scripts/sd-ai-command-pack-*.sh",
             "scripts/sd-ai-command-pack-*.py",
+            "scripts/sd-ai-command-pack-*.mjs",
+            "scripts/sd_ai_command_pack_lib.py",
             "scripts/sd-ai-command-pack-full-check.sh",
             "scripts/sd-ai-command-pack-housekeeping.sh",
         ),
@@ -221,6 +227,7 @@ DEFAULT_RULES = (
         label="CI/review scope",
         headings=("CI/review scope:", "CI scope:", "Workflow scope:"),
         patterns=(
+            ".github/PULL_REQUEST_TEMPLATE.md",
             ".github/workflows/**",
             ".pre-commit-config.yaml",
             "scripts/classify-ci-changes.sh",
@@ -233,6 +240,7 @@ DEFAULT_RULES = (
             "scripts/sd-ai-command-pack-pr-body-scope.py",
             "scripts/sd-ai-command-pack-full-check.sh",
             "scripts/sd-ai-command-pack-shell-lib.sh",
+            "scripts/sd_ai_command_pack_lib.py",
         ),
     ),
 )
@@ -253,15 +261,14 @@ def _split_changed_files(text: str) -> list[str]:
 
 
 def _run_git(root: Path, *args: str) -> tuple[int, str, str]:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+    try:
+        result = run_git_command(
+            list(args),
+            cwd=root,
+            context=f"run git {' '.join(args)}",
+        )
+    except CommandError as exc:
+        return 124, "", str(exc)
     return result.returncode, result.stdout, result.stderr
 
 

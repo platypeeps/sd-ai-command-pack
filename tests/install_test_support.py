@@ -196,9 +196,18 @@ class InstallTestCase(unittest.TestCase):
         self.assertIsNotNone(spec.loader)
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
+        module_dir = str(module_path.parent)
+        inserted = module_dir not in sys.path
+        if inserted:
+            sys.path.insert(0, module_dir)
         try:
             spec.loader.exec_module(module)
         finally:
+            if inserted:
+                try:
+                    sys.path.remove(module_dir)
+                except ValueError:
+                    pass
             sys.modules.pop(module_name, None)
         return module
 

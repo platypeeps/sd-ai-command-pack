@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # Shared helpers for shipped sd-ai-command-pack shell entry points. Callers
-# define REPO_ROOT before sourcing; helpers that emit warnings expect warn(),
-# and run_gito_command expects section(), gito_max_attempts(),
+# define REPO_ROOT before calling helpers that need it; helpers that emit
+# warnings expect warn(), and run_gito_command expects section(), gito_max_attempts(),
 # gito_initial_retry_delay(), gito_max_retry_delay(), and
 # gito_command_timeout_seconds(). Callers that define the optional
 # REVIEW_LOCAL_TEMP_FILES array must install an EXIT/INT/TERM cleanup trap;
@@ -56,6 +56,10 @@ nonnegative_int_or_default() {
     ''|*[!0-9]*) printf '%s' "$fallback" ;;
     *) printf '%s' "$value" ;;
   esac
+}
+
+have() {
+  command -v "$1" >/dev/null 2>&1
 }
 
 run_command_with_timeout() {

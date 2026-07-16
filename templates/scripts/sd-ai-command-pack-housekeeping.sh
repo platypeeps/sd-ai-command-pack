@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+case "${BASH_SOURCE[0]}" in
+  */*) SCRIPT_DIR="${BASH_SOURCE[0]%/*}" ;;
+  *) SCRIPT_DIR="." ;;
+esac
 REMOTE="origin"
 DRY_RUN=0
 SELF_TEST=0
 DELETE_REMOTE_BRANCH=1
 AUTO_MERGE=1
 MERGE_STRATEGY="${SD_AI_COMMAND_PACK_HOUSEKEEPING_MERGE_STRATEGY:-merge}"
+HOUSEKEEPING_GIT_TIMEOUT_SECONDS=60
+HOUSEKEEPING_GH_TIMEOUT_SECONDS=120
 
 ACTIONS=()
 EXPECTED=()
@@ -41,12 +47,34 @@ Environment:
 EOF
 }
 
-section() {
-  printf '\n==> %s\n' "$*"
+warn() {
+  printf 'warning: %s\n' "$*" >&2
 }
 
-have() {
-  command -v "$1" >/dev/null 2>&1
+source_sd_ai_command_pack_shell_lib() {
+  local lib="$SCRIPT_DIR/sd-ai-command-pack-shell-lib.sh"
+  if [ ! -r "$lib" ]; then
+    case " $* " in
+      *" --self-test "*)
+        have() { command -v "$1" >/dev/null 2>&1; }
+        run_command_with_timeout() {
+          shift
+          "$@"
+        }
+        return 0
+        ;;
+    esac
+    printf 'sd-ai-command-pack-housekeeping: missing shared helper library: %s\n' "$lib" >&2
+    exit 1
+  fi
+  # shellcheck source=scripts/sd-ai-command-pack-shell-lib.sh
+  . "$lib"
+}
+
+source_sd_ai_command_pack_shell_lib "$@"
+
+section() {
+  printf '\n==> %s\n' "$*"
 }
 
 add_action() {
@@ -184,13 +212,25 @@ run_mutating_git() {
   git "$@"
 }
 
+run_network_git() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    add_action "would run: git $*"
+    return 0
+  fi
+  run_command_with_timeout "$HOUSEKEEPING_GIT_TIMEOUT_SECONDS" git "$@"
+}
+
+run_gh() {
+  run_command_with_timeout "$HOUSEKEEPING_GH_TIMEOUT_SECONDS" gh "$@"
+}
+
 fetch_and_prune() {
   if ! git remote get-url "$REMOTE" >/dev/null 2>&1; then
     add_anomaly "remote $REMOTE is not configured; skipped fetch/prune and remote checks"
     return 0
   fi
 
-  if run_mutating_git fetch --prune "$REMOTE"; then
+  if run_network_git fetch --prune "$REMOTE"; then
     if [ "$DRY_RUN" -eq 1 ]; then
       return 0
     fi
@@ -225,33 +265,33 @@ configure_github_repo_scope() {
 
 gh_pr_view() {
   if [ -n "$GITHUB_REPO_SLUG" ]; then
-    gh pr view "${GH_REPO_ARGS[@]}" "$@"
+    run_gh pr view "${GH_REPO_ARGS[@]}" "$@"
   else
-    gh pr view "$@"
+    run_gh pr view "$@"
   fi
 }
 
 gh_pr_list() {
   if [ -n "$GITHUB_REPO_SLUG" ]; then
-    gh pr list "${GH_REPO_ARGS[@]}" "$@"
+    run_gh pr list "${GH_REPO_ARGS[@]}" "$@"
   else
-    gh pr list "$@"
+    run_gh pr list "$@"
   fi
 }
 
 gh_issue_list() {
   if [ -n "$GITHUB_REPO_SLUG" ]; then
-    gh issue list "${GH_REPO_ARGS[@]}" "$@"
+    run_gh issue list "${GH_REPO_ARGS[@]}" "$@"
   else
-    gh issue list "$@"
+    run_gh issue list "$@"
   fi
 }
 
 gh_pr_merge() {
   if [ -n "$GITHUB_REPO_SLUG" ]; then
-    gh pr merge "${GH_REPO_ARGS[@]}" "$@"
+    run_gh pr merge "${GH_REPO_ARGS[@]}" "$@"
   else
-    gh pr merge "$@"
+    run_gh pr merge "$@"
   fi
 }
 
@@ -265,9 +305,9 @@ detect_default_branch() {
 
   if have gh; then
     if [ -n "$GITHUB_REPO_SLUG" ]; then
-      DEFAULT_BRANCH="$(gh repo view "$GITHUB_REPO_SLUG" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)"
+      DEFAULT_BRANCH="$(run_gh repo view "$GITHUB_REPO_SLUG" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)"
     else
-      DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)"
+      DEFAULT_BRANCH="$(run_gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)"
     fi
     if [ "$DEFAULT_BRANCH" = "null" ]; then
       # gh prints the literal string "null" with exit 0 for repos without
@@ -372,7 +412,7 @@ fast_forward_default_branch() {
     return 0
   fi
 
-  if run_mutating_git pull --ff-only "$REMOTE" "$DEFAULT_BRANCH"; then
+  if run_network_git pull --ff-only "$REMOTE" "$DEFAULT_BRANCH"; then
     if [ "$DRY_RUN" -eq 1 ]; then
       return 0
     fi
@@ -443,7 +483,7 @@ unresolved_review_thread_count() {
 
     set +e
     page_data="$(
-      gh api graphql \
+      run_gh api graphql \
         "${graphql_args[@]}" \
         -f query='query($owner:String!, $name:String!, $number:Int!, $cursor:String) { repository(owner:$owner, name:$name) { pullRequest(number:$number) { reviewThreads(first: 100, after: $cursor) { nodes { isResolved } pageInfo { hasNextPage endCursor } } } } }' \
         --jq '[([.data.repository.pullRequest.reviewThreads.nodes[]? | select(.isResolved == false)] | length), (.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false), (.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // "")] | map(if . == null then "" else tostring end) | join("\u001f")' \
@@ -471,7 +511,7 @@ unresolved_review_thread_count() {
 remote_branch_head_oid() {
   local branch="$1"
   local output
-  if ! output="$(git ls-remote --exit-code "$REMOTE" "refs/heads/$branch" 2>/dev/null)"; then
+  if ! output="$(run_network_git ls-remote --exit-code "$REMOTE" "refs/heads/$branch" 2>/dev/null)"; then
     return 1
   fi
   output="${output%%$'\n'*}"
@@ -552,7 +592,7 @@ maybe_merge_ready_open_pr() {
 
   pr_data="$(view_open_pr_readiness_for_branch "$branch")"
   if [ -z "$pr_data" ]; then
-    if ! gh auth status >/dev/null 2>&1; then
+    if ! run_gh auth status >/dev/null 2>&1; then
       add_anomaly "gh is unauthenticated; could not inspect an open PR for $branch; skipped auto-merge"
     fi
     return 0
@@ -707,8 +747,13 @@ cleanup_current_branch_if_merged() {
     return 0
   fi
 
+  if [ "$DRY_RUN" -eq 1 ]; then
+    add_action "would delete remote branch $REMOTE/$branch"
+    return 0
+  fi
+
   set +e
-  ls_remote_output="$(git ls-remote --exit-code "$REMOTE" "refs/heads/$branch" 2>/dev/null)"
+  ls_remote_output="$(run_network_git ls-remote --exit-code "$REMOTE" "refs/heads/$branch" 2>/dev/null)"
   local ls_remote_status=$?
   set -e
 
@@ -723,11 +768,9 @@ cleanup_current_branch_if_merged() {
       add_anomaly "remote branch $REMOTE/$branch is at $remote_head_oid, but merged PR #$pr_number ended at $pr_head_oid; left the remote branch untouched"
       return 0
     fi
-    if [ "$DRY_RUN" -eq 1 ]; then
-      add_action "would delete remote branch $REMOTE/$branch"
-    elif git push "$REMOTE" ":refs/heads/$branch"; then
+    if run_network_git push "$REMOTE" ":refs/heads/$branch"; then
       add_action "deleted remote branch $REMOTE/$branch"
-      if git fetch --prune "$REMOTE"; then
+      if run_network_git fetch --prune "$REMOTE"; then
         add_action "pruned $REMOTE after remote branch deletion"
       else
         add_anomaly "deleted remote branch $REMOTE/$branch, but git fetch --prune $REMOTE failed"

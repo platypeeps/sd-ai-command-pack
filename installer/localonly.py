@@ -34,6 +34,9 @@ from installer.registry import (
 )
 from installer.status import LocalOnlyStatus, RemoveStatus
 
+GIT_TIMEOUT_SECONDS = 60
+TRELLIS_INIT_TIMEOUT_SECONDS = 120
+
 
 @dataclass(frozen=True)
 class LocalOnlyResult:
@@ -56,10 +59,17 @@ def git_output(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=False,
+            timeout=GIT_TIMEOUT_SECONDS,
         )
     except FileNotFoundError:
         if required:
             raise SystemExit(f"error: git is required to {context}") from None
+        return None
+    except subprocess.TimeoutExpired:
+        if required:
+            raise SystemExit(
+                f"error: git timed out after {GIT_TIMEOUT_SECONDS}s while trying to {context}"
+            ) from None
         return None
     if result.returncode != 0:
         if required:
@@ -164,14 +174,21 @@ def ensure_trellis_for_local_only(
             f"repo first: {TRELLIS_INSTALL_DOCS_URL}"
         )
 
-    result = subprocess.run(
-        command,
-        cwd=target,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            cwd=target,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=TRELLIS_INIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        raise SystemExit(
+            "error: trellis init timed out after "
+            f"{TRELLIS_INIT_TIMEOUT_SECONDS}s for --local-only"
+        ) from None
     if result.returncode != 0:
         output = result.stdout.rstrip()
         if output:
@@ -232,9 +249,15 @@ def tracked_paths(target: Path, specs: Iterable[str]) -> list[str]:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=False,
+            timeout=GIT_TIMEOUT_SECONDS,
         )
     except FileNotFoundError:
         raise SystemExit("error: git is required to check tracked --local-only paths") from None
+    except subprocess.TimeoutExpired:
+        raise SystemExit(
+            "error: git ls-files timed out after "
+            f"{GIT_TIMEOUT_SECONDS}s while checking tracked --local-only paths"
+        ) from None
     if result.returncode != 0:
         raise SystemExit(f"error: git ls-files failed: {result.stdout}") from None
     return [line for line in result.stdout.splitlines() if line]

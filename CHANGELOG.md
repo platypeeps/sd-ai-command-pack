@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.14.1 - 2026-07-16
+
+- Added a shipped `sd_ai_command_pack_lib.py` helper for common Python script
+  behavior, moved four shipped helpers onto the shared git/command runner, and
+  shared the shell `have()` probe through the shell helper.
+- Hardened pack git/gh/Trellis subprocess calls with bounded timeouts and
+  clearer timeout diagnostics in installer, audit, full-check, and
+  housekeeping paths.
+- Added manifest-backed scanner coverage so PR-body scope and install-audit
+  static path tables fail tests when shipped manifest targets drift.
+
 ## 0.14.0 - 2026-07-16
 
 - Restored the remote PR review round limit default to five

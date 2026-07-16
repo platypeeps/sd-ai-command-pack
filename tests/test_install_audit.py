@@ -667,6 +667,7 @@ class InstallAuditTests(InstallTestCase):
         files = provenance["files"]
         self.assertIn("scripts/sd-ai-command-pack-full-check.sh", files)
         self.assertIn("scripts/sd-ai-command-pack-toolchain.sh", files)
+        self.assertIn("scripts/sd_ai_command_pack_lib.py", files)
         self.assertTrue(
             files["scripts/sd-ai-command-pack-full-check.sh"].startswith("sha256:")
         )

@@ -21,11 +21,13 @@ import functools
 import os
 import shlex
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from urllib.parse import quote, urlparse
+
+from sd_ai_command_pack_lib import CommandError
+from sd_ai_command_pack_lib import git_stdout as run_git_stdout
 
 KB_DIR = Path(".obsidian-kb")
 LEGACY_KB_DASHBOARD = Path("Dashboard.md")
@@ -134,20 +136,15 @@ EXCLUDED_PARTS = {
 
 
 def _git_stdout(root: Path | None, *args: str) -> str | None:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=root,
-        text=True,
-        encoding="utf-8",
-        errors="surrogateescape",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-    if result.returncode != 0:
-        return None
-    stripped = result.stdout.strip()
-    return stripped or None
+    try:
+        return run_git_stdout(
+            list(args),
+            cwd=root,
+            errors="surrogateescape",
+            context=f"run git {' '.join(args)}",
+        )
+    except CommandError as exc:
+        raise SystemExit(f"error: {exc}") from None
 
 
 def repo_root() -> Path:
