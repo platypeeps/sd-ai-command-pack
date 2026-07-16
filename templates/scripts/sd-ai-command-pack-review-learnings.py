@@ -599,7 +599,15 @@ def _one_line(text: str, *, limit: int = 220) -> str:
     collapsed = " ".join(text.split())
     if len(collapsed) <= limit:
         return collapsed
-    return collapsed[: limit - 1] + "..."
+    if limit <= 3:
+        return "." * limit
+
+    budget = limit - 3
+    candidate = collapsed[:budget].rstrip()
+    word_boundary = candidate.rfind(" ")
+    if word_boundary > 0:
+        candidate = candidate[:word_boundary].rstrip()
+    return candidate + "..."
 
 
 def _run_gh_stdout(args: list[str], repo_root: Path) -> str:

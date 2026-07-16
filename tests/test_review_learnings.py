@@ -79,6 +79,22 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertNotIn(learnings.MANAGED_END, rendered)
         self.assertNotIn(learnings.MANAGED_START, rendered)
 
+    def test_learnings_truncate_summaries_at_word_boundaries(self) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_truncation",
+        )
+
+        self.assertEqual(
+            learnings._one_line("alpha beta gamma delta", limit=15),
+            "alpha beta...",
+        )
+        self.assertEqual(
+            learnings._one_line("supercalifragilistic", limit=10),
+            "superca...",
+        )
+        self.assertEqual(learnings._one_line("alpha beta", limit=3), "...")
+
     def test_learnings_report_when_no_base_ref_resolves(self) -> None:
         root = Path(tempfile.mkdtemp(prefix="sd-learnings-no-remote-"))
         self.addCleanup(shutil.rmtree, root, True)

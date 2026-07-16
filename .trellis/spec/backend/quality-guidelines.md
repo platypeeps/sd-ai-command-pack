@@ -61,6 +61,10 @@ that exercise the generic JavaScript review preflight.
 - Changed-path detection for copied/generated disclosure must include staged,
   branch, working-tree, and untracked files instead of letting one source hide
   another.
+- Trellis journal sessions present at the review base and older than the newest
+  current session are append-only. Compare normalized session blocks against
+  the base and fail when an older block changes, disappears, or is renumbered;
+  newly appended/current sessions remain editable.
 - Documentation scans intentionally inspect regular files only; symlinked docs
   are skipped so local or generated links do not expand outside the repo.
 
@@ -74,14 +78,22 @@ that exercise the generic JavaScript review preflight.
   warning just like a staged or branch diff would.
 - Malformed `.sd-ai-command-pack/review-preflight.json` -> fail the preflight
   without wiping the failure during result-buffer reset.
+- Older Trellis journal session differs from the review base -> fail with the
+  session number and direct the author to restore history and edit the intended
+  current session by heading.
+- Review-base Trellis journal session is deleted or renumbered -> fail as a
+  historical-session removal, including when its journal file or the entire
+  current workspace disappears.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: `node scripts/check-review-preflight-link.mjs` points at the pack
   preflight and still runs the checks.
+- Good: a new session is appended while all base sessions remain byte-equivalent
+  after line-ending and trailing-whitespace normalization.
 - Base: a clean repo with no changed paths reports a no-current-diff pass.
-- Bad: a symlinked invocation exits `0` with no output, or an untracked copied
-  adapter is invisible to the copied/generated disclosure check.
+- Bad: a broad replacement updates a repeated fallback line in an older journal
+  session while adding the intended current session.
 
 ### 6. Tests Required
 
@@ -89,6 +101,9 @@ that exercise the generic JavaScript review preflight.
 - Node-version helper coverage for below, at, and above the declared floor.
 - Untracked copied-surface detection in a real Git fixture.
 - Workspace index parsing with trailing whitespace.
+- Historical-session comparison in a real Git fixture, including an appended
+  session that leaves prior history unchanged, per-line trailing whitespace,
+  renumbering, and deletion of a baseline journal file.
 - Template twin byte identity.
 
 ### 7. Wrong vs Correct
@@ -99,6 +114,9 @@ Correct: realpath(import.meta.url path) === realpath(process.argv[1])
 
 Wrong: currentChangedPaths returns the first non-empty diff source
 Correct: currentChangedPaths unions staged, branch, working-tree, and untracked paths
+
+Wrong: replace the first repeated fallback sentence in a whole journal file
+Correct: edit content inside the explicit current `## Session <n>:` block
 ```
 
 ## Session Recorder Retry Contract

@@ -413,9 +413,13 @@ dependencies. It checks for duplicate npm override sources of truth, changed
 copied Trellis or SD command-pack surfaces without companion repo-owned
 integration context, personal absolute paths in docs/prompts/specs, missing
 repo path references in docs/prompts/specs, completed Trellis journal
-placeholder or journal/index commit drift, and large diffs that are likely to
-skip remote AI review. Target repos can tune roots, path-reference prefixes,
-integration paths, optional paths, copied-template paths, and warning thresholds
+placeholder or journal/index commit drift, edits to historical journal sessions
+relative to the review base, and large diffs that are likely to skip remote AI
+review. Journal history is append-only: newly added/current sessions remain
+editable, but an older session must be restored and the intended current session
+edited by its explicit `## Session <n>:` heading. Target repos can tune roots,
+path-reference prefixes, integration paths, optional paths, copied-template
+paths, and warning thresholds
 with `.sd-ai-command-pack/review-preflight.json`. Repos that intentionally
 document service-user paths under `/home/<user>/` can add those service users to
 `allowedLinuxHomeUsers` in that config. The script requires Node 16.9 or newer

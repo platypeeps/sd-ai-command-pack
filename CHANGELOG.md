@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.0 - 2026-07-16
+
+- Added a distributed review-preflight guard that treats Trellis journal
+  history as append-only relative to the review base. It rejects accidental
+  edits, removals, and renumbering of older sessions while allowing the newly
+  appended/current session to be completed, preventing broad repeated-text
+  replacements or whole-workspace deletion from corrupting historical records
+  before remote review.
+- Review-learning summaries now truncate at word boundaries while honoring
+  their configured length limit.
+
 ## 0.14.2 - 2026-07-16
 
 - Resolved audit-roadmap cleanup items: generated install receipts no longer

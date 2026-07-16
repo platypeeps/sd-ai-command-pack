@@ -402,30 +402,64 @@ function checkDocumentationPathHygiene() {
 function checkTrellisJournalRecords() {
   const failureStart = failures.length;
   const workspaceRoot = resolve(rootDir, '.trellis/workspace');
+  const baselineRef = journalBaselineRef();
+  const baselineJournalFiles = baselineRef
+    ? gitFilesAtRef(baselineRef, '.trellis/workspace').filter((file) =>
+        /^\.trellis\/workspace\/[^/]+\/journal-\d+\.md$/.test(file),
+      )
+    : [];
+  const workspacePresent = exists('.trellis/workspace');
 
-  if (!exists('.trellis/workspace')) {
-    pass('.trellis/workspace is not present; Trellis journal checks skipped.');
+  if (!workspacePresent && baselineJournalFiles.length === 0) {
+    pass('.trellis/workspace is not present in the working tree or review base; Trellis journal checks skipped.');
     return;
   }
 
-  const developerDirs = readdirSync(workspaceRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => resolve(workspaceRoot, entry.name))
-    .sort();
+  const currentDeveloperDirs = workspacePresent
+    ? readdirSync(workspaceRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => resolve(workspaceRoot, entry.name))
+    : [];
+  const developerRelatives = [...new Set([
+    ...currentDeveloperDirs.map(absoluteToRelative),
+    ...baselineJournalFiles.map((file) => dirname(file)),
+  ])].sort();
   let completedSessions = 0;
   let comparedSessions = 0;
+  let baselineSessionsCompared = 0;
 
-  for (const developerDir of developerDirs) {
-    const developerRelative = absoluteToRelative(developerDir);
+  for (const developerRelative of developerRelatives) {
+    const developerDir = resolve(rootDir, developerRelative);
     const indexFile = `${developerRelative}/index.md`;
-    const journalFiles = readdirSync(developerDir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && /^journal-\d+\.md$/.test(entry.name))
-      .map((entry) => `${developerRelative}/${entry.name}`)
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const journalFiles = exists(developerRelative)
+      ? readdirSync(developerDir, { withFileTypes: true })
+          .filter((entry) => entry.isFile() && /^journal-\d+\.md$/.test(entry.name))
+          .map((entry) => `${developerRelative}/${entry.name}`)
+          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      : [];
     const journalSessions = [];
+    const baselineJournalSessions = [];
 
     for (const journalFile of journalFiles) {
       journalSessions.push(...parseJournalSessions(journalFile));
+    }
+
+    for (const journalFile of baselineJournalFiles.filter((file) => dirname(file) === developerRelative)) {
+      baselineJournalSessions.push(
+        ...parseJournalSessionsFromText(journalFile, gitFileAtRef(baselineRef, journalFile)),
+      );
+    }
+
+    baselineSessionsCompared += baselineJournalSessions.length;
+    for (const issue of findHistoricalTrellisJournalSessionEdits(
+      baselineJournalSessions,
+      journalSessions,
+    )) {
+      const action = issue.kind === 'removed' ? 'removes' : 'modifies';
+      fail(
+        `${issue.session.file}:${issue.session.startLine} ${action} historical Session ${issue.session.number} from ${baselineRef}; ` +
+          'Trellis journal history is append-only. Restore that session and edit the intended current session by heading.',
+      );
     }
 
     if (journalSessions.length === 0) {
@@ -452,13 +486,17 @@ function checkTrellisJournalRecords() {
     for (const message of validation.failures) {
       fail(message);
     }
+
   }
 
   if (failures.length > failureStart) {
     return;
   }
 
-  pass(`checked ${completedSessions} completed Trellis journal session(s) for placeholders and ${comparedSessions} journal/index commit list(s).`);
+  pass(
+    `checked ${completedSessions} completed Trellis journal session(s) for placeholders, ` +
+      `${comparedSessions} journal/index commit list(s), and ${baselineSessionsCompared} baseline session(s) for historical edits.`,
+  );
 }
 
 function checkDiffSize() {
@@ -836,6 +874,24 @@ function gitStdout(args) {
   return result.stdout.trim();
 }
 
+function gitFileAtRef(ref, file) {
+  const result = runGit(['show', `${ref}:${file}`]);
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout).trim() || `exit status ${result.status}`;
+    throw new GitCommandError(`git show ${ref}:${file} failed: ${detail}`);
+  }
+  return result.stdout;
+}
+
+function gitFilesAtRef(ref, directory) {
+  const result = runGit(['ls-tree', '-r', '--name-only', '-z', ref, '--', directory]);
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout).trim() || `exit status ${result.status}`;
+    throw new GitCommandError(`git ls-tree ${ref} -- ${directory} failed: ${detail}`);
+  }
+  return result.stdout.split('\0').filter(Boolean);
+}
+
 function gitRefExists(ref) {
   if (!ref || ref.startsWith('-')) {
     return false;
@@ -882,6 +938,14 @@ function defaultReviewBaseRef() {
     .sort();
 
   return remoteRefs[0] || '';
+}
+
+function journalBaselineRef() {
+  const baseRef = defaultReviewBaseRef();
+  if (baseRef) {
+    return baseRef;
+  }
+  return gitRefExists('HEAD') ? 'HEAD' : '';
 }
 
 function currentDiffSources(...kindArgs) {
@@ -1099,6 +1163,48 @@ export function parseJournalSessionsFromText(file, text) {
       commits: extractCommitHashes(extractMarkdownSection(content, 'Git Commits')),
     };
   });
+}
+
+export function findHistoricalTrellisJournalSessionEdits(baselineSessions, currentSessions) {
+  if (baselineSessions.length === 0) {
+    return [];
+  }
+
+  const currentByNumber = new Map();
+  for (const session of currentSessions) {
+    if (!currentByNumber.has(session.number)) {
+      currentByNumber.set(session.number, session);
+    }
+  }
+
+  const newestCurrentSession = currentByNumber.size > 0
+    ? Math.max(...currentByNumber.keys())
+    : Number.NEGATIVE_INFINITY;
+  const issues = [];
+
+  for (const baselineSession of baselineSessions) {
+    const currentSession = currentByNumber.get(baselineSession.number);
+    if (!currentSession) {
+      issues.push({ kind: 'removed', session: baselineSession });
+    } else if (
+      currentSession.number < newestCurrentSession &&
+      normalizeJournalSessionContent(currentSession.content) !==
+        normalizeJournalSessionContent(baselineSession.content)
+    ) {
+      issues.push({ kind: 'modified', session: currentSession });
+    }
+  }
+
+  return issues;
+}
+
+function normalizeJournalSessionContent(content) {
+  return content
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .trimEnd();
 }
 
 function parseWorkspaceIndexSessions(file) {
