@@ -110,7 +110,7 @@ explicit user consent.
 
 ## Notes
 
-- Parent task: `.trellis/tasks/07-16-audit-roadmap-cleanup`.
+- Parent task: `.trellis/tasks/archive/2026-07/07-16-audit-roadmap-cleanup`.
 - Related open ledger item: A-027 remains open because the risk exists upstream
   and is not pack-owned.
 - This task should remain `planning`/parked until activated by user consent or a
