@@ -48,3 +48,12 @@ Source:
   changes. The flat manifest plus the single platform registry still represents
   the payload without duplicated groups or unsafe maintenance overhead, so the
   schema-change trigger remains absent.
+
+## Status note (2026-07-16)
+
+The trigger condition (a concrete manifest maintenance problem) fired: the
+manifest reached 534 hand-written entries growing 25 per command. The 0.13.0
+surface-generation work (07-15-surface-generation) addressed it by deriving
+command entries from the registry instead of introducing manifest sections.
+Maintainer decision pending: archive this task as superseded, or keep it
+parked for a future section-schema need.

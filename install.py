@@ -144,6 +144,7 @@ from installer.registry import (
 from installer.removal import (
     GENERATED_REMOVAL_TARGETS,
     MANAGED_BLOCK_REMOVAL_TARGETS,
+    RETIRED_TARGETS,
     installed_target_candidates,
     is_git_internal_candidate,
     may_remove_pack_file,
@@ -152,6 +153,7 @@ from installer.removal import (
     removal_candidate_rejection,
     remove_installed_pack,
     remove_pack_file,
+    retire_stale_targets,
 )
 
 __all__ = [
@@ -187,6 +189,7 @@ __all__ = [
     "PROVENANCE_EXCLUDED_KINDS",
     "PROVENANCE_FILE",
     "PackFile",
+    "RETIRED_TARGETS",
     "REVIEW_ARTIFACT_GITIGNORE_PATTERNS",
     "ROOT",
     "RemoveResult",
@@ -273,6 +276,7 @@ __all__ = [
     "require_git_repo_for_local_only",
     "require_target_directory",
     "require_trellis_repo",
+    "retire_stale_targets",
     "run_diff_check",
     "selected_files",
     "sha256_file",
@@ -504,6 +508,7 @@ def _print_install_summary(
     target: Path,
     *,
     results: list[InstallResult],
+    retired_results: list[RemoveResult],
     local_only_results: list[LocalOnlyResult],
     local_only_results_printed: int,
     skipped: list[tuple[PackFile, str]],
@@ -511,11 +516,16 @@ def _print_install_summary(
     platforms_requested: list[str] | None,
     kept_receipt_targets: list[tuple[Path, str]],
 ) -> None:
-    """Print installed results, local-only results, skips, hints, and notes."""
+    """Print install, retired, local-only results, skips, hints, and notes."""
     for result in results:
         print(f"{result.status:11} {result.file.target}")
         if result.backup:
             print(f"{'backup':11} {result.backup.relative_to(target)}")
+    for retired in retired_results:
+        suffix = f" ({retired.detail})" if retired.detail else ""
+        print(f"{retired.status:17} {display_path(target, retired.target)}{suffix}")
+        if retired.backup:
+            print(f"{'backup':17} {display_path(target, retired.backup)}")
     for result in local_only_results[local_only_results_printed:]:
         suffix = f" ({result.detail})" if result.detail else ""
         print(f"{result.status:29} {display_path(target, result.target)}{suffix}")
@@ -639,6 +649,17 @@ def main(argv: list[str] | None = None) -> int:
         backup=args.backup,
     )
 
+    # Retired-target cleanup must run before the receipt files are rewritten:
+    # it vouches stale files against the prior install's provenance, and the
+    # provenance rewrite below drops retired entries (they left the manifest,
+    # so receipts never list them again).
+    retired_results = retire_stale_targets(
+        target,
+        force=args.force,
+        dry_run=args.dry_run,
+        backup=args.backup,
+    )
+
     kept_receipt_targets = _install_receipt_files(
         manifest_data,
         files,
@@ -657,6 +678,7 @@ def main(argv: list[str] | None = None) -> int:
     _print_install_summary(
         target,
         results=results,
+        retired_results=retired_results,
         local_only_results=local_only_results,
         local_only_results_printed=local_only_results_printed,
         skipped=skipped,

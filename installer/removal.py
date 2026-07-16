@@ -56,6 +56,48 @@ MANAGED_BLOCK_REMOVAL_TARGETS = frozenset(
     }
 )
 
+# sd-review-local-all was retired in 0.13.0: its full-codebase loop moved
+# into `sd-review-local all`. These are the installed target paths the last
+# manifest that shipped the command listed for it; a normal install/refresh
+# deletes vouched leftovers (retire_stale_targets) so consumer repos do not
+# fail the install audit on orphaned pack-like files.
+RETIRED_TARGETS: tuple[str, ...] = (
+    ".agents/skills/sd-review-local-all/SKILL.md",
+    ".claude/commands/sd/review-local-all.md",
+    ".cursor/commands/sd-review-local-all.md",
+    ".gemini/commands/sd/review-local-all.toml",
+    ".github/prompts/sd-review-local-all.prompt.md",
+    ".opencode/commands/sd-review-local-all.md",
+    ".agent/workflows/sd-review-local-all.md",
+    ".codebuddy/commands/sd/review-local-all.md",
+    ".devin/workflows/sd-review-local-all.md",
+    ".factory/commands/sd/review-local-all.md",
+    ".kilocode/workflows/sd-review-local-all.md",
+    ".pi/prompts/sd-review-local-all.md",
+    ".qoder/commands/sd-review-local-all.md",
+    ".trae/commands/sd-review-local-all.md",
+    ".zcode/commands/sd/review-local-all.md",
+    ".agent/skills/sd-review-local-all/SKILL.md",
+    ".codebuddy/skills/sd-review-local-all/SKILL.md",
+    ".devin/skills/sd-review-local-all/SKILL.md",
+    ".factory/skills/sd-review-local-all/SKILL.md",
+    ".kilocode/skills/sd-review-local-all/SKILL.md",
+    ".kiro/skills/sd-review-local-all/SKILL.md",
+    ".pi/skills/sd-review-local-all/SKILL.md",
+    ".qoder/skills/sd-review-local-all/SKILL.md",
+    ".reasonix/skills/sd-review-local-all/SKILL.md",
+    ".trae/skills/sd-review-local-all/SKILL.md",
+)
+
+# remove_pack_file statuses renamed so the install summary reads as
+# retirement, not pack removal ("missing" is excluded on purpose: absent
+# retired targets are skipped without a result).
+_RETIRED_STATUSES = {
+    "removed": "retired",
+    "preserved": "retired-preserved",
+    "would-remove": "would-retire",
+}
+
 
 def normalize_removal_candidate(candidate: str) -> str:
     normalized = candidate.replace("\\", "/")
@@ -69,10 +111,14 @@ def is_git_internal_candidate(candidate: str) -> bool:
 
 
 def recognized_removal_targets(files: list[PackFile]) -> set[str]:
+    # Retired targets stay recognized so a full --remove on a consumer whose
+    # receipts still list them deletes the leftovers instead of reporting
+    # them as unrecognized.
     return {
         *(file.target.as_posix() for file in files),
         *GENERATED_REMOVAL_TARGETS,
         *MANAGED_BLOCK_REMOVAL_TARGETS,
+        *RETIRED_TARGETS,
     }
 
 
@@ -210,6 +256,51 @@ def remove_pack_file(
     return RemoveResult(relative_path, "removed", backup_path)
 
 
+def retire_stale_targets(
+    target: Path,
+    *,
+    force: bool,
+    dry_run: bool,
+    backup: bool,
+) -> list[RemoveResult]:
+    """Delete retired-command leftovers during a normal install/refresh.
+
+    Must run before the receipt files are rewritten: vouching reads the
+    prior install's provenance records, and the provenance rewrite drops
+    retired entries (their targets left the manifest). Semantics mirror the
+    removal flow's per-file handling: hash-vouched files are deleted with
+    empty parent dirs pruned, drifted or unvouched files are preserved and
+    reported unless ``force`` (which honors ``backup``), and absent targets
+    produce no result.
+    """
+    provenance_files = {
+        normalize_removal_candidate(path): digest
+        for path, digest in read_existing_provenance_files_for_remove(target).items()
+    }
+    results: list[RemoveResult] = []
+    for candidate in RETIRED_TARGETS:
+        result = remove_pack_file(
+            target,
+            Path(candidate),
+            file=None,
+            recorded_hash=provenance_files.get(candidate),
+            force=force,
+            dry_run=dry_run,
+            backup=backup,
+        )
+        if result.status == "missing":
+            continue
+        results.append(
+            RemoveResult(
+                result.target,
+                _RETIRED_STATUSES[result.status],
+                backup=result.backup,
+                detail=result.detail,
+            )
+        )
+    return results
+
+
 def remove_installed_pack(
     manifest: dict,
     files: list[PackFile],
@@ -316,6 +407,7 @@ def remove_installed_pack(
 __all__ = [
     "GENERATED_REMOVAL_TARGETS",
     "MANAGED_BLOCK_REMOVAL_TARGETS",
+    "RETIRED_TARGETS",
     "installed_target_candidates",
     "is_git_internal_candidate",
     "may_remove_pack_file",
@@ -324,4 +416,5 @@ __all__ = [
     "removal_candidate_rejection",
     "remove_installed_pack",
     "remove_pack_file",
+    "retire_stale_targets",
 ]

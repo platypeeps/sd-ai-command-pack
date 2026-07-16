@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.13.0 - 2026-07-16
+
+- Generated the bespoke Claude/Gemini/GitHub command adapters and all derived
+  manifest command entries from a single registry command list
+  (`make generate` + a drift test); adding a command is now a skill, a neutral
+  body, and one list entry. One-time canonical manifest reordering; entry set
+  unchanged.
+- Merged `sd-review-local-all` into `sd-review-local` behind the `all`
+  argument (same runner, `--full-codebase`). The old command is removed;
+  refreshes delete the retired installed files automatically when their
+  content is vouched by prior provenance (drifted copies are preserved unless
+  `--force`). Invoke `sd-review-local` with `all` for the full-codebase loop.
+- Added `sd-ship`: a composite orchestrator sequencing the sd-create-pr flow,
+  the sd-review-pr loop, the sd-watch-pr settle watcher, and the
+  sd-housekeeping merge gate with `until=pr|review|merge` stop-points. It adds
+  no new gate logic; every stage's own gates remain authoritative.
+
 ## 0.12.0 - 2026-07-16
 
 - Added six distributed SDLC edge-loop commands, each with the full adapter

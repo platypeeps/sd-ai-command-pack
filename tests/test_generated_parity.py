@@ -27,37 +27,28 @@ SECRET_MARKER_PATTERNS = _support.SECRET_MARKER_PATTERNS
 InstallTestCase = _support.InstallTestCase
 
 
-GITHUB_UNTRUSTED_PR_NOTE = (
-    "   - Before running commands from repo-owned skill instructions in an "
-    "untrusted PR or fork context, require maintainer approval or use a sandbox "
-    "with no secrets and only required network access."
-)
+def _load_surface_generator():
+    """Load the dev-side surface generator that single-sources adapter
+    transform data (alias rewrites, untrusted-PR note, body overrides)."""
+    module = sys.modules.get("generate_command_surfaces")
+    if module is not None:
+        return module
+    generator_script = PACK_ROOT / ".github/scripts/generate-command-surfaces.py"
+    spec = importlib.util.spec_from_file_location(
+        "generate_command_surfaces", generator_script
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load generator module from {generator_script}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["generate_command_surfaces"] = module
+    spec.loader.exec_module(module)
+    return module
 
-CLAUDE_COMMAND_ALIAS_REWRITES = {
-    "continue": (
-        "1. Resolve the `trellis-continue` skill by name using the agent's trusted "
-        "skill discovery mechanism for installed skills. On Claude Code this "
-        "workflow is installed as the `trellis:continue` command; resolving "
-        "`trellis:continue` counts as resolving this skill.",
-        "1. Resolve the `trellis-continue` skill by name using the agent's trusted "
-        "skill discovery mechanism for installed skills.",
-    ),
-    "finish-work": (
-        "1. Resolve the `trellis-finish-work` skill by name using the agent's "
-        "trusted skill discovery mechanism for installed skills. On Claude Code "
-        "this workflow is installed as the `trellis:finish-work` command; "
-        "resolving `trellis:finish-work` counts as resolving this skill.",
-        "1. Resolve the `trellis-finish-work` skill by name using the agent's "
-        "trusted skill discovery mechanism for installed skills.",
-    ),
-}
 
-BESPOKE_BODY_PARITY_EXEMPTIONS = {
-    ("claude", "start"): (
-        "Claude Code receives Trellis start context from the SessionStart hook "
-        "and intentionally has no trellis-start skill."
-    ),
-}
+_surface_generator = _load_surface_generator()
+GITHUB_UNTRUSTED_PR_NOTE = _surface_generator.GITHUB_UNTRUSTED_PR_NOTE
+CLAUDE_COMMAND_ALIAS_REWRITES = _surface_generator.CLAUDE_COMMAND_ALIAS_REWRITES
+BESPOKE_BODY_PARITY_EXEMPTIONS = _surface_generator.OVERRIDE_BODIES
 
 
 def strip_yaml_frontmatter(content: str) -> str:
@@ -130,6 +121,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-work-designs/SKILL.md",
                 ".agents/skills/sd-audit-repo/SKILL.md",
                 ".agents/skills/sd-watch-pr/SKILL.md",
+                ".agents/skills/sd-ship/SKILL.md",
                 ".agents/skills/sd-fix-ci/SKILL.md",
                 ".agents/skills/sd-update-deps/SKILL.md",
                 ".agents/skills/sd-fleet-refresh/SKILL.md",
@@ -142,7 +134,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-finish-work/SKILL.md",
                 ".agents/skills/sd-review-learnings/SKILL.md",
                 ".agents/skills/sd-review-local/SKILL.md",
-                ".agents/skills/sd-review-local-all/SKILL.md",
                 ".agents/skills/sd-update-spec/SKILL.md",
                 "scripts/sd-ai-command-pack-full-check.sh",
                 "scripts/sd-ai-command-pack-shell-lib.sh",
@@ -181,6 +172,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".gemini/commands/sd/work-designs.toml",
                 ".gemini/commands/sd/audit-repo.toml",
                 ".gemini/commands/sd/watch-pr.toml",
+                ".gemini/commands/sd/ship.toml",
                 ".gemini/commands/sd/fix-ci.toml",
                 ".gemini/commands/sd/update-deps.toml",
                 ".gemini/commands/sd/fleet-refresh.toml",
@@ -188,7 +180,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".gemini/commands/sd/retro.toml",
                 ".gemini/commands/sd/review-pr.toml",
                 ".gemini/commands/sd/review-local.toml",
-                ".gemini/commands/sd/review-local-all.toml",
                 ".gemini/commands/sd/review-learnings.toml",
                 ".gemini/commands/sd/full-check.toml",
                 ".gemini/commands/sd/housekeeping.toml",
@@ -201,6 +192,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".github/prompts/sd-work-designs.prompt.md",
                 ".github/prompts/sd-audit-repo.prompt.md",
                 ".github/prompts/sd-watch-pr.prompt.md",
+                ".github/prompts/sd-ship.prompt.md",
                 ".github/prompts/sd-fix-ci.prompt.md",
                 ".github/prompts/sd-update-deps.prompt.md",
                 ".github/prompts/sd-fleet-refresh.prompt.md",
@@ -208,7 +200,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".github/prompts/sd-retro.prompt.md",
                 ".github/prompts/sd-review-pr.prompt.md",
                 ".github/prompts/sd-review-local.prompt.md",
-                ".github/prompts/sd-review-local-all.prompt.md",
                 ".github/prompts/sd-review-learnings.prompt.md",
                 ".github/prompts/sd-full-check.prompt.md",
                 ".github/prompts/sd-housekeeping.prompt.md",
@@ -231,6 +222,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".cursor/commands/sd-work-designs.md",
                 ".cursor/commands/sd-audit-repo.md",
                 ".cursor/commands/sd-watch-pr.md",
+                ".cursor/commands/sd-ship.md",
                 ".cursor/commands/sd-fix-ci.md",
                 ".cursor/commands/sd-update-deps.md",
                 ".cursor/commands/sd-fleet-refresh.md",
@@ -238,7 +230,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".cursor/commands/sd-retro.md",
                 ".cursor/commands/sd-review-pr.md",
                 ".cursor/commands/sd-review-local.md",
-                ".cursor/commands/sd-review-local-all.md",
                 ".cursor/commands/sd-review-learnings.md",
                 ".cursor/commands/sd-full-check.md",
                 ".cursor/commands/sd-housekeeping.md",
@@ -256,6 +247,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".claude/commands/sd/work-designs.md",
                 ".claude/commands/sd/audit-repo.md",
                 ".claude/commands/sd/watch-pr.md",
+                ".claude/commands/sd/ship.md",
                 ".claude/commands/sd/fix-ci.md",
                 ".claude/commands/sd/update-deps.md",
                 ".claude/commands/sd/fleet-refresh.md",
@@ -263,7 +255,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".claude/commands/sd/retro.md",
                 ".claude/commands/sd/review-pr.md",
                 ".claude/commands/sd/review-local.md",
-                ".claude/commands/sd/review-local-all.md",
                 ".claude/commands/sd/review-learnings.md",
                 ".claude/commands/sd/full-check.md",
                 ".claude/commands/sd/housekeeping.md",
@@ -276,6 +267,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".opencode/commands/sd-work-designs.md",
                 ".opencode/commands/sd-audit-repo.md",
                 ".opencode/commands/sd-watch-pr.md",
+                ".opencode/commands/sd-ship.md",
                 ".opencode/commands/sd-fix-ci.md",
                 ".opencode/commands/sd-update-deps.md",
                 ".opencode/commands/sd-fleet-refresh.md",
@@ -283,7 +275,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".opencode/commands/sd-retro.md",
                 ".opencode/commands/sd-review-pr.md",
                 ".opencode/commands/sd-review-local.md",
-                ".opencode/commands/sd-review-local-all.md",
                 ".opencode/commands/sd-review-learnings.md",
                 ".opencode/commands/sd-full-check.md",
                 ".opencode/commands/sd-housekeeping.md",
@@ -306,6 +297,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".kiro/skills/sd-work-designs/SKILL.md",
                 ".kiro/skills/sd-audit-repo/SKILL.md",
                 ".kiro/skills/sd-watch-pr/SKILL.md",
+                ".kiro/skills/sd-ship/SKILL.md",
                 ".kiro/skills/sd-fix-ci/SKILL.md",
                 ".kiro/skills/sd-update-deps/SKILL.md",
                 ".kiro/skills/sd-fleet-refresh/SKILL.md",
@@ -317,6 +309,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".reasonix/skills/sd-work-designs/SKILL.md",
                 ".reasonix/skills/sd-audit-repo/SKILL.md",
                 ".reasonix/skills/sd-watch-pr/SKILL.md",
+                ".reasonix/skills/sd-ship/SKILL.md",
                 ".reasonix/skills/sd-fix-ci/SKILL.md",
                 ".reasonix/skills/sd-update-deps/SKILL.md",
                 ".reasonix/skills/sd-fleet-refresh/SKILL.md",
@@ -328,6 +321,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".trae/commands/sd-work-designs.md",
                 ".trae/commands/sd-audit-repo.md",
                 ".trae/commands/sd-watch-pr.md",
+                ".trae/commands/sd-ship.md",
                 ".trae/commands/sd-fix-ci.md",
                 ".trae/commands/sd-update-deps.md",
                 ".trae/commands/sd-fleet-refresh.md",
@@ -339,6 +333,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".trae/skills/sd-work-designs/SKILL.md",
                 ".trae/skills/sd-audit-repo/SKILL.md",
                 ".trae/skills/sd-watch-pr/SKILL.md",
+                ".trae/skills/sd-ship/SKILL.md",
                 ".trae/skills/sd-fix-ci/SKILL.md",
                 ".trae/skills/sd-update-deps/SKILL.md",
                 ".trae/skills/sd-fleet-refresh/SKILL.md",
@@ -350,6 +345,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".zcode/commands/sd/work-designs.md",
                 ".zcode/commands/sd/audit-repo.md",
                 ".zcode/commands/sd/watch-pr.md",
+                ".zcode/commands/sd/ship.md",
                 ".zcode/commands/sd/fix-ci.md",
                 ".zcode/commands/sd/update-deps.md",
                 ".zcode/commands/sd/fleet-refresh.md",
@@ -375,6 +371,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-work-designs/SKILL.md",
                 ".agents/skills/sd-audit-repo/SKILL.md",
                 ".agents/skills/sd-watch-pr/SKILL.md",
+                ".agents/skills/sd-ship/SKILL.md",
                 ".agents/skills/sd-fix-ci/SKILL.md",
                 ".agents/skills/sd-update-deps/SKILL.md",
                 ".agents/skills/sd-fleet-refresh/SKILL.md",
@@ -382,7 +379,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-retro/SKILL.md",
                 ".agents/skills/sd-review-pr/SKILL.md",
                 ".agents/skills/sd-review-local/SKILL.md",
-                ".agents/skills/sd-review-local-all/SKILL.md",
                 ".agents/skills/sd-review-learnings/SKILL.md",
                 ".agents/skills/sd-full-check/SKILL.md",
                 ".agents/skills/sd-housekeeping/SKILL.md",
@@ -414,6 +410,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".claude/commands/sd/work-designs.md",
                 ".claude/commands/sd/audit-repo.md",
                 ".claude/commands/sd/watch-pr.md",
+                ".claude/commands/sd/ship.md",
                 ".claude/commands/sd/fix-ci.md",
                 ".claude/commands/sd/update-deps.md",
                 ".claude/commands/sd/fleet-refresh.md",
@@ -421,7 +418,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".claude/commands/sd/retro.md",
                 ".claude/commands/sd/review-pr.md",
                 ".claude/commands/sd/review-local.md",
-                ".claude/commands/sd/review-local-all.md",
                 ".claude/commands/sd/review-learnings.md",
                 ".claude/commands/sd/full-check.md",
                 ".claude/commands/sd/housekeeping.md",
@@ -434,6 +430,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".cursor/commands/sd-work-designs.md",
                 ".cursor/commands/sd-audit-repo.md",
                 ".cursor/commands/sd-watch-pr.md",
+                ".cursor/commands/sd-ship.md",
                 ".cursor/commands/sd-fix-ci.md",
                 ".cursor/commands/sd-update-deps.md",
                 ".cursor/commands/sd-fleet-refresh.md",
@@ -441,7 +438,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".cursor/commands/sd-retro.md",
                 ".cursor/commands/sd-review-pr.md",
                 ".cursor/commands/sd-review-local.md",
-                ".cursor/commands/sd-review-local-all.md",
                 ".cursor/commands/sd-review-learnings.md",
                 ".cursor/commands/sd-full-check.md",
                 ".cursor/commands/sd-housekeeping.md",
@@ -454,6 +450,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".gemini/commands/sd/work-designs.toml",
                 ".gemini/commands/sd/audit-repo.toml",
                 ".gemini/commands/sd/watch-pr.toml",
+                ".gemini/commands/sd/ship.toml",
                 ".gemini/commands/sd/fix-ci.toml",
                 ".gemini/commands/sd/update-deps.toml",
                 ".gemini/commands/sd/fleet-refresh.toml",
@@ -461,7 +458,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".gemini/commands/sd/retro.toml",
                 ".gemini/commands/sd/review-pr.toml",
                 ".gemini/commands/sd/review-local.toml",
-                ".gemini/commands/sd/review-local-all.toml",
                 ".gemini/commands/sd/review-learnings.toml",
                 ".gemini/commands/sd/full-check.toml",
                 ".gemini/commands/sd/housekeeping.toml",
@@ -474,6 +470,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".github/prompts/sd-work-designs.prompt.md",
                 ".github/prompts/sd-audit-repo.prompt.md",
                 ".github/prompts/sd-watch-pr.prompt.md",
+                ".github/prompts/sd-ship.prompt.md",
                 ".github/prompts/sd-fix-ci.prompt.md",
                 ".github/prompts/sd-update-deps.prompt.md",
                 ".github/prompts/sd-fleet-refresh.prompt.md",
@@ -481,7 +478,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".github/prompts/sd-retro.prompt.md",
                 ".github/prompts/sd-review-pr.prompt.md",
                 ".github/prompts/sd-review-local.prompt.md",
-                ".github/prompts/sd-review-local-all.prompt.md",
                 ".github/prompts/sd-review-learnings.prompt.md",
                 ".github/prompts/sd-full-check.prompt.md",
                 ".github/prompts/sd-housekeeping.prompt.md",
@@ -504,6 +500,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".opencode/commands/sd-work-designs.md",
                 ".opencode/commands/sd-audit-repo.md",
                 ".opencode/commands/sd-watch-pr.md",
+                ".opencode/commands/sd-ship.md",
                 ".opencode/commands/sd-fix-ci.md",
                 ".opencode/commands/sd-update-deps.md",
                 ".opencode/commands/sd-fleet-refresh.md",
@@ -511,7 +508,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".opencode/commands/sd-retro.md",
                 ".opencode/commands/sd-review-pr.md",
                 ".opencode/commands/sd-review-local.md",
-                ".opencode/commands/sd-review-local-all.md",
                 ".opencode/commands/sd-review-learnings.md",
                 ".opencode/commands/sd-full-check.md",
                 ".opencode/commands/sd-housekeeping.md",
@@ -534,6 +530,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-work-designs/SKILL.md",
                 ".agents/skills/sd-audit-repo/SKILL.md",
                 ".agents/skills/sd-watch-pr/SKILL.md",
+                ".agents/skills/sd-ship/SKILL.md",
                 ".agents/skills/sd-fix-ci/SKILL.md",
                 ".agents/skills/sd-update-deps/SKILL.md",
                 ".agents/skills/sd-fleet-refresh/SKILL.md",
@@ -760,15 +757,16 @@ class GeneratedParityTests(InstallTestCase):
             ),
             (
                 [
-                    root / ".claude/commands/sd/review-local-all.md",
-                    root / ".cursor/commands/sd-review-local-all.md",
-                    root / ".gemini/commands/sd/review-local-all.toml",
-                    root / ".github/prompts/sd-review-local-all.prompt.md",
-                    root / ".opencode/commands/sd-review-local-all.md",
+                    root / ".claude/commands/sd/ship.md",
+                    root / ".cursor/commands/sd-ship.md",
+                    root / ".gemini/commands/sd/ship.toml",
+                    root / ".github/prompts/sd-ship.prompt.md",
+                    root / ".opencode/commands/sd-ship.md",
                 ],
                 [
-                    "Resolve the `sd-review-local-all` skill by name",
-                    "scripts/sd-ai-command-pack-review-local.sh --full-codebase",
+                    "Resolve the `sd-ship` skill by name",
+                    "adds no new gate logic; every stage's own gates remain "
+                    "authoritative",
                 ],
                 [],
             ),
@@ -857,12 +855,12 @@ class GeneratedParityTests(InstallTestCase):
             "### sd-work-designs",
             "### sd-audit-repo",
             "### sd-watch-pr",
+            "### sd-ship",
             "### sd-fix-ci",
             "### sd-update-deps",
             "### sd-fleet-refresh",
             "### sd-test-gaps",
             "### sd-retro",
-            "### sd-review-local-all",
             "### sd-update-spec",
             "### sd-housekeeping",
         ):
@@ -1304,6 +1302,7 @@ class GeneratedParityTests(InstallTestCase):
             ".agent/workflows/sd-work-designs.md",
             ".agent/workflows/sd-audit-repo.md",
             ".agent/workflows/sd-watch-pr.md",
+            ".agent/workflows/sd-ship.md",
             ".agent/workflows/sd-fix-ci.md",
             ".agent/workflows/sd-update-deps.md",
             ".agent/workflows/sd-fleet-refresh.md",
@@ -1315,6 +1314,7 @@ class GeneratedParityTests(InstallTestCase):
             ".agent/skills/sd-work-designs/SKILL.md",
             ".agent/skills/sd-audit-repo/SKILL.md",
             ".agent/skills/sd-watch-pr/SKILL.md",
+            ".agent/skills/sd-ship/SKILL.md",
             ".agent/skills/sd-fix-ci/SKILL.md",
             ".agent/skills/sd-update-deps/SKILL.md",
             ".agent/skills/sd-fleet-refresh/SKILL.md",
@@ -1326,6 +1326,7 @@ class GeneratedParityTests(InstallTestCase):
             ".codebuddy/commands/sd/work-designs.md",
             ".codebuddy/commands/sd/audit-repo.md",
             ".codebuddy/commands/sd/watch-pr.md",
+            ".codebuddy/commands/sd/ship.md",
             ".codebuddy/commands/sd/fix-ci.md",
             ".codebuddy/commands/sd/update-deps.md",
             ".codebuddy/commands/sd/fleet-refresh.md",
@@ -1337,6 +1338,7 @@ class GeneratedParityTests(InstallTestCase):
             ".codebuddy/skills/sd-work-designs/SKILL.md",
             ".codebuddy/skills/sd-audit-repo/SKILL.md",
             ".codebuddy/skills/sd-watch-pr/SKILL.md",
+            ".codebuddy/skills/sd-ship/SKILL.md",
             ".codebuddy/skills/sd-fix-ci/SKILL.md",
             ".codebuddy/skills/sd-update-deps/SKILL.md",
             ".codebuddy/skills/sd-fleet-refresh/SKILL.md",
@@ -1348,6 +1350,7 @@ class GeneratedParityTests(InstallTestCase):
             ".devin/workflows/sd-work-designs.md",
             ".devin/workflows/sd-audit-repo.md",
             ".devin/workflows/sd-watch-pr.md",
+            ".devin/workflows/sd-ship.md",
             ".devin/workflows/sd-fix-ci.md",
             ".devin/workflows/sd-update-deps.md",
             ".devin/workflows/sd-fleet-refresh.md",
@@ -1359,6 +1362,7 @@ class GeneratedParityTests(InstallTestCase):
             ".factory/commands/sd/work-designs.md",
             ".factory/commands/sd/audit-repo.md",
             ".factory/commands/sd/watch-pr.md",
+            ".factory/commands/sd/ship.md",
             ".factory/commands/sd/fix-ci.md",
             ".factory/commands/sd/update-deps.md",
             ".factory/commands/sd/fleet-refresh.md",
@@ -1370,6 +1374,7 @@ class GeneratedParityTests(InstallTestCase):
             ".kilocode/workflows/sd-work-designs.md",
             ".kilocode/workflows/sd-audit-repo.md",
             ".kilocode/workflows/sd-watch-pr.md",
+            ".kilocode/workflows/sd-ship.md",
             ".kilocode/workflows/sd-fix-ci.md",
             ".kilocode/workflows/sd-update-deps.md",
             ".kilocode/workflows/sd-fleet-refresh.md",
@@ -1381,6 +1386,7 @@ class GeneratedParityTests(InstallTestCase):
             ".kiro/skills/sd-work-designs/SKILL.md",
             ".kiro/skills/sd-audit-repo/SKILL.md",
             ".kiro/skills/sd-watch-pr/SKILL.md",
+            ".kiro/skills/sd-ship/SKILL.md",
             ".kiro/skills/sd-fix-ci/SKILL.md",
             ".kiro/skills/sd-update-deps/SKILL.md",
             ".kiro/skills/sd-fleet-refresh/SKILL.md",
@@ -1392,6 +1398,7 @@ class GeneratedParityTests(InstallTestCase):
             ".pi/prompts/sd-work-designs.md",
             ".pi/prompts/sd-audit-repo.md",
             ".pi/prompts/sd-watch-pr.md",
+            ".pi/prompts/sd-ship.md",
             ".pi/prompts/sd-fix-ci.md",
             ".pi/prompts/sd-update-deps.md",
             ".pi/prompts/sd-fleet-refresh.md",
@@ -1403,6 +1410,7 @@ class GeneratedParityTests(InstallTestCase):
             ".qoder/commands/sd-work-designs.md",
             ".qoder/commands/sd-audit-repo.md",
             ".qoder/commands/sd-watch-pr.md",
+            ".qoder/commands/sd-ship.md",
             ".qoder/commands/sd-fix-ci.md",
             ".qoder/commands/sd-update-deps.md",
             ".qoder/commands/sd-fleet-refresh.md",
@@ -1414,6 +1422,7 @@ class GeneratedParityTests(InstallTestCase):
             ".reasonix/skills/sd-work-designs/SKILL.md",
             ".reasonix/skills/sd-audit-repo/SKILL.md",
             ".reasonix/skills/sd-watch-pr/SKILL.md",
+            ".reasonix/skills/sd-ship/SKILL.md",
             ".reasonix/skills/sd-fix-ci/SKILL.md",
             ".reasonix/skills/sd-update-deps/SKILL.md",
             ".reasonix/skills/sd-fleet-refresh/SKILL.md",
@@ -1425,6 +1434,7 @@ class GeneratedParityTests(InstallTestCase):
             ".trae/commands/sd-work-designs.md",
             ".trae/commands/sd-audit-repo.md",
             ".trae/commands/sd-watch-pr.md",
+            ".trae/commands/sd-ship.md",
             ".trae/commands/sd-fix-ci.md",
             ".trae/commands/sd-update-deps.md",
             ".trae/commands/sd-fleet-refresh.md",
@@ -1436,6 +1446,7 @@ class GeneratedParityTests(InstallTestCase):
             ".zcode/commands/sd/work-designs.md",
             ".zcode/commands/sd/audit-repo.md",
             ".zcode/commands/sd/watch-pr.md",
+            ".zcode/commands/sd/ship.md",
             ".zcode/commands/sd/fix-ci.md",
             ".zcode/commands/sd/update-deps.md",
             ".zcode/commands/sd/fleet-refresh.md",
@@ -1505,12 +1516,9 @@ class GeneratedParityTests(InstallTestCase):
             elif "full-check" in file.target.name:
                 self.assertIn("Resolve the `sd-full-check` skill by name", content)
                 self.assertIn("source of truth for the exact checks", content)
-            elif "review-local-all" in file.target.name:
-                self.assertIn("Resolve the `sd-review-local-all` skill by name", content)
-                self.assertIn(
-                    "scripts/sd-ai-command-pack-review-local.sh --full-codebase",
-                    content,
-                )
+            elif "ship" in file.target.name:
+                self.assertIn("Resolve the `sd-ship` skill by name", content)
+                self.assertIn("only merge authority", content)
             elif "review-local" in file.target.name:
                 self.assertIn("Resolve the `sd-review-local` skill by name", content)
                 self.assertIn("scripts/sd-ai-command-pack-review-local.sh", content)
@@ -1690,6 +1698,7 @@ class GeneratedParityTests(InstallTestCase):
             "work-designs",
             "audit-repo",
             "watch-pr",
+            "ship",
             "fix-ci",
             "update-deps",
             "fleet-refresh",
@@ -1697,7 +1706,6 @@ class GeneratedParityTests(InstallTestCase):
             "retro",
             "review-pr",
             "review-local",
-            "review-local-all",
             "review-learnings",
             "full-check",
             "housekeeping",
@@ -1738,7 +1746,7 @@ class GeneratedParityTests(InstallTestCase):
             "retro": "Capture a structured retrospective for a debugging stream or incident, record it in the journal, and propose consent-gated prevention tasks.",
             "review-pr": "Run the Software Delivery (SD) pull-request review loop.",
             "review-local": "Run the Software Delivery (SD) local review loop.",
-            "review-local-all": "Run the Software Delivery (SD) full-codebase local review loop.",
+            "ship": "Take the current branch from committed work to a merged pull request by sequencing the standard SD create-pr, review-pr, watch-pr, and housekeeping stages.",
             "review-learnings": "Detect or update repository review learnings.",
             "full-check": "Run the Software Delivery (SD) full-check gate for deterministic checks, local review, and readiness reporting.",
             "housekeeping": "Run Software Delivery (SD) end-of-stream housekeeping for a completed work stream.",

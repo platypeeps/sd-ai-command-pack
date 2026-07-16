@@ -436,6 +436,36 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
     ),
 }
 
+# Command-list source of truth: one (name, short form) row per sd-* command
+# that ships a neutral body at templates/.commands/<name>.md. The bespoke
+# claude/gemini/github adapters and the per-command manifest entries are
+# generated from this list by .github/scripts/generate-command-surfaces.py
+# (`make generate`); adding a command means adding the skill, the neutral
+# body, and one row here. Row order is the canonical per-command order of
+# the regenerated manifest.
+COMMAND_NAMES: tuple[tuple[str, str], ...] = (
+    ("sd-continue", "continue"),
+    ("sd-start", "start"),
+    ("sd-finish-work", "finish-work"),
+    ("sd-create-pr", "create-pr"),
+    ("sd-work-backlog", "work-backlog"),
+    ("sd-work-designs", "work-designs"),
+    ("sd-audit-repo", "audit-repo"),
+    ("sd-watch-pr", "watch-pr"),
+    ("sd-fix-ci", "fix-ci"),
+    ("sd-update-deps", "update-deps"),
+    ("sd-fleet-refresh", "fleet-refresh"),
+    ("sd-test-gaps", "test-gaps"),
+    ("sd-retro", "retro"),
+    ("sd-ship", "ship"),
+    ("sd-review-pr", "review-pr"),
+    ("sd-review-local", "review-local"),
+    ("sd-review-learnings", "review-learnings"),
+    ("sd-full-check", "full-check"),
+    ("sd-housekeeping", "housekeeping"),
+    ("sd-update-spec", "update-spec"),
+)
+
 # Pack-owned .gito defaults are not a platform but share the local-gitignore
 # grouping; kept here so the managed block order below stays byte-stable.
 PACK_LOCAL_GITIGNORE_GROUP = (
@@ -560,6 +590,7 @@ COPILOT_GUIDANCE_END = "<!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:END -->"
 __all__ = [
     "ACTIVE_TRELLIS_PLATFORM_MARKERS",
     "ALWAYS_INSTALL",
+    "COMMAND_NAMES",
     "COPILOT_GUIDANCE_END",
     "COPILOT_GUIDANCE_START",
     "COPILOT_INSTRUCTIONS_TARGET",

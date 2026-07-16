@@ -208,6 +208,7 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-work-designs/SKILL.md",
                 ".agents/skills/sd-audit-repo/SKILL.md",
                 ".agents/skills/sd-watch-pr/SKILL.md",
+                ".agents/skills/sd-ship/SKILL.md",
                 ".agents/skills/sd-fix-ci/SKILL.md",
                 ".agents/skills/sd-update-deps/SKILL.md",
                 ".agents/skills/sd-fleet-refresh/SKILL.md",
@@ -215,7 +216,6 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-retro/SKILL.md",
                 ".agents/skills/sd-review-pr/SKILL.md",
                 ".agents/skills/sd-review-local/SKILL.md",
-                ".agents/skills/sd-review-local-all/SKILL.md",
                 ".agents/skills/sd-review-learnings/SKILL.md",
                 ".agents/skills/sd-full-check/SKILL.md",
                 ".agents/skills/sd-housekeeping/SKILL.md",
@@ -248,6 +248,7 @@ class InstallCoreTests(InstallTestCase):
                 ".gemini/commands/sd/work-designs.toml",
                 ".gemini/commands/sd/audit-repo.toml",
                 ".gemini/commands/sd/watch-pr.toml",
+                ".gemini/commands/sd/ship.toml",
                 ".gemini/commands/sd/fix-ci.toml",
                 ".gemini/commands/sd/update-deps.toml",
                 ".gemini/commands/sd/fleet-refresh.toml",
@@ -255,7 +256,6 @@ class InstallCoreTests(InstallTestCase):
                 ".gemini/commands/sd/retro.toml",
                 ".gemini/commands/sd/review-pr.toml",
                 ".gemini/commands/sd/review-local.toml",
-                ".gemini/commands/sd/review-local-all.toml",
                 ".gemini/commands/sd/review-learnings.toml",
                 ".gemini/commands/sd/full-check.toml",
                 ".gemini/commands/sd/housekeeping.toml",
@@ -273,6 +273,7 @@ class InstallCoreTests(InstallTestCase):
                 ".claude/commands/sd/work-designs.md",
                 ".claude/commands/sd/audit-repo.md",
                 ".claude/commands/sd/watch-pr.md",
+                ".claude/commands/sd/ship.md",
                 ".claude/commands/sd/fix-ci.md",
                 ".claude/commands/sd/update-deps.md",
                 ".claude/commands/sd/fleet-refresh.md",
@@ -280,7 +281,6 @@ class InstallCoreTests(InstallTestCase):
                 ".claude/commands/sd/retro.md",
                 ".claude/commands/sd/review-pr.md",
                 ".claude/commands/sd/review-local.md",
-                ".claude/commands/sd/review-local-all.md",
                 ".claude/commands/sd/review-learnings.md",
                 ".claude/commands/sd/full-check.md",
                 ".claude/commands/sd/housekeeping.md",
@@ -293,6 +293,7 @@ class InstallCoreTests(InstallTestCase):
                 ".cursor/commands/sd-work-designs.md",
                 ".cursor/commands/sd-audit-repo.md",
                 ".cursor/commands/sd-watch-pr.md",
+                ".cursor/commands/sd-ship.md",
                 ".cursor/commands/sd-fix-ci.md",
                 ".cursor/commands/sd-update-deps.md",
                 ".cursor/commands/sd-fleet-refresh.md",
@@ -300,7 +301,6 @@ class InstallCoreTests(InstallTestCase):
                 ".cursor/commands/sd-retro.md",
                 ".cursor/commands/sd-review-pr.md",
                 ".cursor/commands/sd-review-local.md",
-                ".cursor/commands/sd-review-local-all.md",
                 ".cursor/commands/sd-review-learnings.md",
                 ".cursor/commands/sd-full-check.md",
                 ".cursor/commands/sd-housekeeping.md",
@@ -313,6 +313,7 @@ class InstallCoreTests(InstallTestCase):
                 ".github/prompts/sd-work-designs.prompt.md",
                 ".github/prompts/sd-audit-repo.prompt.md",
                 ".github/prompts/sd-watch-pr.prompt.md",
+                ".github/prompts/sd-ship.prompt.md",
                 ".github/prompts/sd-fix-ci.prompt.md",
                 ".github/prompts/sd-update-deps.prompt.md",
                 ".github/prompts/sd-fleet-refresh.prompt.md",
@@ -320,7 +321,6 @@ class InstallCoreTests(InstallTestCase):
                 ".github/prompts/sd-retro.prompt.md",
                 ".github/prompts/sd-review-pr.prompt.md",
                 ".github/prompts/sd-review-local.prompt.md",
-                ".github/prompts/sd-review-local-all.prompt.md",
                 ".github/prompts/sd-review-learnings.prompt.md",
                 ".github/prompts/sd-full-check.prompt.md",
                 ".github/prompts/sd-housekeeping.prompt.md",
@@ -334,6 +334,7 @@ class InstallCoreTests(InstallTestCase):
                 ".opencode/commands/sd-work-designs.md",
                 ".opencode/commands/sd-audit-repo.md",
                 ".opencode/commands/sd-watch-pr.md",
+                ".opencode/commands/sd-ship.md",
                 ".opencode/commands/sd-fix-ci.md",
                 ".opencode/commands/sd-update-deps.md",
                 ".opencode/commands/sd-fleet-refresh.md",
@@ -341,7 +342,6 @@ class InstallCoreTests(InstallTestCase):
                 ".opencode/commands/sd-retro.md",
                 ".opencode/commands/sd-review-pr.md",
                 ".opencode/commands/sd-review-local.md",
-                ".opencode/commands/sd-review-local-all.md",
                 ".opencode/commands/sd-review-learnings.md",
                 ".opencode/commands/sd-full-check.md",
                 ".opencode/commands/sd-housekeeping.md",
@@ -1583,6 +1583,7 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-work-designs/SKILL.md",
                 ".agents/skills/sd-audit-repo/SKILL.md",
                 ".agents/skills/sd-watch-pr/SKILL.md",
+                ".agents/skills/sd-ship/SKILL.md",
                 ".agents/skills/sd-fix-ci/SKILL.md",
                 ".agents/skills/sd-update-deps/SKILL.md",
                 ".agents/skills/sd-fleet-refresh/SKILL.md",
@@ -1611,6 +1612,7 @@ class InstallCoreTests(InstallTestCase):
                 ".opencode/commands/sd-work-designs.md",
                 ".opencode/commands/sd-audit-repo.md",
                 ".opencode/commands/sd-watch-pr.md",
+                ".opencode/commands/sd-ship.md",
                 ".opencode/commands/sd-fix-ci.md",
                 ".opencode/commands/sd-update-deps.md",
                 ".opencode/commands/sd-fleet-refresh.md",
@@ -1684,6 +1686,7 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-work-designs/SKILL.md",
                 ".agents/skills/sd-audit-repo/SKILL.md",
                 ".agents/skills/sd-watch-pr/SKILL.md",
+                ".agents/skills/sd-ship/SKILL.md",
                 ".agents/skills/sd-fix-ci/SKILL.md",
                 ".agents/skills/sd-update-deps/SKILL.md",
                 ".agents/skills/sd-fleet-refresh/SKILL.md",
@@ -1695,6 +1698,7 @@ class InstallCoreTests(InstallTestCase):
                 ".cursor/commands/sd-work-designs.md",
                 ".cursor/commands/sd-audit-repo.md",
                 ".cursor/commands/sd-watch-pr.md",
+                ".cursor/commands/sd-ship.md",
                 ".cursor/commands/sd-fix-ci.md",
                 ".cursor/commands/sd-update-deps.md",
                 ".cursor/commands/sd-fleet-refresh.md",
@@ -1723,6 +1727,7 @@ class InstallCoreTests(InstallTestCase):
             ".agents/skills/sd-work-designs/SKILL.md",
             ".agents/skills/sd-audit-repo/SKILL.md",
             ".agents/skills/sd-watch-pr/SKILL.md",
+            ".agents/skills/sd-ship/SKILL.md",
             ".agents/skills/sd-fix-ci/SKILL.md",
             ".agents/skills/sd-update-deps/SKILL.md",
             ".agents/skills/sd-fleet-refresh/SKILL.md",
@@ -1737,6 +1742,7 @@ class InstallCoreTests(InstallTestCase):
             ".cursor/commands/sd-work-designs.md",
             ".cursor/commands/sd-audit-repo.md",
             ".cursor/commands/sd-watch-pr.md",
+            ".cursor/commands/sd-ship.md",
             ".cursor/commands/sd-fix-ci.md",
             ".cursor/commands/sd-update-deps.md",
             ".cursor/commands/sd-fleet-refresh.md",
@@ -2351,25 +2357,22 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("asks the user which findings to fix", review_local)
         self.assertIn("Do not substitute `sd-full-check`", review_local)
 
-        review_local_all = (
-            install.ROOT / "templates/.agents/skills/sd-review-local-all/SKILL.md"
-        ).read_text(encoding="utf-8")
-        self.assertIn("name: sd-review-local-all", review_local_all)
-        self.assertIn("# SD Full-Codebase Local Review Loop", review_local_all)
+        # Full-codebase (`all`) mode content migrated from the retired
+        # sd-review-local-all skill lives in the merged sd-review-local skill.
         self.assertIn(
             "bash scripts/sd-ai-command-pack-review-local.sh --full-codebase",
-            review_local_all,
+            review_local,
         )
-        self.assertIn("prism review codebase", review_local_all)
-        self.assertIn("empty chunk response", review_local_all)
-        self.assertIn("gito review --all --path <repo-root>", review_local_all)
-        self.assertIn("replacing `<repo-root>` with the absolute repository root", review_local_all)
-        self.assertIn("branch-diff deletions", review_local_all)
-        self.assertIn("continue stacking fixes", review_local_all)
-        self.assertIn("UV_CACHE_DIR", review_local_all)
+        self.assertIn("prism review codebase", review_local)
+        self.assertIn("empty chunk response", review_local)
+        self.assertIn("gito review --all --path <repo-root>", review_local)
+        self.assertIn("replacing `<repo-root>` with the absolute repository root", review_local)
+        self.assertIn("branch-diff deletions", review_local)
+        self.assertIn("continue stacking fixes", review_local)
+        self.assertIn("UV_CACHE_DIR", review_local)
         self.assertIn(
             "SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND",
-            review_local_all,
+            review_local,
         )
 
         review_learnings = (
@@ -2472,6 +2475,7 @@ class InstallCoreTests(InstallTestCase):
                 "work-designs",
                 "audit-repo",
                 "watch-pr",
+                "ship",
                 "fix-ci",
                 "update-deps",
                 "fleet-refresh",
@@ -2479,7 +2483,6 @@ class InstallCoreTests(InstallTestCase):
                 "retro",
                 "review-pr",
                 "review-local",
-                "review-local-all",
                 "review-learnings",
                 "full-check",
                 "housekeeping",

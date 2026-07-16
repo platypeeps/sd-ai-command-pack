@@ -4,7 +4,7 @@ VENV ?= .venv
 VENV_PYTHON = $(VENV)/bin/python
 VENV_BIN = $(VENV)/bin
 
-.PHONY: setup hooks test lint audit full-check check
+.PHONY: setup hooks generate test lint audit full-check check
 
 setup:
 	"$(PYTHON)" -m venv "$(VENV)"
@@ -13,6 +13,13 @@ setup:
 
 hooks:
 	git config core.hooksPath .githooks
+
+generate:
+	@if [ -x "$(VENV_PYTHON)" ]; then \
+		"$(VENV_PYTHON)" .github/scripts/generate-command-surfaces.py; \
+	else \
+		"$(PYTHON)" .github/scripts/generate-command-surfaces.py; \
+	fi
 
 test:
 	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/run-tests.sh

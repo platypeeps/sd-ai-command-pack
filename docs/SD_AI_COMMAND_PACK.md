@@ -33,8 +33,6 @@ Quick links:
 - `.agents/skills/sd-review-pr/SKILL.md`: deterministic local gate plus remote
   PR review workflow.
 - `.agents/skills/sd-review-local/SKILL.md`: local review provider fix loop.
-- `.agents/skills/sd-review-local-all/SKILL.md`: full-codebase local review
-  provider fix loop.
 - `.agents/skills/sd-review-learnings/SKILL.md`: review feedback learning
   capture workflow.
 - `.agents/skills/sd-audit-repo/SKILL.md`: formal multi-dimension repository
@@ -51,6 +49,8 @@ Quick links:
 - `.agents/skills/sd-test-gaps/SKILL.md`: coverage-driven test authoring
   loop.
 - `.agents/skills/sd-retro/SKILL.md`: debug retrospective capture workflow.
+- `.agents/skills/sd-ship/SKILL.md`: composite publish-to-merge orchestrator
+  chaining create-pr, review-pr, watch-pr, and housekeeping.
 - `.agents/skills/sd-full-check/SKILL.md`: full local verification workflow.
 - `.agents/skills/sd-housekeeping/SKILL.md`: post-merge cleanup workflow.
 - `.agents/skills/sd-update-spec/SKILL.md`: Trellis update-spec workflow plus
@@ -75,7 +75,8 @@ Quick links:
   review preflight for copied/generated disclosure, documentation path hygiene,
   Trellis journal consistency, npm override drift, and large diff warnings.
 - `scripts/sd-ai-command-pack-review-local.sh`: local Prism/Gito and configured
-  review-tool runner for the review-local and review-local-all loops.
+  review-tool runner for the review-local loop, including its `all`
+  full-codebase mode.
 - `scripts/sd-ai-command-pack-review-learnings.py`: local review feedback
   pattern scanner and managed learning-block updater.
 - `scripts/sd-ai-command-pack-install-audit.py`: structural post-install audit
@@ -114,7 +115,7 @@ and then performs the architecture-overview check.
 Codex exposes the pack entry points as skills named `sd-start`, `sd-continue`,
 `sd-finish-work`, `sd-create-pr`, `sd-work-backlog`, `sd-work-designs`,
 `sd-full-check`, `sd-housekeeping`, `sd-review-pr`, `sd-review-local`,
-`sd-review-local-all`, `sd-review-learnings`, `sd-audit-repo`,
+`sd-review-learnings`, `sd-audit-repo`, `sd-ship`,
 `sd-watch-pr`, `sd-fix-ci`, `sd-update-deps`, `sd-fleet-refresh`,
 `sd-test-gaps`, `sd-retro`, and `sd-update-spec`; type
 `/sd` in Codex command completion or invoke them with
@@ -151,7 +152,8 @@ loaded project command files.
 5. Use the review-local command when you want a current-diff local Prism/Gito
    or configured review-tool loop before involving a remote reviewer. It asks
    which findings to fix and repeats until no items are selected.
-6. Use the review-local-all command when you want the same local fix loop run
+6. Use the review-local command with the `all` argument when you want the
+   same local fix loop run
    against the entire checked-out repository rather than just recent diffs.
 7. Use the create-pr command when you want the publishing wrapper: it runs
    `sd-update-spec`, stages only intended files, commits and pushes the feature
@@ -168,7 +170,7 @@ loaded project command files.
    input, and reports links to every planning document it created or updated.
 10. Use the review-pr command for an existing PR loop. It should run the deterministic
    local full-check path with Prism/Gito disabled before requesting remote
-   review. Run `sd-full-check`, `sd-review-local`, or `sd-review-local-all`
+   review. Run `sd-full-check` or `sd-review-local` (optionally with `all`)
    explicitly when you want Prism/Gito.
 11. Request the configured remote reviewer, defaulting to GitHub Copilot, after
    a clean local pass and again after every pushed review-fix commit made
@@ -251,7 +253,7 @@ Claude Code and Gemini CLI:
 /sd:housekeeping
 /sd:review-pr
 /sd:review-local
-/sd:review-local-all
+/sd:ship
 /sd:review-learnings
 /sd:audit-repo
 /sd:watch-pr
@@ -277,7 +279,7 @@ Qoder commands, Trae commands, Pi prompts, workflow adapters, and Codex skills:
 /sd-housekeeping
 /sd-review-pr
 /sd-review-local
-/sd-review-local-all
+/sd-ship
 /sd-review-learnings
 /sd-audit-repo
 /sd-watch-pr
@@ -432,7 +434,8 @@ that script output to ask which findings to fix, applies only selected fixes,
 and repeats the same tool stack until the user selects no more items.
 
 Use `bash scripts/sd-ai-command-pack-review-local.sh --full-codebase` or the
-review-local-all command when you want a full checked-out repository review.
+review-local command with the `all` argument when you want a full
+checked-out repository review.
 The older `--all` flag remains a supported scope alias.
 In that mode, Prism runs `prism review codebase`; Gito normally runs
 `gito review --all --path <absolute-repo-root>` and writes to
@@ -731,7 +734,7 @@ keeps `fixed` entries as history, marks a reappearing fixed finding
 The audit never creates Trellis tasks on its own: untracked P0–P2 findings
 become prd-ready task proposals that wait for explicit user consent.
 
-`sd-audit-repo` complements `sd-review-local-all` (provider loop),
+`sd-audit-repo` complements `sd-review-local` (provider loop),
 `sd-review-pr` (PR loop), and `sd-full-check` (gate); it is the periodic
 formal audit, not a per-change review loop.
 
@@ -785,6 +788,15 @@ files (default 3) authors focused tests through the normal implement/check
 flow, then re-runs coverage and reports per-file before/after numbers. It
 writes test files and fixtures only — never product code — and never
 lowers configured coverage floors.
+
+The `sd-ship` command takes the current branch from committed work to a
+merged pull request by sequencing the standard SD stages: the sd-create-pr
+flow, the sd-review-pr loop, the sd-watch-pr settle watcher, and the
+sd-housekeeping gate, which remains the only merge authority. `until=pr`,
+`until=review`, or the default `until=merge` choose the stop-point, and
+stage arguments such as `timeout-minutes=` pass through. It adds no new
+gate logic; every stage's own gates remain authoritative, and a failed or
+blocked stage stops the chain with that stage's report.
 
 The `sd-retro` command captures a structured retrospective after a
 debugging stream or incident: what broke, the root cause, why existing
@@ -940,7 +952,8 @@ ephemeral tool state and do not change what the checks validate.
   `sd-review-local`. Defaults to `prism gito`; accepts spaces or commas.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_SCOPE=all`: run the local review runner
   against the full checked-out repository. Defaults to current-diff scope. The
-  `sd-review-local-all` command passes this by invoking the runner with
+  `sd-review-local` command in `all` mode passes this by invoking the
+  runner with
   `--full-codebase`.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF`: base ref for the current-diff
   local review scope. Defaults to `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`,
@@ -1000,9 +1013,6 @@ ephemeral tool state and do not change what the checks validate.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_SEMGREP_COMMAND`: example Semgrep custom
   provider command for `sd-review-local`; follows the generic `<TOOL>` command
   naming pattern.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_SEMGREP_COMMAND`: example Semgrep custom
-  provider command for `sd-review-local-all`; falls back to the non-`ALL`
-  Semgrep command when unset.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF`: base ref for review-local Gito
   review. Defaults to `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF`, then
   `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then the discovered branch-diff
@@ -1011,7 +1021,7 @@ ephemeral tool state and do not change what the checks validate.
   Gito reports. Defaults to `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR`, then
   `.build/review/gito`.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_GITO_OUT_DIR`: output folder for
-  review-local-all Gito reports. Defaults to
+  full-codebase (`all` mode) Gito reports. Defaults to
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_OUT_DIR`, then
   `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR`, then `.build/review/gito-all`.
 
@@ -1305,7 +1315,8 @@ python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run
   `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=required` when review must be mandatory.
 - Gito fails due to cache, network sandboxing, or provider rate limiting:
   `sd-full-check` when Gito is explicitly enabled, `sd-review-local`, and
-  `sd-review-local-all` set writable `UV_CACHE_DIR` and `UV_TOOL_DIR` defaults
+  `sd-review-local` in `all` mode set writable `UV_CACHE_DIR` and
+  `UV_TOOL_DIR` defaults
   and retry HTTP 429 / slow-down responses with bounded backoff. If the failure
   is network or credential related, run from an environment with the needed
   access. Leave `SD_AI_COMMAND_PACK_FULL_CHECK_GITO` unset unless Gito is
@@ -1316,7 +1327,7 @@ python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run
   `RUFF_CACHE_DIR` block from Configuration, then rerun the same command.
 - Root-level `code-review-report.*` files appear after manual Gito runs: the
   managed gitignore block ignores them, but prefer running through
-  `sd-review-local`, `sd-review-local-all`, or
+  `sd-review-local` (any scope) or
   `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=1 bash
   scripts/sd-ai-command-pack-full-check.sh` so reports go under the
   pack-managed `.build/review/gito` and `.build/review/gito-all` directories.
