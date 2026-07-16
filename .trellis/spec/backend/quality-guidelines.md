@@ -246,6 +246,70 @@ Wrong: infer one project check and run it during doctor
 Correct: report candidates; run only an explicitly configured or repo-documented check
 ```
 
+## Shipped Script Coverage Gate Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing Python helper tests, `.coveragerc`,
+`.github/scripts/run-tests.sh`,
+`.github/scripts/check-shipped-script-coverage.sh`, `make test`, or the CI
+unittest coverage lane.
+
+### 2. Signatures
+
+- `PYTHON_BIN=<python> bash .github/scripts/check-shipped-script-coverage.sh`
+- CI command: `bash .github/scripts/check-shipped-script-coverage.sh`
+- Local command: `make test`
+
+### 3. Contracts
+
+- The installer coverage gate remains a separate 100% line-and-branch floor for
+  `install.py,installer/*`.
+- The shipped-script gate runs both the aggregate
+  `scripts/sd-ai-command-pack-*.py` floor and a per-file floor for every
+  shipped Python helper.
+- Every tracked `scripts/sd-ai-command-pack-*.py` helper must appear exactly
+  once in `.github/scripts/check-shipped-script-coverage.sh` with an integer
+  floor.
+- Floors should be set at or just below current measured coverage and ratcheted
+  upward when focused tests improve a helper. Do not lower a floor to hide a
+  real regression.
+- The helper honors `PYTHON_BIN`, then `.venv/bin/python`, then `python3` so
+  direct local runs avoid Apple/Xcode Python when the repo venv exists.
+
+### 4. Validation & Error Matrix
+
+- Missing helper listed in the coverage gate -> nonzero with the missing path.
+- Helper coverage below its floor -> nonzero from `coverage report` for that
+  helper.
+- Aggregate shipped-script coverage below 76% -> nonzero before per-file
+  reports.
+- New shipped Python helper without a listed floor -> unit test failure.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a fleet-preflight CLI test raises that script's measured coverage and
+  the floor is ratcheted upward.
+- Base: unrelated test changes leave all aggregate and per-file floors passing.
+- Bad: one helper drops below its floor while the aggregate total remains above
+  76% and CI still passes.
+
+### 6. Tests Required
+
+- CLI behavior tests for helper surfaces that automation invokes directly.
+- A drift test proving every shipped Python helper has a per-file floor.
+- A wiring test proving `make test` and CI call the shared coverage helper.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: rely only on TOTAL coverage for scripts/sd-ai-command-pack-*.py
+Correct: run aggregate coverage plus one fail-under report per shipped helper
+
+Wrong: python3 -m coverage report ...
+Correct: PYTHON_BIN=.venv/bin/python bash .github/scripts/check-shipped-script-coverage.sh
+```
+
 ## Required Patterns
 
 - Use `pathlib.Path` for filesystem work.

@@ -9,6 +9,11 @@ except ModuleNotFoundError as exc:
 
 json = _support.json
 Path = _support.Path
+contextlib = _support.contextlib
+io = _support.io
+mock = _support.mock
+subprocess = _support.subprocess
+sys = _support.sys
 tempfile = _support.tempfile
 unittest = _support.unittest
 PACK_ROOT = _support.PACK_ROOT
@@ -40,42 +45,7 @@ class FleetPreflightTests(InstallTestCase):
             encoding="utf-8",
         )
 
-    def test_checked_in_fleet_manifest_lists_real_consumers(self) -> None:
-        fleet = self.load_fleet_module()
-
-        consumers = fleet.load_fleet_consumers(PACK_ROOT / "docs/fleet/consumers.json")
-        by_slug = {consumer.github: consumer for consumer in consumers}
-
-        self.assertEqual(
-            set(by_slug),
-            {
-                "platypeeps/anomaly-metric-creator",
-                "platypeeps/hoa-manager",
-                "platypeeps/loadsmith",
-                "platypeeps/rwbp-coordinator",
-                "platypeeps/rwbp-website",
-                "answerbook/mezmo_benchmark",
-            },
-        )
-        for consumer in by_slug.values():
-            self.assertNotIn("cursor", consumer.platforms)
-            self.assertIn("claude", consumer.platforms)
-            self.assertIn("gemini", consumer.platforms)
-            self.assertIn("github", consumer.platforms)
-            self.assertIn("opencode", consumer.platforms)
-
-        manifest_text = (PACK_ROOT / "docs/fleet/consumers.json").read_text(
-            encoding="utf-8"
-        )
-        self.assertNotIn("/Users/", manifest_text)
-        self.assertIn("green-button-manager", manifest_text)
-        self.assertIn("trellis-review-pr-pack", manifest_text)
-
-    def test_preflight_skips_at_target_and_flags_refresh_needed(self) -> None:
-        fleet = self.load_fleet_module()
-        tempdir = tempfile.TemporaryDirectory(prefix="sd-fleet-preflight-")
-        self.addCleanup(tempdir.cleanup)
-        root = Path(tempdir.name)
+    def write_fleet_fixture(self, root: Path) -> tuple[Path, Path]:
         at_target = root / "at-target"
         outdated = root / "outdated"
         missing = root / "missing"
@@ -116,6 +86,45 @@ class FleetPreflightTests(InstallTestCase):
         )
         pack_manifest = root / "manifest.json"
         pack_manifest.write_text('{"version": "0.8.5"}\n', encoding="utf-8")
+        return fleet_manifest, pack_manifest
+
+    def test_checked_in_fleet_manifest_lists_real_consumers(self) -> None:
+        fleet = self.load_fleet_module()
+
+        consumers = fleet.load_fleet_consumers(PACK_ROOT / "docs/fleet/consumers.json")
+        by_slug = {consumer.github: consumer for consumer in consumers}
+
+        self.assertEqual(
+            set(by_slug),
+            {
+                "platypeeps/anomaly-metric-creator",
+                "platypeeps/hoa-manager",
+                "platypeeps/loadsmith",
+                "platypeeps/rwbp-coordinator",
+                "platypeeps/rwbp-website",
+                "answerbook/mezmo_benchmark",
+            },
+        )
+        for consumer in by_slug.values():
+            self.assertNotIn("cursor", consumer.platforms)
+            self.assertIn("claude", consumer.platforms)
+            self.assertIn("gemini", consumer.platforms)
+            self.assertIn("github", consumer.platforms)
+            self.assertIn("opencode", consumer.platforms)
+
+        manifest_text = (PACK_ROOT / "docs/fleet/consumers.json").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("/Users/", manifest_text)
+        self.assertIn("green-button-manager", manifest_text)
+        self.assertIn("trellis-review-pr-pack", manifest_text)
+
+    def test_preflight_skips_at_target_and_flags_refresh_needed(self) -> None:
+        fleet = self.load_fleet_module()
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-fleet-preflight-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        fleet_manifest, pack_manifest = self.write_fleet_fixture(root)
 
         consumers = fleet.load_fleet_consumers(fleet_manifest)
         target_version = fleet.pack_version(pack_manifest)
@@ -136,6 +145,107 @@ class FleetPreflightTests(InstallTestCase):
         self.assertEqual(results["missing"].status, "missing-local-clone")
         self.assertIn("--expected-platform claude", fleet.audit_command(results["outdated"]))
         self.assertIn("--platform claude", fleet.install_command(results["outdated"]))
+
+    def test_main_prints_json_output(self) -> None:
+        fleet = self.load_fleet_module()
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-fleet-preflight-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        fleet_manifest, pack_manifest = self.write_fleet_fixture(root)
+        output = io.StringIO()
+
+        with mock.patch.object(
+            sys,
+            "argv",
+            [
+                "sd-ai-command-pack-fleet-preflight.py",
+                "--fleet",
+                str(fleet_manifest),
+                "--manifest",
+                str(pack_manifest),
+                "--json",
+            ],
+        ):
+            with contextlib.redirect_stdout(output):
+                exit_code = fleet.main()
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(output.getvalue())
+        self.assertEqual(
+            [item["name"] for item in payload],
+            ["at-target", "outdated", "missing"],
+        )
+        self.assertEqual(payload[0]["status"], "at-target")
+        self.assertEqual(payload[1]["installedVersion"], "0.7.0")
+        self.assertEqual(payload[2]["status"], "missing-local-clone")
+        self.assertEqual(payload[0]["targetVersion"], "0.8.5")
+
+    def test_main_rejects_unknown_consumer(self) -> None:
+        fleet = self.load_fleet_module()
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-fleet-preflight-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        fleet_manifest, pack_manifest = self.write_fleet_fixture(root)
+
+        with mock.patch.object(
+            sys,
+            "argv",
+            [
+                "sd-ai-command-pack-fleet-preflight.py",
+                "--fleet",
+                str(fleet_manifest),
+                "--manifest",
+                str(pack_manifest),
+                "--consumer",
+                "ghost",
+            ],
+        ):
+            with self.assertRaises(SystemExit) as error:
+                fleet.main()
+
+        self.assertIn("unknown fleet consumer(s): ghost", str(error.exception))
+
+    def test_subprocess_text_output_and_fail_on_refresh_needed(self) -> None:
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-fleet-preflight-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        fleet_manifest, pack_manifest = self.write_fleet_fixture(root)
+        command = [
+            sys.executable,
+            str(PACK_ROOT / "scripts/sd-ai-command-pack-fleet-preflight.py"),
+            "--fleet",
+            str(fleet_manifest),
+            "--manifest",
+            str(pack_manifest),
+        ]
+
+        text_result = subprocess.run(
+            command,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(text_result.returncode, 0, text_result.stdout)
+        self.assertIn("sd-ai-command-pack fleet target: 0.8.5", text_result.stdout)
+        self.assertIn("at-target", text_result.stdout)
+        self.assertIn("refresh-needed", text_result.stdout)
+        self.assertIn("missing-local-clone", text_result.stdout)
+        self.assertIn("install: python3 install.py", text_result.stdout)
+        self.assertIn("--platform claude", text_result.stdout)
+        self.assertIn("audit:   python3 scripts/sd-ai-command-pack-install-audit.py", text_result.stdout)
+
+        fail_result = subprocess.run(
+            [*command, "--fail-on-refresh-needed"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(fail_result.returncode, 1, fail_result.stdout)
+        self.assertIn("refresh-needed", fail_result.stdout)
 
     def test_fleet_manifest_rejects_duplicate_consumer_platforms(self) -> None:
         fleet = self.load_fleet_module()

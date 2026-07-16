@@ -938,8 +938,7 @@ class GeneratedParityTests(InstallTestCase):
             "python3 -m coverage combine",
             'python3 -m coverage report --include="install.py,installer/*"'
             " --fail-under=100",
-            'python3 -m coverage report'
-            ' --include="scripts/sd-ai-command-pack-*" --fail-under=76',
+            "bash .github/scripts/check-shipped-script-coverage.sh",
         ):
             self.assertIn(expected, workflow)
         for expected in (
@@ -954,10 +953,14 @@ class GeneratedParityTests(InstallTestCase):
             "python -m coverage combine",
             'python -m coverage report --include="install.py,installer/*"'
             " --fail-under=100",
-            'python -m coverage report'
-            ' --include="scripts/sd-ai-command-pack-*" --fail-under=76',
+            "PYTHON_BIN=python bash .github/scripts/check-shipped-script-coverage.sh",
         ):
             self.assertIn(expected, readme)
+        coverage_gate = (
+            PACK_ROOT / ".github/scripts/check-shipped-script-coverage.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn('--include="scripts/sd-ai-command-pack-*.py"', coverage_gate)
+        self.assertIn("--fail-under=76", coverage_gate)
         # The parallel test runner owns the coverage rig contract that used to
         # live inline in the workflow/README: the absolute coverage env plus
         # per-module --parallel-mode sharding.
