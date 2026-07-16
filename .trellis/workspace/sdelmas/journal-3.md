@@ -218,7 +218,13 @@ Added the PR-only release payload gate, wired it into CI Result, documented the 
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Added `IF_ANCHOR_EXISTS` and `KNOWN_INSTALL_MODES` as shared installer
+  constants, and wired manifest loading/validation to use them.
+- Added import-time registry group-order validation for missing, unexpected,
+  and duplicate gitignore/local-only groups while keeping the explicit
+  byte-stable order tuples.
+- Added focused installer tests for install-mode typos, defensive selection
+  failure, and registry order drift.
 
 ### Git Commits
 
@@ -229,7 +235,12 @@ Added the PR-only release payload gate, wired it into CI Result, documented the 
 
 ### Testing
 
-- Validation was not recorded for this session.
+- `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- -m unittest tests.test_install_core`
+- `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- -m unittest tests.test_generated_parity tests.test_pack_drift`
+- `make lint`
+- `make test`
+- `python3 scripts/sd-ai-command-pack-update-spec-kb.py`
+- `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh`
 
 ### Status
 
@@ -292,6 +303,39 @@ Updated backend directory documentation for the installer package split, documen
 | Hash | Message |
 |------|---------|
 | `723a00a` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 109: Harden installer manifest validation
+
+**Date**: 2026-07-16
+**Task**: Harden installer manifest validation
+**Branch**: `codex/manifest-validation-tightening`
+
+### Summary
+
+Added explicit install-mode validation and import-time registry group-order checks, with regression coverage for typoed install modes and registry-order drift.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ee87db8` | (see git log) |
 
 ### Testing
 

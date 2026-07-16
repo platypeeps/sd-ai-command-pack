@@ -27,6 +27,7 @@ from installer.registry import (
     COPILOT_GUIDANCE_START,
     COPILOT_INSTRUCTIONS_TARGET,
     FORCE_PRESERVED_TARGETS,
+    IF_ANCHOR_EXISTS,
     IF_NOT_EXISTS,
     LOCAL_ENV_GITIGNORE_PATTERNS,
     PLATFORM_LOCAL_GITIGNORE_PATTERNS,
@@ -168,6 +169,10 @@ def selected_files(
         if file.install in {ALWAYS_INSTALL, IF_NOT_EXISTS}:
             selected.append(file)
             continue
+        if file.install != IF_ANCHOR_EXISTS:
+            raise SystemExit(
+                f"error: unknown install mode {file.install!r} for {file.target}"
+            )
         if platform_filter and file.platform not in platform_filter:
             skipped.append((file, "platform not selected"))
             continue

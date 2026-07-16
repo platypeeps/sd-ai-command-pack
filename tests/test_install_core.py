@@ -1096,12 +1096,42 @@ class InstallCoreTests(InstallTestCase):
             source=install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md",
             target=Path("docs/example.md"),
             anchor=None,
-            install="always",
+            install=install.ALWAYS_INSTALL,
         )
         with self.assertRaisesRegex(
             SystemExit, "unknown kind 'managed_block' in manifest"
         ):
             install.validate_manifest([file])
+
+    def test_validate_manifest_rejects_unknown_install_mode(self) -> None:
+        file = install.PackFile(
+            platform="shared",
+            kind="doc",
+            source=install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md",
+            target=Path("docs/example.md"),
+            anchor=None,
+            install="alway",
+        )
+
+        with self.assertRaisesRegex(
+            SystemExit,
+            "unknown install mode 'alway'.*always, if-anchor-exists, if-not-exists",
+        ):
+            install.validate_manifest([file])
+
+    def test_selected_files_rejects_unknown_install_mode_defensively(self) -> None:
+        root = self.make_repo()
+        file = install.PackFile(
+            platform="shared",
+            kind="doc",
+            source=install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md",
+            target=Path("docs/example.md"),
+            anchor=None,
+            install="sometimes",
+        )
+
+        with self.assertRaisesRegex(SystemExit, "unknown install mode 'sometimes'"):
+            install.selected_files([file], root, platforms=None, install_all=False)
 
     def test_install_skips_trellis_requirement_when_manifest_opts_out(self) -> None:
         fixtures = Path(tempfile.mkdtemp(prefix="sd-manifest-opt-out-"))
@@ -1269,6 +1299,11 @@ class InstallCoreTests(InstallTestCase):
     def test_platform_registry_derives_consistent_tables(self) -> None:
         registry = install.PLATFORM_REGISTRY
         self.assertEqual(install.PLATFORMS, tuple(sorted(registry)))
+        self.assertEqual(install.IF_ANCHOR_EXISTS, "if-anchor-exists")
+        self.assertEqual(
+            install.KNOWN_INSTALL_MODES,
+            frozenset({"always", "if-anchor-exists", "if-not-exists"}),
+        )
 
         _, files = install.load_manifest()
         platforms_with_files = {
@@ -1321,6 +1356,44 @@ class InstallCoreTests(InstallTestCase):
                     install._LOCAL_ONLY_GROUP_ORDER,
                     f"{platform} local-only group missing from group order",
                 )
+
+    def test_platform_registry_order_validation_fails_loudly(self) -> None:
+        gitignore_expected = install._ordered_platform_groups_with_local_gitignore()
+        local_only_expected = install._ordered_platform_groups_with_local_only()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"_LOCAL_GITIGNORE_GROUP_ORDER.*missing group\(s\): claude",
+        ):
+            install._validate_registry_group_order(
+                "_LOCAL_GITIGNORE_GROUP_ORDER",
+                tuple(
+                    group
+                    for group in install._LOCAL_GITIGNORE_GROUP_ORDER
+                    if group != "claude"
+                ),
+                gitignore_expected,
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"_LOCAL_ONLY_GROUP_ORDER.*unexpected group\(s\): mystery",
+        ):
+            install._validate_registry_group_order(
+                "_LOCAL_ONLY_GROUP_ORDER",
+                (*install._LOCAL_ONLY_GROUP_ORDER, "mystery"),
+                local_only_expected,
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"_LOCAL_ONLY_GROUP_ORDER.*duplicate group\(s\): claude",
+        ):
+            install._validate_registry_group_order(
+                "_LOCAL_ONLY_GROUP_ORDER",
+                (*install._LOCAL_ONLY_GROUP_ORDER, "claude"),
+                local_only_expected,
+            )
 
     def test_platform_registry_dirs_covered_by_shipped_scanners(self) -> None:
         audit = self.load_module_from_path(

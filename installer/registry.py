@@ -468,6 +468,7 @@ COMMAND_NAMES: tuple[tuple[str, str], ...] = (
 
 # Pack-owned .gito defaults are not a platform but share the local-gitignore
 # grouping; kept here so the managed block order below stays byte-stable.
+PACK_LOCAL_GITIGNORE_GROUP_NAME = "__pack__"
 PACK_LOCAL_GITIGNORE_GROUP = (
     ".gito/**/*.local.*",
     ".gito/**/.cache/",
@@ -479,12 +480,81 @@ PACK_LOCAL_GITIGNORE_GROUP = (
 
 # Hand-curated group order preserved from the pre-registry literal so the
 # managed .gitignore block content does not churn in consumer repos.
-_LOCAL_GITIGNORE_GROUP_ORDER = ("antigravity", "claude", "codebuddy", "codex", "cursor", "devin", "droid", "gemini", "__pack__", "kiro", "kilo", "opencode", "pi", "qoder", "reasonix", "trae", "zcode",)
+_LOCAL_GITIGNORE_GROUP_ORDER = ("antigravity", "claude", "codebuddy", "codex", "cursor", "devin", "droid", "gemini", PACK_LOCAL_GITIGNORE_GROUP_NAME, "kiro", "kilo", "opencode", "pi", "qoder", "reasonix", "trae", "zcode",)
 _LOCAL_ONLY_GROUP_ORDER = ("antigravity", "shared", "claude", "codebuddy", "codex", "cursor", "devin", "droid", "gemini", "github", "kiro", "kilo", "opencode", "pi", "qoder", "reasonix", "trae", "zcode",)
 
 PLATFORMS = tuple(sorted(PLATFORM_REGISTRY))
 ALWAYS_INSTALL = "always"
+IF_ANCHOR_EXISTS = "if-anchor-exists"
 IF_NOT_EXISTS = "if-not-exists"
+KNOWN_INSTALL_MODES = frozenset({ALWAYS_INSTALL, IF_ANCHOR_EXISTS, IF_NOT_EXISTS})
+
+
+def _ordered_platform_groups_with_local_gitignore() -> frozenset[str]:
+    return frozenset(
+        platform
+        for platform, info in PLATFORM_REGISTRY.items()
+        if info.local_gitignore_patterns
+    ) | frozenset({PACK_LOCAL_GITIGNORE_GROUP_NAME})
+
+
+def _ordered_platform_groups_with_local_only() -> frozenset[str]:
+    return frozenset(
+        platform
+        for platform, info in PLATFORM_REGISTRY.items()
+        if info.trellis_local_only
+    )
+
+
+def _duplicate_order_groups(order: tuple[str, ...]) -> list[str]:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for group in order:
+        if group in seen:
+            duplicates.add(group)
+        seen.add(group)
+    return sorted(duplicates)
+
+
+def _validate_registry_group_order(
+    name: str,
+    order: tuple[str, ...],
+    expected_groups: frozenset[str],
+) -> None:
+    actual_groups = set(order)
+    missing_groups = sorted(expected_groups - actual_groups)
+    unexpected_groups = sorted(actual_groups - expected_groups)
+    duplicate_groups = _duplicate_order_groups(order)
+    if not (missing_groups or unexpected_groups or duplicate_groups):
+        return
+
+    issues: list[str] = []
+    if missing_groups:
+        issues.append(f"missing group(s): {', '.join(missing_groups)}")
+    if unexpected_groups:
+        issues.append(f"unexpected group(s): {', '.join(unexpected_groups)}")
+    if duplicate_groups:
+        issues.append(f"duplicate group(s): {', '.join(duplicate_groups)}")
+    raise RuntimeError(
+        f"{name} is inconsistent with PLATFORM_REGISTRY: {'; '.join(issues)}"
+    )
+
+
+def _validate_registry_group_orders() -> None:
+    _validate_registry_group_order(
+        "_LOCAL_GITIGNORE_GROUP_ORDER",
+        _LOCAL_GITIGNORE_GROUP_ORDER,
+        _ordered_platform_groups_with_local_gitignore(),
+    )
+    _validate_registry_group_order(
+        "_LOCAL_ONLY_GROUP_ORDER",
+        _LOCAL_ONLY_GROUP_ORDER,
+        _ordered_platform_groups_with_local_only(),
+    )
+
+
+_validate_registry_group_orders()
+
 ACTIVE_TRELLIS_PLATFORM_MARKERS = {
     platform: tuple(Path(marker) for marker in info.markers)
     for platform, info in PLATFORM_REGISTRY.items()
@@ -507,7 +577,7 @@ PLATFORM_LOCAL_GITIGNORE_PATTERNS = tuple(
     for group in _LOCAL_GITIGNORE_GROUP_ORDER
     for pattern in (
         PACK_LOCAL_GITIGNORE_GROUP
-        if group == "__pack__"
+        if group == PACK_LOCAL_GITIGNORE_GROUP_NAME
         else PLATFORM_REGISTRY[group].local_gitignore_patterns
     )
 ) + ("node_modules/",)
@@ -596,7 +666,9 @@ __all__ = [
     "COPILOT_INSTRUCTIONS_TARGET",
     "FORCE_PRESERVED_TARGETS",
     "IF_NOT_EXISTS",
+    "IF_ANCHOR_EXISTS",
     "INSTALLED_TARGETS_FILE",
+    "KNOWN_INSTALL_MODES",
     "LOCAL_ENV_GITIGNORE_PATTERNS",
     "LOCAL_ONLY_EXCLUDE_END",
     "LOCAL_ONLY_EXCLUDE_START",
@@ -606,6 +678,7 @@ __all__ = [
     "MANAGED_BLOCK_KIND",
     "NEUTRAL_COMMAND_SOURCE_PLATFORMS",
     "PACK_LOCAL_GITIGNORE_GROUP",
+    "PACK_LOCAL_GITIGNORE_GROUP_NAME",
     "PACK_MANIFEST_FILE",
     "PLATFORM_LOCAL_GITIGNORE_PATTERNS",
     "PLATFORM_REGISTRY",
@@ -621,4 +694,8 @@ __all__ = [
     "TRELLIS_GITIGNORE_TARGET",
     "TRELLIS_INIT_PLATFORM_FLAGS",
     "TRELLIS_INSTALL_DOCS_URL",
+    "_ordered_platform_groups_with_local_gitignore",
+    "_ordered_platform_groups_with_local_only",
+    "_validate_registry_group_order",
+    "_validate_registry_group_orders",
 ]
