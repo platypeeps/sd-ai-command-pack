@@ -22,7 +22,8 @@
     "07-16-source-only-fleet-refresh-command",
     "07-16-option-safe-temp-cleanup",
     "07-16-review-learnings-command-errors",
-    "07-16-sd-retro-toolchain-routing"
+    "07-16-sd-retro-toolchain-routing",
+    "07-16-install-audit-explicit-decode-policy"
   ],
   "parent": null,
   "relatedFiles": [],
