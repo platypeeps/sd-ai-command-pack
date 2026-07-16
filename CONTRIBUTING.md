@@ -56,6 +56,9 @@ insufficient.
 
 - Bump `manifest.json` whenever shipped payload changes: `templates/**`,
   `docs/SD_AI_COMMAND_PACK.md`, or the manifest itself.
+- Pull request CI runs a `Release payload gate` job against the PR base and
+  includes it in `CI Result`, so payload changes without the manifest bump and
+  matching top `CHANGELOG.md` heading are blocked before merge.
 - Treat `templates/**` as the source of truth for shipped files. Root-level
   copies under `.agents/`, `.opencode/`, `scripts/`, and similar dogfood paths
   are mirrors.

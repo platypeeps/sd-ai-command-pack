@@ -212,6 +212,36 @@ class ReleaseLedgerTests(InstallTestCase):
         self.assertEqual(run_step["env"]["BASE_SHA"], "${{ github.event.before }}")
         self.assertEqual(run_step["env"]["HEAD_SHA"], "${{ github.sha }}")
 
+    def test_tests_workflow_runs_release_payload_gate_on_pull_requests(self) -> None:
+        workflow = yaml.load(
+            (PACK_ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8"),
+            Loader=yaml.BaseLoader,
+        )
+
+        job = workflow["jobs"]["release-payload-gate"]
+        self.assertEqual(job["name"], "Release payload gate")
+        self.assertIn("github.event_name == 'pull_request'", job["if"])
+        checkout_step = job["steps"][0]
+        self.assertEqual(checkout_step["with"]["fetch-depth"], "0")
+        run_step = job["steps"][1]
+        self.assertEqual(
+            run_step["env"]["BASE_SHA"],
+            "${{ github.event.pull_request.base.sha }}",
+        )
+        self.assertIn('git cat-file -e "${BASE_SHA}^{commit}"', run_step["run"])
+        self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE=1", run_step["run"])
+        self.assertIn(
+            'SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF="${BASE_SHA}"',
+            run_step["run"],
+        )
+        self.assertIn("run_pack_source_drift_gates", run_step["run"])
+
+        aggregate = workflow["jobs"]["ci-result"]
+        self.assertIn("release-payload-gate", aggregate["needs"])
+        aggregate_run = aggregate["steps"][0]["run"]
+        self.assertIn("RELEASE_PAYLOAD_GATE_RESULT", aggregate["steps"][0]["env"])
+        self.assertIn("The release payload gate failed.", aggregate_run)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,16 +21,26 @@ local gate enforces.
 ## Requirements
 
 - Add a PR-triggered CI job that runs the real release/drift gate against the
-  PR base (`SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF=origin/<base>`
-  already exists per tests/test_pack_drift.py:351); checkout must fetch the
-  base ref.
+  PR base (`SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF` already exists per
+  tests/test_pack_drift.py:351); checkout must make the base commit available.
 - Wire the job into the `ci-result` aggregate so branch protection covers it.
 - Non-payload PRs must pass without a bump (gate scopes to payload paths).
 - Keep runtime small (no full test suite in this job).
 
 ## Acceptance Criteria
 
-- [ ] A PR editing `templates/**` without a manifest bump fails the new job.
-- [ ] The same PR passes after bumping manifest + CHANGELOG.
-- [ ] A docs-only (non-payload) PR passes without a bump.
-- [ ] `ci-result` requires the new job; CI docs/spec updated.
+- [x] A PR editing `templates/**` without a manifest bump fails the new job.
+- [x] The same PR passes after bumping manifest + CHANGELOG.
+- [x] A docs-only (non-payload) PR passes without a bump.
+- [x] `ci-result` requires the new job; CI docs/spec updated.
+
+## Implementation Notes
+
+- Added the pull-request-only `Release payload gate` workflow job. It checks
+  out full history, verifies the PR base SHA exists locally, and runs
+  `run_pack_source_drift_gates` with
+  `SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF=<base-sha>`.
+- Wired the job into the `CI Result` aggregate so branch protection covers it
+  while allowing the job to be skipped on non-PR events.
+- Updated README, CONTRIBUTING, and backend manifest/filesystem spec guidance,
+  plus workflow-structure tests.

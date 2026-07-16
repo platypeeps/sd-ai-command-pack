@@ -477,6 +477,9 @@ branch. Bump `manifest.json` whenever the shipped payload changes: `templates/**
 drift gate fails when those files change without a manifest version bump. Every
 version bump must also add the matching top `CHANGELOG.md` heading in the form
 `## <version> - YYYY-MM-DD`; the same gate rejects missing or stale headings.
+Pull request CI runs the same release payload gate as a small standalone job
+against the PR base and feeds that result into `CI Result`, so payload drift is
+blocked remotely even when the local full-check was missed.
 
 For docs, spec, README, or PRD edits, refresh the local KB before full-check:
 
