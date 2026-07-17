@@ -583,8 +583,9 @@ Report:
 - Comments fixed, rebutted, or left for user decision.
 - Commits pushed during the loop.
 - Finish-work actions and any archive/journal commits pushed.
-- Finish-work ownership: completed here, or `Finish-work deferred to Stage 4
-  sd-housekeeping.` for the authorized composite merge-through path.
+- Finish-work ownership: completed here, or
+  `Finish-work deferred to Stage 4 sd-housekeeping.` for the authorized
+  composite merge-through path.
 - Housekeeping actions if the PR was already merged or became merged while the
   command was running.
 - CI status.
