@@ -100,7 +100,9 @@ Wraps Trellis finish-work and records complete journal entries through
 
 Runs `sd-update-spec`, stages only intended files, commits and pushes the current
 feature branch, creates or reuses the branch PR, and hands off to `sd-review-pr`.
-It detects the default branch instead of assuming `origin/main`.
+It detects the default branch instead of assuming `origin/main`, and sends
+custom Markdown PR bodies through a literal temporary file plus `--body-file`
+so shell expansion cannot execute content or inflate the submitted body.
 
 ### sd-work-backlog
 

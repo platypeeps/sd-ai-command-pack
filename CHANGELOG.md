@@ -9,6 +9,8 @@
   created.
 - Document the rollout interruption threshold and keep consumer refresh review
   focused on installation, provenance, integration, and repo-owned changes.
+- Make `sd-create-pr` pass custom Markdown bodies through literal temporary
+  files and `--body-file`, preventing shell expansion of body content.
 
 ## 0.15.5 - 2026-07-16
 

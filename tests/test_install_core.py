@@ -3003,6 +3003,16 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR", create_pr)
         self.assertIn("Do not run Prism, Gito", create_pr)
         self.assertIn("sd-ai-command-pack-toolchain.sh doctor", create_pr)
+        self.assertIn(
+            'gh pr create --base "$BASE_BRANCH" --title "$PR_TITLE" '
+            '--body-file "$PR_BODY_FILE"',
+            create_pr,
+        )
+        self.assertIn("Never pass generated or user-provided Markdown", create_pr)
+        self.assertNotRegex(
+            create_pr,
+            r"gh pr (?:create|edit)[^\n]* --body(?:\s|=)",
+        )
         self.assertIn("Project checks:", create_pr)
 
         work_backlog = (
