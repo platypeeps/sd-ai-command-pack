@@ -111,6 +111,7 @@ class FleetPreflightTests(InstallTestCase):
                 "platypeeps/loadsmith",
                 "platypeeps/rwbp-coordinator",
                 "platypeeps/rwbp-website",
+                "platypeeps/se-ai-command-pack",
                 "answerbook/mezmo_benchmark",
             },
         )
@@ -129,12 +130,13 @@ class FleetPreflightTests(InstallTestCase):
                 "hoa-manager",
                 "rwbp-website",
                 "mezmo_benchmark",
+                "se-ai-command-pack",
                 "anomaly-metric-creator",
             ],
         )
         self.assertEqual(
             [consumer.rollout_priority for consumer in consumers],
-            [10, 20, 30, 40, 50, 90],
+            [10, 20, 30, 40, 50, 60, 90],
         )
 
         manifest_text = (PACK_ROOT / "docs/fleet/consumers.json").read_text(

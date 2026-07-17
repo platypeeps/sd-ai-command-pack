@@ -51,6 +51,15 @@
       "candidateChecks": [["python3", "scripts/check-review-cycle-patterns.py", "--base", "HEAD", "--include-working-tree"]]
     },
     {
+      "name": "se-ai-command-pack",
+      "github": "platypeeps/se-ai-command-pack",
+      "pathHint": "~/repos/platypeeps/se-ai-command-pack",
+      "platforms": ["claude", "gemini", "github", "opencode"],
+      "rolloutPriority": 60,
+      "candidateTimeoutSeconds": 180,
+      "candidateChecks": [["bash", "scripts/sd-ai-command-pack-housekeeping.sh", "--self-test"]]
+    },
+    {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
       "pathHint": "~/repos/platypeeps/anomaly-metric-creator",
