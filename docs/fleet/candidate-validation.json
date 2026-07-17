@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
-  "validatedAt": "2026-07-17T03:09:14Z",
+  "validatedAt": "2026-07-17T15:51:57Z",
   "packVersion": "0.15.6",
   "payloadDigest": "sha256:cb94160f5ea029faa055a0f21cb489193eb0436611887d8303122df7b2dd7c6f",
-  "fleetManifestDigest": "sha256:96f145be99d27538937899289a8f7a0fa3ddfb05a7db1c9f2ec4f44d34138a26",
+  "fleetManifestDigest": "sha256:b0c6f4382e8f3be08a163c9662ef69c9be9ea9df6a1f7aae88154d40efae5994",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "da35b4e04d3cfa9846997f189d9421ea1c443552",
+      "baseCommit": "5554d1d748b896c130aaf6d6dd4cab751bc95ce5",
       "status": "passed",
       "checks": [
         [
@@ -20,7 +20,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "853bfa7f971dee897b825149b510f922dca7d645",
+      "baseCommit": "767496962caf9f0572d0305b51afd7d4ad04c017",
       "status": "passed",
       "checks": [
         [
@@ -34,7 +34,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "d023967a3cd4f663a623e4c117e440c8aa26ba8c",
+      "baseCommit": "85cd965fcf247f3c2420d8c8e162fba931417236",
       "status": "passed",
       "checks": [
         [
@@ -46,7 +46,7 @@
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
-      "baseCommit": "fa4876bcb2452e2882382e4c923571d43e6fbe56",
+      "baseCommit": "65d0a3fda577f3c191323bea005be67c8558e7ea",
       "status": "passed",
       "checks": [
         [
@@ -62,7 +62,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "2f55d62b1e7d347a0716f566734f9e1969ebdca5",
+      "baseCommit": "0886fe127f88da579bd33a1a58ae85e3a5f5bd8c",
       "status": "passed",
       "checks": [
         [
@@ -75,9 +75,22 @@
       ]
     },
     {
+      "name": "se-ai-command-pack",
+      "github": "platypeeps/se-ai-command-pack",
+      "baseCommit": "1f91efaf7dec57a449ec61e5fd440f715c6566f8",
+      "status": "passed",
+      "checks": [
+        [
+          "bash",
+          "scripts/sd-ai-command-pack-housekeeping.sh",
+          "--self-test"
+        ]
+      ]
+    },
+    {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "26b8a9f74870f682ff603c71b8564e93f42a8ee8",
+      "baseCommit": "b0df00b190c8d9d7b131b47124fc71a0639de3d6",
       "status": "passed",
       "checks": [
         [
