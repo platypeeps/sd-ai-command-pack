@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.0 - 2026-07-17
+
+- Separate `sd-ship` publication and review ownership: Stage 1 now delegates
+  an internal publish-only `sd-create-pr` flow and Stage 2 runs review exactly
+  once according to the selected stop-point.
+- Keep standalone `sd-create-pr` behavior unchanged and reject user attempts
+  to select the composite-only orchestration context before any side effects.
+
 ## 0.16.2 - 2026-07-17
 
 - Keep standalone `sd-review-pr` and `sd-ship until=review` finish-work

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "validatedAt": "2026-07-17T22:59:00Z",
-  "packVersion": "0.16.2",
-  "payloadDigest": "sha256:406fbd73b17a962f1627270cf99b87b52ff6ca1893c6c52b5dc483bca67a50dc",
+  "validatedAt": "2026-07-17T23:47:40Z",
+  "packVersion": "0.17.0",
+  "payloadDigest": "sha256:b85896ed31992dfce834cb065f8ffdc5191681a7801374941751dfc097853e3b",
   "fleetManifestDigest": "sha256:b0c6f4382e8f3be08a163c9662ef69c9be9ea9df6a1f7aae88154d40efae5994",
   "consumers": [
     {
@@ -34,7 +34,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "6e169d2825296708c56c5c1e7b41ba671a2d98df",
+      "baseCommit": "996c5a5e825ac3c48d0a73bcb3d44a2540574591",
       "status": "passed",
       "checks": [
         [

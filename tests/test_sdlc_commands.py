@@ -183,6 +183,87 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("leaves the active Trellis task unarchived", ship_text)
         self.assertIn("exactly once", ship_text)
 
+    def test_ship_separates_publish_and_review_ownership(self) -> None:
+        create_pr = self._skill_text("sd-create-pr")
+        ship = self._skill_text("sd-ship")
+
+        invocation_modes = create_pr.split("## Invocation Modes", 1)[1].split(
+            "## Step 1", 1
+        )[0]
+        invocation_text = " ".join(invocation_modes.split())
+        for pin in (
+            "caller: `sd-ship`",
+            "stage: `1`",
+            "return-after: `pr`",
+            "reject the request before Step 1",
+            "make no update-spec",
+        ):
+            self.assertIn(pin, invocation_text)
+
+        create_step_6 = create_pr.split("## Step 6", 1)[1].split(
+            "## Final Report", 1
+        )[0]
+        create_step_6_text = " ".join(create_step_6.split())
+        self.assertIn(
+            "verified internal orchestration context", create_step_6_text
+        )
+        self.assertIn(
+            "Do not resolve or invoke `sd-review-pr`", create_step_6_text
+        )
+        self.assertIn("For every standalone invocation", create_step_6_text)
+        self.assertIn(
+            "resolve and follow the `sd-review-pr`", create_step_6_text
+        )
+
+        safety_text = " ".join(
+            create_pr.split("## Safety Rules", 1)[1].split(
+                "## Invocation Modes", 1
+            )[0].split()
+        )
+        self.assertIn("In standalone mode, also resolve `sd-review-pr`", safety_text)
+        self.assertIn("the composite owns `sd-review-pr` resolution", safety_text)
+
+        ship_stage_1 = ship.split("2. Stage 1", 1)[1].split("3. Stage 2", 1)[0]
+        ship_stage_1_text = " ".join(ship_stage_1.split())
+        for pin in (
+            "caller: sd-ship",
+            "stage: 1",
+            "return-after: pr",
+            "without entering `sd-create-pr`'s standalone review handoff",
+            "stop the chain here without running review",
+        ):
+            self.assertIn(pin, ship_stage_1_text)
+
+        ship_safety = ship.split("## Safety rules", 1)[1].split(
+            "## Final report", 1
+        )[0]
+        ship_safety_text = " ".join(ship_safety.split())
+        self.assertIn("Stage 1 always returns after publishing", ship_safety_text)
+        self.assertIn("does not run for `until=pr`", ship_safety_text)
+        self.assertIn("runs once normally for `until=review`", ship_safety_text)
+        self.assertIn(
+            "runs once with `defer-finish-work` for `until=merge`",
+            ship_safety_text,
+        )
+
+    def test_create_pr_adapters_do_not_expose_internal_ship_context(self) -> None:
+        adapters = [
+            install.ROOT / "templates/.commands/sd-create-pr.md",
+            install.ROOT / "templates/.claude/commands/sd/create-pr.md",
+            install.ROOT / "templates/.gemini/commands/sd/create-pr.toml",
+            install.ROOT / "templates/.github/prompts/sd-create-pr.prompt.md",
+        ]
+        for adapter in adapters:
+            content = adapter.read_text(encoding="utf-8")
+            with self.subTest(adapter=adapter.name):
+                for internal_control in (
+                    "publish-only",
+                    "caller=",
+                    "stage=",
+                    "return-after=",
+                ):
+                    self.assertNotIn(internal_control, content)
+
     def test_usage_guide_documents_ship_lifecycle_ownership(self) -> None:
         guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")
         guide_text = " ".join(guide.split())
@@ -193,6 +274,8 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("defers finish-work to Stage 4", guide_text)
         self.assertIn("watches with `no-merge`", guide_text)
         self.assertIn("housekeeping exactly once", guide_text)
+        self.assertIn("Stage 2 the only review owner", guide_text)
+        self.assertIn("no review for `until=pr`", guide_text)
 
     def test_usage_guide_documents_all_six(self) -> None:
         guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")

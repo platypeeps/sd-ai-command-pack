@@ -93,6 +93,69 @@ branch before committing or opening a PR, preferring
 `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH_SLUG` or the commit message, with a
 timestamped fallback for empty or colliding names.
 
+### SD Create-PR Composite Delegation Contract
+
+#### 1. Scope / Trigger
+
+Use this contract whenever `sd-create-pr` is called by `sd-ship` or either
+skill's stage ownership changes. Standalone `sd-create-pr` must continue into
+`sd-review-pr`; the composite needs a publish-only Stage 1 so its Stage 2 owns
+review exactly once.
+
+#### 2. Signatures
+
+- Public command: `sd-create-pr` with no publish-only argument.
+- Internal orchestration context: `caller: sd-ship`, `stage: 1`,
+  `return-after: pr`.
+- Composite stop-points: `sd-ship until=pr|review|merge`.
+
+#### 3. Contracts
+
+- Only the active `sd-ship` Stage 1 may supply all three internal context
+  values directly to `sd-create-pr`.
+- Verified delegation runs update-spec, commit, push, and PR creation/reuse,
+  then returns the PR identity without resolving or invoking `sd-review-pr`.
+- Standalone mode keeps the normal non-deferred `sd-review-pr` handoff.
+- The context is not an environment variable or public argument, and thin
+  platform adapters must not expose it.
+
+#### 4. Validation & Error Matrix
+
+- Active `sd-ship` Stage 1 plus the exact context -> publish and return to the
+  composite.
+- Standalone invocation without internal context -> publish and enter review.
+- User-supplied `publish-only`, `caller=`, `stage=`, or `return-after=` -> stop
+  before update-spec or Git/GitHub side effects.
+- Partial, mismatched, inferred, or stale internal context -> reject rather
+  than skipping review.
+
+#### 5. Good / Base / Bad Cases
+
+- Good: `sd-ship until=merge` publishes in Stage 1, reviews once with
+  `defer-finish-work` in Stage 2, and leaves finish-work to Stage 4.
+- Base: standalone `sd-create-pr` publishes and runs normal review once.
+- Bad: Stage 1 invokes standalone `sd-create-pr`, which reviews immediately,
+  then Stage 2 reviews the same head a second time.
+
+#### 6. Tests Required
+
+- Assert standalone `sd-create-pr` retains its review handoff.
+- Assert the exact internal context returns after PR publication.
+- Assert all three `sd-ship` stop-points assign review to Stage 2 correctly.
+- Assert public adapters do not expose the internal controls.
+- Assert user attempts to select the internal mode are rejected before side
+  effects.
+
+#### 7. Wrong vs Correct
+
+```text
+Wrong: sd-ship Stage 1 runs the complete standalone sd-create-pr review flow
+Correct: sd-ship Stage 1 supplies the internal context and Stage 2 owns review
+
+Wrong: expose publish-only as a public command argument or environment variable
+Correct: accept it only as verified in-process orchestration context from sd-ship
+```
+
 When `sd-create-pr` supplies a custom or generated Markdown body, it must write
 the exact text through a literal file API and call `gh pr create --body-file`
 or `gh pr edit --body-file`. Never interpolate Markdown into a shell `--body`
