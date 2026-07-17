@@ -657,7 +657,16 @@ class InstallTestCase(unittest.TestCase):
         blocking_check_count: str = "0",
         successful_check_count: str = "2",
         rollup_json: str | None = None,
+        auto_delete_remote_branch: bool = False,
     ) -> None:
+        # Simulate GitHub's auto-delete-head-branch: the remote drops the
+        # feature branch at merge time (after housekeeping's initial prune),
+        # leaving a stale local tracking ref for cleanup to reconcile.
+        auto_delete_line = (
+            "  git --git-dir=\"$remote\" update-ref -d \"refs/heads/$branch\"\n"
+            if auto_delete_remote_branch
+            else ""
+        )
         if rollup_json is None:
             readiness_branch = (
                 "    printf '6\\037%s\\037false\\037https://example.test/pr/6\\037feature/cleanup\\037%s\\037main\\037CLEAN\\037%s\\037%s\\n' "
@@ -708,6 +717,7 @@ class InstallTestCase(unittest.TestCase):
             "  remote=\"$(git remote get-url origin)\"\n"
             "  head=\"$(git rev-parse HEAD)\"\n"
             "  git --git-dir=\"$remote\" update-ref refs/heads/main \"$head\"\n"
+            + auto_delete_line +
             "  touch \"$marker\"\n"
             "elif [ \"${1:-}\" = pr ] && [ \"${2:-}\" = list ]; then\n"
             "  exit 0\n"
