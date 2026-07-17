@@ -20,8 +20,8 @@ Carry PR #144 through the standard SD publish, review, watch, merge, and houseke
 
 ## Acceptance Criteria
 
-- [ ] Stage 1 reuses PR #144 and publishes any task/spec bookkeeping.
-- [ ] Stage 2 completes with deterministic checks green and no unresolved
+- [x] Stage 1 reuses PR #144 and publishes any task/spec bookkeeping.
+- [x] Stage 2 completes with deterministic checks green and no unresolved
   actionable review feedback.
 - [ ] Stage 3 observes required CI and reviewer state settled green.
 - [ ] Stage 4 merges only through the housekeeping gate.
