@@ -1,8 +1,8 @@
-# Fleet Refresh 0.15.0 Implementation Plan
+# Fleet Refresh 0.15.5 Implementation Plan
 
 ## Execution Order
 
-1. Verify `v0.15.0` resolves to the release merge commit and the pack checkout
+1. Verify `v0.15.5` resolves to the release merge commit and the pack checkout
    is clean on `main` matching `origin/main`.
 2. Run fleet preflight and capture all six before versions and exact commands.
 3. In manifest order, classify each consumer:
@@ -12,17 +12,21 @@
 4. For each stale clean consumer:
    - identify its remote default branch, fetch/prune, switch to it, and pull
      with `--ff-only`;
-   - create `codex/refresh-sd-ai-command-pack-0-15-0`;
+   - create `codex/refresh-sd-ai-command-pack-0-15-5`;
    - run the preflight-provided install and expected-platform audit commands;
    - inspect the diff for installer-owned files only;
    - run the consumer's documented full-check;
    - commit, push, open the PR, and run the installed review/watch flow;
    - merge only through installed housekeeping;
-   - verify clean default-branch state, `0.15.0` provenance, and audit success.
+   - verify clean default-branch state, `0.15.5` provenance, and audit success.
 5. Run fleet preflight again and reconcile each PR URL, merge result, audit
    evidence, and final version into this PRD.
 6. Mark acceptance criteria, finish/archive the Trellis task, and report the
    mandatory fleet table and follow-ups.
+
+Step 6 remains open because `rwbp-website` is still stale and its checkout has
+owner-created untracked Trellis task content. The other five consumer
+transactions are complete and verified.
 
 ## Stop Conditions
 

@@ -1,4 +1,4 @@
-# Fleet Refresh 0.15.0 Design
+# Fleet Refresh 0.15.5 Design
 
 ## Overview
 
@@ -11,11 +11,11 @@ gate, PR review, housekeeping merge, and post-merge verification.
 
 Start with `scripts/sd-ai-command-pack-fleet-preflight.py`. Its target version,
 local path, platform list, and exact install/audit commands define the worklist.
-Consumers already at `0.15.0` are evidence rows only and receive no branch or
+Consumers already at `0.15.5` are evidence rows only and receive no branch or
 empty PR.
 
 For each stale consumer, first update its clean default branch with a
-fast-forward pull. Create a unique `codex/refresh-sd-ai-command-pack-0-15-0`
+fast-forward pull. Create a unique `codex/refresh-sd-ai-command-pack-0-15-5`
 branch, run the printed installer command from this pack checkout, and run the
 printed audit command with all four expected platforms. Inspect the resulting
 diff to ensure it contains only pack-managed payload, receipts, provenance,
@@ -30,7 +30,7 @@ state, identical heads, green checks, and zero unresolved threads.
 
 After merge, rerun the source-owned install audit against the consumer's clean
 default branch and verify `.sd-ai-command-pack/provenance.json` reports
-`0.15.0`. Only then advance to the next manifest row.
+`0.15.5`. Only then advance to the next manifest row.
 
 ## Boundaries
 
