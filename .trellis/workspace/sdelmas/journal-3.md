@@ -1092,3 +1092,37 @@ Released the 0.16.1 preflight and source-identity fixes, validated them across t
 ### Next Steps
 
 - None - task complete
+
+
+## Session 129: Ship PR 144 review loop
+
+**Date**: 2026-07-17
+**Task**: Ship PR 144 review loop
+**Branch**: `codex/archived-task-jsonl-placeholder-preflight`
+
+### Summary
+
+Tracked the PR 144 shipping stream, fixed the Copilot source-hook diagnostic finding, passed focused and fleet validation, and completed the fresh-head review loop cleanly.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d10fda0` | (see git log) |
+| `cfb3295` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
