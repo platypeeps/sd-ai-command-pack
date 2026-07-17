@@ -6,21 +6,22 @@ from __future__ import annotations
 import argparse
 import json
 import shlex
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import sd_ai_command_pack_fleet_lib as fleet_lib  # noqa: E402
+
+FleetConsumer = fleet_lib.FleetConsumer
+
 DEFAULT_FLEET_MANIFEST = ROOT / "docs/fleet/consumers.json"
 DEFAULT_PACK_MANIFEST = ROOT / "manifest.json"
 PROVENANCE_FILE = Path(".sd-ai-command-pack/provenance.json")
-
-
-@dataclass(frozen=True)
-class FleetConsumer:
-    name: str
-    github: str
-    path_hint: str
-    platforms: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -33,83 +34,18 @@ class FleetPreflightResult:
     detail: str
 
 
-def load_json_object(path: Path, label: str) -> dict:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        raise SystemExit(f"error: {label} not found: {path}") from None
-    except json.JSONDecodeError as error:
-        raise SystemExit(f"error: {label} is not valid JSON: {error}") from None
-    if not isinstance(payload, dict):
-        raise SystemExit(f"error: {label} must be a JSON object: {path}")
-    return payload
-
-
 def pack_version(manifest_path: Path = DEFAULT_PACK_MANIFEST) -> str:
-    manifest = load_json_object(manifest_path, "pack manifest")
-    version = manifest.get("version")
-    if not isinstance(version, str) or not version.strip():
-        raise SystemExit(f"error: pack manifest version is missing: {manifest_path}")
-    return version.strip()
+    try:
+        return fleet_lib.pack_version(manifest_path)
+    except fleet_lib.FleetConfigError as error:
+        raise SystemExit(f"error: {error}") from None
 
 
 def load_fleet_consumers(path: Path = DEFAULT_FLEET_MANIFEST) -> list[FleetConsumer]:
-    manifest = load_json_object(path, "fleet manifest")
-    consumers = manifest.get("consumers")
-    if not isinstance(consumers, list):
-        raise SystemExit(f"error: fleet manifest consumers must be an array: {path}")
-
-    parsed: list[FleetConsumer] = []
-    seen: set[str] = set()
-    for index, item in enumerate(consumers):
-        if not isinstance(item, dict):
-            raise SystemExit(
-                f"error: fleet manifest consumers[{index}] must be an object"
-            )
-        name = item.get("name")
-        github = item.get("github")
-        path_hint = item.get("pathHint")
-        platforms = item.get("platforms")
-        if not isinstance(name, str) or not name:
-            raise SystemExit(f"error: fleet manifest consumers[{index}] has no name")
-        if name in seen:
-            raise SystemExit(f"error: duplicate fleet consumer name: {name}")
-        seen.add(name)
-        if not isinstance(github, str) or "/" not in github:
-            raise SystemExit(
-                f"error: fleet manifest consumer {name} has invalid github slug"
-            )
-        if not isinstance(path_hint, str) or not path_hint:
-            raise SystemExit(
-                f"error: fleet manifest consumer {name} has invalid pathHint"
-            )
-        if not isinstance(platforms, list) or not platforms:
-            raise SystemExit(
-                f"error: fleet manifest consumer {name} must list platforms"
-            )
-        platform_values: list[str] = []
-        seen_platforms: set[str] = set()
-        for platform in platforms:
-            if not isinstance(platform, str) or not platform:
-                raise SystemExit(
-                    f"error: fleet manifest consumer {name} has invalid platform"
-                )
-            if platform in seen_platforms:
-                raise SystemExit(
-                    f"error: fleet manifest consumer {name} repeats platform "
-                    f"{platform}"
-                )
-            seen_platforms.add(platform)
-            platform_values.append(platform)
-        parsed.append(
-            FleetConsumer(
-                name=name,
-                github=github,
-                path_hint=path_hint,
-                platforms=tuple(sorted(platform_values)),
-            )
-        )
-    return parsed
+    try:
+        return fleet_lib.load_fleet_consumers(path)
+    except fleet_lib.FleetConfigError as error:
+        raise SystemExit(f"error: {error}") from None
 
 
 def read_installed_version(repo_path: Path) -> str | None:
@@ -251,6 +187,11 @@ def main() -> int:
                         "github": result.consumer.github,
                         "path": str(result.repo_path),
                         "platforms": list(result.consumer.platforms),
+                        "rolloutPriority": result.consumer.rollout_priority,
+                        "candidateChecks": [
+                            list(command)
+                            for command in result.consumer.candidate_checks
+                        ],
                         "status": result.status,
                         "installedVersion": result.installed_version,
                         "targetVersion": result.target_version,
@@ -266,7 +207,8 @@ def main() -> int:
         for result in results:
             installed = result.installed_version or "unknown"
             print(
-                f"{result.status:19} {result.consumer.github} "
+                f"{result.status:19} P{result.consumer.rollout_priority:02d} "
+                f"{result.consumer.github} "
                 f"(installed: {installed}; platforms: "
                 f"{', '.join(result.consumer.platforms)})"
             )

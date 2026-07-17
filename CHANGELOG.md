@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.6 - 2026-07-16
+
+- Add an explicit fast-canary fleet order and repo-owned lightweight
+  compatibility checks, with anomaly-metric-creator last.
+- Validate release candidates in disposable consumer-origin clones and require
+  a payload-bound all-pass ledger before release PRs can merge or tags can be
+  created.
+- Document the rollout interruption threshold and keep consumer refresh review
+  focused on installation, provenance, integration, and repo-owned changes.
+
 ## 0.15.5 - 2026-07-16
 
 - Make the install audit's optional upstream-manifest read explicitly use

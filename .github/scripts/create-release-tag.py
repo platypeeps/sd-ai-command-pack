@@ -10,7 +10,23 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Sequence
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPT_DIR = ROOT / "scripts"
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from sd_ai_command_pack_fleet_lib import (  # noqa: E402
+    FleetConfigError,
+    PayloadSource,
+    fleet_manifest_digest,
+    manifest_version,
+    parse_fleet_consumers,
+    payload_digest,
+    validate_candidate_ledger,
+)
 
 SEMVER_RE = re.compile(
     r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
@@ -58,8 +74,98 @@ def git_text(*args: str) -> str:
     return run_command(["git", *args]).stdout
 
 
+def git_bytes(*args: str) -> bytes:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except OSError as exc:
+        raise ReleaseTagError(
+            f"command failed to start: git {' '.join(args)}: {exc}"
+        ) from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).decode(
+            "utf-8", errors="replace"
+        ).strip()
+        suffix = f": {detail}" if detail else ""
+        raise ReleaseTagError(
+            f"command failed ({result.returncode}): git {' '.join(args)}{suffix}"
+        )
+    return result.stdout
+
+
 def resolve_commit(ref: str) -> str:
     return git_text("rev-parse", "--verify", f"{ref}^{{commit}}").strip()
+
+
+def json_object_at_commit(commit_sha: str, path: str, label: str) -> dict:
+    try:
+        payload = json.loads(
+            git_bytes("show", f"{commit_sha}:{path}").decode("utf-8")
+        )
+    except UnicodeError as exc:
+        raise ReleaseTagError(
+            f"{label} is not valid UTF-8 at {commit_sha}: {exc}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise ReleaseTagError(
+            f"{label} is not valid JSON at {commit_sha}: {exc}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ReleaseTagError(f"{label} is not an object at {commit_sha}")
+    return payload
+
+
+def verify_candidate_ledger(commit_sha: str, manifest: dict, version: str) -> None:
+    fleet_path = "docs/fleet/consumers.json"
+    ledger_path = "docs/fleet/candidate-validation.json"
+    fleet_bytes = git_bytes("show", f"{commit_sha}:{fleet_path}")
+    try:
+        fleet_manifest = json.loads(fleet_bytes.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ReleaseTagError(
+            f"fleet manifest is not valid UTF-8 JSON at {commit_sha}: {exc}"
+        ) from exc
+    if not isinstance(fleet_manifest, dict):
+        raise ReleaseTagError(f"fleet manifest is not an object at {commit_sha}")
+    ledger = json_object_at_commit(commit_sha, ledger_path, "candidate ledger")
+
+    def load_source(source: str) -> PayloadSource:
+        tree_line = git_text("ls-tree", commit_sha, "--", source).strip()
+        if not tree_line:
+            raise ReleaseTagError(
+                f"pack manifest source is absent at {commit_sha}: {source}"
+            )
+        mode = tree_line.split(maxsplit=1)[0]
+        return PayloadSource(
+            content=git_bytes("show", f"{commit_sha}:{source}"),
+            executable=mode == "100755",
+        )
+
+    try:
+        consumers = parse_fleet_consumers(
+            fleet_manifest,
+            f"fleet manifest {fleet_path}",
+        )
+        expected_payload = payload_digest(manifest, load_source)
+        errors = validate_candidate_ledger(
+            ledger,
+            expected_version=version,
+            expected_payload_digest=expected_payload,
+            expected_fleet_digest=fleet_manifest_digest(fleet_bytes),
+            consumers=consumers,
+        )
+    except FleetConfigError as exc:
+        raise ReleaseTagError(
+            f"candidate validation configuration is invalid: {exc}"
+        ) from exc
+    if errors:
+        raise ReleaseTagError(
+            "candidate ledger is not release-ready: " + "; ".join(errors)
+        )
 
 
 def release_tag_plan(base_ref: str, head_ref: str) -> ReleaseTagPlan | None:
@@ -79,8 +185,11 @@ def release_tag_plan(base_ref: str, head_ref: str) -> ReleaseTagPlan | None:
         raise ReleaseTagError(f"manifest.json is not valid JSON at {head_sha}: {exc}") from exc
     if not isinstance(manifest, dict):
         raise ReleaseTagError(f"manifest.json is not an object at {head_sha}")
-    version = manifest.get("version")
-    if not isinstance(version, str) or not SEMVER_RE.fullmatch(version):
+    try:
+        version = manifest_version(manifest)
+    except FleetConfigError as exc:
+        raise ReleaseTagError(str(exc)) from exc
+    if not SEMVER_RE.fullmatch(version):
         raise ReleaseTagError(
             f"manifest.json version at {head_sha} is not a supported semantic version: "
             f"{version!r}"
@@ -100,6 +209,8 @@ def release_tag_plan(base_ref: str, head_ref: str) -> ReleaseTagPlan | None:
             f"manifest version {version!r} requires the top CHANGELOG.md release "
             f"heading '## {version} - YYYY-MM-DD'; found {found}"
         )
+
+    verify_candidate_ledger(head_sha, manifest, version)
 
     return ReleaseTagPlan(tag=f"v{version}", commit_sha=head_sha)
 

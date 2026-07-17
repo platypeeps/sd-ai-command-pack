@@ -58,25 +58,34 @@ class FleetPreflightTests(InstallTestCase):
         fleet_manifest.write_text(
             json.dumps(
                 {
-                    "schemaVersion": 1,
+                    "schemaVersion": 2,
                     "consumers": [
                         {
                             "name": "at-target",
                             "github": "example/at-target",
                             "pathHint": str(at_target),
                             "platforms": ["claude", "github"],
+                            "rolloutPriority": 10,
+                            "candidateTimeoutSeconds": 60,
+                            "candidateChecks": [["node", "check.mjs"]],
                         },
                         {
                             "name": "outdated",
                             "github": "example/outdated",
                             "pathHint": str(outdated),
                             "platforms": ["claude", "github"],
+                            "rolloutPriority": 20,
+                            "candidateTimeoutSeconds": 60,
+                            "candidateChecks": [["bash", "check.sh"]],
                         },
                         {
                             "name": "missing",
                             "github": "example/missing",
                             "pathHint": str(missing),
                             "platforms": ["claude", "github"],
+                            "rolloutPriority": 30,
+                            "candidateTimeoutSeconds": 60,
+                            "candidateChecks": [["python3", "check.py"]],
                         },
                     ],
                 }
@@ -111,6 +120,22 @@ class FleetPreflightTests(InstallTestCase):
             self.assertIn("gemini", consumer.platforms)
             self.assertIn("github", consumer.platforms)
             self.assertIn("opencode", consumer.platforms)
+
+        self.assertEqual(
+            [consumer.name for consumer in consumers],
+            [
+                "rwbp-coordinator",
+                "loadsmith",
+                "hoa-manager",
+                "rwbp-website",
+                "mezmo_benchmark",
+                "anomaly-metric-creator",
+            ],
+        )
+        self.assertEqual(
+            [consumer.rollout_priority for consumer in consumers],
+            [10, 20, 30, 40, 50, 90],
+        )
 
         manifest_text = (PACK_ROOT / "docs/fleet/consumers.json").read_text(
             encoding="utf-8"
@@ -179,6 +204,8 @@ class FleetPreflightTests(InstallTestCase):
         self.assertEqual(payload[1]["installedVersion"], "0.7.0")
         self.assertEqual(payload[2]["status"], "missing-local-clone")
         self.assertEqual(payload[0]["targetVersion"], "0.8.5")
+        self.assertEqual(payload[0]["rolloutPriority"], 10)
+        self.assertEqual(payload[0]["candidateChecks"], [["node", "check.mjs"]])
 
     def test_main_rejects_unknown_consumer(self) -> None:
         fleet = self.load_fleet_module()
@@ -256,13 +283,16 @@ class FleetPreflightTests(InstallTestCase):
         fleet_manifest.write_text(
             json.dumps(
                 {
-                    "schemaVersion": 1,
+                    "schemaVersion": 2,
                     "consumers": [
                         {
                             "name": "duplicate",
                             "github": "example/duplicate",
                             "pathHint": "~/repos/example/duplicate",
                             "platforms": ["github", "github"],
+                            "rolloutPriority": 10,
+                            "candidateTimeoutSeconds": 60,
+                            "candidateChecks": [["node", "check.mjs"]],
                         },
                     ],
                 }
@@ -275,6 +305,57 @@ class FleetPreflightTests(InstallTestCase):
             fleet.load_fleet_consumers(fleet_manifest)
 
         self.assertIn("repeats platform github", str(error.exception))
+
+    def test_fleet_manifest_rejects_shell_string_candidate_check(self) -> None:
+        fleet = self.load_fleet_module()
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-fleet-preflight-")
+        self.addCleanup(tempdir.cleanup)
+        fleet_manifest = Path(tempdir.name) / "fleet.json"
+        fleet_manifest.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 2,
+                    "consumers": [
+                        {
+                            "name": "unsafe",
+                            "github": "example/unsafe",
+                            "pathHint": "~/repos/example/unsafe",
+                            "platforms": ["github"],
+                            "rolloutPriority": 10,
+                            "candidateTimeoutSeconds": 60,
+                            "candidateChecks": ["node check.mjs"],
+                        }
+                    ],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(SystemExit) as error:
+            fleet.load_fleet_consumers(fleet_manifest)
+
+        self.assertIn("must be a non-empty argv array", str(error.exception))
+
+    def test_fleet_manifest_sorts_priority_independently_of_json_order(self) -> None:
+        fleet = self.load_fleet_module()
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-fleet-preflight-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        fleet_manifest, _ = self.write_fleet_fixture(root)
+        payload = json.loads(fleet_manifest.read_text(encoding="utf-8"))
+        payload["consumers"].reverse()
+        fleet_manifest.write_text(
+            json.dumps(payload) + "\n",
+            encoding="utf-8",
+        )
+
+        consumers = fleet.load_fleet_consumers(fleet_manifest)
+
+        self.assertEqual(
+            [consumer.name for consumer in consumers],
+            ["at-target", "outdated", "missing"],
+        )
 
 
 if __name__ == "__main__":

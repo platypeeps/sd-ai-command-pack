@@ -60,6 +60,35 @@ def missing_dogfood_targets(
 class PackDriftTests(InstallTestCase):
     """Tests for source/template drift gates, shipped env vars, and release guards."""
 
+    def write_candidate_ledger_fixture(self, root: Path) -> None:
+        candidate = self.load_module_from_path(
+            root / "scripts/sd-ai-command-pack-fleet-candidate-check.py",
+            "pack_drift_candidate_ledger",
+        )
+        version, payload, fleet_digest, consumers = candidate.current_evidence(
+            root / "manifest.json",
+            root / "docs/fleet/consumers.json",
+        )
+        results = [
+            candidate.CandidateResult(
+                consumer=consumer,
+                status="passed",
+                base_commit="0" * 40,
+                detail="fixture passed",
+                duration_seconds=0.0,
+            )
+            for consumer in consumers
+        ]
+        candidate.write_ledger(
+            root / "docs/fleet/candidate-validation.json",
+            candidate.ledger_content(
+                version=version,
+                payload_digest=payload,
+                fleet_digest=fleet_digest,
+                results=results,
+            ),
+        )
+
     def test_shipped_shell_cleanup_is_option_safe(self) -> None:
         unsafe_cleanup = re.compile(r'\brm\s+-f\s+"\$')
         violations: list[str] = []
@@ -312,7 +341,7 @@ class PackDriftTests(InstallTestCase):
         gate = install.ROOT / ".github/scripts/check-shipped-script-coverage.sh"
         gate_text = gate.read_text(encoding="utf-8")
         matches = re.findall(
-            r"^(scripts/(?:sd-ai-command-pack-[^\s]+|sd_ai_command_pack_lib)\.py)\s+([0-9]+)$",
+            r"^(scripts/(?:sd-ai-command-pack-[^\s]+|sd_ai_command_pack_(?:fleet_)?lib)\.py)\s+([0-9]+)$",
             gate_text,
             flags=re.MULTILINE,
         )
@@ -327,12 +356,13 @@ class PackDriftTests(InstallTestCase):
             for path in (install.ROOT / "scripts").glob("sd-ai-command-pack-*.py")
         }
         helpers.add("scripts/sd_ai_command_pack_lib.py")
+        helpers.add("scripts/sd_ai_command_pack_fleet_lib.py")
 
         self.assertEqual(duplicates, [])
         self.assertEqual(set(configured), helpers)
         self.assertTrue(all(1 <= floor <= 100 for floor in configured.values()))
         self.assertIn(
-            '--include="scripts/sd-ai-command-pack-*.py,scripts/sd_ai_command_pack_lib.py"',
+            '--include="scripts/sd-ai-command-pack-*.py,scripts/sd_ai_command_pack_lib.py,scripts/sd_ai_command_pack_fleet_lib.py"',
             gate_text,
         )
         self.assertIn("--fail-under=76", gate_text)
@@ -384,6 +414,7 @@ class PackDriftTests(InstallTestCase):
             ),
             encoding="utf-8",
         )
+        self.write_candidate_ledger_fixture(root)
 
         result = self.run_pack_source_drift_gates(root)
 
@@ -396,6 +427,37 @@ class PackDriftTests(InstallTestCase):
             "release changelog gate: manifest version bump has matching top heading",
             result.stdout,
         )
+        self.assertIn(
+            "candidate ledger: valid for the current pack payload and fleet",
+            result.stdout,
+        )
+
+    def test_pack_source_drift_gate_rejects_stale_candidate_ledger(self) -> None:
+        root = self.make_pack_source_fixture()
+        self.write_candidate_ledger_fixture(root)
+        manifest_path = root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["version"] = "99.0.0"
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        changelog_path = root / "CHANGELOG.md"
+        changelog_path.write_text(
+            changelog_path.read_text(encoding="utf-8").replace(
+                "# Changelog\n",
+                "# Changelog\n\n## 99.0.0 - 2099-01-01\n\n"
+                "- Release gate fixture.\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_pack_source_drift_gates(root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("release candidate ledger drift", result.stdout)
+        self.assertIn("packVersion", result.stdout)
 
     def test_pack_source_drift_gate_rejects_version_bump_without_top_changelog_heading(
         self,

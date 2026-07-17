@@ -1790,6 +1790,8 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("fail_under = 100", coveragerc)
         self.assertIn("scripts/sd_ai_command_pack_lib.py", coveragerc)
         self.assertIn("*/scripts/sd_ai_command_pack_lib.py", coveragerc)
+        self.assertIn("scripts/sd_ai_command_pack_fleet_lib.py", coveragerc)
+        self.assertIn("*/scripts/sd_ai_command_pack_fleet_lib.py", coveragerc)
 
     def test_main_diff_check_excludes_preserved_targets(self) -> None:
         root = self.make_repo()

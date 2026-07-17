@@ -30,6 +30,9 @@ consumers are behind the target version in `manifest.json`.
 - Rerunning after an interruption is safe: preflight marks already
   refreshed consumers `at-target`, so a rerun resumes with the remaining
   stale consumers instead of opening duplicate refresh PRs.
+- The release must already have a valid full-fleet candidate ledger. Candidate
+  validation is a pre-release source workflow, not part of this post-tag
+  command; follow `docs/FLEET_ROLLOUT.md` when preparing the release.
 
 ## Arguments
 
@@ -65,7 +68,10 @@ variables; every tuning knob is an argument.
    reason.
 2. With `dry-run`: emit the final report from the preflight results and
    stop here. Zero consumer mutations.
-3. Refresh stale consumers strictly sequentially, one consumer at a time.
+3. Refresh stale consumers strictly sequentially in the preflight's explicit
+   priority order, one consumer at a time. Coordinator, loadsmith, and HOA are
+   the fast canaries; AMC runs last. Do not reorder from incidental local path
+   or manifest editing order.
    Start the next consumer only after the previous one resolves as
    refreshed+merged, PR-open under `no-merge`, or skipped:
    1. Verify the consumer checkout has a clean working tree. If it is
@@ -113,6 +119,12 @@ variables; every tuning knob is an argument.
   is a defect.
 - Change only the files the pack installer writes, plus its receipts and
   provenance. Never edit consumer product code.
+- Stop the rollout for correctness, security, install/audit, or compatibility
+  defects in the released pack. Record low-risk hardening, style, or unrelated
+  consumer findings as follow-up work instead of forcing a patch release.
+- Consumer review focuses on selected-platform wiring, provenance, secrets,
+  docs accuracy, and repo-owned migrations. Pack-owned implementation is
+  reviewed in the source PR, not line-by-line in every refresh PR.
 - `dry-run` runs preflight only and performs zero consumer mutations.
 
 ## Final report

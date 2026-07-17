@@ -70,7 +70,10 @@ insufficient.
   `docs/SD_AI_COMMAND_PACK.md`, or the manifest itself.
 - Pull request CI runs a `Release payload gate` job against the PR base and
   includes it in `CI Result`, so payload changes without the manifest bump and
-  matching top `CHANGELOG.md` heading are blocked before merge.
+  matching top `CHANGELOG.md` heading are blocked before merge. A version bump
+  also requires an all-pass `docs/fleet/candidate-validation.json` matching the
+  exact payload and fleet manifest; generate it with
+  `scripts/sd-ai-command-pack-fleet-candidate-check.py` before the final gate.
 - Treat `templates/**` as the source of truth for shipped files. Root-level
   copies under `.agents/`, `.opencode/`, `scripts/`, and similar dogfood paths
   are mirrors.
@@ -85,6 +88,10 @@ insufficient.
   bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
     scripts/sd-ai-command-pack-update-spec-kb.py
   ```
+
+- Run the fleet candidate validator only after payload/template sync is final.
+  It uses disposable origin clones and does not mutate active consumer trees.
+  A partial `--consumer` diagnostic run never replaces the full-fleet ledger.
 
 ## Versioning
 
