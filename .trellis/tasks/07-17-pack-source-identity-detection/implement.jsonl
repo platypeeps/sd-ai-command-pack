@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Defines manifest identity, release payload, source-checkout, and template parity contracts."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines full-check, error-reporting, regression coverage, and shipped source/template requirements."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Requires one shared classifier when multiple source-only checks need the same identity decision."}

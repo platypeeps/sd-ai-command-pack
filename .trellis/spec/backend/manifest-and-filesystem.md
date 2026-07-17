@@ -778,6 +778,15 @@ at the root and byte-match its manifest source. Shared manifest targets are
 always required. This catches missing installed twins, not only content drift in
 twins that happen to be present.
 
+The full-check must establish source identity before running these SD-specific
+assumptions. `install.py`, `manifest.json`, and `templates/` identify only an
+installer-repo candidate. The parsed root manifest is authoritative: its name
+must equal `sd-ai-command-pack`, its version must be a non-empty string, and its
+files field must be a list. Valid manifests for other packs skip the gate. A
+malformed manifest that textually asserts the SD identity, or a parsed SD
+manifest missing those required fields, fails with a controlled diagnostic.
+The source-hook advisory must reuse the same classifier.
+
 Keep these checks in the pack-source drift tests:
 
 - The dogfood target set is derived from `manifest.json`, `PLATFORM_REGISTRY`,

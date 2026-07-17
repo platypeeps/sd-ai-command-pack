@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "validatedAt": "2026-07-17T20:50:24Z",
-  "packVersion": "0.16.0",
-  "payloadDigest": "sha256:3d99f482d39683fa2ce57152b18a5c380014170eb2ed33eb5eb6b14d3c977573",
+  "validatedAt": "2026-07-17T21:39:56Z",
+  "packVersion": "0.16.1",
+  "payloadDigest": "sha256:1901b6649d40376eb2d2cd8eefde03d168250b06bfb41836ab7b1e81df3ad905",
   "fleetManifestDigest": "sha256:b0c6f4382e8f3be08a163c9662ef69c9be9ea9df6a1f7aae88154d40efae5994",
   "consumers": [
     {
@@ -20,7 +20,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "b5dfedd91af54601ae3ab0cbf7e30a15719d31fd",
+      "baseCommit": "b849193b86db0b1e3feb8cc1ade3b2cce4eb1276",
       "status": "passed",
       "checks": [
         [
@@ -46,7 +46,7 @@
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
-      "baseCommit": "d8509e438da223fff1f95d2ee2bb4c8a04007b33",
+      "baseCommit": "47e3cecb95b8501d9368936e9bc15d0a2de30f37",
       "status": "passed",
       "checks": [
         [
@@ -62,7 +62,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "cbe76e84057d66ab802249da7be65759fa49f34e",
+      "baseCommit": "adbdfcb95693466423ec67b3fb6ef375494bfc82",
       "status": "passed",
       "checks": [
         [
@@ -90,7 +90,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "98d567c9959448ee09b71958c4c3854e57742b13",
+      "baseCommit": "12a4ba9d9d70ae4c39de658c0df032e7de229415",
       "status": "passed",
       "checks": [
         [

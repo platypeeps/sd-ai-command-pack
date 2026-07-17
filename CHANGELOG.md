@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.16.1 - 2026-07-17
+
+- Fail the generic review preflight when changed `implement.jsonl` or
+  `check.jsonl` files in newly completed or archived Trellis tasks still
+  contain generated `_example` seed rows.
+- Check both context siblings when `task.json` marks completion while
+  grandfathering untouched historical archives, active planning scaffolds,
+  and symlinked context files.
+- Identify SD pack source checkouts by the parsed manifest name rather than the
+  generic presence of `install.py`, `manifest.json`, and `templates/`, so other
+  installer repositories skip SD-only drift and hook checks.
+- Fail conservatively, with a controlled diagnostic, when a malformed manifest
+  asserts the SD identity or omits the fields required by the source gate.
+
 ## 0.16.0 - 2026-07-17
 
 - Added read-only installer self-inspection with human and schema-versioned

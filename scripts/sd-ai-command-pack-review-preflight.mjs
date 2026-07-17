@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -41,6 +41,7 @@ export function runReviewPreflight(options = {}) {
   runCheck('copied template diff disclosure', checkCopiedTemplateDiffDisclosure);
   runCheck('documentation path hygiene', checkDocumentationPathHygiene);
   runCheck('documentation path references', checkDocumentationPathReferences);
+  runCheck('Trellis task context seeds', checkTrellisTaskContextSeeds);
   runCheck('Trellis journal records', checkTrellisJournalRecords);
   runCheck('diff size warning', checkDiffSize);
   runCheck('tooling/generated scope advisory', checkScopeAdvisory);
@@ -398,6 +399,124 @@ function checkDocumentationPathHygiene() {
   }
 
   pass(`checked ${scanned} documentation/prompt/spec file(s) for personal absolute paths.`);
+}
+
+function checkTrellisTaskContextSeeds() {
+  const failureStart = failures.length;
+  const diff = currentChangedPaths();
+  if (diff === null) {
+    warn('could not inspect current diff for completed Trellis task context seeds.');
+    return;
+  }
+
+  const taskChanges = new Map();
+  for (const path of diff.paths) {
+    const artifact = parseTrellisTaskArtifactPath(path);
+    if (!artifact) {
+      continue;
+    }
+
+    const entry = taskChanges.get(artifact.taskDir) || {
+      archived: artifact.archived,
+      artifacts: new Set(),
+    };
+    entry.artifacts.add(artifact.artifact);
+    taskChanges.set(artifact.taskDir, entry);
+  }
+
+  let inspectedFiles = 0;
+  for (const [taskDir, change] of taskChanges) {
+    const taskFile = `${taskDir}/task.json`;
+    const completed = change.archived || completedTrellisTaskStatus(taskFile);
+    if (!completed) {
+      continue;
+    }
+
+    const contextFiles = new Set(
+      [...change.artifacts]
+        .filter((artifact) => artifact === 'implement.jsonl' || artifact === 'check.jsonl')
+        .map((artifact) => `${taskDir}/${artifact}`),
+    );
+    if (change.artifacts.has('task.json')) {
+      contextFiles.add(`${taskDir}/implement.jsonl`);
+      contextFiles.add(`${taskDir}/check.jsonl`);
+    }
+
+    for (const file of contextFiles) {
+      if (!isRegularFile(file)) {
+        continue;
+      }
+
+      inspectedFiles += 1;
+      for (const seed of findTrellisTaskContextSeedRows(file, readText(file))) {
+        fail(
+          `${seed.file}:${seed.line} still contains a generated _example seed after task completion; ` +
+            'replace it with grounded {"file": "<path>", "reason": "<why>"} context or remove the seed row.',
+        );
+      }
+    }
+  }
+
+  if (inspectedFiles === 0) {
+    if (failures.length === failureStart) {
+      pass('no changed completed or archived Trellis task context files require seed checks.');
+    }
+    return;
+  }
+
+  if (failures.length === failureStart) {
+    pass(`checked ${inspectedFiles} changed completed or archived Trellis task context file(s) for generated _example seeds.`);
+  }
+}
+
+function completedTrellisTaskStatus(taskFile) {
+  if (!isRegularFile(taskFile)) {
+    return false;
+  }
+
+  try {
+    return readJson(taskFile)?.status === 'completed';
+  } catch (error) {
+    fail(`${taskFile} could not be parsed as JSON while checking task completion: ${error.message}`);
+    return false;
+  }
+}
+
+export function parseTrellisTaskArtifactPath(path) {
+  const normalized = normalizePathSeparators(path).replace(/^\.\//, '');
+  const match = /^\.trellis\/tasks\/((?:archive\/[^/]+\/[^/]+)|[^/]+)\/(task\.json|implement\.jsonl|check\.jsonl)$/.exec(normalized);
+  if (!match || match[1] === 'archive') {
+    return null;
+  }
+
+  return {
+    taskDir: `.trellis/tasks/${match[1]}`,
+    artifact: match[2],
+    archived: match[1].startsWith('archive/'),
+  };
+}
+
+export function findTrellisTaskContextSeedRows(file, text) {
+  const seeds = [];
+
+  for (const [index, line] of text.split(/\r?\n/).entries()) {
+    if (!line.trim()) {
+      continue;
+    }
+
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    if (isPlainObject(record) && Object.prototype.hasOwnProperty.call(record, '_example')) {
+      seeds.push({ file, line: index + 1 });
+    }
+  }
+
+  return seeds;
 }
 
 function checkTrellisJournalRecords() {
@@ -1372,6 +1491,14 @@ function listFiles(directory) {
 
 function exists(file) {
   return existsSync(resolve(rootDir, file));
+}
+
+function isRegularFile(file) {
+  try {
+    return lstatSync(resolve(rootDir, file)).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function readJson(file) {

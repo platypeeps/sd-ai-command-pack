@@ -63,8 +63,15 @@ class FullCheckTests(InstallTestCase):
             self.skipTest("bash is not available on PATH")
 
         root = self.make_repo()
-        (root / "manifest.json").write_text('{"name": "pack"}\n', encoding="utf-8")
+        (root / "manifest.json").write_text(
+            json.dumps(
+                {"name": "sd-ai-command-pack", "version": "1.0.0", "files": []}
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         (root / "install.py").write_text("# source marker\n", encoding="utf-8")
+        (root / "templates").mkdir()
         (root / ".githooks").mkdir()
         scripts_dir = root / "scripts"
         scripts_dir.mkdir()
@@ -106,6 +113,52 @@ class FullCheckTests(InstallTestCase):
             stderr=subprocess.STDOUT,
             check=False,
         )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("pre-push chore-scope guard is not armed", result.stdout)
+
+    def test_full_check_script_skips_source_hook_for_other_pack_identity(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        (root / "manifest.json").write_text(
+            json.dumps(
+                {"name": "se-ai-command-pack", "version": "1.0.0", "files": []}
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (root / "install.py").write_text("# source marker\n", encoding="utf-8")
+        (root / "templates").mkdir()
+        (root / ".githooks").mkdir()
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir()
+        shutil.copy2(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
+            scripts_dir / "sd-ai-command-pack-full-check.sh",
+        )
+        shutil.copy2(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
+            scripts_dir / "sd-ai-command-pack-shell-lib.sh",
+        )
+
+        result = subprocess.run(
+            [
+                self._bash_path,
+                "-c",
+                "export SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE=1; "
+                "source scripts/sd-ai-command-pack-full-check.sh; "
+                "warn_unarmed_pack_source_hook",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertNotIn("pre-push chore-scope guard is not armed", result.stdout)
 
