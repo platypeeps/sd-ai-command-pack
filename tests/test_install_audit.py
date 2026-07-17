@@ -94,7 +94,11 @@ class InstallAuditTests(InstallTestCase):
         self.assertEqual(warnings, [])
         self.assertEqual(
             audit.SOURCE_ONLY_ALLOWED_PACK_FILES
-            - {"scripts/sd-ai-command-pack-fleet-preflight.py"},
+            - {
+                "scripts/sd-ai-command-pack-fleet-candidate-check.py",
+                "scripts/sd-ai-command-pack-fleet-preflight.py",
+                "scripts/sd_ai_command_pack_fleet_lib.py",
+            },
             set(install.SOURCE_ONLY_COMMAND_TARGETS),
         )
 

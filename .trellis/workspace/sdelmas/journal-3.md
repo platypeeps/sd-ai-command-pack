@@ -263,7 +263,13 @@ Batched install-audit gitignore checks with git check-ignore --stdin -z, preserv
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Added disposable candidate validation for every fleet consumer and bound
+  release/tag gates to committed all-pass evidence for the exact payload.
+- Added explicit fast-canary rollout priorities, bounded repo-owned checks, and
+  rollout interruption/review ownership policy.
+- Hardened fleet inputs, clone option handling, payload digest framing,
+  exact-commit symlink resolution, candidate PATH construction, and PR body
+  materialization through five Copilot rounds.
 
 ### Git Commits
 
@@ -809,6 +815,49 @@ Made shipped shell temp-file cleanup option-safe, added a regression guard, and 
 
 - [OK] 73 focused unittest cases passed.
 - [OK] make check passed, including coverage, lint, types, security, audit, parity, KB freshness, and release gates.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 122: Harden fleet candidate validation and rollout priority
+
+**Date**: 2026-07-16
+**Task**: Harden fleet candidate validation and rollout priority
+**Branch**: `codex/fleet-candidate-validation`
+
+### Summary
+
+Added disposable full-fleet candidate validation, payload-bound release evidence, fast-canary rollout ordering, and review ownership policy; hardened candidate and release tooling through five Copilot rounds, with all fleet checks and repository gates passing.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b4085aa` | feat: validate fleet release candidates before tagging |
+| `8e5d828` | docs: specify fleet candidate release contract |
+| `cde4aff` | fix: validate fleet consumer identifiers |
+| `52b58dd` | fix: harden fleet candidate inputs |
+| `e82b67c` | fix: materialize custom pull request bodies |
+| `68af84e` | fix: align release payload digest resolution |
+| `16fb096` | fix: avoid implicit candidate path entries |
+
+### Testing
+
+- All six disposable fleet candidate checks passed on each final payload.
+- `make check` and the deterministic full-check passed with Prism and Gito
+  disabled for the PR cycle.
+- GitHub CI passed on Python 3.10 and 3.13 for Linux plus Python 3.13 for macOS;
+  Copilot round 5 completed with no new comments.
 
 ### Status
 

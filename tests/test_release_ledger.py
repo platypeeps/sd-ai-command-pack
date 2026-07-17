@@ -18,21 +18,74 @@ PACK_ROOT = _support.PACK_ROOT
 InstallTestCase = _support.InstallTestCase
 
 RELEASE_TAG_SCRIPT = PACK_ROOT / ".github/scripts/create-release-tag.py"
+FLEET_LIB = PACK_ROOT / "scripts/sd_ai_command_pack_fleet_lib.py"
 
 
 class ReleaseLedgerTests(InstallTestCase):
+    def write_candidate_ledger(self, root: Path, version: str) -> None:
+        fleet = self.load_module_from_path(FLEET_LIB, "release_test_fleet_lib")
+        fleet_path = root / "docs/fleet/consumers.json"
+        fleet_bytes = fleet_path.read_bytes()
+        consumers = fleet.load_fleet_consumers(fleet_path)
+        ledger = {
+            "schemaVersion": fleet.CANDIDATE_LEDGER_SCHEMA_VERSION,
+            "validatedAt": "2026-01-02T00:00:00Z",
+            "packVersion": version,
+            "payloadDigest": fleet.filesystem_payload_digest(root / "manifest.json"),
+            "fleetManifestDigest": fleet.fleet_manifest_digest(fleet_bytes),
+            "consumers": [
+                {
+                    "name": consumer.name,
+                    "github": consumer.github,
+                    "baseCommit": "0" * 40,
+                    "status": "passed",
+                    "checks": [list(command) for command in consumer.candidate_checks],
+                }
+                for consumer in consumers
+            ],
+        }
+        ledger_path = root / "docs/fleet/candidate-validation.json"
+        ledger_path.write_text(
+            json.dumps(ledger, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
     def make_release_repo(self) -> Path:
         root = self.make_git_repo_without_trellis()
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
         (root / "manifest.json").write_text(
-            json.dumps({"version": "1.0.0"}, indent=2) + "\n",
+            json.dumps({"version": "1.0.0", "files": []}, indent=2) + "\n",
             encoding="utf-8",
         )
         (root / "CHANGELOG.md").write_text(
             "# Changelog\n\n## 1.0.0 - 2026-01-01\n\n- Baseline.\n",
             encoding="utf-8",
         )
+        fleet_path = root / "docs/fleet/consumers.json"
+        fleet_path.parent.mkdir(parents=True)
+        fleet_path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 2,
+                    "consumers": [
+                        {
+                            "name": "fixture",
+                            "github": "example/fixture",
+                            "pathHint": "~/fixture",
+                            "platforms": ["github"],
+                            "rolloutPriority": 10,
+                            "candidateTimeoutSeconds": 60,
+                            "candidateChecks": [["node", "check.mjs"]],
+                        }
+                    ],
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.write_candidate_ledger(root, "1.0.0")
         self.run_git(root, "add", ".")
         self.run_git(root, "commit", "-m", "release 1.0.0")
         return root
@@ -42,10 +95,12 @@ class ReleaseLedgerTests(InstallTestCase):
         root: Path,
         version: str,
         *,
+        files: list[dict[str, str]] | None = None,
         top_heading: bool = True,
+        update_candidate_ledger: bool = True,
     ) -> str:
         (root / "manifest.json").write_text(
-            json.dumps({"version": version}, indent=2) + "\n",
+            json.dumps({"version": version, "files": files or []}, indent=2) + "\n",
             encoding="utf-8",
         )
         heading = f"## {version} - 2026-01-02\n\n- Release fixture.\n"
@@ -55,7 +110,9 @@ class ReleaseLedgerTests(InstallTestCase):
         else:
             changelog = f"{changelog.rstrip()}\n\n{heading}"
         (root / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
-        self.run_git(root, "add", "manifest.json", "CHANGELOG.md")
+        if update_candidate_ledger:
+            self.write_candidate_ledger(root, version)
+        self.run_git(root, "add", ".")
         self.run_git(root, "commit", "-m", f"release {version}")
         return self.git_output(root, "rev-parse", "HEAD")
 
@@ -112,6 +169,39 @@ class ReleaseLedgerTests(InstallTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(f"would create v1.1.0 at {head_sha}", result.stdout)
 
+    def test_release_tag_resolves_symlinked_manifest_source_from_commit(self) -> None:
+        root = self.make_release_repo()
+        templates = root / "templates"
+        templates.mkdir()
+        target = templates / "tool-real.sh"
+        target.write_text("#!/bin/sh\necho tool\n", encoding="utf-8")
+        target.chmod(0o755)
+        (templates / "tool.sh").symlink_to(target.name)
+        head_sha = self.commit_release(
+            root,
+            "1.1.0",
+            files=[
+                {
+                    "platform": "shared",
+                    "kind": "file",
+                    "source": "templates/tool.sh",
+                    "target": "scripts/tool.sh",
+                }
+            ],
+        )
+
+        result = self.run_release_tag(
+            root,
+            "--base",
+            "HEAD^",
+            "--head",
+            "HEAD",
+            "--dry-run",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(f"would create v1.1.0 at {head_sha}", result.stdout)
+
     def test_release_tag_rejects_matching_heading_below_older_release(self) -> None:
         root = self.make_release_repo()
         self.commit_release(root, "1.1.0", top_heading=False)
@@ -128,6 +218,23 @@ class ReleaseLedgerTests(InstallTestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("requires the top CHANGELOG.md release heading", result.stdout)
         self.assertIn("found '## 1.0.0 - 2026-01-01'", result.stdout)
+
+    def test_release_tag_rejects_stale_candidate_ledger(self) -> None:
+        root = self.make_release_repo()
+        self.commit_release(root, "1.1.0", update_candidate_ledger=False)
+
+        result = self.run_release_tag(
+            root,
+            "--base",
+            "HEAD^",
+            "--head",
+            "HEAD",
+            "--dry-run",
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("candidate ledger is not release-ready", result.stdout)
+        self.assertIn("packVersion", result.stdout)
 
     def test_release_tag_rejects_non_object_manifest_without_traceback(self) -> None:
         root = self.make_release_repo()

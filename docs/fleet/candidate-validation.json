@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "validatedAt": "2026-07-17T03:09:14Z",
+  "packVersion": "0.15.6",
+  "payloadDigest": "sha256:cb94160f5ea029faa055a0f21cb489193eb0436611887d8303122df7b2dd7c6f",
+  "fleetManifestDigest": "sha256:96f145be99d27538937899289a8f7a0fa3ddfb05a7db1c9f2ec4f44d34138a26",
+  "consumers": [
+    {
+      "name": "rwbp-coordinator",
+      "github": "platypeeps/rwbp-coordinator",
+      "baseCommit": "da35b4e04d3cfa9846997f189d9421ea1c443552",
+      "status": "passed",
+      "checks": [
+        [
+          "node",
+          "scripts/check-review-churn.mjs"
+        ]
+      ]
+    },
+    {
+      "name": "loadsmith",
+      "github": "platypeeps/loadsmith",
+      "baseCommit": "853bfa7f971dee897b825149b510f922dca7d645",
+      "status": "passed",
+      "checks": [
+        [
+          "bash",
+          "scripts/check_review_readiness.sh",
+          "--all",
+          "--skip-build"
+        ]
+      ]
+    },
+    {
+      "name": "hoa-manager",
+      "github": "platypeeps/hoa-manager",
+      "baseCommit": "d023967a3cd4f663a623e4c117e440c8aa26ba8c",
+      "status": "passed",
+      "checks": [
+        [
+          "node",
+          "scripts/check-review-preflight.mjs"
+        ]
+      ]
+    },
+    {
+      "name": "rwbp-website",
+      "github": "platypeeps/rwbp-website",
+      "baseCommit": "fa4876bcb2452e2882382e4c923571d43e6fbe56",
+      "status": "passed",
+      "checks": [
+        [
+          "node",
+          "scripts/sd-ai-command-pack-review-preflight.mjs"
+        ],
+        [
+          "node",
+          "scripts/ops-check.mjs"
+        ]
+      ]
+    },
+    {
+      "name": "mezmo_benchmark",
+      "github": "answerbook/mezmo_benchmark",
+      "baseCommit": "2f55d62b1e7d347a0716f566734f9e1969ebdca5",
+      "status": "passed",
+      "checks": [
+        [
+          "python3",
+          "scripts/check-review-cycle-patterns.py",
+          "--base",
+          "HEAD",
+          "--include-working-tree"
+        ]
+      ]
+    },
+    {
+      "name": "anomaly-metric-creator",
+      "github": "platypeeps/anomaly-metric-creator",
+      "baseCommit": "26b8a9f74870f682ff603c71b8564e93f42a8ee8",
+      "status": "passed",
+      "checks": [
+        [
+          "python3",
+          "tools/check_ci_review_contract.py"
+        ],
+        [
+          "python3",
+          "tools/check_copilot_instruction_contract.py"
+        ]
+      ]
+    }
+  ]
+}

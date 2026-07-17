@@ -90,6 +90,14 @@ branch before committing or opening a PR, preferring
 `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH_SLUG` or the commit message, with a
 timestamped fallback for empty or colliding names.
 
+When `sd-create-pr` supplies a custom or generated Markdown body, it must write
+the exact text through a literal file API and call `gh pr create --body-file`
+or `gh pr edit --body-file`. Never interpolate Markdown into a shell `--body`
+argument: backticks, dollar signs, and command-substitution syntax are content,
+not shell instructions. Secure temporary creation plus option-safe cleanup are
+part of this contract; `gh pr create --fill` remains valid when no custom body
+is needed.
+
 The `sd-review-local` and `sd-review-local-all` shared skills should continue
 to define the interactive local review/fix loop while delegating provider
 execution to `scripts/sd-ai-command-pack-review-local.sh`. Keep their behavior

@@ -100,7 +100,9 @@ Wraps Trellis finish-work and records complete journal entries through
 
 Runs `sd-update-spec`, stages only intended files, commits and pushes the current
 feature branch, creates or reuses the branch PR, and hands off to `sd-review-pr`.
-It detects the default branch instead of assuming `origin/main`.
+It detects the default branch instead of assuming `origin/main`, and sends
+custom Markdown PR bodies through a literal temporary file plus `--body-file`
+so shell expansion cannot execute content or inflate the submitted body.
 
 ### sd-work-backlog
 
@@ -489,6 +491,20 @@ Pull request CI runs the same release payload gate as a small standalone job
 against the PR base and feeds that result into `CI Result`, so payload drift is
 blocked remotely even when the local full-check was missed.
 
+Before merging a release payload change, validate the working candidate against
+disposable clones of every fleet consumer:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-candidate-check.py
+```
+
+The all-pass run updates `docs/fleet/candidate-validation.json`. The local/CI
+release gate and automatic tag creator verify that ledger against the exact
+pack payload and fleet manifest, so stale or partial evidence cannot release.
+The validator never modifies active consumer worktrees. See the fleet runbook
+for diagnostic filters and failure policy.
+
 For docs, spec, README, or PRD edits, refresh the local KB before full-check:
 
 ```bash
@@ -522,8 +538,9 @@ consumer refresh PRs.
 ### Fleet Rollout
 
 The checked-in fleet manifest lives at `docs/fleet/consumers.json`. It lists
-the real consumer repositories, GitHub slugs, local path hints, and explicit
-platform sets. Run the source-owned preflight from this checkout:
+the real consumer repositories, GitHub slugs, local path hints, explicit
+platform sets, lightweight candidate checks, and rollout priorities. Run the
+source-owned preflight from this checkout:
 
 ```bash
 python3 scripts/sd-ai-command-pack-fleet-preflight.py
@@ -535,7 +552,8 @@ exact `install.py --force --platform ...` and install-audit commands. The audit
 command passes each explicit platform through `--expected-platform`, so missing
 selected-platform files are caught even if a faulty install also omitted them
 from receipts and provenance. See [docs/FLEET_ROLLOUT.md](docs/FLEET_ROLLOUT.md)
-for the compact rollout runbook.
+for the fast-canary order, interruption threshold, review ownership, and
+compact rollout runbook.
 
 ### Direct-to-main Chore Commits
 

@@ -913,6 +913,8 @@ class InstallTestCase(unittest.TestCase):
         {
             # Internal test hook, intentionally undocumented.
             "SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE",
+            # Source-only fleet candidate marker, never read by consumers.
+            "SD_AI_COMMAND_PACK_CANDIDATE_CHECK",
             # Legacy rename hint prefixes emitted by the install audit.
             "SD_AI_COMMAND_PACK_FULL_CHECK",
             "SD_AI_COMMAND_PACK_HOUSEKEEPING",

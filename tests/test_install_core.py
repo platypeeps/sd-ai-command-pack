@@ -1790,6 +1790,8 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("fail_under = 100", coveragerc)
         self.assertIn("scripts/sd_ai_command_pack_lib.py", coveragerc)
         self.assertIn("*/scripts/sd_ai_command_pack_lib.py", coveragerc)
+        self.assertIn("scripts/sd_ai_command_pack_fleet_lib.py", coveragerc)
+        self.assertIn("*/scripts/sd_ai_command_pack_fleet_lib.py", coveragerc)
 
     def test_main_diff_check_excludes_preserved_targets(self) -> None:
         root = self.make_repo()
@@ -3001,6 +3003,16 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR", create_pr)
         self.assertIn("Do not run Prism, Gito", create_pr)
         self.assertIn("sd-ai-command-pack-toolchain.sh doctor", create_pr)
+        self.assertIn(
+            'gh pr create --base "$BASE_BRANCH" --title "$PR_TITLE" '
+            '--body-file "$PR_BODY_FILE"',
+            create_pr,
+        )
+        self.assertIn("Never pass generated or user-provided Markdown", create_pr)
+        self.assertNotRegex(
+            create_pr,
+            r"gh pr (?:create|edit)[^\n]* --body(?:\s|=)",
+        )
         self.assertIn("Project checks:", create_pr)
 
         work_backlog = (
