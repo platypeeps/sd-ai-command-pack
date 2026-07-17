@@ -23,12 +23,15 @@ Carry PR #144 through the standard SD publish, review, watch, merge, and houseke
 - [x] Stage 1 reuses PR #144 and publishes any task/spec bookkeeping.
 - [x] Stage 2 completes with deterministic checks green and no unresolved
   actionable review feedback.
-- [ ] Stage 3 observes required CI and reviewer state settled green.
-- [ ] Stage 4 merges only through the housekeeping gate.
-- [ ] Final checkout is on the default branch, clean, synchronized with its
+- [x] Stage 3 observes required CI and reviewer state settled green.
+- [x] Stage 4 merges only through the housekeeping gate.
+- [x] Final checkout is on the default branch, clean, synchronized with its
   remote, and free of stale feature-branch refs.
 
 ## Notes
 
 - This is a lightweight operational task; no new product or architecture
   design is required.
+- PR #144 was merged by the housekeeping gate at 2026-07-17T22:22:34Z; the
+  final checkout was verified on synchronized, clean `main` with both source
+  branch refs removed.
