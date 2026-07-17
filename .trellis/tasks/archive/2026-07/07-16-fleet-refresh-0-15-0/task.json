@@ -3,7 +3,7 @@
   "name": "fleet-refresh-0-15-0",
   "title": "Roll out sd-ai-command-pack 0.15.5 to the fleet",
   "description": "Sequentially refresh every stale consumer in docs/fleet/consumers.json to sd-ai-command-pack 0.15.5 using fleet preflight, installer audit, consumer full-check, PR review, gated merge, post-merge provenance verification, and housekeeping.",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "sdelmas",
   "assignee": "sdelmas",
   "createdAt": "2026-07-16",
-  "completedAt": null,
+  "completedAt": "2026-07-16",
   "branch": null,
   "base_branch": "main",
   "worktree_path": null,
@@ -27,6 +27,6 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Five of six consumers are at 0.15.5. rwbp-website remains at 0.8.6 because its checkout contains owner-created untracked Trellis task content; rerun the website-only refresh after that worktree is clean. The historical task id retains the original 0.15.0 suffix.",
+  "notes": "All six fleet consumers are at 0.15.5. rwbp-website completed through PR #123 with a passing 134-target post-merge audit and clean housekeeping. The historical task id retains the original 0.15.0 suffix.",
   "meta": {}
 }

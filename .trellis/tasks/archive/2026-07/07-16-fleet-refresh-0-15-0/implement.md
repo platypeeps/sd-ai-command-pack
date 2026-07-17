@@ -24,9 +24,9 @@
 6. Mark acceptance criteria, finish/archive the Trellis task, and report the
    mandatory fleet table and follow-ups.
 
-Step 6 remains open because `rwbp-website` is still stale and its checkout has
-owner-created untracked Trellis task content. The other five consumer
-transactions are complete and verified.
+All six steps are complete. Every manifest consumer is at `0.15.5`, every
+refreshed checkout passed its expected-platform post-merge audit, and final
+fleet preflight reports no stale consumers.
 
 ## Stop Conditions
 

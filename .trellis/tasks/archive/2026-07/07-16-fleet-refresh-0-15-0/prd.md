@@ -48,13 +48,11 @@ Sequentially refresh every stale consumer in docs/fleet/consumers.json to sd-ai-
 | `platypeeps/loadsmith` | `0.15.4` | `refreshed+merged` | [PR #74](https://github.com/platypeeps/loadsmith/pull/74), merged 2026-07-17T00:36:40Z | `0.15.5` |
 | `answerbook/mezmo_benchmark` | `0.8.6` | `refreshed+merged` | [PR #345](https://github.com/answerbook/mezmo_benchmark/pull/345), merged 2026-07-16T23:09:36Z | `0.15.5` |
 | `platypeeps/rwbp-coordinator` | `0.8.6` | `refreshed+merged` | [PR #111](https://github.com/platypeeps/rwbp-coordinator/pull/111), merged 2026-07-16T23:32:29Z | `0.15.5` |
-| `platypeeps/rwbp-website` | `0.8.6` | `skipped+dirty-worktree` | Untracked `.trellis/tasks/07-15-rwbpr-024-gdpr-compliance-readiness/` | `0.8.6` |
+| `platypeeps/rwbp-website` | `0.8.6` | `refreshed+merged` | [PR #123](https://github.com/platypeeps/rwbp-website/pull/123), merged 2026-07-17T01:11:48Z | `0.15.5` |
 
 ## Remaining Follow-Up
 
-The website checkout must be made clean by the owner of the untracked GDPR
-planning task. Then rerun `sd-fleet-refresh consumer=rwbp-website` from this
-checkout. Do not stash, delete, or absorb that task as part of the rollout.
+None. Final fleet preflight reports all six manifest consumers at `0.15.5`.
 
 ## Notes
 
@@ -68,3 +66,7 @@ checkout. Do not stash, delete, or absorb that task as part of the rollout.
 - Loadsmith CI exposed a timing-sensitive MQTT debounce test and an opaque DMG
   packaging failure. PR #74 added deterministic task-backed test synchronization
   and package-log diagnostics; all 456 Swift tests and the package gate passed.
+- The website refresh exposed repo-owned references and guard assertions for the
+  retired `sd-review-local-all` surface. PR #123 migrated them to
+  `sd-review-local all`, added focused regression coverage, and passed the full
+  CI lane before merge.
