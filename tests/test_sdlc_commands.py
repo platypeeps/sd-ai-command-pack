@@ -163,10 +163,18 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("defer-finish-work", review_text)
         self.assertIn("accepted only from `sd-ship`", review_text)
         self.assertIn("Standalone `sd-review-pr`", review_text)
+        self.assertIn("routing in Steps 1.5 and 8", review_text)
         self.assertIn(
             "run the Trellis finish-work flow automatically", review_text
         )
         self.assertIn("Finish-work deferred to Stage 4", review_text)
+        review_step_8 = review.split("## Step 8")[1].split("## Final Report")[0]
+        self.assertEqual(
+            review_step_8.count(
+                'PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq .state)'
+            ),
+            2,
+        )
 
         self.assertIn("`until=review`", ship_text)
         self.assertIn("without `defer-finish-work`", ship_text)

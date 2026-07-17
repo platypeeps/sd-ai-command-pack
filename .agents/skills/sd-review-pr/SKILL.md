@@ -18,8 +18,9 @@ Standalone `sd-review-pr` is the default and runs finish-work after a clean
 review loop. The internal `defer-finish-work` mode is accepted only from
 `sd-ship` when that composite command is continuing through `until=merge`.
 It is not a public user argument: reject it when the caller is not the active
-`sd-ship` merge-through chain. The mode changes only Step 8; every local check,
-remote-review round, CI check, and thread rule remains authoritative.
+`sd-ship` merge-through chain. The mode changes only lifecycle ownership
+routing in Steps 1.5 and 8; every local check, remote-review round, CI check,
+and thread rule remains authoritative.
 
 ## Safety Rules
 
@@ -556,6 +557,13 @@ commit. The standalone or review-stop loop is complete only after finish-work
 has either completed successfully or reported a concrete blocker. In deferred
 mode, the review loop is complete only after the handoff is explicit and the
 working tree is clean and pushed.
+
+Refresh PR state after finish-work and any resulting push so a merge that
+happened during that work still enters the post-merge handoff:
+
+```bash
+PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq .state)
+```
 
 If `PR_STATE` is `MERGED`, immediately run:
 
