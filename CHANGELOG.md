@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.16.0 - 2026-07-17
+
+- Added read-only installer self-inspection with human and schema-versioned
+  JSON output: `--status` optionally runs the install audit, while `--check`
+  always audits and returns exit `3` when a valid target needs a refresh.
+- Validate installed receipts and vouched hashes before classifying a target,
+  report installed and active platform adapters, and preserve the target
+  byte-for-byte during every inspection mode.
+- Removed the expired `REVIEW_PREFLIGHT_PR_BODY` compatibility fallback; use
+  `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` or the dedicated PR-body-scope variable.
+
 ## 0.15.7 - 2026-07-17
 
 - Fixed `sd-ai-command-pack-housekeeping.sh` flagging a false

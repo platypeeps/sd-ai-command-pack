@@ -8,6 +8,7 @@ _LOCAL_TEST_MODULES = {
     "test_housekeeping",
     "test_install_audit",
     "test_install_core",
+    "test_install_inspection",
     "test_pack_drift",
     "test_record_session",
     "test_remove",
@@ -24,6 +25,7 @@ try:
     from test_housekeeping import HousekeepingTests
     from test_install_audit import InstallAuditTests
     from test_install_core import InstallCoreTests
+    from test_install_inspection import InstallInspectionTests
     from test_pack_drift import PackDriftTests
     from test_record_session import RecordSessionTests
     from test_remove import RemoveTests
@@ -40,6 +42,7 @@ except ModuleNotFoundError as exc:
     from .test_housekeeping import HousekeepingTests
     from .test_install_audit import InstallAuditTests
     from .test_install_core import InstallCoreTests
+    from .test_install_inspection import InstallInspectionTests
     from .test_pack_drift import PackDriftTests
     from .test_record_session import RecordSessionTests
     from .test_remove import RemoveTests
@@ -52,6 +55,7 @@ except ModuleNotFoundError as exc:
 
 class InstallTests(
     InstallCoreTests,
+    InstallInspectionTests,
     GeneratedParityTests,
     ReviewLocalTests,
     FullCheckTests,

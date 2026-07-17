@@ -259,9 +259,7 @@ fast-forwarding, deleting merged refs, and reporting the final clean state.
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote review request/fix rounds before asking whether to continue. | `5` |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_SETTLE_POLLS` | Maximum 30-second polls before an accepted request without author-matched activity stops as ambiguous. | `40` |
 
-The deprecated `REVIEW_PREFLIGHT_PR_BODY` fallback remains honored through
-`0.15.x` and is scheduled for removal in `0.16.0`; use
-`SD_AI_COMMAND_PACK_SCOPE_PR_BODY` for new wiring.
+Use `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` for explicit review-scope PR body text.
 
 ## Install
 
@@ -299,6 +297,10 @@ Useful options:
 ```bash
 python3 install.py --help
 python3 install.py --version
+python3 install.py /path/to/repo --status
+python3 install.py /path/to/repo --status --audit
+python3 install.py /path/to/repo --check
+python3 install.py /path/to/repo --check --json
 python3 install.py /path/to/repo --dry-run
 python3 install.py /path/to/repo --local-only
 python3 install.py /path/to/repo --all
@@ -307,6 +309,21 @@ python3 install.py /path/to/repo --force
 python3 install.py /path/to/repo --force --backup
 python3 install.py /path/to/repo --remove
 ```
+
+`--status` is a read-only informational comparison against the current pack
+checkout. Add `--audit` for the structural installed-footprint audit. `--check`
+always runs that audit and is intended for automation: it exits `0` when the
+install is current, `3` when a valid install is absent or needs a refresh, and
+`1` for invalid receipts, integrity failures, or audit errors. Add `--json` to
+either mode for schema-versioned machine output. Inspection modes cannot be
+combined with install, removal, selection, or dry-run options.
+
+| Exit | Inspection meaning |
+| --- | --- |
+| `0` | Status completed; for `--check`, the install is current and audit-clean. |
+| `1` | Installed state is invalid, audit failed, or inspection could not run. |
+| `2` | Command-line usage is invalid. |
+| `3` | `--check` found a valid missing or stale installation that needs action. |
 
 After installing or refreshing a target repo, a quick smoke test is:
 

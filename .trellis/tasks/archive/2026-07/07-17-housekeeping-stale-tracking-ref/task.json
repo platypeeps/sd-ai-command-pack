@@ -2,7 +2,7 @@
   "id": "housekeeping-stale-tracking-ref",
   "name": "housekeeping-stale-tracking-ref",
   "title": "Fix housekeeping stale tracking ref on auto-delete-head-branch",
-  "description": "",
+  "description": "Prune stale remote-tracking refs after GitHub auto-deletes a merged pull request branch so clean housekeeping does not report a false anomaly.",
   "status": "completed",
   "dev_type": null,
   "scope": null,

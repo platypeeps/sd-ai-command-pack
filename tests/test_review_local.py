@@ -948,6 +948,7 @@ class ReviewLocalTests(InstallTestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertTrue(log_path.is_file(), result.stdout)
         log = log_path.read_text(encoding="utf-8")
         user_root = temp_root / f"sd-ai-command-pack-{os.getuid()}"
         self.assertIn(f"UV_CACHE_DIR={user_root}/uv-cache", log)

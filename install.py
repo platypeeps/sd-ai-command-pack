@@ -11,6 +11,7 @@ from pathlib import Path
 
 from installer import (
     fileops,
+    inspection,
     localonly,
     manifest,
     removal,
@@ -184,6 +185,7 @@ __all__ = [
     "ensure_local_only_exclude",
     "ensure_trellis_for_local_only",
     "fileops",
+    "inspection",
     "git_info_exclude_path",
     "git_output",
     "install_file",
@@ -264,6 +266,36 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=".",
         help="Target Trellis repository root. Defaults to the current directory.",
     )
+    inspection_group = parser.add_mutually_exclusive_group()
+    inspection_group.add_argument(
+        "--status",
+        action="store_true",
+        help=(
+            "Report whether the target is current with this pack checkout "
+            "without changing files."
+        ),
+    )
+    inspection_group.add_argument(
+        "--check",
+        action="store_true",
+        help=(
+            "Check status and structural integrity; exit 3 when a valid "
+            "install needs a refresh."
+        ),
+    )
+    parser.add_argument(
+        "--audit",
+        action="store_true",
+        help=(
+            "With --status, also run the structural install audit; --check "
+            "always runs it."
+        ),
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="With --status or --check, emit the stable JSON report schema.",
+    )
     parser.add_argument(
         "--platform",
         action="append",
@@ -339,7 +371,34 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Skip the final git diff --check validation.",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    inspecting = args.status or args.check
+    if args.audit and not inspecting:
+        parser.error("--audit requires --status or --check")
+    if args.json and not inspecting:
+        parser.error("--json requires --status or --check")
+    if inspecting:
+        incompatible = [
+            option
+            for option, enabled in (
+                ("--platform", bool(args.platform)),
+                ("--all", args.all),
+                ("--remove", args.remove),
+                ("--force", args.force),
+                ("--backup", args.backup),
+                ("--local-only", args.local_only),
+                ("--skip-trellis-init", args.skip_trellis_init),
+                ("--dry-run", args.dry_run),
+                ("--skip-diff-check", args.skip_diff_check),
+            )
+            if enabled
+        ]
+        if incompatible:
+            parser.error(
+                f"{('--check' if args.check else '--status')} cannot be combined "
+                f"with {', '.join(incompatible)}"
+            )
+    return args
 
 
 def _install_payload(
@@ -510,6 +569,89 @@ def _print_install_summary(
         )
 
 
+def _run_inspection(
+    args: argparse.Namespace,
+    target: Path,
+    manifest_data: dict,
+    files: list[PackFile],
+) -> int:
+    """Plan a refresh without writes and render status/check output."""
+    receipts = inspection.inspect_receipts(target)
+    receipt_errors = list(receipts.errors)
+    try:
+        require_target_directory(target)
+        if manifest_data.get("requiresTrellis", True):
+            require_trellis_repo(target)
+    except SystemExit as error:
+        receipt_errors.append(system_exit_detail(error))
+    if tuple(receipt_errors) != receipts.errors:
+        receipts = inspection.ReceiptState(
+            receipts.present,
+            receipts.installed_version,
+            receipts.targets,
+            receipts.platforms,
+            tuple(dict.fromkeys(receipt_errors)),
+        )
+
+    results: list[InstallResult] = []
+    retired_results: list[RemoveResult] = []
+    if receipts.present and not receipts.errors:
+        try:
+            selected, skipped = selected_files(files, target, None, False)
+            results, generated_targets = _install_payload(
+                selected,
+                target,
+                local_only=False,
+                force=False,
+                dry_run=True,
+                backup=False,
+            )
+            retired_results = retire_stale_targets(
+                target,
+                force=False,
+                dry_run=True,
+                backup=False,
+            )
+            _install_receipt_files(
+                manifest_data,
+                files,
+                target,
+                selected=selected,
+                skipped=skipped,
+                results=results,
+                generated_targets=generated_targets,
+                dry_run=True,
+            )
+        except SystemExit as error:
+            receipts = inspection.ReceiptState(
+                receipts.present,
+                receipts.installed_version,
+                receipts.targets,
+                receipts.platforms,
+                (*receipts.errors, system_exit_detail(error)),
+            )
+
+    audit_requested = args.audit or args.check
+    if not receipts.present:
+        audit_result = inspection.not_requested_audit(
+            applicable=False, requested=audit_requested
+        )
+    elif audit_requested:
+        audit_result = inspection.run_install_audit(target)
+    else:
+        audit_result = inspection.not_requested_audit()
+    report = inspection.build_report(
+        manifest_data=manifest_data,
+        target=target,
+        receipts=receipts,
+        install_results=results,
+        retired_results=retired_results,
+        audit=audit_result,
+    )
+    print(inspection.render_json(report) if args.json else inspection.render_human(report))
+    return inspection.report_exit_code(report, check=args.check)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     if args.backup and not args.force and not args.remove:
@@ -521,6 +663,8 @@ def main(argv: list[str] | None = None) -> int:
     manifest_data, files = load_manifest()
 
     validate_manifest(files)
+    if args.status or args.check:
+        return _run_inspection(args, target, manifest_data, files)
     if args.remove:
         return remove_installed_pack(
             manifest_data,

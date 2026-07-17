@@ -178,14 +178,6 @@ check_pr_body_scope() {
     return 0
   fi
 
-  if [ "${REVIEW_PREFLIGHT_PR_BODY+x}" ]; then
-    warn "REVIEW_PREFLIGHT_PR_BODY is deprecated and will be removed in sd-ai-command-pack 0.16.0; prefer SD_AI_COMMAND_PACK_SCOPE_PR_BODY."
-    if ! github_pr_body_mentions_scope "$REVIEW_PREFLIGHT_PR_BODY"; then
-      fail "tooling/generated files changed, but the provided PR body does not include a recognized tooling/generated scope section"
-    fi
-    return 0
-  fi
-
   if ! have gh; then
     if is_required "$GH_MODE"; then
       fail "gh is required for tooling/generated PR scope checks but is not on PATH"

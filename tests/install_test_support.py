@@ -739,7 +739,7 @@ class InstallTestCase(unittest.TestCase):
         extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         command = [sys.executable, str(INSTALLER), str(root), *args]
-        if skip_diff_check:
+        if skip_diff_check and not ({"--status", "--check"} & set(args)):
             command.append("--skip-diff-check")
         env = self.installer_subprocess_env()
         if extra_env:
@@ -774,7 +774,7 @@ class InstallTestCase(unittest.TestCase):
         symlink-exec entry — must keep :meth:`run_install`.
         """
         argv = [str(root), *args]
-        if skip_diff_check:
+        if skip_diff_check and not ({"--status", "--check"} & set(args)):
             argv.append("--skip-diff-check")
         output = io.StringIO()
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
