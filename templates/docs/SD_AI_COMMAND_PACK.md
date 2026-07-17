@@ -810,6 +810,12 @@ stage arguments such as `timeout-minutes=` pass through. It adds no new
 gate logic; every stage's own gates remain authoritative, and a failed or
 blocked stage stops the chain with that stage's report.
 
+Lifecycle side effects have one owner. `until=review` keeps finish-work in
+`sd-review-pr`. The default merge-through chain defers finish-work to Stage 4,
+watches with `no-merge` in Stage 3, and invokes housekeeping exactly once in
+Stage 4. A blocked or timed-out watch therefore leaves the active Trellis task
+available for a later resume instead of archiving it before the PR settles.
+
 The `sd-retro` command captures a structured retrospective after a
 debugging stream or incident: what broke, the root cause, why existing
 gates and tests missed it, and what limited the blast radius. It records
@@ -1140,10 +1146,12 @@ checks.
 
 ## Housekeeping cadence
 
-Run housekeeping after a PR is merged and any finish-work journal commit has
-landed. If the command reports anomalies, treat them as the next manual action:
-dirty files, an unmerged PR, extra branches, open PRs/issues, or remaining
-Trellis tasks mean the repo is not yet in the expected clean state.
+Run housekeeping at the end of a development stream. From an open PR branch it
+owns finish-work before applying the merge gate; after an already-merged PR it
+performs the remaining cleanup and verification. If the command reports
+anomalies, treat them as the next manual action: dirty files, an unmerged PR,
+extra branches, open PRs/issues, or remaining Trellis tasks mean the repo is
+not yet in the expected clean state.
 
 ## Updating the pack
 

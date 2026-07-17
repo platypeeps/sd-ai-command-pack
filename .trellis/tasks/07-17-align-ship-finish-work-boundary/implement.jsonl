@@ -1,0 +1,2 @@
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Defines the canonical shared-skill and thin-adapter workflow ownership contract."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Defines prompt consistency and generated parity expectations for shipped command changes."}

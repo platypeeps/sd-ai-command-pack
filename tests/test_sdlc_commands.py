@@ -154,6 +154,38 @@ class SdlcCommandsTests(InstallTestCase):
                         self.assertIn(pin, content)
                     self.assertIn("final-report format", content)
 
+    def test_ship_assigns_lifecycle_side_effects_to_one_stage(self) -> None:
+        review = self._skill_text("sd-review-pr")
+        ship = self._skill_text("sd-ship")
+        review_text = " ".join(review.split())
+        ship_text = " ".join(ship.split())
+
+        self.assertIn("defer-finish-work", review_text)
+        self.assertIn("accepted only from `sd-ship`", review_text)
+        self.assertIn("Standalone `sd-review-pr`", review_text)
+        self.assertIn(
+            "run the Trellis finish-work flow automatically", review_text
+        )
+        self.assertIn("Finish-work deferred to Stage 4", review_text)
+
+        self.assertIn("`until=review`", ship_text)
+        self.assertIn("without `defer-finish-work`", ship_text)
+        self.assertIn("with `defer-finish-work`", ship_text)
+        self.assertIn("with `no-merge`", ship_text)
+        self.assertIn("leaves the active Trellis task unarchived", ship_text)
+        self.assertIn("exactly once", ship_text)
+
+    def test_usage_guide_documents_ship_lifecycle_ownership(self) -> None:
+        guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")
+        guide_text = " ".join(guide.split())
+
+        self.assertIn(
+            "`until=review` keeps finish-work in `sd-review-pr`", guide_text
+        )
+        self.assertIn("defers finish-work to Stage 4", guide_text)
+        self.assertIn("watches with `no-merge`", guide_text)
+        self.assertIn("housekeeping exactly once", guide_text)
+
     def test_usage_guide_documents_all_six(self) -> None:
         guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")
         for name, (short, _pins, _apins) in COMMANDS.items():

@@ -1,0 +1,2 @@
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Check the final lifecycle behavior against the documented ownership contract."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check release, validation, and shipped-payload quality requirements."}
