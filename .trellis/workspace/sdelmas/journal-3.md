@@ -1170,3 +1170,41 @@ Aligned standalone and composite finish-work ownership, added lifecycle regressi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 131: Ship PR 145 through deferred lifecycle stages
+
+**Date**: 2026-07-17
+**Task**: Ship PR 145 through deferred lifecycle stages
+**Branch**: `codex/align-ship-finish-work-boundary`
+
+### Summary
+
+Resumed PR 145 through sd-ship, verified deferred review and no-merge watch behavior, and handed the active task to Stage 4 housekeeping.
+
+### Main Changes
+
+- Created and completed the operational PR 145 shipping task.
+- Verified Stage 2 deferred finish-work and Stage 3 no-merge ownership on the final reviewed head.
+- Recorded the sd-create-pr Stage 1 review-handoff inconsistency as a parked P1 follow-up task.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f0f2305` | chore(task): track PR 145 shipping follow-through |
+
+### Testing
+
+- [OK] Deterministic full-check passed with Prism and Gito disabled.
+- [OK] GitHub CI passed on Ubuntu Python 3.10 and 3.13 plus macOS Python 3.13.
+- [OK] Copilot reviewed head f0f2305 with no new comments and all prior threads resolved.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
