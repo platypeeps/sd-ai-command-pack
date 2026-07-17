@@ -780,6 +780,16 @@ cleanup_current_branch_if_merged() {
     fi
   elif [ "$ls_remote_status" -eq 2 ]; then
     add_action "remote branch $REMOTE/$branch is already absent"
+    # With auto-delete-head-branch enabled the remote drops the branch at
+    # merge time, after the initial fetch/prune ran. Prune again so the stale
+    # local tracking ref does not trip the final remote-branch-absent check.
+    if git show-ref --verify --quiet "refs/remotes/$REMOTE/$branch"; then
+      if run_network_git fetch --prune "$REMOTE"; then
+        add_action "pruned stale $REMOTE/$branch tracking ref"
+      else
+        add_anomaly "remote branch $REMOTE/$branch is already absent, but git fetch --prune $REMOTE failed"
+      fi
+    fi
   else
     add_anomaly "failed to check whether remote branch $REMOTE/$branch exists"
   fi

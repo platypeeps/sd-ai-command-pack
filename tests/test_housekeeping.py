@@ -389,6 +389,64 @@ class HousekeepingTests(InstallTestCase):
         )
         self.assertEqual(remote_branch.returncode, 2, remote_branch.stdout)
 
+    def test_housekeeping_prunes_stale_tracking_ref_on_auto_delete_head_branch(
+        self,
+    ) -> None:
+        # Regression: with GitHub auto-delete-head-branch the remote drops the
+        # branch at merge time, after housekeeping's initial fetch/prune. The
+        # "already absent" cleanup path must prune the stale local tracking ref
+        # so the final remote-branch-absent check does not flag a false anomaly.
+        repo, remote, stub_bin, _ = self.make_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_merge_gh_stub(
+            stub_bin, marker, auto_delete_remote_branch=True
+        )
+
+        result = subprocess.run(
+            ["bash", str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("merged PR #6 with merge strategy", result.stdout)
+        self.assertIn(
+            "remote branch origin/feature/cleanup is already absent",
+            result.stdout,
+        )
+        self.assertIn(
+            "pruned stale origin/feature/cleanup tracking ref",
+            result.stdout,
+        )
+        self.assertIn(
+            "remote source branch absent: origin/feature/cleanup", result.stdout
+        )
+        self.assertNotIn("remote source branch still tracked", result.stdout)
+        self.assertIn("==> Anomalies\nnone", result.stdout)
+        self.assertEqual(
+            subprocess.run(
+                [
+                    "git",
+                    "show-ref",
+                    "--verify",
+                    "--quiet",
+                    "refs/remotes/origin/feature/cleanup",
+                ],
+                cwd=repo,
+                check=False,
+            ).returncode,
+            1,
+            "stale remote tracking ref should be pruned",
+        )
+
     def test_housekeeping_rejects_undeterminable_check_counts_before_auto_merge(
         self,
     ) -> None:

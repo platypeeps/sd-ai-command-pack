@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.7 - 2026-07-17
+
+- Fixed `sd-ai-command-pack-housekeeping.sh` flagging a false
+  "remote source branch still tracked" anomaly (nonzero exit) after a clean
+  merge on remotes with GitHub's auto-delete-head-branch enabled. The branch
+  is removed server-side at merge time, after the initial fetch/prune; the
+  "already absent" cleanup path now prunes the stale local tracking ref so the
+  final verification passes.
+
 ## 0.15.6 - 2026-07-16
 
 - Add an explicit fast-canary fleet order and repo-owned lightweight
