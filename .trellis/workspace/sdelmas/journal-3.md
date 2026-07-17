@@ -866,3 +866,39 @@ Added disposable full-fleet candidate validation, payload-bound release evidence
 ### Next Steps
 
 - None - task complete
+
+
+## Session 123: Fleet refresh 0.15.6
+
+**Date**: 2026-07-17
+**Task**: Fleet refresh 0.15.6
+**Branch**: `main`
+
+### Summary
+
+Rolled sd-ai-command-pack 0.15.6 through all six fleet consumers with sequential validation, review, gated merge, and post-merge audit.
+
+### Main Changes
+
+- Refreshed and merged rwbp-coordinator PR #112, loadsmith PR #75, hoa-manager PR #108, rwbp-website PR #124, mezmo_benchmark PR #346, and anomaly-metric-creator PR #245.
+- Verified every consumer clean on its default branch with 0.15.6 provenance and the 134-target expected-platform audit.
+- Archived the completed 07-16-fleet-refresh-0-15-6 task with its PR, validation, anomaly, and follow-up evidence.
+
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] Final fleet preflight reports all six consumers at target 0.15.6.
+- [OK] All six consumer-owned local gates and required GitHub checks passed before merge.
+- [OK] All six post-merge expected-platform audits passed 134 targets.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Track AMC's repo-local cross-file Trellis hygiene hook batching limitation as non-blocking consumer hardening.
