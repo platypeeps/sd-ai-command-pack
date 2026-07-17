@@ -976,3 +976,39 @@ Fixed the housekeeping script's false 'remote source branch still tracked' anoma
 ### Next Steps
 
 - Confirm v0.15.7 auto-tag (validates the transitive-skip fix)
+
+
+## Session 126: Early advisory for tooling/generated PR scope (0.15.8)
+
+**Date**: 2026-07-17
+**Task**: Early advisory for tooling/generated PR scope (0.15.8)
+**Branch**: `main`
+
+### Summary
+
+Added an early, PR-independent advisory that names the required tooling/generated PR scope section: review-scope.sh advisory mode + a warn-only hook in the shared review preflight, keeping classification/heading policy single-sourced. Copilot flagged the mjs matching the human phrase; switched to a stable machine marker. Merged PR #142 (2 rounds) as 0.15.8.
+
+### Main Changes
+
+- review-scope.sh advisory mode names the section (no gh/PR/fail); off/disabled join the disable set; no-PR warning names the section too
+- review-preflight.mjs warn-only check surfaces the advisory via a stable sd-ai-command-pack-scope-advisory: marker (Copilot fix), decoupled from wording
+- 3 tests, docs, twins; bump 0.15.8; fleet ledger regenerated (7/7 pass); backfilled a missing archived-task description
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f104b02` | Merge pull request #142 from platypeeps/feat/scope-advisory-early-signal |
+
+### Testing
+
+- [OK] make test + make full-check green; advisory/off/preflight tests pass; Copilot round 2 clean, thread resolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Consumers pick up the advisory on re-vendor / sd-fleet-refresh
