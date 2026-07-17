@@ -195,7 +195,10 @@ before/after numbers. Writes test files and fixtures only.
 
 Sequences the publish-to-merge endgame — create-pr, review-pr, watch-pr, then
 the housekeeping merge gate — with `until=pr|review|merge` stop-points. Adds
-no gate logic of its own; every stage's gates remain authoritative.
+no gate logic of its own; every stage's gates remain authoritative. A review
+stop finishes Trellis work in the review stage, while the merge-through path
+keeps the task active during the watch and lets housekeeping finish, merge,
+and clean up exactly once.
 
 ### sd-retro
 

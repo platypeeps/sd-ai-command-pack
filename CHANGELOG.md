@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.16.2 - 2026-07-17
+
+- Keep standalone `sd-review-pr` and `sd-ship until=review` finish-work
+  behavior while allowing the merge-through composite to defer finish-work to
+  Stage 4.
+- Run the composite watch stage with its existing `no-merge` mode so
+  `sd-housekeeping` owns finish-work, merge, and cleanup exactly once, and a
+  blocked watch leaves the active Trellis task available for resume.
+
 ## 0.16.1 - 2026-07-17
 
 - Fail the generic review preflight when changed `implement.jsonl` or

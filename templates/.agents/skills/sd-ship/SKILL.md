@@ -59,6 +59,10 @@ is arguments-only.
 stopping before the watch-and-merge tail, so `no-merge` fails as an
 unknown argument like any other unrecognized name.
 
+`defer-finish-work` and Stage 3's `no-merge` are internal delegation modes,
+not public `sd-ship` arguments. The composite supplies them only as described
+below so lifecycle side effects have one owner.
+
 ## Workflow
 
 1. Validate the arguments and the preconditions above, and record the
@@ -74,13 +78,21 @@ unknown argument like any other unrecognized name.
    chain here.
 3. Stage 2 — `sd-review-pr`: run its bounded review loop — deterministic
    local gate, configured remote review, fixes, replies — until the loop
-   stops clean or blocked. If `until=review`, stop the chain here.
-4. Stage 3 — `sd-watch-pr`: run its watch flow until the pull request
-   settles green or blocked, forwarding `timeout-minutes=` verbatim when
-   it was passed.
-5. Stage 4 — `sd-housekeeping`: its gate performs the merge and the
-   post-merge cleanup and reports the final repo state; sd-ship relays
-   that outcome.
+   stops clean or blocked. With `until=review`, invoke it without
+   `defer-finish-work`, so its normal Step 8 finishes the Trellis work before
+   the chain stops. With `until=merge`, invoke it with `defer-finish-work` and
+   require the explicit Stage 4 handoff; no task archive or final journal
+   commit happens in Stage 2.
+4. Stage 3 — `sd-watch-pr`: for the merge-through path, run its watch flow
+   with `no-merge` until the pull request settles green or blocked, forwarding
+   `timeout-minutes=` verbatim when it was passed. `no-merge` suppresses the
+   standalone watch command's automatic housekeeping handoff so Stage 4 owns
+   that side effect exactly once. If Stage 3 blocks or times out, stop the
+   chain; this leaves the active Trellis task unarchived for a later resume.
+5. Stage 4 — `sd-housekeeping`: invoke housekeeping exactly once. Its gate
+   runs finish-work, pushes any resulting task/journal commits and waits for
+   their checks, performs the merge, and reports the post-merge state;
+   `sd-ship` relays that outcome.
 6. A failed or blocked stage stops the chain immediately with that
    stage's report; later stages do not run and appear in the stage table
    as skipped. Stopping — at a stop-point, a failed stage, or a blocked
@@ -94,6 +106,10 @@ unknown argument like any other unrecognized name.
 - The `sd-housekeeping` gate is the only merge authority. sd-ship never
   merges directly, and neither a stop-point nor a resume changes that
   gate's criteria.
+- In an `until=merge` chain, finish-work and housekeeping side effects belong
+  only to Stage 4. Stage 2 must defer finish-work and Stage 3 must not invoke
+  housekeeping. In an `until=review` chain, Stage 2 retains its normal
+  finish-work behavior.
 - sd-ship never force-pushes; any push happens inside a stage flow, under
   that stage skill's own rules.
 - A stopped chain is a report, not an error loop: never restart the chain
@@ -118,6 +134,9 @@ bullets, one point per line, no paragraph blobs.
   stopped the run before a PR existed.
 - Stopping stage's report: the report of the stage that ended the chain
   early, or an explicit `none — the chain ran to its stop-point`.
+- Finish-work owner and outcome: Stage 2 for `until=review`, Stage 4 for
+  `until=merge`, or an explicit deferred/unrun state when an earlier stage
+  stopped the chain.
 - Next step: the single most useful follow-up — the next stage command
   after a stop-point, the stopping stage's own recommendation after a
   failure or blocker, or nothing further after a clean merge.

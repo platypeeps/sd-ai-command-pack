@@ -76,7 +76,10 @@ The `sd-review-pr` shared skill should continue to define:
   threads without asking for separate approval
 - reply, resolve, fix, commit, and push behavior
 - the five-round limit before asking the user to continue
-- automatic Trellis finish-work after a clean final review
+- automatic Trellis finish-work after a clean final standalone review or an
+  `sd-ship until=review` stop; when `sd-ship` continues through merge, accept
+  its internal `defer-finish-work` mode and hand lifecycle ownership to the
+  composite Stage 4
 - the final report fields
 
 The `sd-full-check` shared skill should continue to define the canonical
@@ -220,6 +223,15 @@ The `sd-housekeeping` shared skill should continue to define the
 post-merge task list, the expected clean-state report, anomaly reporting, and
 safety rules that prevent deleting branches unless GitHub confirms the PR is
 merged and the local branch head matches that PR.
+
+The `sd-ship` shared skill must assign lifecycle side effects to one stage.
+For `until=review`, Stage 2 invokes `sd-review-pr` normally and that command
+runs finish-work. For `until=merge`, Stage 2 uses the review skill's internal
+`defer-finish-work` mode, Stage 3 uses `sd-watch-pr no-merge`, and Stage 4
+invokes `sd-housekeeping` exactly once. If Stage 3 blocks or times out, the
+active Trellis task remains unarchived for a later resume. These internal
+delegation modes are not public `sd-ship` arguments, and they must not weaken
+any delegated stage gate.
 
 The `sd-work-backlog` shared skill should compose existing task, PR, review,
 and housekeeping workflows instead of duplicating them. It must work exactly

@@ -1126,3 +1126,85 @@ Tracked the PR 144 shipping stream, fixed the Copilot source-hook diagnostic fin
 ### Next Steps
 
 - None - task complete
+
+
+## Session 130: Align sd-ship finish-work ownership
+
+**Date**: 2026-07-17
+**Task**: Align sd-ship finish-work ownership
+**Branch**: `codex/align-ship-finish-work-boundary`
+
+### Summary
+
+Aligned standalone and composite finish-work ownership, added lifecycle regression coverage, and resolved three Copilot findings across three review rounds.
+
+### Main Changes
+
+- Added composite-only finish-work deferral so `sd-ship until=merge` preserves
+  its active Trellis task through review and watch stages.
+- Kept standalone `sd-review-pr` and `sd-ship until=review` finish-work
+  behavior, with Stage 4 housekeeping as the sole merge-through owner.
+- Addressed three Copilot findings covering Markdown rendering, invocation-mode
+  wording, and stale post-finish-work PR state.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a57bd8e` | fix: align sd-ship finish-work ownership |
+| `318aedb` | fix: address review feedback round 1 |
+| `9ee3ca6` | fix: address review feedback round 2 |
+
+### Testing
+
+- `make check`
+- `.venv/bin/python -m unittest tests.test_sdlc_commands tests.test_generated_parity` (37 tests)
+- Deterministic `sd-ai-command-pack-full-check.sh` with Prism and Gito disabled
+- Fleet candidate validation across all seven configured consumers
+- GitHub CI on Python 3.10 and 3.13 for Ubuntu plus Python 3.13 for macOS
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 131: Ship PR 145 through deferred lifecycle stages
+
+**Date**: 2026-07-17
+**Task**: Ship PR 145 through deferred lifecycle stages
+**Branch**: `codex/align-ship-finish-work-boundary`
+
+### Summary
+
+Resumed PR 145 through sd-ship, verified deferred review and no-merge watch behavior, and handed the active task to Stage 4 housekeeping.
+
+### Main Changes
+
+- Created and completed the operational PR 145 shipping task.
+- Verified Stage 2 deferred finish-work and Stage 3 no-merge ownership on the final reviewed head.
+- Recorded the sd-create-pr Stage 1 review-handoff inconsistency as a parked P1 follow-up task.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f0f2305` | chore(task): track PR 145 shipping follow-through |
+
+### Testing
+
+- [OK] Deterministic full-check passed with Prism and Gito disabled.
+- [OK] GitHub CI passed on Ubuntu Python 3.10 and 3.13 plus macOS Python 3.13.
+- [OK] Copilot reviewed head f0f2305 with no new comments and all prior threads resolved.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

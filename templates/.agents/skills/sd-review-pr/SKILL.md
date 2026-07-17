@@ -12,6 +12,16 @@ existing comments and CI, and requesting the configured remote reviewer after a
 clean local pass and after every pushed review-fix commit made during the loop.
 GitHub Copilot is the default remote reviewer unless a repo overrides it.
 
+## Invocation Mode
+
+Standalone `sd-review-pr` is the default and runs finish-work after a clean
+review loop. The internal `defer-finish-work` mode is accepted only from
+`sd-ship` when that composite command is continuing through `until=merge`.
+It is not a public user argument: reject it when the caller is not the active
+`sd-ship` merge-through chain. The mode changes only lifecycle ownership
+routing in Steps 1.5 and 8; every local check, remote-review round, CI check,
+and thread rule remains authoritative.
+
 ## Safety Rules
 
 - Require `gh` and an authenticated GitHub session before starting:
@@ -121,8 +131,11 @@ keeps `ready_for_review` workflows from starting before local review is clean.
 
 ## Step 1.5: Post-Merge Handoff
 
-If the PR is already merged, do not continue the review loop. Run housekeeping
-inside the current command run:
+If the PR is already merged, do not continue the review loop. If authorized
+`defer-finish-work` mode is active, cancel the deferral and run the Trellis
+finish-work procedure from Step 8 first; the composite Stage 4 cannot own
+finish-work after an external merge has already ended the normal chain. Then
+run housekeeping inside the current command run:
 
 ```bash
 PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq .state)
@@ -506,12 +519,26 @@ If the remote loop would exceed `REMOTE_REVIEW_ROUND_LIMIT`, ask:
 
 Do not continue until the user approves.
 
-## Step 8: Finish Work And Post-Merge Housekeeping Automatically
+## Step 8: Finish Work Or Hand Off To The Composite Merge Tail
 
 After the loop stops because deterministic local full-check passes and no
-requested remote review produced new actionable comments, run the Trellis
-finish-work flow automatically before the final report. Do not ask whether to
-run it; a clean review loop is the trigger.
+requested remote review produced new actionable comments, choose the lifecycle
+owner before the final report:
+
+```bash
+PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq .state)
+```
+
+- In authorized `defer-finish-work` mode while the PR remains open, do not
+  archive the active task or record the final session yet. Report exactly:
+  `Finish-work deferred to Stage 4 sd-housekeeping.` Return control to
+  `sd-ship`, which keeps the task active through its watch stage.
+- Otherwise, including standalone `sd-review-pr`, `sd-ship until=review`, and
+  a PR that became merged during the review loop, run the Trellis finish-work
+  flow automatically. Do not ask whether to run it; a clean review loop is the
+  trigger.
+
+When finish-work is not deferred:
 
 1. Read `.agents/skills/trellis-finish-work/SKILL.md`.
 2. Use that skill as the primary instructions to archive completed task state
@@ -524,12 +551,15 @@ git status -sb
 git push
 ```
 
-If finish-work detects uncommitted PR work or ambiguous unrelated files, follow
-the routing in `trellis-finish-work` rather than forcing a commit. The PR review
-loop is complete only after finish-work has either completed successfully or
-reported a concrete blocker.
+If non-deferred finish-work detects uncommitted PR work or ambiguous unrelated
+files, follow the routing in `trellis-finish-work` rather than forcing a
+commit. The standalone or review-stop loop is complete only after finish-work
+has either completed successfully or reported a concrete blocker. In deferred
+mode, the review loop is complete only after the handoff is explicit and the
+working tree is clean and pushed.
 
-Before the final report, refresh PR state:
+Refresh PR state after finish-work and any resulting push so a merge that
+happened during that work still enters the post-merge handoff:
 
 ```bash
 PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq .state)
@@ -561,6 +591,9 @@ Report:
 - Comments fixed, rebutted, or left for user decision.
 - Commits pushed during the loop.
 - Finish-work actions and any archive/journal commits pushed.
+- Finish-work ownership: completed here, or
+  `Finish-work deferred to Stage 4 sd-housekeeping.` for the authorized
+  composite merge-through path.
 - Housekeeping actions if the PR was already merged or became merged while the
   command was running.
 - CI status.
