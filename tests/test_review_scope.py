@@ -210,6 +210,9 @@ class ReviewScopeTests(InstallTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("the PR body must include", result.stdout)
         self.assertIn("Tooling/generated scope:", result.stdout)
+        # Stable machine marker consumed by the preflight; pinned so it cannot
+        # drift out from under the mjs matcher.
+        self.assertIn("sd-ai-command-pack-scope-advisory:", result.stdout)
 
     def test_review_scope_off_suppresses_advisory(self) -> None:
         root = self.make_repo()

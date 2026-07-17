@@ -296,7 +296,11 @@ main() {
   done
 
   if is_advisory "$MODE"; then
-    warn "This branch changes tooling/generated files; the PR body must include $SCOPE_SECTION_HINT. Add it before opening the PR."
+    local advisory_message="This branch changes tooling/generated files; the PR body must include $SCOPE_SECTION_HINT. Add it before opening the PR."
+    warn "$advisory_message"
+    # Stable machine marker so callers (e.g. the review preflight) surface this
+    # advisory by token rather than matching the human-readable wording above.
+    printf 'sd-ai-command-pack-scope-advisory: %s\n' "$advisory_message"
     return 0
   fi
 

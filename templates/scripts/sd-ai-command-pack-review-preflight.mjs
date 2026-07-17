@@ -552,11 +552,12 @@ function checkScopeAdvisory() {
     return;
   }
   const output = `${result.stdout || ''}${result.stderr || ''}`;
-  const advisoryLine = output
-    .split('\n')
-    .find((line) => line.includes('the PR body must include'));
+  // Match the stable machine marker, not the human wording, so the bash
+  // advisory text can change without silently dropping this warning.
+  const marker = 'sd-ai-command-pack-scope-advisory: ';
+  const advisoryLine = output.split('\n').find((line) => line.includes(marker));
   if (advisoryLine) {
-    warn(advisoryLine.replace(/^warning:\s*/, '').trim());
+    warn(advisoryLine.slice(advisoryLine.indexOf(marker) + marker.length).trim());
   }
 }
 
