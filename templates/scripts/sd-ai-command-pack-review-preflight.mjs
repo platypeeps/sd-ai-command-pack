@@ -258,9 +258,13 @@ function runCheck(label, check) {
       fail(`${label}: ${error.message}`);
       return;
     }
-    const reason = error instanceof Error ? error.message : String(error);
+    const reason = thrownValueMessage(error);
     fail(`${label} check crashed: ${reason}`);
   }
+}
+
+export function thrownValueMessage(value) {
+  return value instanceof Error ? value.message : String(value);
 }
 
 function checkPackageOverrides() {
@@ -477,7 +481,7 @@ function completedTrellisTaskStatus(taskFile) {
   try {
     return readJson(taskFile)?.status === 'completed';
   } catch (error) {
-    fail(`${taskFile} could not be parsed as JSON while checking task completion: ${error.message}`);
+    fail(`${taskFile} could not be parsed as JSON while checking task completion: ${thrownValueMessage(error)}`);
     return false;
   }
 }

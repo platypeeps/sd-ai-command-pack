@@ -54,6 +54,7 @@ import {
   parseTrellisTaskArtifactPath,
   parseWorkspaceIndexSessionsFromText,
   shouldCheckDocumentationPathReference,
+  thrownValueMessage,
   unsupportedNodeVersionMessage,
   validateTrellisJournalSessions,
 } from './scripts/sd-ai-command-pack-review-preflight.mjs';
@@ -106,6 +107,8 @@ assert.equal(shouldCheckDocumentationPathReference('docs/review-learnings.md'), 
 assert.equal(shouldCheckDocumentationPathReference('package.json'), false);
 assert.equal(shouldCheckDocumentationPathReference('https://example.com/docs.md'), false);
 assert.equal(shouldCheckDocumentationPathReference('obsidian://open?vault=Repo'), false);
+assert.equal(thrownValueMessage(new Error('error detail')), 'error detail');
+assert.equal(thrownValueMessage('string detail'), 'string detail');
 const journal = parseJournalSessionsFromText('.trellis/workspace/dev/journal-1.md', [
   '## Session 1: Done',
   '### Status',
