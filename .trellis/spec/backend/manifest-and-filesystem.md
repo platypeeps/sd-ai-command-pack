@@ -52,6 +52,63 @@ Wire any future release-gate changes through the shared
 `scripts/sd-ai-command-pack-full-check.sh` and its template twin. Do not create
 a separate CI-only interpretation of shipped-payload paths.
 
+### Release Candidate Fleet Ledger Contract
+
+1. **Scope / Trigger**: When a release changes the installable payload, validate
+   the working candidate against disposable clones of every consumer before
+   merging or tagging. This catches consumer integration failures without
+   writing into active consumer worktrees.
+2. **Signatures**:
+   - `sd-ai-command-pack-fleet-candidate-check.py [--consumer NAME] [--json]`
+     performs validation; `--check-ledger` performs read-only evidence checks.
+   - `payload_digest(manifest, source_loader) -> str` binds evidence to every
+     unique manifest source's bytes and executable bit plus canonical manifest
+     JSON.
+   - `validate_candidate_ledger(...) -> list[str]` returns every ledger defect;
+     callers fail when the list is non-empty.
+   - `create-release-tag.py --base REF --head REF` validates the ledger from the
+     exact committed head tree before creating `v<manifest-version>`.
+3. **Contracts**:
+   - `docs/fleet/consumers.json` schema version 2 requires unique consumer
+     names, GitHub slugs, rollout priorities, bounded positive timeouts,
+     platform lists, and `candidateChecks` as non-empty argv arrays.
+   - `docs/fleet/candidate-validation.json` schema version 1 records
+     `packVersion`, `payloadDigest`, `fleetManifestDigest`, and one passing row
+     per consumer with its checked base commit and exact command arrays.
+   - A full all-pass run replaces the ledger atomically. Filtered or failing
+     runs never replace canonical evidence.
+4. **Validation & Error Matrix**:
+   - Invalid fleet schema, duplicate priority/name, unsafe command shape, or
+     unreadable payload source -> configuration error and exit 2.
+   - Clone, install, audit, timeout, missing executable, or candidate-check
+     failure -> report the consumer failure, continue the fleet, and exit 1.
+   - Missing, malformed, partial, failing, or digest-stale ledger -> local/CI
+     release gate and tag planner fail; no release tag is created.
+   - `--consumer` combined with `--check-ledger` -> usage error; filtered runs
+     are diagnostics and cannot certify a release.
+5. **Good / Base / Bad Cases**:
+   - Good: all disposable clones pass and the committed ledger matches the
+     exact release payload, fleet manifest, checks, and consumer set.
+   - Base: a filtered diagnostic identifies one consumer issue while leaving
+     the prior canonical ledger untouched.
+   - Bad: validate or install directly into a developer's active consumer
+     checkout, or accept a ledger generated for different payload bytes.
+6. **Tests Required**: Cover schema and priority validation, argv execution
+   without shell interpolation, disposable origin clones, timeout and command
+   failures, full-fleet continuation, atomic ledger preservation, every ledger
+   drift dimension, source-only install-audit boundaries, full-check rejection,
+   and exact-commit tag-planner rejection. Keep per-file coverage floors for
+   the validator and shared fleet library at 90% or higher.
+7. **Wrong vs Correct**:
+
+   ```text
+   Wrong: tag the version, then discover compatibility one consumer PR at a time
+   Wrong: let a partial diagnostic overwrite the release evidence
+   Correct: validate the working payload in disposable origin clones, commit the
+            all-pass ledger, merge, let main CI tag that exact commit, then refresh
+            consumers in explicit fast-canary priority order
+   ```
+
 ## Manifest Path Safety
 
 Validate manifest paths before any target-repo writes:
