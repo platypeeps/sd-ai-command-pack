@@ -76,6 +76,8 @@ a separate CI-only interpretation of shipped-payload paths.
    - `docs/fleet/candidate-validation.json` schema version 1 records
      `packVersion`, `payloadDigest`, `fleetManifestDigest`, and one passing row
      per consumer with its checked base commit and exact command arrays.
+   - Candidate clone commands place `--` before the discovered origin URL so a
+     malformed local remote beginning with `-` cannot inject Git options.
    - A full all-pass run replaces the ledger atomically. Filtered or failing
      runs never replace canonical evidence.
 4. **Validation & Error Matrix**:

@@ -242,6 +242,42 @@ class FleetCandidateTests(InstallTestCase):
         self.assertEqual(missing.status, "failed")
         self.assertIn("local checkout not found", missing.detail)
 
+    def test_validate_consumer_terminates_clone_options_before_origin(self) -> None:
+        candidate = self.load_candidate_module()
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-fleet-clone-options-test-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        source = root / "source"
+        pack = root / "pack"
+        work = root / "work"
+        source.mkdir()
+        pack.mkdir()
+        work.mkdir()
+
+        command_result = candidate.CommandResult
+        with mock.patch.object(
+            candidate,
+            "run_command",
+            side_effect=[
+                command_result(0, "-hostile-origin", 0.1),
+                command_result(1, "clone rejected", 0.1),
+            ],
+        ) as run:
+            result = candidate.validate_consumer(
+                self.consumer(candidate, source),
+                pack_root=pack,
+                work_root=work,
+                python_executable=Path(sys.executable),
+            )
+
+        clone_command = run.call_args_list[1].args[0]
+        self.assertEqual(
+            clone_command[-3:],
+            ["--", "-hostile-origin", str(work / "fixture")],
+        )
+        self.assertEqual(result.status, "failed")
+        self.assertIn("clone", result.detail)
+
     def test_ledger_detects_payload_and_fleet_drift(self) -> None:
         candidate = self.load_candidate_module()
         tempdir = tempfile.TemporaryDirectory(prefix="sd-fleet-ledger-test-")

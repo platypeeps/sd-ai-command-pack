@@ -171,6 +171,7 @@ def validate_consumer(
         "--quiet",
         "--no-tags",
         "--single-branch",
+        "--",
         origin_url,
         str(checkout),
     ]
