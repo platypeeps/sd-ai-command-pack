@@ -210,6 +210,34 @@ assert.deepEqual(
         self.assertIn("WARN untracked files changes copied", result.stdout)
         self.assertIn(".agents/skills/sd-review-pr/SKILL.md", result.stdout)
 
+    def test_review_preflight_advises_scope_section_for_generated_files(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        # An untracked repository-map file requires a PR scope section; the
+        # pre-PR preflight must surface the advisory (naming the section)
+        # without any PR present.
+        (root / "docs").mkdir(exist_ok=True)
+        (root / "docs" / "repomix-map.md").write_text("# map\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("the PR body must include", result.stdout)
+        self.assertIn("Tooling/generated scope:", result.stdout)
+
     def test_review_preflight_fails_hard_when_git_cannot_run(self) -> None:
         # Regression: a git spawn failure (missing binary, buffer overflow)
         # must FAIL the preflight naming the git command, not silently pass
