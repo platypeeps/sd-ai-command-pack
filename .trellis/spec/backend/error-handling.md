@@ -14,7 +14,11 @@ expressed through process exit codes and concise terminal output.
 - Use `SystemExit` for fatal CLI validation failures, as in
   `require_trellis_repo()` and missing template checks in `install_file()`.
 - Use integer return codes from `main()` for expected command outcomes:
-  `0` for success and `2` for file conflicts.
+  normal install/remove uses `0` for success and `2` for file conflicts;
+  inspection uses `0` for a successful current/informational result, `1` for
+  invalid state or operational/audit failure, and `3` when `--check` finds a
+  valid install or refresh action is required. Argparse usage errors remain
+  `2` before `main()` runs.
 - Reject incompatible flag combinations early, such as `--backup` without
   `--force`.
 - Avoid custom exception classes until there is more than one caller that needs

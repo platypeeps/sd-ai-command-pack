@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Defines installer manifest, receipt, provenance, target safety, and read-only inspection contracts."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Defines installer CLI validation, expected outcome, and exit-code conventions."}

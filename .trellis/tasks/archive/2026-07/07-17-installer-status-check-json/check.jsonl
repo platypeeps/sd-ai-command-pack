@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Verify inspection remains read-only, receipt-safe, audit-delegating, and schema-compatible."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify every inspection state maps to the documented deterministic exit semantics."}

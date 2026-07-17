@@ -155,6 +155,69 @@ Reference file:
 
 - `installer/manifest.py`, `require_trellis_repo()`
 
+## Installer Inspection Contract
+
+1. **Scope / Trigger**: Use this contract whenever changing the read-only
+   installer inspection path, its receipt parsing, report schema, audit
+   delegation, or exit semantics. Inspection compares a consumer checkout
+   with the current pack checkout; it must not fetch or mutate either one.
+2. **Signatures**:
+   - `python3 install.py TARGET --status [--audit] [--json]`
+   - `python3 install.py TARGET --check [--json]`
+   - `--check` implies the structural install audit. `--status` is
+     informational unless receipt validation or an explicitly requested audit
+     reports invalid state.
+3. **Contracts**:
+   - Stable states are `current`, `refresh-required`, `not-installed`, and
+     `invalid`.
+   - JSON schema version 1 contains pack identity, absolute target, source and
+     installed versions, version relation, state, installed and active
+     platforms, aggregate result counts, change count, deterministic reasons,
+     and audit request/status/exit/output fields.
+   - Inspection reuses the existing selection and dry-run planning behavior.
+     `installer/inspection.py` owns receipt validation, aggregate
+     classification, and human/JSON rendering. The shipped
+     `sd-ai-command-pack-install-audit.py` remains the structural audit policy
+     authority.
+   - Inspection rejects mutation and selection flags: `--remove`,
+     `--dry-run`, `--force`, `--backup`, `--local-only`,
+     `--skip-trellis-init`, `--skip-diff-check`, `--platform`, and `--all`.
+     `--audit` and `--json` require an inspection action.
+   - Inspection must not create receipts, provenance, backups, Trellis state,
+     managed blocks, or local excludes. It must not persist the source checkout
+     path in consumer state or reports intended for tracking.
+4. **Validation & Error Matrix**:
+   - Current, audit-clean `--check` -> exit 0.
+   - Malformed, contradictory, unsafe, or integrity-invalid receipts; failed
+     audit; audit timeout; or launch error -> state `invalid`, exit 1.
+   - Invalid CLI combination -> argparse exit 2.
+   - Valid missing or refresh-required `--check` -> exit 3.
+   - Informational `--status` with valid missing or refresh-required state ->
+     exit 0. Missing installs mark requested audits `not-applicable` without
+     spawning the audit subprocess.
+5. **Good / Base / Bad Cases**:
+   - Good: a current target reports bounded aggregate output or exactly one
+     deterministic JSON document and leaves the complete target tree unchanged.
+   - Base: an older valid install reports `refresh-required`; `--status` exits
+     0 while `--check` exits 3.
+   - Bad: corruption is presented as a routine refresh, inspection modifies a
+     consumer receipt, or audit rules are duplicated in the installer module.
+6. **Tests Required**: Cover parser combinations, every state/exit-code path,
+   deterministic JSON, human output bounds, version relationships, active and
+   installed platforms, malformed/partial/unsafe receipts, vouched hash drift,
+   audit pass/failure/timeout/launch failure, environment override isolation,
+   and complete target-tree snapshots proving no writes. Installer line and
+   branch coverage remains 100 percent.
+7. **Wrong vs Correct**:
+
+   ```text
+   Wrong: parse verbose --dry-run output or reimplement the audit scanner
+   Correct: reuse dry-run-safe planning and delegate structural policy to the audit
+
+   Wrong: return success from --check when a valid refresh is needed
+   Correct: reserve exit 3 for valid operator action and exit 1 for invalid state
+   ```
+
 ## Selection Rules
 
 Use `selected_files()` for platform filtering, anchor checks, and active

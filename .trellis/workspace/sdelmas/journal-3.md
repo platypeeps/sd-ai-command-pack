@@ -1012,3 +1012,43 @@ Added an early, PR-independent advisory that names the required tooling/generate
 ### Next Steps
 
 - Consumers pick up the advisory on re-vendor / sd-fleet-refresh
+
+
+## Session 127: Installer inspection and PR review
+
+**Date**: 2026-07-17
+**Task**: Installer inspection and PR review
+**Branch**: `codex/installer-status-check-json`
+
+### Summary
+
+Added read-only installer status/check/JSON inspection, integrated the current main branch, and converged PR #143 through two Copilot review rounds.
+
+### Main Changes
+
+- Added read-only installer status, check, audit, and schema-versioned JSON reporting with strict receipt and provenance validation.
+- Released the additive contract as 0.16.0, removed the expired PR-body fallback, and documented the executable CLI contract.
+- Addressed all four Copilot findings, merged the 0.15.8 scope advisory, and regenerated all-fleet candidate evidence.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f8b9690` | feat: add installer status and check modes |
+| `c189701` | fix: harden installer inspection validation |
+| `2bbcf05` | Merge remote-tracking branch 'origin/main' into codex/installer-status-check-json |
+
+### Testing
+
+- [OK] make check (all tests, 100% installer line/branch coverage, Ruff, mypy, zizmor, deterministic full-check)
+- [OK] fleet candidate validation passed for all seven configured consumers
+- [OK] Copilot round 2 reviewed 26/26 changed files with no new comments; CI is green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

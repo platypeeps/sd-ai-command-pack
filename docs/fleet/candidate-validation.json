@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "validatedAt": "2026-07-17T20:38:36Z",
-  "packVersion": "0.15.8",
-  "payloadDigest": "sha256:218478788253c3ab1a30744a30eb41abee51a1fd00cafeeb49eaabfacb722ed6",
+  "validatedAt": "2026-07-17T20:50:24Z",
+  "packVersion": "0.16.0",
+  "payloadDigest": "sha256:3d99f482d39683fa2ce57152b18a5c380014170eb2ed33eb5eb6b14d3c977573",
   "fleetManifestDigest": "sha256:b0c6f4382e8f3be08a163c9662ef69c9be9ea9df6a1f7aae88154d40efae5994",
   "consumers": [
     {
@@ -20,7 +20,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "93c09407886fcf9ab62f1c403c6688e3b7e28458",
+      "baseCommit": "b5dfedd91af54601ae3ab0cbf7e30a15719d31fd",
       "status": "passed",
       "checks": [
         [
@@ -77,7 +77,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "1f91efaf7dec57a449ec61e5fd440f715c6566f8",
+      "baseCommit": "b66a619ff217ecea720e79394ba1ac7682a755ec",
       "status": "passed",
       "checks": [
         [

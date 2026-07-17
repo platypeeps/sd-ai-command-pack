@@ -254,7 +254,7 @@ class ReviewScopeTests(InstallTestCase):
             self.assertIn("CI/review scope:", content, doc_path)
             self.assertIn("command invocation", content, doc_path)
             self.assertIn("SD_AI_COMMAND_PACK_SCOPE_PR_BODY", content, doc_path)
-            self.assertIn("REVIEW_PREFLIGHT_PR_BODY", content, doc_path)
+            self.assertNotIn("REVIEW_PREFLIGHT_PR_BODY", content, doc_path)
 
     def test_pr_body_scope_default_rule_patterns_match_representatives(self) -> None:
         module = self.load_module_from_path(
@@ -636,7 +636,7 @@ class ReviewScopeTests(InstallTestCase):
         self.assertEqual(covered.returncode, 0, covered.stdout)
         self.assertIn("PR body scope sections cover", covered.stdout)
 
-    def test_pr_body_scope_script_accepts_legacy_body_env_and_classifier_name(
+    def test_pr_body_scope_script_ignores_removed_legacy_body_env(
         self,
     ) -> None:
         root = self.make_repo()
@@ -667,7 +667,8 @@ class ReviewScopeTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("detected CI/review scope", result.stdout)
-        self.assertIn("PR body scope sections cover", result.stdout)
+        self.assertIn("PR body not provided", result.stdout)
+        self.assertNotIn("PR body scope sections cover", result.stdout)
 
     def test_pr_body_scope_script_reports_malformed_config_without_traceback(
         self,
@@ -773,11 +774,25 @@ class ReviewScopeTests(InstallTestCase):
         self.assertIn(".trellis/workspace/sdelmas/journal-1.md", result.stdout)
         self.assertIn(".sd-ai-command-pack/installed-targets.txt", result.stdout)
 
-    def test_review_scope_script_accepts_legacy_pr_body_env(self) -> None:
+    def test_review_scope_script_ignores_removed_legacy_pr_body_env(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
 
         root = self.make_repo(".github")
+        stub_bin = root.parent / f"{root.name}-bin"
+        stub_bin.mkdir()
+        (stub_bin / "gh").write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "if [ \"${1:-}\" = pr ] && [ \"${2:-}\" = view ]; then\n"
+            "  printf '%s\\n' "
+            "'{\"title\":\"Product fix\",\"body\":\"Updates behavior.\",\"url\":\"https://example.test/pr/1\"}'\n"
+            "else\n"
+            "  exit 1\n"
+            "fi\n",
+            encoding="utf-8",
+        )
+        (stub_bin / "gh").chmod(0o755)
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.run_git(root, "config", "user.email", "test@example.com")
@@ -797,6 +812,8 @@ class ReviewScopeTests(InstallTestCase):
             cwd=root,
             env={
                 **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK_GH": "required",
                 "REVIEW_PREFLIGHT_PR_BODY": (
                     "Tooling/generated scope: refreshed copied pack docs."
                 ),
@@ -807,9 +824,12 @@ class ReviewScopeTests(InstallTestCase):
             check=False,
         )
 
-        self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("REVIEW_PREFLIGHT_PR_BODY is deprecated", result.stdout)
-        self.assertIn("Tooling/generated review-scope files changed", result.stdout)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertNotIn("REVIEW_PREFLIGHT_PR_BODY", result.stdout)
+        self.assertIn(
+            "does not include a recognized tooling/generated scope section",
+            result.stdout,
+        )
 
     def test_review_scope_script_requires_pr_body_scope_when_configured(
         self,

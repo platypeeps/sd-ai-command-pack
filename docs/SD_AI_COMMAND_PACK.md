@@ -1051,9 +1051,7 @@ ephemeral tool state and do not change what the checks validate.
   Defaults to `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then the discovered
   branch-diff sequence above.
 - `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`: explicit PR body text for tooling/generated
-  scope checks when `gh pr view` should not be used. Deprecated fallback:
-  `REVIEW_PREFLIGHT_PR_BODY`, honored through `0.15.x` and scheduled for
-  removal in `0.16.0`.
+  scope checks when `gh pr view` should not be used.
 - `SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR`: PR number or URL for `sd-review-pr`
   when the command cannot resolve the pull request from the current branch.
 - `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER`: remote reviewer request
@@ -1090,9 +1088,7 @@ ephemeral tool state and do not change what the checks validate.
   `.sd-ai-command-pack/pr-body-scope.json` when present.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY`: explicit PR body text for
   configurable PR-body scope checks. Falls back to
-  `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`, then the deprecated
-  `REVIEW_PREFLIGHT_PR_BODY`, honored through `0.15.x` and scheduled for
-  removal in `0.16.0`.
+  `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`.
 - `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHANGED_FILES`: explicit newline- or
   NUL-delimited changed path list for configurable PR-body scope checks.
 - `SD_AI_COMMAND_PACK_CHANGED_FILES`: fallback changed-path list for the
@@ -1147,6 +1143,36 @@ To refresh installed assets from the pack checkout:
 ```bash
 python3 /path/to/sd-ai-command-pack/install.py /path/to/target/repo --force
 ```
+
+Inspect before refreshing without modifying the target:
+
+```bash
+python3 /path/to/sd-ai-command-pack/install.py /path/to/target/repo --status
+python3 /path/to/sd-ai-command-pack/install.py /path/to/target/repo --status --audit
+python3 /path/to/sd-ai-command-pack/install.py /path/to/target/repo --check
+python3 /path/to/sd-ai-command-pack/install.py /path/to/target/repo --check --json
+```
+
+`--status` reports `current`, `refresh-required`, `not-installed`, or `invalid`
+and exits `0` for every non-invalid informational result. Add `--audit` to run
+the shipped structural audit. `--check` always runs the audit and exits `0`
+only for a current, audit-clean install; it exits `3` for a valid missing or
+stale install and `1` for invalid receipts, vouched-file drift, audit failures,
+or operational errors. Argument-usage errors remain exit `2`.
+
+`--json` emits schema version `1` with the pack and target, source and installed
+versions, version relation, state, installed and active platforms, result
+counts, change count, reasons, and captured audit status/output. JSON output
+does not change exit semantics. Inspection modes are read-only and reject
+install, removal, platform-selection, force, backup, local-only, dry-run, and
+diff-check options.
+
+| Exit | Inspection meaning |
+| --- | --- |
+| `0` | Status completed; for `--check`, the install is current and audit-clean. |
+| `1` | Installed state is invalid, audit failed, or inspection could not run. |
+| `2` | Command-line usage is invalid. |
+| `3` | `--check` found a valid missing or stale installation that needs action. |
 
 Use `python3 /path/to/sd-ai-command-pack/install.py --help` for the safe CLI
 summary, or `--version` to print the pack name and version without touching a
