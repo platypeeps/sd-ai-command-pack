@@ -13,6 +13,8 @@
   files and `--body-file`, preventing shell expansion of body content.
 - Keep fleet payload digest framing uniform and make exact-commit tag checks
   resolve supported in-repo manifest symlinks like candidate validation does.
+- Prevent candidate subprocess environments from adding an implicit
+  current-directory search when the inherited `PATH` is empty.
 
 ## 0.15.5 - 2026-07-16
 

@@ -146,6 +146,22 @@ class FleetCandidateTests(InstallTestCase):
         self.assertNotIn("COVERAGE_FILE", env)
         self.assertNotIn("COVERAGE_PROCESS_START", env)
 
+    def test_command_environment_does_not_add_empty_path_entry(self) -> None:
+        candidate = self.load_candidate_module()
+        python = Path(sys.executable)
+        python_bin = str(python.resolve().parent)
+
+        with mock.patch.dict(candidate.os.environ, {"PATH": ""}):
+            empty_path_env = candidate.command_environment(python, Path("/tmp"))
+        with mock.patch.dict(candidate.os.environ, {"PATH": "/usr/bin"}):
+            populated_path_env = candidate.command_environment(python, Path("/tmp"))
+
+        self.assertEqual(empty_path_env["PATH"], python_bin)
+        self.assertEqual(
+            populated_path_env["PATH"],
+            os.pathsep.join([python_bin, "/usr/bin"]),
+        )
+
     def test_run_command_normalizes_timeout_and_start_failures(self) -> None:
         candidate = self.load_candidate_module()
         with mock.patch.object(

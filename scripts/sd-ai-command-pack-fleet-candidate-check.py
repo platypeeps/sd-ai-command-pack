@@ -62,7 +62,10 @@ def command_environment(python_executable: Path, work_root: Path) -> dict[str, s
     env.pop("COVERAGE_FILE", None)
     env.pop("COVERAGE_PROCESS_START", None)
     python_bin = str(python_executable.resolve().parent)
-    env["PATH"] = os.pathsep.join([python_bin, env.get("PATH", "")])
+    inherited_path = env.get("PATH")
+    env["PATH"] = (
+        os.pathsep.join([python_bin, inherited_path]) if inherited_path else python_bin
+    )
     env.setdefault("PYTHONPYCACHEPREFIX", str(work_root / "python-cache"))
     env["SD_AI_COMMAND_PACK_CANDIDATE_CHECK"] = "1"
     return env

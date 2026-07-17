@@ -78,6 +78,9 @@ a separate CI-only interpretation of shipped-payload paths.
      per consumer with its checked base commit and exact command arrays.
    - Candidate clone commands place `--` before the discovered origin URL so a
      malformed local remote beginning with `-` cannot inject Git options.
+   - Candidate subprocess environments prepend the selected Python directory
+     without adding an empty `PATH` entry when the inherited value is unset or
+     empty.
    - Payload digest records delimit the executable marker on both sides before
      the content hash. Tag-time validation resolves tracked in-repo symlink
      chains from the exact commit tree and hashes the resolved regular blob and
