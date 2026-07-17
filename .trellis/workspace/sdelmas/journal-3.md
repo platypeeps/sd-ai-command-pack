@@ -902,3 +902,40 @@ Rolled sd-ai-command-pack 0.15.6 through all six fleet consumers with sequential
 ### Next Steps
 
 - Track AMC's repo-local cross-file Trellis hygiene hook batching limitation as non-blocking consumer hardening.
+
+
+## Session 124: Onboard se-ai-command-pack: SD workflow install + fleet enrollment
+
+**Date**: 2026-07-17
+**Task**: Onboard se-ai-command-pack: SD workflow install + fleet enrollment
+**Branch**: `main`
+
+### Summary
+
+Installed the SD delivery workflow (0.15.6) into the sibling pack se-ai-command-pack (PR platypeeps/se-ai-command-pack#2, gated-merged) and enrolled it as fleet consumer #7 (sd PR #140, gated-merged). Regenerated candidate-validation.json via the full fleet candidate-check: all 7 consumers install+audit+check pass at 0.15.6.
+
+### Main Changes
+
+- se-ai-command-pack: conflict-aware install of SD pack (64 files, 4 platforms); install-audit clean; its make test green; merged via gh
+- consumers.json: se entry priority 60, platforms claude/gemini/github/opencode; candidateChecks changed from make test (needs PyYAML, unviable in bare clone) to hermetic housekeeping --self-test
+- candidate-validation.json regenerated (7 consumers all passed); test_fleet_preflight consumer pins updated
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fe7eaae` | Merge pull request #140 from platypeeps/feat/fleet-enroll-se-ai-command-pack |
+
+### Testing
+
+- [OK] fleet candidate-check: 7/7 passed; --check-ledger green; make test + make full-check green
+- [OK] se PR #2 and sd PR #140 both green + Copilot-clean, gated-merged
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Fleet rollout of 0.10.5+ to consumers via sd-fleet-refresh when requested (se now included)
