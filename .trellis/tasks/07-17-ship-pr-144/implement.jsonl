@@ -1,0 +1,2 @@
+{"file":".trellis/workflow.md","reason":"Defines the required planning, execution, validation, commit, archive, and session-recording phases for the shipping task."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines the deterministic validation, review, and testing expectations that the delegated SD stages must preserve."}
