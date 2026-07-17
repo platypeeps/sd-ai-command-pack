@@ -1,0 +1,31 @@
+{
+  "id": "fleet-refresh-0-15-6",
+  "name": "fleet-refresh-0-15-6",
+  "title": "Roll out sd-ai-command-pack 0.15.6 to the fleet",
+  "description": "Roll the tagged 0.15.6 pack release through all six known consumers in fast-canary priority order with install, audit, consumer checks, PR review, gated merge, and post-merge verification.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "fleet rollout",
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-16",
+  "completedAt": "2026-07-17",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "docs/FLEET_ROLLOUT.md",
+    "docs/fleet/consumers.json",
+    "docs/fleet/candidate-validation.json",
+    "scripts/sd-ai-command-pack-fleet-preflight.py"
+  ],
+  "notes": "All six fleet consumers advanced from 0.15.5 to 0.15.6 through green, comment-clean PRs and passed the 134-target post-merge audit. Final fleet preflight reports six at-target consumers. AMC's repo-local cross-file Trellis hygiene hook has a non-blocking pre-commit --all-files batching follow-up.",
+  "meta": {}
+}
