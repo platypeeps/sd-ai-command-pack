@@ -187,7 +187,13 @@ def _manifest_platforms(
             continue
         target = entry.get("target")
         platform = entry.get("platform")
-        if target in targets and isinstance(platform, str) and platform != "shared":
+        if not isinstance(target, str):
+            errors.append("installed pack manifest file entry has a non-string target")
+            continue
+        if not isinstance(platform, str):
+            errors.append("installed pack manifest file entry has a non-string platform")
+            continue
+        if target in targets and platform != "shared":
             platforms.add(platform)
     return version, tuple(sorted(platforms))
 
@@ -332,6 +338,8 @@ def run_install_audit(target: Path) -> AuditResult:
         output = error.stdout or ""
         if isinstance(output, bytes):
             output = output.decode("utf-8", errors="replace")
+        if output and not output.endswith("\n"):
+            output += "\n"
         return AuditResult(True, "error", None, f"{output}audit timed out".strip())
     except OSError as error:
         return AuditResult(True, "error", None, f"cannot run install audit: {error}")

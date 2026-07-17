@@ -303,21 +303,20 @@ class InstallInspectionTests(InstallTestCase):
 
     def test_audit_runner_reports_timeout_and_spawn_errors(self) -> None:
         root = self.make_repo()
-        timeout = subprocess.TimeoutExpired("audit", 60, output="partial\n")
-        with mock.patch.object(
-            install.inspection.subprocess, "run", side_effect=timeout
+        for captured, expected in (
+            ("partial", "partial\naudit timed out"),
+            (b"bytes", "bytes\naudit timed out"),
+            ("complete\n", "complete\naudit timed out"),
+            (None, "audit timed out"),
         ):
-            result = install.inspection.run_install_audit(root)
-        self.assertEqual(result.status, "error")
-        self.assertIn("partial", result.output)
-        self.assertIn("timed out", result.output)
-
-        timeout = subprocess.TimeoutExpired("audit", 60, output=b"bytes\n")
-        with mock.patch.object(
-            install.inspection.subprocess, "run", side_effect=timeout
-        ):
-            result = install.inspection.run_install_audit(root)
-        self.assertIn("bytes", result.output)
+            with self.subTest(captured=captured):
+                timeout = subprocess.TimeoutExpired("audit", 60, output=captured)
+                with mock.patch.object(
+                    install.inspection.subprocess, "run", side_effect=timeout
+                ):
+                    result = install.inspection.run_install_audit(root)
+                self.assertEqual(result.status, "error")
+                self.assertEqual(result.output, expected)
 
         with mock.patch.object(
             install.inspection.subprocess, "run", side_effect=OSError("missing")
@@ -379,6 +378,7 @@ class InstallInspectionTests(InstallTestCase):
                 "version": "1.0.0",
                 "files": [
                     "bad",
+                    {"target": [], "platform": "gemini"},
                     {"target": "shared", "platform": "shared"},
                     {"target": "other", "platform": "gemini"},
                     {"target": "adapter", "platform": 3},
@@ -390,6 +390,8 @@ class InstallInspectionTests(InstallTestCase):
         )
         self.assertEqual(version, "1.0.0")
         self.assertEqual(platforms, ("gemini",))
+        self.assertTrue(any("non-string target" in error for error in errors))
+        self.assertTrue(any("non-string platform" in error for error in errors))
 
         module._validate_provenance(root, None, None, frozenset(), errors)
         module._validate_provenance(
