@@ -1034,7 +1034,15 @@ ephemeral tool state and do not change what the checks validate.
 
 ### Scope And PR Body Checks
 
-- `SD_AI_COMMAND_PACK_SCOPE_CHECK=0`: skip tooling/generated file scope checks.
+- `SD_AI_COMMAND_PACK_SCOPE_CHECK=0`: skip tooling/generated file scope checks
+  (`off`/`disabled` also work, and disable the early advisory below too).
+- `SD_AI_COMMAND_PACK_SCOPE_CHECK=advisory`: classify the working/branch diff
+  and, when a tooling/generated file is present, warn naming the required PR
+  scope section without contacting `gh` or a PR. The shared review preflight
+  (`sd-ai-command-pack-review-preflight.mjs`, which the local pre-PR gate runs)
+  invokes this automatically, so the reminder to add a
+  `Tooling/generated scope:` section arrives before the PR exists — while the
+  full-check hard-fail with a PR present is unchanged.
 - `SD_AI_COMMAND_PACK_TARGETS_FILE`: explicit installed-targets file for the
   review-scope check. Defaults to `.sd-ai-command-pack/installed-targets.txt`.
 - `SD_AI_COMMAND_PACK_SCOPE_CHECK_GH=required`: fail when `gh` cannot resolve the

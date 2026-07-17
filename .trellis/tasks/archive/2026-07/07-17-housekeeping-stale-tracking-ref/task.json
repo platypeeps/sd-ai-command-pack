@@ -2,7 +2,7 @@
   "id": "housekeeping-stale-tracking-ref",
   "name": "housekeeping-stale-tracking-ref",
   "title": "Fix housekeeping stale tracking ref on auto-delete-head-branch",
-  "description": "",
+  "description": "Fix the housekeeping script's false 'remote source branch still tracked' anomaly on auto-delete-head-branch remotes by pruning the stale tracking ref in the already-absent cleanup path.",
   "status": "completed",
   "dev_type": null,
   "scope": null,

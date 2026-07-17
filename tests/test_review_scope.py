@@ -189,6 +189,47 @@ class ReviewScopeTests(InstallTestCase):
         self.assertIn("detected Automation scope", result.stdout)
         self.assertIn("PR body not provided", result.stdout)
 
+    def test_review_scope_advisory_names_required_section_without_pr(self) -> None:
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        (root / "docs").mkdir(exist_ok=True)
+        (root / "docs" / "repomix-map.md").write_text("# map\n", encoding="utf-8")
+
+        result = subprocess.run(
+            ["bash", "scripts/sd-ai-command-pack-review-scope.sh"],
+            cwd=root,
+            env={**os.environ, "SD_AI_COMMAND_PACK_SCOPE_CHECK": "advisory"},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        # Advisory mode never fails and never needs a PR/gh; it just names the
+        # section the eventual PR body must carry.
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("the PR body must include", result.stdout)
+        self.assertIn("Tooling/generated scope:", result.stdout)
+
+    def test_review_scope_off_suppresses_advisory(self) -> None:
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        (root / "docs").mkdir(exist_ok=True)
+        (root / "docs" / "repomix-map.md").write_text("# map\n", encoding="utf-8")
+
+        result = subprocess.run(
+            ["bash", "scripts/sd-ai-command-pack-review-scope.sh"],
+            cwd=root,
+            env={**os.environ, "SD_AI_COMMAND_PACK_SCOPE_CHECK": "off"},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("the PR body must include", result.stdout)
+
     def test_docs_show_mixed_tooling_and_ci_review_pr_body_scope_example(
         self,
     ) -> None:

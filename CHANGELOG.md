@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.8 - 2026-07-17
+
+- Surface the tooling/generated PR-scope requirement early. `review-scope.sh`
+  gains an `advisory` mode (`SD_AI_COMMAND_PACK_SCOPE_CHECK=advisory`) that
+  classifies the working/branch diff and, when a scope-requiring file is
+  present, warns naming the required PR body section (e.g.
+  `Tooling/generated scope:`) with no `gh`/PR lookup and no failure. The shared
+  review preflight now runs this advisory, so the local pre-PR gate reminds the
+  author to add the section before the PR exists. The full-check hard-fail with
+  a PR present is unchanged; `off`/`disabled` now also disable the checks.
+
 ## 0.15.7 - 2026-07-17
 
 - Fixed `sd-ai-command-pack-housekeeping.sh` flagging a false
