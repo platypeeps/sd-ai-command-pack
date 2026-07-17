@@ -302,7 +302,12 @@ Updated backend directory documentation for the installer package split, documen
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Added composite-only finish-work deferral so `sd-ship until=merge` preserves
+  its active Trellis task through review and watch stages.
+- Kept standalone `sd-review-pr` and `sd-ship until=review` finish-work
+  behavior, with Stage 4 housekeeping as the sole merge-through owner.
+- Addressed three Copilot findings covering Markdown rendering, invocation-mode
+  wording, and stale post-finish-work PR state.
 
 ### Git Commits
 
@@ -1118,6 +1123,45 @@ Tracked the PR 144 shipping stream, fixed the Copilot source-hook diagnostic fin
 ### Testing
 
 - Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 130: Align sd-ship finish-work ownership
+
+**Date**: 2026-07-17
+**Task**: Align sd-ship finish-work ownership
+**Branch**: `codex/align-ship-finish-work-boundary`
+
+### Summary
+
+Aligned standalone and composite finish-work ownership, added lifecycle regression coverage, and resolved three Copilot findings across three review rounds.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a57bd8e` | fix: align sd-ship finish-work ownership |
+| `318aedb` | fix: address review feedback round 1 |
+| `9ee3ca6` | fix: address review feedback round 2 |
+
+### Testing
+
+- `make check`
+- `.venv/bin/python -m unittest tests.test_sdlc_commands tests.test_generated_parity` (37 tests)
+- Deterministic `sd-ai-command-pack-full-check.sh` with Prism and Gito disabled
+- Fleet candidate validation across all seven configured consumers
+- GitHub CI on Python 3.10 and 3.13 for Ubuntu plus Python 3.13 for macOS
 
 ### Status
 

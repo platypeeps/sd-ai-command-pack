@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 129
+- **Total Sessions**: 130
 - **Last Active**: 2026-07-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1128 | Active |
+| `journal-3.md` | ~1163 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 130 | 2026-07-17 | Align sd-ship finish-work ownership | `a57bd8e`, `318aedb`, `9ee3ca6` | `codex/align-ship-finish-work-boundary` |
 | 129 | 2026-07-17 | Ship PR 144 review loop | `d10fda0`, `cfb3295` | `codex/archived-task-jsonl-placeholder-preflight` |
 | 128 | 2026-07-17 | Harden preflight and pack source identity | `7e97f71`, `c26521b` | `codex/archived-task-jsonl-placeholder-preflight` |
 | 127 | 2026-07-17 | Installer inspection and PR review | `f8b9690`, `c189701`, `2bbcf05` | `codex/installer-status-check-json` |
