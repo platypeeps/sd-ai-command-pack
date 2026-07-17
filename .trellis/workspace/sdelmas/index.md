@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 124
+- **Total Sessions**: 125
 - **Last Active**: 2026-07-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~940 | Active |
+| `journal-3.md` | ~977 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 125 | 2026-07-17 | Fix housekeeping stale tracking ref on auto-delete-head-branch (0.15.7) | `2731d46` | `main` |
 | 124 | 2026-07-17 | Onboard se-ai-command-pack: SD workflow install + fleet enrollment | `fe7eaae` | `main` |
 | 123 | 2026-07-17 | Fleet refresh 0.15.6 | - | `main` |
 | 122 | 2026-07-16 | Harden fleet candidate validation and rollout priority | `b4085aa`, `8e5d828`, `cde4aff`, `52b58dd`, `e82b67c`, `68af84e`, `16fb096` | `codex/fleet-candidate-validation` |

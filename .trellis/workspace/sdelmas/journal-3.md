@@ -939,3 +939,40 @@ Installed the SD delivery workflow (0.15.6) into the sibling pack se-ai-command-
 ### Next Steps
 
 - Fleet rollout of 0.10.5+ to consumers via sd-fleet-refresh when requested (se now included)
+
+
+## Session 125: Fix housekeeping stale tracking ref on auto-delete-head-branch (0.15.7)
+
+**Date**: 2026-07-17
+**Task**: Fix housekeeping stale tracking ref on auto-delete-head-branch (0.15.7)
+**Branch**: `main`
+
+### Summary
+
+Fixed the housekeeping script's false 'remote source branch still tracked' anomaly on auto-delete-head-branch remotes: the already-absent cleanup path now prunes the stale local tracking ref (guarded second fetch --prune). Added a regression test (auto_delete_remote_branch stub option) validated to fail without the fix. Bumped 0.15.7, regenerated the fleet ledger (7/7 pass). Merged PR #141.
+
+### Main Changes
+
+- housekeeping.sh already-absent path prunes stale tracking ref; both twins byte-identical
+- test_housekeeping regression + write_auto_merge_gh_stub auto_delete_remote_branch option
+- bump 0.15.7 + CHANGELOG; candidate-validation.json regenerated (all 7 consumers pass)
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2731d46` | Merge pull request #141 from platypeeps/fix/housekeeping-stale-tracking-ref |
+
+### Testing
+
+- [OK] new regression test fails without fix (reproduces the anomaly), passes with it
+- [OK] make test + make full-check green (incl. release ledger lane at 0.15.7)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Confirm v0.15.7 auto-tag (validates the transitive-skip fix)
