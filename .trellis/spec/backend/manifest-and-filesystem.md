@@ -70,7 +70,8 @@ a separate CI-only interpretation of shipped-payload paths.
      exact committed head tree before creating `v<manifest-version>`.
 3. **Contracts**:
    - `docs/fleet/consumers.json` schema version 2 requires unique consumer
-     names, GitHub slugs, rollout priorities, bounded positive timeouts,
+   names that are safe non-path identifiers, GitHub slugs, rollout priorities,
+   bounded positive timeouts,
      platform lists, and `candidateChecks` as non-empty argv arrays.
    - `docs/fleet/candidate-validation.json` schema version 1 records
      `packVersion`, `payloadDigest`, `fleetManifestDigest`, and one passing row

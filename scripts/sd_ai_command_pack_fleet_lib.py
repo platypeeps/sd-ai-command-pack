@@ -16,6 +16,7 @@ FLEET_SCHEMA_VERSION = 2
 CANDIDATE_LEDGER_SCHEMA_VERSION = 1
 MAX_CANDIDATE_TIMEOUT_SECONDS = 3600
 SHA_RE = re.compile(r"^[0-9a-f]{40,64}$")
+CONSUMER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class FleetConfigError(ValueError):
@@ -117,6 +118,11 @@ def parse_fleet_consumers(
             )
         label = f"fleet manifest consumer {item.get('name', index)}"
         name = _required_string(item, "name", label)
+        if name in {".", ".."} or not CONSUMER_NAME_RE.fullmatch(name):
+            raise FleetConfigError(
+                f"{label} name must be a non-path identifier using only "
+                "letters, numbers, dots, underscores, and hyphens"
+            )
         name_key = name.casefold()
         if name_key in seen_names:
             raise FleetConfigError(f"duplicate fleet consumer name: {name}")

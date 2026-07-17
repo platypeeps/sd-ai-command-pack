@@ -323,6 +323,11 @@ class FleetCandidateTests(InstallTestCase):
             {"schemaVersion": 2, "consumers": []},
             {"schemaVersion": 2, "consumers": ["bad"]},
             {"schemaVersion": 2, "consumers": [{**valid, "name": ""}]},
+            {"schemaVersion": 2, "consumers": [{**valid, "name": ".."}]},
+            {"schemaVersion": 2, "consumers": [{**valid, "name": "../escape"}]},
+            {"schemaVersion": 2, "consumers": [{**valid, "name": "nested/name"}]},
+            {"schemaVersion": 2, "consumers": [{**valid, "name": "nested\\name"}]},
+            {"schemaVersion": 2, "consumers": [{**valid, "name": "/absolute"}]},
             {
                 "schemaVersion": 2,
                 "consumers": [valid, {**valid, "name": "FIXTURE", "rolloutPriority": 20}],
