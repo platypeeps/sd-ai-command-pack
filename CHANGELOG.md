@@ -11,6 +11,8 @@
   focused on installation, provenance, integration, and repo-owned changes.
 - Make `sd-create-pr` pass custom Markdown bodies through literal temporary
   files and `--body-file`, preventing shell expansion of body content.
+- Keep fleet payload digest framing uniform and make exact-commit tag checks
+  resolve supported in-repo manifest symlinks like candidate validation does.
 
 ## 0.15.5 - 2026-07-16
 

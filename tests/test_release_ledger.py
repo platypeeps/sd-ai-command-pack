@@ -24,7 +24,6 @@ FLEET_LIB = PACK_ROOT / "scripts/sd_ai_command_pack_fleet_lib.py"
 class ReleaseLedgerTests(InstallTestCase):
     def write_candidate_ledger(self, root: Path, version: str) -> None:
         fleet = self.load_module_from_path(FLEET_LIB, "release_test_fleet_lib")
-        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
         fleet_path = root / "docs/fleet/consumers.json"
         fleet_bytes = fleet_path.read_bytes()
         consumers = fleet.load_fleet_consumers(fleet_path)
@@ -32,10 +31,7 @@ class ReleaseLedgerTests(InstallTestCase):
             "schemaVersion": fleet.CANDIDATE_LEDGER_SCHEMA_VERSION,
             "validatedAt": "2026-01-02T00:00:00Z",
             "packVersion": version,
-            "payloadDigest": fleet.payload_digest(
-                manifest,
-                lambda source: self.fail(f"unexpected fixture source: {source}"),
-            ),
+            "payloadDigest": fleet.filesystem_payload_digest(root / "manifest.json"),
             "fleetManifestDigest": fleet.fleet_manifest_digest(fleet_bytes),
             "consumers": [
                 {
@@ -99,11 +95,12 @@ class ReleaseLedgerTests(InstallTestCase):
         root: Path,
         version: str,
         *,
+        files: list[dict[str, str]] | None = None,
         top_heading: bool = True,
         update_candidate_ledger: bool = True,
     ) -> str:
         (root / "manifest.json").write_text(
-            json.dumps({"version": version, "files": []}, indent=2) + "\n",
+            json.dumps({"version": version, "files": files or []}, indent=2) + "\n",
             encoding="utf-8",
         )
         heading = f"## {version} - 2026-01-02\n\n- Release fixture.\n"
@@ -159,6 +156,39 @@ class ReleaseLedgerTests(InstallTestCase):
     def test_release_tag_dry_run_plans_valid_manifest_version_tag(self) -> None:
         root = self.make_release_repo()
         head_sha = self.commit_release(root, "1.1.0")
+
+        result = self.run_release_tag(
+            root,
+            "--base",
+            "HEAD^",
+            "--head",
+            "HEAD",
+            "--dry-run",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(f"would create v1.1.0 at {head_sha}", result.stdout)
+
+    def test_release_tag_resolves_symlinked_manifest_source_from_commit(self) -> None:
+        root = self.make_release_repo()
+        templates = root / "templates"
+        templates.mkdir()
+        target = templates / "tool-real.sh"
+        target.write_text("#!/bin/sh\necho tool\n", encoding="utf-8")
+        target.chmod(0o755)
+        (templates / "tool.sh").symlink_to(target.name)
+        head_sha = self.commit_release(
+            root,
+            "1.1.0",
+            files=[
+                {
+                    "platform": "shared",
+                    "kind": "file",
+                    "source": "templates/tool.sh",
+                    "target": "scripts/tool.sh",
+                }
+            ],
+        )
 
         result = self.run_release_tag(
             root,

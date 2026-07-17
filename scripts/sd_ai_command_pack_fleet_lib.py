@@ -216,7 +216,7 @@ def payload_digest(
     for source in sorted(sources):
         payload = source_loader(source)
         digest.update(source.encode("utf-8"))
-        digest.update(b"\0x" if payload.executable else b"\0-\0")
+        digest.update(b"\0x\0" if payload.executable else b"\0-\0")
         digest.update(hashlib.sha256(payload.content).digest())
     return f"sha256:{digest.hexdigest()}"
 

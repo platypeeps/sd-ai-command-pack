@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Sequence
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -119,6 +119,112 @@ def json_object_at_commit(commit_sha: str, path: str, label: str) -> dict:
     return payload
 
 
+def git_tree_entries(commit_sha: str) -> dict[bytes, tuple[str, str, str]]:
+    entries: dict[bytes, tuple[str, str, str]] = {}
+    tree = git_bytes("ls-tree", "-r", "-t", "-z", commit_sha)
+    for record in tree.split(b"\0"):
+        if not record:
+            continue
+        metadata, separator, path = record.partition(b"\t")
+        fields = metadata.split()
+        if not separator or len(fields) != 3:
+            raise ReleaseTagError(f"malformed git tree entry at {commit_sha}")
+        try:
+            mode, object_type, object_id = (
+                field.decode("ascii", errors="strict") for field in fields
+            )
+        except UnicodeError as exc:
+            raise ReleaseTagError(
+                f"malformed git tree metadata at {commit_sha}: {exc}"
+            ) from exc
+        entries[path] = (mode, object_type, object_id)
+    return entries
+
+
+def normalize_tree_path(path: PurePosixPath, source: str) -> str:
+    if path.is_absolute():
+        raise ReleaseTagError(
+            f"pack manifest source resolves outside the repository at commit: {source}"
+        )
+    parts: list[str] = []
+    for part in path.parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not parts:
+                raise ReleaseTagError(
+                    "pack manifest source resolves outside the repository at commit: "
+                    f"{source}"
+                )
+            parts.pop()
+            continue
+        parts.append(part)
+    if not parts:
+        raise ReleaseTagError(
+            f"pack manifest source does not resolve to a file at commit: {source}"
+        )
+    return PurePosixPath(*parts).as_posix()
+
+
+def payload_source_at_commit(
+    commit_sha: str,
+    source: str,
+    entries: dict[bytes, tuple[str, str, str]],
+) -> PayloadSource:
+    current = normalize_tree_path(PurePosixPath(source), source)
+    visited: set[str] = set()
+
+    while current not in visited:
+        visited.add(current)
+        parts = PurePosixPath(current).parts
+        for index in range(1, len(parts) + 1):
+            prefix = PurePosixPath(*parts[:index]).as_posix()
+            entry = entries.get(prefix.encode("utf-8"))
+            if entry is None:
+                raise ReleaseTagError(
+                    f"pack manifest source is absent at {commit_sha}: {source}"
+                )
+            mode, object_type, object_id = entry
+            if mode == "120000":
+                if object_type != "blob":
+                    raise ReleaseTagError(
+                        f"pack manifest source has an invalid symlink at {commit_sha}: "
+                        f"{source}"
+                    )
+                target_bytes = git_bytes("cat-file", "blob", object_id)
+                try:
+                    target = target_bytes.decode("utf-8", errors="strict")
+                except UnicodeError as exc:
+                    raise ReleaseTagError(
+                        "pack manifest source has a non-UTF-8 symlink target at "
+                        f"{commit_sha}: {source}: {exc}"
+                    ) from exc
+                combined = PurePosixPath(*parts[: index - 1]) / PurePosixPath(target)
+                if index < len(parts):
+                    combined = combined.joinpath(*parts[index:])
+                current = normalize_tree_path(combined, source)
+                break
+            if index < len(parts):
+                if mode != "040000" or object_type != "tree":
+                    raise ReleaseTagError(
+                        "pack manifest source traverses a non-directory at "
+                        f"{commit_sha}: {source}"
+                    )
+                continue
+            if mode not in {"100644", "100755"} or object_type != "blob":
+                raise ReleaseTagError(
+                    f"pack manifest source is not a regular file at {commit_sha}: {source}"
+                )
+            return PayloadSource(
+                content=git_bytes("cat-file", "blob", object_id),
+                executable=mode == "100755",
+            )
+
+    raise ReleaseTagError(
+        f"pack manifest source has a symlink cycle at {commit_sha}: {source}"
+    )
+
+
 def verify_candidate_ledger(commit_sha: str, manifest: dict, version: str) -> None:
     fleet_path = "docs/fleet/consumers.json"
     ledger_path = "docs/fleet/candidate-validation.json"
@@ -133,17 +239,10 @@ def verify_candidate_ledger(commit_sha: str, manifest: dict, version: str) -> No
         raise ReleaseTagError(f"fleet manifest is not an object at {commit_sha}")
     ledger = json_object_at_commit(commit_sha, ledger_path, "candidate ledger")
 
+    tree_entries = git_tree_entries(commit_sha)
+
     def load_source(source: str) -> PayloadSource:
-        tree_line = git_text("ls-tree", commit_sha, "--", source).strip()
-        if not tree_line:
-            raise ReleaseTagError(
-                f"pack manifest source is absent at {commit_sha}: {source}"
-            )
-        mode = tree_line.split(maxsplit=1)[0]
-        return PayloadSource(
-            content=git_bytes("show", f"{commit_sha}:{source}"),
-            executable=mode == "100755",
-        )
+        return payload_source_at_commit(commit_sha, source, tree_entries)
 
     try:
         consumers = parse_fleet_consumers(

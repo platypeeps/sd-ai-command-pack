@@ -8,6 +8,7 @@ except ModuleNotFoundError as exc:
     from . import install_test_support as _support
 
 contextlib = _support.contextlib
+hashlib = _support.hashlib
 io = _support.io
 json = _support.json
 mock = _support.mock
@@ -471,6 +472,33 @@ class FleetCandidateTests(InstallTestCase):
         )
         with self.assertRaises(candidate.FleetConfigError):
             fleet_lib.filesystem_payload_digest(manifest_path)
+
+    def test_payload_digest_frames_executable_marker_with_delimiters(self) -> None:
+        candidate = self.load_candidate_module()
+        fleet_lib = candidate.sys.modules["sd_ai_command_pack_fleet_lib"]
+        manifest = {"version": "1.0.0", "files": [{"source": "bin/tool"}]}
+        content = b"tool payload\n"
+
+        expected = hashlib.sha256()
+        expected.update(b"sd-ai-command-pack-candidate-payload-v1\0")
+        expected.update(
+            json.dumps(
+                manifest,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode("utf-8")
+        )
+        expected.update(b"\0bin/tool\0x\0")
+        expected.update(hashlib.sha256(content).digest())
+
+        self.assertEqual(
+            fleet_lib.payload_digest(
+                manifest,
+                lambda _: fleet_lib.PayloadSource(content, True),
+            ),
+            f"sha256:{expected.hexdigest()}",
+        )
 
     def test_partial_run_never_writes_canonical_ledger(self) -> None:
         candidate = self.load_candidate_module()

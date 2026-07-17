@@ -78,6 +78,10 @@ a separate CI-only interpretation of shipped-payload paths.
      per consumer with its checked base commit and exact command arrays.
    - Candidate clone commands place `--` before the discovered origin URL so a
      malformed local remote beginning with `-` cannot inject Git options.
+   - Payload digest records delimit the executable marker on both sides before
+     the content hash. Tag-time validation resolves tracked in-repo symlink
+     chains from the exact commit tree and hashes the resolved regular blob and
+     its executable mode, matching working-tree candidate validation.
    - A full all-pass run replaces the ledger atomically. Filtered or failing
      runs never replace canonical evidence.
 4. **Validation & Error Matrix**:
