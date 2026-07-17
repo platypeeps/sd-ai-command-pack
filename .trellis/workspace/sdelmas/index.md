@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 121
+- **Total Sessions**: 122
 - **Last Active**: 2026-07-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~818 | Active |
+| `journal-3.md` | ~858 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 122 | 2026-07-16 | Harden fleet candidate validation and rollout priority | `b4085aa`, `8e5d828`, `cde4aff`, `52b58dd`, `e82b67c`, `68af84e`, `16fb096` | `codex/fleet-candidate-validation` |
 | 121 | 2026-07-16 | Option-safe fleet review cleanup | `15a1711` | `codex/option-safe-temp-cleanup` |
 | 120 | 2026-07-16 | Source-only fleet refresh prerequisite | `2b34a70` | `codex/source-only-fleet-refresh-command` |
 | 119 | 2026-07-16 | Guard historical Trellis journal sessions | `9a5cad7`, `5daa604`, `6624148`, `58096ca` | `codex/trellis-journal-history-guard` |
