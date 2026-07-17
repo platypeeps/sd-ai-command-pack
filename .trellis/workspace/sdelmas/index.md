@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 127
+- **Total Sessions**: 128
 - **Last Active**: 2026-07-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1052 | Active |
+| `journal-3.md` | ~1091 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 128 | 2026-07-17 | Harden preflight and pack source identity | `7e97f71`, `c26521b` | `codex/archived-task-jsonl-placeholder-preflight` |
 | 127 | 2026-07-17 | Installer inspection and PR review | `f8b9690`, `c189701`, `2bbcf05` | `codex/installer-status-check-json` |
 | 126 | 2026-07-17 | Early advisory for tooling/generated PR scope (0.15.8) | `f104b02` | `main` |
 | 125 | 2026-07-17 | Fix housekeeping stale tracking ref on auto-delete-head-branch (0.15.7) | `2731d46` | `main` |
