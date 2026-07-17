@@ -302,12 +302,7 @@ Updated backend directory documentation for the installer package split, documen
 
 ### Main Changes
 
-- Added composite-only finish-work deferral so `sd-ship until=merge` preserves
-  its active Trellis task through review and watch stages.
-- Kept standalone `sd-review-pr` and `sd-ship until=review` finish-work
-  behavior, with Stage 4 housekeeping as the sole merge-through owner.
-- Addressed three Copilot findings covering Markdown rendering, invocation-mode
-  wording, and stale post-finish-work PR state.
+- Detailed change bullets were not supplied; see the summary above.
 
 ### Git Commits
 
@@ -1145,7 +1140,12 @@ Aligned standalone and composite finish-work ownership, added lifecycle regressi
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Added composite-only finish-work deferral so `sd-ship until=merge` preserves
+  its active Trellis task through review and watch stages.
+- Kept standalone `sd-review-pr` and `sd-ship until=review` finish-work
+  behavior, with Stage 4 housekeeping as the sole merge-through owner.
+- Addressed three Copilot findings covering Markdown rendering, invocation-mode
+  wording, and stale post-finish-work PR state.
 
 ### Git Commits
 
