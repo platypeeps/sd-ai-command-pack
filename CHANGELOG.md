@@ -13,6 +13,8 @@
   installer repositories skip SD-only drift and hook checks.
 - Fail conservatively, with a controlled diagnostic, when a malformed manifest
   asserts the SD identity or omits the fields required by the source gate.
+- Explain when the source-hook advisory cannot verify pack identity because
+  Python is unavailable instead of silently skipping hook configuration checks.
 
 ## 0.16.0 - 2026-07-17
 

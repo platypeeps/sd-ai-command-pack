@@ -141,6 +141,10 @@ warn_unarmed_pack_source_hook() {
   if [ "$identity_status" -eq 2 ]; then
     return 1
   fi
+  if [ "$identity_status" -eq 3 ]; then
+    warn "python3 not found on PATH; cannot verify pack source identity for the source-hook advisory, so pre-push hook configuration is not checked."
+    return 0
+  fi
   if [ "$identity_status" -ne 0 ] || [ "$identity" != "sd-ai-command-pack" ]; then
     return 0
   fi

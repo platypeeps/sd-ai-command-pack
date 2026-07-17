@@ -162,6 +162,58 @@ class FullCheckTests(InstallTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertNotIn("pre-push chore-scope guard is not armed", result.stdout)
 
+    def test_full_check_script_explains_source_hook_skip_without_python(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        (root / "manifest.json").write_text(
+            json.dumps(
+                {"name": "sd-ai-command-pack", "version": "1.0.0", "files": []}
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (root / "install.py").write_text("# source marker\n", encoding="utf-8")
+        (root / "templates").mkdir()
+        (root / ".githooks").mkdir()
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir()
+        shutil.copy2(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
+            scripts_dir / "sd-ai-command-pack-full-check.sh",
+        )
+        shutil.copy2(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
+            scripts_dir / "sd-ai-command-pack-shell-lib.sh",
+        )
+
+        result = subprocess.run(
+            [
+                self._bash_path,
+                "-c",
+                "export SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE=1; "
+                "source scripts/sd-ai-command-pack-full-check.sh; "
+                'have() { [ "$1" != "python3" ]; }; '
+                "warn_unarmed_pack_source_hook",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "cannot verify pack source identity for the source-hook advisory",
+            result.stdout,
+        )
+        self.assertIn("pre-push hook configuration is not checked", result.stdout)
+        self.assertNotIn("pre-push chore-scope guard is not armed", result.stdout)
+
     def test_full_check_script_runs_from_repo_root_and_uses_env_script_name(
         self,
     ) -> None:
