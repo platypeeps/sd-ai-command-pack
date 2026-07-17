@@ -1,8 +1,8 @@
 {
-  "id": "housekeeping-stale-tracking-ref",
-  "name": "housekeeping-stale-tracking-ref",
-  "title": "Fix housekeeping stale tracking ref on auto-delete-head-branch",
-  "description": "Fix the housekeeping script's false 'remote source branch still tracked' anomaly on auto-delete-head-branch remotes by pruning the stale tracking ref in the already-absent cleanup path.",
+  "id": "scope-advisory-early-signal",
+  "name": "scope-advisory-early-signal",
+  "title": "Early advisory for tooling/generated PR scope",
+  "description": "Add an early, PR-independent advisory that names the required tooling/generated PR scope section, surfaced through the shared review preflight.",
   "status": "completed",
   "dev_type": null,
   "scope": null,

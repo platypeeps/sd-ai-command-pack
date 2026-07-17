@@ -43,6 +43,7 @@ export function runReviewPreflight(options = {}) {
   runCheck('documentation path references', checkDocumentationPathReferences);
   runCheck('Trellis journal records', checkTrellisJournalRecords);
   runCheck('diff size warning', checkDiffSize);
+  runCheck('tooling/generated scope advisory', checkScopeAdvisory);
 
   return {
     failures: [...failures],
@@ -524,6 +525,39 @@ function checkDiffSize() {
 
   for (const file of largeFiles) {
     warn(`${diff.label} includes a large file diff (${file.added + file.deleted} lines): ${file.path}`);
+  }
+}
+
+function checkScopeAdvisory() {
+  // Author-time soft signal: shell out to the pack's scope classifier in
+  // advisory mode so the required PR-body scope section is named before any
+  // PR exists. All file-classification and heading policy lives in the bash
+  // script; this only surfaces its warning and never fails the preflight.
+  const ambient = process.env.SD_AI_COMMAND_PACK_SCOPE_CHECK;
+  if (ambient && /^(0|false|FALSE|no|NO|skip|none|off|OFF|disabled|DISABLED)$/.test(ambient)) {
+    return;
+  }
+  const script = resolve(rootDir, 'scripts', 'sd-ai-command-pack-review-scope.sh');
+  if (!existsSync(script)) {
+    return;
+  }
+  const result = spawnSync('bash', [script], {
+    cwd: rootDir,
+    encoding: 'utf8',
+    maxBuffer: GIT_MAX_BUFFER_BYTES,
+    env: { ...process.env, SD_AI_COMMAND_PACK_SCOPE_CHECK: 'advisory' },
+  });
+  if (result.error) {
+    // Advisory only: a missing bash or spawn failure must not fail the gate.
+    return;
+  }
+  const output = `${result.stdout || ''}${result.stderr || ''}`;
+  // Match the stable machine marker, not the human wording, so the bash
+  // advisory text can change without silently dropping this warning.
+  const marker = 'sd-ai-command-pack-scope-advisory: ';
+  const advisoryLine = output.split('\n').find((line) => line.includes(marker));
+  if (advisoryLine) {
+    warn(advisoryLine.slice(advisoryLine.indexOf(marker) + marker.length).trim());
   }
 }
 
