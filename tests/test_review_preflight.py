@@ -48,10 +48,13 @@ import {
   copiedTemplateKind,
   extractDocumentationPathReferences,
   findHistoricalTrellisJournalSessionEdits,
+  findTrellisTaskContextSeedRows,
   parseNumstat,
   parseJournalSessionsFromText,
+  parseTrellisTaskArtifactPath,
   parseWorkspaceIndexSessionsFromText,
   shouldCheckDocumentationPathReference,
+  thrownValueMessage,
   unsupportedNodeVersionMessage,
   validateTrellisJournalSessions,
 } from './scripts/sd-ai-command-pack-review-preflight.mjs';
@@ -62,6 +65,23 @@ assert.equal(copiedTemplateKind('.agents/skills/sd-review-pr/SKILL.md'), 'sd-ai-
 assert.equal(copiedTemplateKind('.qoder/commands/sd-review-pr.md'), 'sd-ai-command-pack');
 assert.equal(copiedTemplateKind('scripts/sd-ai-command-pack-review-scope.sh'), 'sd-ai-command-pack');
 assert.equal(copiedTemplateKind('.sd-ai-command-pack/manifest.json'), 'sd-ai-command-pack');
+assert.deepEqual(parseTrellisTaskArtifactPath('.trellis/tasks/07-17-demo/check.jsonl'), {
+  taskDir: '.trellis/tasks/07-17-demo',
+  artifact: 'check.jsonl',
+  archived: false,
+});
+assert.deepEqual(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/07-17-demo/implement.jsonl'), {
+  taskDir: '.trellis/tasks/archive/2026-07/07-17-demo',
+  artifact: 'implement.jsonl',
+  archived: true,
+});
+assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/07-17-demo/prd.md'), null);
+assert.deepEqual(findTrellisTaskContextSeedRows('check.jsonl', [
+  '{"file":"spec.md","reason":"real"}',
+  '{"_example":"remove me"}',
+  '{"nested":{"_example":"not a seed row"}}',
+  'malformed',
+].join('\\n')), [{ file: 'check.jsonl', line: 2 }]);
 assert.deepEqual(parseNumstat('1\\t2\\tsrc/file\\tname.js\\0'), [
   { added: 1, deleted: 2, path: 'src/file\\tname.js' },
 ]);
@@ -87,6 +107,8 @@ assert.equal(shouldCheckDocumentationPathReference('docs/review-learnings.md'), 
 assert.equal(shouldCheckDocumentationPathReference('package.json'), false);
 assert.equal(shouldCheckDocumentationPathReference('https://example.com/docs.md'), false);
 assert.equal(shouldCheckDocumentationPathReference('obsidian://open?vault=Repo'), false);
+assert.equal(thrownValueMessage(new Error('error detail')), 'error detail');
+assert.equal(thrownValueMessage('string detail'), 'string detail');
 const journal = parseJournalSessionsFromText('.trellis/workspace/dev/journal-1.md', [
   '## Session 1: Done',
   '### Status',
@@ -380,6 +402,160 @@ assert.deepEqual(
                 root / ".trellis/tasks/archive",
                 base_root=root,
             ),
+        )
+
+    def test_review_preflight_checks_context_when_task_becomes_completed(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        task = root / ".trellis/tasks/07-17-demo"
+        task.mkdir(parents=True)
+        task_json = task / "task.json"
+        task_json.write_text('{"status":"planning"}\n', encoding="utf-8")
+        seed = '{"_example":"replace me"}\n'
+        (task / "implement.jsonl").write_text(seed, encoding="utf-8")
+        (task / "check.jsonl").write_text(seed, encoding="utf-8")
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "no changed completed or archived Trellis task context files",
+            result.stdout,
+        )
+
+        task_json.write_text("{malformed\n", encoding="utf-8")
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "task.json could not be parsed as JSON while checking task completion",
+            result.stdout,
+        )
+        self.assertNotIn(
+            "no changed completed or archived Trellis task context files",
+            result.stdout,
+        )
+
+        task_json.write_text('{"status":"completed"}\n', encoding="utf-8")
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            ".trellis/tasks/07-17-demo/implement.jsonl:1 still contains",
+            result.stdout,
+        )
+        self.assertIn(
+            ".trellis/tasks/07-17-demo/check.jsonl:1 still contains",
+            result.stdout,
+        )
+
+        context = '{"file":"spec.md","reason":"grounded"}\n'
+        (task / "implement.jsonl").write_text(context, encoding="utf-8")
+        (task / "check.jsonl").write_text(context, encoding="utf-8")
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "checked 2 changed completed or archived Trellis task context file(s)",
+            result.stdout,
+        )
+
+    def test_review_preflight_checks_new_but_not_untouched_archived_seeds(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        legacy = root / ".trellis/tasks/archive/2026-07/legacy"
+        legacy.mkdir(parents=True)
+        (legacy / "task.json").write_text(
+            '{"status":"completed"}\n', encoding="utf-8"
+        )
+        (legacy / "implement.jsonl").write_text(
+            '{"_example":"legacy"}\n', encoding="utf-8"
+        )
+        (legacy / "check.jsonl").write_text(
+            '{"_example":"legacy"}\n', encoding="utf-8"
+        )
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline with legacy archive")
+
+        (root / ".trellis/config.yaml").write_text("# changed\n", encoding="utf-8")
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("legacy/implement.jsonl:1", result.stdout)
+
+        current = root / ".trellis/tasks/archive/2026-07/current"
+        current.mkdir(parents=True)
+        (current / "task.json").write_text(
+            '{"status":"completed"}\n', encoding="utf-8"
+        )
+        (current / "implement.jsonl").write_text(
+            '{"_example":"current"}\n', encoding="utf-8"
+        )
+        (current / "check.jsonl").write_text(
+            '{"file":"spec.md","reason":"grounded"}\n', encoding="utf-8"
+        )
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            ".trellis/tasks/archive/2026-07/current/implement.jsonl:1 still contains",
+            result.stdout,
+        )
+        self.assertNotIn("legacy/implement.jsonl:1", result.stdout)
+
+    def test_review_preflight_skips_symlinked_completed_task_context(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        outside = root / "outside.jsonl"
+        outside.write_text('{"_example":"outside"}\n', encoding="utf-8")
+        task = root / ".trellis/tasks/archive/2026-07/symlinked"
+        task.mkdir(parents=True)
+        (task / "task.json").write_text(
+            '{"status":"completed"}\n', encoding="utf-8"
+        )
+        (task / "check.jsonl").write_text(
+            '{"file":"spec.md","reason":"grounded"}\n', encoding="utf-8"
+        )
+        try:
+            (task / "implement.jsonl").symlink_to(outside)
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"symlinks are not available: {exc}")
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "checked 1 changed completed or archived Trellis task context file(s)",
+            result.stdout,
+        )
+
+    def run_review_preflight(
+        self, node: str, root: Path
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
         )
 
     def test_review_preflight_script_detects_trellis_journal_drift(self) -> None:

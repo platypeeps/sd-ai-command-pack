@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines the generic JavaScript review-preflight runtime, validation, and regression-test contract."}
+{"file":".trellis/spec/guides/index.md","reason":"Requires cross-layer and reuse review when introducing a structured JSONL parser helper."}

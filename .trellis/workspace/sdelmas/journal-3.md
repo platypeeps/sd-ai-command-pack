@@ -1052,3 +1052,77 @@ Added read-only installer status/check/JSON inspection, integrated the current m
 ### Next Steps
 
 - None - task complete
+
+
+## Session 128: Harden preflight and pack source identity
+
+**Date**: 2026-07-17
+**Task**: Harden preflight and pack source identity
+**Branch**: `codex/archived-task-jsonl-placeholder-preflight`
+
+### Summary
+
+Released the 0.16.1 preflight and source-identity fixes, validated them across the fleet, and converged PR #144 through two Copilot rounds.
+
+### Main Changes
+
+- Reject generated Trellis task context seeds when changed tasks are completed or archived.
+- Gate SD-only source checks on a validated sd-ai-command-pack manifest identity, skipping unrelated installer packs.
+- Handle non-Error preflight failures through a shared tested formatter after Copilot review.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7e97f71` | fix: harden preflight and pack identity checks |
+| `c26521b` | fix: handle non-error preflight failures |
+
+### Testing
+
+- [OK] make check
+- [OK] 49 affected full-check/pack-drift tests and 19 review-preflight tests
+- [OK] fleet candidate validation passed 7 of 7 consumers
+- [OK] Copilot round 2 reviewed all 23 files with no new comments; CI Result passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 129: Ship PR 144 review loop
+
+**Date**: 2026-07-17
+**Task**: Ship PR 144 review loop
+**Branch**: `codex/archived-task-jsonl-placeholder-preflight`
+
+### Summary
+
+Tracked the PR 144 shipping stream, fixed the Copilot source-hook diagnostic finding, passed focused and fleet validation, and completed the fresh-head review loop cleanly.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d10fda0` | (see git log) |
+| `cfb3295` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

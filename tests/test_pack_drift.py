@@ -60,6 +60,27 @@ def missing_dogfood_targets(
 class PackDriftTests(InstallTestCase):
     """Tests for source/template drift gates, shipped env vars, and release guards."""
 
+    def make_installer_pack_fixture(self, manifest_text: str) -> Path:
+        root = self.make_git_repo_without_trellis()
+        (root / "templates").mkdir()
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir()
+        shutil.copy2(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
+            scripts_dir / "sd-ai-command-pack-full-check.sh",
+        )
+        shutil.copy2(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
+            scripts_dir / "sd-ai-command-pack-shell-lib.sh",
+        )
+        (root / "install.py").write_text("# installer marker\n", encoding="utf-8")
+        (root / "manifest.json").write_text(manifest_text, encoding="utf-8")
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "baseline")
+        return root
+
     def write_candidate_ledger_fixture(self, root: Path) -> None:
         candidate = self.load_module_from_path(
             root / "scripts/sd-ai-command-pack-fleet-candidate-check.py",
@@ -313,6 +334,91 @@ class PackDriftTests(InstallTestCase):
             result.stdout,
         )
         self.assertIn("shipped scripts or skills", result.stdout)
+
+    def test_pack_source_drift_gate_runs_for_sd_manifest_identity(self) -> None:
+        root = self.make_pack_source_fixture()
+
+        result = self.run_pack_source_drift_gates(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Pack source drift gates:", result.stdout)
+        self.assertIn("template twin pairs compared:", result.stdout)
+        self.assertNotIn("skipping SD-specific source checks", result.stdout)
+
+    def test_pack_source_drift_gate_skips_se_pack_identity(self) -> None:
+        root = self.make_installer_pack_fixture(
+            json.dumps(
+                {"name": "se-ai-command-pack", "version": "1.0.0", "files": []}
+            )
+            + "\n"
+        )
+
+        result = self.run_pack_source_drift_gates(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "manifest identity is not sd-ai-command-pack; "
+            "skipping SD-specific source checks",
+            result.stdout,
+        )
+        self.assertNotIn("template twin pairs compared:", result.stdout)
+
+    def test_pack_source_drift_gate_rejects_malformed_asserted_identity(
+        self,
+    ) -> None:
+        root = self.make_installer_pack_fixture(
+            '{"name": "sd-ai-command-pack", "version": "1.0.0", invalid\n'
+        )
+
+        result = self.run_pack_source_drift_gates(root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "manifest.json asserts 'sd-ai-command-pack' but is malformed",
+            result.stdout,
+        )
+        self.assertNotIn("Traceback", result.stdout)
+
+    def test_pack_source_drift_gate_rejects_invalid_sd_manifest_fields(
+        self,
+    ) -> None:
+        root = self.make_installer_pack_fixture(
+            json.dumps(
+                {"name": "sd-ai-command-pack", "version": "", "files": {}}
+            )
+            + "\n"
+        )
+
+        result = self.run_pack_source_drift_gates(root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "manifest.json asserts 'sd-ai-command-pack' but is malformed",
+            result.stdout,
+        )
+        self.assertIn("version must be a non-empty string", result.stdout)
+        self.assertIn("files must be a list", result.stdout)
+        self.assertNotIn("Traceback", result.stdout)
+
+    def test_pack_source_drift_gate_disable_override_precedes_identity_check(
+        self,
+    ) -> None:
+        root = self.make_installer_pack_fixture(
+            '{"name": "sd-ai-command-pack", "version": "1.0.0", invalid\n'
+        )
+
+        result = self.run_pack_source_drift_gates(
+            root,
+            extra_env={"SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT": "0"},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "Skipping pack source drift gates because "
+            "SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT=0",
+            result.stdout,
+        )
+        self.assertNotIn("pack source identity error", result.stdout)
 
     def test_pack_source_drift_gate_rejects_payload_without_version_bump(
         self,

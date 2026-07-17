@@ -67,6 +67,12 @@ that exercise the generic JavaScript review preflight.
   newly appended/current sessions remain editable.
 - Documentation scans intentionally inspect regular files only; symlinked docs
   are skipped so local or generated links do not expand outside the repo.
+- Diff-scoped Trellis task checks inspect changed `implement.jsonl` and
+  `check.jsonl` files after their task is archived or its `task.json` status is
+  `completed`. A changed completion `task.json` checks both sibling context
+  files. Parsed records with an own `_example` key fail; active planning
+  scaffolds, untouched historical archives, and symlinked context files remain
+  outside the check.
 
 ### 4. Validation & Error Matrix
 
@@ -84,6 +90,10 @@ that exercise the generic JavaScript review preflight.
 - Review-base Trellis journal session is deleted or renumbered -> fail as a
   historical-session removal, including when its journal file or the entire
   current workspace disappears.
+- Changed completed/archived context owns `_example` -> fail with the exact
+  file and line plus replacement/removal guidance.
+- Planning context, untouched archived context, or symlinked context -> skip
+  without reading outside the repository.
 
 ### 5. Good/Base/Bad Cases
 
@@ -104,6 +114,8 @@ that exercise the generic JavaScript review preflight.
 - Historical-session comparison in a real Git fixture, including an appended
   session that leaves prior history unchanged, per-line trailing whitespace,
   renumbering, and deletion of a baseline journal file.
+- Completed-status sibling checks, newly archived seed rejection, untouched
+  archive grandfathering, planning scaffold allowance, and symlink skipping.
 - Template twin byte identity.
 
 ### 7. Wrong vs Correct
@@ -339,6 +351,9 @@ Correct: PYTHON_BIN=.venv/bin/python bash .github/scripts/check-shipped-script-c
   scripts and shipped skill templates. A `SD_AI_COMMAND_PACK_*` variable that
   appears only in `templates/.agents/skills/**/SKILL.md` is still user-facing
   and must be documented in `docs/SD_AI_COMMAND_PACK.md`.
+- Gate SD pack-source assumptions on the parsed manifest name, not generic
+  installer paths. Other installer repositories must skip SD-only checks, while
+  malformed manifests that assert the SD identity fail without a traceback.
 - Validate manifest paths before deriving target destinations or anchors.
 - Treat Windows drive/root anchors and backslash-separated parent traversal as
   unsafe manifest paths, even when tests run on POSIX.

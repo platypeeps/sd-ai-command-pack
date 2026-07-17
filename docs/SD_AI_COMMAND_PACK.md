@@ -411,11 +411,16 @@ dependencies. It checks for duplicate npm override sources of truth, changed
 copied Trellis or SD command-pack surfaces without companion repo-owned
 integration context, personal absolute paths in docs/prompts/specs, missing
 repo path references in docs/prompts/specs, completed Trellis journal
-placeholder or journal/index commit drift, edits to historical journal sessions
-relative to the review base, and large diffs that are likely to skip remote AI
-review. Journal history is append-only: newly added/current sessions remain
-editable, but an older session must be restored and the intended current session
-edited by its explicit `## Session <n>:` heading. Target repos can tune roots,
+placeholder or journal/index commit drift, generated `_example` seed rows in
+changed task context after a task is completed or archived, edits to historical
+journal sessions relative to the review base, and large diffs that are likely
+to skip remote AI review. The task-context check inspects `implement.jsonl` and
+`check.jsonl`; a changed `task.json` that marks completion also checks both
+sibling files. Active planning scaffolds, untouched legacy archives, and
+symlinked context files are skipped. Journal history is append-only: newly
+added/current sessions remain editable, but an older session must be restored
+and the intended current session edited by its explicit `## Session <n>:`
+heading. Target repos can tune roots,
 path-reference prefixes, integration paths, optional paths, copied-template
 paths, and warning thresholds
 with `.sd-ai-command-pack/review-preflight.json`. Repos that intentionally
@@ -906,9 +911,13 @@ ephemeral tool state and do not change what the checks validate.
   refresh hint.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT=0`: skip the pack source drift
   gates (template twin parity, release-version coverage for shipped payload
-  changes, and env-var documentation coverage). These gates only run inside the
-  sd-ai-command-pack source repository itself and are skipped automatically in
-  target repos.
+  changes, and env-var documentation coverage). In `auto` mode, generic source
+  markers (`install.py`, `manifest.json`, and `templates/`) only make a repo a
+  candidate: the gates run only when the parsed root manifest has
+  `name: sd-ai-command-pack` plus a non-empty `version` and a `files` list.
+  Other installer repos, including `se-ai-command-pack`, skip the SD-specific
+  gates. A malformed manifest that asserts the SD identity fails conservatively
+  instead of silently bypassing source checks.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF`: explicit base ref for the
   pack-source release-version gate. Defaults to
   `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then the discovered branch-diff
