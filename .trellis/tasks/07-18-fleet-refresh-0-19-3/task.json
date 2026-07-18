@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-07-18",
   "completedAt": null,
-  "branch": "codex/status-file-path-resolution",
+  "branch": "codex/main-push-squash-pr-detection",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "The rollout began at 0.19.3. Loadsmith PR #90 surfaced a pack-owned file-path resolution defect in sd-status, so the rollout stopped and moved to corrective release 0.19.4.",
+  "notes": "The rollout began at 0.19.3. Loadsmith PR #90 surfaced a pack-owned file-path resolution defect in sd-status, so the rollout stopped and moved to corrective release 0.19.4. Source PR #154 merged the correction, then its squash merge exposed a main-push guard assumption that only two-parent PR merges were sanctioned; the guard recovery is tracked in this task before tagging or consumer rollout resumes.",
   "meta": {}
 }

@@ -1185,6 +1185,9 @@ class GeneratedParityTests(InstallTestCase):
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF", workflow)
         self.assertIn("run_pack_source_drift_gates", workflow)
         self.assertIn('"${{ github.event.before }}" "${{ github.sha }}"', workflow)
+        self.assertIn("pull-requests: read", workflow)
+        self.assertIn("commits/${GITHUB_SHA}/pulls", workflow)
+        self.assertIn("SD_AI_COMMAND_PACK_MAIN_PUSH_PR_MERGE", workflow)
         self.assertIn("git diff --no-renames --name-only -z", main_push_guard)
         self.assertIn(
             ".trellis/tasks/*|.trellis/workspace/*|.trellis/audit/*",

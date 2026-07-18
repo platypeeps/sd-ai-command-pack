@@ -55,3 +55,8 @@ inspection. After PR creation, never force-push or bypass a blocked merge gate.
 - [x] Passed the full-fleet 0.19.4 candidate check for all seven consumers.
 - [x] Passed the canonical source tests, coverage, lint, type, security, audit,
   KB freshness, template parity, release-ledger, and full-check lanes.
+- [x] Stopped before tagging when source PR #154's squash merge exposed the
+  two-parent-only main-push scope assumption.
+- [x] Added GitHub-confirmed squash/rebase PR-merge detection while preserving
+  fail-closed direct-push behavior, with focused tests for accepted and
+  malformed evidence.

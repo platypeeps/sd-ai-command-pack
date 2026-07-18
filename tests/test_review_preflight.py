@@ -1288,6 +1288,36 @@ assert.deepEqual(
         self.assertEqual(merged.returncode, 0, merged.stderr)
         self.assertIn("pull-request merge commit accepted", merged.stdout)
 
+        squash_merged = subprocess.run(
+            ["bash", str(script), baseline, source_head],
+            cwd=root,
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_MAIN_PUSH_PR_MERGE": "1",
+            },
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(squash_merged.returncode, 0, squash_merged.stderr)
+        self.assertIn(
+            "GitHub-confirmed pull-request merge accepted", squash_merged.stdout
+        )
+
+        malformed_evidence = subprocess.run(
+            ["bash", str(script), baseline, source_head],
+            cwd=root,
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_MAIN_PUSH_PR_MERGE": "unexpected",
+            },
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(malformed_evidence.returncode, 1, malformed_evidence.stdout)
+        self.assertIn("failing closed", malformed_evidence.stderr)
+
         missing_before = subprocess.run(
             ["bash", str(script), "0" * 40, rename_head],
             cwd=root,
