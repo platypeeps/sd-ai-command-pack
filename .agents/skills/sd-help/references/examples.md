@@ -30,6 +30,7 @@ branch, pull request, task, and goal context when producing a final invocation.
 ## Maintenance and fleet
 
 - Dependencies: `Use sd-help to explain which dependency updates sd-update-deps can merge automatically.`
+- Fleet visibility: `Use sd-help to explain how sd-status fleet works from an installed consumer.`
 - Fleet rollout: `Use sd-help to explain why sd-fleet-refresh is source-checkout-only.`
 
 ## Bounded workflow examples

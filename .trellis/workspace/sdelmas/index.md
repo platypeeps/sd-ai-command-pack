@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 134
+- **Total Sessions**: 135
 - **Last Active**: 2026-07-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1314 | Active |
+| `journal-3.md` | ~1352 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 135 | 2026-07-17 | Portable status and fleet candidate release | `daa2f6d`, `da885c0`, `8675467`, `af12edf` | `codex/portable-fleet-status` |
 | 134 | 2026-07-17 | Ship sd-help command | `d5b2e1c`, `3d6db89`, `df1f98f` | `main` |
 | 133 | 2026-07-17 | Separate create-PR publish and review ownership | `34c50ce` | `codex/separate-create-pr-review-stage` |
 | 132 | 2026-07-17 | Pin SE pack source identity regression | `1be8263` | `codex/fix-pack-source-drift-identity` |

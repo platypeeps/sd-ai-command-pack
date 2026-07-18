@@ -1066,6 +1066,36 @@ class GeneratedParityTests(InstallTestCase):
         ):
             self.assertIn(expected, runner)
 
+    def test_parallel_test_runner_rejects_unusable_python(self) -> None:
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("bash is unavailable")
+        env = dict(os.environ)
+        env.pop("SD_AI_COMMAND_PACK_PYTHON", None)
+        with tempfile.TemporaryDirectory(prefix="sd-test-runner-python-") as temp_dir:
+            non_executable = Path(temp_dir) / "python"
+            non_executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            for python_bin in (
+                "sd-ai-command-pack-python-does-not-exist",
+                str(non_executable),
+            ):
+                with self.subTest(python_bin=python_bin):
+                    result = subprocess.run(
+                        [bash, ".github/scripts/run-tests.sh"],
+                        cwd=PACK_ROOT,
+                        env={**env, "PYTHON_BIN": python_bin},
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        check=False,
+                    )
+
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn(
+                        "PYTHON_BIN must resolve to an executable",
+                        result.stderr,
+                    )
+
     def test_opencode_javascript_syntax_gate_checks_tracked_files(self) -> None:
         script = PACK_ROOT / ".github/scripts/check-opencode-js.sh"
         current = subprocess.run(
@@ -1717,6 +1747,10 @@ class GeneratedParityTests(InstallTestCase):
             elif "review-learnings" in file.target.name:
                 self.assertIn("Resolve the `sd-review-learnings` skill by name", content)
                 self.assertIn("scripts/sd-ai-command-pack-review-learnings.py", content)
+            elif "status" in file.target.name:
+                self.assertIn("Resolve the `sd-status` skill by name", content)
+                self.assertIn("scripts/sd-ai-command-pack-toolchain.sh", content)
+                self.assertIn("read-only", content)
             else:
                 self.assertIn("Resolve the `sd-review-pr` skill by name", content)
 
@@ -1915,6 +1949,7 @@ class GeneratedParityTests(InstallTestCase):
     def test_gemini_entries_use_namespaced_toml_completion_shape(self) -> None:
         expected_descriptions = {
             "help": "Discover, compare, and understand Software Delivery commands without running the selected workflow.",
+            "status": "Report read-only local repository or configured fleet status with actionable next steps.",
             "start": "Initialize or resume a task using the Trellis start workflow.",
             "continue": "Resume the current Trellis task or workflow state.",
             "finish-work": "Wrap up the current Trellis coding session.",

@@ -1,15 +1,21 @@
 {
-  "schemaVersion": 1,
-  "validatedAt": "2026-07-18T02:43:49Z",
-  "packVersion": "0.18.0",
-  "payloadDigest": "sha256:dc614f0d022f718768f2cf31f860240b9828fe8439a9bebdd85e83254989d65e",
-  "fleetManifestDigest": "sha256:9ee6b5171265f17e752776b2608b0cd83e6d9079aa42d9ad82e61f5c0fd041f2",
+  "schemaVersion": 2,
+  "validatedAt": "2026-07-18T05:00:40Z",
+  "packVersion": "0.19.0",
+  "payloadDigest": "sha256:cedd377abb0bc355b20d6ef3fd9abf9d62444328872b2f254c4ce926fd9651b0",
+  "fleetManifestDigest": "sha256:1776b0a45d7faa3b20fc61ff0ef8587f7fc577eebc503b7ddce0563479ef247a",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
       "baseCommit": "d21749f7bba550faa1f475f3f9054a48d8c977ba",
       "status": "passed",
+      "prepares": [
+        [
+          "bash",
+          "scripts/update_repomix"
+        ]
+      ],
       "checks": [
         [
           "node",
@@ -22,6 +28,12 @@
       "github": "platypeeps/loadsmith",
       "baseCommit": "7e16c06a8b5734c1b39bec5e4f8c9724f7818e6c",
       "status": "passed",
+      "prepares": [
+        [
+          "bash",
+          "scripts/update_repomix"
+        ]
+      ],
       "checks": [
         [
           "bash",
@@ -36,11 +48,13 @@
       "github": "platypeeps/hoa-manager",
       "baseCommit": "996c5a5e825ac3c48d0a73bcb3d44a2540574591",
       "status": "passed",
-      "checks": [
+      "prepares": [
         [
           "bash",
           "scripts/update_repomix"
-        ],
+        ]
+      ],
+      "checks": [
         [
           "node",
           "scripts/check-review-preflight.mjs"
@@ -52,6 +66,12 @@
       "github": "platypeeps/rwbp-website",
       "baseCommit": "6840e280f0e483a4a65240f4c3155141e92185fe",
       "status": "passed",
+      "prepares": [
+        [
+          "bash",
+          "scripts/update_repomix"
+        ]
+      ],
       "checks": [
         [
           "node",
@@ -68,6 +88,12 @@
       "github": "answerbook/mezmo_benchmark",
       "baseCommit": "adbdfcb95693466423ec67b3fb6ef375494bfc82",
       "status": "passed",
+      "prepares": [
+        [
+          "bash",
+          "scripts/update_repomix"
+        ]
+      ],
       "checks": [
         [
           "python3",
@@ -83,6 +109,7 @@
       "github": "platypeeps/se-ai-command-pack",
       "baseCommit": "d39b843e39ccfb31f7681c0279852eda07733594",
       "status": "passed",
+      "prepares": [],
       "checks": [
         [
           "bash",
@@ -94,8 +121,14 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "12a4ba9d9d70ae4c39de658c0df032e7de229415",
+      "baseCommit": "aefd08f457995ebba891f95cffbacccda0c39168",
       "status": "passed",
+      "prepares": [
+        [
+          "bash",
+          "scripts/update_repomix"
+        ]
+      ],
       "checks": [
         [
           "python3",

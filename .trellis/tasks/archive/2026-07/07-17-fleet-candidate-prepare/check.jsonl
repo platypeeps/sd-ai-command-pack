@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Verify prepare-before-check ordering, explicit empty preparation, failure continuation, ledger binding, and full-fleet release evidence."}

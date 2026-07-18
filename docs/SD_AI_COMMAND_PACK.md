@@ -26,6 +26,8 @@ Quick links:
   families, descriptions, release version, and bundled availability policy.
 - `.agents/skills/sd-help/references/examples.md`: authored examples for common
   delivery goals and command overlaps.
+- `.agents/skills/sd-status/SKILL.md`: read-only local repository and
+  configured fleet status reporting.
 - `.agents/skills/sd-start/SKILL.md`: Codex-visible Trellis start wrapper.
 - `.agents/skills/sd-continue/SKILL.md`: Codex-visible Trellis continue wrapper.
 - `.agents/skills/sd-finish-work/SKILL.md`: Codex-visible Trellis finish-work wrapper.
@@ -68,6 +70,10 @@ Quick links:
   deterministic Python resolver used by SD workflows before dependency-sensitive
   checks.
 - `scripts/sd-ai-command-pack-housekeeping.sh`: canonical post-merge housekeeping script.
+- `scripts/sd-ai-command-pack-status.py`: read-only local/fleet status collector
+  and schema-versioned JSON reporter used by housekeeping final verification.
+- `scripts/sd_ai_command_pack_fleet_lib.py`: shared fleet-manifest validation,
+  machine-profile resolution, checkout override, and release-ledger contracts.
 - `scripts/sd-ai-command-pack-record-session.py`: one-shot session journal
   recorder — wraps Trellis' `add_session.py`, resolving commit subjects
   from git (failing fast on unknown hashes), filling the Main Changes and
@@ -118,7 +124,8 @@ in the shared skills and scripts. The update-spec workflow runs the
 Trellis-provided `trellis-update-spec` skill as-is, refreshes repo-owned
 repospec artifacts through existing maintenance infrastructure when available,
 and then performs the architecture-overview check.
-Codex exposes the pack entry points as skills named `sd-help`, `sd-start`, `sd-continue`,
+Codex exposes the pack entry points as skills named `sd-help`, `sd-status`,
+`sd-start`, `sd-continue`,
 `sd-finish-work`, `sd-create-pr`, `sd-work-backlog`, `sd-work-designs`,
 `sd-full-check`, `sd-housekeeping`, `sd-review-pr`, `sd-review-local`,
 `sd-review-learnings`, `sd-audit-repo`, `sd-ship`,
@@ -263,6 +270,7 @@ Claude Code and Gemini CLI:
 
 ```bash
 /sd:help
+/sd:status
 /sd:start
 /sd:continue
 /sd:finish-work
@@ -289,6 +297,7 @@ Qoder commands, Trae commands, Pi prompts, workflow adapters, and Codex skills:
 
 ```bash
 /sd-help
+/sd-status
 /sd-start
 /sd-continue
 /sd-finish-work
@@ -378,8 +387,30 @@ bash scripts/sd-ai-command-pack-full-check.sh
 bash scripts/sd-ai-command-pack-review-local.sh
 bash scripts/sd-ai-command-pack-review-local.sh --full-codebase
 bash scripts/sd-ai-command-pack-housekeeping.sh
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-status.py
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-status.py fleet --json
 python3 scripts/sd-ai-command-pack-review-learnings.py --include-working-tree
 ```
+
+`sd-status` is the read-only delivery snapshot for a repository. It reports the
+branch, staged/unstaged/untracked counts, upstream ahead/behind state, default
+and local/remote branches, installed SD pack and Trellis versions, relevant PR,
+open PRs/issues, current/in-progress/planned Trellis work, anomalies, and
+numbered next steps. `--no-network` suppresses GitHub calls, `--repo PATH`
+selects another checkout, and `--json` emits schema version 1. Ordinary runs do
+not fetch and label ref-derived values `cached`.
+
+The optional positional `fleet` mode works from any installed checkout. It
+resolves the canonical fleet manifest from `--fleet-manifest`,
+`SD_AI_COMMAND_PACK_FLEET_MANIFEST`, the machine-local fleet profile, or the
+canonical source checkout, in that order. It preserves rollout priority,
+reports missing checkouts, compares installed versions to the source manifest
+version, and returns one bounded row per fleet member. A dirty, stale, missing,
+behind, or diverged repository is advisory in ordinary status; the command
+remains read-only and exits zero after producing the report. Invalid
+repositories and malformed, missing, or stale fleet configuration exit
+nonzero. This repository-status command is separate from `install.py --status`,
+which compares one target's installed payload to the current pack.
 
 The full-check script runs `git diff --check`, `git diff --cached --check`,
 review preflight through `scripts/sd-ai-command-pack-review-preflight.mjs`, any
@@ -678,10 +709,13 @@ When that is true, it merges the PR and then performs normal cleanup. If that ga
 not satisfied, it behaves as a post-merge cleanup command: fetch/prune
 `origin`, confirm the current feature branch's PR is merged and the local branch
 head matches that PR before deleting it, switch to the default branch,
-fast-forward from `origin`, delete the merged local and remote branch, and then
-report the current-stream clean state plus anomalies. Repo-wide open PRs, open
-issues, and active Trellis tasks are reported in a separate inventory section
-rather than blockers for this cleanup.
+fast-forward from `origin`, and delete the merged local and remote branch. The
+script then invokes the installed `sd-status` collector in strict mode, passing
+the default/source branches, remote-branch policy, cleanup anomalies, and a
+`refreshed` label after a successful fetch/prune. That shared collector owns the
+final Git verification, pack/Trellis versions, relevant PR/review count,
+repo-wide open PRs/issues, Trellis inventory, anomaly list, and numbered next
+steps. Repo-wide inventory remains context rather than a cleanup blocker.
 
 The installed script also supports
 `bash scripts/sd-ai-command-pack-housekeeping.sh --self-test`, which verifies
@@ -690,23 +724,35 @@ It is hermetic (no git, gh, or network access), so repos can run it from CI or
 a test suite instead of maintaining bespoke contract tests over the vendored
 script; it fails non-zero if any gate scenario misbehaves.
 
-A clean current-stream housekeeping run should end with:
+A clean current-stream housekeeping run should end with the shared status
+shape:
 
 ```text
+SD status: healthy
+Ref freshness: refreshed
+
 ==> Expected clean state
 - branch: <default>
 - working tree: clean
-- <default> matches origin/<default>
-- local branches: only <default>
-- remote branches: only origin/HEAD and origin/<default>
+- upstream: origin/<default>; synchronized
+- local branches (1): <default>
+- remote source branch absent: origin/<feature>
+
+==> Delivery
+- SD pack: <installed version>
+- Trellis: <installed version>
+- relevant PR: #<number> MERGED
 
 ==> Inventory
-- open PRs: <summary>
-- open issues: <summary>
-- Trellis active tasks: <summary>
+- open PRs (<count>): <summary>
+- open issues (<count>): <summary>
+- current Trellis task: <summary>
 
 ==> Anomalies
 none
+
+==> Next Steps
+1. <highest-value evidence-backed next action>
 ```
 
 The agent-facing final response should summarize that script output in a short
@@ -869,6 +915,43 @@ auto-creates tasks and makes no code changes.
 ## Configuration
 
 Common environment variables:
+
+### Fleet Status
+
+Create or refresh the machine-local fleet profile explicitly from the
+canonical pack checkout:
+
+```bash
+python3 /path/to/sd-ai-command-pack/install.py /path/to/target/repo \
+  --configure-fleet
+```
+
+The default profile is
+`$XDG_CONFIG_HOME/sd-ai-command-pack/config.json` when `XDG_CONFIG_HOME` is
+set, otherwise `~/.config/sd-ai-command-pack/config.json`. It has schema
+version 1 and stores `packSource`, optional `fleetManifest`, and optional
+`pathOverrides` keyed by fleet consumer name. Only machine-specific locations
+belong there: the checked-in `docs/fleet/consumers.json` remains authoritative
+for fleet membership, rollout priority, platforms, and candidate commands.
+Existing path overrides are preserved when the installer refreshes the
+profile. `sd-status` reads but never writes it.
+
+```json
+{
+  "schemaVersion": 1,
+  "packSource": "/path/to/sd-ai-command-pack",
+  "fleetManifest": "/path/to/sd-ai-command-pack/docs/fleet/consumers.json",
+  "pathOverrides": {
+    "rwbp-coordinator": "/path/to/rwbp-coordinator"
+  }
+}
+```
+
+- `SD_AI_COMMAND_PACK_FLEET_CONFIG`: advanced override for the machine profile
+  path, useful when several independent pack sources are present.
+- `SD_AI_COMMAND_PACK_FLEET_MANIFEST`: override the canonical fleet manifest
+  for one environment. The public `--fleet-manifest` option has higher
+  precedence; both take precedence over the machine profile.
 
 ### Full Check And Preflight
 
@@ -1202,6 +1285,11 @@ To refresh installed assets from the pack checkout:
 ```bash
 python3 /path/to/sd-ai-command-pack/install.py /path/to/target/repo --force
 ```
+
+Add `--configure-fleet` when this machine should also use that pack checkout as
+the source for `sd-status fleet`. Ordinary installs do not create or modify
+user-global configuration. The option honors `--dry-run`, preserves existing
+checkout path overrides, and is incompatible with inspection or removal modes.
 
 Inspect before refreshing without modifying the target:
 

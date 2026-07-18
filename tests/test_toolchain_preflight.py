@@ -56,11 +56,16 @@ class ToolchainPreflightTests(InstallTestCase):
         *args: str,
         env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        inherited_env = dict(os.environ)
+        # The parallel coverage harness pins subprocesses to its interpreter.
+        # Toolchain-selection tests must start without that harness-only
+        # override unless the individual case explicitly supplies one.
+        inherited_env.pop("SD_AI_COMMAND_PACK_PYTHON", None)
         return subprocess.run(
             [self._bash_path, str(self.script), *args],
             cwd=root,
             env={
-                **os.environ,
+                **inherited_env,
                 "SD_AI_COMMAND_PACK_REPO_ROOT": str(root),
                 **(env or {}),
             },

@@ -1,0 +1,28 @@
+{
+  "id": "fleet-candidate-prepare",
+  "name": "fleet-candidate-prepare",
+  "title": "Separate fleet preparation from candidate validation",
+  "description": "Introduce a declarative candidatePrepare phase for fleet consumers, regenerate tracked structural maps before read-only candidate checks, and keep non-map consumers explicit and deterministic.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-17",
+  "completedAt": "2026-07-17",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-17-sd-status-command"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

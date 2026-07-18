@@ -484,6 +484,7 @@ COMMAND_FAMILIES: tuple[CommandFamily, ...] = (
 # Row order remains the canonical regenerated-manifest order.
 COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
     CommandInfo("sd-help", "help", "orientation-knowledge"),
+    CommandInfo("sd-status", "status", "orientation-knowledge"),
     CommandInfo("sd-continue", "continue", "orientation-knowledge"),
     CommandInfo("sd-start", "start", "orientation-knowledge"),
     CommandInfo("sd-finish-work", "finish-work", "orientation-knowledge"),

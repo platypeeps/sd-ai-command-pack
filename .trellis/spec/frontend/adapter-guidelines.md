@@ -15,6 +15,8 @@ Reference files:
 - `templates/.agents/skills/sd-help/references/command-catalog.md`
 - `templates/.agents/skills/sd-help/references/examples.md`
 - `templates/.commands/sd-help.md`
+- `templates/.agents/skills/sd-status/SKILL.md`
+- `templates/.commands/sd-status.md`
 - `templates/.agents/skills/sd-review-pr/SKILL.md`
 - `templates/.agents/skills/sd-review-local/SKILL.md`
 - `templates/.agents/skills/sd-review-local-all/SKILL.md`
@@ -99,6 +101,9 @@ Keep detailed workflow rules in the matching shared skill under
 - Help is strictly read-only. It may inspect skill text and metadata but never
   invokes the selected workflow or mutates repository, Trellis, or GitHub
   state in the same request.
+- Status is also strictly read-only. Its adapters delegate to the installed
+  collector, preserve cached/refreshed labels, and never reconstruct the report
+  with platform-specific Git or GitHub commands.
 
 ### 4. Validation & Error Matrix
 

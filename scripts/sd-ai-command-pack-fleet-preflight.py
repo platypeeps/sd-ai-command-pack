@@ -188,6 +188,10 @@ def main() -> int:
                         "path": str(result.repo_path),
                         "platforms": list(result.consumer.platforms),
                         "rolloutPriority": result.consumer.rollout_priority,
+                        "candidatePrepare": [
+                            list(command)
+                            for command in result.consumer.candidate_prepare
+                        ],
                         "candidateChecks": [
                             list(command)
                             for command in result.consumer.candidate_checks

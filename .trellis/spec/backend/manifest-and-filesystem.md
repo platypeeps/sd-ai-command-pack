@@ -69,13 +69,19 @@ a separate CI-only interpretation of shipped-payload paths.
    - `create-release-tag.py --base REF --head REF` validates the ledger from the
      exact committed head tree before creating `v<manifest-version>`.
 3. **Contracts**:
-   - `docs/fleet/consumers.json` schema version 2 requires unique consumer
+   - `docs/fleet/consumers.json` schema version 3 requires unique consumer
    names that are safe non-path identifiers, GitHub slugs, rollout priorities,
    bounded positive timeouts,
-     platform lists, and `candidateChecks` as non-empty argv arrays.
-   - `docs/fleet/candidate-validation.json` schema version 1 records
+     platform lists, explicit `candidatePrepare` argv arrays that may be empty,
+     and `candidateChecks` as non-empty argv arrays.
+   - `docs/fleet/candidate-validation.json` schema version 2 records
      `packVersion`, `payloadDigest`, `fleetManifestDigest`, and one passing row
-     per consumer with its checked base commit and exact command arrays.
+     per consumer with its checked base commit plus exact preparation and check
+     command arrays.
+   - Candidate execution orders clone, install, audit, preparation, then
+     checks. Preparation may mutate only the disposable clone; candidate checks
+     remain read-only. Repositories without a preparation step declare `[]`
+     rather than relying on auto-detection.
    - Candidate clone commands place `--` before the discovered origin URL so a
      malformed local remote beginning with `-` cannot inject Git options.
    - Candidate subprocess environments prepend the selected Python directory
@@ -90,19 +96,22 @@ a separate CI-only interpretation of shipped-payload paths.
 4. **Validation & Error Matrix**:
    - Invalid fleet schema, duplicate priority/name, unsafe command shape, or
      unreadable payload source -> configuration error and exit 2.
-   - Clone, install, audit, timeout, missing executable, or candidate-check
-     failure -> report the consumer failure, continue the fleet, and exit 1.
+   - Clone, install, audit, preparation, timeout, missing executable, or
+     candidate-check failure -> report the consumer failure, continue the
+     fleet, and exit 1.
    - Missing, malformed, partial, failing, or digest-stale ledger -> local/CI
      release gate and tag planner fail; no release tag is created.
    - `--consumer` combined with `--check-ledger` -> usage error; filtered runs
      are diagnostics and cannot certify a release.
 5. **Good / Base / Bad Cases**:
-   - Good: all disposable clones pass and the committed ledger matches the
-     exact release payload, fleet manifest, checks, and consumer set.
+   - Good: all disposable clones prepare and pass, and the committed ledger
+     matches the exact release payload, fleet manifest, preparation, checks,
+     and consumer set.
    - Base: a filtered diagnostic identifies one consumer issue while leaving
      the prior canonical ledger untouched.
-   - Bad: validate or install directly into a developer's active consumer
-     checkout, or accept a ledger generated for different payload bytes.
+   - Bad: prepare, validate, or install directly into a developer's active
+     consumer checkout, hide a generator in `candidateChecks`, or accept a
+     ledger generated for different payload bytes.
 6. **Tests Required**: Cover schema and priority validation, argv execution
    without shell interpolation, disposable origin clones, timeout and command
    failures, full-fleet continuation, atomic ledger preservation, every ledger
@@ -113,10 +122,11 @@ a separate CI-only interpretation of shipped-payload paths.
 
    ```text
    Wrong: tag the version, then discover compatibility one consumer PR at a time
+   Wrong: let a mutating generator masquerade as a candidate check
    Wrong: let a partial diagnostic overwrite the release evidence
-   Correct: validate the working payload in disposable origin clones, commit the
-            all-pass ledger, merge, let main CI tag that exact commit, then refresh
-            consumers in explicit fast-canary priority order
+   Correct: prepare and validate the working payload in disposable origin clones,
+            commit the all-pass ledger, merge, let main CI tag that exact commit,
+            then refresh consumers in explicit fast-canary priority order
    ```
 
 ## Manifest Path Safety
@@ -768,6 +778,60 @@ Wrong: delete sd-fleet-refresh from COMMAND_NAMES and hand-maintain root copies
 Correct: generate it from COMMAND_NAMES, exclude it via SOURCE_ONLY_COMMAND_NAMES,
          retire vouched consumer copies, and preserve the verified source checkout
 ```
+
+## Read-Only Status And Housekeeping Delegation
+
+`templates/scripts/sd-ai-command-pack-status.py` is the canonical collector for
+repository delivery status. Its root `scripts/` twin must remain byte-identical
+and the manifest ships it to consumers. The shared
+`sd_ai_command_pack_fleet_lib.py` template and root twin are also shipped so
+manifest parsing and machine-profile resolution remain one contract. Local and
+positional `fleet` modes are available in every installed repository.
+
+Fleet topology, rollout policy, candidate commands, and release evidence stay
+checked into the canonical source checkout. Machine-specific discovery uses a
+schema-versioned profile at `$XDG_CONFIG_HOME/sd-ai-command-pack/config.json`
+or `~/.config/sd-ai-command-pack/config.json`, with
+`SD_AI_COMMAND_PACK_FLEET_CONFIG` as an advanced path override. Profile schema
+version 1 contains required `packSource`, optional `fleetManifest`, and optional
+string `pathOverrides` keyed by consumer name. It must not duplicate rollout
+policy.
+
+Fleet resolution precedence is public `--fleet-manifest`,
+`SD_AI_COMMAND_PACK_FLEET_MANIFEST`, the machine profile, then the current
+canonical source checkout. The resolved pack manifest must identify
+`sd-ai-command-pack` and provide the target version. Missing, malformed, moved,
+or stale configuration fails with a controlled remedy rather than silently
+using a guessed fleet. Unknown checkout overrides fail as stale profile data.
+
+`install.py --configure-fleet` is the only pack-owned writer for this profile.
+It is opt-in, validates existing configuration before repository writes,
+preserves checkout overrides, writes atomically with owner-only permissions,
+honors `--dry-run`, and is incompatible with inspection or removal modes.
+Ordinary installs and all status modes must not mutate user-global state.
+
+The collector is read-only: it may inspect Git, optional GitHub metadata,
+Trellis task JSON, and local version receipts, but must never fetch, pull,
+switch, stage, commit, push, merge, delete branches, or modify task state.
+Ref-derived remote facts are labelled `cached` unless the trusted housekeeping
+caller supplies the internal refreshed-ref attestation. Human output stays
+bounded; `--json` exposes schema version 1 for complete structured detail.
+Ordinary dirty, stale, missing, behind, or diverged observations are advisory
+and do not change a successful report's exit status. Invalid repositories or
+fleet configuration fail, and internal `--expect-clean` fails when cleanup
+invariants or prior housekeeping anomalies remain.
+
+Housekeeping owns mutation and merge safety only. After its action log, it must
+invoke the sibling status collector through the sibling toolchain resolver and
+pass cleanup context as argv values. Status owns final Git comparison,
+GitHub/Trellis inventory, anomalies, and numbered next steps. Do not reintroduce
+parallel expected-state or inventory collectors in the Bash script.
+
+Required tests cover clean, dirty, detached, diverged, unavailable-tool,
+strict-cleanup, no-write, fleet-order, stale-version, missing-checkout, source
+identity, explicit/environment/profile/source precedence, path overrides,
+missing/malformed/moved profiles, atomic profile updates, adapter parity,
+installer lifecycle, and housekeeping merge/cleanup integration behavior.
 
 ## Source Checkout Dogfood Drift Gates
 

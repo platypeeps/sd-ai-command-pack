@@ -58,7 +58,7 @@ class FleetPreflightTests(InstallTestCase):
         fleet_manifest.write_text(
             json.dumps(
                 {
-                    "schemaVersion": 2,
+                    "schemaVersion": 3,
                     "consumers": [
                         {
                             "name": "at-target",
@@ -67,6 +67,7 @@ class FleetPreflightTests(InstallTestCase):
                             "platforms": ["claude", "github"],
                             "rolloutPriority": 10,
                             "candidateTimeoutSeconds": 60,
+                            "candidatePrepare": [["bash", "prepare.sh"]],
                             "candidateChecks": [["node", "check.mjs"]],
                         },
                         {
@@ -76,6 +77,7 @@ class FleetPreflightTests(InstallTestCase):
                             "platforms": ["claude", "github"],
                             "rolloutPriority": 20,
                             "candidateTimeoutSeconds": 60,
+                            "candidatePrepare": [],
                             "candidateChecks": [["bash", "check.sh"]],
                         },
                         {
@@ -85,6 +87,7 @@ class FleetPreflightTests(InstallTestCase):
                             "platforms": ["claude", "github"],
                             "rolloutPriority": 30,
                             "candidateTimeoutSeconds": 60,
+                            "candidatePrepare": [["python3", "prepare.py"]],
                             "candidateChecks": [["python3", "check.py"]],
                         },
                     ],
@@ -121,6 +124,13 @@ class FleetPreflightTests(InstallTestCase):
             self.assertIn("gemini", consumer.platforms)
             self.assertIn("github", consumer.platforms)
             self.assertIn("opencode", consumer.platforms)
+
+        expected_map_prepare = (("bash", "scripts/update_repomix"),)
+        for name, consumer in by_slug.items():
+            if name == "platypeeps/se-ai-command-pack":
+                self.assertEqual(consumer.candidate_prepare, ())
+            else:
+                self.assertEqual(consumer.candidate_prepare, expected_map_prepare)
 
         self.assertEqual(
             [consumer.name for consumer in consumers],
@@ -207,6 +217,7 @@ class FleetPreflightTests(InstallTestCase):
         self.assertEqual(payload[2]["status"], "missing-local-clone")
         self.assertEqual(payload[0]["targetVersion"], "0.8.5")
         self.assertEqual(payload[0]["rolloutPriority"], 10)
+        self.assertEqual(payload[0]["candidatePrepare"], [["bash", "prepare.sh"]])
         self.assertEqual(payload[0]["candidateChecks"], [["node", "check.mjs"]])
 
     def test_main_rejects_unknown_consumer(self) -> None:
@@ -285,7 +296,7 @@ class FleetPreflightTests(InstallTestCase):
         fleet_manifest.write_text(
             json.dumps(
                 {
-                    "schemaVersion": 2,
+                    "schemaVersion": 3,
                     "consumers": [
                         {
                             "name": "duplicate",
@@ -294,6 +305,7 @@ class FleetPreflightTests(InstallTestCase):
                             "platforms": ["github", "github"],
                             "rolloutPriority": 10,
                             "candidateTimeoutSeconds": 60,
+                            "candidatePrepare": [],
                             "candidateChecks": [["node", "check.mjs"]],
                         },
                     ],
@@ -316,7 +328,7 @@ class FleetPreflightTests(InstallTestCase):
         fleet_manifest.write_text(
             json.dumps(
                 {
-                    "schemaVersion": 2,
+                    "schemaVersion": 3,
                     "consumers": [
                         {
                             "name": "unsafe",
@@ -325,6 +337,7 @@ class FleetPreflightTests(InstallTestCase):
                             "platforms": ["github"],
                             "rolloutPriority": 10,
                             "candidateTimeoutSeconds": 60,
+                            "candidatePrepare": [],
                             "candidateChecks": ["node check.mjs"],
                         }
                     ],
