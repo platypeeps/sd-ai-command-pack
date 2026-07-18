@@ -664,7 +664,7 @@ def _recent_pull_requests(
     query = """
 query($owner:String!, $name:String!, $endCursor:String) {
   repository(owner:$owner, name:$name) {
-    pullRequests(first:100, after:$endCursor, orderBy:{field:UPDATED_AT, direction:DESC}) {
+    pullRequests(first:100, after:$endCursor, states:[OPEN,MERGED,CLOSED], orderBy:{field:UPDATED_AT, direction:DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes { number title url updatedAt }
     }

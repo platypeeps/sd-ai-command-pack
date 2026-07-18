@@ -130,6 +130,13 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertEqual(window.prs_inspected, 1)
         self.assertFalse(window.truncated)
         self.assertEqual(len(window.comments), 1)
+        inventory_query = next(
+            value
+            for call in calls
+            for value in call
+            if value.startswith("query=") and "pullRequests(first:100" in value
+        )
+        self.assertIn("states:[OPEN,MERGED,CLOSED]", inventory_query)
         self.assertTrue(
             any("endCursor=page-2" in call for call in calls),
             calls,
