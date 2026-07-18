@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 136
+- **Total Sessions**: 137
 - **Last Active**: 2026-07-18
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1386 | Active |
+| `journal-3.md` | ~1423 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 137 | 2026-07-18 | Narrow structured input split detection | `8d8c419`, `f1e7c13`, `d18c03f`, `4637059`, `81529a1` | `codex/narrow-split-risk-detection` |
 | 136 | 2026-07-18 | Pre-PR review workflow hardening | `821deab`, `748554b` | `codex/reduce-review-churn` |
 | 135 | 2026-07-17 | Portable status and fleet candidate release | `daa2f6d`, `da885c0`, `8675467`, `af12edf` | `codex/portable-fleet-status` |
 | 134 | 2026-07-17 | Ship sd-help command | `d5b2e1c`, `3d6db89`, `df1f98f` | `main` |

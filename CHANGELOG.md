@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.12 - 2026-07-18
+
+- Narrow the first-review structured-input advisory so routine string
+  `.split(...)` calls do not trigger it, while direct CLI argument,
+  environment-value, and file-content splits remain covered.
+
 ## 0.19.11 - 2026-07-18
 
 - Compare review-size and added-code risk advisories from the branch merge

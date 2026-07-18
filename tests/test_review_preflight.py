@@ -94,6 +94,40 @@ assert.deepEqual(
     'digest/integrity framing',
   ],
 );
+assert.deepEqual(reviewRiskCategories("const words = label.split(' ');"), []);
+assert.deepEqual(reviewRiskCategories("words = read_text(value).split(' ')"), []);
+assert.deepEqual(
+  reviewRiskCategories("const values = process.argv[2].split(',');"),
+  ['parser/structured input'],
+);
+assert.deepEqual(
+  reviewRiskCategories("const values = process.env.VALUES?.split(',');"),
+  ['parser/structured input', 'environment/global state'],
+);
+assert.deepEqual(
+  reviewRiskCategories("values = os.getenv('VALUES', default_values()).split(',')"),
+  ['parser/structured input', 'environment/global state'],
+);
+assert.deepEqual(
+  reviewRiskCategories("values = os.environ.get('VALUES', default_values()).split(',')"),
+  ['parser/structured input', 'environment/global state'],
+);
+assert.deepEqual(
+  reviewRiskCategories("const values = readFileSync(path, 'utf8').split('\\n');"),
+  ['parser/structured input', 'path/filesystem boundary'],
+);
+assert.deepEqual(
+  reviewRiskCategories("const values = readFileSync(resolve(root, name), 'utf8').split('\\n');"),
+  ['parser/structured input', 'path/filesystem boundary'],
+);
+assert.deepEqual(
+  reviewRiskCategories("const values = fs.readFileSync(resolve(root, name), 'utf8').split('\\n');"),
+  ['parser/structured input', 'path/filesystem boundary'],
+);
+assert.deepEqual(
+  reviewRiskCategories("values = Path(resolve(root, name)).read_text(encoding='utf8').split('\\n')"),
+  ['parser/structured input', 'path/filesystem boundary'],
+);
 assert.deepEqual(parseTrellisTaskArtifactPath('.trellis/tasks/07-17-demo/check.jsonl'), {
   taskDir: '.trellis/tasks/07-17-demo',
   artifact: 'check.jsonl',
@@ -348,6 +382,34 @@ assert.deepEqual(
             r"WARN .* changes \d+ authored source line\(s\) across \d+ file\(s\)",
         )
         self.assertIn("changes 2 Trellis task directories", result.stdout)
+
+    def test_review_preflight_ignores_routine_string_split(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        source = root / "templates/scripts/split_fixture.mjs"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(
+            "export const words = (label) => label.split(' ');\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("parser/structured input", result.stdout)
+        self.assertRegex(
+            result.stdout,
+            r"PASS checked \d+ changed code path\(s\); no boundary-risk trigger was added",
+        )
 
     def test_review_preflight_ignores_upstream_only_changes_behind_base(self) -> None:
         node = shutil.which("node")
