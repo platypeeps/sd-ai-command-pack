@@ -1274,3 +1274,43 @@ Separated sd-ship publication from its authoritative review stage through a priv
 ### Next Steps
 
 - None - task complete
+
+
+## Session 134: Ship sd-help command
+
+**Date**: 2026-07-17
+**Task**: Ship sd-help command
+**Branch**: `main`
+
+### Summary
+
+Added and released the discoverable read-only sd-help command, converged Copilot review, and validated the 0.18.0 candidate across the fleet.
+
+### Main Changes
+
+- Added registry-backed sd-help discovery, explanations, comparisons, recommendations, examples, and onboarding tour across supported platform adapters.
+- Generated the help catalog and shared reference fanout from validated command metadata, including nested reference ownership coverage.
+- Hardened fleet candidate validation with ordered generated-map refreshes and forced disposable tool caches.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d5b2e1c` | feat: add discoverable sd-help command |
+| `3d6db89` | release: prepare sd-ai-command-pack 0.18.0 |
+| `df1f98f` | fix: address Copilot review feedback round 1 |
+
+### Testing
+
+- [OK] make check
+- [OK] Full 0.18.0 candidate validation passed all seven configured consumers
+- [OK] Copilot round 2 completed with no new comments; all CI checks passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
