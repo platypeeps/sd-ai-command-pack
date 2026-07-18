@@ -1235,10 +1235,20 @@ function currentDiffSources(...kindArgs) {
 
 function reviewBaselineRef() {
   const baseRef = defaultReviewBaseRef();
-  if (baseRef) {
+  if (!baseRef) {
+    return gitRefExists('HEAD') ? 'HEAD' : '';
+  }
+  if (!gitRefExists('HEAD')) {
     return baseRef;
   }
-  return gitRefExists('HEAD') ? 'HEAD' : '';
+
+  const mergeBase = gitStdout(['merge-base', baseRef, 'HEAD']);
+  if (gitRefExists(mergeBase)) {
+    return mergeBase;
+  }
+
+  warn(`could not resolve the merge base of ${baseRef} and HEAD; falling back to ${baseRef}.`);
+  return baseRef;
 }
 
 function currentUntrackedPaths() {

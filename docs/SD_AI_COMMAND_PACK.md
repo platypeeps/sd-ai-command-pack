@@ -1051,7 +1051,10 @@ ephemeral tool state and do not change what the checks validate.
 - `SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF`: explicit base ref for the
   JavaScript review-preflight branch-diff probes. Defaults to
   `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then the discovered branch-diff
-  sequence above.
+  sequence above. Review size and added-code risk probes compare the working
+  tree with the merge base of this ref and `HEAD`, so upstream-only changes do
+  not inflate the advisory. If no merge base exists, the preflight warns and
+  conservatively falls back to the configured or discovered base ref.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT=0`: skip
   repo-local review preflight.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT=required`: fail if no configured
