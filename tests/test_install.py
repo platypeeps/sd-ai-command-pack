@@ -16,6 +16,7 @@ _LOCAL_TEST_MODULES = {
     "test_review_local",
     "test_review_preflight",
     "test_review_scope",
+    "test_status",
     "test_update_spec_kb",
 }
 
@@ -33,6 +34,7 @@ try:
     from test_review_local import ReviewLocalTests
     from test_review_preflight import ReviewPreflightTests
     from test_review_scope import ReviewScopeTests
+    from test_status import StatusTests
     from test_update_spec_kb import UpdateSpecKbTests
 except ModuleNotFoundError as exc:
     if not __package__ or exc.name not in _LOCAL_TEST_MODULES:
@@ -50,6 +52,7 @@ except ModuleNotFoundError as exc:
     from .test_review_local import ReviewLocalTests
     from .test_review_preflight import ReviewPreflightTests
     from .test_review_scope import ReviewScopeTests
+    from .test_status import StatusTests
     from .test_update_spec_kb import UpdateSpecKbTests
 
 
@@ -65,6 +68,7 @@ class InstallTests(
     ReviewLearningsTests,
     UpdateSpecKbTests,
     ReviewScopeTests,
+    StatusTests,
     RecordSessionTests,
     HousekeepingTests,
     PackDriftTests,

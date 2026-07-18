@@ -1634,7 +1634,10 @@ class InstallAuditTests(InstallTestCase):
             if path.is_file() and path.name.startswith("sd-ai-command-pack-")
         )
         self.assertTrue(current_scripts)
-        post_rename_scripts = {"sd-ai-command-pack-toolchain.sh"}
+        post_rename_scripts = {
+            "sd-ai-command-pack-status.py",
+            "sd-ai-command-pack-toolchain.sh",
+        }
         self.assertLessEqual(post_rename_scripts, set(current_scripts))
         for name in current_scripts:
             if name in post_rename_scripts:

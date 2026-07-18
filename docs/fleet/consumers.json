@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "description": "Known sd-ai-command-pack consumer repositories for operator-triggered fleet refreshes.",
   "consumers": [
     {
@@ -9,6 +9,7 @@
       "platforms": ["claude", "gemini", "github", "opencode"],
       "rolloutPriority": 10,
       "candidateTimeoutSeconds": 180,
+      "candidatePrepare": [["bash", "scripts/update_repomix"]],
       "candidateChecks": [["node", "scripts/check-review-churn.mjs"]]
     },
     {
@@ -18,6 +19,7 @@
       "platforms": ["claude", "gemini", "github", "opencode"],
       "rolloutPriority": 20,
       "candidateTimeoutSeconds": 180,
+      "candidatePrepare": [["bash", "scripts/update_repomix"]],
       "candidateChecks": [["bash", "scripts/check_review_readiness.sh", "--all", "--skip-build"]]
     },
     {
@@ -27,10 +29,8 @@
       "platforms": ["claude", "gemini", "github", "opencode"],
       "rolloutPriority": 30,
       "candidateTimeoutSeconds": 180,
-      "candidateChecks": [
-        ["bash", "scripts/update_repomix"],
-        ["node", "scripts/check-review-preflight.mjs"]
-      ]
+      "candidatePrepare": [["bash", "scripts/update_repomix"]],
+      "candidateChecks": [["node", "scripts/check-review-preflight.mjs"]]
     },
     {
       "name": "rwbp-website",
@@ -39,6 +39,7 @@
       "platforms": ["claude", "gemini", "github", "opencode"],
       "rolloutPriority": 40,
       "candidateTimeoutSeconds": 300,
+      "candidatePrepare": [["bash", "scripts/update_repomix"]],
       "candidateChecks": [
         ["node", "scripts/sd-ai-command-pack-review-preflight.mjs"],
         ["node", "scripts/ops-check.mjs"]
@@ -51,6 +52,7 @@
       "platforms": ["claude", "gemini", "github", "opencode"],
       "rolloutPriority": 50,
       "candidateTimeoutSeconds": 300,
+      "candidatePrepare": [["bash", "scripts/update_repomix"]],
       "candidateChecks": [["python3", "scripts/check-review-cycle-patterns.py", "--base", "HEAD", "--include-working-tree"]]
     },
     {
@@ -60,6 +62,7 @@
       "platforms": ["claude", "gemini", "github", "opencode"],
       "rolloutPriority": 60,
       "candidateTimeoutSeconds": 180,
+      "candidatePrepare": [],
       "candidateChecks": [["bash", "scripts/sd-ai-command-pack-housekeeping.sh", "--self-test"]]
     },
     {
@@ -69,6 +72,7 @@
       "platforms": ["claude", "gemini", "github", "opencode"],
       "rolloutPriority": 90,
       "candidateTimeoutSeconds": 300,
+      "candidatePrepare": [["bash", "scripts/update_repomix"]],
       "candidateChecks": [
         ["python3", "tools/check_ci_review_contract.py"],
         ["python3", "tools/check_copilot_instruction_contract.py"]

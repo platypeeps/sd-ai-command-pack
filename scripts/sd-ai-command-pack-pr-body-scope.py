@@ -183,7 +183,7 @@ DEFAULT_RULES = (
             "scripts/sd-ai-command-pack-*.sh",
             "scripts/sd-ai-command-pack-*.py",
             "scripts/sd-ai-command-pack-*.mjs",
-            "scripts/sd_ai_command_pack_lib.py",
+            "scripts/sd_ai_command_pack_*.py",
             "scripts/sd-ai-command-pack-full-check.sh",
             "scripts/sd-ai-command-pack-housekeeping.sh",
         ),

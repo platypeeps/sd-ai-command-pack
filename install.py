@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 from installer import (
     fileops,
@@ -182,6 +184,7 @@ __all__ = [
     "_validate_registry_group_orders",
     "atomic_write_bytes",
     "display_path",
+    "configure_fleet_profile",
     "ensure_local_only_exclude",
     "ensure_trellis_for_local_only",
     "fileops",
@@ -251,6 +254,27 @@ class ManifestVersionAction(argparse.Action):
         parser.exit()
 
 
+def configure_fleet_profile(
+    pack_source: Path,
+    *,
+    dry_run: bool,
+) -> Any:
+    scripts_dir = str((pack_source / "scripts").resolve())
+    inserted = scripts_dir not in sys.path
+    if inserted:
+        sys.path.insert(0, scripts_dir)
+    try:
+        fleet = importlib.import_module("sd_ai_command_pack_fleet_lib")
+    except ImportError as error:
+        raise ValueError(
+            "fleet helper is missing from the pack source; refresh the checkout"
+        ) from error
+    finally:
+        if inserted:
+            sys.path.remove(scripts_dir)
+    return fleet.configure_fleet_profile(pack_source, dry_run=dry_run)
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Install SD AI command pack shared assets and command adapters."
@@ -312,6 +336,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Install all adapters even if platform directories or active Trellis "
             "markers are not present."
+        ),
+    )
+    parser.add_argument(
+        "--configure-fleet",
+        action="store_true",
+        help=(
+            "Create or update the machine-local fleet profile so installed "
+            "sd-status commands can find this pack checkout and its fleet "
+            "manifest. Existing checkout path overrides are preserved."
         ),
     )
     parser.add_argument(
@@ -383,6 +416,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             for option, enabled in (
                 ("--platform", bool(args.platform)),
                 ("--all", args.all),
+                ("--configure-fleet", args.configure_fleet),
                 ("--remove", args.remove),
                 ("--force", args.force),
                 ("--backup", args.backup),
@@ -398,6 +432,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                 f"{('--check' if args.check else '--status')} cannot be combined "
                 f"with {', '.join(incompatible)}"
             )
+    if args.remove and args.configure_fleet:
+        parser.error("--remove cannot be combined with --configure-fleet")
     return args
 
 
@@ -663,6 +699,13 @@ def main(argv: list[str] | None = None) -> int:
     manifest_data, files = load_manifest()
 
     validate_manifest(files)
+    fleet_profile_plan = None
+    if args.configure_fleet:
+        try:
+            fleet_profile_plan = configure_fleet_profile(ROOT, dry_run=True)
+        except ValueError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
     if args.status or args.check:
         return _run_inspection(args, target, manifest_data, files)
     if args.remove:
@@ -807,6 +850,15 @@ def main(argv: list[str] | None = None) -> int:
         diff_status = run_diff_check(target, diff_paths)
         if diff_status != 0:
             return diff_status
+
+    if args.configure_fleet:
+        assert fleet_profile_plan is not None
+        profile = (
+            fleet_profile_plan
+            if args.dry_run
+            else configure_fleet_profile(ROOT, dry_run=False)
+        )
+        print(f"{profile.status:29} fleet profile {profile.path}")
 
     return 0
 

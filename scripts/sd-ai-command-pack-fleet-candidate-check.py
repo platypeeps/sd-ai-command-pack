@@ -258,6 +258,26 @@ def validate_consumer(
             duration_seconds=time.monotonic() - started,
         )
 
+    for prepare_index, command in enumerate(consumer.candidate_prepare, start=1):
+        prepare_result = run_command(
+            command,
+            cwd=checkout,
+            timeout_seconds=consumer.candidate_timeout_seconds,
+            env=env,
+        )
+        if prepare_result.returncode != 0:
+            return CandidateResult(
+                consumer=consumer,
+                status="failed",
+                base_commit=base_commit,
+                detail=concise_failure(
+                    f"candidate preparation {prepare_index}",
+                    command,
+                    prepare_result,
+                ),
+                duration_seconds=time.monotonic() - started,
+            )
+
     for check_index, command in enumerate(consumer.candidate_checks, start=1):
         check_result = run_command(
             command,
@@ -280,7 +300,11 @@ def validate_consumer(
         consumer=consumer,
         status="passed",
         base_commit=base_commit,
-        detail=f"install, audit, and {len(consumer.candidate_checks)} check(s) passed",
+        detail=(
+            "install, audit, "
+            f"{len(consumer.candidate_prepare)} preparation(s), and "
+            f"{len(consumer.candidate_checks)} check(s) passed"
+        ),
         duration_seconds=time.monotonic() - started,
     )
 
@@ -320,6 +344,9 @@ def ledger_content(
                 "github": result.consumer.github,
                 "baseCommit": result.base_commit,
                 "status": result.status,
+                "prepares": [
+                    list(command) for command in result.consumer.candidate_prepare
+                ],
                 "checks": [list(command) for command in result.consumer.candidate_checks],
             }
             for result in results

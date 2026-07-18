@@ -13,6 +13,23 @@ REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd -- "$REPO_ROOT" || exit 1
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+# Shipped helpers invoked through the toolchain resolver during tests must use
+# the same interpreter as coverage. Otherwise a consumer fixture without its
+# own venv can select a different Homebrew Python whose sitecustomize cannot
+# import this run's coverage dependency.
+if [ -z "${SD_AI_COMMAND_PACK_PYTHON:-}" ]; then
+  case "$PYTHON_BIN" in
+    /*) toolchain_python="$PYTHON_BIN" ;;
+    */*)
+      toolchain_python="$(
+        cd -- "$(dirname -- "$PYTHON_BIN")" &&
+          printf '%s/%s\n' "$PWD" "$(basename -- "$PYTHON_BIN")"
+      )"
+      ;;
+    *) toolchain_python="$(command -v -- "$PYTHON_BIN")" ;;
+  esac
+  export SD_AI_COMMAND_PACK_PYTHON="$toolchain_python"
+fi
 
 if [ -n "${TEST_WORKERS:-}" ]; then
   case "$TEST_WORKERS" in

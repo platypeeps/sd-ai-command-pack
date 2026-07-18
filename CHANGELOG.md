@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.19.0 - 2026-07-17
+
+- Add the read-only `sd-status` command across supported adapters, with bounded
+  local reports, portable fleet aggregation, explicit cached/refreshed
+  ref labels, schema-versioned JSON, pack/Trellis version visibility, and
+  evidence-backed numbered next steps.
+- Ship the fleet parser to consumers and add an opt-in machine-local profile so
+  `sd-status fleet` can locate canonical versioned fleet policy from any
+  installed repository while preserving per-machine checkout path overrides.
+- Add `install.py --configure-fleet` with dry-run, profile validation, atomic
+  writes, and preservation of existing checkout overrides; ordinary installs
+  and status collection remain free of user-global side effects.
+- Make housekeeping delegate final Git, GitHub, Trellis, anomaly, and next-step
+  reporting to the shared status collector in strict mode while preserving its
+  existing merge and cleanup safety gates.
+
 ## 0.18.0 - 2026-07-17
 
 - Add the read-only `sd-help` command across supported adapters, with

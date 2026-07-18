@@ -12,8 +12,9 @@ Install reusable AI workflow helpers into
 [Trellis-managed repositories](https://trytrellis.app/). The current pack is
 focused on Trellis enrichment: start, continue, finish-work, local review, PR
 creation/review, full-codebase local review, review learnings, full-check,
-post-merge housekeeping, update-spec, backlog implementation, and backlog
-design workflows. The repository and `sd` command namespace are intentionally
+read-only repository/fleet status, post-merge housekeeping, update-spec,
+backlog implementation, and backlog design workflows. The repository and `sd`
+command namespace are intentionally
 broader than that initial scope, so future skills, commands, scripts, docs, or
 rules may cover adjacent AI workflow support that is not strictly
 Trellis-specific.
@@ -101,6 +102,36 @@ Examples:
 Use the native form exposed by the current platform, such as `/sd:help`,
 `/sd-help`, `sd/help`, or `$sd-help`. Run the recommended command only in a
 separate explicit request.
+
+### sd-status
+
+Reports repository delivery state without changing it: branch and working-tree
+counts, cached upstream divergence, pack/Trellis versions, GitHub PR and issue
+inventory, current/open Trellis work, anomalies, and numbered next steps. Use
+`fleet` from any installed checkout to collect a rollout-priority summary for
+every configured consumer after creating the machine-local fleet profile.
+
+```text
+/sd:status
+/sd:status --no-network
+/sd:status fleet
+/sd:status fleet --json
+```
+
+Configure that profile once from the canonical pack checkout (or repeat after
+moving it):
+
+```bash
+python3 install.py /path/to/a/consumer --configure-fleet
+```
+
+Fleet topology and rollout policy remain versioned in
+`docs/fleet/consumers.json`; the user profile only locates that source and may
+override local checkout paths.
+
+Ordinary status does not fetch, so it labels refs `cached`. Housekeeping passes
+the `refreshed` label after its fetch/prune and delegates its final verification
+to the same collector. The command's `--json` output uses schema version 1.
 
 ### sd-start
 
@@ -245,6 +276,8 @@ repo-local `.obsidian-kb/` copy folder.
 Ends a development stream by running finish-work before merge, merging only when
 the PR is clean and comment-free, then switching to the default branch,
 fast-forwarding, deleting merged refs, and reporting the final clean state.
+The cleanup script delegates final Git/GitHub/Trellis inventory, anomaly
+classification, and next steps to `sd-status` in strict mode.
 
 ## Configuration Quick Reference
 

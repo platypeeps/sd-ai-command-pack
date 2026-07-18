@@ -33,7 +33,14 @@ class FleetCandidateTests(InstallTestCase):
             "sd_ai_command_pack_fleet_candidate",
         )
 
-    def consumer(self, candidate, path_hint: Path, *, name: str = "fixture"):
+    def consumer(
+        self,
+        candidate,
+        path_hint: Path,
+        *,
+        name: str = "fixture",
+        prepare: bool = True,
+    ):
         return candidate.FleetConsumer(
             name=name,
             github=f"example/{name}",
@@ -41,6 +48,9 @@ class FleetCandidateTests(InstallTestCase):
             platforms=("github",),
             rollout_priority=10,
             candidate_timeout_seconds=60,
+            candidate_prepare=(
+                ((sys.executable, "prepare.py"),) if prepare else ()
+            ),
             candidate_checks=((sys.executable, "check.py"),),
         )
 
@@ -49,7 +59,7 @@ class FleetCandidateTests(InstallTestCase):
         path.write_text(
             json.dumps(
                 {
-                    "schemaVersion": 2,
+                    "schemaVersion": 3,
                     "consumers": [
                         {
                             "name": "fixture",
@@ -58,6 +68,7 @@ class FleetCandidateTests(InstallTestCase):
                             "platforms": ["github"],
                             "rolloutPriority": 10,
                             "candidateTimeoutSeconds": 60,
+                            "candidatePrepare": [[sys.executable, "prepare.py"]],
                             "candidateChecks": [[sys.executable, "check.py"]],
                         }
                     ],
@@ -80,9 +91,15 @@ class FleetCandidateTests(InstallTestCase):
         self.run_git(source, "config", "user.name", "Test User")
         (source / ".trellis").mkdir()
         (source / ".trellis/config.yaml").write_text("# fixture\n", encoding="utf-8")
+        (source / "prepare.py").write_text(
+            "from pathlib import Path\n"
+            "Path('prepared-marker').write_text('ok\\n', encoding='utf-8')\n",
+            encoding="utf-8",
+        )
         (source / "check.py").write_text(
             "from pathlib import Path\n"
-            "raise SystemExit(0 if Path('installed-marker').is_file() else 1)\n",
+            "ready = Path('installed-marker').is_file() and Path('prepared-marker').is_file()\n"
+            "raise SystemExit(0 if ready else 1)\n",
             encoding="utf-8",
         )
         self.run_git(source, "add", ".")
@@ -130,7 +147,10 @@ class FleetCandidateTests(InstallTestCase):
         self.assertEqual(result.status, "passed", result.detail)
         self.assertEqual(result.base_commit, expected_commit)
         self.assertFalse((source / "installed-marker").exists())
+        self.assertFalse((source / "prepared-marker").exists())
         self.assertTrue((work_root / "fixture/installed-marker").is_file())
+        self.assertTrue((work_root / "fixture/prepared-marker").is_file())
+        self.assertIn("1 preparation(s)", result.detail)
 
     def test_candidate_commands_do_not_inherit_pack_coverage_state(self) -> None:
         candidate = self.load_candidate_module()
@@ -243,10 +263,19 @@ class FleetCandidateTests(InstallTestCase):
                 command_result(0),
                 command_result(1, "audit failed"),
             ],
+            "candidate preparation": [
+                command_result(0, "origin"),
+                command_result(0),
+                command_result(0, "a" * 40),
+                command_result(0),
+                command_result(0),
+                command_result(1, "prepare failed"),
+            ],
             "candidate check": [
                 command_result(0, "origin"),
                 command_result(0),
                 command_result(0, "a" * 40),
+                command_result(0),
                 command_result(0),
                 command_result(0),
                 command_result(1, "check failed"),
@@ -276,6 +305,23 @@ class FleetCandidateTests(InstallTestCase):
         )
         self.assertEqual(missing.status, "failed")
         self.assertIn("local checkout not found", missing.detail)
+
+        with mock.patch.object(
+            candidate,
+            "run_command",
+            side_effect=[command_result(0, "origin")]
+            + [command_result(0)] * 3
+            + [command_result(0, "audit passed"), command_result(0, "check passed")],
+        ) as run:
+            empty_prepare = candidate.validate_consumer(
+                self.consumer(candidate, source, prepare=False),
+                pack_root=pack,
+                work_root=work,
+                python_executable=Path(sys.executable),
+            )
+        self.assertEqual(empty_prepare.status, "passed", empty_prepare.detail)
+        self.assertEqual(run.call_count, 6)
+        self.assertIn("0 preparation(s)", empty_prepare.detail)
 
     def test_validate_consumer_terminates_clone_options_before_origin(self) -> None:
         candidate = self.load_candidate_module()
@@ -359,6 +405,11 @@ class FleetCandidateTests(InstallTestCase):
                 results=[result],
             ),
         )
+        ledger_payload = json.loads(ledger.read_text(encoding="utf-8"))
+        self.assertEqual(
+            ledger_payload["consumers"][0]["prepares"],
+            [[sys.executable, "prepare.py"]],
+        )
 
         self.assertEqual(
             candidate.check_ledger(
@@ -387,43 +438,55 @@ class FleetCandidateTests(InstallTestCase):
             "platforms": ["github"],
             "rolloutPriority": 10,
             "candidateTimeoutSeconds": 60,
+            "candidatePrepare": [],
             "candidateChecks": [["node", "check.mjs"]],
         }
+        missing_prepare = dict(valid)
+        missing_prepare.pop("candidatePrepare")
         invalid_manifests = [
             {},
-            {"schemaVersion": 2, "consumers": []},
-            {"schemaVersion": 2, "consumers": ["bad"]},
-            {"schemaVersion": 2, "consumers": [{**valid, "name": ""}]},
-            {"schemaVersion": 2, "consumers": [{**valid, "name": ".."}]},
-            {"schemaVersion": 2, "consumers": [{**valid, "name": "../escape"}]},
-            {"schemaVersion": 2, "consumers": [{**valid, "name": "nested/name"}]},
-            {"schemaVersion": 2, "consumers": [{**valid, "name": "nested\\name"}]},
-            {"schemaVersion": 2, "consumers": [{**valid, "name": "/absolute"}]},
+            {"schemaVersion": 3, "consumers": []},
+            {"schemaVersion": 3, "consumers": ["bad"]},
+            {"schemaVersion": 3, "consumers": [{**valid, "name": ""}]},
+            {"schemaVersion": 3, "consumers": [{**valid, "name": ".."}]},
+            {"schemaVersion": 3, "consumers": [{**valid, "name": "../escape"}]},
+            {"schemaVersion": 3, "consumers": [{**valid, "name": "nested/name"}]},
+            {"schemaVersion": 3, "consumers": [{**valid, "name": "nested\\name"}]},
+            {"schemaVersion": 3, "consumers": [{**valid, "name": "/absolute"}]},
             {
-                "schemaVersion": 2,
+                "schemaVersion": 3,
                 "consumers": [valid, {**valid, "name": "FIXTURE", "rolloutPriority": 20}],
             },
-            {"schemaVersion": 2, "consumers": [{**valid, "github": "fixture"}]},
-            {"schemaVersion": 2, "consumers": [{**valid, "rolloutPriority": 0}]},
+            {"schemaVersion": 3, "consumers": [{**valid, "github": "fixture"}]},
+            {"schemaVersion": 3, "consumers": [{**valid, "rolloutPriority": 0}]},
             {
-                "schemaVersion": 2,
+                "schemaVersion": 3,
                 "consumers": [valid, {**valid, "name": "two"}],
             },
             {
-                "schemaVersion": 2,
+                "schemaVersion": 3,
                 "consumers": [{**valid, "candidateTimeoutSeconds": 0}],
             },
-            {"schemaVersion": 2, "consumers": [{**valid, "platforms": []}]},
+            {"schemaVersion": 3, "consumers": [{**valid, "platforms": []}]},
             {
-                "schemaVersion": 2,
+                "schemaVersion": 3,
                 "consumers": [{**valid, "platforms": [1]}],
             },
+            {"schemaVersion": 3, "consumers": [missing_prepare]},
             {
-                "schemaVersion": 2,
+                "schemaVersion": 3,
+                "consumers": [{**valid, "candidatePrepare": "python prepare.py"}],
+            },
+            {
+                "schemaVersion": 3,
+                "consumers": [{**valid, "candidatePrepare": [[""]]}],
+            },
+            {
+                "schemaVersion": 3,
                 "consumers": [{**valid, "candidateChecks": []}],
             },
             {
-                "schemaVersion": 2,
+                "schemaVersion": 3,
                 "consumers": [{**valid, "candidateChecks": [[""]]}],
             },
         ]
@@ -433,7 +496,7 @@ class FleetCandidateTests(InstallTestCase):
                     fleet_lib.parse_fleet_consumers(manifest)
 
         consumer = fleet_lib.parse_fleet_consumers(
-            {"schemaVersion": 2, "consumers": [valid]}
+            {"schemaVersion": 3, "consumers": [valid]}
         )[0]
         malformed_ledger = {
             "schemaVersion": 0,
@@ -475,6 +538,7 @@ class FleetCandidateTests(InstallTestCase):
             "github does not match",
             "status",
             "baseCommit",
+            "prepares do not match",
             "checks do not match",
         ):
             self.assertTrue(any(expected in error for error in errors), (expected, errors))

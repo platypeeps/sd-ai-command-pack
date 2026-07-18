@@ -1717,6 +1717,10 @@ class GeneratedParityTests(InstallTestCase):
             elif "review-learnings" in file.target.name:
                 self.assertIn("Resolve the `sd-review-learnings` skill by name", content)
                 self.assertIn("scripts/sd-ai-command-pack-review-learnings.py", content)
+            elif "status" in file.target.name:
+                self.assertIn("Resolve the `sd-status` skill by name", content)
+                self.assertIn("scripts/sd-ai-command-pack-toolchain.sh", content)
+                self.assertIn("read-only", content)
             else:
                 self.assertIn("Resolve the `sd-review-pr` skill by name", content)
 
@@ -1915,6 +1919,7 @@ class GeneratedParityTests(InstallTestCase):
     def test_gemini_entries_use_namespaced_toml_completion_shape(self) -> None:
         expected_descriptions = {
             "help": "Discover, compare, and understand Software Delivery commands without running the selected workflow.",
+            "status": "Report read-only local repository or configured fleet status with actionable next steps.",
             "start": "Initialize or resume a task using the Trellis start workflow.",
             "continue": "Resume the current Trellis task or workflow state.",
             "finish-work": "Wrap up the current Trellis coding session.",

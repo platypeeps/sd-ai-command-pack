@@ -1538,6 +1538,7 @@ class InstallCoreTests(InstallTestCase):
                     "--remove",
                     "--platform",
                     "--local-only",
+                    "--configure-fleet",
                 ],
             ),
             (
@@ -1570,6 +1571,108 @@ class InstallCoreTests(InstallTestCase):
                         stdout.getvalue(),
                     )
                     self.assertEqual(stderr.getvalue(), "")
+
+    def test_configure_fleet_is_explicit_and_installs_portable_helper(self) -> None:
+        root = self.make_repo()
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-install-fleet-profile-")
+        self.addCleanup(tempdir.cleanup)
+        profile = Path(tempdir.name) / "config.json"
+
+        result = self.run_install(
+            root,
+            "--configure-fleet",
+            extra_env={"SD_AI_COMMAND_PACK_FLEET_CONFIG": str(profile)},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("created", result.stdout)
+        self.assertIn("fleet profile", result.stdout)
+        payload = json.loads(profile.read_text(encoding="utf-8"))
+        self.assertEqual(payload["schemaVersion"], 1)
+        self.assertEqual(Path(payload["packSource"]), PACK_ROOT)
+        self.assertEqual(payload["pathOverrides"], {})
+        self.assertTrue(
+            (root / "scripts/sd_ai_command_pack_fleet_lib.py").is_file()
+        )
+
+    def test_configure_fleet_dry_run_does_not_write_profile(self) -> None:
+        root = self.make_repo()
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-install-fleet-dry-")
+        self.addCleanup(tempdir.cleanup)
+        profile = Path(tempdir.name) / "config.json"
+
+        result = self.run_install(
+            root,
+            "--configure-fleet",
+            "--dry-run",
+            extra_env={"SD_AI_COMMAND_PACK_FLEET_CONFIG": str(profile)},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("planned", result.stdout)
+        self.assertIn("fleet profile", result.stdout)
+        self.assertFalse(profile.exists())
+
+    def test_malformed_fleet_profile_fails_before_install_writes(self) -> None:
+        root = self.make_repo()
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-install-fleet-bad-")
+        self.addCleanup(tempdir.cleanup)
+        profile = Path(tempdir.name) / "config.json"
+        profile.write_text("{broken\n", encoding="utf-8")
+
+        result = self.run_install(
+            root,
+            "--configure-fleet",
+            extra_env={"SD_AI_COMMAND_PACK_FLEET_CONFIG": str(profile)},
+        )
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("fleet profile is not valid", result.stdout)
+        self.assertFalse((root / ".sd-ai-command-pack").exists())
+        self.assertFalse((root / ".gitignore").exists())
+        self.assertEqual(profile.read_text(encoding="utf-8"), "{broken\n")
+
+    def test_configure_fleet_rejects_inspection_and_remove_modes(self) -> None:
+        for args in (
+            ["--status", "--configure-fleet"],
+            ["--check", "--configure-fleet"],
+            ["--remove", "--configure-fleet"],
+        ):
+            with self.subTest(args=args):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as raised:
+                        install.parse_args(args)
+                self.assertEqual(raised.exception.code, 2)
+
+    def test_configure_fleet_lazy_loader_handles_cached_path_and_missing_helper(
+        self,
+    ) -> None:
+        scripts_path = str((PACK_ROOT / "scripts").resolve())
+        update = object()
+        fleet_module = mock.Mock()
+        fleet_module.configure_fleet_profile.return_value = update
+        with mock.patch.object(sys, "path", [scripts_path, *sys.path]), mock.patch.object(
+            install.importlib,
+            "import_module",
+            return_value=fleet_module,
+        ):
+            result = install.configure_fleet_profile(PACK_ROOT, dry_run=True)
+
+        self.assertIs(result, update)
+        fleet_module.configure_fleet_profile.assert_called_once_with(
+            PACK_ROOT,
+            dry_run=True,
+        )
+
+        path_without_scripts = [entry for entry in sys.path if entry != scripts_path]
+        with mock.patch.object(sys, "path", path_without_scripts), mock.patch.object(
+            install.importlib,
+            "import_module",
+            side_effect=ImportError("missing"),
+        ):
+            with self.assertRaisesRegex(ValueError, "fleet helper is missing"):
+                install.configure_fleet_profile(PACK_ROOT, dry_run=True)
+            self.assertNotIn(scripts_path, sys.path)
 
     def test_load_manifest_rejects_malformed_manifests(self) -> None:
         fixtures = Path(tempfile.mkdtemp(prefix="sd-manifest-fixtures-"))
@@ -3184,6 +3287,7 @@ class InstallCoreTests(InstallTestCase):
             f"sd-{command}.md"
             for command in [
                 "help",
+                "status",
                 "start",
                 "continue",
                 "finish-work",

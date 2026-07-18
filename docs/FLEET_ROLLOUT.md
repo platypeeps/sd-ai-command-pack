@@ -5,9 +5,27 @@ This repository tracks the known sd-ai-command-pack consumer fleet in
 an unattended rollout system.
 
 The manifest owns rollout order explicitly. The current fast-first order is
-rwbp-coordinator, loadsmith, hoa-manager, rwbp-website, mezmo_benchmark, then
-anomaly-metric-creator. The first three are the canary group; AMC remains last
-because its CI feedback loop is materially slower.
+rwbp-coordinator, loadsmith, hoa-manager, rwbp-website, mezmo_benchmark,
+se-ai-command-pack, then anomaly-metric-creator. The first three are the canary
+group; AMC remains last because its CI feedback loop is materially slower.
+
+Use the read-only fleet status report before or after rollout activity:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-status.py fleet
+```
+
+The same command can run from an installed consumer after the machine profile
+has been created once with `install.py TARGET --configure-fleet`. That profile
+only locates this checked-in manifest and applies local checkout path overrides;
+it does not replace the versioned fleet policy in this repository.
+
+It preserves the manifest's rollout order and reports checkout availability,
+working-tree/upstream state, installed versus target pack versions, GitHub
+inventory, Trellis work, and numbered next steps. It does not fetch or modify
+consumers, so ref-derived values are labelled `cached`; add `--no-network` for
+a local-only snapshot or `--json` for schema-versioned automation output.
 
 ## Release Candidate Validation
 
@@ -22,24 +40,31 @@ bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
 The validator does not write to active consumer worktrees. It discovers each
 checkout's `origin`, clones the default branch under a temporary directory,
 installs the working pack candidate, runs the install audit, and runs the
-repo-owned lightweight `candidateChecks` declared in the fleet manifest. It
-continues after failures so the report covers the whole fleet, then cleans the
-temporary clones.
+repo-owned `candidatePrepare` phase followed by the lightweight, read-only
+`candidateChecks` declared in the fleet manifest. It continues after failures
+so the report covers the whole fleet, then cleans the temporary clones.
 
-Candidate checks run in declaration order in the same disposable checkout.
-When a repo-owned gate validates generated metadata derived from installed file
-structure, declare that repository's deterministic refresh command immediately
-before the validating check. This keeps candidate validation representative of
-the real rollout without weakening the consumer gate.
+Preparation and checks run in declaration order in the same disposable
+checkout. Preparation is the only repo-owned phase allowed to mutate generated
+artifacts. Every consumer declares `candidatePrepare` explicitly; use an empty
+array when the repository owns no preparation step. When a repo owns a tracked
+structural map, declare its deterministic refresh command in
+`candidatePrepare`, then keep the corresponding preflight in `candidateChecks`
+read-only. This keeps candidate validation representative of the real rollout
+without weakening or hiding mutation inside the consumer gate.
+
+The current six map-owning consumers run `bash scripts/update_repomix` during
+preparation. `se-ai-command-pack` explicitly declares no preparation because
+it owns neither that generator nor `docs/repomix-map.md`.
 The validator supplies disposable npm, uv, and Python bytecode cache paths to
 these commands so local cache permissions cannot make a candidate fail.
 
 A full all-pass run atomically updates
 `docs/fleet/candidate-validation.json`. That ledger is bound to the pack
-version, installable payload, fleet manifest, declared checks, and consumer
-base commits. Release PR/full-check validation and automatic tagging reject a
-missing, stale, partial, or failing ledger. Verify it without running consumer
-commands:
+version, installable payload, fleet manifest, declared preparation and checks,
+and consumer base commits. Release PR/full-check validation and automatic
+tagging reject a missing, stale, partial, or failing ledger. Verify it without
+running consumer commands:
 
 ```bash
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
@@ -60,6 +85,10 @@ python3 scripts/sd-ai-command-pack-fleet-preflight.py
 The target version is read from `manifest.json`. Repos already at that version
 are reported as `at-target` and should be skipped, which prevents duplicate
 empty refresh PRs.
+
+JSON preflight output includes both `candidatePrepare` and `candidateChecks`,
+so orchestration can inspect the complete candidate contract without parsing
+the source manifest independently.
 
 For each repo that needs a refresh, the preflight prints the exact install and
 audit commands. The audit command passes the fleet manifest's explicit platform

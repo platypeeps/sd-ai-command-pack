@@ -39,6 +39,9 @@ class ReleaseLedgerTests(InstallTestCase):
                     "github": consumer.github,
                     "baseCommit": "0" * 40,
                     "status": "passed",
+                    "prepares": [
+                        list(command) for command in consumer.candidate_prepare
+                    ],
                     "checks": [list(command) for command in consumer.candidate_checks],
                 }
                 for consumer in consumers
@@ -67,7 +70,7 @@ class ReleaseLedgerTests(InstallTestCase):
         fleet_path.write_text(
             json.dumps(
                 {
-                    "schemaVersion": 2,
+                    "schemaVersion": 3,
                     "consumers": [
                         {
                             "name": "fixture",
@@ -76,6 +79,7 @@ class ReleaseLedgerTests(InstallTestCase):
                             "platforms": ["github"],
                             "rolloutPriority": 10,
                             "candidateTimeoutSeconds": 60,
+                            "candidatePrepare": [],
                             "candidateChecks": [["node", "check.mjs"]],
                         }
                     ],
