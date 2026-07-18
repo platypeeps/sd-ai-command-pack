@@ -112,6 +112,9 @@ Keep detailed workflow rules in the matching shared skill under
   bounded GraphQL `reviews.totalCount` query. It must not use the length of a
   single paginated REST response; unavailable or malformed totals remain
   explicitly unavailable.
+- Review preflight applies `untrackedFileReadLimitBytes` to both diff sizing and
+  the first-review boundary-risk scan. Oversized untracked code files are never
+  read in full and must be named in an explicit advisory warning.
 
 ### 4. Validation & Error Matrix
 

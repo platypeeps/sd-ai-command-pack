@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.19.10 - 2026-07-18
+
+- Bound first-review risk scanning of untracked code with the existing byte
+  limit and warn when oversized files are skipped.
+
 ## 0.19.9 - 2026-07-18
 
 - Count all review events for the relevant pull request with GitHub GraphQL's

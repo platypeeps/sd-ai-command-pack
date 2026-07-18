@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, lstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -687,8 +687,14 @@ function checkReviewRiskSweep() {
     return;
   }
 
-  const addedText = currentAddedCodeText(codePaths);
-  const categories = reviewRiskCategories(addedText);
+  const addedCode = currentAddedCodeText(codePaths);
+  if (addedCode.oversizedUntrackedPaths.length > 0) {
+    warn(
+      `first-review boundary-risk content scan skipped ${addedCode.oversizedUntrackedPaths.length} oversized untracked code file(s) above ` +
+        `${config.untrackedFileReadLimitBytes} bytes: ${addedCode.oversizedUntrackedPaths.join(', ')}`,
+    );
+  }
+  const categories = reviewRiskCategories(addedCode.text);
   if (categories.length === 0) {
     pass(`checked ${codePaths.length} changed code path(s); no boundary-risk trigger was added.`);
     return;
@@ -1277,22 +1283,56 @@ function currentReviewDiffStats() {
 }
 
 function untrackedAddedLineEstimate(path) {
-  let entry;
-  try {
-    entry = lstatSync(resolve(rootDir, path));
-  } catch {
+  const content = boundedUntrackedFileText(path);
+  if (!content) {
     return null;
   }
 
-  if (!entry.isFile()) {
-    return null;
-  }
-
-  if (entry.size > config.untrackedFileReadLimitBytes) {
+  if (content.oversized) {
     return Math.max(config.largeFileWarningLines + 1, 1);
   }
 
-  return textLineCount(readText(path));
+  return textLineCount(content.text);
+}
+
+function boundedUntrackedFileText(path) {
+  let descriptor;
+  try {
+    const pathEntry = lstatSync(resolve(rootDir, path));
+    if (!pathEntry.isFile()) {
+      return null;
+    }
+
+    descriptor = openSync(resolve(rootDir, path), 'r');
+    const openedEntry = fstatSync(descriptor);
+    if (!openedEntry.isFile()) {
+      return null;
+    }
+    if (openedEntry.size > config.untrackedFileReadLimitBytes) {
+      return { oversized: true, text: '' };
+    }
+
+    const buffer = Buffer.alloc(openedEntry.size);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const count = readSync(descriptor, buffer, bytesRead, buffer.length - bytesRead, bytesRead);
+      if (count === 0) {
+        break;
+      }
+      bytesRead += count;
+    }
+    return { oversized: false, text: buffer.toString('utf8', 0, bytesRead) };
+  } catch {
+    return null;
+  } finally {
+    if (descriptor !== undefined) {
+      try {
+        closeSync(descriptor);
+      } catch {
+        // The scan is advisory; a failed close must not hide its result.
+      }
+    }
+  }
 }
 
 function addedLinesFromDiff(output) {
@@ -1306,6 +1346,7 @@ function addedLinesFromDiff(output) {
 function currentAddedCodeText(codePaths) {
   const baseline = reviewBaselineRef();
   const outputs = [];
+  const oversizedUntrackedPaths = [];
   const diffArgs = ['diff', '--unified=0', '--no-ext-diff', '--no-color'];
   if (baseline) {
     const result = runGit([...diffArgs, baseline, '--', ...codePaths]);
@@ -1323,12 +1364,21 @@ function currentAddedCodeText(codePaths) {
 
   const untracked = new Set(currentUntrackedPaths());
   for (const path of codePaths) {
-    if (untracked.has(path) && isRegularFile(path)) {
-      outputs.push(readText(path));
+    if (!untracked.has(path)) {
+      continue;
+    }
+    const content = boundedUntrackedFileText(path);
+    if (!content) {
+      continue;
+    }
+    if (content.oversized) {
+      oversizedUntrackedPaths.push(path);
+    } else {
+      outputs.push(content.text);
     }
   }
 
-  return outputs.join('\n');
+  return { text: outputs.join('\n'), oversizedUntrackedPaths };
 }
 
 function currentChangedPaths() {

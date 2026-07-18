@@ -1,4 +1,4 @@
-# Fleet Refresh 0.19.9 Design
+# Fleet Refresh 0.19.10 Design
 
 ## Boundaries
 
@@ -53,9 +53,12 @@ review found a pack-owned defect in 0.19.3, so the rollout stopped. The first
 correction merged as 0.19.4 but was not tagged after its squash merge exposed a
 main-push guard defect. Source review then accumulated the complete correction
 into 0.19.8. Coordinator integration review then found a paginated review-count
-defect in that tagged payload, so 0.19.9 must replace the REST page length with
-a bounded GraphQL total and refresh the full-fleet ledger before rollout
-resumes.
+defect in that tagged payload, so 0.19.9 replaced the REST page length with a
+bounded GraphQL total. A late thread on the same coordinator PR then found that
+the sibling first-review risk sweep still read oversized untracked code in
+full. Release 0.19.10 must route both consumers through the same bounded reader,
+emit an explicit skipped-file advisory, and refresh the full-fleet ledger
+before rollout resumes.
 
 ## Verification
 

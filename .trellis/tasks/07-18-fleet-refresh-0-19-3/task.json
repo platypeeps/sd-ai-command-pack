@@ -1,8 +1,8 @@
 {
   "id": "fleet-refresh-0-19-3",
   "name": "fleet-refresh-0-19-3",
-  "title": "Roll out sd-ai-command-pack 0.19.9 to the fleet",
-  "description": "Refresh every stale registered consumer to the corrected pack release 0.19.9 after integration review stopped earlier rollout candidates.",
+  "title": "Roll out sd-ai-command-pack 0.19.10 to the fleet",
+  "description": "Refresh every stale registered consumer to the corrected pack release 0.19.10 after integration review stopped earlier rollout candidates.",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,
@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-07-18",
   "completedAt": null,
-  "branch": "codex/status-review-count-pagination",
+  "branch": "codex/bound-untracked-risk-sweep",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "The rollout began at 0.19.3. Loadsmith PR #90 surfaced a pack-owned file-path resolution defect, and source PRs #154/#155 produced tagged release 0.19.8 after guard and review hardening. Coordinator PR #118 then exposed a second pack-owned sd-status defect: reviewCount used one paginated REST page. The rollout is paused again while 0.19.9 replaces that with a bounded GraphQL total and is validated, merged, and tagged.",
+  "notes": "The rollout began at 0.19.3. Loadsmith PR #90 surfaced a pack-owned file-path resolution defect, and source PRs #154/#155 produced tagged release 0.19.8 after guard and review hardening. Coordinator PR #118 then exposed paginated review-count truncation, fixed and tagged in 0.19.9, followed by a late thread showing the sibling boundary-risk sweep still read oversized untracked code in full. The rollout remains paused while 0.19.10 applies the shared byte limit there with an explicit advisory and is validated, merged, and tagged.",
   "meta": {}
 }
