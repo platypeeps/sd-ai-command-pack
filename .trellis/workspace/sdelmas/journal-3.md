@@ -1208,3 +1208,36 @@ Resumed PR 145 through sd-ship, verified deferred review and no-merge watch beha
 ### Next Steps
 
 - None - task complete
+
+
+## Session 132: Separate create-PR publish and review ownership
+
+**Date**: 2026-07-17
+**Task**: Separate create-PR publish and review ownership
+**Branch**: `codex/separate-create-pr-review-stage`
+
+### Summary
+
+Separated sd-ship publication from its authoritative review stage through a private validated delegation context, preserved standalone sd-create-pr behavior, added contract coverage and documentation, released pack metadata 0.17.0, validated the fleet candidate, created PR #146, and completed a clean Copilot review with green CI.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `34c50ce` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
