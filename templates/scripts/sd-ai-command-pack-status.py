@@ -694,6 +694,8 @@ def collect_local(
         supplied_default=supplied_default,
         refs_refreshed=refs_refreshed,
     )
+    if not git:
+        return None
     slug = github_repo or git.get("github")
     if not isinstance(slug, str) or not GITHUB_SLUG_RE.fullmatch(slug):
         slug = None
@@ -874,14 +876,19 @@ def render_local(report: Mapping[str, Any], *, dry_run: bool) -> None:
 
 def fleet_api() -> Any:
     scripts_dir = Path(__file__).resolve().parent
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
+    scripts_path = str(scripts_dir)
+    inserted = scripts_path not in sys.path
+    if inserted:
+        sys.path.insert(0, scripts_path)
     try:
         import sd_ai_command_pack_fleet_lib as fleet
     except ImportError as error:
         raise RuntimeError(
             "installed fleet helper is missing; refresh sd-ai-command-pack"
         ) from error
+    finally:
+        if inserted:
+            sys.path.remove(scripts_path)
     return fleet
 
 
@@ -1149,7 +1156,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         prior_anomalies=args.prior_anomaly,
     )
     if local_report is None:
-        print(f"error: not a Git repository: {args.repo}", file=sys.stderr)
+        print(f"error: unable to inspect Git repository: {args.repo}", file=sys.stderr)
         return 1
     if args.json:
         print(json.dumps(local_report, indent=2, sort_keys=False))

@@ -246,8 +246,40 @@ class StatusTests(InstallTestCase):
         result = self.run_status(root)
 
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("error: not a Git repository", result.stdout)
+        self.assertIn("error: unable to inspect Git repository", result.stdout)
         self.assertNotIn("Traceback", result.stdout)
+
+    def test_git_status_failure_stops_before_rendering(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        output = io.StringIO()
+
+        with (
+            mock.patch.object(
+                status,
+                "collect_git",
+                return_value=({}, ["git status is unavailable"]),
+            ),
+            contextlib.redirect_stderr(output),
+        ):
+            result = status.main(["--repo", str(root), "--no-network"])
+
+        self.assertEqual(result, 1)
+        self.assertIn("error: unable to inspect Git repository", output.getvalue())
+        self.assertNotIn("Traceback", output.getvalue())
+
+    def test_fleet_helper_import_restores_sys_path(self) -> None:
+        status = self.load_status_module()
+        scripts_path = str(
+            (PACK_ROOT / "templates/scripts").resolve()
+        )
+        original_path = [entry for entry in status.sys.path if entry != scripts_path]
+
+        with mock.patch.object(status.sys, "path", original_path.copy()):
+            fleet = status.fleet_api()
+
+            self.assertEqual(status.sys.path, original_path)
+            self.assertTrue(hasattr(fleet, "resolve_fleet_configuration"))
 
     def test_fleet_report_uses_priority_and_surfaces_stale_and_missing_repos(
         self,
