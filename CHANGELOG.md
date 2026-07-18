@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.19.8 - 2026-07-18
+
+- Run `sd-status` repository discovery from the normalized candidate directory
+  so file arguments do not retain an avoidable dependency on the caller's
+  current working directory.
+- Skip the GitHub commit-to-PR API lookup for traditional two-parent merge
+  commits while preserving fail-closed evidence checks for squash and rebase
+  merges.
+- Preserve the reserved Trellis `archive/` task root as non-task state while
+  continuing to recognize valid `archive/<month>/<task>/` artifacts.
+
+## 0.19.7 - 2026-07-18
+
+- Add a review-preflight byte-size guard for untracked files so very large
+  artifacts are treated as large diffs without loading the full file into
+  memory just to count lines.
+
+## 0.19.6 - 2026-07-18
+
+- Add explicit review-preflight regression coverage for Markdown and code-span
+  documentation references that use `path.md:line` and `path:line:column`
+  anchors.
+
+## 0.19.5 - 2026-07-18
+
+- Resolve `sd-status --repo` when callers pass relative files or other
+  non-directory paths inside a Git checkout by probing the parent directory
+  before `git -C`. Paths whose parent cannot be used as a repository still
+  fail cleanly.
+- Clarify first-time fleet profile creation by documenting the intentional
+  missing-file path instead of leaving an empty exception block.
+
 ## 0.19.4 - 2026-07-18
 
 - Resolve repository status correctly when `--repo` names a file within a Git

@@ -104,6 +104,7 @@ assert.deepEqual(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/07
   artifact: 'implement.jsonl',
   archived: true,
 });
+assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/task.json'), null);
 assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/07-17-demo/prd.md'), null);
 assert.deepEqual(findTrellisTaskContextSeedRows('check.jsonl', [
   '{"file":"spec.md","reason":"real"}',
@@ -347,6 +348,43 @@ assert.deepEqual(
             r"WARN .* changes \d+ authored source line\(s\) across \d+ file\(s\)",
         )
         self.assertIn("changes 2 Trellis task directories", result.stdout)
+
+    def test_review_preflight_size_checks_large_untracked_file_without_reading_it(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        config = root / ".sd-ai-command-pack/review-preflight.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "largeFileWarningLines": 3,
+                    "untrackedFileReadLimitBytes": 8,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (root / "docs/large-untracked.md").write_text(
+            "this is one long line that should not be counted exactly",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "includes a large file diff (4 lines): docs/large-untracked.md",
+            result.stdout,
+        )
 
     def test_review_preflight_fails_hard_when_git_cannot_run(self) -> None:
         # Regression: a git spawn failure (missing binary, buffer overflow)
@@ -1051,8 +1089,12 @@ assert.deepEqual(
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
 
+        (root / "docs/current.md").write_text("# Current\n", encoding="utf-8")
+
         (root / "docs/cite.md").write_text(
-            "See [the gate](../scripts/sd-ai-command-pack-full-check.sh:12) and\n"
+            "See [the current guide](./current.md:42) and\n"
+            "[the gate](../scripts/sd-ai-command-pack-full-check.sh:12) and\n"
+            "`docs/current.md:12:5` and\n"
             "`scripts/sd-ai-command-pack-housekeeping.sh:34-56` for details.\n"
             "Also `scripts/sd-ai-command-pack-install-audit.py:7:3` and\n"
             "`scripts/sd-ai-command-pack-review-local.sh:10-20:4`.\n"
@@ -1078,6 +1120,8 @@ assert.deepEqual(
             result.stdout,
         )
         self.assertNotIn("full-check.sh:12", result.stdout)
+        self.assertNotIn("current.md:42", result.stdout)
+        self.assertNotIn("current.md:12:5", result.stdout)
         self.assertNotIn("housekeeping.sh:34-56", result.stdout)
         self.assertNotIn("install-audit.py:7:3", result.stdout)
         self.assertNotIn("review-local.sh:10-20:4", result.stdout)
@@ -1287,6 +1331,41 @@ assert.deepEqual(
         )
         self.assertEqual(merged.returncode, 0, merged.stderr)
         self.assertIn("pull-request merge commit accepted", merged.stdout)
+
+        squash_merged = subprocess.run(
+            ["bash", str(script), baseline, source_head],
+            cwd=root,
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_MAIN_PUSH_PR_MERGE": "1",
+            },
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(squash_merged.returncode, 0, squash_merged.stderr)
+        self.assertIn(
+            "GitHub-confirmed pull-request merge accepted", squash_merged.stdout
+        )
+
+        malformed_evidence = subprocess.run(
+            ["bash", str(script), baseline, source_head],
+            cwd=root,
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_MAIN_PUSH_PR_MERGE": "unexpected",
+            },
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(
+            malformed_evidence.returncode,
+            1,
+            f"stdout={malformed_evidence.stdout!r} "
+            f"stderr={malformed_evidence.stderr!r}",
+        )
+        self.assertIn("failing closed", malformed_evidence.stderr)
 
         missing_before = subprocess.run(
             ["bash", str(script), "0" * 40, rename_head],

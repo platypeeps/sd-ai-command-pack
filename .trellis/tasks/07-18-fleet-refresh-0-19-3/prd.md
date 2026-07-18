@@ -1,8 +1,8 @@
-# Roll out sd-ai-command-pack 0.19.4 to the fleet
+# Roll out sd-ai-command-pack 0.19.8 to the fleet
 
 ## Goal
 
-Refresh every stale registered consumer to corrected pack release 0.19.4 using the sequential fleet rollout procedure.
+Refresh every stale registered consumer to corrected pack release 0.19.8 using the sequential fleet rollout procedure.
 
 ## Confirmed Facts
 
@@ -11,9 +11,12 @@ Refresh every stale registered consumer to corrected pack release 0.19.4 using t
   resolution passed file inputs directly to `git -C` instead of using the
   containing directory.
 - The rollout stopped before any consumer merge and moved to corrective
-  release `0.19.4`, which fixes the defect with regression coverage.
-- The full-fleet 0.19.4 candidate check passed all seven consumers and updated
-  `docs/fleet/candidate-validation.json`.
+  release `0.19.4`, which fixed the original defect with regression coverage.
+- The `0.19.4` source PR merged, but its squash merge exposed a main-push scope
+  assumption and prevented release tagging. Follow-up source review fixes now
+  make `0.19.8` the coherent rollout target.
+- The full-fleet `0.19.8` candidate check passed all seven consumers and
+  replaced `docs/fleet/candidate-validation.json` with exact-payload evidence.
 - `docs/fleet/consumers.json` registers seven consumers and defines their
   fast-first rollout order.
 - The full-fleet candidate ledger is a release prerequisite and is checked by
@@ -21,7 +24,7 @@ Refresh every stale registered consumer to corrected pack release 0.19.4 using t
 
 ## Requirements
 
-- Use tagged release `0.19.4` from the clean `sd-ai-command-pack` `main`
+- Use tagged release `0.19.8` from the clean `sd-ai-command-pack` `main`
   checkout as the only installation source.
 - Cover every consumer selected by `docs/fleet/consumers.json` in its declared
   rollout-priority order.
@@ -37,16 +40,18 @@ Refresh every stale registered consumer to corrected pack release 0.19.4 using t
   audit, or compatibility defects. Record unrelated or low-risk consumer
   findings without forcing another release.
 - Keep rollout status recoverable so an interrupted rerun skips consumers that
-  have already reached `0.19.4`.
+  have already reached `0.19.8`.
 
 ## Acceptance Criteria
 
-- [ ] Fleet preflight validates the release and reports every selected
+- [x] Full-fleet candidate validation passes all seven registered consumers
+  against the exact `0.19.8` payload.
+- [ ] Fleet preflight validates the tagged release and reports every selected
   consumer with its starting version and disposition.
 - [ ] Every stale, clean, locally available consumer is refreshed sequentially
   through install, audit, full-check, pull request, review/watch, gated merge,
   and housekeeping.
-- [ ] Post-merge provenance and install audit confirm `0.19.4` for every
+- [ ] Post-merge provenance and install audit confirm `0.19.8` for every
   successfully refreshed consumer.
 - [ ] Every at-target or skipped consumer is explicitly recorded; no consumer
   is silently omitted.

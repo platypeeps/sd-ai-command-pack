@@ -151,6 +151,7 @@ function defaultConfig() {
     diffSizeWarningLines: 20000,
     largeFileWarningLines: 5000,
     sourceReviewWarningLines: 1000,
+    untrackedFileReadLimitBytes: 1048576,
   };
 }
 
@@ -187,7 +188,7 @@ function loadConfig(root, explicitPath) {
     }
   }
 
-  for (const key of ['diffSizeWarningLines', 'largeFileWarningLines', 'sourceReviewWarningLines']) {
+  for (const key of ['diffSizeWarningLines', 'largeFileWarningLines', 'sourceReviewWarningLines', 'untrackedFileReadLimitBytes']) {
     if (Number.isFinite(raw[key])) {
       merged[key] = raw[key];
     }
@@ -1258,10 +1259,14 @@ function currentReviewDiffStats() {
   const files = parseNumstat(result.stdout);
   const seen = new Set(files.map((file) => file.path));
   for (const path of currentUntrackedPaths()) {
-    if (seen.has(path) || !isRegularFile(path)) {
+    if (seen.has(path)) {
       continue;
     }
-    files.push({ added: textLineCount(readText(path)), deleted: 0, path });
+    const added = untrackedAddedLineEstimate(path);
+    if (added === null) {
+      continue;
+    }
+    files.push({ added, deleted: 0, path });
   }
 
   return {
@@ -1269,6 +1274,25 @@ function currentReviewDiffStats() {
     label: baseline ? `${baseline} to working tree` : 'working tree diff',
     files,
   };
+}
+
+function untrackedAddedLineEstimate(path) {
+  let entry;
+  try {
+    entry = lstatSync(resolve(rootDir, path));
+  } catch {
+    return null;
+  }
+
+  if (!entry.isFile()) {
+    return null;
+  }
+
+  if (entry.size > config.untrackedFileReadLimitBytes) {
+    return Math.max(config.largeFileWarningLines + 1, 1);
+  }
+
+  return textLineCount(readText(path));
 }
 
 function addedLinesFromDiff(output) {

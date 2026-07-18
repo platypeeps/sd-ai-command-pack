@@ -1,8 +1,8 @@
 {
   "id": "fleet-refresh-0-19-3",
   "name": "fleet-refresh-0-19-3",
-  "title": "Roll out sd-ai-command-pack 0.19.4 to the fleet",
-  "description": "Refresh every stale registered consumer to the corrected pack release 0.19.4 after integration review stopped the original 0.19.3 rollout.",
+  "title": "Roll out sd-ai-command-pack 0.19.8 to the fleet",
+  "description": "Refresh every stale registered consumer to the corrected pack release 0.19.8 after integration and source review stopped the original 0.19.3 rollout.",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,
@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-07-18",
   "completedAt": null,
-  "branch": "codex/status-file-path-resolution",
+  "branch": "codex/main-push-squash-pr-detection",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "The rollout began at 0.19.3. Loadsmith PR #90 surfaced a pack-owned file-path resolution defect in sd-status, so the rollout stopped and moved to corrective release 0.19.4.",
+  "notes": "The rollout began at 0.19.3. Loadsmith PR #90 surfaced a pack-owned file-path resolution defect in sd-status, so the rollout stopped. Source PR #154 merged the first correction as 0.19.4, but its squash merge exposed a main-push guard assumption and prevented tagging. Source PR #155 now carries the guard recovery plus follow-up status and preflight hardening as release 0.19.8; rollout resumes only after that exact release merges, passes main CI, and is tagged.",
   "meta": {}
 }
