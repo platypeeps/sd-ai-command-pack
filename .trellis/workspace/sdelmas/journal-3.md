@@ -302,10 +302,7 @@ Updated backend directory documentation for the installer package split, documen
 
 ### Main Changes
 
-- Replaced generic `.split(...)` risk detection with explicit parser and direct boundary heuristics.
-- Covered nested environment and file calls, namespaced Node file reads, and method-only Python `read_text` calls.
-- Bumped the pack to 0.19.12 and refreshed generated catalogs, provenance, KB content, and fleet candidate evidence.
-- Completed five Copilot review rounds and resolved every review thread.
+- Detailed change bullets were not supplied; see the summary above.
 
 ### Git Commits
 
@@ -1401,7 +1398,10 @@ Narrowed structured-input split detection to explicit parsers and direct CLI, en
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Replaced generic `.split(...)` risk detection with explicit parser and direct boundary heuristics.
+- Covered nested environment and file calls, namespaced Node file reads, and method-only Python `read_text` calls.
+- Bumped the pack to 0.19.12 and refreshed generated catalogs, provenance, KB content, and fleet candidate evidence.
+- Completed five Copilot review rounds and resolved every review thread.
 
 ### Git Commits
 
