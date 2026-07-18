@@ -2,8 +2,8 @@
 """Generate the committed command surfaces from the registry command list.
 
 Dev-side tooling (run via `make generate`); consumers never execute this
-script. `installer/registry.py` `COMMAND_NAMES` is the command-list source
-of truth. For each (name, short form) row the generator reads the neutral
+script. `installer/registry.py` `COMMAND_REGISTRY` is the command-list and
+family source of truth. For each command row the generator reads the neutral
 body `templates/.commands/<name>.md` and regenerates the committed bespoke
 adapters in place:
 
@@ -31,10 +31,16 @@ command/workflow/prompt fan-out from `PLATFORM_REGISTRY` target patterns,
 and the platform skill fan-out) is dropped, and the remaining static entries
 (scripts, configs, docs, charters, managed blocks, ...) are kept in their
 original relative order. The manifest is then rewritten as the static
-entries followed by the derived entries in canonical order: `COMMAND_NAMES`
+entries followed by the derived entries in canonical order: `COMMAND_REGISTRY`
 row order, then the fixed per-command entry order. Regeneration is therefore
 idempotent and needs no second source file; header fields are preserved
 verbatim.
+
+The generator also renders the `sd-help` command catalog from registry family
+metadata, canonical skill frontmatter, source-only policy, and manifest
+version. Shared-skill reference declarations are fanned out through the same
+derived manifest path as each skill, so installed skill directories stay
+self-contained.
 
 `--check` regenerates everything into a temp dir and byte-compares against
 the committed files, exiting nonzero and listing drifted paths on any
@@ -49,16 +55,19 @@ import re
 import sys
 import tempfile
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, cast
 
 PACK_ROOT = Path(__file__).resolve().parents[2]
 if str(PACK_ROOT) not in sys.path:
     sys.path.insert(0, str(PACK_ROOT))
 
 from installer.registry import (  # noqa: E402
+    COMMAND_FAMILIES,
     COMMAND_NAMES,
+    COMMAND_REGISTRY,
     NEUTRAL_COMMAND_SOURCE_PLATFORMS,
     PLATFORM_REGISTRY,
+    SHARED_SKILL_REFERENCES,
     SOURCE_ONLY_COMMAND_NAMES,
 )
 
@@ -168,8 +177,17 @@ SKILL_FANOUT_PLATFORMS = (
     "trae",
 )
 
+HELP_CATALOG_PATH = (
+    "templates/.agents/skills/sd-help/references/command-catalog.md"
+)
+GENERATED_REFERENCE_PATHS = frozenset({HELP_CATALOG_PATH})
+
 _COMMAND_SOURCE_PATTERNS = (
     re.compile(r"^templates/\.agents/skills/(sd-[a-z0-9-]+)/SKILL\.md$"),
+    re.compile(
+        r"^templates/\.agents/skills/(sd-[a-z0-9-]+)/references/"
+        r"(?:[a-z0-9-]+/)*[a-z0-9-]+\.md$"
+    ),
     re.compile(r"^templates/\.commands/(sd-[a-z0-9-]+)\.md$"),
     re.compile(r"^templates/\.claude/commands/sd/([a-z0-9-]+)\.md$"),
     re.compile(r"^templates/\.gemini/commands/sd/([a-z0-9-]+)\.toml$"),
@@ -179,6 +197,118 @@ _COMMAND_SOURCE_PATTERNS = (
 
 class GenerationError(RuntimeError):
     """Raised when a surface cannot be generated safely."""
+
+
+def manifest_object() -> dict[str, object]:
+    manifest_path = PACK_ROOT / "manifest.json"
+    try:
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise GenerationError(f"cannot read {manifest_path}: {exc}") from exc
+    if not isinstance(raw, dict) or not isinstance(raw.get("files"), list):
+        raise GenerationError("manifest.json must be an object with a files array")
+    if not all(isinstance(entry, dict) for entry in raw["files"]):
+        raise GenerationError("manifest.json files entries must be objects")
+    return raw
+
+
+def _frontmatter_scalar(value: str, source: Path, key: str) -> str:
+    value = value.strip()
+    if not value:
+        raise GenerationError(f"{source}: empty frontmatter {key}")
+    if value.startswith('"'):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise GenerationError(
+                f"{source}: invalid quoted frontmatter {key}: {exc}"
+            ) from exc
+        if not isinstance(decoded, str):
+            raise GenerationError(f"{source}: frontmatter {key} must be text")
+        return decoded
+    if value.startswith("'"):
+        if len(value) < 2 or not value.endswith("'"):
+            raise GenerationError(f"{source}: invalid quoted frontmatter {key}")
+        return value[1:-1].replace("''", "'")
+    return value
+
+
+def skill_description(name: str) -> str:
+    source = PACK_ROOT / f"templates/.agents/skills/{name}/SKILL.md"
+    try:
+        text = source.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise GenerationError(f"cannot read canonical skill {source}: {exc}") from exc
+    if not text.startswith("---\n"):
+        raise GenerationError(f"{source}: missing YAML frontmatter")
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        raise GenerationError(f"{source}: missing frontmatter terminator")
+    fields: dict[str, str] = {}
+    for line in text[4:end].splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        if key in {"name", "description"}:
+            fields[key] = _frontmatter_scalar(value, source, key)
+    if fields.get("name") != name:
+        raise GenerationError(
+            f"{source}: frontmatter name must be {name!r}, got {fields.get('name')!r}"
+        )
+    description = fields.get("description")
+    if not description:
+        raise GenerationError(f"{source}: missing frontmatter description")
+    return " ".join(description.split())
+
+
+def _markdown_cell(value: str) -> str:
+    return " ".join(value.split()).replace("|", "\\|")
+
+
+def generate_command_catalog() -> str:
+    manifest = manifest_object()
+    version = manifest.get("version")
+    if not isinstance(version, str) or not version.strip():
+        raise GenerationError("manifest.json version must be non-empty text")
+
+    lines = [
+        "<!-- Generated by .github/scripts/generate-command-surfaces.py; do not edit. -->",
+        "# SD Command Catalog",
+        "",
+        f"Bundled pack version: `{version}`",
+        "",
+        "This catalog describes pack-owned commands. Runtime discovery remains",
+        "authoritative for whether a command is available in the current session.",
+        "",
+    ]
+    for family in COMMAND_FAMILIES:
+        commands = [
+            command for command in COMMAND_REGISTRY if command.family == family.id
+        ]
+        if not commands:
+            raise GenerationError(f"command family has no members: {family.id}")
+        lines.extend(
+            [
+                f"## {family.label}",
+                "",
+                family.summary,
+                "",
+                "| Command | Bundled availability | Description |",
+                "|---|---|---|",
+            ]
+        )
+        for command in commands:
+            availability = (
+                "source-checkout-only"
+                if command.name in SOURCE_ONLY_COMMAND_NAMES
+                else "included in installed pack"
+            )
+            lines.append(
+                f"| `{command.name}` | {availability} | "
+                f"{_markdown_cell(skill_description(command.name))} |"
+            )
+        lines.append("")
+    return "\n".join(lines)
 
 
 def neutral_description_and_body(name: str) -> tuple[str, str]:
@@ -331,6 +461,37 @@ def _platform_skill_entry(platform: str, name: str) -> dict[str, str]:
     }
 
 
+def _skill_reference_entries(name: str) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for reference in SHARED_SKILL_REFERENCES.get(name, ()):
+        source = f"templates/.agents/skills/{name}/{reference}"
+        if source not in GENERATED_REFERENCE_PATHS and not (PACK_ROOT / source).is_file():
+            raise GenerationError(f"missing shared skill reference: {source}")
+        entries.append(
+            {
+                "platform": "shared",
+                "kind": "skill",
+                "source": source,
+                "target": f".agents/skills/{name}/{reference}",
+                "install": "always",
+            }
+        )
+        entries.extend(
+            {
+                "platform": platform,
+                "kind": "skill",
+                "source": source,
+                "target": (
+                    f"{PLATFORM_REGISTRY[platform].directory}/skills/"
+                    f"{name}/{reference}"
+                ),
+                "anchor": PLATFORM_REGISTRY[platform].directory,
+            }
+            for platform in SKILL_FANOUT_PLATFORMS
+        )
+    return entries
+
+
 def derived_manifest_entries(name: str, short: str) -> list[dict[str, str]]:
     entries = [
         {
@@ -371,6 +532,7 @@ def derived_manifest_entries(name: str, short: str) -> list[dict[str, str]]:
     entries.extend(
         _platform_skill_entry(platform, name) for platform in SKILL_FANOUT_PLATFORMS
     )
+    entries.extend(_skill_reference_entries(name))
     return entries
 
 
@@ -402,14 +564,9 @@ def _is_command_shaped(entry: dict[str, object]) -> bool:
 
 
 def generate_manifest_text() -> str:
-    manifest_path = PACK_ROOT / "manifest.json"
-    try:
-        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise GenerationError(f"cannot read {manifest_path}: {exc}") from exc
-    if not isinstance(raw, dict) or not isinstance(raw.get("files"), list):
-        raise GenerationError("manifest.json must be an object with a files array")
-    static = [entry for entry in raw["files"] if not _is_command_shaped(entry)]
+    raw = manifest_object()
+    raw_files = cast(list[dict[str, object]], raw["files"])
+    static = [entry for entry in raw_files if not _is_command_shaped(entry)]
     derived = [
         entry
         for name, short in COMMAND_NAMES
@@ -433,6 +590,7 @@ def generate_manifest_text() -> str:
 
 def generate_surfaces() -> dict[str, str]:
     outputs = generate_adapters()
+    outputs[HELP_CATALOG_PATH] = generate_command_catalog()
     outputs["manifest.json"] = generate_manifest_text()
     return outputs
 
@@ -490,8 +648,8 @@ def write_surfaces(outputs: dict[str, str]) -> int:
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Regenerate the bespoke command adapters and manifest.json from "
-            "installer/registry.py COMMAND_NAMES."
+            "Regenerate command adapters, the help catalog, and manifest.json "
+            "from installer/registry.py COMMAND_REGISTRY."
         )
     )
     parser.add_argument(

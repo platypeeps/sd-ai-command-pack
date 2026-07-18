@@ -79,6 +79,29 @@ Claude and Gemini expose wrappers as namespaced commands such as
 platforms expose native `sd-*` skills. See [Supported Adapters](#supported-adapters)
 for the platform matrix and command shapes.
 
+### sd-help
+
+Provides read-only discovery for the installed SD command surface. It can list
+commands by family, explain or compare commands, recommend the smallest-fit
+workflow for a goal, show examples, or give a compact lifecycle tour. It
+reports the bundled and installed pack versions plus current-session
+availability when those values can be observed, and it never runs the command
+it recommends.
+
+Examples:
+
+```text
+/sd:help
+/sd:help review-pr
+/sd:help "compare sd-create-pr and sd-ship"
+/sd:help "I need to fix failing CI"
+/sd:help all
+```
+
+Use the native form exposed by the current platform, such as `/sd:help`,
+`/sd-help`, `sd/help`, or `$sd-help`. Run the recommended command only in a
+separate explicit request.
+
 ### sd-start
 
 Initializes Trellis session context through the existing `trellis-start`

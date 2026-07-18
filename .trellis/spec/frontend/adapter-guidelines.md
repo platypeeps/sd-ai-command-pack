@@ -11,6 +11,10 @@ load the shared skill and summarize the required behavior.
 
 Reference files:
 
+- `templates/.agents/skills/sd-help/SKILL.md`
+- `templates/.agents/skills/sd-help/references/command-catalog.md`
+- `templates/.agents/skills/sd-help/references/examples.md`
+- `templates/.commands/sd-help.md`
 - `templates/.agents/skills/sd-review-pr/SKILL.md`
 - `templates/.agents/skills/sd-review-local/SKILL.md`
 - `templates/.agents/skills/sd-review-local-all/SKILL.md`
@@ -52,6 +56,107 @@ local OpenCode surface remains dependency-free.
 
 Keep detailed workflow rules in the matching shared skill under
 `templates/.agents/skills/<command>/SKILL.md`.
+
+## Scenario: Registry-Backed Command Discovery
+
+### 1. Scope / Trigger
+
+- Trigger: adding, renaming, retiring, or reclassifying an `sd-*` command, or
+  adding reference files that must remain inside an installed skill directory.
+- The registry, generated adapters, manifest, help catalog, installed mirrors,
+  and focused tests form one consumer-facing contract.
+
+### 2. Signatures
+
+- Command row: `CommandInfo(name: str, short: str, family: str)`.
+- Family row: `CommandFamily(id: str, label: str, summary: str)`.
+- Compatibility view: `COMMAND_NAMES: tuple[tuple[str, str], ...]`, derived
+  from `COMMAND_REGISTRY` rather than maintained separately.
+- Reference declaration:
+  `SHARED_SKILL_REFERENCES[skill_name] = ("references/<file>.md", ...)`.
+- Generator entry point:
+  `.github/scripts/generate-command-surfaces.py [--check]`.
+- Help modes: `list`, `explain`, `compare`, `recommend`, `examples`, and
+  `tour`, with optional `family`, `skill`, `skills`, `goal`, and `detail` keys.
+
+### 3. Contracts
+
+- Every pack-owned command appears exactly once in `COMMAND_REGISTRY` and
+  belongs to exactly one declared family. `SOURCE_ONLY_COMMAND_NAMES` remains
+  the single source for source-checkout-only availability.
+- The generator reads canonical skill frontmatter for descriptions and the
+  root manifest for the bundled version. Do not hand-maintain those values in
+  the help skill or catalog.
+- Shared skill references use safe relative Markdown paths below
+  `references/`. Authored references must exist before manifest generation;
+  generator-owned references must be declared explicitly.
+- Reference entries fan out to the shared `.agents` skill plus every supported
+  platform-specific skill root so installed skill directories are
+  self-contained.
+- `sd-help` reconciles the generated pack catalog with the current runtime
+  skill inventory. An `sd-` prefix alone never proves pack ownership or local
+  availability.
+- Help is strictly read-only. It may inspect skill text and metadata but never
+  invokes the selected workflow or mutates repository, Trellis, or GitHub
+  state in the same request.
+
+### 4. Validation & Error Matrix
+
+- Duplicate command name or short form -> registry import fails.
+- Missing/unknown family or mismatched `sd-<short>` name -> registry import
+  fails.
+- Unsafe, duplicate, unknown-skill, or missing authored reference -> generation
+  fails before writing any surface.
+- Missing/malformed canonical frontmatter or manifest version -> generation
+  fails with the source path and field named.
+- Duplicate/case-folding manifest target -> generation fails.
+- Runtime skill missing from the catalog -> help labels it `unknown/external`.
+- Catalog command absent from runtime discovery -> help labels it bundled but
+  unavailable instead of claiming it can run.
+
+### 5. Good / Base / Bad Cases
+
+- Good: one registry row plus canonical skill/adapter sources regenerates every
+  adapter, manifest row, and the version-bound help catalog.
+- Base: a catalog command missing from the current platform remains visible
+  with an honest availability label and a limited explanation.
+- Bad: a new command is added to a hand-written help list, a reference is copied
+  to only `.agents`, or help executes a recommended mutating workflow.
+
+### 6. Tests Required
+
+- Assert registry uniqueness, family completeness, short-name consistency, and
+  source-only policy.
+- Assert deterministic family/catalog order, canonical frontmatter
+  descriptions, version binding, Markdown escaping, and no-write failure.
+- Assert reference path validation and manifest fanout to every skill root.
+- Assert adapter generation/parity, install/update/remove behavior, root
+  dogfood parity, and manifest case-fold uniqueness.
+- Assert help's availability labels, bounded recommendation behavior,
+  read-only boundary, failure guidance, and registry-valid authored examples.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+COMMAND_NAMES = (("sd-example", "example"),)
+HELP_FAMILIES = {"Example": ("sd-example",)}
+```
+
+This creates parallel command and help registries that can drift.
+
+#### Correct
+
+```python
+COMMAND_REGISTRY = (
+    CommandInfo("sd-example", "example", "orientation-knowledge"),
+)
+COMMAND_NAMES = tuple((item.name, item.short) for item in COMMAND_REGISTRY)
+```
+
+The generator derives the compatibility view, catalog, adapters, and manifest
+fanout from the same validated row.
 
 The `sd-review-pr` shared skill should continue to define:
 
