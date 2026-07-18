@@ -696,7 +696,9 @@ function checkReviewRiskSweep() {
   }
   const categories = reviewRiskCategories(addedCode.text);
   if (categories.length === 0) {
-    pass(`checked ${codePaths.length} changed code path(s); no boundary-risk trigger was added.`);
+    if (addedCode.oversizedUntrackedPaths.length === 0) {
+      pass(`checked ${codePaths.length} changed code path(s); no boundary-risk trigger was added.`);
+    }
     return;
   }
 

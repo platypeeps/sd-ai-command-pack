@@ -423,6 +423,7 @@ assert.deepEqual(
             result.stdout,
         )
         self.assertNotIn("changed code adds subprocess/external command", result.stdout)
+        self.assertNotIn("no boundary-risk trigger was added", result.stdout)
         self.assertIn(
             "includes a large file diff (4 lines): scripts/large-untracked.py",
             result.stdout,
