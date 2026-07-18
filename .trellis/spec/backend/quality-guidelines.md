@@ -58,6 +58,10 @@ that exercise the generic JavaScript review preflight.
   symlink. Compare resolved real paths before deciding whether to run.
 - The script requires Node 16.9 or newer and must print a clear version error
   before running checks when invoked with an older supported-parser runtime.
+- The module invokes its main routine before lower helper declarations are
+  evaluated. Any `const`, `let`, or class binding used by that run must be
+  declared above the invocation; lower function declarations remain safe
+  because they are hoisted.
 - Changed-path detection for copied/generated disclosure must include staged,
   branch, working-tree, and untracked files instead of letting one source hide
   another.
@@ -69,6 +73,10 @@ that exercise the generic JavaScript review preflight.
   environment/global-state, or digest/integrity behavior emits one advisory
   naming the boundary-test matrix for author disposition. This sweep is
   deterministic and must never invoke a review provider.
+- A routine string `.split(...)` call is not structured-input evidence by
+  itself. Preserve explicit parser signals and direct splits of CLI arguments,
+  environment values, or file-read results; keep the heuristic conservative
+  rather than inferring data flow between assignments.
 - More than one changed Trellis task directory emits a soft scope warning so
   unrelated outcomes can be split before remote review.
 - Trellis journal sessions present at the review base and older than the newest
@@ -107,6 +115,10 @@ that exercise the generic JavaScript review preflight.
 - Added boundary-sensitive code -> warn with stable risk categories and the
   malformed input, command failure/timeout, path, environment, symlink/global
   state, and multiline/extension matrix; do not fail the gate.
+- Routine string tokenization -> no parser/structured-input warning; direct
+  `argv`, environment-value, and file-read splits -> retain the advisory.
+- A check reaches a lower `const` or class before initialization -> fail the
+  executable preflight test; move that binding above the module-level main run.
 - Installed mirrors or known generated reports dominate a large diff -> retain
   the total-size warning but exclude them from the authored-source threshold.
 - Two changed task directories -> warn to confirm one reviewable outcome or
@@ -136,6 +148,9 @@ that exercise the generic JavaScript review preflight.
 - Stable first-review risk categorization, authored-source exclusions, and
   multi-task directory extraction, plus a real Git fixture covering all three
   advisory types.
+- Positive CLI/environment/file split cases and a negative routine string
+  split case, exercised through both the exported helper and executable
+  preflight path.
 - Template twin byte identity.
 
 ### 7. Wrong vs Correct
@@ -149,6 +164,9 @@ Correct: currentChangedPaths unions staged, branch, working-tree, and untracked 
 
 Wrong: replace the first repeated fallback sentence in a whole journal file
 Correct: edit content inside the explicit current `## Session <n>:` block
+
+Wrong: declare a helper-used `const` below the module-level main invocation
+Correct: declare non-hoisted bindings above that invocation
 ```
 
 ## Session Recorder Retry Contract
