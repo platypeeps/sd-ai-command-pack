@@ -1350,3 +1350,37 @@ Added portable local and fleet status reporting, explicit candidate preparation,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 136: Pre-PR review workflow hardening
+
+**Date**: 2026-07-18
+**Task**: Pre-PR review workflow hardening
+**Branch**: `codex/reduce-review-churn`
+
+### Summary
+
+Added task-context scaffold enforcement, stash status reporting, review churn advisories, complete PR-state review-learning scans, and a single post-cycle learning pass; validated the release across the fleet and completed two Copilot review rounds.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `821deab` | (see git log) |
+| `748554b` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
