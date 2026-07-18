@@ -358,10 +358,16 @@ function checkDocumentationPathReferences() {
   const missing = [];
 
   for (const file of documentationGuardFiles()) {
+    const basename = file.split('/').pop();
     if (
       file === 'docs/SD_AI_COMMAND_PACK.md' ||
       file === 'docs/repomix-map.md' ||
-      file.startsWith('.trellis/tasks/archive/')
+      file.startsWith('.trellis/tasks/archive/') ||
+      // Design/implement artifacts are forward-looking: they reference files
+      // the task proposes to CREATE, so a path-existence check is wrong for
+      // them. PRDs/specs describe current state and keep the check.
+      ((basename === 'design.md' || basename === 'implement.md') &&
+        file.startsWith('.trellis/tasks/'))
     ) {
       continue;
     }
@@ -940,11 +946,11 @@ export function findMissingDocumentationPathReferences(file, text, existsPath, o
 
 function resolvesToLineSuffixedPath(resolved, existsPath) {
   // Documentation commonly cites line anchors — `path.md:42`, `path:12-34`,
-  // `path:12:5`, `path:12-34:5`, `path:1-2,3-4` — so a target with trailing
-  // line/column suffixes (including comma-joined multi-ranges) resolves against
-  // its base path. Files literally named with `:digits` were already matched by
-  // the direct existence check above.
-  const base = resolved.replace(/(?::\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)+$/, '');
+  // `path:12:5`, `path:12-34:5`, `path:1-2,3-4`, `path:~145` — so a target with
+  // trailing line/column suffixes (including comma-joined multi-ranges and `~`
+  // approximate markers) resolves against its base path. Files literally named
+  // with `:digits` were already matched by the direct existence check above.
+  const base = resolved.replace(/(?::~?\d+(?:-\d+)?(?:,~?\d+(?:-\d+)?)*)+$/, '');
   return base !== resolved && existsPath(base);
 }
 
