@@ -180,3 +180,12 @@ uv.lock
 
 # Local unittest transcript retained when make test needs skip/failure diagnostics.
 unittest-output.log
+
+# Track one Claude Trellis marker so active_platforms() detects the `claude`
+# platform in a fresh clone. The generated `.claude/**` rule above otherwise
+# hides all of claude's detection markers (unlike gemini/github/opencode, whose
+# markers are tracked), which breaks the local `make full-check` install-audit.
+# Hand-authored here (outside the generated sections) so it stays dogfood-only.
+!.claude/skills/
+!.claude/skills/trellis-before-dev/
+!.claude/skills/trellis-before-dev/SKILL.md
