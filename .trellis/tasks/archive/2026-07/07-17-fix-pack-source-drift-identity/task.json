@@ -1,0 +1,31 @@
+{
+  "id": "fix-pack-source-drift-identity",
+  "name": "fix-pack-source-drift-identity",
+  "title": "Fix SD pack source-drift identity detection",
+  "description": "Validate the released SD manifest-identity source gate and pin the SE-pack false-positive regression output.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "full-check source identity and regression coverage",
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-17",
+  "completedAt": "2026-07-17",
+  "branch": null,
+  "base_branch": "codex/fix-pack-source-drift-identity",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "templates/scripts/sd-ai-command-pack-full-check.sh",
+    "scripts/sd-ai-command-pack-full-check.sh",
+    "tests/test_pack_drift.py",
+    ".trellis/spec/backend/manifest-and-filesystem.md"
+  ],
+  "notes": "Canonical runtime fix already shipped in 0.16.1; this task pins the exact SE-pack diagnostic regression and validates the current release contract.",
+  "meta": {}
+}

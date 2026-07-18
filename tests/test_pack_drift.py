@@ -362,6 +362,9 @@ class PackDriftTests(InstallTestCase):
             result.stdout,
         )
         self.assertNotIn("template twin pairs compared:", result.stdout)
+        self.assertNotIn("env vars checked:", result.stdout)
+        self.assertNotIn("stale documented env var:", result.stdout)
+        self.assertNotIn("0 in skills", result.stdout)
 
     def test_pack_source_drift_gate_rejects_malformed_asserted_identity(
         self,

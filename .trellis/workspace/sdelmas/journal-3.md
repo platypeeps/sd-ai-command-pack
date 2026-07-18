@@ -1210,7 +1210,40 @@ Resumed PR 145 through sd-ship, verified deferred review and no-merge watch beha
 - None - task complete
 
 
-## Session 132: Separate create-PR publish and review ownership
+## Session 132: Pin SE pack source identity regression
+
+**Date**: 2026-07-17
+**Task**: Pin SE pack source identity regression
+**Branch**: `codex/fix-pack-source-drift-identity`
+
+### Summary
+
+Verified that the canonical manifest-name source classifier was already released in sd-ai-command-pack 0.16.1, strengthened the SE-shaped regression test so SD environment-variable scan output cannot recur, preserved the canonical script twins and scan path, validated focused tests and full-check, and created PR #147 with a clean Copilot review and green CI.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1be8263` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 133: Separate create-PR publish and review ownership
 
 **Date**: 2026-07-17
 **Task**: Separate create-PR publish and review ownership
