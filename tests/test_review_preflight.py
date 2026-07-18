@@ -413,6 +413,9 @@ assert.deepEqual(
             "import subprocess\nsubprocess.run(['tool'])\n",
             encoding="utf-8",
         )
+        if os.name != "nt":
+            source.chmod(0)
+            self.addCleanup(source.chmod, 0o600)
 
         result = self.run_review_preflight(node, root)
 

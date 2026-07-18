@@ -1304,6 +1304,9 @@ function boundedUntrackedFileText(path) {
     if (!pathEntry.isFile()) {
       return null;
     }
+    if (pathEntry.size > config.untrackedFileReadLimitBytes) {
+      return { oversized: true, text: '' };
+    }
 
     descriptor = openSync(resolve(rootDir, path), 'r');
     const openedEntry = fstatSync(descriptor);
