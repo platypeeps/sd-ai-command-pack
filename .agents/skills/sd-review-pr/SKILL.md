@@ -38,6 +38,11 @@ and thread rule remains authoritative.
   review. Disable Prism and Gito for this command-owned gate; those local
   review tools run only when the user explicitly invokes `sd-full-check`,
   or `sd-review-local` (optionally with `all`).
+- Treat preflight first-review risk, authored-source size, and multi-task scope
+  warnings as required author-time dispositions before requesting remote
+  review. Add focused coverage for applicable boundaries or record why a
+  warning is not applicable; the warnings stay advisory and do not replace
+  project tests.
 - Treat `sd-review-pr` as a bounded remote-review convergence loop by default.
   Unless the user explicitly asks for local-only review, request the configured
   remote reviewer after the local gate passes and again after each pushed
@@ -174,6 +179,29 @@ If full-check fails, fix the smallest correct set of issues, run the relevant
 checks again, commit and push the fixes, then return to Step 1 to refresh PR
 state. Do not request remote review on code that has not passed the local gate
 unless the user explicitly asks for a remote diagnostic despite local failures.
+
+## Step 2.5: Disposition First-Review Advisories
+
+Before the first remote-review request for each PR head, inspect the preflight
+output from Step 2. When it warns about changed parser or structured-input
+logic, subprocess/external-command behavior, path/filesystem boundaries,
+environment or global state, or digest/integrity framing, cover every
+applicable boundary with a focused test or record why it does not apply:
+
+- malformed or unhashable input;
+- missing commands, nonzero exits, or timeouts;
+- option-like values and path traversal;
+- empty environment values or `PATH`;
+- symlink and time-of-check/time-of-use behavior;
+- process-global state restoration; and
+- multiline syntax and relevant file-extension variants.
+
+Also disposition authored-source size and multiple-Trellis-task warnings:
+split unrelated outcomes, or record why the changed files form one reviewable
+unit and what focused validation protects it. Keep this sweep deterministic and
+local; do not invoke Prism, Gito, or the remote reviewer for it. If the head
+changes before its first remote request, repeat Step 2 and this disposition for
+the new head.
 
 ## Step 3: Decide Whether To Trigger Remote Review
 
@@ -519,6 +547,29 @@ If the remote loop would exceed `REMOTE_REVIEW_ROUND_LIMIT`, ask:
 
 Do not continue until the user approves.
 
+## Step 7.5: Capture Review Learnings Once
+
+Only after the Step 7 stop conditions are satisfied, run one read-only,
+PR-scoped learning pass for the completed overall review cycle:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-review-learnings.py \
+  --github-pr "$PR_NUMBER" --dry-run
+```
+
+Attempt this command exactly once per `sd-review-pr` invocation. Do not run it
+after individual rounds, while fixes are still changing the head, or again from
+`sd-ship`, finish-work, or housekeeping. Inspect its output for a repeated
+finding that should become a focused test, deterministic preflight check,
+Trellis spec, or task. Do not mutate the now-clean reviewed PR merely to record
+that prevention work; report the recommendation or create the follow-up only
+when the surrounding workflow already authorizes task creation.
+
+The learning pass is observational and does not reopen a clean remote-review
+loop. If it fails, report the exact failure and continue to Step 8; do not hide
+the failed attempt or retry it in the same invocation.
+
 ## Step 8: Finish Work Or Hand Off To The Composite Merge Tail
 
 After the loop stops because deterministic local full-check passes and no
@@ -589,6 +640,10 @@ Report:
 - Optional AI review: reviewer label/slug used, or why remote review was
   skipped.
 - Comments fixed, rebutted, or left for user decision.
+- First-review advisories: triggered risk categories, source/task scope
+  disposition, and focused validation added or cited.
+- Post-cycle review learnings: the one PR-scoped attempt and its preventive
+  follow-up, or the exact reason the attempt failed.
 - Commits pushed during the loop.
 - Finish-work actions and any archive/journal commits pushed.
 - Finish-work ownership: completed here, or

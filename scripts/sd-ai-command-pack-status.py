@@ -242,6 +242,12 @@ def collect_git(
         if remote_branches
         else []
     )
+    stash_list = git_output(repo, "stash", "list", "--format=%gd")
+    if stash_list is None:
+        state["stashCount"] = None
+        anomalies.append("git stash inventory is unavailable")
+    else:
+        state["stashCount"] = len(stash_list.splitlines()) if stash_list else 0
     remote_url = git_output(repo, "remote", "get-url", remote)
     state["remoteConfigured"] = remote_url is not None
     state["github"] = github_slug_from_url(remote_url or "")
@@ -806,6 +812,8 @@ def render_local(report: Mapping[str, Any], *, dry_run: bool) -> None:
     remote_branches = git.get("remoteBranches") or []
     print(f"- local branches ({len(local_branches)}): {', '.join(local_branches) or 'none'}")
     print(f"- remote branches ({len(remote_branches)}): {', '.join(remote_branches[:10]) or 'none'}")
+    stash_count = git.get("stashCount")
+    print(f"- git stashes: {stash_count if isinstance(stash_count, int) else 'unavailable'}")
     cleanup = report.get("cleanupContext")
     if dry_run:
         print(
@@ -1071,6 +1079,8 @@ def render_fleet(report: Mapping[str, Any]) -> None:
         versions = local["versions"]
         github = local["github"]
         trellis = local["trellis"]
+        stash_count = git.get("stashCount")
+        stash_label = stash_count if isinstance(stash_count, int) else "unavailable"
         pr_count = (
             str(len(github.get("openPrs", [])))
             if github.get("openPrsStatus") == "available"
@@ -1081,6 +1091,7 @@ def render_fleet(report: Mapping[str, Any]) -> None:
             f"{git.get('branch') or 'detached'}; "
             f"{report['refsFreshness']}:{git['syncState']}; "
             f"pack {versions.get('sdAiCommandPack') or 'none'}; "
+            f"stashes {stash_label}; "
             f"PRs {pr_count}; "
             f"tasks {len(trellis.get('inProgress', []))}/{len(trellis.get('planned', []))}"
         )

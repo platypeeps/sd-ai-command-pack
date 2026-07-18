@@ -49,11 +49,14 @@ import {
   extractDocumentationPathReferences,
   findHistoricalTrellisJournalSessionEdits,
   findTrellisTaskContextSeedRows,
+  isSourceReviewPath,
   parseNumstat,
   parseJournalSessionsFromText,
   parseTrellisTaskArtifactPath,
   parseWorkspaceIndexSessionsFromText,
+  reviewRiskCategories,
   shouldCheckDocumentationPathReference,
+  trellisTaskDirectory,
   thrownValueMessage,
   unsupportedNodeVersionMessage,
   validateTrellisJournalSessions,
@@ -65,6 +68,32 @@ assert.equal(copiedTemplateKind('.agents/skills/sd-review-pr/SKILL.md'), 'sd-ai-
 assert.equal(copiedTemplateKind('.qoder/commands/sd-review-pr.md'), 'sd-ai-command-pack');
 assert.equal(copiedTemplateKind('scripts/sd-ai-command-pack-review-scope.sh'), 'sd-ai-command-pack');
 assert.equal(copiedTemplateKind('.sd-ai-command-pack/manifest.json'), 'sd-ai-command-pack');
+assert.equal(isSourceReviewPath('templates/scripts/sd-ai-command-pack-review-preflight.mjs'), true);
+assert.equal(isSourceReviewPath('scripts/sd-ai-command-pack-review-preflight.mjs'), false);
+assert.equal(isSourceReviewPath('docs/repomix-map.md'), false);
+assert.equal(isSourceReviewPath('.trellis/tasks/07-17-demo/prd.md'), false);
+assert.equal(trellisTaskDirectory('.trellis/tasks/07-17-demo/prd.md'), '.trellis/tasks/07-17-demo');
+assert.equal(
+  trellisTaskDirectory('.trellis/tasks/archive/2026-07/07-17-demo/task.json'),
+  '.trellis/tasks/archive/2026-07/07-17-demo',
+);
+assert.equal(trellisTaskDirectory('src/demo.py'), '');
+assert.deepEqual(
+  reviewRiskCategories([
+    'const parsed = JSON.parse(text);',
+    'spawnSync(command);',
+    'const target = resolve(root, name);',
+    'const token = process.env.TOKEN;',
+    'createHash("sha256").digest();',
+  ].join('\\n')),
+  [
+    'parser/structured input',
+    'subprocess/external command',
+    'path/filesystem boundary',
+    'environment/global state',
+    'digest/integrity framing',
+  ],
+);
 assert.deepEqual(parseTrellisTaskArtifactPath('.trellis/tasks/07-17-demo/check.jsonl'), {
   taskDir: '.trellis/tasks/07-17-demo',
   artifact: 'check.jsonl',
@@ -260,6 +289,65 @@ assert.deepEqual(
         self.assertIn("the PR body must include", result.stdout)
         self.assertIn("Tooling/generated scope:", result.stdout)
 
+    def test_review_preflight_advises_first_review_risks_and_review_scope(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        config = root / ".sd-ai-command-pack/review-preflight.json"
+        config.write_text(
+            json.dumps({"sourceReviewWarningLines": 5}), encoding="utf-8"
+        )
+        source = root / "templates/scripts/risk_fixture.py"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(
+            "\n".join(
+                [
+                    "import hashlib",
+                    "import json",
+                    "import os",
+                    "import subprocess",
+                    "from pathlib import Path",
+                    "def inspect(raw):",
+                    "    parsed = json.loads(raw)",
+                    "    subprocess.run(['tool'], timeout=1)",
+                    "    target = Path(parsed['path'])",
+                    "    token = os.environ.get('TOKEN', '')",
+                    "    return hashlib.sha256((str(target) + token).encode()).hexdigest()",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        for task_name in ("07-18-one", "07-18-two"):
+            task = root / ".trellis/tasks" / task_name
+            task.mkdir(parents=True)
+            (task / "task.json").write_text(
+                '{"status":"planning"}\n', encoding="utf-8"
+            )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("WARN changed code adds parser/structured input", result.stdout)
+        self.assertIn("subprocess/external command", result.stdout)
+        self.assertIn("path/filesystem boundary", result.stdout)
+        self.assertIn("environment/global state", result.stdout)
+        self.assertIn("digest/integrity framing", result.stdout)
+        self.assertIn("cover the applicable boundary matrix", result.stdout)
+        self.assertRegex(
+            result.stdout,
+            r"WARN .* changes \d+ authored source line\(s\) across \d+ file\(s\)",
+        )
+        self.assertIn("changes 2 Trellis task directories", result.stdout)
+
     def test_review_preflight_fails_hard_when_git_cannot_run(self) -> None:
         # Regression: a git spawn failure (missing binary, buffer overflow)
         # must FAIL the preflight naming the git command, not silently pass
@@ -404,7 +492,7 @@ assert.deepEqual(
             ),
         )
 
-    def test_review_preflight_checks_context_when_task_becomes_completed(self) -> None:
+    def test_review_preflight_checks_context_after_task_leaves_planning(self) -> None:
         node = shutil.which("node")
         if node is None:
             self.skipTest("node is not available on PATH")
@@ -427,19 +515,43 @@ assert.deepEqual(
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
-            "no changed completed or archived Trellis task context files",
+            "no changed in-progress, completed, or archived Trellis task context files",
             result.stdout,
         )
 
+        task_json.write_text('{"status":"in_progress"}\n', encoding="utf-8")
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            ".trellis/tasks/07-17-demo/implement.jsonl:1 still contains",
+            result.stdout,
+        )
+        self.assertIn(
+            ".trellis/tasks/07-17-demo/check.jsonl:1 still contains",
+            result.stdout,
+        )
+
+        context = '{"file":"spec.md","reason":"grounded"}\n'
+        (task / "implement.jsonl").write_text(context, encoding="utf-8")
+        (task / "check.jsonl").write_text("", encoding="utf-8")
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "checked 2 changed in-progress, completed, or archived Trellis task context file(s)",
+            result.stdout,
+        )
+
+        (task / "implement.jsonl").write_text(seed, encoding="utf-8")
+        (task / "check.jsonl").write_text(seed, encoding="utf-8")
         task_json.write_text("{malformed\n", encoding="utf-8")
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
-            "task.json could not be parsed as JSON while checking task completion",
+            "task.json could not be parsed as JSON while checking task context state",
             result.stdout,
         )
         self.assertNotIn(
-            "no changed completed or archived Trellis task context files",
+            "no changed in-progress, completed, or archived Trellis task context files",
             result.stdout,
         )
 
@@ -455,13 +567,12 @@ assert.deepEqual(
             result.stdout,
         )
 
-        context = '{"file":"spec.md","reason":"grounded"}\n'
         (task / "implement.jsonl").write_text(context, encoding="utf-8")
         (task / "check.jsonl").write_text(context, encoding="utf-8")
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
-            "checked 2 changed completed or archived Trellis task context file(s)",
+            "checked 2 changed in-progress, completed, or archived Trellis task context file(s)",
             result.stdout,
         )
 
@@ -542,7 +653,7 @@ assert.deepEqual(
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
-            "checked 1 changed completed or archived Trellis task context file(s)",
+            "checked 1 changed in-progress, completed, or archived Trellis task context file(s)",
             result.stdout,
         )
 

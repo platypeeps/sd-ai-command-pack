@@ -187,6 +187,9 @@ local caches, and LLM credentials.
 Runs the deterministic local PR gate with Prism and Gito disabled, requests the
 configured remote reviewer, addresses review comments or CI failures, and
 re-requests review after each pushed fix up to the configured round limit.
+Before remote review it dispositions deterministic boundary-risk and scope
+advisories; after the overall loop is clean it runs one read-only, PR-scoped
+review-learning pass.
 
 ### sd-review-local
 
@@ -200,7 +203,9 @@ retry behavior lives in the installed guide's
 ### sd-review-learnings
 
 Scans local diffs and optional recent GitHub review comments for repeated review
-patterns, then updates a managed learning block when requested.
+patterns, then updates a managed learning block when requested. Time-window
+scans cover the complete window by default, while `--github-pr` supports a
+bounded single-PR analysis.
 
 ### sd-audit-repo
 

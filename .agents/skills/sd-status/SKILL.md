@@ -45,11 +45,11 @@ shell text.
    local refs and reports them as `cached`; do not fetch merely to make the
    report fresher.
 4. For local mode, report repository identity, branch and working-tree counts,
-   cached upstream divergence, default/local/remote branches, installed pack
+   Git stash count, cached upstream divergence, default/local/remote branches, installed pack
    and Trellis versions, relevant PR, open PRs/issues, current and queued
    Trellis work, anomalies, and numbered next steps.
 5. For fleet mode, preserve registry rollout order and show one bounded row per
-   consumer with checkout availability, branch/tree/upstream state, installed
+   consumer with checkout availability, branch/tree/upstream state, stash count, installed
    versus target pack version, PR counts, and task counts. Put missing, dirty,
    divergent, behind, or stale consumers into evidence-backed next steps.
 6. Return the collector's exit status unchanged. A dirty or stale ordinary

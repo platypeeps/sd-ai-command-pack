@@ -37,16 +37,187 @@ class ReviewLearningsTests(InstallTestCase):
             PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_payloads",
         )
-        responses = ['[{"number": 7, "title": "t", "url": "u"}]', "null"]
-
-        def fake_stdout(args, repo_root):
-            return responses.pop(0)
-
-        with mock.patch.object(learnings, "_run_gh_stdout", fake_stdout):
+        with mock.patch.object(learnings, "_run_gh_json", return_value=None):
             comments = learnings.fetch_recent_copilot_comments(
                 Path("."), days=7, limit=5, github_repo="owner/name"
             )
         self.assertEqual(comments, [])
+
+    def test_review_window_pages_to_exact_cutoff_and_reports_inventory(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_pagination",
+        )
+        calls: list[list[str]] = []
+
+        def fake_run_gh_json(args: list[str], repo_root: Path):
+            calls.append(args)
+            query = next(value for value in args if value.startswith("query="))
+            if "pullRequests(first:100" in query:
+                if any(value == "endCursor=page-2" for value in args):
+                    return {
+                        "data": {
+                            "repository": {
+                                "pullRequests": {
+                                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                    "nodes": [
+                                        {
+                                            "number": 1,
+                                            "title": "old",
+                                            "url": "https://example.test/1",
+                                            "updatedAt": "2000-01-01T00:00:00Z",
+                                        }
+                                    ],
+                                }
+                            }
+                        }
+                    }
+                return {
+                    "data": {
+                        "repository": {
+                            "pullRequests": {
+                                "pageInfo": {
+                                    "hasNextPage": True,
+                                    "endCursor": "page-2",
+                                },
+                                "nodes": [
+                                    {
+                                        "number": 7,
+                                        "title": "current",
+                                        "url": "https://example.test/7",
+                                        "updatedAt": "2999-01-01T00:00:00Z",
+                                    }
+                                ],
+                            }
+                        }
+                    }
+                }
+            return {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [
+                                    {
+                                        "isResolved": True,
+                                        "isOutdated": False,
+                                        "path": "src/current.py",
+                                        "comments": {
+                                            "nodes": [
+                                                {
+                                                    "author": {
+                                                        "login": module.COPILOT_LOGIN
+                                                    },
+                                                    "body": "Add a boundary fixture.",
+                                                }
+                                            ]
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+
+        with mock.patch.object(module, "_run_gh_json", fake_run_gh_json):
+            window = module.fetch_recent_copilot_review_window(
+                Path("."),
+                days=2,
+                github_repo="owner/name",
+            )
+
+        self.assertEqual(window.prs_inspected, 1)
+        self.assertFalse(window.truncated)
+        self.assertEqual(len(window.comments), 1)
+        self.assertTrue(
+            any("endCursor=page-2" in call for call in calls),
+            calls,
+        )
+
+    def test_review_window_limit_is_explicitly_truncated(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_limit",
+        )
+        payload = {
+            "data": {
+                "repository": {
+                    "pullRequests": {
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        "nodes": [
+                            {
+                                "number": number,
+                                "title": f"PR {number}",
+                                "url": f"https://example.test/{number}",
+                                "updatedAt": "2999-01-01T00:00:00Z",
+                            }
+                            for number in (1, 2)
+                        ],
+                    }
+                }
+            }
+        }
+
+        with mock.patch.object(module, "_run_gh_json", return_value=payload):
+            window = module.fetch_recent_copilot_review_window(
+                Path("."),
+                days=2,
+                limit=1,
+                github_repo="owner/name",
+            )
+
+        self.assertEqual(window.prs_inspected, 1)
+        self.assertTrue(window.truncated)
+
+    def test_explicit_pr_review_window_is_bounded_to_requested_pr(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_explicit_pr",
+        )
+        payload = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [
+                                {
+                                    "isResolved": False,
+                                    "isOutdated": False,
+                                    "path": "src/example.py",
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "author": {
+                                                    "login": module.COPILOT_LOGIN
+                                                },
+                                                "body": "Cover the failure path.",
+                                            }
+                                        ]
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+
+        with mock.patch.object(module, "_run_gh_json", return_value=payload):
+            window = module.fetch_copilot_review_for_prs(
+                Path("."),
+                pr_numbers=[42, 42],
+                github_repo="owner/name",
+            )
+
+        self.assertEqual(window.prs_inspected, 1)
+        self.assertEqual(window.cutoff, None)
+        self.assertFalse(window.truncated)
+        self.assertEqual(window.comments[0].pr_number, 42)
+        self.assertEqual(
+            window.comments[0].pr_url,
+            "https://github.com/owner/name/pull/42",
+        )
 
     def test_learnings_neutralize_embedded_managed_markers(self) -> None:
         learnings = self.load_module_from_path(
@@ -367,7 +538,7 @@ class ReviewLearningsTests(InstallTestCase):
             with mock.patch.object(module, "extract_findings", return_value=[]):
                 with mock.patch.object(
                     module,
-                    "fetch_recent_copilot_comments",
+                    "fetch_recent_copilot_review_window",
                     side_effect=TypeError("expected list in review learnings payload"),
                 ):
                     stderr = io.StringIO()
@@ -592,7 +763,7 @@ class ReviewLearningsTests(InstallTestCase):
         diff_file.write_text("", encoding="utf-8")
         with mock.patch.object(
             module,
-            "fetch_recent_copilot_comments",
+            "fetch_recent_copilot_review_window",
             side_effect=RuntimeError("gh timed out after 60s"),
         ):
             stderr = io.StringIO()
