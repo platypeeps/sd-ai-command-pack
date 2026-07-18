@@ -3178,6 +3178,7 @@ class InstallCoreTests(InstallTestCase):
         expected_sources = {
             f"sd-{command}.md"
             for command in [
+                "help",
                 "start",
                 "continue",
                 "finish-work",

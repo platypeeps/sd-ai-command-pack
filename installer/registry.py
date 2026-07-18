@@ -436,40 +436,178 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
     ),
 }
 
-# Command-list source of truth: one (name, short form) row per sd-* command
-# that ships a neutral body at templates/.commands/<name>.md. The bespoke
-# claude/gemini/github adapters and the per-command manifest entries are
-# generated from this list by .github/scripts/generate-command-surfaces.py
-# (`make generate`); adding a command means adding the skill, the neutral
-# body, and one row here. Row order is the canonical per-command order of
-# the regenerated manifest.
-COMMAND_NAMES: tuple[tuple[str, str], ...] = (
-    ("sd-continue", "continue"),
-    ("sd-start", "start"),
-    ("sd-finish-work", "finish-work"),
-    ("sd-create-pr", "create-pr"),
-    ("sd-work-backlog", "work-backlog"),
-    ("sd-work-designs", "work-designs"),
-    ("sd-audit-repo", "audit-repo"),
-    ("sd-watch-pr", "watch-pr"),
-    ("sd-fix-ci", "fix-ci"),
-    ("sd-update-deps", "update-deps"),
-    ("sd-fleet-refresh", "fleet-refresh"),
-    ("sd-test-gaps", "test-gaps"),
-    ("sd-retro", "retro"),
-    ("sd-ship", "ship"),
-    ("sd-review-pr", "review-pr"),
-    ("sd-review-local", "review-local"),
-    ("sd-review-learnings", "review-learnings"),
-    ("sd-full-check", "full-check"),
-    ("sd-housekeeping", "housekeeping"),
-    ("sd-update-spec", "update-spec"),
+@dataclass(frozen=True)
+class CommandFamily:
+    id: str
+    label: str
+    summary: str
+
+
+@dataclass(frozen=True)
+class CommandInfo:
+    name: str
+    short: str
+    family: str
+
+
+COMMAND_FAMILIES: tuple[CommandFamily, ...] = (
+    CommandFamily(
+        id="orientation-knowledge",
+        label="Orientation and knowledge",
+        summary="Start or resume work, preserve knowledge, and close a session.",
+    ),
+    CommandFamily(
+        id="planning-backlog",
+        label="Planning and backlog",
+        summary="Prepare implementation-ready plans and work the task backlog.",
+    ),
+    CommandFamily(
+        id="verification-improvement",
+        label="Verification and improvement",
+        summary="Check quality, investigate failures, and strengthen the repository.",
+    ),
+    CommandFamily(
+        id="pull-requests-shipping",
+        label="Pull requests and shipping",
+        summary="Publish, review, watch, merge, and clean up delivery streams.",
+    ),
+    CommandFamily(
+        id="maintenance-fleet",
+        label="Maintenance and fleet",
+        summary="Maintain dependencies and roll pack releases across repositories.",
+    ),
+)
+
+# Command source of truth: one row per sd-* command that ships a neutral body
+# at templates/.commands/<name>.md. The generator derives the compatibility
+# pair list, help catalog, bespoke adapters, and per-command manifest entries.
+# Row order remains the canonical regenerated-manifest order.
+COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
+    CommandInfo("sd-help", "help", "orientation-knowledge"),
+    CommandInfo("sd-continue", "continue", "orientation-knowledge"),
+    CommandInfo("sd-start", "start", "orientation-knowledge"),
+    CommandInfo("sd-finish-work", "finish-work", "orientation-knowledge"),
+    CommandInfo("sd-create-pr", "create-pr", "pull-requests-shipping"),
+    CommandInfo("sd-work-backlog", "work-backlog", "planning-backlog"),
+    CommandInfo("sd-work-designs", "work-designs", "planning-backlog"),
+    CommandInfo("sd-audit-repo", "audit-repo", "verification-improvement"),
+    CommandInfo("sd-watch-pr", "watch-pr", "pull-requests-shipping"),
+    CommandInfo("sd-fix-ci", "fix-ci", "verification-improvement"),
+    CommandInfo("sd-update-deps", "update-deps", "maintenance-fleet"),
+    CommandInfo("sd-fleet-refresh", "fleet-refresh", "maintenance-fleet"),
+    CommandInfo("sd-test-gaps", "test-gaps", "verification-improvement"),
+    CommandInfo("sd-retro", "retro", "orientation-knowledge"),
+    CommandInfo("sd-ship", "ship", "pull-requests-shipping"),
+    CommandInfo("sd-review-pr", "review-pr", "pull-requests-shipping"),
+    CommandInfo("sd-review-local", "review-local", "verification-improvement"),
+    CommandInfo(
+        "sd-review-learnings",
+        "review-learnings",
+        "verification-improvement",
+    ),
+    CommandInfo("sd-full-check", "full-check", "verification-improvement"),
+    CommandInfo("sd-housekeeping", "housekeeping", "pull-requests-shipping"),
+    CommandInfo("sd-update-spec", "update-spec", "orientation-knowledge"),
+)
+
+
+def validate_command_registry(
+    commands: tuple[CommandInfo, ...],
+    families: tuple[CommandFamily, ...],
+) -> None:
+    def duplicates(values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        repeated: set[str] = set()
+        for value in values:
+            if value in seen:
+                repeated.add(value)
+            else:
+                seen.add(value)
+        return sorted(repeated)
+
+    family_ids = [family.id for family in families]
+    duplicate_family_ids = duplicates(family_ids)
+    errors: list[str] = []
+    if duplicate_family_ids:
+        errors.append("duplicate family id(s): " + ", ".join(duplicate_family_ids))
+    for family in families:
+        if not family.id or not family.label or not family.summary:
+            errors.append(f"family fields must be non-empty: {family!r}")
+
+    names = [command.name for command in commands]
+    shorts = [command.short for command in commands]
+    duplicate_names = duplicates(names)
+    duplicate_shorts = duplicates(shorts)
+    if duplicate_names:
+        errors.append("duplicate command name(s): " + ", ".join(duplicate_names))
+    if duplicate_shorts:
+        errors.append("duplicate command short form(s): " + ", ".join(duplicate_shorts))
+
+    known_families = set(family_ids)
+    for command in commands:
+        if not command.name or not command.short or not command.family:
+            errors.append(f"command fields must be non-empty: {command!r}")
+            continue
+        if not command.name.startswith("sd-"):
+            errors.append(f"command name must start with sd-: {command.name}")
+        elif command.short != command.name.removeprefix("sd-"):
+            errors.append(
+                f"command short form must match name: {command.name} -> {command.short}"
+            )
+        if command.family not in known_families:
+            errors.append(
+                f"command {command.name} uses unknown family: {command.family}"
+            )
+
+    if errors:
+        raise RuntimeError("invalid COMMAND_REGISTRY: " + "; ".join(errors))
+
+
+validate_command_registry(COMMAND_REGISTRY, COMMAND_FAMILIES)
+
+# Compatibility view retained for existing installer/generator consumers.
+COMMAND_NAMES: tuple[tuple[str, str], ...] = tuple(
+    (command.name, command.short) for command in COMMAND_REGISTRY
 )
 
 # Commands in this set are generated and available from the pack source
 # checkout, but are not included in consumer manifests. Their workflows depend
 # on source-only operator files such as the fleet registry and install entrypoint.
 SOURCE_ONLY_COMMAND_NAMES = frozenset({"sd-fleet-refresh"})
+
+# Extra files that must travel with an installed shared skill. Relative paths
+# are rooted inside templates/.agents/skills/<skill>/ and are fanned out by the
+# command-surface generator to every supported skill root.
+SHARED_SKILL_REFERENCES: dict[str, tuple[str, ...]] = {
+    "sd-help": (
+        "references/command-catalog.md",
+        "references/examples.md",
+    ),
+}
+
+
+def validate_shared_skill_references(
+    command_names: tuple[tuple[str, str], ...],
+    references: dict[str, tuple[str, ...]],
+) -> None:
+    known_commands = {name for name, _short in command_names}
+    unknown = sorted(set(references) - known_commands)
+    errors = ["unknown skill(s): " + ", ".join(unknown)] if unknown else []
+    for name, paths in references.items():
+        if len(paths) != len(set(paths)):
+            errors.append(f"{name} contains duplicate reference paths")
+        for value in paths:
+            path = Path(value)
+            if (
+                path.is_absolute()
+                or ".." in path.parts
+                or len(path.parts) < 2
+                or path.parts[0] != "references"
+                or path.suffix != ".md"
+            ):
+                errors.append(f"{name} contains unsafe reference path: {value}")
+    if errors:
+        raise RuntimeError("invalid SHARED_SKILL_REFERENCES: " + "; ".join(errors))
 
 
 def validate_source_only_command_names(
@@ -485,6 +623,7 @@ def validate_source_only_command_names(
 
 
 validate_source_only_command_names(COMMAND_NAMES, SOURCE_ONLY_COMMAND_NAMES)
+validate_shared_skill_references(COMMAND_NAMES, SHARED_SKILL_REFERENCES)
 
 # Pack-owned .gito defaults are not a platform but share the local-gitignore
 # grouping; kept here so the managed block order below stays byte-stable.
@@ -680,7 +819,11 @@ COPILOT_GUIDANCE_END = "<!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:END -->"
 __all__ = [
     "ACTIVE_TRELLIS_PLATFORM_MARKERS",
     "ALWAYS_INSTALL",
+    "COMMAND_FAMILIES",
+    "COMMAND_REGISTRY",
     "COMMAND_NAMES",
+    "CommandFamily",
+    "CommandInfo",
     "COPILOT_GUIDANCE_END",
     "COPILOT_GUIDANCE_START",
     "COPILOT_INSTRUCTIONS_TARGET",
@@ -707,6 +850,7 @@ __all__ = [
     "PlatformInfo",
     "REVIEW_ARTIFACT_GITIGNORE_PATTERNS",
     "ROOT",
+    "SHARED_SKILL_REFERENCES",
     "SOURCE_ONLY_COMMAND_NAMES",
     "TRELLIS_BLANKET_GITIGNORE_ENTRIES",
     "TRELLIS_GITIGNORE_END",
@@ -719,5 +863,7 @@ __all__ = [
     "_ordered_platform_groups_with_local_only",
     "_validate_registry_group_order",
     "_validate_registry_group_orders",
+    "validate_command_registry",
+    "validate_shared_skill_references",
     "validate_source_only_command_names",
 ]

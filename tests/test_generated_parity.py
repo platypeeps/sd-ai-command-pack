@@ -928,6 +928,7 @@ class GeneratedParityTests(InstallTestCase):
         self.assertIn("[Configuration Quick Reference](#configuration-quick-reference)", readme)
         self.assertIn("[Install](#install)", readme)
         for command_heading in (
+            "### sd-help",
             "### sd-start",
             "### sd-create-pr",
             "### sd-work-backlog",
@@ -1644,7 +1645,11 @@ class GeneratedParityTests(InstallTestCase):
         self.assertGreater(len(adapter_files), 0)
         for file in adapter_files:
             content = file.source.read_text(encoding="utf-8")
-            if "start" in file.target.name:
+            if "help" in file.target.name:
+                self.assertIn("Resolve the `sd-help` skill by name", content)
+                self.assertIn("references/command-catalog.md", content)
+                self.assertIn("separate explicit request", content)
+            elif "start" in file.target.name:
                 if file.platform == "claude":
                     self.assertIn("installs no `trellis-start` skill", content)
                     self.assertIn("./.trellis/scripts/get_context.py", content)
@@ -1909,6 +1914,7 @@ class GeneratedParityTests(InstallTestCase):
 
     def test_gemini_entries_use_namespaced_toml_completion_shape(self) -> None:
         expected_descriptions = {
+            "help": "Discover, compare, and understand Software Delivery commands without running the selected workflow.",
             "start": "Initialize or resume a task using the Trellis start workflow.",
             "continue": "Resume the current Trellis task or workflow state.",
             "finish-work": "Wrap up the current Trellis coding session.",

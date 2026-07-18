@@ -20,6 +20,12 @@ Quick links:
 
 ## What is installed
 
+- `.agents/skills/sd-help/SKILL.md`: read-only SD command discovery,
+  comparison, explanation, and recommendation workflow.
+- `.agents/skills/sd-help/references/command-catalog.md`: generated command
+  families, descriptions, release version, and bundled availability policy.
+- `.agents/skills/sd-help/references/examples.md`: authored examples for common
+  delivery goals and command overlaps.
 - `.agents/skills/sd-start/SKILL.md`: Codex-visible Trellis start wrapper.
 - `.agents/skills/sd-continue/SKILL.md`: Codex-visible Trellis continue wrapper.
 - `.agents/skills/sd-finish-work/SKILL.md`: Codex-visible Trellis finish-work wrapper.
@@ -112,7 +118,7 @@ in the shared skills and scripts. The update-spec workflow runs the
 Trellis-provided `trellis-update-spec` skill as-is, refreshes repo-owned
 repospec artifacts through existing maintenance infrastructure when available,
 and then performs the architecture-overview check.
-Codex exposes the pack entry points as skills named `sd-start`, `sd-continue`,
+Codex exposes the pack entry points as skills named `sd-help`, `sd-start`, `sd-continue`,
 `sd-finish-work`, `sd-create-pr`, `sd-work-backlog`, `sd-work-designs`,
 `sd-full-check`, `sd-housekeeping`, `sd-review-pr`, `sd-review-local`,
 `sd-review-learnings`, `sd-audit-repo`, `sd-ship`,
@@ -141,6 +147,11 @@ already running, use `/commands reload`, then `/commands list` to confirm the
 loaded project command files.
 
 ## Recommended review loop
+
+When you do not know which workflow owns the next step, start with `sd-help`.
+It inspects the bundled catalog and current skill inventory, recommends the
+smallest fitting command, and returns a copy-ready invocation without running
+it. Use a separate request to execute the recommendation.
 
 1. Iterate with the narrowest deterministic checks for the files you touched.
 2. Use the continue command when resuming an in-progress Trellis task.
@@ -236,6 +247,14 @@ guidance without starting implementation, parks tasks that need user input,
 and ends with numbered links to every planning document it created or
 updated.
 
+The help command is a read-only orientation surface. Use bare help for a
+compact lifecycle tour, `all` for the complete catalog, an exact command for
+an explanation, two or more commands for a comparison, or an ordinary-language
+goal for a recommendation. It distinguishes commands available in the current
+session from bundled-but-undiscoverable, source-checkout-only, and external
+skills. It reports observed version information honestly and never executes,
+delegates to, or mutates state on behalf of the selected command.
+
 ## Commands
 
 Use the platform-native command when available.
@@ -243,6 +262,7 @@ Use the platform-native command when available.
 Claude Code and Gemini CLI:
 
 ```bash
+/sd:help
 /sd:start
 /sd:continue
 /sd:finish-work
@@ -268,6 +288,7 @@ Cursor command files, GitHub Copilot prompt files, OpenCode command files,
 Qoder commands, Trae commands, Pi prompts, workflow adapters, and Codex skills:
 
 ```bash
+/sd-help
 /sd-start
 /sd-continue
 /sd-finish-work
@@ -291,6 +312,20 @@ Qoder commands, Trae commands, Pi prompts, workflow adapters, and Codex skills:
 
 In Codex, you can also invoke the enabled skills explicitly with
 `$sd-review-pr`-style skill mentions.
+
+Common help requests:
+
+```text
+/sd:help
+/sd:help review-pr
+/sd:help "compare sd-create-pr and sd-ship"
+/sd:help "I need to fix failing CI"
+/sd:help all
+```
+
+Use the equivalent native adapter form on other platforms. A help response may
+recommend one command or a bounded workflow, but execution always requires a
+separate explicit request.
 
 CodeBuddy, Factory Droid, and ZCode use namespaced `sd/<command>` command
 folders. Kiro and Reasonix expose the same entries as native `sd-*` skills.
