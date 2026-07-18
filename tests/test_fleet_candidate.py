@@ -162,6 +162,33 @@ class FleetCandidateTests(InstallTestCase):
             os.pathsep.join([python_bin, "/usr/bin"]),
         )
 
+    def test_command_environment_uses_disposable_tool_caches(self) -> None:
+        candidate = self.load_candidate_module()
+        work_root = Path("/tmp/candidate-work")
+        with mock.patch.dict(
+            candidate.os.environ,
+            {
+                "NPM_CONFIG_CACHE": "/custom/npm-cache",
+                "UV_CACHE_DIR": "/custom/uv-cache",
+            },
+        ):
+            explicit_env = candidate.command_environment(
+                Path(sys.executable), work_root
+            )
+        with mock.patch.dict(
+            candidate.os.environ,
+            {"NPM_CONFIG_CACHE": "", "UV_CACHE_DIR": ""},
+            clear=False,
+        ):
+            candidate.os.environ.pop("NPM_CONFIG_CACHE")
+            candidate.os.environ.pop("UV_CACHE_DIR")
+            default_env = candidate.command_environment(Path(sys.executable), work_root)
+
+        self.assertEqual(explicit_env["NPM_CONFIG_CACHE"], "/custom/npm-cache")
+        self.assertEqual(explicit_env["UV_CACHE_DIR"], "/custom/uv-cache")
+        self.assertEqual(default_env["NPM_CONFIG_CACHE"], str(work_root / "npm-cache"))
+        self.assertEqual(default_env["UV_CACHE_DIR"], str(work_root / "uv-cache"))
+
     def test_run_command_normalizes_timeout_and_start_failures(self) -> None:
         candidate = self.load_candidate_module()
         with mock.patch.object(

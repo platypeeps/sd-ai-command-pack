@@ -26,6 +26,14 @@ repo-owned lightweight `candidateChecks` declared in the fleet manifest. It
 continues after failures so the report covers the whole fleet, then cleans the
 temporary clones.
 
+Candidate checks run in declaration order in the same disposable checkout.
+When a repo-owned gate validates generated metadata derived from installed file
+structure, declare that repository's deterministic refresh command immediately
+before the validating check. This keeps candidate validation representative of
+the real rollout without weakening the consumer gate.
+The validator supplies disposable npm, uv, and Python bytecode cache paths to
+these commands so local cache permissions cannot make a candidate fail.
+
 A full all-pass run atomically updates
 `docs/fleet/candidate-validation.json`. That ledger is bound to the pack
 version, installable payload, fleet manifest, declared checks, and consumer

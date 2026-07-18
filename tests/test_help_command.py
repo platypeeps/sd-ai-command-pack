@@ -104,6 +104,28 @@ class HelpCommandTests(InstallTestCase):
             ):
                 registry.validate_command_registry(commands, families)
 
+        family_cases = (
+            (
+                (
+                    registry.CommandFamily("one", "One", "One family."),
+                    registry.CommandFamily("one", "Another", "Another family."),
+                ),
+                "duplicate family id",
+            ),
+            ((registry.CommandFamily("", "One", "One family."),), "non-empty"),
+        )
+        for invalid_families, message in family_cases:
+            with self.subTest(message=message), self.assertRaisesRegex(
+                RuntimeError, message
+            ):
+                registry.validate_command_registry((), invalid_families)
+
+        with self.assertRaisesRegex(RuntimeError, "command fields must be non-empty"):
+            registry.validate_command_registry(
+                (registry.CommandInfo("", "", ""),),
+                families,
+            )
+
     def test_shared_skill_reference_validation_rejects_unknown_and_unsafe(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "unknown skill"):
             registry.validate_shared_skill_references(

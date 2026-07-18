@@ -27,7 +27,10 @@
       "platforms": ["claude", "gemini", "github", "opencode"],
       "rolloutPriority": 30,
       "candidateTimeoutSeconds": 180,
-      "candidateChecks": [["node", "scripts/check-review-preflight.mjs"]]
+      "candidateChecks": [
+        ["bash", "scripts/update_repomix"],
+        ["node", "scripts/check-review-preflight.mjs"]
+      ]
     },
     {
       "name": "rwbp-website",

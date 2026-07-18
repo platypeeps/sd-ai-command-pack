@@ -67,6 +67,8 @@ def command_environment(python_executable: Path, work_root: Path) -> dict[str, s
         os.pathsep.join([python_bin, inherited_path]) if inherited_path else python_bin
     )
     env.setdefault("PYTHONPYCACHEPREFIX", str(work_root / "python-cache"))
+    env.setdefault("NPM_CONFIG_CACHE", str(work_root / "npm-cache"))
+    env.setdefault("UV_CACHE_DIR", str(work_root / "uv-cache"))
     env["SD_AI_COMMAND_PACK_CANDIDATE_CHECK"] = "1"
     return env
 

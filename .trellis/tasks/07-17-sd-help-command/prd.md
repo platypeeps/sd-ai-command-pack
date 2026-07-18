@@ -21,9 +21,9 @@ from their current source text.
 - Every consumer receives shared skills under `.agents/skills/`, so help can
   discover the actual local command set and read skill frontmatter/body without
   maintaining a second full command catalog.
-- The current release on `main` is `0.16.2`; PR #146 reserves `0.17.0` but is
-  still open. This additive command should use the next available minor version
-  after reconciling the branch with the release order before publication.
+- PR #146 released `0.17.0` while this task was in progress. The branch was
+  reconciled with that release before assigning this additive command the next
+  available minor version, `0.18.0`.
 - The adjacent `se-ai-command-pack` has a planning-only `se-help` task, not a
   shipped command. Its proposed experience includes generated family/catalog
   data, list/explain/compare/recommend/examples/tour modes, current-availability
@@ -129,29 +129,29 @@ from their current source text.
 
 ## Acceptance Criteria
 
-- [ ] Bare `sd-help` reports the installed version when available, groups every
+- [x] Bare `sd-help` reports the installed version when available, groups every
       locally available `sd-*` skill by family, and includes intent-oriented
       examples without executing any workflow.
-- [ ] `sd-help <skill>` reads and explains that skill's current installed
+- [x] `sd-help <skill>` reads and explains that skill's current installed
       instructions, including arguments, side effects, examples, and related
       commands.
-- [ ] Natural-language, family, `all`, and comparison requests produce bounded,
+- [x] Natural-language, family, `all`, and comparison requests produce bounded,
       useful output; examples/tour modes produce copy-ready prompts; unknown
       requests offer ranked suggestions.
-- [ ] The generated catalog and runtime inventory clearly distinguish available,
+- [x] The generated catalog and runtime inventory clearly distinguish available,
       bundled-but-not-discoverable, source-only, and unknown/external skills.
-- [ ] Every current registry command is classified exactly once, with
+- [x] Every current registry command is classified exactly once, with
       `sd-fleet-refresh` labeled source-only; compatibility `COMMAND_NAMES` is
       derived from the richer canonical registry model.
-- [ ] Recommendations prefer one smallest-fit command, cap genuine workflow
+- [x] Recommendations prefer one smallest-fit command, cap genuine workflow
       chains at three stages, and name each handoff.
-- [ ] The shared skill and all generated/installed adapter surfaces are present,
+- [x] The shared skill and all generated/installed adapter surfaces are present,
       synchronized, manifest-declared, and covered by focused regression tests.
-- [ ] README and both installed-guide copies document the command and realistic
+- [x] README and both installed-guide copies document the command and realistic
       invocation examples.
-- [ ] The release ledger, version metadata, changelog, self-install provenance,
+- [x] The release ledger, version metadata, changelog, self-install provenance,
       and Obsidian KB are current for the final payload.
-- [ ] Focused tests, generated-surface checks, installer tests, `make check`,
+- [x] Focused tests, generated-surface checks, installer tests, `make check`,
       and the deterministic SD full check pass.
 
 ## Out Of Scope
@@ -168,3 +168,18 @@ from their current source text.
 - `sd-help` is strictly explanatory. It may end with the exact recommended
   invocation, but executing that command requires a separate user request so a
   help query never causes workflow side effects.
+
+## Validation
+
+- `make check` passed on 2026-07-17: all unit/integration shards passed, installer
+  line and branch coverage remained 100%, shipped-script coverage floors passed,
+  Ruff and mypy passed, Bandit reported no blocking findings, and Zizmor reported
+  no findings (six configured suppressions).
+- The deterministic SD full check passed with Prism and Gito disabled by the
+  canonical Make target. It verified 136 template twin pairs, the 0.18.0 release
+  bump/changelog contract, 141 installed targets, current provenance, and the
+  refreshed Obsidian KB.
+- The full 0.18.0 fleet candidate run passed all seven configured consumers and
+  wrote `docs/fleet/candidate-validation.json`. `hoa-manager` now refreshes its
+  generated Repomix map before its repo-owned preflight, and candidate commands
+  use disposable npm, uv, and Python bytecode caches.

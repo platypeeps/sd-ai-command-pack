@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "validatedAt": "2026-07-17T23:47:40Z",
-  "packVersion": "0.17.0",
-  "payloadDigest": "sha256:b85896ed31992dfce834cb065f8ffdc5191681a7801374941751dfc097853e3b",
-  "fleetManifestDigest": "sha256:b0c6f4382e8f3be08a163c9662ef69c9be9ea9df6a1f7aae88154d40efae5994",
+  "validatedAt": "2026-07-18T02:31:54Z",
+  "packVersion": "0.18.0",
+  "payloadDigest": "sha256:dc614f0d022f718768f2cf31f860240b9828fe8439a9bebdd85e83254989d65e",
+  "fleetManifestDigest": "sha256:9ee6b5171265f17e752776b2608b0cd83e6d9079aa42d9ad82e61f5c0fd041f2",
   "consumers": [
     {
       "name": "rwbp-coordinator",
@@ -37,6 +37,10 @@
       "baseCommit": "996c5a5e825ac3c48d0a73bcb3d44a2540574591",
       "status": "passed",
       "checks": [
+        [
+          "bash",
+          "scripts/update_repomix"
+        ],
         [
           "node",
           "scripts/check-review-preflight.mjs"
@@ -77,7 +81,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "b66a619ff217ecea720e79394ba1ac7682a755ec",
+      "baseCommit": "d39b843e39ccfb31f7681c0279852eda07733594",
       "status": "passed",
       "checks": [
         [

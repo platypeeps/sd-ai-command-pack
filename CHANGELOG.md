@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.18.0 - 2026-07-17
+
+- Add the read-only `sd-help` command across supported adapters, with
+  list/explain/compare/recommend/examples/tour modes, honest runtime
+  availability labels, bounded workflow recommendations, and copy-ready native
+  invocations.
+- Generate the help catalog and all shared-reference fanout from a validated
+  command/family registry so command names, descriptions, source-only policy,
+  adapters, and installed skill resources cannot drift independently.
+- Make fleet candidate checks representative of generated repository metadata
+  and isolate npm, uv, and Python bytecode caches during disposable validation.
+
 ## 0.17.0 - 2026-07-17
 
 - Separate `sd-ship` publication and review ownership: Stage 1 now delegates
