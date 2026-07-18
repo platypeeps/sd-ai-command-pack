@@ -95,6 +95,7 @@ assert.deepEqual(
   ],
 );
 assert.deepEqual(reviewRiskCategories("const words = label.split(' ');"), []);
+assert.deepEqual(reviewRiskCategories("words = read_text(value).split(' ')"), []);
 assert.deepEqual(
   reviewRiskCategories("const values = process.argv[2].split(',');"),
   ['parser/structured input'],

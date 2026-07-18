@@ -32,7 +32,7 @@ const DIRECT_BOUNDARY_SPLIT_PATTERNS = [
   /\bprocess\.env(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[^\]\r\n]+\])\s*(?:\?\.|\.)\s*split\s*\(/,
   /\b(?:os\.environ(?:\.get\s*\([^\r\n]*\)|\[[^\]\r\n]+\])|(?:os\.)?getenv\s*\([^\r\n]*\))\s*\.\s*split\s*\(/,
   /\b(?:[A-Za-z_$][A-Za-z0-9_$]*\.)?(?:readFileSync|readFile)\s*\([^\r\n]*\)\s*(?:\?\.|\.)\s*split\s*\(/,
-  /\bread_text\s*\([^\r\n]*\)\s*\.\s*split\s*\(/,
+  /\.\s*read_text\s*\([^\r\n]*\)\s*\.\s*split\s*\(/,
 ];
 
 // Declared before the module-level main run below: unlike function
