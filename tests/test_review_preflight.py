@@ -104,6 +104,14 @@ assert.deepEqual(
   ['parser/structured input', 'environment/global state'],
 );
 assert.deepEqual(
+  reviewRiskCategories("values = os.getenv('VALUES', default_values()).split(',')"),
+  ['parser/structured input', 'environment/global state'],
+);
+assert.deepEqual(
+  reviewRiskCategories("values = os.environ.get('VALUES', default_values()).split(',')"),
+  ['parser/structured input', 'environment/global state'],
+);
+assert.deepEqual(
   reviewRiskCategories("const values = readFileSync(path, 'utf8').split('\\n');"),
   ['parser/structured input', 'path/filesystem boundary'],
 );
