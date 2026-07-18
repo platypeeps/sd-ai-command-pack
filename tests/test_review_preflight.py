@@ -120,6 +120,10 @@ assert.deepEqual(
   ['parser/structured input', 'path/filesystem boundary'],
 );
 assert.deepEqual(
+  reviewRiskCategories("const values = fs.readFileSync(resolve(root, name), 'utf8').split('\\n');"),
+  ['parser/structured input', 'path/filesystem boundary'],
+);
+assert.deepEqual(
   reviewRiskCategories("values = Path(resolve(root, name)).read_text(encoding='utf8').split('\\n')"),
   ['parser/structured input', 'path/filesystem boundary'],
 );

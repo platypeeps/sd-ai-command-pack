@@ -31,7 +31,7 @@ const DIRECT_BOUNDARY_SPLIT_PATTERNS = [
   /\b(?:process|sys)\.argv(?:\[[^\]\r\n]+\])?\s*\.\s*split\s*\(/,
   /\bprocess\.env(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[^\]\r\n]+\])\s*(?:\?\.|\.)\s*split\s*\(/,
   /\b(?:os\.environ(?:\.get\s*\([^\r\n]*\)|\[[^\]\r\n]+\])|(?:os\.)?getenv\s*\([^\r\n]*\))\s*\.\s*split\s*\(/,
-  /\b(?:readFileSync|readFile)\s*\([^\r\n]*\)\s*(?:\?\.|\.)\s*split\s*\(/,
+  /\b(?:[A-Za-z_$][A-Za-z0-9_$]*\.)?(?:readFileSync|readFile)\s*\([^\r\n]*\)\s*(?:\?\.|\.)\s*split\s*\(/,
   /\bread_text\s*\([^\r\n]*\)\s*\.\s*split\s*\(/,
 ];
 
