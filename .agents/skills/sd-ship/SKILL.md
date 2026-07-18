@@ -59,9 +59,11 @@ is arguments-only.
 stopping before the watch-and-merge tail, so `no-merge` fails as an
 unknown argument like any other unrecognized name.
 
-`defer-finish-work` and Stage 3's `no-merge` are internal delegation modes,
-not public `sd-ship` arguments. The composite supplies them only as described
-below so lifecycle side effects have one owner.
+`sd-create-pr`'s Stage 1 orchestration context, `defer-finish-work`, and Stage
+3's `no-merge` are internal delegation modes, not public `sd-ship` arguments.
+The composite supplies them only as described below so review and lifecycle
+side effects each have one owner. Reject user-supplied `publish-only`,
+`caller=`, `stage=`, or `return-after=` controls as unknown arguments.
 
 ## Workflow
 
@@ -72,10 +74,12 @@ below so lifecycle side effects have one owner.
    instructions: its own preconditions, gates, loops, and reports remain
    authoritative, and sd-ship never re-implements, abridges, or reorders a
    stage's internals.
-2. Stage 1 — `sd-create-pr`: run its flow to refresh specs, commit and
-   push the intended work, and create or reuse the branch pull request.
-   Record the PR number and URL for the report. If `until=pr`, stop the
-   chain here.
+2. Stage 1 — `sd-create-pr`: delegate its flow with the exact internal
+   orchestration context `caller: sd-ship`, `stage: 1`, `return-after: pr`.
+   This runs update-spec, commit, push, and PR creation/reuse, then returns the
+   publish result without entering `sd-create-pr`'s standalone review handoff.
+   Record the PR number and URL for the report. If `until=pr`, stop the chain
+   here without running review.
 3. Stage 2 — `sd-review-pr`: run its bounded review loop — deterministic
    local gate, configured remote review, fixes, replies — until the loop
    stops clean or blocked. With `until=review`, invoke it without
@@ -110,6 +114,13 @@ below so lifecycle side effects have one owner.
   only to Stage 4. Stage 2 must defer finish-work and Stage 3 must not invoke
   housekeeping. In an `until=review` chain, Stage 2 retains its normal
   finish-work behavior.
+- Stage 1 always returns after publishing and never runs review. Stage 2 is the
+  only review owner in an `sd-ship` chain: it does not run for `until=pr`, runs
+  once normally for `until=review`, and runs once with `defer-finish-work` for
+  `until=merge`.
+- The Stage 1 orchestration context is supplied by this composite directly to
+  `sd-create-pr`. Never expose it through a platform adapter, environment
+  variable, or user-facing argument.
 - sd-ship never force-pushes; any push happens inside a stage flow, under
   that stage skill's own rules.
 - A stopped chain is a report, not an error loop: never restart the chain

@@ -2994,7 +2994,12 @@ class InstallCoreTests(InstallTestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("name: sd-create-pr", create_pr)
         self.assertIn("# SD Create Pull Request", create_pr)
-        self.assertIn("Resolve both `sd-update-spec` and `sd-review-pr`", create_pr)
+        self.assertIn("Resolve `sd-update-spec` by name", create_pr)
+        self.assertIn("In standalone mode, also resolve `sd-review-pr`", create_pr)
+        self.assertRegex(
+            create_pr,
+            r"the composite owns\s+`sd-review-pr` resolution",
+        )
         self.assertIn("Do not create a duplicate PR", create_pr)
         self.assertIn("Do not assume the base branch is `main`", create_pr)
         self.assertIn("SD_AI_COMMAND_PACK_CREATE_PR_BRANCH", create_pr)
