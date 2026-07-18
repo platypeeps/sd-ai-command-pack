@@ -107,6 +107,14 @@ assert.deepEqual(
   reviewRiskCategories("const values = readFileSync(path, 'utf8').split('\\n');"),
   ['parser/structured input', 'path/filesystem boundary'],
 );
+assert.deepEqual(
+  reviewRiskCategories("const values = readFileSync(resolve(root, name), 'utf8').split('\\n');"),
+  ['parser/structured input', 'path/filesystem boundary'],
+);
+assert.deepEqual(
+  reviewRiskCategories("values = Path(resolve(root, name)).read_text(encoding='utf8').split('\\n')"),
+  ['parser/structured input', 'path/filesystem boundary'],
+);
 assert.deepEqual(parseTrellisTaskArtifactPath('.trellis/tasks/07-17-demo/check.jsonl'), {
   taskDir: '.trellis/tasks/07-17-demo',
   artifact: 'check.jsonl',
