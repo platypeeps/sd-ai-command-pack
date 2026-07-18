@@ -1,9 +1,9 @@
-# Fleet Refresh 0.19.9 Implementation Plan
+# Fleet Refresh 0.19.10 Implementation Plan
 
 ## 1. Establish Release State
 
 - [ ] Confirm `main` is clean and synchronized with `origin/main`.
-- [ ] Confirm `manifest.json` reports `0.19.9` and tag `v0.19.9` resolves to
+- [ ] Confirm `manifest.json` reports `0.19.10` and tag `v0.19.10` resolves to
   the current release commit.
 - [ ] Run the source-owned fleet preflight and preserve its starting-version
   classifications and exact install/audit commands.
@@ -29,7 +29,7 @@ For each refresh-needed consumer in preflight order:
   findings and stop for any released-pack defect.
 - [ ] Merge through the consumer's housekeeping gate and complete branch/ref
   cleanup.
-- [ ] Confirm post-merge provenance is `0.19.9` and rerun install audit.
+- [ ] Confirm post-merge provenance is `0.19.10` and rerun install audit.
 
 Rollback point: before PR creation, leave a failed local branch intact for
 inspection. After PR creation, never force-push or bypass a blocked merge gate.
@@ -73,3 +73,10 @@ inspection. After PR creation, never force-push or bypass a blocked merge gate.
 - [x] Replace the REST page length with GraphQL `reviews.totalCount`, add
   regression coverage above the default page size, and document the contract.
 - [x] Pass the full-fleet candidate check and canonical source gates for 0.19.9.
+- [x] Merge source PR #156, pass the main release workflow, and tag the exact
+  reviewed merge commit as `v0.19.9`.
+- [x] Stop before updating the coordinator when its late review thread showed
+  the boundary-risk sweep still read oversized untracked code in full.
+- [x] Reuse a bounded file-descriptor read for untracked diff sizing and risk
+  scanning, warn about skipped oversized code, and add focused coverage.
+- [x] Pass the full-fleet candidate check and canonical source gates for 0.19.10.

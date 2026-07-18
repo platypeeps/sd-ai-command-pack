@@ -497,7 +497,9 @@ code adds parser/structured-input, subprocess, filesystem/path, environment or
 global-state, or digest/integrity behavior. The warning names a conservative
 boundary-test matrix for author disposition before remote review. Diff sizing
 uses the complete review-base-to-working-tree state plus untracked files; large
-untracked files are counted as large without reading the entire file. Its
+untracked files are counted as large without reading the entire file. The same
+byte limit bounds the first-review boundary-risk content scan; skipped
+oversized untracked code files are named in an explicit warning. Its
 authored-source threshold excludes installed pack/Trellis mirrors, Trellis task
 and workspace records, and known generated reports. A separate warning calls
 out changes spanning more than one Trellis task directory. The task-context
