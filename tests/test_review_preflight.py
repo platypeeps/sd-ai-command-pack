@@ -104,6 +104,7 @@ assert.deepEqual(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/07
   artifact: 'implement.jsonl',
   archived: true,
 });
+assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/task.json'), null);
 assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/07-17-demo/prd.md'), null);
 assert.deepEqual(findTrellisTaskContextSeedRows('check.jsonl', [
   '{"file":"spec.md","reason":"real"}',

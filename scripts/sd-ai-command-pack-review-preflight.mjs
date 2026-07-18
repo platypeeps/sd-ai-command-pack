@@ -505,7 +505,7 @@ function trellisTaskRequiresGroundedContext(taskFile) {
 export function parseTrellisTaskArtifactPath(path) {
   const normalized = normalizePathSeparators(path).replace(/^\.\//, '');
   const match = /^\.trellis\/tasks\/((?:archive\/[^/]+\/[^/]+)|[^/]+)\/(task\.json|implement\.jsonl|check\.jsonl)$/.exec(normalized);
-  if (!match) {
+  if (!match || match[1] === 'archive') {
     return null;
   }
 

@@ -63,5 +63,8 @@ inspection. After PR creation, never force-push or bypass a blocked merge gate.
 - [x] Hardened the workflow to avoid the GitHub PR API for traditional merge
   commits and made status repository discovery run from its normalized
   candidate directory.
+- [x] Restored reserved `archive/` root rejection in the Trellis task artifact
+  parser after final source review exposed the invalid-path regression.
 - [x] Passed the full-fleet 0.19.8 candidate check for all seven consumers.
-- [x] Passed the canonical source gates for the final 0.19.8 candidate.
+- [x] Refreshed the full-fleet candidate ledger after the archive-root fix.
+- [x] Passed the canonical source gates for the final reviewed 0.19.8 payload.

@@ -8,6 +8,8 @@
 - Skip the GitHub commit-to-PR API lookup for traditional two-parent merge
   commits while preserving fail-closed evidence checks for squash and rebase
   merges.
+- Preserve the reserved Trellis `archive/` task root as non-task state while
+  continuing to recognize valid `archive/<month>/<task>/` artifacts.
 
 ## 0.19.7 - 2026-07-18
 
@@ -17,8 +19,6 @@
 
 ## 0.19.6 - 2026-07-18
 
-- Simplify the Trellis task artifact parser by removing an unreachable archive
-  branch while preserving archived task recognition.
 - Add explicit review-preflight regression coverage for Markdown and code-span
   documentation references that use `path.md:line` and `path:line:column`
   anchors.
