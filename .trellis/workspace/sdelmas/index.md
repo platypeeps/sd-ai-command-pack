@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 131
+- **Total Sessions**: 132
 - **Last Active**: 2026-07-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1208 | Active |
+| `journal-3.md` | ~1243 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 132 | 2026-07-17 | Pin SE pack source identity regression | `1be8263` | `codex/fix-pack-source-drift-identity` |
 | 131 | 2026-07-17 | Ship PR 145 through deferred lifecycle stages | `f0f2305` | `codex/align-ship-finish-work-boundary` |
 | 130 | 2026-07-17 | Align sd-ship finish-work ownership | `a57bd8e`, `318aedb`, `9ee3ca6` | `codex/align-ship-finish-work-boundary` |
 | 129 | 2026-07-17 | Ship PR 144 review loop | `d10fda0`, `cfb3295` | `codex/archived-task-jsonl-placeholder-preflight` |
