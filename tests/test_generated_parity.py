@@ -1186,7 +1186,10 @@ class GeneratedParityTests(InstallTestCase):
         self.assertIn("run_pack_source_drift_gates", workflow)
         self.assertIn('"${{ github.event.before }}" "${{ github.sha }}"', workflow)
         self.assertIn("pull-requests: read", workflow)
+        self.assertEqual(workflow.count("pull-requests: read"), 1)
         self.assertIn("commits/${GITHUB_SHA}/pulls", workflow)
+        self.assertIn("set -o pipefail", workflow)
+        self.assertIn("invalid pull-request merge evidence", workflow)
         self.assertIn("SD_AI_COMMAND_PACK_MAIN_PUSH_PR_MERGE", workflow)
         self.assertIn("git diff --no-renames --name-only -z", main_push_guard)
         self.assertIn(

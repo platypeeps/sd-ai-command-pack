@@ -14,7 +14,6 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
   unittest:
@@ -174,6 +173,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
 
     steps:
       - name: Check out pushed history
@@ -186,6 +188,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -o pipefail
           reviewed_pr_merge=0
           reviewed_pr_count="$(
             gh api \
@@ -194,6 +197,12 @@ jobs:
               jq --arg sha "$GITHUB_SHA" --arg base "$GITHUB_REF_NAME" \
                 '[.[] | select(.merged_at != null and .merge_commit_sha == $sha and .base.ref == $base)] | length'
           )"
+          case "$reviewed_pr_count" in
+            ''|*[!0-9]*)
+              echo "GitHub returned invalid pull-request merge evidence; failing closed." >&2
+              exit 1
+              ;;
+          esac
           if [ "$reviewed_pr_count" -gt 0 ]; then
             reviewed_pr_merge=1
           fi

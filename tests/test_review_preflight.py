@@ -1315,7 +1315,12 @@ assert.deepEqual(
             capture_output=True,
             check=False,
         )
-        self.assertEqual(malformed_evidence.returncode, 1, malformed_evidence.stdout)
+        self.assertEqual(
+            malformed_evidence.returncode,
+            1,
+            f"stdout={malformed_evidence.stdout!r} "
+            f"stderr={malformed_evidence.stderr!r}",
+        )
         self.assertIn("failing closed", malformed_evidence.stderr)
 
         missing_before = subprocess.run(
