@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.19.5 - 2026-07-18
+
+- Resolve `sd-status --repo` when callers pass relative files or other
+  non-directory paths inside a Git checkout by probing the parent directory
+  before `git -C`. Paths whose parent cannot be used as a repository still
+  fail cleanly.
+- Clarify first-time fleet profile creation by documenting the intentional
+  missing-file path instead of leaving an empty exception block.
+
 ## 0.19.4 - 2026-07-18
 
 - Resolve repository status correctly when `--repo` names a file within a Git
