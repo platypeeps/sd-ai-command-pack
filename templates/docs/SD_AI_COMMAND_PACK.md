@@ -494,7 +494,8 @@ to skip remote AI review. It also emits soft first-review warnings when changed
 code adds parser/structured-input, subprocess, filesystem/path, environment or
 global-state, or digest/integrity behavior. The warning names a conservative
 boundary-test matrix for author disposition before remote review. Diff sizing
-uses the complete review-base-to-working-tree state plus untracked files; its
+uses the complete review-base-to-working-tree state plus untracked files; large
+untracked files are counted as large without reading the entire file. Its
 authored-source threshold excludes installed pack/Trellis mirrors, Trellis task
 and workspace records, and known generated reports. A separate warning calls
 out changes spanning more than one Trellis task directory. The task-context
@@ -506,8 +507,8 @@ added/current sessions remain editable, but an older session must be restored
 and the intended current session edited by its explicit `## Session <n>:`
 heading. Target repos can tune roots,
 path-reference prefixes, integration paths, optional paths, copied-template
-paths, and the `diffSizeWarningLines`, `largeFileWarningLines`, and
-`sourceReviewWarningLines` warning thresholds
+paths, and the `diffSizeWarningLines`, `largeFileWarningLines`,
+`sourceReviewWarningLines`, and `untrackedFileReadLimitBytes` warning thresholds
 with `.sd-ai-command-pack/review-preflight.json`. Repos that intentionally
 document service-user paths under `/home/<user>/` can add those service users to
 `allowedLinuxHomeUsers` in that config. The script requires Node 16.9 or newer

@@ -348,6 +348,43 @@ assert.deepEqual(
         )
         self.assertIn("changes 2 Trellis task directories", result.stdout)
 
+    def test_review_preflight_size_checks_large_untracked_file_without_reading_it(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        config = root / ".sd-ai-command-pack/review-preflight.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "largeFileWarningLines": 3,
+                    "untrackedFileReadLimitBytes": 8,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (root / "docs/large-untracked.md").write_text(
+            "this is one long line that should not be counted exactly",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "includes a large file diff (4 lines): docs/large-untracked.md",
+            result.stdout,
+        )
+
     def test_review_preflight_fails_hard_when_git_cannot_run(self) -> None:
         # Regression: a git spawn failure (missing binary, buffer overflow)
         # must FAIL the preflight naming the git command, not silently pass

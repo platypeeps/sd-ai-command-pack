@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.7 - 2026-07-18
+
+- Add a review-preflight byte-size guard for untracked files so very large
+  artifacts are treated as large diffs without loading the full file into
+  memory just to count lines.
+
 ## 0.19.6 - 2026-07-18
 
 - Simplify the Trellis task artifact parser by removing an unreachable archive
