@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Verify the status/profile implementation against its validation matrix, no-write requirement, template parity, installer lifecycle, and housekeeping integration tests."}
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Verify every installed adapter remains thin, read-only, and synchronized with the shared sd-status skill."}
