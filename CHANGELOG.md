@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.19.11 - 2026-07-18
+
+- Compare review-size and added-code risk advisories from the branch merge
+  base so upstream-only changes do not create false first-review warnings.
+
 ## 0.19.10 - 2026-07-18
 
 - Bound first-review risk scanning of untracked code with the existing byte

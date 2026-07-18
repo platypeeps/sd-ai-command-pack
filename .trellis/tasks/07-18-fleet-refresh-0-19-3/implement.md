@@ -1,9 +1,9 @@
-# Fleet Refresh 0.19.10 Implementation Plan
+# Fleet Refresh 0.19.11 Implementation Plan
 
 ## 1. Establish Release State
 
 - [ ] Confirm `main` is clean and synchronized with `origin/main`.
-- [ ] Confirm `manifest.json` reports `0.19.10` and tag `v0.19.10` resolves to
+- [ ] Confirm `manifest.json` reports `0.19.11` and tag `v0.19.11` resolves to
   the current release commit.
 - [ ] Run the source-owned fleet preflight and preserve its starting-version
   classifications and exact install/audit commands.
@@ -29,7 +29,7 @@ For each refresh-needed consumer in preflight order:
   findings and stop for any released-pack defect.
 - [ ] Merge through the consumer's housekeeping gate and complete branch/ref
   cleanup.
-- [ ] Confirm post-merge provenance is `0.19.10` and rerun install audit.
+- [ ] Confirm post-merge provenance is `0.19.11` and rerun install audit.
 
 Rollback point: before PR creation, leave a failed local branch intact for
 inspection. After PR creation, never force-push or bypass a blocked merge gate.
@@ -80,3 +80,12 @@ inspection. After PR creation, never force-push or bypass a blocked merge gate.
 - [x] Reuse a bounded file-descriptor read for untracked diff sizing and risk
   scanning, warn about skipped oversized code, and add focused coverage.
 - [x] Pass the full-fleet candidate check and canonical source gates for 0.19.10.
+- [x] Merge source PR #157, pass the main release workflow, and tag the exact
+  reviewed merge commit as `v0.19.10`.
+- [x] Complete coordinator PRs #118/#119 at 0.19.10 and verify post-merge audit.
+- [x] Stop the Loadsmith rollout when PR #90 exposed raw-base comparison in
+  the shared review-size and added-code risk probes.
+- [x] Compare those probes from the branch merge base, document the contract,
+  and add behind-base regression coverage.
+- [x] Pass the full-fleet candidate check for all seven consumers on 0.19.11.
+- [x] Pass the canonical source gates for 0.19.11.

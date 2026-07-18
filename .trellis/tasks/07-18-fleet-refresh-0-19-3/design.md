@@ -1,4 +1,4 @@
-# Fleet Refresh 0.19.10 Design
+# Fleet Refresh 0.19.11 Design
 
 ## Boundaries
 
@@ -58,7 +58,10 @@ bounded GraphQL total. A late thread on the same coordinator PR then found that
 the sibling first-review risk sweep still read oversized untracked code in
 full. Release 0.19.10 must route both consumers through the same bounded reader,
 emit an explicit skipped-file advisory, and refresh the full-fleet ledger
-before rollout resumes.
+before rollout resumes. Loadsmith integration review then found that two
+first-review probes still diffed the raw base ref against the working tree.
+Release 0.19.11 moves their common baseline to the branch merge base so an
+advanced base cannot inject upstream-only size or risk signals.
 
 ## Verification
 

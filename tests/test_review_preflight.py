@@ -349,6 +349,114 @@ assert.deepEqual(
         )
         self.assertIn("changes 2 Trellis task directories", result.stdout)
 
+    def test_review_preflight_ignores_upstream_only_changes_behind_base(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        upstream = root / "scripts/upstream.py"
+        upstream.write_text(
+            "import subprocess\n"
+            + "\n".join(f"UPSTREAM_{index} = {index}" for index in range(12))
+            + "\n",
+            encoding="utf-8",
+        )
+        feature = root / "scripts/feature.py"
+        feature.write_text("FEATURE = 1\n", encoding="utf-8")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+        self.run_git(root, "branch", "-M", "main")
+        self.run_git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+        self.run_git(root, "switch", "-c", "feature")
+        feature.write_text("FEATURE = 2\n", encoding="utf-8")
+        self.run_git(root, "add", "scripts/feature.py")
+        self.run_git(root, "commit", "-m", "feature change")
+
+        self.run_git(root, "switch", "main")
+        upstream.write_text("SAFE = True\n", encoding="utf-8")
+        self.run_git(root, "add", "scripts/upstream.py")
+        self.run_git(root, "commit", "-m", "advance base")
+        self.run_git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.run_git(root, "switch", "feature")
+
+        config = root / ".sd-ai-command-pack/review-preflight.json"
+        config.write_text(
+            json.dumps({"sourceReviewWarningLines": 5}), encoding="utf-8"
+        )
+        env = os.environ.copy()
+        env["SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF"] = "origin/main"
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotRegex(result.stdout, r"WARN .* authored source line\(s\)")
+        self.assertNotIn("changed code adds subprocess/external command", result.stdout)
+        self.assertRegex(
+            result.stdout,
+            r"PASS checked \d+ changed code path\(s\); no boundary-risk trigger was added",
+        )
+
+    def test_review_preflight_warns_and_falls_back_without_merge_base(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+        empty_tree = subprocess.run(
+            ["git", "mktree"],
+            cwd=root,
+            input="",
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(empty_tree.returncode, 0, empty_tree.stdout)
+        unrelated = self.git_output(
+            root,
+            "commit-tree",
+            empty_tree.stdout.strip(),
+            "-m",
+            "unrelated base",
+        )
+        self.run_git(root, "update-ref", "refs/remotes/origin/main", unrelated)
+
+        env = os.environ.copy()
+        env["SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF"] = "origin/main"
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "WARN could not resolve the merge base of origin/main and HEAD; "
+            "falling back to origin/main.",
+            result.stdout,
+        )
+
     def test_review_preflight_size_checks_large_untracked_file_without_reading_it(
         self,
     ) -> None:
