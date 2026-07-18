@@ -185,7 +185,8 @@ GENERATED_REFERENCE_PATHS = frozenset({HELP_CATALOG_PATH})
 _COMMAND_SOURCE_PATTERNS = (
     re.compile(r"^templates/\.agents/skills/(sd-[a-z0-9-]+)/SKILL\.md$"),
     re.compile(
-        r"^templates/\.agents/skills/(sd-[a-z0-9-]+)/references/[a-z0-9-]+\.md$"
+        r"^templates/\.agents/skills/(sd-[a-z0-9-]+)/references/"
+        r"(?:[a-z0-9-]+/)*[a-z0-9-]+\.md$"
     ),
     re.compile(r"^templates/\.commands/(sd-[a-z0-9-]+)\.md$"),
     re.compile(r"^templates/\.claude/commands/sd/([a-z0-9-]+)\.md$"),

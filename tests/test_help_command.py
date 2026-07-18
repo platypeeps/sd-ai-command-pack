@@ -233,6 +233,21 @@ class HelpCommandTests(InstallTestCase):
         self.assertEqual({entry["target"] for entry in entries}, expected_targets)
         self.assertEqual(len(entries), len(expected_targets))
 
+    def test_nested_skill_reference_sources_remain_generator_owned(self) -> None:
+        generator = load_surface_generator()
+
+        self.assertEqual(
+            generator._candidate_command_pairs(
+                {
+                    "source": (
+                        "templates/.agents/skills/sd-help/references/guides/"
+                        "advanced.md"
+                    )
+                }
+            ),
+            {("sd-help", "help")},
+        )
+
     def test_manifest_generation_rejects_a_missing_authored_reference(self) -> None:
         generator = load_surface_generator()
         with (
