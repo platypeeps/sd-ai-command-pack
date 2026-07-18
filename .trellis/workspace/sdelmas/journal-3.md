@@ -302,7 +302,10 @@ Updated backend directory documentation for the installer package split, documen
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Replaced generic `.split(...)` risk detection with explicit parser and direct boundary heuristics.
+- Covered nested environment and file calls, namespaced Node file reads, and method-only Python `read_text` calls.
+- Bumped the pack to 0.19.12 and refreshed generated catalogs, provenance, KB content, and fleet candidate evidence.
+- Completed five Copilot review rounds and resolved every review thread.
 
 ### Git Commits
 
@@ -1376,6 +1379,46 @@ Added task-context scaffold enforcement, stash status reporting, review churn ad
 ### Testing
 
 - Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 137: Narrow structured input split detection
+
+**Date**: 2026-07-18
+**Task**: Narrow structured input split detection
+**Branch**: `codex/narrow-split-risk-detection`
+
+### Summary
+
+Narrowed structured-input split detection to explicit parsers and direct CLI, environment, and file boundaries; added conservative nested, namespaced, and false-positive regression coverage; refreshed release and fleet evidence; and completed five Copilot review rounds with all findings resolved.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8d8c419` | fix: narrow structured input split detection |
+| `f1e7c13` | fix: detect nested file-read split boundaries |
+| `d18c03f` | fix: detect nested environment split boundaries |
+| `4637059` | fix: detect namespaced file-read split boundaries |
+| `81529a1` | fix: require method syntax for read text boundaries |
+
+### Testing
+
+- `PYTHONPYCACHEPREFIX=/private/tmp/sd-ai-command-pack-pycache .venv/bin/python -m unittest tests.test_review_preflight`
+- `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-fleet-candidate-check.py`
+- `make check`
+- PR #160 exact-head CI: all required jobs passed on `81529a1`.
 
 ### Status
 
