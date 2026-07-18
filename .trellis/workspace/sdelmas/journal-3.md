@@ -1314,3 +1314,39 @@ Added and released the discoverable read-only sd-help command, converged Copilot
 ### Next Steps
 
 - None - task complete
+
+
+## Session 135: Portable status and fleet candidate release
+
+**Date**: 2026-07-17
+**Task**: Portable status and fleet candidate release
+**Branch**: `codex/portable-fleet-status`
+
+### Summary
+
+Added portable local and fleet status reporting, explicit candidate preparation, machine-profile fleet discovery, and the review-driven robustness and CI guard fixes for release 0.19.0.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `daa2f6d` | (see git log) |
+| `da885c0` | (see git log) |
+| `8675467` | (see git log) |
+| `af12edf` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
