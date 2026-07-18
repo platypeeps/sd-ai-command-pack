@@ -845,6 +845,13 @@ stage arguments such as `timeout-minutes=` pass through. It adds no new
 gate logic; every stage's own gates remain authoritative, and a failed or
 blocked stage stops the chain with that stage's report.
 
+Stage 1 delegates `sd-create-pr` with an internal composite-only orchestration
+context that returns after PR publication. It is not a public argument or
+environment variable. This keeps standalone `sd-create-pr` behavior unchanged
+while making Stage 2 the only review owner in `sd-ship`: no review for
+`until=pr`, one normal review for `until=review`, and one deferred-finish-work
+review for `until=merge`.
+
 Lifecycle side effects have one owner. `until=review` keeps finish-work in
 `sd-review-pr`. The default merge-through chain defers finish-work to Stage 4,
 watches with `no-merge` in Stage 3, and invokes housekeeping exactly once in

@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Provides the acceptance matrix used to verify standalone review ownership, private composite routing, adapter non-exposure, and rejection before side effects."}
