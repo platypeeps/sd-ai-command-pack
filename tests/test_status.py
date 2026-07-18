@@ -318,6 +318,49 @@ class StatusTests(InstallTestCase):
         self.assertEqual(report["openPrsStatus"], "unavailable")
         self.assertEqual(report["openIssues"], [])
 
+    def test_relevant_pr_uses_unpaginated_graphql_review_total(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        separator = status.PR_SEPARATOR
+        pr_output = separator.join(
+            [
+                "42",
+                "OPEN",
+                "",
+                "https://github.com/example/repo/pull/42",
+                "feature",
+                "a" * 40,
+            ]
+        )
+
+        with mock.patch.object(
+            status,
+            "run_command",
+            side_effect=[
+                status.CommandResult(0, f"{pr_output}\n"),
+                status.CommandResult(0, '{"pass": 2}\n'),
+                status.CommandResult(0, "47\n"),
+            ],
+        ) as run_command:
+            report = status.collect_relevant_pr(
+                root,
+                "example/repo",
+                "feature",
+            )
+
+        self.assertIsNotNone(report)
+        assert report is not None
+        self.assertEqual(report["reviewCount"], 47)
+        review_argv = run_command.call_args_list[2].args[0]
+        self.assertEqual(review_argv[:3], ["gh", "api", "graphql"])
+        self.assertIn("owner=example", review_argv)
+        self.assertIn("name=repo", review_argv)
+        self.assertIn("number=42", review_argv)
+        self.assertTrue(
+            any("reviews{totalCount}" in argument for argument in review_argv)
+        )
+        self.assertNotIn("repos/example/repo/pulls/42/reviews", review_argv)
+
     def test_invalid_repository_fails_without_traceback(self) -> None:
         tempdir = tempfile.TemporaryDirectory(prefix="sd-status-invalid-")
         self.addCleanup(tempdir.cleanup)

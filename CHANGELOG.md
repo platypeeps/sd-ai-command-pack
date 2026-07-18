@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.19.9 - 2026-07-18
+
+- Count all review events for the relevant pull request with GitHub GraphQL's
+  bounded `reviews.totalCount` field instead of the first REST page length.
+
 ## 0.19.8 - 2026-07-18
 
 - Run `sd-status` repository discovery from the normalized candidate directory

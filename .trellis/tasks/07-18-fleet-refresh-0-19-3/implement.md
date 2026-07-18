@@ -1,9 +1,9 @@
-# Fleet Refresh 0.19.8 Implementation Plan
+# Fleet Refresh 0.19.9 Implementation Plan
 
 ## 1. Establish Release State
 
 - [ ] Confirm `main` is clean and synchronized with `origin/main`.
-- [ ] Confirm `manifest.json` reports `0.19.8` and tag `v0.19.8` resolves to
+- [ ] Confirm `manifest.json` reports `0.19.9` and tag `v0.19.9` resolves to
   the current release commit.
 - [ ] Run the source-owned fleet preflight and preserve its starting-version
   classifications and exact install/audit commands.
@@ -29,7 +29,7 @@ For each refresh-needed consumer in preflight order:
   findings and stop for any released-pack defect.
 - [ ] Merge through the consumer's housekeeping gate and complete branch/ref
   cleanup.
-- [ ] Confirm post-merge provenance is `0.19.8` and rerun install audit.
+- [ ] Confirm post-merge provenance is `0.19.9` and rerun install audit.
 
 Rollback point: before PR creation, leave a failed local branch intact for
 inspection. After PR creation, never force-push or bypass a blocked merge gate.
@@ -68,3 +68,8 @@ inspection. After PR creation, never force-push or bypass a blocked merge gate.
 - [x] Passed the full-fleet 0.19.8 candidate check for all seven consumers.
 - [x] Refreshed the full-fleet candidate ledger after the archive-root fix.
 - [x] Passed the canonical source gates for the final reviewed 0.19.8 payload.
+- [x] Stopped the 0.19.8 rollout when coordinator PR #118 exposed first-page
+  review-count truncation; no consumer refresh PR was merged.
+- [x] Replace the REST page length with GraphQL `reviews.totalCount`, add
+  regression coverage above the default page size, and document the contract.
+- [x] Pass the full-fleet candidate check and canonical source gates for 0.19.9.

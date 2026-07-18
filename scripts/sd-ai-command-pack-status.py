@@ -22,6 +22,11 @@ CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
 GITHUB_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 PR_SEPARATOR = "\x1f"
 PRIORITY_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+REVIEW_TOTAL_COUNT_QUERY = (
+    "query($owner:String!,$name:String!,$number:Int!){"
+    "repository(owner:$owner,name:$name){"
+    "pullRequest(number:$number){reviews{totalCount}}}}"
+)
 
 
 @dataclass(frozen=True)
@@ -473,18 +478,28 @@ def collect_relevant_pr(repo: Path, slug: str, branch: str | None) -> dict[str, 
                 for key, value in parsed_checks.items()
                 if isinstance(value, int)
             }
-    reviews = run_command(
-        [
-            "gh",
-            "api",
-            f"repos/{slug}/pulls/{pr['number']}/reviews",
-            "--jq",
-            "length",
-        ],
-        cwd=repo,
-    )
-    if reviews.returncode == 0 and reviews.stdout.strip().isdigit():
-        pr["reviewCount"] = int(reviews.stdout.strip())
+    owner, separator, name = slug.partition("/")
+    if owner and separator and name:
+        reviews = run_command(
+            [
+                "gh",
+                "api",
+                "graphql",
+                "-F",
+                f"owner={owner}",
+                "-F",
+                f"name={name}",
+                "-F",
+                f"number={pr['number']}",
+                "-f",
+                f"query={REVIEW_TOTAL_COUNT_QUERY}",
+                "--jq",
+                ".data.repository.pullRequest.reviews.totalCount",
+            ],
+            cwd=repo,
+        )
+        if reviews.returncode == 0 and reviews.stdout.strip().isdigit():
+            pr["reviewCount"] = int(reviews.stdout.strip())
     return pr
 
 

@@ -108,6 +108,10 @@ Keep detailed workflow rules in the matching shared skill under
   rows, and the local JSON `git.stashCount` field. Saved stashes are
   informational rather than a dirty-tree or unhealthy-state signal; failed
   stash inventory is reported as unavailable instead of zero.
+- Status reports the relevant PR's complete review-event total through a
+  bounded GraphQL `reviews.totalCount` query. It must not use the length of a
+  single paginated REST response; unavailable or malformed totals remain
+  explicitly unavailable.
 
 ### 4. Validation & Error Matrix
 
