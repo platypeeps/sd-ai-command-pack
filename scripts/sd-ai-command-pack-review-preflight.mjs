@@ -694,9 +694,15 @@ function checkReviewRiskSweep() {
         `${config.untrackedFileReadLimitBytes} bytes: ${addedCode.oversizedUntrackedPaths.join(', ')}`,
     );
   }
+  if (addedCode.unreadableUntrackedPaths.length > 0) {
+    warn(
+      `first-review boundary-risk content scan skipped ${addedCode.unreadableUntrackedPaths.length} unreadable untracked code file(s): ` +
+        addedCode.unreadableUntrackedPaths.join(', '),
+    );
+  }
   const categories = reviewRiskCategories(addedCode.text);
   if (categories.length === 0) {
-    if (addedCode.oversizedUntrackedPaths.length === 0) {
+    if (addedCode.oversizedUntrackedPaths.length === 0 && addedCode.unreadableUntrackedPaths.length === 0) {
       pass(`checked ${codePaths.length} changed code path(s); no boundary-risk trigger was added.`);
     }
     return;
@@ -1290,31 +1296,40 @@ function untrackedAddedLineEstimate(path) {
     return null;
   }
 
-  if (content.oversized) {
+  if (content.status === 'oversized') {
     return Math.max(config.largeFileWarningLines + 1, 1);
+  }
+
+  if (content.status === 'unreadable') {
+    return null;
   }
 
   return textLineCount(content.text);
 }
 
 function boundedUntrackedFileText(path) {
+  let pathEntry;
+  try {
+    pathEntry = lstatSync(resolve(rootDir, path));
+  } catch {
+    return null;
+  }
+  if (!pathEntry.isFile()) {
+    return null;
+  }
+  if (pathEntry.size > config.untrackedFileReadLimitBytes) {
+    return { status: 'oversized', text: '' };
+  }
+
   let descriptor;
   try {
-    const pathEntry = lstatSync(resolve(rootDir, path));
-    if (!pathEntry.isFile()) {
-      return null;
-    }
-    if (pathEntry.size > config.untrackedFileReadLimitBytes) {
-      return { oversized: true, text: '' };
-    }
-
     descriptor = openSync(resolve(rootDir, path), 'r');
     const openedEntry = fstatSync(descriptor);
     if (!openedEntry.isFile()) {
-      return null;
+      return { status: 'unreadable', text: '' };
     }
     if (openedEntry.size > config.untrackedFileReadLimitBytes) {
-      return { oversized: true, text: '' };
+      return { status: 'oversized', text: '' };
     }
 
     const buffer = Buffer.alloc(openedEntry.size);
@@ -1326,9 +1341,9 @@ function boundedUntrackedFileText(path) {
       }
       bytesRead += count;
     }
-    return { oversized: false, text: buffer.toString('utf8', 0, bytesRead) };
+    return { status: 'read', text: buffer.toString('utf8', 0, bytesRead) };
   } catch {
-    return null;
+    return { status: 'unreadable', text: '' };
   } finally {
     if (descriptor !== undefined) {
       try {
@@ -1352,6 +1367,7 @@ function currentAddedCodeText(codePaths) {
   const baseline = reviewBaselineRef();
   const outputs = [];
   const oversizedUntrackedPaths = [];
+  const unreadableUntrackedPaths = [];
   const diffArgs = ['diff', '--unified=0', '--no-ext-diff', '--no-color'];
   if (baseline) {
     const result = runGit([...diffArgs, baseline, '--', ...codePaths]);
@@ -1376,14 +1392,16 @@ function currentAddedCodeText(codePaths) {
     if (!content) {
       continue;
     }
-    if (content.oversized) {
+    if (content.status === 'oversized') {
       oversizedUntrackedPaths.push(path);
+    } else if (content.status === 'unreadable') {
+      unreadableUntrackedPaths.push(path);
     } else {
       outputs.push(content.text);
     }
   }
 
-  return { text: outputs.join('\n'), oversizedUntrackedPaths };
+  return { text: outputs.join('\n'), oversizedUntrackedPaths, unreadableUntrackedPaths };
 }
 
 function currentChangedPaths() {
