@@ -65,18 +65,18 @@ Refresh every stale registered consumer to corrected pack release 0.19.11 using 
   against the exact `0.19.10` payload.
 - [x] Full-fleet candidate validation passed all seven registered consumers
   against the exact `0.19.11` payload.
-- [ ] Fleet preflight validates the tagged release and reports every selected
+- [x] Fleet preflight validates the tagged release and reports every selected
   consumer with its starting version and disposition.
-- [ ] Every stale, clean, locally available consumer is refreshed sequentially
+- [x] Every stale, clean, locally available consumer is refreshed sequentially
   through install, audit, full-check, pull request, review/watch, gated merge,
   and housekeeping.
-- [ ] Post-merge provenance and install audit confirm `0.19.11` for every
+- [x] Post-merge provenance and install audit confirm `0.19.11` for every
   successfully refreshed consumer.
-- [ ] Every at-target or skipped consumer is explicitly recorded; no consumer
+- [x] Every at-target or skipped consumer is explicitly recorded; no consumer
   is silently omitted.
-- [ ] The final report lists each consumer's before-version and one of
+- [x] The final report lists each consumer's before-version and one of
   `at-target`, `refreshed+merged`, `PR-open`, or `skipped+<reason>`.
-- [ ] Remaining stale consumers, open refresh PRs, and anomalies are listed as
+- [x] Remaining stale consumers, open refresh PRs, and anomalies are listed as
   follow-ups, or the report states that none remain.
 
 ## Out Of Scope

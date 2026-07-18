@@ -3,7 +3,7 @@
   "name": "fleet-refresh-0-19-3",
   "title": "Roll out sd-ai-command-pack 0.19.11 to the fleet",
   "description": "Refresh every stale registered consumer to the corrected pack release 0.19.11 after integration review stopped earlier rollout candidates.",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "sdelmas",
   "assignee": "sdelmas",
   "createdAt": "2026-07-18",
-  "completedAt": null,
+  "completedAt": "2026-07-18",
   "branch": "codex/merge-base-review-baseline",
   "base_branch": "main",
   "worktree_path": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "The rollout began at 0.19.3. Source corrections produced tagged releases through 0.19.10, and coordinator PRs #118/#119 completed at 0.19.10. Loadsmith PR #90 then exposed raw-base comparison in the shared review-size and added-code risk probes. The rollout remains paused while 0.19.11 moves both probes to the branch merge base, validates the exact payload, merges, and tags it.",
+  "notes": "The rollout began at 0.19.3 and stopped for several pack-owned integration findings before converging on 0.19.11. Release 0.19.11 was tagged from the reviewed source merge, all seven registered consumers were refreshed sequentially through green CI and exact-head review, post-merge audits passed, and final fleet preflight reports every consumer at target.",
   "meta": {}
 }
