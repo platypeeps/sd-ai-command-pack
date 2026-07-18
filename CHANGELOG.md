@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.19.3 - 2026-07-18
+
+- Exempt forward-looking `design.md` and `implement.md` planning artifacts under
+  `.trellis/tasks/` from the review-preflight path-existence check, so a task's
+  proposed (to-be-created) files no longer fail the local gate. `prd.md` and
+  specs still describe current state and keep the check.
+- Extend the review-preflight line-anchor stripper to resolve `~` approximate
+  markers (for example `path:~145` and `path:~315-366`) alongside the
+  comma-joined multi-ranges added in 0.19.2, so compact citations of existing
+  files in PRDs and specs are no longer reported as missing.
+
 ## 0.19.2 - 2026-07-18
 
 - Resolve documentation citations that use comma-joined multi-line ranges

@@ -1057,6 +1057,8 @@ assert.deepEqual(
             "Also `scripts/sd-ai-command-pack-install-audit.py:7:3` and\n"
             "`scripts/sd-ai-command-pack-review-local.sh:10-20:4`.\n"
             "Multi-range `scripts/sd-ai-command-pack-full-check.sh:1-2,3-4,5-6`.\n"
+            "Approx `scripts/sd-ai-command-pack-install-audit.py:~145` and\n"
+            "`scripts/sd-ai-command-pack-review-local.sh:~315-366`.\n"
             "Broken: `docs/definitely-missing.md:5`.\n",
             encoding="utf-8",
         )
@@ -1080,6 +1082,56 @@ assert.deepEqual(
         self.assertNotIn("install-audit.py:7:3", result.stdout)
         self.assertNotIn("review-local.sh:10-20:4", result.stdout)
         self.assertNotIn("full-check.sh:1-2,3-4,5-6", result.stdout)
+        self.assertNotIn("install-audit.py:~145", result.stdout)
+        self.assertNotIn("review-local.sh:~315-366", result.stdout)
+
+    def test_review_preflight_exempts_design_implement_docs_from_path_check(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        task = root / ".trellis/tasks/07-17-demo"
+        task.mkdir(parents=True, exist_ok=True)
+        # design.md / implement.md are forward-looking: they name files the task
+        # proposes to CREATE, so the path-existence check must skip them.
+        (task / "design.md").write_text(
+            "Introduce `apps/web/src/lib/designOnly.ts` for the new route.\n",
+            encoding="utf-8",
+        )
+        (task / "implement.md").write_text(
+            "Add `apps/web/src/lib/implementOnly.ts` in step 2.\n",
+            encoding="utf-8",
+        )
+        # prd.md describes current state and keeps the existence check.
+        (task / "prd.md").write_text(
+            "Depends on `apps/web/src/lib/prdRequired.ts` existing today.\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        # prd.md is still checked, so its missing reference fails the gate.
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "references missing path apps/web/src/lib/prdRequired.ts",
+            result.stdout,
+        )
+        # design.md / implement.md are exempt: their proposed files are not flagged.
+        self.assertNotIn("designOnly.ts", result.stdout)
+        self.assertNotIn("implementOnly.ts", result.stdout)
 
     def test_review_preflight_reports_malformed_config_as_failure(self) -> None:
         # Regression: a malformed review-preflight.json must FAIL, not be wiped
