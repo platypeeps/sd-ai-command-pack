@@ -1056,6 +1056,7 @@ assert.deepEqual(
             "`scripts/sd-ai-command-pack-housekeeping.sh:34-56` for details.\n"
             "Also `scripts/sd-ai-command-pack-install-audit.py:7:3` and\n"
             "`scripts/sd-ai-command-pack-review-local.sh:10-20:4`.\n"
+            "Multi-range `scripts/sd-ai-command-pack-full-check.sh:1-2,3-4,5-6`.\n"
             "Broken: `docs/definitely-missing.md:5`.\n",
             encoding="utf-8",
         )
@@ -1078,6 +1079,7 @@ assert.deepEqual(
         self.assertNotIn("housekeeping.sh:34-56", result.stdout)
         self.assertNotIn("install-audit.py:7:3", result.stdout)
         self.assertNotIn("review-local.sh:10-20:4", result.stdout)
+        self.assertNotIn("full-check.sh:1-2,3-4,5-6", result.stdout)
 
     def test_review_preflight_reports_malformed_config_as_failure(self) -> None:
         # Regression: a malformed review-preflight.json must FAIL, not be wiped

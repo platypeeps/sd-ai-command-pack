@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.2 - 2026-07-18
+
+- Resolve documentation citations that use comma-joined multi-line ranges
+  (for example `path:1-2,3-4,5-6`) in the review preflight, so valid anchored
+  references are no longer flagged as missing paths. Existing single-range,
+  column, and internal-colon citation forms continue to resolve unchanged.
+
 ## 0.19.1 - 2026-07-18
 
 - Fail review preflight when changed Trellis task context still contains
