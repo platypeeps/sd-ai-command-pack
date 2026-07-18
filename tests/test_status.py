@@ -138,7 +138,17 @@ class StatusTests(InstallTestCase):
         status = self.load_status_module()
 
         self.assertEqual(status.resolve_repo(root / "README.md"), root.resolve())
-        self.assertIsNone(status.resolve_repo(root / "missing"))
+        self.assertEqual(status.resolve_repo(root / "missing"), root.resolve())
+        self.assertIsNone(status.resolve_repo(root / "missing/nested"))
+
+    def test_resolve_repo_accepts_relative_file_within_repository(self) -> None:
+        root = self.make_status_repo()
+        status = self.load_status_module()
+        previous_cwd = Path.cwd()
+        self.addCleanup(os.chdir, previous_cwd)
+        os.chdir(root)
+
+        self.assertEqual(status.resolve_repo(Path("README.md")), root.resolve())
 
     def test_local_json_is_read_only_and_reports_cached_state(self) -> None:
         root = self.make_status_repo()

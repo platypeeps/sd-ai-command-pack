@@ -308,7 +308,8 @@ def configure_fleet_profile(
     try:
         current = profile_path.read_text(encoding="utf-8", errors="strict")
     except FileNotFoundError:
-        pass
+        # Missing profile means a first-time write; keep current absent.
+        current = None
     except (OSError, UnicodeError) as error:
         raise FleetConfigError(f"cannot read fleet profile {profile_path}: {error}") from None
     if current == content:
