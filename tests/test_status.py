@@ -150,6 +150,22 @@ class StatusTests(InstallTestCase):
 
         self.assertEqual(status.resolve_repo(Path("README.md")), root.resolve())
 
+    def test_resolve_repo_runs_git_from_candidate_directory(self) -> None:
+        root = self.make_status_repo()
+        status = self.load_status_module()
+
+        with mock.patch.object(
+            status,
+            "run_command",
+            return_value=status.CommandResult(0, f"{root}\n"),
+        ) as run_command:
+            self.assertEqual(status.resolve_repo(root / "README.md"), root.resolve())
+
+        run_command.assert_called_once_with(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            cwd=root,
+        )
+
     def test_local_json_is_read_only_and_reports_cached_state(self) -> None:
         root = self.make_status_repo()
         before_files = self.working_files_snapshot(root)

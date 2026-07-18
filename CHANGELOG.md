@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.19.8 - 2026-07-18
+
+- Run `sd-status` repository discovery from the normalized candidate directory
+  so file arguments do not retain an avoidable dependency on the caller's
+  current working directory.
+- Skip the GitHub commit-to-PR API lookup for traditional two-parent merge
+  commits while preserving fail-closed evidence checks for squash and rebase
+  merges.
+
 ## 0.19.7 - 2026-07-18
 
 - Add a review-preflight byte-size guard for untracked files so very large

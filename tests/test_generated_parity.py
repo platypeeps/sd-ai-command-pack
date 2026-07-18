@@ -1189,6 +1189,11 @@ class GeneratedParityTests(InstallTestCase):
         self.assertEqual(workflow.count("pull-requests: read"), 1)
         self.assertIn("commits/${GITHUB_SHA}/pulls", workflow)
         self.assertIn("set -o pipefail", workflow)
+        merge_probe = (
+            'git rev-parse --verify --quiet "${GITHUB_SHA}^2" >/dev/null'
+        )
+        self.assertIn(merge_probe, workflow)
+        self.assertLess(workflow.index(merge_probe), workflow.index("gh api"))
         self.assertIn("invalid pull-request merge evidence", workflow)
         self.assertIn("SD_AI_COMMAND_PACK_MAIN_PUSH_PR_MERGE", workflow)
         self.assertIn("git diff --no-renames --name-only -z", main_push_guard)

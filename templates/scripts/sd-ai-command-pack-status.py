@@ -95,7 +95,7 @@ def resolve_repo(path: Path) -> Path | None:
         git_path = git_path.parent
     result = run_command(
         ["git", "-C", str(git_path), "rev-parse", "--show-toplevel"],
-        cwd=Path.cwd(),
+        cwd=git_path,
     )
     if result.returncode != 0 or not result.stdout.strip():
         return None

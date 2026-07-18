@@ -190,21 +190,23 @@ jobs:
         run: |
           set -o pipefail
           reviewed_pr_merge=0
-          reviewed_pr_count="$(
-            gh api \
-              -H "Accept: application/vnd.github+json" \
-              "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" |
-              jq --arg sha "$GITHUB_SHA" --arg base "$GITHUB_REF_NAME" \
-                '[.[] | select(.merged_at != null and .merge_commit_sha == $sha and .base.ref == $base)] | length'
-          )"
-          case "$reviewed_pr_count" in
-            ''|*[!0-9]*)
-              echo "GitHub returned invalid pull-request merge evidence; failing closed." >&2
-              exit 1
-              ;;
-          esac
-          if [ "$reviewed_pr_count" -gt 0 ]; then
-            reviewed_pr_merge=1
+          if ! git rev-parse --verify --quiet "${GITHUB_SHA}^2" >/dev/null; then
+            reviewed_pr_count="$(
+              gh api \
+                -H "Accept: application/vnd.github+json" \
+                "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" |
+                jq --arg sha "$GITHUB_SHA" --arg base "$GITHUB_REF_NAME" \
+                  '[.[] | select(.merged_at != null and .merge_commit_sha == $sha and .base.ref == $base)] | length'
+            )"
+            case "$reviewed_pr_count" in
+              ''|*[!0-9]*)
+                echo "GitHub returned invalid pull-request merge evidence; failing closed." >&2
+                exit 1
+                ;;
+            esac
+            if [ "$reviewed_pr_count" -gt 0 ]; then
+              reviewed_pr_merge=1
+            fi
           fi
           SD_AI_COMMAND_PACK_MAIN_PUSH_PR_MERGE="$reviewed_pr_merge" \
             bash .github/scripts/check-main-push-scope.sh \

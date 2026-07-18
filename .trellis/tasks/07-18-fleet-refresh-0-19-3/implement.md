@@ -1,9 +1,9 @@
-# Fleet Refresh 0.19.4 Implementation Plan
+# Fleet Refresh 0.19.8 Implementation Plan
 
 ## 1. Establish Release State
 
 - [ ] Confirm `main` is clean and synchronized with `origin/main`.
-- [ ] Confirm `manifest.json` reports `0.19.4` and tag `v0.19.4` resolves to
+- [ ] Confirm `manifest.json` reports `0.19.8` and tag `v0.19.8` resolves to
   the current release commit.
 - [ ] Run the source-owned fleet preflight and preserve its starting-version
   classifications and exact install/audit commands.
@@ -29,7 +29,7 @@ For each refresh-needed consumer in preflight order:
   findings and stop for any released-pack defect.
 - [ ] Merge through the consumer's housekeeping gate and complete branch/ref
   cleanup.
-- [ ] Confirm post-merge provenance is `0.19.4` and rerun install audit.
+- [ ] Confirm post-merge provenance is `0.19.8` and rerun install audit.
 
 Rollback point: before PR creation, leave a failed local branch intact for
 inspection. After PR creation, never force-push or bypass a blocked merge gate.
@@ -60,3 +60,8 @@ inspection. After PR creation, never force-push or bypass a blocked merge gate.
 - [x] Added GitHub-confirmed squash/rebase PR-merge detection while preserving
   fail-closed direct-push behavior, with focused tests for accepted and
   malformed evidence.
+- [x] Hardened the workflow to avoid the GitHub PR API for traditional merge
+  commits and made status repository discovery run from its normalized
+  candidate directory.
+- [x] Passed the full-fleet 0.19.8 candidate check for all seven consumers.
+- [x] Passed the canonical source gates for the final 0.19.8 candidate.
