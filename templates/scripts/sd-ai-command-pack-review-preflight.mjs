@@ -19,6 +19,12 @@ const MIN_NODE_VERSION = { major: 16, minor: 9, label: '16.9.0' };
 // Git output ceiling for spawnSync calls that read diffs; Node's 1 MiB
 // default truncates large diffs and surfaces as a spawn error.
 const GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+const REVIEW_CODE_PATH_PATTERN = /\.(?:cjs|js|mjs|py|sh|ts|tsx)$/;
+const GENERATED_REVIEW_PATHS = new Set([
+  'docs/fleet/candidate-validation.json',
+  'docs/repomix-map.md',
+  'templates/.agents/skills/sd-help/references/command-catalog.md',
+]);
 
 // Declared before the module-level main run below: unlike function
 // declarations, class bindings are not hoisted out of the temporal dead
@@ -43,6 +49,7 @@ export function runReviewPreflight(options = {}) {
   runCheck('documentation path references', checkDocumentationPathReferences);
   runCheck('Trellis task context seeds', checkTrellisTaskContextSeeds);
   runCheck('Trellis journal records', checkTrellisJournalRecords);
+  runCheck('first-review risk sweep', checkReviewRiskSweep);
   runCheck('diff size warning', checkDiffSize);
   runCheck('tooling/generated scope advisory', checkScopeAdvisory);
 
@@ -143,6 +150,7 @@ function defaultConfig() {
     allowedLinuxHomeUsers: [],
     diffSizeWarningLines: 20000,
     largeFileWarningLines: 5000,
+    sourceReviewWarningLines: 1000,
   };
 }
 
@@ -179,7 +187,7 @@ function loadConfig(root, explicitPath) {
     }
   }
 
-  for (const key of ['diffSizeWarningLines', 'largeFileWarningLines']) {
+  for (const key of ['diffSizeWarningLines', 'largeFileWarningLines', 'sourceReviewWarningLines']) {
     if (Number.isFinite(raw[key])) {
       merged[key] = raw[key];
     }
@@ -409,7 +417,7 @@ function checkTrellisTaskContextSeeds() {
   const failureStart = failures.length;
   const diff = currentChangedPaths();
   if (diff === null) {
-    warn('could not inspect current diff for completed Trellis task context seeds.');
+    warn('could not inspect current diff for Trellis task context seeds.');
     return;
   }
 
@@ -431,8 +439,8 @@ function checkTrellisTaskContextSeeds() {
   let inspectedFiles = 0;
   for (const [taskDir, change] of taskChanges) {
     const taskFile = `${taskDir}/task.json`;
-    const completed = change.archived || completedTrellisTaskStatus(taskFile);
-    if (!completed) {
+    const requiresContext = change.archived || trellisTaskRequiresGroundedContext(taskFile);
+    if (!requiresContext) {
       continue;
     }
 
@@ -454,7 +462,7 @@ function checkTrellisTaskContextSeeds() {
       inspectedFiles += 1;
       for (const seed of findTrellisTaskContextSeedRows(file, readText(file))) {
         fail(
-          `${seed.file}:${seed.line} still contains a generated _example seed after task completion; ` +
+          `${seed.file}:${seed.line} still contains a generated _example seed after the task entered implementation; ` +
             'replace it with grounded {"file": "<path>", "reason": "<why>"} context or remove the seed row.',
         );
       }
@@ -463,25 +471,26 @@ function checkTrellisTaskContextSeeds() {
 
   if (inspectedFiles === 0) {
     if (failures.length === failureStart) {
-      pass('no changed completed or archived Trellis task context files require seed checks.');
+      pass('no changed in-progress, completed, or archived Trellis task context files require seed checks.');
     }
     return;
   }
 
   if (failures.length === failureStart) {
-    pass(`checked ${inspectedFiles} changed completed or archived Trellis task context file(s) for generated _example seeds.`);
+    pass(`checked ${inspectedFiles} changed in-progress, completed, or archived Trellis task context file(s) for generated _example seeds.`);
   }
 }
 
-function completedTrellisTaskStatus(taskFile) {
+function trellisTaskRequiresGroundedContext(taskFile) {
   if (!isRegularFile(taskFile)) {
     return false;
   }
 
   try {
-    return readJson(taskFile)?.status === 'completed';
+    const status = readJson(taskFile)?.status;
+    return status === 'in_progress' || status === 'completed';
   } catch (error) {
-    fail(`${taskFile} could not be parsed as JSON while checking task completion: ${thrownValueMessage(error)}`);
+    fail(`${taskFile} could not be parsed as JSON while checking task context state: ${thrownValueMessage(error)}`);
     return false;
   }
 }
@@ -623,8 +632,70 @@ function checkTrellisJournalRecords() {
   );
 }
 
+export function reviewRiskCategories(text) {
+  const categories = [];
+  const rules = [
+    ['parser/structured input', /(?:JSON\.parse|json\.(?:load|loads)|yaml\.(?:load|safe_load)|argparse|parse_[A-Za-z0-9_]+|\.split\s*\()/],
+    ['subprocess/external command', /(?:\bspawn(?:Sync)?\s*\(|\bexec(?:File|Sync)?\s*\(|subprocess\.(?:run|Popen|check_call|check_output)|os\.system\s*\()/],
+    ['path/filesystem boundary', /(?:\bPath\s*\(|\bresolve\s*\(|\brealpath|\blstat|\bsymlink|readFileSync|writeFileSync|os\.path|pathlib)/],
+    ['environment/global state', /(?:process\.env|os\.environ|\bgetenv\s*\(|\bsetenv\s*\(|\bglobal\s+[A-Za-z_]|\bglobals\s*\()/],
+    ['digest/integrity framing', /(?:hashlib|createHash\s*\(|\bsha(?:1|224|256|384|512)\b|\bdigest\s*\(|\bhexdigest\s*\(|\bchecksum\b|\bintegrity\b)/i],
+  ];
+
+  for (const [category, pattern] of rules) {
+    if (pattern.test(text)) {
+      categories.push(category);
+    }
+  }
+
+  return categories;
+}
+
+export function trellisTaskDirectory(path) {
+  const normalized = normalizePathSeparators(path).replace(/^\.\//, '');
+  const match = /^\.trellis\/tasks\/((?:archive\/[^/]+\/[^/]+)|[^/]+)(?:\/|$)/.exec(normalized);
+  return match ? `.trellis/tasks/${match[1]}` : '';
+}
+
+export function isSourceReviewPath(path) {
+  const normalized = normalizePathSeparators(path).replace(/^\.\//, '');
+  return (
+    !copiedTemplateKind(normalized) &&
+    !normalized.startsWith('.trellis/tasks/') &&
+    !normalized.startsWith('.trellis/workspace/') &&
+    !GENERATED_REVIEW_PATHS.has(normalized)
+  );
+}
+
+function checkReviewRiskSweep() {
+  const changed = currentChangedPaths();
+  if (!changed) {
+    warn('could not read changed paths; first-review risk sweep skipped.');
+    return;
+  }
+
+  const codePaths = changed.paths.filter((path) => REVIEW_CODE_PATH_PATTERN.test(path));
+  if (codePaths.length === 0) {
+    pass('no changed code paths require a first-review boundary-risk sweep.');
+    return;
+  }
+
+  const addedText = currentAddedCodeText(codePaths);
+  const categories = reviewRiskCategories(addedText);
+  if (categories.length === 0) {
+    pass(`checked ${codePaths.length} changed code path(s); no boundary-risk trigger was added.`);
+    return;
+  }
+
+  warn(
+    `changed code adds ${categories.join(', ')} behavior; before the first remote review, cover the applicable boundary matrix: ` +
+      'malformed or unhashable input; missing commands or timeouts; option-like or traversal path values; empty env/PATH; ' +
+      'symlink/TOCTOU behavior; global-state cleanup; and multiline syntax or extension variants.',
+  );
+}
+
 function checkDiffSize() {
-  const diff = currentDiffStats();
+  const diff = currentReviewDiffStats();
 
   if (!diff) {
     warn('could not read git diff stats; PR-size warning skipped.');
@@ -648,6 +719,27 @@ function checkDiffSize() {
 
   for (const file of largeFiles) {
     warn(`${diff.label} includes a large file diff (${file.added + file.deleted} lines): ${file.path}`);
+  }
+
+  const sourceFiles = diff.files.filter((file) => isSourceReviewPath(file.path));
+  const sourceLines = sourceFiles.reduce((total, file) => total + file.added + file.deleted, 0);
+  if (sourceLines > config.sourceReviewWarningLines) {
+    warn(
+      `${diff.label} changes ${sourceLines} authored source line(s) across ${sourceFiles.length} file(s); ` +
+        'split the PR or record focused first-review risk evidence before requesting remote review.',
+    );
+  } else {
+    pass(`${diff.label} changes ${sourceLines} authored source line(s), below the focused-review warning threshold.`);
+  }
+
+  const taskDirectories = new Set(diff.files.map((file) => trellisTaskDirectory(file.path)).filter(Boolean));
+  if (taskDirectories.size > 1) {
+    warn(
+      `${diff.label} changes ${taskDirectories.size} Trellis task directories; ` +
+        'confirm they form one reviewable outcome or split the work before remote review.',
+    );
+  } else {
+    pass(`${diff.label} changes at most one Trellis task directory.`);
   }
 }
 
@@ -1119,24 +1211,93 @@ function currentDiffSources(...kindArgs) {
   return sources;
 }
 
-function currentDiffStats() {
-  const sources = currentDiffSources('--numstat', '-z');
+function reviewBaselineRef() {
+  const baseRef = defaultReviewBaseRef();
+  if (baseRef) {
+    return baseRef;
+  }
+  return gitRefExists('HEAD') ? 'HEAD' : '';
+}
 
-  for (const source of sources) {
-    const result = runGit(source.args);
+function currentUntrackedPaths() {
+  const result = runGit(['ls-files', '--others', '--exclude-standard', '-z']);
+  if (result.status !== 0) {
+    return [];
+  }
+  return result.stdout.split('\0').filter(Boolean);
+}
 
-    if (result.status !== 0) {
+function textLineCount(text) {
+  if (!text) {
+    return 0;
+  }
+  const lines = text.split(/\r?\n/);
+  return lines.at(-1) === '' ? lines.length - 1 : lines.length;
+}
+
+function currentReviewDiffStats() {
+  const baseline = reviewBaselineRef();
+  const args = ['diff', '--numstat', '-z'];
+  if (baseline) {
+    args.push(baseline);
+  }
+  args.push('--');
+
+  const result = runGit(args);
+  if (result.status !== 0) {
+    return null;
+  }
+
+  const files = parseNumstat(result.stdout);
+  const seen = new Set(files.map((file) => file.path));
+  for (const path of currentUntrackedPaths()) {
+    if (seen.has(path) || !isRegularFile(path)) {
       continue;
     }
+    files.push({ added: textLineCount(readText(path)), deleted: 0, path });
+  }
 
-    const files = parseNumstat(result.stdout);
+  return {
+    args,
+    label: baseline ? `${baseline} to working tree` : 'working tree diff',
+    files,
+  };
+}
 
-    if (files.length > 0 || source.label === 'working tree diff') {
-      return { ...source, files };
+function addedLinesFromDiff(output) {
+  return output
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
+    .map((line) => line.slice(1))
+    .join('\n');
+}
+
+function currentAddedCodeText(codePaths) {
+  const baseline = reviewBaselineRef();
+  const outputs = [];
+  const diffArgs = ['diff', '--unified=0', '--no-ext-diff', '--no-color'];
+  if (baseline) {
+    const result = runGit([...diffArgs, baseline, '--', ...codePaths]);
+    if (result.status === 0) {
+      outputs.push(addedLinesFromDiff(result.stdout));
+    }
+  } else {
+    for (const extraArgs of [['--cached'], []]) {
+      const result = runGit([...diffArgs, ...extraArgs, '--', ...codePaths]);
+      if (result.status === 0) {
+        outputs.push(addedLinesFromDiff(result.stdout));
+      }
     }
   }
 
-  return null;
+  const untracked = new Set(currentUntrackedPaths());
+  for (const path of codePaths) {
+    if (untracked.has(path) && isRegularFile(path)) {
+      outputs.push(readText(path));
+    }
+  }
+
+  return outputs.join('\n');
 }
 
 function currentChangedPaths() {

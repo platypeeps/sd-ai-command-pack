@@ -182,6 +182,10 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("with `no-merge`", ship_text)
         self.assertIn("leaves the active Trellis task unarchived", ship_text)
         self.assertIn("exactly once", ship_text)
+        self.assertIn("one read-only, PR-scoped post-cycle review-learning pass", ship_text)
+        self.assertIn("no other ship stage repeats it", ship_text)
+        self.assertIn("Stage 2 is also the only review-learning owner", ship_text)
+        self.assertNotIn("sd-ai-command-pack-review-learnings.py", ship)
 
     def test_ship_separates_publish_and_review_ownership(self) -> None:
         create_pr = self._skill_text("sd-create-pr")
@@ -280,6 +284,8 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("housekeeping exactly once", guide_text)
         self.assertIn("Stage 2 the only review owner", guide_text)
         self.assertIn("no review for `until=pr`", guide_text)
+        self.assertIn("one post-cycle review-learning pass", guide_text)
+        self.assertIn("No later ship, watch, finish-work, or housekeeping stage repeats it", guide_text)
 
     def test_usage_guide_documents_all_six(self) -> None:
         guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")

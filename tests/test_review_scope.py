@@ -1213,6 +1213,21 @@ class ReviewScopeTests(InstallTestCase):
                 "fixes for review comments that existed before this command was",
                 skill,
             )
+            self.assertIn("## Step 2.5: Disposition First-Review Advisories", skill)
+            self.assertIn("cover every", skill)
+            self.assertIn("applicable boundary", skill)
+            self.assertIn("authored-source size", skill)
+            self.assertIn("multiple-Trellis-task warnings", skill)
+            self.assertIn("## Step 7.5: Capture Review Learnings Once", skill)
+            self.assertEqual(
+                skill.count("scripts/sd-ai-command-pack-review-learnings.py"),
+                1,
+            )
+            self.assertIn('--github-pr "$PR_NUMBER" --dry-run', skill)
+            self.assertLess(skill.index("## Step 7.5"), skill.index("## Step 8"))
+            self.assertIn("exactly once per `sd-review-pr` invocation", skill)
+            self.assertIn("Do not run it", skill)
+            self.assertIn("after individual rounds", skill)
             self.assertIn('-f reviewers[]="$REMOTE_REVIEWER"', skill)
             self.assertIn(
                 'gh pr edit "$PR_NUMBER" --add-reviewer "$REMOTE_REVIEWER"',

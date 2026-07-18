@@ -21,6 +21,9 @@ mock = _support.mock
 Path = _support.Path
 PACK_ROOT = _support.PACK_ROOT
 InstallTestCase = _support.InstallTestCase
+PACK_VERSION = json.loads(
+    (PACK_ROOT / "manifest.json").read_text(encoding="utf-8")
+)["version"]
 
 
 class StatusTests(InstallTestCase):
@@ -52,7 +55,7 @@ class StatusTests(InstallTestCase):
         )
         return scripts / "sd-ai-command-pack-status.py"
 
-    def make_status_repo(self, *, pack_version: str = "0.19.0") -> Path:
+    def make_status_repo(self, *, pack_version: str = PACK_VERSION) -> Path:
         tempdir = tempfile.TemporaryDirectory(prefix="sd-status-")
         self.addCleanup(tempdir.cleanup)
         root = Path(tempdir.name) / "repo"
@@ -147,6 +150,7 @@ class StatusTests(InstallTestCase):
         self.assertEqual(report["mode"], "local")
         self.assertEqual(report["git"]["branch"], "main")
         self.assertEqual(report["git"]["workingTree"]["state"], "clean")
+        self.assertEqual(report["git"]["stashCount"], 0)
         self.assertEqual(report["git"]["syncState"], "synchronized")
         self.assertEqual(report["git"]["refsFreshness"], "cached")
         self.assertIn("origin/HEAD", report["git"]["remoteBranches"])
@@ -158,6 +162,49 @@ class StatusTests(InstallTestCase):
             self.git_output(root, "for-each-ref", "--format=%(refname) %(objectname)"),
             before_refs,
         )
+
+    def test_local_status_counts_stashes_without_marking_attention(self) -> None:
+        root = self.make_status_repo()
+        for index in range(2):
+            (root / "README.md").write_text(
+                f"stashed change {index}\n",
+                encoding="utf-8",
+            )
+            self.run_git(root, "stash", "push", "-m", f"status fixture {index}")
+
+        machine = self.run_status(root, "--json")
+        human = self.run_status(root)
+
+        self.assertEqual(machine.returncode, 0, machine.stdout)
+        self.assertEqual(json.loads(machine.stdout)["git"]["stashCount"], 2)
+        self.assertEqual(human.returncode, 0, human.stdout)
+        self.assertIn("SD status: healthy", human.stdout)
+        self.assertIn("- git stashes: 2", human.stdout)
+
+    def test_unavailable_stash_inventory_is_explicit(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        real_git_output = status.git_output
+
+        def git_output_without_stashes(repo: Path, *args: str) -> str | None:
+            if args[:2] == ("stash", "list"):
+                return None
+            return real_git_output(repo, *args)
+
+        with mock.patch.object(
+            status,
+            "git_output",
+            side_effect=git_output_without_stashes,
+        ):
+            git, anomalies = status.collect_git(
+                root,
+                remote="origin",
+                supplied_default=None,
+                refs_refreshed=False,
+            )
+
+        self.assertIsNone(git["stashCount"])
+        self.assertIn("git stash inventory is unavailable", anomalies)
 
     def test_dirty_state_is_advisory_unless_housekeeping_requests_strict_mode(
         self,
@@ -285,8 +332,10 @@ class StatusTests(InstallTestCase):
         self,
     ) -> None:
         status = self.load_status_module()
-        current = self.make_status_repo(pack_version="0.19.0")
+        current = self.make_status_repo(pack_version=PACK_VERSION)
         stale = self.make_status_repo(pack_version="0.18.0")
+        (current / "README.md").write_text("fleet stash\n", encoding="utf-8")
+        self.run_git(current, "stash", "push", "-m", "fleet status fixture")
         missing = current.parent / "missing"
         manifest = current.parent / "fleet.json"
         manifest.write_text(
@@ -354,7 +403,9 @@ class StatusTests(InstallTestCase):
             status.render_fleet(report)
         rendered = output.getvalue()
         self.assertLess(rendered.index("fast-stale"), rendered.index("slow-current"))
-        self.assertIn("Target pack: 0.19.0", rendered)
+        self.assertIn(f"Target pack: {PACK_VERSION}", rendered)
+        self.assertIn("slow-current: clean; main; cached:synchronized; pack", rendered)
+        self.assertIn("stashes 1", rendered)
         self.assertIn("PRs unavailable", rendered)
 
     def test_fleet_loader_requires_pack_identity(self) -> None:
@@ -474,7 +525,7 @@ class StatusTests(InstallTestCase):
         self.assertEqual(profile_path.read_bytes(), before)
 
     def test_installed_status_uses_machine_profile_and_checkout_override(self) -> None:
-        root = self.make_status_repo(pack_version="0.19.0")
+        root = self.make_status_repo(pack_version=PACK_VERSION)
         install_root = root.parent / "consumer"
         status_script = self.make_portable_status_install(install_root)
         manifest = root.parent / "portable-fleet.json"

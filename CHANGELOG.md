@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.19.1 - 2026-07-18
+
+- Fail review preflight when changed Trellis task context still contains
+  generated `_example` rows after the task enters implementation, while
+  preserving planning-time scaffolds and existing archive safety boundaries.
+- Report the Git stash count in local, fleet, human-readable, and JSON status
+  output without treating saved stashes as an unhealthy working tree.
+- Inspect complete GitHub review-learning windows by default, report PR
+  inventory/truncation, and support explicit PR-scoped analysis.
+- Warn before remote review when changed code adds boundary-sensitive behavior,
+  the authored source surface is large, or the diff spans multiple Trellis
+  tasks; installed/generated mirrors remain outside the authored threshold.
+- Run one read-only PR-scoped review-learning pass after the complete
+  `sd-review-pr` cycle, never after individual rounds or again from `sd-ship`.
+
 ## 0.19.0 - 2026-07-17
 
 - Add the read-only `sd-status` command across supported adapters, with bounded

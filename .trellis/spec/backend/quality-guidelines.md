@@ -61,6 +61,16 @@ that exercise the generic JavaScript review preflight.
 - Changed-path detection for copied/generated disclosure must include staged,
   branch, working-tree, and untracked files instead of letting one source hide
   another.
+- Diff-size review advisories compare the review base with the complete working
+  tree and add untracked regular files. The authored-source threshold excludes
+  installed pack/Trellis mirrors, task/workspace records, and known generated
+  reports; canonical `templates/**` sources remain included.
+- Changed code that adds parser/structured-input, subprocess, path/filesystem,
+  environment/global-state, or digest/integrity behavior emits one advisory
+  naming the boundary-test matrix for author disposition. This sweep is
+  deterministic and must never invoke a review provider.
+- More than one changed Trellis task directory emits a soft scope warning so
+  unrelated outcomes can be split before remote review.
 - Trellis journal sessions present at the review base and older than the newest
   current session are append-only. Compare normalized session blocks against
   the base and fail when an older block changes, disappears, or is renumbered;
@@ -68,11 +78,11 @@ that exercise the generic JavaScript review preflight.
 - Documentation scans intentionally inspect regular files only; symlinked docs
   are skipped so local or generated links do not expand outside the repo.
 - Diff-scoped Trellis task checks inspect changed `implement.jsonl` and
-  `check.jsonl` files after their task is archived or its `task.json` status is
-  `completed`. A changed completion `task.json` checks both sibling context
-  files. Parsed records with an own `_example` key fail; active planning
-  scaffolds, untouched historical archives, and symlinked context files remain
-  outside the check.
+  `check.jsonl` files after their task leaves planning: `in_progress`,
+  `completed`, or archived. A changed qualifying `task.json` checks both
+  sibling context files. Parsed records with an own `_example` key fail;
+  planning scaffolds, untouched historical archives, and symlinked context
+  files remain outside the check.
 
 ### 4. Validation & Error Matrix
 
@@ -90,10 +100,17 @@ that exercise the generic JavaScript review preflight.
 - Review-base Trellis journal session is deleted or renumbered -> fail as a
   historical-session removal, including when its journal file or the entire
   current workspace disappears.
-- Changed completed/archived context owns `_example` -> fail with the exact
-  file and line plus replacement/removal guidance.
+- Changed in-progress/completed/archived context owns `_example` -> fail with
+  the exact file and line plus replacement/removal guidance.
 - Planning context, untouched archived context, or symlinked context -> skip
   without reading outside the repository.
+- Added boundary-sensitive code -> warn with stable risk categories and the
+  malformed input, command failure/timeout, path, environment, symlink/global
+  state, and multiline/extension matrix; do not fail the gate.
+- Installed mirrors or known generated reports dominate a large diff -> retain
+  the total-size warning but exclude them from the authored-source threshold.
+- Two changed task directories -> warn to confirm one reviewable outcome or
+  split the work.
 
 ### 5. Good/Base/Bad Cases
 
@@ -116,6 +133,9 @@ that exercise the generic JavaScript review preflight.
   renumbering, and deletion of a baseline journal file.
 - Completed-status sibling checks, newly archived seed rejection, untouched
   archive grandfathering, planning scaffold allowance, and symlink skipping.
+- Stable first-review risk categorization, authored-source exclusions, and
+  multi-task directory extraction, plus a real Git fixture covering all three
+  advisory types.
 - Template twin byte identity.
 
 ### 7. Wrong vs Correct

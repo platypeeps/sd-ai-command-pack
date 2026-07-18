@@ -104,6 +104,10 @@ Keep detailed workflow rules in the matching shared skill under
 - Status is also strictly read-only. Its adapters delegate to the installed
   collector, preserve cached/refreshed labels, and never reconstruct the report
   with platform-specific Git or GitHub commands.
+- Status reports Git stash counts consistently in local human output, fleet
+  rows, and the local JSON `git.stashCount` field. Saved stashes are
+  informational rather than a dirty-tree or unhealthy-state signal; failed
+  stash inventory is reported as unavailable instead of zero.
 
 ### 4. Validation & Error Matrix
 
@@ -186,6 +190,11 @@ The `sd-review-pr` shared skill should continue to define:
   threads without asking for separate approval
 - reply, resolve, fix, commit, and push behavior
 - the five-round limit before asking the user to continue
+- deterministic disposition of first-review boundary-risk, authored-source
+  size, and multi-task scope advisories before requesting review for a head
+- exactly one read-only, PR-scoped `sd-review-learnings` attempt after the
+  overall review loop reaches its clean stop conditions; never run it after
+  individual rounds or repeat it from `sd-ship`/housekeeping
 - automatic Trellis finish-work after a clean final standalone review or an
   `sd-ship until=review` stop; when `sd-ship` continues through merge, accept
   its internal `defer-finish-work` mode and hand lifecycle ownership to the
@@ -405,6 +414,8 @@ invokes `sd-housekeeping` exactly once. If Stage 3 blocks or times out, the
 active Trellis task remains unarchived for a later resume. These internal
 delegation modes are not public `sd-ship` arguments, and they must not weaken
 any delegated stage gate.
+Stage 2 also owns the one post-cycle review-learning pass inside
+`sd-review-pr`; the composite and later stages must not repeat that pass.
 
 The `sd-work-backlog` shared skill should compose existing task, PR, review,
 and housekeeping workflows instead of duplicating them. It must work exactly

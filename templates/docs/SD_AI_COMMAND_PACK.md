@@ -188,8 +188,10 @@ it. Use a separate request to execute the recommendation.
    input, and reports links to every planning document it created or updated.
 10. Use the review-pr command for an existing PR loop. It should run the deterministic
    local full-check path with Prism/Gito disabled before requesting remote
-   review. Run `sd-full-check` or `sd-review-local` (optionally with `all`)
-   explicitly when you want Prism/Gito.
+   review, then disposition any first-review boundary-risk, authored-source
+   size, or multi-task scope advisory before round one. Run `sd-full-check` or
+   `sd-review-local` (optionally with `all`) explicitly when you want
+   Prism/Gito.
 11. Request the configured remote reviewer, defaulting to GitHub Copilot, after
    a clean local pass and again after every pushed review-fix commit made
    during the loop, unless the user explicitly asked for local-only review.
@@ -197,7 +199,9 @@ it. Use a separate request to execute the recommendation.
    normal loop once findings are fixed, rebutted with evidence, or confirmed
    already addressed.
 13. Use the review-learnings command when review comments repeat across PRs and
-   you want to capture repo-specific preventive guidance.
+   you want to capture repo-specific preventive guidance. The review-pr loop
+   automatically attempts one read-only, PR-scoped learning pass after the
+   overall cycle is clean; it never runs the learning pass after each round.
 14. Run the update-spec command when the work taught you a durable
    implementation contract or convention. It runs the existing update-spec skill
    and also checks whether an existing architectural overview needs to be
@@ -225,7 +229,11 @@ counts the review as materialized. Target repos can override it with
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`. The bounded materialization
 wait uses `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_SETTLE_POLLS`. The round limit
 defaults to five configured remote-review requests before the command asks
-whether to keep going.
+whether to keep going. Once the overall loop meets its stop conditions,
+review-pr runs
+`sd-ai-command-pack-review-learnings.py --github-pr <number> --dry-run`
+exactly once and reports any preventive follow-up without reopening the clean
+review cycle.
 
 The create-pr wrapper honors `SD_AI_COMMAND_PACK_CREATE_PR_BASE` for a base
 branch override, `SD_AI_COMMAND_PACK_CREATE_PR_COMMIT_MESSAGE` when it creates
@@ -389,11 +397,12 @@ bash scripts/sd-ai-command-pack-review-local.sh --full-codebase
 bash scripts/sd-ai-command-pack-housekeeping.sh
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-status.py
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-status.py fleet --json
-python3 scripts/sd-ai-command-pack-review-learnings.py --include-working-tree
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-review-learnings.py --include-working-tree
 ```
 
 `sd-status` is the read-only delivery snapshot for a repository. It reports the
-branch, staged/unstaged/untracked counts, upstream ahead/behind state, default
+branch, staged/unstaged/untracked counts, Git stash count, upstream ahead/behind state, default
 and local/remote branches, installed SD pack and Trellis versions, relevant PR,
 open PRs/issues, current/in-progress/planned Trellis work, anomalies, and
 numbered next steps. `--no-network` suppresses GitHub calls, `--repo PATH`
@@ -478,17 +487,27 @@ copied Trellis or SD command-pack surfaces without companion repo-owned
 integration context, personal absolute paths in docs/prompts/specs, missing
 repo path references in docs/prompts/specs, completed Trellis journal
 placeholder or journal/index commit drift, generated `_example` seed rows in
-changed task context after a task is completed or archived, edits to historical
+changed task context after a task enters implementation, completes, or is
+archived, edits to historical
 journal sessions relative to the review base, and large diffs that are likely
-to skip remote AI review. The task-context check inspects `implement.jsonl` and
-`check.jsonl`; a changed `task.json` that marks completion also checks both
-sibling files. Active planning scaffolds, untouched legacy archives, and
+to skip remote AI review. It also emits soft first-review warnings when changed
+code adds parser/structured-input, subprocess, filesystem/path, environment or
+global-state, or digest/integrity behavior. The warning names a conservative
+boundary-test matrix for author disposition before remote review. Diff sizing
+uses the complete review-base-to-working-tree state plus untracked files; its
+authored-source threshold excludes installed pack/Trellis mirrors, Trellis task
+and workspace records, and known generated reports. A separate warning calls
+out changes spanning more than one Trellis task directory. The task-context
+check inspects `implement.jsonl` and
+`check.jsonl`; a changed qualifying `task.json` also checks both sibling files.
+Planning scaffolds, untouched legacy archives, and
 symlinked context files are skipped. Journal history is append-only: newly
 added/current sessions remain editable, but an older session must be restored
 and the intended current session edited by its explicit `## Session <n>:`
 heading. Target repos can tune roots,
 path-reference prefixes, integration paths, optional paths, copied-template
-paths, and warning thresholds
+paths, and the `diffSizeWarningLines`, `largeFileWarningLines`, and
+`sourceReviewWarningLines` warning thresholds
 with `.sd-ai-command-pack/review-preflight.json`. Repos that intentionally
 document service-user paths under `/home/<user>/` can add those service users to
 `allowedLinuxHomeUsers` in that config. The script requires Node 16.9 or newer
@@ -736,6 +755,7 @@ Ref freshness: refreshed
 - working tree: clean
 - upstream: origin/<default>; synchronized
 - local branches (1): <default>
+- git stashes: 0
 - remote source branch absent: origin/<feature>
 
 ==> Delivery
@@ -897,6 +917,10 @@ environment variable. This keeps standalone `sd-create-pr` behavior unchanged
 while making Stage 2 the only review owner in `sd-ship`: no review for
 `until=pr`, one normal review for `until=review`, and one deferred-finish-work
 review for `until=merge`.
+
+Stage 2 also owns the one post-cycle review-learning pass performed by
+`sd-review-pr`. No later ship, watch, finish-work, or housekeeping stage repeats
+it.
 
 Lifecycle side effects have one owner. `until=review` keeps finish-work in
 `sd-review-pr`. The default merge-through chain defers finish-work to Stage 4,

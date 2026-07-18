@@ -82,7 +82,9 @@ side effects each have one owner. Reject user-supplied `publish-only`,
    here without running review.
 3. Stage 2 — `sd-review-pr`: run its bounded review loop — deterministic
    local gate, configured remote review, fixes, replies — until the loop
-   stops clean or blocked. With `until=review`, invoke it without
+   stops clean or blocked. Its completed loop owns the one read-only,
+   PR-scoped post-cycle review-learning pass; no other ship stage repeats it.
+   With `until=review`, invoke it without
    `defer-finish-work`, so its normal Step 8 finishes the Trellis work before
    the chain stops. With `until=merge`, invoke it with `defer-finish-work` and
    require the explicit Stage 4 handoff; no task archive or final journal
@@ -118,6 +120,9 @@ side effects each have one owner. Reject user-supplied `publish-only`,
   only review owner in an `sd-ship` chain: it does not run for `until=pr`, runs
   once normally for `until=review`, and runs once with `defer-finish-work` for
   `until=merge`.
+- Stage 2 is also the only review-learning owner. Its `sd-review-pr` invocation
+  attempts the PR-scoped learning pass once after the overall review loop; the
+  composite, watch, finish-work, and housekeeping stages never repeat it.
 - The Stage 1 orchestration context is supplied by this composite directly to
   `sd-create-pr`. Never expose it through a platform adapter, environment
   variable, or user-facing argument.
@@ -148,6 +153,8 @@ bullets, one point per line, no paragraph blobs.
 - Finish-work owner and outcome: Stage 2 for `until=review`, Stage 4 for
   `until=merge`, or an explicit deferred/unrun state when an earlier stage
   stopped the chain.
+- Post-cycle review learnings: Stage 2's one PR-scoped attempt and outcome, or
+  `not run` with the stage/stop reason.
 - Next step: the single most useful follow-up — the next stage command
   after a stop-point, the stopping stage's own recommendation after a
   failure or blocker, or nothing further after a clean merge.
