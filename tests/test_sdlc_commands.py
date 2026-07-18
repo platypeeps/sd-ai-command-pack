@@ -255,14 +255,18 @@ class SdlcCommandsTests(InstallTestCase):
         ]
         for adapter in adapters:
             content = adapter.read_text(encoding="utf-8")
+            normalized_content = content.replace("`", "")
             with self.subTest(adapter=adapter.name):
                 for internal_control in (
                     "publish-only",
                     "caller=",
                     "stage=",
                     "return-after=",
+                    "caller: sd-ship",
+                    "stage: 1",
+                    "return-after: pr",
                 ):
-                    self.assertNotIn(internal_control, content)
+                    self.assertNotIn(internal_control, normalized_content)
 
     def test_usage_guide_documents_ship_lifecycle_ownership(self) -> None:
         guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")
