@@ -407,7 +407,9 @@ and local/remote branches, installed SD pack and Trellis versions, relevant PR,
 open PRs/issues, current/in-progress/planned Trellis work, anomalies, and
 numbered next steps. `--no-network` suppresses GitHub calls, `--repo PATH`
 selects another checkout, and `--json` emits schema version 1. Ordinary runs do
-not fetch and label ref-derived values `cached`.
+not fetch and label ref-derived values `cached`. Relevant-PR review totals use
+GitHub's GraphQL `reviews.totalCount`, so repositories with more than one REST
+page of review events are reported accurately without fetching every review.
 
 The optional positional `fleet` mode works from any installed checkout. It
 resolves the canonical fleet manifest from `--fleet-manifest`,

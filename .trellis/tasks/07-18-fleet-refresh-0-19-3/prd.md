@@ -1,8 +1,8 @@
-# Roll out sd-ai-command-pack 0.19.8 to the fleet
+# Roll out sd-ai-command-pack 0.19.9 to the fleet
 
 ## Goal
 
-Refresh every stale registered consumer to corrected pack release 0.19.8 using the sequential fleet rollout procedure.
+Refresh every stale registered consumer to corrected pack release 0.19.9 using the sequential fleet rollout procedure.
 
 ## Confirmed Facts
 
@@ -17,6 +17,9 @@ Refresh every stale registered consumer to corrected pack release 0.19.8 using t
   make `0.19.8` the coherent rollout target.
 - The full-fleet `0.19.8` candidate check passed all seven consumers and
   replaced `docs/fleet/candidate-validation.json` with exact-payload evidence.
+- Coordinator PR #118 then exposed a pack-owned status defect: the relevant
+  PR's review count used the length of one paginated REST response. Release
+  `0.19.9` replaces it with a bounded GraphQL total before any consumer merge.
 - `docs/fleet/consumers.json` registers seven consumers and defines their
   fast-first rollout order.
 - The full-fleet candidate ledger is a release prerequisite and is checked by
@@ -24,7 +27,7 @@ Refresh every stale registered consumer to corrected pack release 0.19.8 using t
 
 ## Requirements
 
-- Use tagged release `0.19.8` from the clean `sd-ai-command-pack` `main`
+- Use tagged release `0.19.9` from the clean `sd-ai-command-pack` `main`
   checkout as the only installation source.
 - Cover every consumer selected by `docs/fleet/consumers.json` in its declared
   rollout-priority order.
@@ -40,18 +43,21 @@ Refresh every stale registered consumer to corrected pack release 0.19.8 using t
   audit, or compatibility defects. Record unrelated or low-risk consumer
   findings without forcing another release.
 - Keep rollout status recoverable so an interrupted rerun skips consumers that
-  have already reached `0.19.8`.
+  have already reached `0.19.9`.
 
 ## Acceptance Criteria
 
-- [x] Full-fleet candidate validation passes all seven registered consumers
-  against the exact `0.19.8` payload.
+- [x] Full-fleet candidate validation passed all seven registered consumers
+  against the superseded `0.19.8` payload before integration review stopped
+  the rollout.
+- [ ] Full-fleet candidate validation passes all seven registered consumers
+  against the exact `0.19.9` payload.
 - [ ] Fleet preflight validates the tagged release and reports every selected
   consumer with its starting version and disposition.
 - [ ] Every stale, clean, locally available consumer is refreshed sequentially
   through install, audit, full-check, pull request, review/watch, gated merge,
   and housekeeping.
-- [ ] Post-merge provenance and install audit confirm `0.19.8` for every
+- [ ] Post-merge provenance and install audit confirm `0.19.9` for every
   successfully refreshed consumer.
 - [ ] Every at-target or skipped consumer is explicitly recorded; no consumer
   is silently omitted.
