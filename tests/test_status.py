@@ -133,6 +133,13 @@ class StatusTests(InstallTestCase):
             snapshot[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
         return snapshot
 
+    def test_resolve_repo_accepts_file_within_repository(self) -> None:
+        root = self.make_status_repo()
+        status = self.load_status_module()
+
+        self.assertEqual(status.resolve_repo(root / "README.md"), root.resolve())
+        self.assertIsNone(status.resolve_repo(root / "missing"))
+
     def test_local_json_is_read_only_and_reports_cached_state(self) -> None:
         root = self.make_status_repo()
         before_files = self.working_files_snapshot(root)

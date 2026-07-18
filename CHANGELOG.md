@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.19.4 - 2026-07-18
+
+- Resolve repository status correctly when `--repo` names a file within a Git
+  checkout, while continuing to reject missing repository paths.
+
 ## 0.19.3 - 2026-07-18
 
 - Exempt forward-looking `design.md` and `implement.md` planning artifacts under
