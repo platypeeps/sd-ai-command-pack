@@ -88,9 +88,10 @@ def github_slug_from_url(url: str) -> str | None:
 
 
 def resolve_repo(path: Path) -> Path | None:
+    git_cwd = path.parent if path.is_file() else path
     result = run_command(
-        ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-        cwd=path if path.is_dir() else Path.cwd(),
+        ["git", "-C", str(git_cwd), "rev-parse", "--show-toplevel"],
+        cwd=git_cwd if git_cwd.is_dir() else Path.cwd(),
     )
     if result.returncode != 0 or not result.stdout.strip():
         return None
