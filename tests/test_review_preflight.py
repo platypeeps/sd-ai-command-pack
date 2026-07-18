@@ -1051,8 +1051,12 @@ assert.deepEqual(
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
 
+        (root / "docs/current.md").write_text("# Current\n", encoding="utf-8")
+
         (root / "docs/cite.md").write_text(
-            "See [the gate](../scripts/sd-ai-command-pack-full-check.sh:12) and\n"
+            "See [the current guide](./current.md:42) and\n"
+            "[the gate](../scripts/sd-ai-command-pack-full-check.sh:12) and\n"
+            "`docs/current.md:12:5` and\n"
             "`scripts/sd-ai-command-pack-housekeeping.sh:34-56` for details.\n"
             "Also `scripts/sd-ai-command-pack-install-audit.py:7:3` and\n"
             "`scripts/sd-ai-command-pack-review-local.sh:10-20:4`.\n"
@@ -1078,6 +1082,8 @@ assert.deepEqual(
             result.stdout,
         )
         self.assertNotIn("full-check.sh:12", result.stdout)
+        self.assertNotIn("current.md:42", result.stdout)
+        self.assertNotIn("current.md:12:5", result.stdout)
         self.assertNotIn("housekeeping.sh:34-56", result.stdout)
         self.assertNotIn("install-audit.py:7:3", result.stdout)
         self.assertNotIn("review-local.sh:10-20:4", result.stdout)

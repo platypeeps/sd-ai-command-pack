@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.19.6 - 2026-07-18
+
+- Simplify the Trellis task artifact parser by removing an unreachable archive
+  branch while preserving archived task recognition.
+- Add explicit review-preflight regression coverage for Markdown and code-span
+  documentation references that use `path.md:line` and `path:line:column`
+  anchors.
+
 ## 0.19.5 - 2026-07-18
 
 - Resolve `sd-status --repo` when callers pass relative files or other
