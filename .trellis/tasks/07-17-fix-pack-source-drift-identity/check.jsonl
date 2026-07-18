@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Provides the acceptance contract for SD identity, other-pack skipping, malformed asserted identity, template parity, and release decisions."}
