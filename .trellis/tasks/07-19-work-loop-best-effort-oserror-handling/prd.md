@@ -42,15 +42,15 @@ fail on filesystems without chmod support.
 
 ## Acceptance Criteria
 
-- [ ] Every intentional empty `OSError` handler in the affected functions has
+- [x] Every intentional empty `OSError` handler in the affected functions has
   a short explanation of why failure is suppressed.
-- [ ] Candidate-file reads pin strict UTF-8 decoding and have focused
+- [x] Candidate-file reads pin strict UTF-8 decoding and have focused
   regression coverage.
-- [ ] Atomic state writes succeed when chmod is unsupported and retain focused
+- [x] Atomic state writes succeed when chmod is unsupported and retain focused
   regression coverage.
-- [ ] Template/generated parity checks pass.
-- [ ] Focused work-loop tests and the canonical pack checks pass.
-- [ ] Consumer refresh reviews no longer need a local implementation patch for
+- [x] Template/generated parity checks pass.
+- [x] Focused work-loop tests and the canonical pack checks pass.
+- [x] Consumer refresh reviews no longer need a local implementation patch for
   these findings.
 
 ## Evidence

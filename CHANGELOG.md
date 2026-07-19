@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.21.3 - 2026-07-19
+
+- Reject missing positional `sd-status` repository paths instead of silently
+  inspecting an existing parent repository; existing file paths inside a
+  repository remain supported.
+
 ## 0.21.2 - 2026-07-19
 
 - Rely on `tempfile.mkstemp()` for private temporary-file creation so work-loop
