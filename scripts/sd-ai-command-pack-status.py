@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
 import json
 import os
@@ -11,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -34,6 +36,17 @@ REVIEW_TOTAL_COUNT_QUERY = (
 class CommandResult:
     returncode: int
     stdout: str
+
+
+@contextlib.contextmanager
+def suppress_bytecode_writes() -> Iterator[None]:
+    """Keep read-only status imports from creating repository-local caches."""
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        yield
+    finally:
+        sys.dont_write_bytecode = previous
 
 
 def run_command(
@@ -412,7 +425,8 @@ def collect_work_loop(repo: Path) -> dict[str, Any]:
         if spec is None or spec.loader is None:
             raise ImportError("cannot construct work-loop helper loader")
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        with suppress_bytecode_writes():
+            spec.loader.exec_module(module)
         snapshot = module.status_snapshot(repo)
     except (
         AttributeError,
@@ -1005,7 +1019,8 @@ def fleet_api() -> Any:
     if inserted:
         sys.path.insert(0, scripts_path)
     try:
-        import sd_ai_command_pack_fleet_lib as fleet
+        with suppress_bytecode_writes():
+            import sd_ai_command_pack_fleet_lib as fleet
     except ImportError as error:
         raise RuntimeError(
             "installed fleet helper is missing; refresh sd-ai-command-pack"

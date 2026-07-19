@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.21.4 - 2026-07-19
+
+- Keep direct `sd-status` local and fleet reads from creating repository-local
+  Python bytecode caches while restoring the caller's bytecode setting after
+  helper imports.
+
 ## 0.21.3 - 2026-07-19
 
 - Reject missing positional `sd-status` repository paths instead of silently
