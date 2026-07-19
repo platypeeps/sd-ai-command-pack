@@ -1709,3 +1709,36 @@ Added atomic same-phase Git and PR evidence updates, hardened reconciliation and
 ### Next Steps
 
 - None - task complete
+
+
+## Session 145: Retire review-body fallback guidance
+
+**Date**: 2026-07-19
+**Task**: Retire review-body fallback guidance
+**Branch**: `main`
+
+### Summary
+
+Removed the expired REVIEW_PREFLIGHT_PR_BODY fallback from current shipped guidance, added a manifest-derived regression over all shipped guidance surfaces, released version 0.23.1, passed canonical validation and fleet candidate checks, and merged PR #173 after one clean Copilot round.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ded1b36` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
