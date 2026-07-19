@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.21.6 - 2026-07-19
+
+- Validate dynamically loaded work-loop status snapshots before rendering and
+  report missing, unsupported, or incomplete shapes as bounded `invalid`
+  anomalies instead of printing absent run metadata.
+
 ## 0.21.5 - 2026-07-19
 
 - Keep generated GitHub review provenance inside the managed review-learning

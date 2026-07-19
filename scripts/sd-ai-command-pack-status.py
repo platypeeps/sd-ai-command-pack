@@ -25,6 +25,16 @@ CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
 GITHUB_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 PR_SEPARATOR = "\x1f"
 PRIORITY_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+WORK_LOOP_TERMINAL_STATUSES = frozenset({"none", "invalid", "unavailable"})
+WORK_LOOP_RUN_STATUSES = frozenset({"active", "paused", "stopped", "completed"})
+WORK_LOOP_REQUIRED_STRING_FIELDS = (
+    "runId",
+    "mode",
+    "selector",
+    "phase",
+    "focusMode",
+    "heartbeatAt",
+)
 REVIEW_TOTAL_COUNT_QUERY = (
     "query($owner:String!,$name:String!,$number:Int!){"
     "repository(owner:$owner,name:$name){"
@@ -441,6 +451,50 @@ def collect_work_loop(repo: Path) -> dict[str, Any]:
         return {"status": "invalid", "error": safe_text(error, limit=500)}
     if not isinstance(snapshot, dict):
         return {"status": "invalid", "error": "work-loop helper returned invalid data"}
+    return validate_work_loop_snapshot(snapshot)
+
+
+def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Fail closed when a loaded helper does not honor the status contract."""
+    status = snapshot.get("status")
+    if not isinstance(status, str) or not status:
+        return {
+            "status": "invalid",
+            "error": "work-loop helper returned snapshot without a valid status",
+        }
+    if status in WORK_LOOP_TERMINAL_STATUSES:
+        return snapshot
+    if status not in WORK_LOOP_RUN_STATUSES:
+        return {
+            "status": "invalid",
+            "error": "work-loop helper returned unsupported status",
+        }
+
+    def invalid_field(field: str) -> dict[str, Any]:
+        return {
+            "status": "invalid",
+            "error": f"work-loop helper returned invalid run snapshot field: {field}",
+        }
+
+    for field in WORK_LOOP_REQUIRED_STRING_FIELDS:
+        value = snapshot.get(field)
+        if not isinstance(value, str) or not value:
+            return invalid_field(field)
+    iteration = snapshot.get("iteration")
+    if isinstance(iteration, bool) or not isinstance(iteration, int):
+        return invalid_field("iteration")
+    focus = snapshot.get("focus")
+    if not isinstance(focus, list) or not all(
+        isinstance(value, str) for value in focus
+    ):
+        return invalid_field("focus")
+    for field in ("counters", "contextHealth", "checkpoint"):
+        if not isinstance(snapshot.get(field), dict):
+            return invalid_field(field)
+    for container, member in (("contextHealth", "level"), ("checkpoint", "state")):
+        value = snapshot[container].get(member)
+        if not isinstance(value, str) or not value:
+            return invalid_field(f"{container}.{member}")
     return snapshot
 
 

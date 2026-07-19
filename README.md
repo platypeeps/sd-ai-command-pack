@@ -110,7 +110,9 @@ counts, cached upstream divergence, pack/Trellis versions, GitHub PR and issue
 inventory, current/open Trellis work, user-local autonomous loop progress,
 anomalies, and numbered next steps. Loop status includes its run ID, selector
 and focus, iteration, phase, task/PR, counters, heartbeat, context health, and
-checkpoint without mutating the ledger or lock. Use `fleet` from any installed
+checkpoint without mutating the ledger or lock. Malformed helper snapshots are
+reported as bounded `invalid` anomalies instead of rendering absent metadata.
+Use `fleet` from any installed
 checkout to collect a rollout-priority summary for every configured consumer
 after creating the machine-local fleet profile.
 

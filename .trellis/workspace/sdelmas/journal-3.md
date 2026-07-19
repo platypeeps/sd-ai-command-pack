@@ -1546,3 +1546,41 @@ Prevented generated GitHub review paths from being treated as current local docu
 ### Next Steps
 
 - None - task complete
+
+
+## Session 141: Validate sd-status work-loop snapshots
+
+**Date**: 2026-07-19
+**Task**: Validate sd-status work-loop snapshots
+**Branch**: `codex/status-snapshot-contract-validation`
+
+### Summary
+
+Added a fail-closed validation boundary for dynamically loaded work-loop status snapshots and released it as sd-ai-command-pack 0.21.6.
+
+### Main Changes
+
+- Accepted existing terminal and persisted-run states only when renderer-required fields have valid structural shapes.
+- Converted missing, unsupported, and incomplete helper snapshots into bounded invalid anomalies without echoing helper-controlled values.
+- Updated focused tests, documentation, code specs, generated mirrors, provenance, and the release candidate ledger.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `240a624` | fix: validate work-loop status snapshots |
+
+### Testing
+
+- [OK] 29 focused status tests passed and status-script coverage remained 86%.
+- [OK] make check passed, including 127 core tests, 100% installer line/branch coverage, Ruff, mypy, security, parity, audit, KB, and release gates.
+- [OK] All seven disposable fleet candidates and GitHub CI passed; Copilot round 1 was resolved cleanly.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

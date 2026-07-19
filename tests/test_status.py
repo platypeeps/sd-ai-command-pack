@@ -364,6 +364,82 @@ class StatusTests(InstallTestCase):
         self.assertEqual(malformed_state["status"], "invalid")
         self.assertIn("mode", malformed_state["error"])
 
+    def test_collect_work_loop_validates_helper_snapshot_shapes(self) -> None:
+        root = self.make_status_repo()
+        status = self.load_status_module()
+        spec = mock.Mock()
+        spec.loader = mock.Mock()
+        module = mock.Mock()
+
+        def collect(snapshot: object) -> dict[str, object]:
+            module.status_snapshot.return_value = snapshot
+            with (
+                mock.patch.object(
+                    status.importlib.util,
+                    "spec_from_file_location",
+                    return_value=spec,
+                ),
+                mock.patch.object(
+                    status.importlib.util,
+                    "module_from_spec",
+                    return_value=module,
+                ),
+            ):
+                return status.collect_work_loop(root)
+
+        for loop_status in ("none", "invalid", "unavailable"):
+            with self.subTest(valid_terminal=loop_status):
+                snapshot = {"status": loop_status}
+                self.assertEqual(collect(snapshot), snapshot)
+
+        valid_run = {
+            "status": "active",
+            "runId": "run-1",
+            "mode": "backlog",
+            "selector": "all",
+            "iteration": 2,
+            "phase": "implementing",
+            "focusMode": "none",
+            "focus": [],
+            "heartbeatAt": "2026-07-19T00:00:00Z",
+            "counters": {},
+            "contextHealth": {"level": "green"},
+            "checkpoint": {"state": "none"},
+        }
+        for loop_status in ("active", "paused", "stopped", "completed"):
+            with self.subTest(valid_run=loop_status):
+                snapshot = {**valid_run, "status": loop_status}
+                self.assertEqual(collect(snapshot), snapshot)
+
+        missing_status = collect({})
+        self.assertEqual(missing_status["status"], "invalid")
+        self.assertIn("valid status", missing_status["error"])
+
+        unsupported_status = collect(
+            {"status": "secret-status-value", "token": "do-not-render"}
+        )
+        self.assertEqual(unsupported_status["status"], "invalid")
+        self.assertEqual(
+            unsupported_status["error"],
+            "work-loop helper returned unsupported status",
+        )
+        self.assertNotIn("secret-status-value", unsupported_status["error"])
+
+        malformed_fields = (
+            ("runId", None, "runId"),
+            ("iteration", True, "iteration"),
+            ("focus", ["CI", 42], "focus"),
+            ("counters", [], "counters"),
+            ("contextHealth", {}, "contextHealth.level"),
+            ("checkpoint", {"state": ""}, "checkpoint.state"),
+        )
+        for field, value, expected in malformed_fields:
+            with self.subTest(malformed_field=field):
+                snapshot = {**valid_run, field: value}
+                result = collect(snapshot)
+                self.assertEqual(result["status"], "invalid")
+                self.assertIn(expected, result["error"])
+
     def test_collect_work_loop_restores_bytecode_setting_after_loader_failure(self) -> None:
         root = self.make_status_repo()
         status = self.load_status_module()
