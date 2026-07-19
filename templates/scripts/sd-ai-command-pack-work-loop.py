@@ -127,6 +127,10 @@ def canonical_remote(value: str | None) -> str:
     remote = (value or "").strip()
     if not remote:
         return ""
+    windows_drive_path = re.match(r"^[A-Za-z]:[\\/]", remote)
+    if windows_drive_path:
+        normalized_windows = PureWindowsPath(remote).as_posix().casefold()
+        return normalized_windows.removesuffix(".git").rstrip("/")
     scp_match = re.fullmatch(r"([^@\s]+@)?([^:/\s]+):(.+)", remote)
     if scp_match and "://" not in remote:
         user = scp_match.group(1) or ""
@@ -249,8 +253,38 @@ def validate_state(state: Mapping[str, Any]) -> None:
     if not isinstance(state.get("iteration"), int) or state["iteration"] < 1:
         raise WorkLoopError("work-loop iteration must be a positive integer")
     focus = state.get("focus")
-    if not isinstance(focus, dict) or focus.get("mode") not in {"none", "prefer", "only"}:
+    if not isinstance(focus, dict) or focus.get("mode") not in {
+        "none",
+        "prefer",
+        "only",
+    }:
         raise WorkLoopError("work-loop focus is malformed")
+    originals = focus.get("original")
+    selectors = focus.get("selectors")
+    if (
+        not isinstance(originals, list)
+        or any(not isinstance(item, str) or not item for item in originals)
+        or not isinstance(selectors, list)
+        or len(originals) != len(selectors)
+    ):
+        raise WorkLoopError("work-loop focus is malformed")
+    if (focus["mode"] == "none") != (not originals):
+        raise WorkLoopError("work-loop focus mode does not match its selectors")
+    for selector in selectors:
+        if not isinstance(selector, dict):
+            raise WorkLoopError("work-loop focus selector is malformed")
+        kind = selector.get("kind")
+        field = selector.get("field")
+        value = selector.get("value")
+        if (
+            kind not in {"natural", "structured"}
+            or not isinstance(field, str)
+            or not isinstance(value, str)
+            or not value
+            or (kind == "natural" and field != "text")
+            or (kind == "structured" and field not in FOCUS_FIELDS)
+        ):
+            raise WorkLoopError("work-loop focus selector is malformed")
     counters = state.get("counters")
     if not isinstance(counters, dict) or any(
         not isinstance(value, int) or value < 0 for value in counters.values()
@@ -865,6 +899,19 @@ def _print(value: Mapping[str, Any], *, as_json: bool) -> None:
     if as_json:
         print(json.dumps(value, indent=2, sort_keys=True))
         return
+    candidates = value.get("candidates")
+    if isinstance(candidates, list):
+        print(f"count: {len(candidates)}")
+        for candidate in candidates:
+            if not isinstance(candidate, Mapping):
+                continue
+            label = candidate.get("id") or candidate.get("task") or candidate.get("title")
+            evidence = candidate.get("focusEvidence")
+            detail = ""
+            if isinstance(evidence, list) and evidence:
+                detail = f" ({'; '.join(str(item) for item in evidence)})"
+            print(f"- {compact_text(label, limit=160)}{detail}")
+        return
     for key in (
         "status",
         "runId",
@@ -1047,7 +1094,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise WorkLoopError("candidate file must contain a JSON array")
             ranked = rank_candidates(payload, state["focus"])
             output = {"count": len(ranked), "candidates": ranked}
-            _print(output, as_json=True)
+            _print(output, as_json=args.json)
             return 0
 
         if args.command == "transition":

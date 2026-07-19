@@ -117,6 +117,10 @@ class WorkLoopTests(InstallTestCase):
             module.canonical_remote("HTTPS://GitHub.COM/platypeeps/example.git/"),
             "https://github.com/platypeeps/example",
         )
+        self.assertEqual(
+            module.canonical_remote("C:/Users/Test/Example.git"),
+            "c:/users/test/example",
+        )
 
     def test_focus_normalization_supports_bare_ordered_and_structured(self) -> None:
         module = self.load_module()
@@ -211,6 +215,35 @@ class WorkLoopTests(InstallTestCase):
         state["apiToken"] = "do-not-store"
         with self.assertRaisesRegex(module.WorkLoopError, "secret-like key"):
             module.validate_state(state)
+
+    def test_validate_state_rejects_incomplete_or_malformed_focus(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(preferred=["CI pipeline"]),
+            until="merge",
+            run_id="run-1",
+        )
+        invalid_focus_values = (
+            {"mode": "prefer"},
+            {"mode": "prefer", "original": ["CI pipeline"], "selectors": []},
+            {"mode": "none", "original": ["CI"], "selectors": []},
+            {
+                "mode": "prefer",
+                "original": ["CI"],
+                "selectors": [{"kind": "natural", "field": "priority", "value": "ci"}],
+            },
+        )
+
+        for focus in invalid_focus_values:
+            with self.subTest(focus=focus):
+                candidate = dict(state)
+                candidate["focus"] = focus
+                with self.assertRaisesRegex(module.WorkLoopError, "focus"):
+                    module.validate_state(candidate)
 
     def test_atomic_write_preserves_prior_state_when_replace_fails(self) -> None:
         module = self.load_module()
@@ -601,6 +634,22 @@ class WorkLoopTests(InstallTestCase):
         )
         ranked = invoke("rank", "--candidates-file", str(candidates))
         self.assertEqual(ranked["candidates"][0]["id"], "ci")
+
+        human_stdout = io.StringIO()
+        with contextlib.redirect_stdout(human_stdout):
+            result = module.main(
+                [
+                    *common,
+                    "rank",
+                    "--repo",
+                    str(root),
+                    "--candidates-file",
+                    str(candidates),
+                ]
+            )
+        self.assertEqual(result, 0, human_stdout.getvalue())
+        self.assertIn("count: 2", human_stdout.getvalue())
+        self.assertIn("- ci", human_stdout.getvalue())
 
         transition_args = ["--run-id", state["runId"], "--phase"]
         invoke(

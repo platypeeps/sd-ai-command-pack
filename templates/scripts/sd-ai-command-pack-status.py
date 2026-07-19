@@ -412,7 +412,14 @@ def collect_work_loop(repo: Path) -> dict[str, Any]:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         snapshot = module.status_snapshot(repo)
-    except (ImportError, OSError, RuntimeError, ValueError) as error:
+    except (
+        AttributeError,
+        ImportError,
+        OSError,
+        RuntimeError,
+        SyntaxError,
+        ValueError,
+    ) as error:
         return {"status": "invalid", "error": safe_text(error, limit=500)}
     if not isinstance(snapshot, dict):
         return {"status": "invalid", "error": "work-loop helper returned invalid data"}
