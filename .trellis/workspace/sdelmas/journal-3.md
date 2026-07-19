@@ -1509,3 +1509,40 @@ Added the version 0.21.0 autonomous work-loop controller, selector wrappers, sta
 ### Next Steps
 
 - None - task complete
+
+
+## Session 140: Review learning remote path validation
+
+**Date**: 2026-07-19
+**Task**: Review learning remote path validation
+**Branch**: `main`
+
+### Summary
+
+Prevented generated GitHub review paths from being treated as current local documentation references and released the fix as sd-ai-command-pack 0.21.5.
+
+### Main Changes
+
+- Masked complete managed review-learning blocks during local path extraction while preserving surrounding human-authored diagnostics.
+- Rendered remote paths containing backticks with safe Markdown code-span fences and synchronized shipped templates, mirrors, documentation, and release metadata.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d3e7cd2` | fix: isolate remote review paths from local validation |
+
+### Testing
+
+- [OK] 55 focused review-preflight and review-learning tests passed.
+- [OK] make check passed, including coverage, lint, type checks, template parity, install audit, KB freshness, and release gates.
+- [OK] All seven disposable fleet candidate validations and GitHub CI passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
