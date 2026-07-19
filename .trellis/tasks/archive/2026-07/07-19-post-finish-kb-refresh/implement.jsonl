@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Defines lifecycle ownership, thin skill composition, and generated KB behavior across shipped SD commands."}
+{"file": ".trellis/tasks/07-19-post-finish-kb-refresh/design.md", "reason": "Defines the guarded helper contract and assigns archive and follow-up refreshes to one owner each."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Defines actionable CLI failures and stable exit-code behavior for shipped helpers."}

@@ -1625,3 +1625,42 @@ Added status and preflight enforcement for completed Trellis tasks left outside 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 143: Post-finish KB refresh
+
+**Date**: 2026-07-19
+**Task**: Post-finish KB refresh
+**Branch**: `codex/post-finish-kb-refresh`
+
+### Summary
+
+Added opt-in-by-presence KB refresh ownership after task archival and backlog follow-up creation, released as pack 0.22.0.
+
+### Main Changes
+
+- Added --if-present to the canonical Obsidian KB helper with visible no-op behavior for absent KBs and normal conflict handling for occupied paths.
+- Made housekeeping own the post-finish archive refresh before merge and the backlog controller own only the later post-follow-up refresh.
+- Updated lifecycle specs, shipped docs, release metadata, generated mirrors, provenance, and the all-consumer candidate ledger.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bd09d60` | feat: refresh existing KB after lifecycle mutations |
+| `0b5f2c0` | chore: archive completed task |
+
+### Testing
+
+- [OK] 65 focused KB, housekeeping, and lifecycle tests passed.
+- [OK] Full coverage battery passed with installer at 100% and all shipped-script floors met.
+- [OK] Ruff, mypy, Node syntax, ShellCheck, Bandit, Zizmor, housekeeping self-test, KB check, fleet candidate validation, CI, and full-check passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

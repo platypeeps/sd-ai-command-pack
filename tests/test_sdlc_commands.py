@@ -232,6 +232,9 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("no other ship stage repeats it", ship_text)
         self.assertIn("Stage 2 is also the only review-learning owner", ship_text)
         self.assertNotIn("sd-ai-command-pack-review-learnings.py", ship)
+        self.assertIn("post-finish Obsidian KB refresh", ship_text)
+        self.assertIn("housekeeping remains its only owner", ship_text)
+        self.assertNotIn("sd-ai-command-pack-update-spec-kb.py", ship)
 
     def test_ship_separates_publish_and_review_ownership(self) -> None:
         create_pr = self._skill_text("sd-create-pr")
@@ -351,6 +354,12 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("SD_SHIP_MERGE_RESULT", ship_text)
         self.assertIn("trusted `sd-work-backlog` context", ship_text)
         self.assertIn("does not change stage order", ship_text)
+        self.assertIn(
+            "after follow-up task creation and before recording the iteration result",
+            backlog_text,
+        )
+        self.assertIn("sd-ai-command-pack-update-spec-kb.py --if-present", backlog_text)
+        self.assertIn("blocks the iteration", backlog_text)
 
     def test_work_loop_adapters_forward_arguments_and_do_not_duplicate_policy(self) -> None:
         for name in ("sd-work-backlog", "sd-work-designs"):

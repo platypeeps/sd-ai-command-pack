@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 142
+- **Total Sessions**: 143
 - **Last Active**: 2026-07-19
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1624 | Active |
+| `journal-3.md` | ~1664 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 143 | 2026-07-19 | Post-finish KB refresh | `bd09d60`, `0b5f2c0` | `codex/post-finish-kb-refresh` |
 | 142 | 2026-07-19 | Archive completed active-root tasks | `bb009b7`, `128cb2f`, `80050e7` | `codex/completed-task-root-cleanup` |
 | 141 | 2026-07-19 | Validate sd-status work-loop snapshots | `240a624` | `codex/status-snapshot-contract-validation` |
 | 140 | 2026-07-19 | Review learning remote path validation | `d3e7cd2` | `main` |
