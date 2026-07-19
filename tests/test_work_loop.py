@@ -650,6 +650,9 @@ class WorkLoopTests(InstallTestCase):
         )
         with self.assertRaisesRegex(module.WorkLoopError, "recorded branch"):
             module.update_evidence(state, {"head": sibling}, repo=root)
+        self.run_git(root, "branch", "-D", "codex/task-one")
+        with self.assertRaisesRegex(module.WorkLoopError, "not a local Git branch"):
+            module.update_evidence(state, {"head": sibling}, repo=root)
         self.run_git(root, "branch", "-f", "codex/task-one", sibling)
         with self.assertRaisesRegex(module.WorkLoopError, "descendant"):
             module.update_evidence(state, {"head": sibling}, repo=root)
@@ -673,6 +676,12 @@ class WorkLoopTests(InstallTestCase):
             module.update_evidence(state, {"head": head}, repo=root)
 
         module.transition_state(state, "selected", updates={"task": "task-one"})
+        with self.assertRaisesRegex(module.WorkLoopError, "not a local Git branch"):
+            module.update_evidence(
+                state,
+                {"branch": "does-not-exist", "baseBranch": "main"},
+                repo=root,
+            )
         module.update_evidence(
             state,
             {"branch": "main", "baseBranch": "main", "head": head},
@@ -701,7 +710,14 @@ class WorkLoopTests(InstallTestCase):
                     module.update_evidence(state, updates, repo=root)
                 self.assertEqual(state["current"], before)
 
-        with mock.patch.object(module, "run_git", return_value=None):
+        with (
+            mock.patch.object(
+                module,
+                "_branch_commit",
+                return_value=state["current"]["head"],
+            ),
+            mock.patch.object(module, "run_git", return_value=None),
+        ):
             with self.assertRaisesRegex(module.WorkLoopError, "local Git commit"):
                 module.update_evidence(
                     state, {"head": state["current"]["head"]}, repo=root

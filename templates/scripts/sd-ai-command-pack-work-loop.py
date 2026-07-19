@@ -961,6 +961,17 @@ def validated_evidence(
                 "branch evidence may change only to the base branch at a verified merge boundary"
             )
 
+    branch_head: str | None = None
+    verify_branch = candidate_branch is not None and bool(
+        {"branch", "head"} & set(updates)
+    )
+    if verify_branch:
+        branch_head = _branch_commit(evidence_repo, candidate_branch)
+        if branch_head is None:
+            raise WorkLoopError(
+                f"branch evidence is not a local Git branch: {candidate_branch}"
+            )
+
     remembered_head = current.get("head")
     candidate_head = candidate.get("head")
     if candidate_head is not None:
@@ -969,10 +980,8 @@ def validated_evidence(
             raise WorkLoopError(f"head evidence is not a local Git commit: {candidate_head}")
         candidate["head"] = resolved_head
         candidate_head = resolved_head
-        if candidate_branch is not None and ({"branch", "head"} & set(updates)):
-            branch_head = _branch_commit(evidence_repo, candidate_branch)
-            if branch_head != resolved_head:
-                raise WorkLoopError("HEAD evidence does not match the recorded branch")
+        if verify_branch and branch_head != resolved_head:
+            raise WorkLoopError("HEAD evidence does not match the recorded branch")
         if not branch_changed and remembered_head is not None and candidate_head != remembered_head:
             resolved_remembered = _resolved_commit(evidence_repo, remembered_head)
             if resolved_remembered is None or not _is_ancestor(
