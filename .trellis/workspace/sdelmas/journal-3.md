@@ -1664,3 +1664,48 @@ Added opt-in-by-presence KB refresh ownership after task archival and backlog fo
 ### Next Steps
 
 - None - task complete
+
+
+## Session 144: Work-loop evidence updates
+
+**Date**: 2026-07-19
+**Task**: Work-loop evidence updates
+**Branch**: `main`
+
+### Summary
+
+Added atomic same-phase Git and PR evidence updates, hardened reconciliation and branch validation through five Copilot review rounds, released pack 0.23.0, and merged PR #172.
+
+### Main Changes
+
+- Added a verified evidence operation for same-phase task, branch, commit, PR, and merge facts.
+- Normalized stable values and reconciliation observations, persisted immutable commit SHAs, and validated local branch refs with precise errors.
+- Updated shipped skills, documentation, release metadata, fleet candidate evidence, and focused lifecycle coverage.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b763591` | feat: support work-loop evidence updates |
+| `a13b7b5` | fix: normalize stable evidence before comparison |
+| `1b468fb` | fix: persist resolved work-loop commit evidence |
+| `88af490` | fix: validate work-loop branch evidence |
+| `27875a1` | fix: narrow branch evidence for static checks |
+| `bf45640` | fix: normalize reconciliation evidence |
+
+### Testing
+
+- [OK] 36 focused work-loop unit tests
+- [OK] Ruff and Mypy
+- [OK] All seven fleet candidate installs and checks
+- [OK] SD full-check with Prism and Gito disabled
+- [OK] GitHub CI and five Copilot review rounds; final round clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
