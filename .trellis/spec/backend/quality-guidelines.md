@@ -85,6 +85,10 @@ that exercise the generic JavaScript review preflight.
   newly appended/current sessions remain editable.
 - Documentation scans intentionally inspect regular files only; symlinked docs
   are skipped so local or generated links do not expand outside the repo.
+- Documentation-path checks mask only complete managed `sd-review-learnings`
+  blocks because their GitHub paths and comment snippets are remote provenance.
+  Preserve newlines for accurate diagnostics, and keep surrounding human text
+  plus incomplete marker pairs in the normal local-path check.
 - Diff-scoped Trellis task checks inspect changed `implement.jsonl` and
   `check.jsonl` files after their task leaves planning: `in_progress`,
   `completed`, or archived. A changed qualifying `task.json` checks both
@@ -152,6 +156,9 @@ that exercise the generic JavaScript review preflight.
   split case, exercised through both the exported helper and executable
   preflight path.
 - Template twin byte identity.
+- Generated review-learning remote paths and path-like comment snippets are
+  exempt only inside a complete managed block; surrounding human references
+  and incomplete marker pairs remain checked with accurate line numbers.
 
 ### 7. Wrong vs Correct
 

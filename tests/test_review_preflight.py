@@ -50,6 +50,7 @@ import {
   findHistoricalTrellisJournalSessionEdits,
   findTrellisTaskContextSeedRows,
   isSourceReviewPath,
+  maskGeneratedDocumentationPathProvenance,
   parseNumstat,
   parseJournalSessionsFromText,
   parseTrellisTaskArtifactPath,
@@ -155,6 +156,31 @@ assert.deepEqual(parseNumstat('3\\t4\\t\\0old\\tname.js\\0new\\tname.js\\0'), [
 assert.deepEqual(
   extractDocumentationPathReferences('docs/guide.md', 'See `docs/current.md` and [missing](../missing.md).').map((item) => item.target),
   ['../missing.md', 'docs/current.md'],
+);
+const managedReviewLearnings = [
+  '# Review Learnings',
+  '<!-- sd-review-learnings:start -->',
+  '- PR #1 `remote/missing.py`: mentions `docs/also-missing.md`.',
+  '<!-- sd-review-learnings:end -->',
+  'Human reference: `docs/human-missing.md`.',
+].join('\\n');
+const maskedReviewLearnings = maskGeneratedDocumentationPathProvenance(
+  'docs/review-learnings.md',
+  managedReviewLearnings,
+);
+assert.equal(maskedReviewLearnings.split('\\n').length, managedReviewLearnings.split('\\n').length);
+assert.deepEqual(
+  extractDocumentationPathReferences('docs/review-learnings.md', maskedReviewLearnings),
+  [{ file: 'docs/review-learnings.md', kind: 'code-span', line: 5, target: 'docs/human-missing.md' }],
+);
+const incompleteReviewLearnings = '<!-- sd-review-learnings:start -->\\n`docs/still-checked.md`';
+assert.equal(
+  maskGeneratedDocumentationPathProvenance('docs/review-learnings.md', incompleteReviewLearnings),
+  incompleteReviewLearnings,
+);
+assert.equal(
+  maskGeneratedDocumentationPathProvenance('docs/guide.md', managedReviewLearnings),
+  managedReviewLearnings,
 );
 assert.equal(shouldCheckDocumentationPathReference('docs/guide:section.md'), true);
 assert.equal(shouldCheckDocumentationPathReference('.sd-ai-command-pack/installed-targets.txt'), false);
@@ -1372,6 +1398,59 @@ assert.deepEqual(
         self.assertNotIn("full-check.sh:1-2,3-4,5-6", result.stdout)
         self.assertNotIn("install-audit.py:~145", result.stdout)
         self.assertNotIn("review-local.sh:~315-366", result.stdout)
+
+    def test_review_preflight_ignores_only_managed_review_provenance_paths(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        target = root / "docs/review-learnings.md"
+        target.write_text(
+            "# Review Learnings\n\n"
+            "<!-- sd-review-learnings:start -->\n"
+            "- PR #7 `remote/deleted.py`: mentions `docs/remote-missing.md`.\n"
+            "<!-- sd-review-learnings:end -->\n\n"
+            "Human reference: `docs/SD_AI_COMMAND_PACK.md`.\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("remote/deleted.py", result.stdout)
+        self.assertNotIn("docs/remote-missing.md", result.stdout)
+
+        with target.open("a", encoding="utf-8") as stream:
+            stream.write("Human broken reference: `docs/human-missing.md`.\n")
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "docs/review-learnings.md:8 references missing path "
+            "docs/human-missing.md",
+            result.stdout,
+        )
+        self.assertNotIn("remote/deleted.py", result.stdout)
+        self.assertNotIn("docs/remote-missing.md", result.stdout)
 
     def test_review_preflight_exempts_design_implement_docs_from_path_check(
         self,

@@ -3,7 +3,7 @@
   "name": "review-learning-remote-path-rendering",
   "title": "Render remote review paths without local path validation",
   "description": "Prevent generated review-learning snapshots from treating historical GitHub review paths as current local documentation references, with renderer regression coverage and normal shipped-payload release handling.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-07-19",
   "completedAt": null,
-  "branch": null,
+  "branch": "codex/review-learning-path-validation",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
@@ -26,6 +26,6 @@
     "tests/test_review_learnings.py",
     "tests/test_review_preflight.py"
   ],
-  "notes": "Found when a two-day learning refresh captured six historical or intentionally invalid remote PR paths that the local documentation-path gate tried to resolve.",
+  "notes": "Implemented a line-preserving managed-block mask for remote review provenance, safe code-span fences for backtick-containing paths, focused regressions, and the 0.21.5 release ledger. All seven disposable fleet candidates and the canonical check pass.",
   "meta": {}
 }

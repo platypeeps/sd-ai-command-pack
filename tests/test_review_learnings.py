@@ -257,6 +257,30 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertNotIn(learnings.MANAGED_END, rendered)
         self.assertNotIn(learnings.MANAGED_START, rendered)
 
+    def test_learnings_render_historical_markdown_sensitive_remote_paths(
+        self,
+    ) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_remote_paths",
+        )
+        comment = learnings.PullRequestComment(
+            pr_number=17,
+            pr_title="historical",
+            pr_url="https://github.com/owner/repo/pull/17",
+            path="archive/odd`path[1].md\ncontinued",
+            body="Mentions `docs/remote-missing.md` from the old head.",
+            is_resolved=True,
+            is_outdated=False,
+        )
+
+        rendered = comment.markdown_item()
+
+        self.assertIn("**historical** PR #17", rendered)
+        self.assertIn("`` archive/odd`path[1].md continued ``", rendered)
+        self.assertIn("`docs/remote-missing.md`", rendered)
+        self.assertNotIn("\n", rendered)
+
     def test_learnings_truncate_summaries_at_word_boundaries(self) -> None:
         learnings = self.load_module_from_path(
             PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",

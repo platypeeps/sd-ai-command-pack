@@ -20,6 +20,9 @@ const MIN_NODE_VERSION = { major: 16, minor: 9, label: '16.9.0' };
 // default truncates large diffs and surfaces as a spawn error.
 const GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 const REVIEW_CODE_PATH_PATTERN = /\.(?:cjs|js|mjs|py|sh|ts|tsx)$/;
+const REVIEW_LEARNINGS_PATH_PROVENANCE_FILE = 'docs/review-learnings.md';
+const REVIEW_LEARNINGS_MANAGED_BLOCK_PATTERN =
+  /<!-- sd-review-learnings:start -->[\s\S]*?<!-- sd-review-learnings:end -->/g;
 const GENERATED_REVIEW_PATHS = new Set([
   'docs/fleet/candidate-validation.json',
   'docs/repomix-map.md',
@@ -382,7 +385,17 @@ function checkDocumentationPathReferences() {
       continue;
     }
 
-    missing.push(...findMissingDocumentationPathReferences(file, readText(file), (candidate) => exists(candidate)));
+    const referenceText = maskGeneratedDocumentationPathProvenance(
+      file,
+      readText(file),
+    );
+    missing.push(
+      ...findMissingDocumentationPathReferences(
+        file,
+        referenceText,
+        (candidate) => exists(candidate),
+      ),
+    );
   }
 
   for (const reference of missing) {
@@ -976,6 +989,17 @@ export function findMissingDocumentationPathReferences(file, text, existsPath, o
   }
 
   return missing;
+}
+
+export function maskGeneratedDocumentationPathProvenance(file, text) {
+  if (file !== REVIEW_LEARNINGS_PATH_PROVENANCE_FILE) {
+    return text;
+  }
+
+  return text.replace(
+    REVIEW_LEARNINGS_MANAGED_BLOCK_PATTERN,
+    (block) => block.replace(/[^\n]/g, ' '),
+  );
 }
 
 function resolvesToLineSuffixedPath(resolved, existsPath) {
