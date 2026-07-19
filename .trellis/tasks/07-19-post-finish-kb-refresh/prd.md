@@ -39,19 +39,19 @@ pack's canonical full-check.
 
 ## Acceptance Criteria
 
-- [ ] In a repository with an existing `.obsidian-kb`, `sd-ship until=merge`
+- [x] In a repository with an existing `.obsidian-kb`, `sd-ship until=merge`
       ends with `sd-ai-command-pack-update-spec-kb.py --check` passing after the
       Trellis task is archived.
-- [ ] Follow-up Trellis tasks created by `sd-work-backlog` are reflected in the
+- [x] Follow-up Trellis tasks created by `sd-work-backlog` are reflected in the
       KB before that iteration reports a clean completion boundary.
-- [ ] A repository without `.obsidian-kb` completes the same workflows without
+- [x] A repository without `.obsidian-kb` completes the same workflows without
       creating the directory.
-- [ ] A KB refresh failure blocks or clearly marks the owning workflow as
+- [x] A KB refresh failure blocks or clearly marks the owning workflow as
       failed and names the recovery command.
-- [ ] Focused lifecycle tests cover present-KB, absent-KB, archive, follow-up,
+- [x] Focused lifecycle tests cover present-KB, absent-KB, archive, follow-up,
       and refresh-failure cases.
-- [ ] Shipped template sources and installed mirrors remain byte-identical.
-- [ ] The canonical repository checks pass with KB freshness enabled.
+- [x] Shipped template sources and installed mirrors remain byte-identical.
+- [x] The canonical repository checks pass with KB freshness enabled.
 
 ## Out of Scope
 

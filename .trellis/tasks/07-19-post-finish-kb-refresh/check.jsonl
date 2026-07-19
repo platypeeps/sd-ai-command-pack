@@ -1,1 +1,3 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/tasks/07-19-post-finish-kb-refresh/prd.md", "reason": "Verify present and absent KB behavior, archive and follow-up freshness, failure recovery, parity, and canonical checks."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify shipped template and installed-mirror consistency across command surfaces."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify explicit no-op output, focused test coverage, and canonical repository gates."}

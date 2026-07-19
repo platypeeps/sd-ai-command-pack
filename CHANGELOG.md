@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.22.0 - 2026-07-19
+
+- Add `--if-present` to the shipped Obsidian KB helper so lifecycle workflows
+  can refresh an existing KB without opting other repositories into one.
+- Make housekeeping refresh generated knowledge after finish-work task
+  archival and make the autonomous backlog loop refresh again after any later
+  follow-up task creation, with actionable failure handling and one owner per
+  lifecycle boundary.
+
 ## 0.21.7 - 2026-07-19
 
 - Report completed Trellis tasks stranded outside the archive in `sd-status`

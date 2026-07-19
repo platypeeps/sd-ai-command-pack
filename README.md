@@ -178,6 +178,9 @@ implements and validates one task at a time, delegates the complete PR lifecycle
 to `sd-ship until=merge`, processes follow-ups, verifies clean state, then
 re-inventories until a documented stop condition. A user-local atomic ledger
 and lock make it safe to resume after interruption or context compaction.
+Repositories that already maintain `.obsidian-kb` are refreshed after task
+archival and again after any follow-up task creation; repositories without that
+folder remain unchanged.
 
 ```text
 /sd:work-backlog
@@ -627,6 +630,11 @@ For docs, spec, README, or PRD edits, refresh the local KB before full-check:
 ```bash
 python3 scripts/sd-ai-command-pack-update-spec-kb.py
 ```
+
+Lifecycle owners use `--if-present` when they must refresh generated knowledge
+without creating a KB in repositories that have not opted into one. Missing
+KBs return success with a visible skip reason; existing invalid or conflicting
+KB paths still fail.
 
 Run the local release gate with local AI reviewers disabled unless the release
 is explicitly about Prism or Gito behavior:

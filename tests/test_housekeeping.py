@@ -221,8 +221,110 @@ class HousekeepingTests(InstallTestCase):
             "--refs-refreshed",
             "--prior-anomaly",
             "REFS_REFRESHED=1",
+            "refresh_existing_kb()",
+            "sd-ai-command-pack-update-spec-kb.py",
+            "--if-present",
+            "existing Obsidian KB refresh failed",
         ]:
             self.assertIn(text, script)
+
+        refresh_index = script.index("if ! refresh_existing_kb; then")
+        fetch_index = script.index("fetch_and_prune", refresh_index)
+        merge_index = script.index("maybe_merge_ready_open_pr", refresh_index)
+        self.assertLess(refresh_index, fetch_index)
+        self.assertLess(refresh_index, merge_index)
+
+    def test_housekeeping_kb_refresh_contract_covers_skip_success_and_failure(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        script = str(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"
+        )
+        function_source = (
+            f'eval "$(awk \'/^refresh_existing_kb\\(\\)/,/^}}/\' {script})";'
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            scripts_dir = root / "scripts"
+            scripts_dir.mkdir()
+            toolchain = scripts_dir / "sd-ai-command-pack-toolchain.sh"
+            helper = scripts_dir / "sd-ai-command-pack-update-spec-kb.py"
+            helper.write_text("# fixture\n", encoding="utf-8")
+            marker = root / "invocation.txt"
+            toolchain.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf '%s\\n' \"$*\" > \"$KB_MARKER\"\n"
+                "exit \"${KB_RESULT:-0}\"\n",
+                encoding="utf-8",
+            )
+
+            base_probe = (
+                "ACTIONS=(); ANOMALIES=(); DRY_RUN=0;"
+                f'SCRIPT_DIR={str(scripts_dir)!r};'
+                "add_action() { ACTIONS+=(\"$*\"); };"
+                "add_anomaly() { ANOMALIES+=(\"$*\"); };"
+                f"{function_source}"
+                "refresh_existing_kb; rc=$?;"
+                'printf "rc=%s\\nactions=%s\\nanomalies=%s\\n" '
+                '"$rc" "${ACTIONS[*]-}" "${ANOMALIES[*]-}"'
+            )
+
+            absent = subprocess.run(
+                [self._bash_path, "-c", base_probe],
+                cwd=root,
+                env={**os.environ, "KB_MARKER": str(marker)},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(absent.returncode, 0, absent.stdout)
+            self.assertIn("rc=0", absent.stdout)
+            self.assertIn("skipped (.obsidian-kb is not present)", absent.stdout)
+            self.assertFalse(marker.exists())
+
+            (root / ".obsidian-kb").mkdir()
+            success = subprocess.run(
+                [self._bash_path, "-c", base_probe],
+                cwd=root,
+                env={**os.environ, "KB_MARKER": str(marker)},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(success.returncode, 0, success.stdout)
+            self.assertIn("rc=0", success.stdout)
+            self.assertIn("refreshed existing .obsidian-kb", success.stdout)
+            self.assertEqual(
+                marker.read_text(encoding="utf-8").strip(),
+                f"run-python -- {helper} --if-present",
+            )
+
+            failure = subprocess.run(
+                [self._bash_path, "-c", base_probe],
+                cwd=root,
+                env={
+                    **os.environ,
+                    "KB_MARKER": str(marker),
+                    "KB_RESULT": "7",
+                },
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(failure.returncode, 0, failure.stdout)
+            self.assertIn("rc=1", failure.stdout)
+            self.assertIn("existing Obsidian KB refresh failed", failure.stdout)
+            self.assertIn(
+                "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- "
+                "scripts/sd-ai-command-pack-update-spec-kb.py --if-present",
+                failure.stdout,
+            )
 
     def test_housekeeping_dry_run_previews_branch_cleanup_without_final_state_anomaly(
         self,

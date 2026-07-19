@@ -807,7 +807,145 @@ class UpdateSpecKbTests(InstallTestCase):
         self.assertIn("usage:", result.stdout)
         self.assertIn("--dry-run", result.stdout)
         self.assertIn("--check", result.stdout)
+        self.assertIn("--if-present", result.stdout)
         self.assertFalse((root / ".obsidian-kb").exists())
+
+    def test_update_spec_kb_if_present_skips_absent_kb_without_writes(self) -> None:
+        script = install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+
+        for mode in ((), ("--dry-run",), ("--check",)):
+            with self.subTest(mode=mode or ("refresh",)):
+                root = self.make_repo()
+                (root / "README.md").write_text("# Project\n", encoding="utf-8")
+
+                result = subprocess.run(
+                    [sys.executable, str(script), "--if-present", *mode],
+                    cwd=root,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    check=False,
+                )
+
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertIn(
+                    "Obsidian KB refresh: skipped (.obsidian-kb is not present)",
+                    result.stdout,
+                )
+                self.assertFalse((root / ".obsidian-kb").exists())
+                self.assertFalse((root / ".gitignore").exists())
+
+    def test_update_spec_kb_if_present_refreshes_existing_kb(self) -> None:
+        root = self.make_repo()
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        (root / ".obsidian-kb").mkdir()
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(
+                    install.ROOT
+                    / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+                ),
+                "--if-present",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertTrue(
+            (root / ".obsidian-kb/Repository Overview/README.md").is_file()
+        )
+        self.assertIn(
+            "# sd-ai-command-pack obsidian-kb start",
+            (root / ".gitignore").read_text(encoding="utf-8"),
+        )
+
+    def test_update_spec_kb_if_present_reflects_archive_and_followup_tasks(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        script = (
+            install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+        )
+        active_task = root / ".trellis/tasks/07-19-demo"
+        active_task.mkdir(parents=True)
+        (active_task / "prd.md").write_text("# Demo task\n", encoding="utf-8")
+        (root / ".obsidian-kb").mkdir()
+
+        initial = subprocess.run(
+            [sys.executable, str(script), "--if-present"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(initial.returncode, 0, initial.stdout)
+        active_copy = root / ".obsidian-kb/Task Documentation/07-19-demo-prd.md"
+        self.assertTrue(active_copy.is_file())
+
+        archived_task = root / ".trellis/tasks/archive/2026-07/07-19-demo"
+        archived_task.parent.mkdir(parents=True)
+        shutil.move(active_task, archived_task)
+        followup = root / ".trellis/tasks/07-20-follow-up"
+        followup.mkdir(parents=True)
+        (followup / "prd.md").write_text("# Follow-up task\n", encoding="utf-8")
+
+        refreshed = subprocess.run(
+            [sys.executable, str(script), "--if-present"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(refreshed.returncode, 0, refreshed.stdout)
+        self.assertFalse(active_copy.exists())
+        self.assertTrue(
+            (
+                root
+                / ".obsidian-kb/Task Documentation/"
+                "archive-2026-07-07-19-demo-prd.md"
+            ).is_file()
+        )
+        self.assertEqual(
+            (
+                root
+                / ".obsidian-kb/Task Documentation/07-20-follow-up-prd.md"
+            ).read_text(encoding="utf-8"),
+            "# Follow-up task\n",
+        )
+
+    def test_update_spec_kb_if_present_does_not_skip_occupied_path(self) -> None:
+        root = self.make_repo()
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        (root / ".obsidian-kb").write_text("occupied\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(
+                    install.ROOT
+                    / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+                ),
+                "--if-present",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("Obsidian KB refresh: skipped", result.stdout)
+        self.assertTrue((root / ".obsidian-kb").is_file())
 
     def test_update_spec_kb_dry_run_does_not_write_files(self) -> None:
         root = self.make_repo()

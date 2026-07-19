@@ -721,7 +721,10 @@ conflicts it could not bring current — automation should treat `3` as
 "KB partially stale", not success. Run
 `python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run` to preview the
 refresh without writes, `--check` to verify the generated folder and ignore
-entry are current, or `--help` for the safe CLI summary.
+entry are current, or `--help` for the safe CLI summary. Add `--if-present` to
+any mode when automation should refresh only repositories that already have
+`.obsidian-kb`; an absent folder returns success with a visible skip reason and
+causes no writes, while an occupied or invalid path retains the normal failure.
 
 To use the generated knowledge folder inside an Obsidian vault, copy the repo's
 `.obsidian-kb` folder into the vault. Recopy it after future `sd-update-spec`
@@ -960,6 +963,9 @@ Lifecycle side effects have one owner. `until=review` keeps finish-work in
 watches with `no-merge` in Stage 3, and invokes housekeeping exactly once in
 Stage 4. A blocked or timed-out watch therefore leaves the active Trellis task
 available for a later resume instead of archiving it before the PR settles.
+After finish-work, housekeeping owns one `--if-present` KB refresh before its
+merge gate so archived task documentation is current. `sd-ship` does not repeat
+that refresh.
 
 When the canonical backlog controller invokes the merge-through chain, it adds
 a trusted internal `caller: sd-work-backlog` context bound to the active run,
@@ -968,6 +974,10 @@ bounded `SD_SHIP_MERGE_RESULT` with PR/merge, finish-work, housekeeping, review
 rounds, final branch/HEAD, and anomalies. This changes only report ownership:
 all four stages and safety gates still run exactly as in standalone shipping,
 and the parent loop remains the only owner of the overall final response.
+After it creates or updates post-ship follow-up tasks, the parent controller
+owns one final `--if-present` KB refresh before recording the iteration result.
+That later refresh covers only mutations made after nested housekeeping
+returned and is not a duplicate unconditional archive refresh.
 
 The `sd-retro` command captures a structured retrospective after a
 debugging stream or incident: what broke, the root cause, why existing

@@ -197,6 +197,20 @@ Before selecting another task:
   never rerun the PR-scoped learning pass at this outer level; and
 - record each follow-up as addressed, tasked, captured, parked, or blocked.
 
+Refresh an existing `.obsidian-kb` after follow-up task creation and before
+recording the iteration result:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-update-spec-kb.py --if-present
+```
+
+The helper's absent-KB result is a visible no-op and must not create the
+directory. A nonzero result blocks the iteration before its clean boundary;
+report the helper diagnostics and the exact command above as recovery. This
+does not repeat housekeeping's earlier post-finish refresh: it owns only task
+documentation created after the nested ship returned.
+
 Record the compact iteration result through the helper, including PR,
 review-round and CI-retry counts, decisions, and follow-up pointers. Verify the
 repository is back on the synchronized default branch with a clean tree, then
