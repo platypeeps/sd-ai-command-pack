@@ -515,13 +515,17 @@ class WorkLoopTests(InstallTestCase):
             run_id="run-1",
         )
         module.transition_state(state, "selected", updates={"task": "task-one"})
+        module.transition_state(
+            state, "planning", updates={"task": "task-one   "}
+        )
+        self.assertEqual(state["current"]["task"], "task-one")
 
         with self.assertRaisesRegex(module.WorkLoopError, "stable"):
             module.transition_state(
-                state, "planning", updates={"task": "different-task"}
+                state, "implementing", updates={"task": "different-task"}
             )
 
-        self.assertEqual(state["phase"], "selected")
+        self.assertEqual(state["phase"], "planning")
         self.assertEqual(state["current"]["task"], "task-one")
 
     def test_result_history_is_bounded_and_updates_cost_counters(self) -> None:

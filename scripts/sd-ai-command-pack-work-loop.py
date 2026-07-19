@@ -855,21 +855,22 @@ def transition_state(
     current_phase = state["phase"]
     if phase not in LEGAL_TRANSITIONS[current_phase]:
         raise WorkLoopError(f"illegal work-loop transition: {current_phase} -> {phase}")
+    normalized_updates: dict[str, Any] = {}
     if updates:
         for key, value in updates.items():
             if key not in state["current"]:
                 raise WorkLoopError(f"unknown current-state field: {key}")
+            normalized = compact_text(value) if isinstance(value, str) else value
             remembered = state["current"].get(key)
             if (
                 key in STABLE_CURRENT_FIELDS
                 and remembered is not None
-                and remembered != value
+                and remembered != normalized
             ):
                 raise WorkLoopError(f"cannot replace stable current-state field: {key}")
+            normalized_updates[key] = normalized
     state["phase"] = phase
-    if updates:
-        for key, value in updates.items():
-            state["current"][key] = compact_text(value) if isinstance(value, str) else value
+    state["current"].update(normalized_updates)
     if phase == "inventory" and current_phase == "complete":
         state["iteration"] += 1
         state["current"] = {key: None for key in state["current"]}
