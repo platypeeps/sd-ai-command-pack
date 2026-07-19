@@ -1,0 +1,33 @@
+{
+  "id": "completed-task-root-cleanup",
+  "name": "completed-task-root-cleanup",
+  "title": "Archive completed active-root tasks and detect recurrence",
+  "description": "Archive completed Trellis tasks stranded outside archive and report future active-root completed tasks through status and preflight checks.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P3",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-19",
+  "completedAt": "2026-07-19",
+  "branch": "codex/completed-task-root-cleanup",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "templates/scripts/sd-ai-command-pack-status.py",
+    "scripts/sd-ai-command-pack-status.py",
+    "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
+    "scripts/sd-ai-command-pack-review-preflight.mjs",
+    "tests/test_status.py",
+    "tests/test_review_preflight.py"
+  ],
+  "notes": "",
+  "meta": {}
+}

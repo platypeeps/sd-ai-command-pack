@@ -1584,3 +1584,44 @@ Added a fail-closed validation boundary for dynamically loaded work-loop status 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 142: Archive completed active-root tasks
+
+**Date**: 2026-07-19
+**Task**: Archive completed active-root tasks
+**Branch**: `codex/completed-task-root-cleanup`
+
+### Summary
+
+Added status and preflight enforcement for completed Trellis tasks left outside the archive, shipped release 0.21.7, and incorporated two Copilot review hardening fixes.
+
+### Main Changes
+
+- Archived four previously completed task records and added a recurrence guard to the shared review preflight.
+- Reported completed active-root tasks in sd-status using actionable task directory paths.
+- Explicitly excluded symlinked task directories from the preflight scan and kept template mirrors synchronized.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bb009b7` | fix: reject completed tasks in active root |
+| `128cb2f` | fix: show task paths in completion anomalies |
+| `80050e7` | fix: explicitly skip symlinked task entries |
+
+### Testing
+
+- [OK] make check
+- [OK] 30 status tests and 31 review-preflight tests
+- [OK] fleet candidate validation passed for all seven configured consumers
+- [OK] Copilot review converged after three rounds with no new comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

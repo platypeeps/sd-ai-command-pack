@@ -485,17 +485,21 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - severity: P3 · effort: S · confidence: Plausible
 - dimension: security
 - first-seen: 2026-07-15 @ f6f3932
-- last-seen: 2026-07-16 @ 772bf2a
+- last-seen: 2026-07-19 @ e4b10b3
 - evidence:
-  - .trellis/scripts/common/task_utils.py:262-271 subprocess.run(cmd,
-    shell=True, ...)
-  - cmd from .trellis/config.yaml hooks lists
-    (.trellis/scripts/common/config.py:275-292)
-- why: A repo shipping a malicious .trellis/config.yaml gains code execution
-  when a developer runs a Trellis task command; matches the git-hooks/npm-
-  scripts trust model, hence P3. Trellis-owned runtime — upstream concern.
-- fix: Upstream: document full-shell semantics as trusted repo config and/or
-  first-use opt-in gate.
+  - .trellis/scripts/common/task_utils.py:260 — iterates repo-configured hook
+    commands.
+  - .trellis/scripts/common/task_utils.py:262 — invokes each command through
+    subprocess.run.
+  - .trellis/scripts/common/task_utils.py:264 — explicitly enables shell=True.
+  - .trellis/scripts/common/config.py:285 — loads hook configuration from the
+    repository.
+  - .trellis/scripts/common/config.py:289 — accepts hook entries as a list.
+- why: Repository configuration can execute shell strings when a developer runs
+  Trellis task commands; this matches a trusted-repo hook model but remains an
+  upstream contract and consent concern.
+- fix: Upstream Trellis should document trusted full-shell semantics, add a
+  first-use consent gate, or support argv-list hook execution.
 - notes: upstream-owned; do not edit `.trellis/scripts/**` in this pack or open
   an upstream Trellis PR without explicit user approval. Handoff:
   "Trellis task-command lifecycle hooks run config-sourced hook commands with
@@ -505,9 +509,8 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   change hook config to argv-list execution. This was found from
   sd-ai-command-pack audit A-027 and intentionally left upstream-owned."
   Parked as `.trellis/tasks/07-16-upstream-trellis-hook-shell-semantics/`.
-  Follow-up 2026-07-16 @ 772bf2a: still open; evidence remains present in
-  Trellis-owned runtime and the parked task remains the accurate tracking
-  record.
+  Follow-up 2026-07-19 @ e4b10b3: still open; evidence remains present in
+  Trellis 0.6.7 runtime and the parked task remains accurate.
 
 ## A-028 — review-learnings git error/edge branches are untested (script at 69%)
 - status: fixed
@@ -630,3 +633,76 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
 - notes: tracked → .trellis/tasks/07-15-surface-generation (implemented in
   0.13.0: make generate + drift test; transform rules moved from parity tests
   into the generator)
+
+## A-035 — Post-review task lifecycle changes leave the generated knowledge base stale
+- status: open
+- severity: P2 · effort: M · confidence: Plausible
+- dimension: tooling
+- first-seen: 2026-07-19 @ e4b10b3
+- last-seen: 2026-07-19 @ e4b10b3
+- evidence:
+  - templates/.agents/skills/sd-ship/SKILL.md:93 — Stage 1 refreshes specs and
+    generated knowledge before PR review.
+  - templates/.agents/skills/sd-ship/SKILL.md:114 — Stage 4 archives the task
+    after that final refresh.
+  - scripts/sd-ai-command-pack-update-spec-kb.py:307 — active and archived
+    Trellis task Markdown is part of the generated knowledge source set.
+  - templates/scripts/sd-ai-command-pack-full-check.sh:517 — stale generated
+    knowledge fails the canonical full check when `.obsidian-kb` exists.
+- why: The normal ship lifecycle moves task documents after the last knowledge
+  refresh; post-merge follow-up tasks add another path, leaving an expected
+  local knowledge package stale and `make check` red on clean main.
+- fix: Give post-review task archive/follow-up mutations a final conditional KB
+  refresh owner, then add an end-to-end regression that finishes with
+  `update-spec-kb.py --check` green when `.obsidian-kb` already exists.
+- notes: `make check` on 2026-07-19 passed 650 tests, coverage, Ruff, mypy,
+  Bandit, Zizmor, and source drift, then failed only on missing/stale task
+  copies created by the PR #169 archive and the 0.21.6 fleet follow-up task.
+  Tracked by `.trellis/tasks/07-19-post-finish-kb-refresh/` after user consent.
+
+## A-036 — Removed review-body fallback remains documented in the shipped full-check skill
+- status: open
+- severity: P2 · effort: S · confidence: Plausible
+- dimension: documentation
+- first-seen: 2026-07-19 @ e4b10b3
+- last-seen: 2026-07-19 @ e4b10b3
+- evidence:
+  - templates/.agents/skills/sd-full-check/SKILL.md:110 — still documents
+    REVIEW_PREFLIGHT_PR_BODY as a supported deprecated fallback.
+  - CHANGELOG.md:220 — records that the fallback was removed in 0.16.0.
+  - tests/test_review_scope.py:248 — retirement coverage checks only the two
+    installed guide copies, not shipped skill documentation.
+- why: Consumers following the shipped skill can set a variable that no longer
+  affects full-check PR-body resolution, producing avoidable scope failures.
+- fix: Remove the stale skill entry and extend the retirement regression across
+  every shipped documentation and skill surface.
+- notes: Tracked by
+  `.trellis/tasks/07-19-remove-retired-review-body-skill-doc/` after user
+  consent.
+
+## A-037 — Completed Trellis tasks remain stranded in the active task root
+- status: fixed
+- severity: P3 · effort: S · confidence: Plausible
+- dimension: bloat
+- first-seen: 2026-07-19 @ e4b10b3
+- last-seen: 2026-07-19 @ e4b10b3
+- evidence:
+  - .trellis/tasks/07-19-fleet-refresh-0-21-0/task.json:6 — completed task is
+    still outside the archive.
+  - .trellis/tasks/07-19-status-read-only-bytecode/task.json:6 — completed task
+    is still outside the archive.
+  - .trellis/tasks/07-19-status-repository-path-validation/task.json:6 —
+    completed task is still outside the archive.
+  - .trellis/tasks/07-19-work-loop-best-effort-oserror-handling/task.json:6 —
+    completed task is still outside the archive.
+  - scripts/sd-ai-command-pack-status.py:411 — status inventory emits only
+    in-progress and planning task lists, so stranded completed tasks are hidden.
+- why: Trellis reports these directories as active inventory while SD status
+  reports a healthy task state, allowing completed artifacts to accumulate and
+  making backlog counts disagree across tools.
+- fix: Archive the four completed tasks and surface active-root completed tasks
+  as a bounded status/preflight anomaly so the state cannot silently recur.
+- notes: Resolved by `.trellis/tasks/07-19-completed-task-root-cleanup/` in the
+  0.21.7 working tree. The four records moved to the 2026-07 archive;
+  `sd-status` now reports the invariant and shared review preflight enforces it.
+  All seven fleet candidates and `make check` passed.

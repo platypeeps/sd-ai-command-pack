@@ -385,7 +385,11 @@ def collect_trellis(repo: Path) -> dict[str, Any]:
     tasks: list[dict[str, Any]] = []
     if task_root.is_dir():
         for task_json in sorted(task_root.glob("*/task.json")):
-            if task_json.is_symlink() or not task_json.is_file():
+            if (
+                task_json.parent.is_symlink()
+                or task_json.is_symlink()
+                or not task_json.is_file()
+            ):
                 continue
             task = task_record(task_json)
             if task is not None:
@@ -416,10 +420,15 @@ def collect_trellis(repo: Path) -> dict[str, Any]:
         (task for task in tasks if task["status"] == "planning"),
         key=task_sort_key,
     )
+    completed_outside_archive = sorted(
+        (task for task in tasks if task["status"] == "completed"),
+        key=task_sort_key,
+    )
     return {
         "activeTask": active,
         "inProgress": in_progress,
         "planned": planned,
+        "completedOutsideArchive": completed_outside_archive,
     }
 
 
@@ -796,6 +805,12 @@ def next_steps(report: Mapping[str, Any]) -> list[str]:
             )
     trellis = report.get("trellis")
     if isinstance(trellis, dict):
+        completed_outside_archive = trellis.get("completedOutsideArchive")
+        if completed_outside_archive:
+            steps.append(
+                "Archive completed active-root Trellis tasks with "
+                "python3 ./.trellis/scripts/task.py archive <task-dir>."
+            )
         active = trellis.get("activeTask")
         if isinstance(active, dict):
             steps.append(
@@ -850,6 +865,7 @@ def collect_local(
     if relevant_branch is None and git.get("branch") != default:
         relevant_branch = git.get("branch")
     work_loop = collect_work_loop(repo)
+    trellis = collect_trellis(repo)
     report: dict[str, Any] = {
         "schemaVersion": SCHEMA_VERSION,
         "mode": "local",
@@ -866,7 +882,7 @@ def collect_local(
             branch=relevant_branch if isinstance(relevant_branch, str) else None,
             network=network,
         ),
-        "trellis": collect_trellis(repo),
+        "trellis": trellis,
         "workLoop": work_loop,
         "cleanupContext": {
             "sourceBranch": source_branch,
@@ -883,6 +899,21 @@ def collect_local(
         report["anomalies"].append(
             "work-loop state is invalid: "
             + safe_text(work_loop.get("error") or "unknown error", limit=400)
+        )
+    completed_outside_archive = trellis.get("completedOutsideArchive", [])
+    if completed_outside_archive:
+        shown = ", ".join(
+            safe_text(task.get("path") or task.get("id"), limit=160)
+            for task in completed_outside_archive[:HUMAN_ITEM_LIMIT]
+        )
+        suffix = (
+            f"; +{len(completed_outside_archive) - HUMAN_ITEM_LIMIT} more"
+            if len(completed_outside_archive) > HUMAN_ITEM_LIMIT
+            else ""
+        )
+        report["anomalies"].append(
+            f"{len(completed_outside_archive)} completed Trellis task(s) remain "
+            f"outside .trellis/tasks/archive/: {shown}{suffix}"
         )
     if expect_clean:
         report["anomalies"].extend(
@@ -1053,6 +1084,12 @@ def render_local(report: Mapping[str, Any], *, dry_run: bool) -> None:
     print(f"- in-progress Trellis tasks: {len(trellis.get('inProgress', []))}")
     planned = trellis.get("planned", [])
     print(f"- planned Trellis tasks ({len(planned)}): {format_task(planned[0]) if planned else 'none'}")
+    completed_outside_archive = trellis.get("completedOutsideArchive", [])
+    print(
+        "- completed Trellis tasks outside archive "
+        f"({len(completed_outside_archive)}): "
+        f"{format_task(completed_outside_archive[0]) if completed_outside_archive else 'none'}"
+    )
 
     print("\n==> Anomalies")
     if anomalies:

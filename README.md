@@ -108,10 +108,14 @@ separate explicit request.
 Reports repository delivery state without changing it: branch and working-tree
 counts, cached upstream divergence, pack/Trellis versions, GitHub PR and issue
 inventory, current/open Trellis work, user-local autonomous loop progress,
-anomalies, and numbered next steps. Loop status includes its run ID, selector
+completed tasks stranded outside the Trellis archive, anomalies, and numbered
+next steps. Loop status includes its run ID, selector
 and focus, iteration, phase, task/PR, counters, heartbeat, context health, and
 checkpoint without mutating the ledger or lock. Malformed helper snapshots are
 reported as bounded `invalid` anomalies instead of rendering absent metadata.
+The shared preflight fails when a completed task remains directly under
+`.trellis/tasks/` and reports the `task.py archive` remediation; `sd-status`
+surfaces the same condition without mutating it.
 Use `fleet` from any installed
 checkout to collect a rollout-priority summary for every configured consumer
 after creating the machine-local fleet profile.
