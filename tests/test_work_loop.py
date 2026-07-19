@@ -470,6 +470,14 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["contextHealth"]["level"], "amber")
         self.assertEqual(state["contextHealth"]["epoch"], 1)
 
+        module.reconcile_state(
+            state,
+            {"task": "task-one", "branch": "codex/task-one"},
+        )
+        self.assertEqual(state["contextHealth"]["level"], "green")
+        self.assertEqual(state["contextHealth"]["epoch"], 1)
+        self.assertEqual(state["contextHealth"]["reasons"], [])
+
         module.reconcile_state(state, {"task": "different-task"})
         self.assertEqual(state["contextHealth"]["level"], "red")
         self.assertEqual(state["checkpoint"]["state"], "blocked")
@@ -492,7 +500,9 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["phase"], "planning")
         self.assertEqual(state["contextHealth"]["level"], "amber")
 
-        state["contextHealth"] = {"level": "green", "epoch": 1, "reasons": []}
+        module.reconcile_state(state, {"phase": "planning"})
+        self.assertEqual(state["contextHealth"]["level"], "green")
+
         module.reconcile_state(state, {"phase": "shipping"})
         self.assertEqual(state["phase"], "planning")
         self.assertEqual(state["contextHealth"]["level"], "red")

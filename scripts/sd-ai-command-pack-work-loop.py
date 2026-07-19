@@ -878,6 +878,7 @@ def reconcile_state(
     verified_live_advance: bool = False,
 ) -> None:
     contradictions: list[str] = []
+    context_signal_applied = False
     current = state["current"]
     for observed_key, current_key in (
         ("task", "task"),
@@ -904,6 +905,7 @@ def reconcile_state(
                 "continuation-summary",
                 f"verified live state advanced to {observed_phase}",
             )
+            context_signal_applied = True
         elif observed_phase != state["phase"]:
             contradictions.append(
                 f"observed phase {observed_phase} differs from ledger {state['phase']}"
@@ -918,7 +920,7 @@ def reconcile_state(
         return
     if signal:
         apply_context_signal(state, signal, f"runtime signal: {signal}")
-    elif state["contextHealth"]["level"] != "amber":
+    elif not context_signal_applied:
         state["contextHealth"] = {
             "level": "green",
             "epoch": state["contextHealth"]["epoch"],
