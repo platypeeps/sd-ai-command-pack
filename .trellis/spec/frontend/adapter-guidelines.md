@@ -146,7 +146,8 @@ timeouts, retries, dry-run behavior, and output formats explicit.
 - Nested ship context: `caller: sd-work-backlog`, ledger run ID, positive
   iteration, and `return-after: merge-result`.
 - Durable helper: `scripts/sd-ai-command-pack-work-loop.py` owns the user-local
-  ledger, lock, focus ranking, transitions, reconciliation, and snapshots.
+  ledger, lock, focus ranking, transitions, same-phase evidence updates,
+  reconciliation, and snapshots.
 
 ### 3. Contracts
 
@@ -156,6 +157,11 @@ timeouts, retries, dry-run behavior, and output formats explicit.
 - Work exactly one task, branch, and PR at a time. Reconcile ledger state with
   live Trellis, Git, and GitHub evidence before every phase or iteration
   transition and before retrying any side effect.
+- Keep phase progression separate from mutable evidence. `transition` changes
+  lifecycle phase; `evidence` atomically records locally verified commits, PR
+  publication, review/finish commits, and the final default-branch merge state
+  without a checkpoint detour. Task and base branch are stable identity;
+  conflicting PRs, unrelated branches, and non-descendant commits fail red.
 - User-local state stores only bounded coordination metadata and uses atomic
   writes, versioned JSON, private permissions where supported, and a
   recoverable run lock. It never becomes a tracked repository artifact.
@@ -176,8 +182,10 @@ timeouts, retries, dry-run behavior, and output formats explicit.
   option-shaped input, or invalid lifecycle values -> usage error before lock.
 - Concurrent active lock -> stop; stale lock -> reconcile live state, then use
   explicit recovery only when the prior process is gone.
-- Ledger behind verified live state -> advance with amber rehydration; ledger
-  ahead of evidence or duplicate-side-effect attempt -> red checkpoint.
+- Ledger behind in the same phase -> validate and record the evidence, clear an
+  obsolete recovery checkpoint, and return green. A verified later phase uses
+  amber rehydration until exact reconciliation. Ledger ahead, invalid ancestry,
+  identity/PR conflict, or duplicate-side-effect attempt -> red checkpoint.
 - Task-local pre-mutation blocker -> park and continue from clean state;
   uncommitted work, blocking PR, unexplained dirty path, or repository-wide
   contradiction -> stop the run.
@@ -199,8 +207,10 @@ timeouts, retries, dry-run behavior, and output formats explicit.
   transition legality, bounded history, pause/resume, and invalid state.
 - Cover natural and structured focus evidence, ordered bands, preferred
   fallback, focus-only exhaustion, and pre-mutation argument rejection.
-- Cover green/amber/red reconciliation and verified versus unverified live
-  advancement.
+- Cover green/amber/red reconciliation; verified versus unverified live
+  advancement; create/push/review-fix/finish/merge evidence; invalid identity,
+  ancestry, branch, and PR updates; atomic failure; old ledgers; and obsolete
+  checkpoint clearing.
 - Pin canonical-controller, thin-selector, nested-return, status visibility,
   generated adapter, reference fanout, manifest, and template/root parity.
 

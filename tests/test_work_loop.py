@@ -59,6 +59,46 @@ class WorkLoopTests(InstallTestCase):
         module.atomic_write_json(state_path, state)
         return state, state_path, lock_path
 
+    def commit_file(
+        self, module, root: Path, name: str, content: str, message: str
+    ) -> str:
+        (root / name).write_text(content, encoding="utf-8")
+        self.run_git(root, "add", name)
+        self.run_git(root, "commit", "-m", message)
+        commit = module.run_git(root, "rev-parse", "HEAD")
+        self.assertIsNotNone(commit)
+        return commit
+
+    def make_shipping_state(self, module, root: Path) -> tuple[dict, str]:
+        initial = module.run_git(root, "rev-parse", "HEAD")
+        self.assertIsNotNone(initial)
+        self.run_git(root, "switch", "-c", "codex/task-one")
+        feature_head = self.commit_file(
+            module, root, "feature.txt", "first\n", "feature commit"
+        )
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        module.transition_state(
+            state,
+            "selected",
+            updates={"task": "task-one", "baseBranch": "main"},
+        )
+        module.transition_state(state, "planning")
+        module.transition_state(
+            state,
+            "implementing",
+            updates={"branch": "codex/task-one", "head": feature_head},
+        )
+        module.transition_state(state, "validating")
+        module.transition_state(state, "shipping")
+        return state, initial
+
     def test_state_root_precedence_and_platform_fallbacks(self) -> None:
         module = self.load_module()
 
@@ -463,6 +503,27 @@ class WorkLoopTests(InstallTestCase):
 
         self.assertEqual(state["iteration"], 2)
 
+    def test_transition_rejects_stable_identity_replacement_before_phase_change(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        module.transition_state(state, "selected", updates={"task": "task-one"})
+
+        with self.assertRaisesRegex(module.WorkLoopError, "stable"):
+            module.transition_state(
+                state, "planning", updates={"task": "different-task"}
+            )
+
+        self.assertEqual(state["phase"], "selected")
+        self.assertEqual(state["current"]["task"], "task-one")
+
     def test_result_history_is_bounded_and_updates_cost_counters(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -496,6 +557,200 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["counters"]["mergedPrs"], module.MAX_HISTORY + 3)
         self.assertEqual(state["counters"]["reviewRounds"], 2 * (module.MAX_HISTORY + 3))
 
+    def test_evidence_tracks_publish_review_finish_and_squash_merge(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, main_head = self.make_shipping_state(module, root)
+        feature_head = state["current"]["head"]
+
+        state["checkpoint"] = {
+            "state": "ready",
+            "target": "shipping",
+            "reason": "old recovery",
+        }
+        module.update_evidence(
+            state,
+            {
+                "prNumber": 42,
+                "prUrl": "https://example.test/pull/42",
+                "lastShippedSha": feature_head,
+            },
+            repo=root,
+        )
+        self.assertEqual(state["checkpoint"]["state"], "none")
+
+        review_head = self.commit_file(
+            module, root, "feature.txt", "review fix\n", "review fix"
+        )
+        module.update_evidence(state, {"head": review_head}, repo=root)
+        finish_head = self.commit_file(
+            module, root, "journal.md", "session\n", "finish work"
+        )
+        module.update_evidence(
+            state,
+            {"head": finish_head, "lastShippedSha": finish_head},
+            repo=root,
+        )
+
+        self.run_git(root, "switch", "main")
+        merged_head = self.commit_file(
+            module, root, "merged.txt", "squashed\n", "squash merge result"
+        )
+        self.assertNotEqual(main_head, merged_head)
+        module.update_evidence(
+            state,
+            {"branch": "main", "head": merged_head},
+            repo=root,
+        )
+
+        self.assertEqual(state["current"]["branch"], "main")
+        self.assertEqual(state["current"]["head"], merged_head)
+        self.assertEqual(state["current"]["lastShippedSha"], finish_head)
+        self.assertEqual(state["phase"], "shipping")
+        self.assertEqual(state["contextHealth"]["level"], "green")
+
+    def test_evidence_rejects_identity_branch_pr_and_commit_conflicts(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _main_head = self.make_shipping_state(module, root)
+        feature_head = state["current"]["head"]
+        module.update_evidence(
+            state,
+            {
+                "prNumber": 42,
+                "prUrl": "https://example.test/pull/42",
+                "lastShippedSha": feature_head,
+            },
+            repo=root,
+        )
+
+        invalid_updates = (
+            ({"task": "different-task"}, "stable"),
+            ({"baseBranch": "develop"}, "stable"),
+            ({"branch": "other"}, "merge boundary"),
+            ({"prNumber": 43}, "request number"),
+            ({"prUrl": "https://example.test/pull/43"}, "request URL"),
+            ({"unknown": "value"}, "unknown"),
+        )
+        for updates, error in invalid_updates:
+            with self.subTest(updates=updates):
+                with self.assertRaisesRegex(module.WorkLoopError, error):
+                    module.update_evidence(state, updates, repo=root)
+
+        self.run_git(root, "switch", "-c", "sibling", "main")
+        sibling = self.commit_file(
+            module, root, "sibling.txt", "sibling\n", "sibling commit"
+        )
+        with self.assertRaisesRegex(module.WorkLoopError, "recorded branch"):
+            module.update_evidence(state, {"head": sibling}, repo=root)
+        self.run_git(root, "branch", "-f", "codex/task-one", sibling)
+        with self.assertRaisesRegex(module.WorkLoopError, "descendant"):
+            module.update_evidence(state, {"head": sibling}, repo=root)
+        with self.assertRaisesRegex(module.WorkLoopError, "local Git commit"):
+            module.update_evidence(state, {"head": "not-a-commit"}, repo=root)
+
+    def test_evidence_initializes_schema_one_state_and_rejects_idle_phase(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        head = module.run_git(root, "rev-parse", "HEAD")
+        self.assertEqual(state["schemaVersion"], 1)
+        with self.assertRaisesRegex(module.WorkLoopError, "inventory"):
+            module.update_evidence(state, {"head": head}, repo=root)
+
+        module.transition_state(state, "selected", updates={"task": "task-one"})
+        module.update_evidence(
+            state,
+            {"branch": "main", "baseBranch": "main", "head": head},
+            repo=root,
+        )
+        module.validate_state(state)
+        self.assertEqual(state["current"]["head"], head)
+
+    def test_evidence_rejects_malformed_and_unverifiable_values(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _main_head = self.make_shipping_state(module, root)
+        before = dict(state["current"])
+
+        invalid_updates = (
+            ({"head": ""}, "non-empty"),
+            ({"head": ["not", "a", "string"]}, "non-empty"),
+            ({"prNumber": True}, "positive integer"),
+            ({"prNumber": 0}, "positive integer"),
+            ({"prNumber": 42, "prUrl": "https://example.test/pull/not-42"}, "match"),
+            ({"head": "--help"}, "local Git commit"),
+        )
+        for updates, error in invalid_updates:
+            with self.subTest(updates=updates):
+                with self.assertRaisesRegex(module.WorkLoopError, error):
+                    module.update_evidence(state, updates, repo=root)
+                self.assertEqual(state["current"], before)
+
+        with mock.patch.object(module, "run_git", return_value=None):
+            with self.assertRaisesRegex(module.WorkLoopError, "local Git commit"):
+                module.update_evidence(
+                    state, {"head": state["current"]["head"]}, repo=root
+                )
+        self.assertEqual(state["current"], before)
+
+    def test_failed_cli_evidence_update_preserves_ledger_bytes(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, _main_head = self.make_shipping_state(module, root)
+        state_path, lock_path = module.state_paths(
+            module.repository_identity(root), state_root
+        )
+        module.acquire_lock(lock_path, state)
+        module.atomic_write_json(state_path, state)
+        before = state_path.read_bytes()
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "evidence",
+                    "--repo",
+                    str(root),
+                    "--run-id",
+                    state["runId"],
+                    "--task",
+                    "different-task",
+                    "--head",
+                    "not-a-commit",
+                ]
+            )
+
+        self.assertEqual(result, 2)
+        self.assertIn("stable", stderr.getvalue())
+        self.assertEqual(state_path.read_bytes(), before)
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "evidence",
+                    "--repo",
+                    str(root),
+                    "--run-id",
+                    state["runId"],
+                ]
+            )
+        self.assertEqual(result, 2)
+        self.assertIn("at least one", stderr.getvalue())
+        self.assertEqual(state_path.read_bytes(), before)
+
     def test_reconciliation_classifies_context_health_from_evidence(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -528,6 +783,12 @@ class WorkLoopTests(InstallTestCase):
         module.reconcile_state(state, {"task": "different-task"})
         self.assertEqual(state["contextHealth"]["level"], "red")
         self.assertEqual(state["checkpoint"]["state"], "blocked")
+        module.reconcile_state(state, {})
+        self.assertEqual(state["contextHealth"]["level"], "red")
+        self.assertEqual(state["checkpoint"]["state"], "blocked")
+        module.reconcile_state(state, {"task": "task-one"})
+        self.assertEqual(state["contextHealth"]["level"], "green")
+        self.assertEqual(state["checkpoint"]["state"], "none")
 
     def test_verified_live_advance_is_idempotent_and_unverified_advance_is_red(self) -> None:
         module = self.load_module()
@@ -553,6 +814,79 @@ class WorkLoopTests(InstallTestCase):
         module.reconcile_state(state, {"phase": "shipping"})
         self.assertEqual(state["phase"], "planning")
         self.assertEqual(state["contextHealth"]["level"], "red")
+
+    def test_verified_reconcile_updates_same_phase_evidence_and_clears_checkpoint(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _main_head = self.make_shipping_state(module, root)
+        prior_head = state["current"]["head"]
+        next_head = self.commit_file(
+            module, root, "feature.txt", "next\n", "next feature commit"
+        )
+        state["checkpoint"] = {
+            "state": "blocked",
+            "target": "shipping",
+            "reason": "stale mismatch",
+        }
+        state["contextHealth"] = {
+            "level": "red",
+            "epoch": 2,
+            "reasons": ["stale mismatch"],
+        }
+
+        module.reconcile_state(
+            state,
+            {
+                "phase": "shipping",
+                "head": next_head,
+                "prNumber": 42,
+                "prUrl": "https://example.test/pull/42",
+                "lastShippedSha": prior_head,
+            },
+            verified_live_advance=True,
+            repo=root,
+        )
+
+        self.assertEqual(state["current"]["head"], next_head)
+        self.assertEqual(state["current"]["prNumber"], 42)
+        self.assertEqual(state["contextHealth"]["level"], "green")
+        self.assertEqual(state["checkpoint"]["state"], "none")
+
+        module.reconcile_state(state, {"task": "different-task"}, repo=root)
+        self.assertEqual(state["contextHealth"]["level"], "red")
+        self.assertEqual(state["checkpoint"]["state"], "blocked")
+
+    def test_verified_reconcile_validates_merge_evidence_at_observed_phase(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _main_head = self.make_shipping_state(module, root)
+        feature_head = state["current"]["head"]
+        module.update_evidence(
+            state,
+            {
+                "prNumber": 42,
+                "prUrl": "https://example.test/pull/42",
+                "lastShippedSha": feature_head,
+            },
+            repo=root,
+        )
+        module.transition_state(state, "validating")
+        self.run_git(root, "switch", "main")
+        merged_head = self.commit_file(
+            module, root, "merged.txt", "merged\n", "merged result"
+        )
+
+        module.reconcile_state(
+            state,
+            {"phase": "followups", "branch": "main", "head": merged_head},
+            verified_live_advance=True,
+            repo=root,
+        )
+
+        self.assertEqual(state["phase"], "followups")
+        self.assertEqual(state["current"]["branch"], "main")
+        self.assertEqual(state["current"]["head"], merged_head)
+        self.assertEqual(state["contextHealth"]["level"], "amber")
 
     def test_status_snapshot_is_read_only_and_reports_active_paused_and_invalid(self) -> None:
         module = self.load_module()
@@ -893,6 +1227,8 @@ class WorkLoopTests(InstallTestCase):
         self.assertIn("- ci", human_stdout.getvalue())
 
         transition_args = ["--run-id", state["runId"], "--phase"]
+        initial_head = module.run_git(root, "rev-parse", "HEAD")
+        self.assertIsNotNone(initial_head)
         invoke(
             "transition",
             *transition_args,
@@ -900,7 +1236,7 @@ class WorkLoopTests(InstallTestCase):
             "--task",
             "ci",
             "--head",
-            "abc123",
+            initial_head,
             "--base-branch",
             "main",
         )
@@ -913,11 +1249,24 @@ class WorkLoopTests(InstallTestCase):
             "--task",
             "ci",
             "--head",
-            "abc123",
+            initial_head,
         )
         self.assertEqual(reconciled["contextHealth"]["level"], "green")
-        for phase in ("planning", "implementing", "validating", "shipping", "followups"):
+        for phase in ("planning", "implementing", "validating", "shipping"):
             invoke("transition", *transition_args, phase)
+        shipped = invoke(
+            "evidence",
+            "--run-id",
+            state["runId"],
+            "--pr-number",
+            "42",
+            "--pr-url",
+            "https://example.test/pull/42",
+            "--last-shipped-sha",
+            initial_head,
+        )
+        self.assertEqual(shipped["current"]["prNumber"], 42)
+        invoke("transition", *transition_args, "followups")
         completed = invoke(
             "result",
             "--run-id",

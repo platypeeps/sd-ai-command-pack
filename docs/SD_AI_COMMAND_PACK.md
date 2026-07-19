@@ -265,6 +265,14 @@ asks to stop. Task-local pre-mutation blockers can be parked; contradictory or
 dirty repository-wide state stops safely. Unavoidable user input gets one
 recommended question and a wait of up to 15 minutes when supported.
 
+Lifecycle phases and mutable evidence are separate contracts. `transition`
+advances a phase, while the helper's `evidence` subcommand records verified
+same-phase commit, PR, review-fix, finish-work, and merge facts atomically.
+Task and base branch are stable iteration identity; commit ancestry, PR
+identity, and the final feature-to-base branch switch are validated locally.
+Verified same-phase reconciliation uses the same rules and clears obsolete
+recovery checkpoints instead of routing through a synthetic checkpoint phase.
+
 The work-designs command is a thin `needs-design` selector for that same
 controller. Its default now carries selected tasks from planning through a
 green merge. `sd-work-designs until=design` preserves planning-only behavior
@@ -1044,7 +1052,13 @@ Git remote. The schema-versioned JSON ledger and lock use atomic replacement,
 user-only permissions where supported, bounded history, and no credentials or
 raw command/review output. A relative explicit state path is rejected. Use
 `sd-status --json` for read-only loop visibility; use the work-loop command to
-resume, reconcile, checkpoint, or stop it.
+resume, record evidence, reconcile, checkpoint, or stop it. For example:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-work-loop.py evidence --repo . \
+  --run-id <run-id> --head <sha> --pr-number <n> --pr-url <url>
+```
 
 ### Full Check And Preflight
 

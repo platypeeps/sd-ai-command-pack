@@ -28,23 +28,23 @@ Let the autonomous work-loop ledger record expected HEAD and PR evidence changes
 
 ## Acceptance Criteria
 
-- [ ] A `shipping` ledger can record a newly committed HEAD and newly created PR
+- [x] A `shipping` ledger can record a newly committed HEAD and newly created PR
       without an illegal same-phase transition or red context health.
-- [ ] A pushed review-fix or finish-work commit can advance the recorded HEAD
+- [x] A pushed review-fix or finish-work commit can advance the recorded HEAD
       without a checkpoint workaround.
-- [ ] A verified merged PR can record final default-branch/merge-commit evidence
+- [x] A verified merged PR can record final default-branch/merge-commit evidence
       before follow-up processing.
-- [ ] Same-phase updates reject a changed task, an unrelated branch, a
+- [x] Same-phase updates reject a changed task, an unrelated branch, a
       conflicting PR number, a non-descendant HEAD where Git evidence is
       available, and unknown current-state fields.
-- [ ] `reconcile --verified-live-advance` distinguishes a legitimate evidence
+- [x] `reconcile --verified-live-advance` distinguishes a legitimate evidence
       advance from a contradiction and retains red behavior for unverified
       mismatches.
-- [ ] Successful recovery clears obsolete checkpoint state and produces a
+- [x] Successful recovery clears obsolete checkpoint state and produces a
       green, internally consistent status snapshot.
-- [ ] Focused tests cover create/push/review-fix/finish-work/merge advances,
+- [x] Focused tests cover create/push/review-fix/finish-work/merge advances,
       invalid updates, old ledgers, atomic failure, and resume behavior.
-- [ ] Shared skills, command docs, generated mirrors, and canonical checks pass.
+- [x] Shared skills, command docs, generated mirrors, and canonical checks pass.
 
 ## Notes
 

@@ -103,6 +103,25 @@ If live state is verifiably ahead, record a verified live advance. If the
 ledger claims work that live state cannot prove, record red context health and
 stop instead of replaying it.
 
+Phase transitions and same-phase evidence have separate owners. Use
+`transition` only when the lifecycle phase changes. After a commit, PR
+publication, pushed review fix, finish-work commit, or verified merge changes
+the facts inside the current phase, record them atomically with `evidence`:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-work-loop.py evidence --repo . \
+  --run-id <run-id> --head <sha> [--pr-number <n> --pr-url <url>] \
+  [--last-shipped-sha <sha>] [--branch <default-branch>]
+```
+
+`task` and `baseBranch` are stable iteration identity. Branch changes are
+accepted only from the feature branch to the recorded base branch at a verified
+merge boundary; commit advances must be locally verifiable. Never use a
+checkpoint transition merely to replace HEAD or PR evidence. A successful
+evidence update or exact verified reconciliation clears an obsolete recovery
+checkpoint; real identity, branch, ancestry, or PR conflicts remain red.
+
 ## Candidate Inventory And Focus
 
 Require a clean, unambiguous iteration boundary before selecting new work.
@@ -185,6 +204,13 @@ stages. The outer loop must not invoke `sd-create-pr`, `sd-review-pr`,
 `sd-watch-pr`, or `sd-housekeeping` separately. Its nested result records the
 PR, merge state, finish-work, housekeeping, review rounds, final branch/HEAD,
 and anomalies, then returns here.
+
+Record each commit and PR fact returned during the nested lifecycle with
+`evidence` while the ledger remains in `shipping`. When housekeeping returns a
+verified clean default branch and merge HEAD, record `branch`, `head`, and the
+final shipped feature SHA before transitioning to `followups`. Reconcile the
+result exactly after the evidence update; do not replay any nested lifecycle
+stage to repair a stale ledger.
 
 ### 4. Process Follow-Ups
 

@@ -3,7 +3,7 @@
   "name": "work-loop-same-phase-evidence-updates",
   "title": "Support same-phase work-loop evidence updates",
   "description": "Let the autonomous work-loop ledger record expected HEAD and PR evidence changes within an active lifecycle phase without false red contradictions.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
