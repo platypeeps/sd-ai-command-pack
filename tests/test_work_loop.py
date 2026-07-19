@@ -797,7 +797,7 @@ class WorkLoopTests(InstallTestCase):
 
         module.reconcile_state(
             state,
-            {"task": "task-one", "branch": "codex/task-one"},
+            {"task": "task-one   ", "branch": "codex/task-one   "},
         )
         self.assertEqual(state["contextHealth"]["level"], "green")
         self.assertEqual(state["contextHealth"]["epoch"], 1)

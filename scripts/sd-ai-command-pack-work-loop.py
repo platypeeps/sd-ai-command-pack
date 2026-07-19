@@ -1071,11 +1071,14 @@ def reconcile_state(
             contradictions.append(
                 f"observed phase {observed_phase} differs from ledger {state['phase']}"
             )
-    evidence_observations = {
-        key: observations[key]
-        for key in CURRENT_FIELD_ORDER
-        if observations.get(key) is not None
-    }
+    evidence_observations: dict[str, Any] = {}
+    for key in CURRENT_FIELD_ORDER:
+        value = observations.get(key)
+        if value is None:
+            continue
+        evidence_observations[key] = (
+            compact_text(value) if isinstance(value, str) else value
+        )
     mismatches = {
         key: value
         for key, value in evidence_observations.items()
