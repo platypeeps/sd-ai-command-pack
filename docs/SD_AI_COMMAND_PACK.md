@@ -532,6 +532,10 @@ document service-user paths under `/home/<user>/` can add those service users to
 `allowedLinuxHomeUsers` in that config. The script requires Node 16.9 or newer
 and scans regular documentation files only; symlinked docs are skipped
 intentionally so local/generated links do not expand outside the repository.
+Generated GitHub paths and path-like comment snippets inside the complete
+`sd-review-learnings` managed block are remote provenance, so the local path
+validator masks only that block while preserving line numbers. Human-authored
+content around the block and incomplete marker pairs remain checked normally.
 
 The review-local script is intentionally tool-stack aware. In this pack version
 its runner-owned default toolset is Prism and Gito. Its default scope is

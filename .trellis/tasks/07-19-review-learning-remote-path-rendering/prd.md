@@ -32,15 +32,28 @@ exist in the current checkout and fails the canonical gate.
 
 ## Acceptance Criteria
 
-- [ ] Generated remote review-path labels do not enter the local path-reference
+- [x] Generated remote review-path labels do not enter the local path-reference
       validator.
-- [ ] Ordinary missing local paths in documentation still fail preflight.
-- [ ] Managed-marker and Markdown-injection protections remain covered.
-- [ ] Template parity, focused tests, and the canonical source check pass.
-- [ ] The shipped change is versioned and released through the normal process.
+- [x] Ordinary missing local paths in documentation still fail preflight.
+- [x] Managed-marker and Markdown-injection protections remain covered.
+- [x] Template parity, focused tests, and the canonical source check pass.
+- [x] The shipped change is versioned and released through the normal process.
 
 ## Out Of Scope
 
 - Rewriting or summarizing historical Copilot comment meaning.
 - Weakening path validation outside the managed review-learning snapshot.
 - Creating a pull request in the upstream Trellis repository.
+
+## Results
+
+- The review preflight now masks only complete managed review-learning blocks
+  during local path extraction and preserves newlines for accurate diagnostics.
+- Human-authored references around the block and incomplete marker pairs remain
+  in the normal local path check.
+- Remote paths containing backticks use a longer Markdown code-span fence while
+  the existing managed-marker neutralization remains in force.
+- The managed snapshot was regenerated with the canonical renderer from 25
+  recent PRs and 58 Copilot comments.
+- Release `0.21.5` passed focused tests, the full canonical check, and disposable
+  candidate validation for all seven configured consumers.

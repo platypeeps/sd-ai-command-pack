@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.21.5 - 2026-07-19
+
+- Keep generated GitHub review provenance inside the managed review-learning
+  block out of local documentation-path validation while preserving checks and
+  line diagnostics for surrounding human-authored content.
+- Render remote review paths containing backticks with safe Markdown code-span
+  fences and keep managed-marker neutralization intact.
+
 ## 0.21.4 - 2026-07-19
 
 - Keep direct `sd-status` local and fleet reads from creating repository-local
