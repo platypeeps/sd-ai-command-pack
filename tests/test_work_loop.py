@@ -109,7 +109,7 @@ class WorkLoopTests(InstallTestCase):
         identity = module.repository_identity(root)
 
         self.assertEqual(
-            identity["remote"], "ssh://git@github.com/platypeeps/example"
+            identity["remote"], "ssh://github.com/platypeeps/example"
         )
         self.assertEqual(identity["label"], "example")
         self.assertEqual(len(identity["digest"]), 64)
@@ -120,6 +120,31 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(
             module.canonical_remote("C:/Users/Test/Example.git"),
             "c:/users/test/example",
+        )
+
+    def test_repository_identity_strips_remote_credentials_before_persistence(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        identity = module.repository_identity(
+            root,
+            remote="https://token-user:secret-value@GitHub.com/platypeeps/example.git",
+        )
+        state = module.new_state(
+            identity,
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        serialized = module._json_payload(state)
+
+        self.assertEqual(identity["remote"], "https://github.com/platypeeps/example")
+        self.assertNotIn("token-user", serialized)
+        self.assertNotIn("secret-value", serialized)
+        self.assertEqual(
+            module.canonical_remote("git@github.com:platypeeps/example.git"),
+            "ssh://github.com/platypeeps/example",
         )
 
     def test_focus_normalization_supports_bare_ordered_and_structured(self) -> None:

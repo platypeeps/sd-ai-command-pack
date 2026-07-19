@@ -166,8 +166,9 @@ def canonical_remote(value: str | None) -> str:
         url_path = split.path.rstrip("/")
         if url_path.endswith(".git"):
             url_path = url_path[:-4]
+        credential_free_netloc = split.netloc.rsplit("@", 1)[-1]
         return urlunsplit(
-            (split.scheme.lower(), split.netloc.lower(), url_path, "", "")
+            (split.scheme.lower(), credential_free_netloc.lower(), url_path, "", "")
         )
     local_path = Path(remote).expanduser()
     try:
