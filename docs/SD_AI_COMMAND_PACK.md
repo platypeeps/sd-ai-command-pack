@@ -405,8 +405,10 @@ bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
 branch, staged/unstaged/untracked counts, Git stash count, upstream ahead/behind state, default
 and local/remote branches, installed SD pack and Trellis versions, relevant PR,
 open PRs/issues, current/in-progress/planned Trellis work, anomalies, and
-numbered next steps. `--no-network` suppresses GitHub calls, `--repo PATH`
-selects another checkout, and `--json` emits schema version 1. Ordinary runs do
+numbered next steps. A positional path selects another checkout, so
+`sd-status /path/to/repo` is equivalent to
+`sd-status --repo /path/to/repo`.
+`--no-network` suppresses GitHub calls and `--json` emits schema version 1. Ordinary runs do
 not fetch and label ref-derived values `cached`. Relevant-PR review totals use
 GitHub's GraphQL `reviews.totalCount`, so repositories with more than one REST
 page of review events are reported accurately without fetching every review.
@@ -829,8 +831,8 @@ dimensions plus consumer-impact, observability, and accessibility-i18n when
 the fingerprint stage selects them). The pipeline is fixed and ordered:
 fingerprint → dimension reviews → adversarial verification → synthesis → Trellis reconciliation → report + ledger.
 
-Arguments: `dimensions=<a,b,c>` restricts the run to the named charters
-(unknown names are an error, not a silent skip); `depth=quick|standard|deep`
+Arguments: bare exact charter names such as `security testing`, or the explicit
+`dimensions=<a,b,c>` form, restrict the run to the named charters; unknown names are an error, not a silent skip. `depth=quick|standard|deep`
 controls verification (quick skips it, standard refutes P0/P1 findings, deep
 refutes P0–P2 with 2-of-3 votes on P0); `follow-up` re-verifies open ledger
 items against the current tree instead of sweeping the whole repository.
@@ -893,15 +895,17 @@ with the
 deciding which consumers are stale. It processes one consumer at a time: verify a clean tree (dirty
 trees are skipped and reported, never touched), branch, install the
 release, run the consumer's full-check, open the consumer PR, watch it to
-settled, and merge through the consumer's housekeeping gate (`no-merge`
-stops before merging; `consumer=a,b` filters; `dry-run` reports preflight
-only). The report is a per-consumer status table plus a fleet version
-summary.
+settled, and merge through the consumer's housekeeping gate. Bare consumer
+names such as `loadsmith rwbp-website`, or `consumer=a,b`, filter the run;
+`no-merge` stops before merging and `dry-run` reports preflight only. Unknown
+consumer names fail before mutation rather than broadening to the whole fleet.
+The report is a per-consumer status table plus a fleet version summary.
 
 The `sd-test-gaps` command closes the worst coverage gaps with targeted
 tests. It runs the repository's coverage flow as a baseline (aborting if
-the baseline itself fails), ranks shipped files by per-file coverage
-ascending (`file=<path>` targets one file), and for the top `max-gaps=N`
+the baseline itself fails), ranks shipped files by per-file coverage ascending
+(a bare path such as `scripts/example.py`, or `file=<path>`, targets one file),
+and for the top `max-gaps=N`
 files (default 3) authors focused tests through the normal implement/check
 flow, then re-runs coverage and reports per-file before/after numbers. It
 writes test files and fixtures only — never product code — and never
@@ -937,9 +941,10 @@ The `sd-retro` command captures a structured retrospective after a
 debugging stream or incident: what broke, the root cause, why existing
 gates and tests missed it, and what limited the blast radius. It records
 the retrospective as a journal entry through the session recorder
-(`Retro: <topic>`), then derives prevention candidates and presents them
-as Trellis task proposals that wait for explicit user consent — it never
-auto-creates tasks and makes no code changes.
+(`Retro: <topic>`). Bare text such as `deployment timeout`, or the explicit
+`topic="deployment timeout"` form, supplies that topic. It then derives
+prevention candidates and presents them as Trellis task proposals that wait
+for explicit user consent — it never auto-creates tasks and makes no code changes.
 
 ## Configuration
 

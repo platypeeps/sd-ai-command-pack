@@ -100,6 +100,29 @@ COMMANDS = {
     ),
 }
 
+POSITIONAL_PRIMARY_INPUTS = {
+    "sd-retro": (
+        "`sd-retro deployment timeout`",
+        '`topic="deployment timeout"`',
+    ),
+    "sd-test-gaps": (
+        "`sd-test-gaps scripts/example.py`",
+        "`file=scripts/example.py`",
+    ),
+    "sd-fleet-refresh": (
+        "`sd-fleet-refresh loadsmith rwbp-website`",
+        "`consumer=loadsmith,rwbp-website`",
+    ),
+    "sd-audit-repo": (
+        "`sd-audit-repo security testing`",
+        "`dimensions=security,testing`",
+    ),
+    "sd-status": (
+        "`sd-status /path/to/repo`",
+        "`sd-status --repo /path/to/repo`",
+    ),
+}
+
 
 class SdlcCommandsTests(InstallTestCase):
     """Format-drift protection for the six SDLC edge-loop command skills."""
@@ -135,6 +158,29 @@ class SdlcCommandsTests(InstallTestCase):
                 self.assertIn("error", skill.split("## Arguments")[1].split("##")[0].lower())
                 report = skill.split("## Final report")[1]
                 self.assertIn("explicitly", report)
+
+    def test_commands_document_fail_closed_positional_primary_inputs(self) -> None:
+        for name, pins in POSITIONAL_PRIMARY_INPUTS.items():
+            with self.subTest(skill=name):
+                skill = self._skill_text(name)
+                arguments = skill.split("## Arguments", 1)[1].split("##", 1)[0]
+                normalized_arguments = " ".join(arguments.split())
+                for pin in pins:
+                    self.assertIn(pin, normalized_arguments)
+                self.assertIn("positional", arguments.lower())
+                self.assertIn("reject", arguments.lower())
+                self.assertIn("before", arguments.lower())
+
+        fleet = self._skill_text("sd-fleet-refresh")
+        audit = self._skill_text("sd-audit-repo")
+        status = self._skill_text("sd-status")
+        self.assertIn("normalized", fleet.split("## Workflow", 1)[0].lower())
+        self.assertIn("normalized", audit.split("## Pipeline", 1)[0].lower())
+        self.assertNotIn("[fleet|REPO_PATH] [--repo PATH]", status)
+        self.assertIn("sd-ai-command-pack-status.py --repo PATH", status)
+
+        guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")
+        self.assertIn("`sd-status --repo /path/to/repo`", guide)
 
     def test_command_adapters_share_contract(self) -> None:
         for name, (short, _pins, adapter_pins) in COMMANDS.items():

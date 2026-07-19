@@ -114,6 +114,7 @@ every configured consumer after creating the machine-local fleet profile.
 ```text
 /sd:status
 /sd:status --no-network
+/sd:status /path/to/another/repo
 /sd:status fleet
 /sd:status fleet --json
 ```
@@ -212,8 +213,9 @@ bounded single-PR analysis.
 Runs the formal multi-dimension repository audit: one read-only reviewer per
 charter dimension, adversarial verification of findings, Trellis backlog
 reconciliation, and a canonical report backed by the committed findings ledger
-at `.trellis/audit/ledger.md`. Supports `dimensions=`, `depth=`, and
-`follow-up` arguments; details live in the installed guide's
+at `.trellis/audit/ledger.md`. Bare exact charter names such as `security
+testing` select dimensions; `dimensions=`, `depth=`, and `follow-up` remain
+available explicitly. Details live in the installed guide's
 [Commands](docs/SD_AI_COMMAND_PACK.md#commands) section.
 
 ### sd-watch-pr
@@ -245,13 +247,17 @@ registry, and rollout procedure. It rolls the pack release across consumer
 repos per `docs/FLEET_ROLLOUT.md`:
 fleet preflight, then one consumer at a time — clean-tree check, install,
 consumer full-check, PR, watch, gated merge — ending with a per-consumer
-status table.
+status table. Bare consumer names select a subset, for example
+`/sd:fleet-refresh loadsmith rwbp-website`; `consumer=`, `dry-run`, and
+`no-merge` remain available explicitly.
 
 ### sd-test-gaps
 
 Ranks shipped files by per-file coverage, authors targeted tests for the
 worst `max-gaps=` files through the normal implement/check flow, and reports
-before/after numbers. Writes test files and fixtures only.
+before/after numbers. A bare path such as `/sd:test-gaps scripts/example.py`
+targets one file, equivalent to `file=scripts/example.py`. Writes test files
+and fixtures only.
 
 ### sd-ship
 
@@ -267,7 +273,9 @@ the sole review owner and does not run for `until=pr`.
 
 Captures a structured debug retrospective (what broke, root cause, why gates
 missed it) as a journal entry via the session recorder, and proposes
-consent-gated prevention tasks. Makes no code changes.
+consent-gated prevention tasks. Bare text supplies the topic, for example
+`/sd:retro deployment timeout`; `topic=` remains available explicitly. Makes
+no code changes.
 
 ### sd-update-spec
 

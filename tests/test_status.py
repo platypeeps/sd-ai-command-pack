@@ -372,6 +372,43 @@ class StatusTests(InstallTestCase):
         self.assertIn("error: unable to inspect Git repository", result.stdout)
         self.assertNotIn("Traceback", result.stdout)
 
+    def test_parse_args_accepts_positional_repository_and_reserved_fleet(self) -> None:
+        status = self.load_status_module()
+        root = Path("/tmp/status repo")
+
+        positional = status.parse_args([str(root), "--json", "--no-network"])
+        explicit = status.parse_args(["--repo", str(root), "--json"])
+        relative = status.parse_args(["../status-repo"])
+        option_like = status.parse_args(["--", "-status-repo"])
+        fleet = status.parse_args(["fleet", "--no-network"])
+        current = status.parse_args([])
+
+        self.assertIsNone(positional.mode)
+        self.assertEqual(positional.repo, root)
+        self.assertTrue(positional.json)
+        self.assertTrue(positional.no_network)
+        self.assertIsNone(explicit.mode)
+        self.assertEqual(explicit.repo, root)
+        self.assertEqual(relative.repo, Path("../status-repo"))
+        self.assertEqual(option_like.repo, Path("-status-repo"))
+        self.assertEqual(fleet.mode, "fleet")
+        self.assertEqual(current.repo, Path.cwd())
+
+    def test_parse_args_rejects_positional_repository_conflicts(self) -> None:
+        status = self.load_status_module()
+        conflicts = (
+            ["/tmp/one", "--repo", "/tmp/two"],
+            ["fleet", "--repo", "/tmp/two"],
+            ["/tmp/one", "/tmp/two"],
+        )
+
+        for argv in conflicts:
+            with self.subTest(argv=argv):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as raised:
+                        status.parse_args(argv)
+                self.assertEqual(raised.exception.code, 2)
+
     def test_git_status_failure_stops_before_rendering(self) -> None:
         status = self.load_status_module()
         root = self.make_status_repo()

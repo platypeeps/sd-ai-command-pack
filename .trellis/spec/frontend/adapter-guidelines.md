@@ -59,6 +59,75 @@ local OpenCode surface remains dependency-free.
 Keep detailed workflow rules in the matching shared skill under
 `templates/.agents/skills/<command>/SKILL.md`.
 
+## Positional Primary Subjects
+
+### 1. Scope / Trigger
+
+Use positional input only when a command has one obvious primary subject. Bare
+text names what the command acts on; explicit arguments continue to control
+behavior, safety, lifecycle, depth, budgets, and output.
+
+### 2. Signatures
+
+- `sd-retro <topic text>` is equivalent to `topic=<topic text>`.
+- `sd-test-gaps <path>` is equivalent to `file=<path>`.
+- `sd-fleet-refresh <consumer...>` is equivalent to
+  `consumer=<consumer,...>`.
+- `sd-audit-repo <dimension...>` is equivalent to
+  `dimensions=<dimension,...>`.
+- `sd-status <repo-path>` is equivalent to `sd-status --repo <repo-path>`;
+  the exact positional token `fleet` remains the reserved fleet mode.
+
+### 3. Contracts
+
+- Parse recognized flags and key/value arguments before positional fallback.
+- Preserve positional order and de-duplicate exact repeated list values.
+- Keep explicit compatibility forms supported and semantically identical.
+- Mutating commands report the normalized subject and controls before acting.
+- Platform adapters pass invocation text unchanged; the shared skill or
+  executable parser owns normalization.
+
+### 4. Validation & Error Matrix
+
+- Unknown option-shaped input -> usage error before any side effect.
+- Positional subject plus its explicit equivalent -> usage error.
+- Unknown fleet consumer or audit charter -> usage error; never broaden to all.
+- `sd-audit-repo follow-up` plus dimensions -> usage error because the modes
+  are mutually exclusive.
+- `sd-status fleet --repo <path>` or positional path plus `--repo` -> usage
+  error.
+- Multiple positional status paths -> usage error.
+
+### 5. Good / Base / Bad Cases
+
+- Good: `sd-fleet-refresh loadsmith rwbp-website no-merge` normalizes two
+  consumers and preserves the explicit lifecycle flag.
+- Base: `sd-status` inspects the current checkout exactly as before.
+- Bad: `sd-fleet-refresh typoed-consumer` stops before preflight or mutation.
+
+### 6. Tests Required
+
+- Assert each positional form maps to the documented explicit form.
+- Assert existing no-argument and explicit forms remain supported.
+- Assert mixed positional/explicit forms and extra positional status paths exit
+  with usage status `2` where an executable parser owns the boundary.
+- Assert generated adapters retain the thin argument-forwarding contract.
+
+### 7. Wrong vs Correct
+
+Wrong: infer an unrecognized option or invalid filter as ordinary subject text,
+then fall back to an unfiltered operation.
+
+Correct: normalize and validate the primary subject before any side effect,
+fail closed on ambiguity, and retain explicit controls for behavior and safety.
+- Thin adapters pass the user's invocation arguments unchanged to the canonical
+  skill; they do not duplicate parsing policy.
+
+Examples: bare text can identify an `sd-retro` topic, `sd-test-gaps` file,
+`sd-fleet-refresh` consumer set, `sd-audit-repo` dimension set, or `sd-status`
+repository path. Keep `sd-ship` stop points, housekeeping merge controls,
+timeouts, retries, dry-run behavior, and output formats explicit.
+
 ## Scenario: Registry-Backed Command Discovery
 
 ### 1. Scope / Trigger
