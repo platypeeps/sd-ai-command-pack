@@ -176,6 +176,70 @@ Wrong: declare a helper-used `const` below the module-level main invocation
 Correct: declare non-hoisted bindings above that invocation
 ```
 
+## Status Work-Loop Snapshot Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing the dynamically loaded work-loop boundary in
+`sd-ai-command-pack-status.py`, its template twin, or the paired snapshot
+schema.
+
+### 2. Signatures
+
+- Adapter: `collect_work_loop(repo: Path) -> dict[str, Any]`
+- Validator: `validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]`
+- Helper source: `sd-ai-command-pack-work-loop.py::status_snapshot()`
+
+### 3. Contracts
+
+- Accept lightweight terminal states `none`, `invalid`, and `unavailable`.
+- Persisted run states are `active`, `paused`, `stopped`, and `completed`.
+- Run snapshots require non-empty string `runId`, `mode`, `selector`, `phase`,
+  `focusMode`, and `heartbeatAt`; integer-but-not-boolean `iteration`; string
+  list `focus`; dictionary `counters`, `contextHealth`, and `checkpoint`; and
+  non-empty `contextHealth.level` plus `checkpoint.state`.
+- Missing, unsupported, and incomplete mappings become adapter-owned `invalid`
+  snapshots. Diagnostics name only the structural field and never echo a
+  helper-controlled value.
+- Valid helper snapshots and their human/JSON rendering remain unchanged.
+
+### 4. Validation & Error Matrix
+
+- Non-dictionary helper result -> `invalid data` anomaly.
+- Missing or non-string status -> `snapshot without a valid status` anomaly.
+- Unsupported status -> `unsupported status` anomaly without the supplied
+  value.
+- Missing or malformed run field -> `invalid run snapshot field: <field>`.
+- Import, syntax, filesystem, or helper exception -> existing bounded
+  `invalid` anomaly behavior.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a complete paused snapshot renders the same run, focus, heartbeat,
+  context, checkpoint, and counters as before.
+- Base: `{"status": "none"}` remains a valid no-loop result.
+- Bad: a drifted helper returns `{"status": "active"}` and the report prints
+  `None` for required metadata.
+
+### 6. Tests Required
+
+- Every accepted terminal and persisted-run status.
+- Missing and unsupported status, including proof that the unknown value is
+  not included in the error.
+- Missing string fields, boolean iteration, mixed-type focus, non-dictionary
+  containers, and missing nested renderer members.
+- Existing real-ledger JSON and human-output tests plus template twin parity.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: any helper-returned dictionary flows directly into the renderer
+Correct: validate its status and renderer-required fields at the load boundary
+
+Wrong: include an unsupported helper value in the diagnostic
+Correct: report only that the status is unsupported
+```
+
 ## Session Recorder Retry Contract
 
 ### 1. Scope / Trigger

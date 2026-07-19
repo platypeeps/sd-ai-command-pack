@@ -417,7 +417,11 @@ open PRs/issues, current/in-progress/planned Trellis work, user-local autonomous
 loop state, anomalies, and numbered next steps. Loop state includes run ID,
 mode/selector/focus, iteration, phase, task/PR, counters, heartbeat, context
 health, checkpoint, lock, and stop reason. Reading it never refreshes the
-ledger or lock. A positional path selects another checkout, so
+ledger or lock. The status adapter accepts terminal `none`, `invalid`, and
+`unavailable` snapshots plus complete `active`, `paused`, `stopped`, and
+`completed` run snapshots. Missing, unsupported, or incomplete helper results
+become bounded `invalid` anomalies without echoing helper-controlled values. A
+positional path selects another checkout, so
 `sd-status /path/to/repo` is equivalent to
 `sd-status --repo /path/to/repo`.
 `--no-network` suppresses GitHub calls and `--json` emits schema version 1. Ordinary runs do
