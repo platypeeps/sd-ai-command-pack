@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.20.0 - 2026-07-18
+
+- Accept bare primary subjects for retrospective topics, coverage target files,
+  fleet consumers, audit dimensions, and status repository paths while keeping
+  lifecycle and safety controls explicit and fail-closed.
+
 ## 0.19.12 - 2026-07-18
 
 - Narrow the first-review structured-input advisory so routine string

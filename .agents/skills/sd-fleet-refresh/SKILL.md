@@ -36,10 +36,11 @@ consumers are behind the target version in `manifest.json`.
 
 ## Arguments
 
-Arguments arrive as free text with the invocation, as `key=value` pairs and
-bare flags. Unknown argument names are an error, not a silent skip: stop and
-report them before running preflight. This skill reads no environment
-variables; every tuning knob is an argument.
+Arguments arrive as free text with the invocation. Parse the recognized
+`key=value` argument and bare flags before treating remaining bare values as
+the positional primary subject. Unknown option-shaped arguments are an error,
+not a silent skip: stop and report them before running preflight. This skill
+reads no environment variables; every tuning knob is an argument.
 
 - `consumer=<a,b>` — comma-separated fleet consumer names. Limit the run to
   those consumers. Pass each name to preflight via `--consumer`; preflight
@@ -49,6 +50,16 @@ variables; every tuning knob is an argument.
   consumer PR, but do not merge it.
 - `dry-run` — bare flag. Run preflight and emit the report only; perform no
   consumer mutations.
+- Remaining bare values are consumer names. `sd-fleet-refresh loadsmith
+  rwbp-website` is equivalent to `consumer=loadsmith,rwbp-website`. Split bare
+  names on whitespace or commas, preserve their order, and de-duplicate exact
+  repeats.
+
+Reject bare consumers combined with `consumer=` before preflight. Validate
+every normalized consumer against the fleet manifest before mutation; an
+unknown name is an error and must never broaden the run to the whole fleet.
+Before preflight, report the normalized consumer set (`all` when unfiltered),
+merge behavior, and dry-run state.
 
 ## Workflow
 

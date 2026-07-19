@@ -1124,8 +1124,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Report read-only SD repository or fleet status."
     )
-    parser.add_argument("mode", nargs="?", choices=("fleet",))
-    parser.add_argument("--repo", type=Path, default=Path.cwd())
+    parser.add_argument(
+        "target",
+        nargs="?",
+        help="Reserved word 'fleet' or a local repository path.",
+    )
+    parser.add_argument("--repo", type=Path)
     parser.add_argument(
         "--fleet-manifest",
         type=Path,
@@ -1150,7 +1154,21 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         default=[],
         help=argparse.SUPPRESS,
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.target == "fleet":
+        if args.repo is not None:
+            parser.error("fleet cannot be combined with --repo")
+        args.mode = "fleet"
+        args.repo = Path.cwd()
+    elif args.target is not None:
+        if args.repo is not None:
+            parser.error("a positional repository path cannot be combined with --repo")
+        args.mode = None
+        args.repo = Path(args.target)
+    else:
+        args.mode = None
+        args.repo = args.repo if args.repo is not None else Path.cwd()
+    return args
 
 
 def main(argv: Sequence[str] | None = None) -> int:

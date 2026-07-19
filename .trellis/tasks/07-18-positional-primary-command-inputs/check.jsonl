@@ -1,0 +1,2 @@
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Verify generated and dogfood adapters remain thin, synchronized, and argument-preserving."}
+{"file":".trellis/tasks/07-18-positional-primary-command-inputs/prd.md","reason":"Verify every accepted shorthand, compatibility guarantee, conflict rule, and documentation acceptance criterion."}

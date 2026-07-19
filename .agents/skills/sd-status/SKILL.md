@@ -11,14 +11,19 @@ changing repository, GitHub, Trellis, or fleet state.
 
 ## Arguments
 
-The optional positional argument `fleet` switches from the current repository
-to every consumer in the source-owned fleet registry. The following flags are
-also supported:
+The reserved positional argument `fleet` switches from the current repository
+to every consumer in the source-owned fleet registry. Any other single
+positional value is the primary repository-path subject. The following flags
+are also supported:
 
 - `--repo PATH` reports a specific local checkout instead of the current one.
 - `--fleet-manifest PATH` explicitly selects the canonical fleet manifest.
 - `--json` returns schema-versioned machine-readable output.
 - `--no-network` skips GitHub queries and labels that inventory unavailable.
+
+`sd-status /path/to/repo` is equivalent to
+`sd-status --repo /path/to/repo`. Preserve a quoted path containing spaces as
+one path and validate it exactly as `--repo` does.
 
 `fleet` resolves its manifest from `--fleet-manifest`,
 `SD_AI_COMMAND_PACK_FLEET_MANIFEST`, the machine-local fleet profile, or the
@@ -27,8 +32,10 @@ normally created once with `install.py TARGET --configure-fleet`; status never
 creates or modifies it. A missing or stale profile is a configuration blocker,
 not an invitation to guess fleet members.
 
-Reject unknown positional arguments or flags. Do not reinterpret them as
-shell text.
+Reject a positional repository path combined with `--repo`, more than one
+positional value, `fleet` combined with a repository path or `--repo`, and
+unknown flags. Reject these conflicts before running the collector. Do not
+reinterpret them as shell text.
 
 ## Workflow
 
@@ -37,7 +44,7 @@ shell text.
 
    ```bash
    bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-     scripts/sd-ai-command-pack-status.py [fleet] [--repo PATH] \
+     scripts/sd-ai-command-pack-status.py [fleet|REPO_PATH] [--repo PATH] \
        [--fleet-manifest PATH] [--json] [--no-network]
    ```
 

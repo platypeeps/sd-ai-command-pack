@@ -1,0 +1,2 @@
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Defines the template-first thin-adapter contract and positional primary-subject rules for command surfaces."}
+{"file":".trellis/tasks/07-18-positional-primary-command-inputs/design.md","reason":"Defines normalization, conflict handling, and fail-closed behavior for the five approved commands."}

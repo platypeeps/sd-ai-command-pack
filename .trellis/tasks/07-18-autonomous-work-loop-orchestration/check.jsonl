@@ -1,0 +1,3 @@
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Review selector composition, nested skill return contracts, adapter parity, and public command semantics."}
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Review user-state path resolution, atomic writes, locking, manifest registration, and installer behavior."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review transition, recovery, parity, documentation, and canonical-check coverage."}
