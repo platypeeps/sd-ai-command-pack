@@ -364,6 +364,32 @@ class StatusTests(InstallTestCase):
         self.assertEqual(malformed_state["status"], "invalid")
         self.assertIn("mode", malformed_state["error"])
 
+    def test_collect_work_loop_restores_bytecode_setting_after_loader_failure(self) -> None:
+        root = self.make_status_repo()
+        status = self.load_status_module()
+        spec = mock.Mock()
+        spec.loader = mock.Mock()
+        observed: list[bool] = []
+
+        def fail_while_loading(_module: object) -> None:
+            observed.append(status.sys.dont_write_bytecode)
+            raise SyntaxError("corrupt helper")
+
+        spec.loader.exec_module.side_effect = fail_while_loading
+        with (
+            mock.patch.object(status.sys, "dont_write_bytecode", False),
+            mock.patch.object(
+                status.importlib.util,
+                "spec_from_file_location",
+                return_value=spec,
+            ),
+        ):
+            result = status.collect_work_loop(root)
+            self.assertFalse(status.sys.dont_write_bytecode)
+
+        self.assertEqual(result["status"], "invalid")
+        self.assertEqual(observed, [True])
+
     def test_local_status_counts_stashes_without_marking_attention(self) -> None:
         root = self.make_status_repo()
         for index in range(2):
@@ -862,15 +888,21 @@ class StatusTests(InstallTestCase):
         )
         before = profile.read_bytes()
 
+        child_env = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX"}
+        }
+        child_env.update(
+            {
+                "SD_AI_COMMAND_PACK_FLEET_CONFIG": str(profile),
+                "SD_AI_COMMAND_PACK_FLEET_MANIFEST": "",
+            }
+        )
         result = subprocess.run(
             [sys.executable, str(status_script), "fleet", "--json", "--no-network"],
             cwd=install_root,
-            env={
-                **os.environ,
-                "PYTHONDONTWRITEBYTECODE": "1",
-                "SD_AI_COMMAND_PACK_FLEET_CONFIG": str(profile),
-                "SD_AI_COMMAND_PACK_FLEET_MANIFEST": "",
-            },
+            env=child_env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -882,6 +914,7 @@ class StatusTests(InstallTestCase):
         self.assertEqual(report["configuration"]["source"], "machine profile")
         self.assertEqual(report["repositories"][0]["path"], str(root.resolve()))
         self.assertEqual(profile.read_bytes(), before)
+        self.assertFalse((status_script.parent / "__pycache__").exists())
 
     def test_installed_status_reports_missing_or_malformed_profile_cleanly(self) -> None:
         tempdir = tempfile.TemporaryDirectory(prefix="sd-status-portable-")
