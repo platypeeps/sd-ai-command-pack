@@ -176,6 +176,9 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("normalized", fleet.split("## Workflow", 1)[0].lower())
         self.assertIn("normalized", audit.split("## Pipeline", 1)[0].lower())
 
+        guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")
+        self.assertIn("`sd-status --repo /path/to/repo`", guide)
+
     def test_command_adapters_share_contract(self) -> None:
         for name, (short, _pins, adapter_pins) in COMMANDS.items():
             adapters = [

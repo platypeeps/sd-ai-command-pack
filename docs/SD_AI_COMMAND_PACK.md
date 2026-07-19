@@ -406,7 +406,8 @@ branch, staged/unstaged/untracked counts, Git stash count, upstream ahead/behind
 and local/remote branches, installed SD pack and Trellis versions, relevant PR,
 open PRs/issues, current/in-progress/planned Trellis work, anomalies, and
 numbered next steps. A positional path selects another checkout, so
-`sd-status /path/to/repo` is equivalent to `--repo /path/to/repo`.
+`sd-status /path/to/repo` is equivalent to
+`sd-status --repo /path/to/repo`.
 `--no-network` suppresses GitHub calls and `--json` emits schema version 1. Ordinary runs do
 not fetch and label ref-derived values `cached`. Relevant-PR review totals use
 GitHub's GraphQL `reviews.totalCount`, so repositories with more than one REST
