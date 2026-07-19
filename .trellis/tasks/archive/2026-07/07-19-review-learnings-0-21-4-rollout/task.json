@@ -24,6 +24,6 @@
     "docs/review-learnings.md",
     "scripts/sd-ai-command-pack-review-learnings.py"
   ],
-  "notes": "Two-day scan inspected 25 PRs and 54 Copilot comments. All signals are historical after resolving three verified stale threads from merged PR #154. Existing prevention was confirmed; the distinct generated remote-path validation defect is tracked by 07-19-review-learning-remote-path-rendering.",
+  "notes": "Two-day scan inspected 25 PRs and 54 Copilot comments. All signals are historical after resolving three verified stale threads from merged PR #154. Existing prevention was confirmed; the distinct generated remote-path validation defect is tracked by review-learning-remote-path-rendering.",
   "meta": {}
 }
