@@ -1,19 +1,20 @@
-# Roll out SD pack 0.21.3 to the consumer fleet
+# Roll out SD pack 0.21.4 to the consumer fleet
 
 ## Goal
 
-Refresh every stale consumer to the corrective sd-ai-command-pack 0.21.3 payload
+Refresh every stale consumer to the corrective sd-ai-command-pack 0.21.4 payload
 through reviewable, sequential pull requests. Finish with each available
-consumer clean on its default branch, provenance and audit confirming 0.21.3,
+consumer clean on its default branch, provenance and audit confirming 0.21.4,
 and no unresolved rollout PRs.
 
 ## Confirmed Facts
 
 - Release 0.21.0 was merged and tagged after PR #162.
 - Four consumers reached 0.21.0 before mezmo_benchmark's full pytest suite
-  exposed a pack-owned candidate-file UTF-8 policy defect.
-- The rollout stopped before publishing mezmo_benchmark, as required by R9;
-  0.21.3 is the corrective fleet target.
+  exposed a pack-owned candidate-file UTF-8 policy defect. Subsequent canary
+  review found chmod portability, status path validation, and read-only status
+  import defects; each stopped the rollout and shipped through 0.21.1-0.21.4.
+- Release 0.21.4 is the final corrective fleet target.
 - `docs/FLEET_ROLLOUT.md` is the rollout procedure authority.
 - `docs/fleet/consumers.json` defines seven consumers and their selected
   Claude, Gemini, GitHub, and OpenCode platforms.
@@ -41,7 +42,7 @@ and no unresolved rollout PRs.
   reviews to settle, and merge only through the consumer's green,
   comment-clean housekeeping gate.
 - R8: After merge, confirm the consumer is clean on its default branch, its
-  installed provenance reports 0.21.3, and expected-platform audit passes.
+  installed provenance reports 0.21.4, and expected-platform audit passes.
 - R9: Stop the fleet for a released-pack correctness, security, install/audit,
   or compatibility defect. Record low-risk or unrelated findings as follow-up
   work instead of forcing a patch release.
@@ -50,23 +51,39 @@ and no unresolved rollout PRs.
 
 ## Acceptance Criteria
 
-- [ ] rwbp-coordinator is at 0.21.3 or has an explicit skip reason.
-- [ ] loadsmith is at 0.21.3 or has an explicit skip reason.
-- [ ] hoa-manager is at 0.21.3 or has an explicit skip reason.
-- [ ] rwbp-website is at 0.21.3 or has an explicit skip reason.
-- [ ] mezmo_benchmark is at 0.21.3 or has an explicit skip reason.
-- [ ] se-ai-command-pack is at 0.21.3 or has an explicit skip reason.
-- [ ] anomaly-metric-creator is at 0.21.3 or has an explicit skip reason.
-- [ ] Every refreshed consumer passes install audit and its repository-owned
+- [x] rwbp-coordinator is at 0.21.4.
+- [x] loadsmith is at 0.21.4.
+- [x] hoa-manager is at 0.21.4.
+- [x] rwbp-website is at 0.21.4.
+- [x] mezmo_benchmark is at 0.21.4.
+- [x] se-ai-command-pack is at 0.21.4.
+- [x] anomaly-metric-creator is at 0.21.4.
+- [x] Every refreshed consumer passes install audit and its repository-owned
   validation before PR creation.
-- [ ] Every merged consumer passes post-merge provenance and audit checks and
+- [x] Every merged consumer passes post-merge provenance and audit checks and
   ends clean on its default branch.
-- [ ] No rollout PR remains open unless the final report explicitly records it.
-- [ ] The final fleet table and target-version summary are complete.
+- [x] No rollout PR remains open unless the final report explicitly records it.
+- [x] The final fleet table and target-version summary are complete.
+
+## Results
+
+| Consumer | Before | Outcome |
+| --- | --- | --- |
+| rwbp-coordinator | 0.21.3 | 0.21.4, [PR #125](https://github.com/platypeeps/rwbp-coordinator/pull/125) merged |
+| loadsmith | 0.21.3 | 0.21.4, [PR #96](https://github.com/platypeeps/loadsmith/pull/96) merged |
+| hoa-manager | 0.21.3 | 0.21.4, [PR #121](https://github.com/platypeeps/hoa-manager/pull/121) merged |
+| rwbp-website | 0.21.3 | 0.21.4, [PR #139](https://github.com/platypeeps/rwbp/pull/139) merged |
+| mezmo_benchmark | 0.21.3 | 0.21.4, [PR #358](https://github.com/answerbook/mezmo_benchmark/pull/358) merged |
+| se-ai-command-pack | 0.19.11 | 0.21.4, [PR #9](https://github.com/platypeeps/se-ai-command-pack/pull/9) merged |
+| anomaly-metric-creator | 0.19.11 | 0.21.4, [PR #256](https://github.com/platypeeps/anomaly-metric-creator/pull/256) merged |
+
+Final source preflight reported seven `at-target` consumers. The only new
+follow-up is the planned P3 `status-snapshot-contract-validation` hardening
+task recorded from AMC's non-blocking Copilot review.
 
 ## Out Of Scope
 
 - Consumer product changes, dependency upgrades, and unrelated maintenance.
 - Cloning missing consumer repositories or modifying dirty worktrees.
-- Retagging earlier releases; the corrective payload ships as 0.21.3.
+- Retagging earlier releases; the final corrective payload ships as 0.21.4.
 - Opening a pull request in the upstream Trellis repository.

@@ -1,9 +1,9 @@
-# Fleet refresh 0.21.0 design
+# Fleet refresh 0.21.4 design
 
 ## Boundaries
 
 The pack checkout is the orchestration source and remains on clean `main` at
-released version 0.21.0. Each consumer is an independent mutation boundary.
+released version 0.21.4. Each consumer is an independent mutation boundary.
 The installer may change only managed payload, receipts, provenance, and
 managed blocks; consumer product code is outside this task.
 
@@ -14,14 +14,14 @@ For each consumer in manifest priority order:
 1. `eligible`: local clone exists and the worktree is clean.
 2. `branched`: the default branch is current and a dedicated refresh branch is
    checked out.
-3. `installed`: the preflight command installs 0.21.0 for every selected
+3. `installed`: the preflight command installs 0.21.4 for every selected
    platform.
 4. `validated`: expected-platform audit and consumer-owned full-check pass.
 5. `published`: installer-owned changes are committed, pushed, and represented
    by exactly one open PR.
 6. `settled`: required checks are green and review threads are resolved.
 7. `merged`: the consumer housekeeping gate merges and cleans the branch.
-8. `verified`: provenance reads 0.21.0, audit passes, and the default branch is
+8. `verified`: provenance reads 0.21.4, audit passes, and the default branch is
    clean and synchronized.
 
 The next consumer starts only after the previous consumer reaches `verified`,

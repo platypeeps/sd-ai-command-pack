@@ -33,5 +33,9 @@ must reach consumers only through a released installer refresh.
 - [x] Loader failures restore the prior bytecode setting.
 - [x] Focused status tests, parity, candidate fleet validation, and canonical
   pack checks pass.
-- [ ] The corrected release reaches the paused SE consumer PR through
+- [x] The corrected release reaches the paused SE consumer PR through
   `install.py`.
+
+Released as 0.21.4 in [PR #166](https://github.com/platypeeps/sd-ai-command-pack/pull/166)
+and verified through the merged [SE PR #9](https://github.com/platypeeps/se-ai-command-pack/pull/9)
+plus the final seven-consumer fleet preflight.

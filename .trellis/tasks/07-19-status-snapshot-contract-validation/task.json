@@ -1,0 +1,30 @@
+{
+  "id": "status-snapshot-contract-validation",
+  "name": "status-snapshot-contract-validation",
+  "title": "Validate sd-status work-loop snapshot contracts",
+  "description": "Fail closed when the dynamically loaded work-loop helper returns a mapping with a missing or unsupported status or without the fields required for an active loop report.",
+  "status": "planned",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P3",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-19",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "templates/scripts/sd-ai-command-pack-status.py",
+    "scripts/sd-ai-command-pack-status.py",
+    "tests/test_status.py"
+  ],
+  "notes": "Found during Copilot review of anomaly-metric-creator PR #256 while rolling out sd-ai-command-pack 0.21.4.",
+  "meta": {}
+}

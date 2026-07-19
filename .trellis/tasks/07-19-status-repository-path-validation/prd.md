@@ -36,4 +36,7 @@ canonical template and installer flow rather than a consumer-local patch.
 - [x] Existing directory and file paths continue to resolve correctly.
 - [x] Focused status tests, template parity, all-fleet candidate validation,
   and canonical pack checks pass.
-- [ ] The corrected release reaches the active consumer PR through install.py.
+- [x] The corrected release reaches the active consumer PR through install.py.
+
+Released as 0.21.3 in [PR #165](https://github.com/platypeeps/sd-ai-command-pack/pull/165)
+and retained in the final 0.21.4 payload verified across all seven consumers.

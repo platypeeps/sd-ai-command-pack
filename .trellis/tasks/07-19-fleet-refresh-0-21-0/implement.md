@@ -1,4 +1,4 @@
-# Fleet refresh 0.21.0 implementation plan
+# Fleet refresh 0.21.4 implementation plan
 
 ## Execution Order
 
@@ -16,16 +16,16 @@
 ## Per-Consumer Checklist
 
 1. Verify clean status, default branch, remote synchronization, and no existing
-   refresh PR for 0.21.0.
+   refresh PR for 0.21.4.
 2. Fast-forward the default branch and create
-   `codex/refresh-sd-ai-command-pack-0-21-0`.
+   `codex/refresh-sd-ai-command-pack-0-21-4`.
 3. Run the preflight-printed installer and expected-platform audit commands.
 4. Run the consumer-documented full-check gate.
 5. Inspect the diff and require only installer-owned changes.
 6. Commit, push, and create the consumer PR using a literal body file.
 7. Watch CI and review state; address only consumer integration findings.
 8. Run the consumer housekeeping gate to merge and clean.
-9. Verify 0.21.0 provenance, expected-platform audit, clean default branch, and
+9. Verify 0.21.4 provenance, expected-platform audit, clean default branch, and
    absence of the refresh branch.
 
 ## Validation Commands
@@ -52,7 +52,7 @@ creation. After all merges, rerun preflight and require seven `at-target` rows.
 - No PR opens before install, audit, and consumer validation pass.
 - No merge occurs outside the consumer housekeeping gate.
 - No consumer product code is included in a refresh diff.
-- Post-merge provenance and audit must agree on 0.21.0.
+- Post-merge provenance and audit must agree on 0.21.4.
 
 ## Rollback Points
 
