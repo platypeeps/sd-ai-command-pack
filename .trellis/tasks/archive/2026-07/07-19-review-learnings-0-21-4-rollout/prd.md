@@ -62,7 +62,7 @@ can inspect both the working tree and recent GitHub review comments.
   sequential fleet rollout, stop-and-release behavior for pack defects, and a
   post-cycle review-learning pass.
 - The only non-blocking rollout hardening idea is already tracked by
-  `07-19-status-snapshot-contract-validation`; no duplicate task or shipped
+  `status-snapshot-contract-validation`; no duplicate task or shipped
   behavior change is justified by this review.
 
 ## Out Of Scope
