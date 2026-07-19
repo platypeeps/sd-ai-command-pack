@@ -97,8 +97,10 @@ def resolve_repo(path: Path) -> Path | None:
     git_path = path.expanduser()
     if not git_path.is_absolute():
         git_path = Path.cwd() / git_path
-    if not git_path.is_dir():
+    if git_path.is_file():
         git_path = git_path.parent
+    elif not git_path.is_dir():
+        return None
     result = run_command(
         ["git", "-C", str(git_path), "rev-parse", "--show-toplevel"],
         cwd=git_path,

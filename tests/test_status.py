@@ -183,7 +183,7 @@ class StatusTests(InstallTestCase):
         status = self.load_status_module()
 
         self.assertEqual(status.resolve_repo(root / "README.md"), root.resolve())
-        self.assertEqual(status.resolve_repo(root / "missing"), root.resolve())
+        self.assertIsNone(status.resolve_repo(root / "missing"))
         self.assertIsNone(status.resolve_repo(root / "missing/nested"))
 
     def test_resolve_repo_accepts_relative_file_within_repository(self) -> None:
@@ -561,6 +561,22 @@ class StatusTests(InstallTestCase):
         self.assertEqual(option_like.repo, Path("-status-repo"))
         self.assertEqual(fleet.mode, "fleet")
         self.assertEqual(current.repo, Path.cwd())
+
+    def test_main_rejects_missing_positional_repository_path(self) -> None:
+        root = self.make_status_repo()
+        status = self.load_status_module()
+        previous_cwd = Path.cwd()
+        self.addCleanup(os.chdir, previous_cwd)
+        os.chdir(root)
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = status.main(["repoo", "--no-network"])
+
+        self.assertEqual(result, 1)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("unable to inspect Git repository: repoo", stderr.getvalue())
 
     def test_parse_args_rejects_positional_repository_conflicts(self) -> None:
         status = self.load_status_module()
