@@ -767,6 +767,46 @@ class WorkLoopTests(InstallTestCase):
             ["task-1", "task-2"],
         )
 
+    def test_rank_candidate_file_pins_strict_utf8_decoding(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        self.make_state(module, root, state_root)
+        candidates = root.parent / "candidates.json"
+        candidates.write_text("[]\n", encoding="utf-8")
+        calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+        original_read_text = module.Path.read_text
+
+        def tracked_read_text(path, *args, **kwargs):
+            if path == candidates:
+                calls.append((args, kwargs))
+            return original_read_text(path, *args, **kwargs)
+
+        stdout = io.StringIO()
+        with (
+            mock.patch.object(module.Path, "read_text", tracked_read_text),
+            contextlib.redirect_stdout(stdout),
+        ):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "rank",
+                    "--repo",
+                    str(root),
+                    "--candidates-file",
+                    str(candidates),
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(stdout.getvalue()), {"candidates": [], "count": 0})
+        self.assertEqual(
+            calls,
+            [((), {"encoding": "utf-8", "errors": "strict"})],
+        )
+
     def test_public_cli_drives_a_complete_iteration(self) -> None:
         module = self.load_module()
         root = self.make_repo()

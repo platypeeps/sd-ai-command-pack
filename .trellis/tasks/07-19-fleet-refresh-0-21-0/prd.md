@@ -1,15 +1,19 @@
-# Roll out SD pack 0.21.0 to the consumer fleet
+# Roll out SD pack 0.21.1 to the consumer fleet
 
 ## Goal
 
-Refresh every stale consumer to the released sd-ai-command-pack 0.21.0 payload
+Refresh every stale consumer to the corrective sd-ai-command-pack 0.21.1 payload
 through reviewable, sequential pull requests. Finish with each available
-consumer clean on its default branch, provenance and audit confirming 0.21.0,
+consumer clean on its default branch, provenance and audit confirming 0.21.1,
 and no unresolved rollout PRs.
 
 ## Confirmed Facts
 
-- The pack source checkout is clean on `main` at version 0.21.0 after PR #162.
+- Release 0.21.0 was merged and tagged after PR #162.
+- Four consumers reached 0.21.0 before mezmo_benchmark's full pytest suite
+  exposed a pack-owned candidate-file UTF-8 policy defect.
+- The rollout stopped before publishing mezmo_benchmark, as required by R9;
+  0.21.1 is the corrective fleet target.
 - `docs/FLEET_ROLLOUT.md` is the rollout procedure authority.
 - `docs/fleet/consumers.json` defines seven consumers and their selected
   Claude, Gemini, GitHub, and OpenCode platforms.
@@ -37,7 +41,7 @@ and no unresolved rollout PRs.
   reviews to settle, and merge only through the consumer's green,
   comment-clean housekeeping gate.
 - R8: After merge, confirm the consumer is clean on its default branch, its
-  installed provenance reports 0.21.0, and expected-platform audit passes.
+  installed provenance reports 0.21.1, and expected-platform audit passes.
 - R9: Stop the fleet for a released-pack correctness, security, install/audit,
   or compatibility defect. Record low-risk or unrelated findings as follow-up
   work instead of forcing a patch release.
@@ -46,13 +50,13 @@ and no unresolved rollout PRs.
 
 ## Acceptance Criteria
 
-- [ ] rwbp-coordinator is at 0.21.0 or has an explicit skip reason.
-- [ ] loadsmith is at 0.21.0 or has an explicit skip reason.
-- [ ] hoa-manager is at 0.21.0 or has an explicit skip reason.
-- [ ] rwbp-website is at 0.21.0 or has an explicit skip reason.
-- [ ] mezmo_benchmark is at 0.21.0 or has an explicit skip reason.
-- [ ] se-ai-command-pack is at 0.21.0 or has an explicit skip reason.
-- [ ] anomaly-metric-creator is at 0.21.0 or has an explicit skip reason.
+- [ ] rwbp-coordinator is at 0.21.1 or has an explicit skip reason.
+- [ ] loadsmith is at 0.21.1 or has an explicit skip reason.
+- [ ] hoa-manager is at 0.21.1 or has an explicit skip reason.
+- [ ] rwbp-website is at 0.21.1 or has an explicit skip reason.
+- [ ] mezmo_benchmark is at 0.21.1 or has an explicit skip reason.
+- [ ] se-ai-command-pack is at 0.21.1 or has an explicit skip reason.
+- [ ] anomaly-metric-creator is at 0.21.1 or has an explicit skip reason.
 - [ ] Every refreshed consumer passes install audit and its repository-owned
   validation before PR creation.
 - [ ] Every merged consumer passes post-merge provenance and audit checks and
@@ -64,6 +68,5 @@ and no unresolved rollout PRs.
 
 - Consumer product changes, dependency upgrades, and unrelated maintenance.
 - Cloning missing consumer repositories or modifying dirty worktrees.
-- Retagging 0.21.0 or changing pack-owned implementation during a healthy
-  rollout.
+- Retagging 0.21.0; the corrective payload ships as 0.21.1.
 - Opening a pull request in the upstream Trellis repository.

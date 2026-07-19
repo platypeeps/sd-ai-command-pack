@@ -1,8 +1,8 @@
 {
   "id": "fleet-refresh-0-21-0",
   "name": "fleet-refresh-0-21-0",
-  "title": "Roll out SD pack 0.21.0 to the consumer fleet",
-  "description": "Sequentially refresh every stale consumer in docs/fleet/consumers.json to sd-ai-command-pack 0.21.0 using fleet preflight, installer audit, consumer full-check, PR review, gated merge, post-merge provenance verification, and housekeeping.",
+  "title": "Roll out SD pack 0.21.1 to the consumer fleet",
+  "description": "Sequentially refresh every stale consumer in docs/fleet/consumers.json to sd-ai-command-pack 0.21.1. The original 0.21.0 rollout was superseded after mezmo_benchmark exposed a pack-owned UTF-8 boundary defect.",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,
