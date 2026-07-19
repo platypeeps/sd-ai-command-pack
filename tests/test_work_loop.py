@@ -345,6 +345,24 @@ class WorkLoopTests(InstallTestCase):
         module.acquire_lock(lock_path, first, recover_stale=True)
         self.assertEqual(module.read_json(lock_path)["runId"], first["runId"])
 
+        module.release_lock(lock_path, first["runId"])
+        malformed_lock = {
+            "schemaVersion": module.SCHEMA_VERSION,
+            "runId": "other-run",
+            "repositoryDigest": first["repository"]["digest"],
+            "pid": 99999999,
+            "hostname": "different-host",
+            "acquiredAt": "2000-01-01T00:00:00Z",
+        }
+        module.atomic_write_json(lock_path, malformed_lock)
+        malformed_bytes = lock_path.read_bytes()
+        with self.assertRaisesRegex(module.WorkLoopError, "malformed"):
+            module.acquire_lock(lock_path, first)
+        self.assertEqual(lock_path.read_bytes(), malformed_bytes)
+
+        module.acquire_lock(lock_path, first, recover_stale=True)
+        self.assertEqual(module.read_json(lock_path)["runId"], first["runId"])
+
     def test_legal_transitions_increment_iteration_and_clear_current_state(self) -> None:
         module = self.load_module()
         root = self.make_repo()

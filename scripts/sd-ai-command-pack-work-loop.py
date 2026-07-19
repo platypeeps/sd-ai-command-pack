@@ -672,6 +672,29 @@ def lock_payload(state: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def validate_lock(lock: Mapping[str, Any]) -> None:
+    if lock.get("schemaVersion") != SCHEMA_VERSION:
+        raise WorkLoopError("work-loop lock schema is malformed")
+    if not isinstance(lock.get("runId"), str) or not lock["runId"]:
+        raise WorkLoopError("work-loop lock runId is malformed")
+    if (
+        not isinstance(lock.get("repositoryDigest"), str)
+        or not lock["repositoryDigest"]
+    ):
+        raise WorkLoopError("work-loop lock repository digest is malformed")
+    if (
+        not isinstance(lock.get("pid"), int)
+        or isinstance(lock.get("pid"), bool)
+        or lock["pid"] <= 0
+    ):
+        raise WorkLoopError("work-loop lock pid is malformed")
+    if not isinstance(lock.get("hostname"), str) or not lock["hostname"]:
+        raise WorkLoopError("work-loop lock hostname is malformed")
+    for timestamp_key in ("acquiredAt", "heartbeatAt"):
+        if parse_utc(lock.get(timestamp_key)) is None:
+            raise WorkLoopError(f"work-loop lock {timestamp_key} is malformed")
+
+
 def process_alive(pid: object) -> bool:
     if not isinstance(pid, int) or pid <= 0:
         return False
@@ -687,9 +710,10 @@ def process_alive(pid: object) -> bool:
 def lock_is_stale(
     lock: Mapping[str, Any], *, stale_after: int = DEFAULT_STALE_LOCK_SECONDS
 ) -> bool:
+    validate_lock(lock)
     heartbeat = parse_utc(lock.get("heartbeatAt"))
     if heartbeat is None:
-        return False
+        raise WorkLoopError("work-loop lock heartbeatAt is malformed")
     age = (datetime.now(timezone.utc) - heartbeat).total_seconds()
     if age <= stale_after:
         return False
@@ -713,10 +737,11 @@ def acquire_lock(
         except FileExistsError:
             try:
                 current = read_json(lock_path)
+                validate_lock(current)
             except WorkLoopError as error:
                 if not recover_stale:
                     raise WorkLoopError(
-                        "work-loop lock is unreadable; inspect it or retry with "
+                        "work-loop lock is unreadable or malformed; inspect it or retry with "
                         "--recover-stale-lock"
                     ) from error
                 try:
@@ -733,8 +758,9 @@ def acquire_lock(
             stale = lock_is_stale(current, stale_after=stale_after)
             if not stale or not recover_stale:
                 state_label = "stale" if stale else "active"
+                article = "an" if state_label == "active" else "a"
                 raise WorkLoopError(
-                    f"repository has an {state_label} work-loop lock owned by "
+                    f"repository has {article} {state_label} work-loop lock owned by "
                     f"run {current.get('runId')}; reconcile before recovery"
                 ) from None
             try:
@@ -751,6 +777,7 @@ def acquire_lock(
 
 def require_lock(lock_path: Path, run_id: str) -> dict[str, Any]:
     lock = read_json(lock_path)
+    validate_lock(lock)
     if lock.get("runId") != run_id:
         raise WorkLoopError(
             f"work-loop lock belongs to run {lock.get('runId')}, not {run_id}"
@@ -764,6 +791,7 @@ def release_lock(lock_path: Path, run_id: str) -> None:
     if not lock_path.exists():
         return
     lock = read_json(lock_path)
+    validate_lock(lock)
     if lock.get("runId") != run_id:
         raise WorkLoopError("refusing to release another work-loop run's lock")
     try:
