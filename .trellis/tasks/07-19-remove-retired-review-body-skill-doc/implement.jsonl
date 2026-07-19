@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Defines canonical shared-skill ownership and template/mirror synchronization."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines focused regression and canonical validation expectations."}

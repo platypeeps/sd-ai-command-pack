@@ -256,6 +256,30 @@ class ReviewScopeTests(InstallTestCase):
             self.assertIn("SD_AI_COMMAND_PACK_SCOPE_PR_BODY", content, doc_path)
             self.assertNotIn("REVIEW_PREFLIGHT_PR_BODY", content, doc_path)
 
+    def test_retired_pr_body_env_is_absent_from_current_shipped_guidance(
+        self,
+    ) -> None:
+        guidance_kinds = {"skill", "command", "prompt", "doc"}
+        guidance_sources = sorted(
+            {
+                file.source
+                for file in self._manifest_files
+                if file.kind in guidance_kinds
+            }
+        )
+        full_check_skill = (
+            install.ROOT / "templates/.agents/skills/sd-full-check/SKILL.md"
+        )
+
+        self.assertIn(full_check_skill, guidance_sources)
+        self.assertGreater(len(guidance_sources), 1)
+        for source in guidance_sources:
+            with self.subTest(source=source):
+                self.assertNotIn(
+                    "REVIEW_PREFLIGHT_PR_BODY",
+                    source.read_text(encoding="utf-8"),
+                )
+
     def test_pr_body_scope_default_rule_patterns_match_representatives(self) -> None:
         module = self.load_module_from_path(
             install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",

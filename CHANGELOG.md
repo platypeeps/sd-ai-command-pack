@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.23.1 - 2026-07-19
+
+- Remove the expired `REVIEW_PREFLIGHT_PR_BODY` compatibility fallback from
+  current shipped `sd-full-check` guidance.
+- Guard every manifest-declared skill, command, prompt, and guide source
+  against reintroducing the retired variable while preserving historical and
+  runtime retirement evidence.
+
 ## 0.23.0 - 2026-07-19
 
 - Add an atomic work-loop `evidence` operation for verified same-phase commit,
