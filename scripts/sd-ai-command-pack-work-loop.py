@@ -967,6 +967,8 @@ def validated_evidence(
         resolved_head = _resolved_commit(evidence_repo, candidate_head)
         if resolved_head is None:
             raise WorkLoopError(f"head evidence is not a local Git commit: {candidate_head}")
+        candidate["head"] = resolved_head
+        candidate_head = resolved_head
         if candidate_branch is not None and ({"branch", "head"} & set(updates)):
             branch_head = _branch_commit(evidence_repo, candidate_branch)
             if branch_head != resolved_head:
@@ -986,6 +988,8 @@ def validated_evidence(
             raise WorkLoopError(
                 f"lastShippedSha evidence is not a local Git commit: {candidate_shipped}"
             )
+        candidate["lastShippedSha"] = resolved_shipped
+        candidate_shipped = resolved_shipped
         if remembered_shipped is not None and candidate_shipped != remembered_shipped:
             resolved_remembered = _resolved_commit(evidence_repo, remembered_shipped)
             if resolved_remembered is None or not _is_ancestor(

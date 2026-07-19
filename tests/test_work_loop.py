@@ -577,11 +577,14 @@ class WorkLoopTests(InstallTestCase):
             {
                 "prNumber": 42,
                 "prUrl": "https://example.test/pull/42",
-                "lastShippedSha": feature_head,
+                "head": "HEAD",
+                "lastShippedSha": "HEAD",
             },
             repo=root,
         )
         self.assertEqual(state["checkpoint"]["state"], "none")
+        self.assertEqual(state["current"]["head"], feature_head)
+        self.assertEqual(state["current"]["lastShippedSha"], feature_head)
 
         review_head = self.commit_file(
             module, root, "feature.txt", "review fix\n", "review fix"
