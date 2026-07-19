@@ -903,7 +903,7 @@ def collect_local(
     completed_outside_archive = trellis.get("completedOutsideArchive", [])
     if completed_outside_archive:
         shown = ", ".join(
-            safe_text(task.get("id"), limit=80)
+            safe_text(task.get("path") or task.get("id"), limit=160)
             for task in completed_outside_archive[:HUMAN_ITEM_LIMIT]
         )
         suffix = (

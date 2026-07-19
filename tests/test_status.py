@@ -279,7 +279,7 @@ class StatusTests(InstallTestCase):
         (stranded / "task.json").write_text(
             json.dumps(
                 {
-                    "id": "completed-fixture",
+                    "id": "completed-record-id",
                     "title": "Completed fixture",
                     "status": "completed",
                     "priority": "P2",
@@ -313,11 +313,13 @@ class StatusTests(InstallTestCase):
         self.assertEqual(machine.returncode, 0, machine.stdout)
         report = json.loads(machine.stdout)
         completed = report["trellis"]["completedOutsideArchive"]
-        self.assertEqual([task["id"] for task in completed], ["completed-fixture"])
+        self.assertEqual([task["id"] for task in completed], ["completed-record-id"])
+        self.assertEqual([task["path"] for task in completed], ["tasks/completed-fixture"])
         self.assertTrue(
             any(
                 "1 completed Trellis task(s) remain outside" in anomaly
-                and "completed-fixture" in anomaly
+                and "tasks/completed-fixture" in anomaly
+                and "completed-record-id" not in anomaly
                 for anomaly in report["anomalies"]
             )
         )
@@ -327,7 +329,7 @@ class StatusTests(InstallTestCase):
         self.assertEqual(human.returncode, 0, human.stdout)
         self.assertIn("SD status: attention", human.stdout)
         self.assertIn("completed Trellis tasks outside archive (1)", human.stdout)
-        self.assertIn("completed-fixture", human.stdout)
+        self.assertIn("completed-record-id", human.stdout)
 
     def test_local_status_reports_paused_stopped_and_completed_loop_states(
         self,
