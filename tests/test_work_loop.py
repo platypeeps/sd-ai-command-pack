@@ -311,6 +311,28 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"value": "before"})
         self.assertEqual(list(target.parent.glob("*.tmp")), [])
 
+    def test_atomic_write_succeeds_when_chmod_is_unsupported(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        target = root.parent / "state/state.json"
+
+        with (
+            mock.patch.object(
+                module.Path, "chmod", side_effect=OSError("unsupported")
+            ) as path_chmod,
+            mock.patch.object(
+                module.os,
+                "chmod",
+                side_effect=AssertionError("direct chmod must not be used"),
+            ) as direct_chmod,
+        ):
+            module.atomic_write_json(target, {"value": "written"})
+
+        direct_chmod.assert_not_called()
+        path_chmod.assert_has_calls([mock.call(0o700), mock.call(0o600)])
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"value": "written"})
+        self.assertEqual(list(target.parent.glob("*.tmp")), [])
+
     def test_validation_and_persistence_use_the_same_size_limit(self) -> None:
         module = self.load_module()
         root = self.make_repo()

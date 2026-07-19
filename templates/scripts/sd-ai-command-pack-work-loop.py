@@ -420,7 +420,6 @@ def atomic_write_json(path: Path, value: Mapping[str, Any]) -> None:
     )
     temporary = Path(temporary_name)
     try:
-        os.chmod(temporary, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8", errors="strict") as stream:
             stream.write(payload)
             stream.flush()

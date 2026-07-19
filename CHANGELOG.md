@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.21.2 - 2026-07-19
+
+- Rely on `tempfile.mkstemp()` for private temporary-file creation so work-loop
+  state writes remain portable when a filesystem does not support `chmod`.
+
 ## 0.21.1 - 2026-07-19
 
 - Pin strict UTF-8 decoding for work-loop candidate files so consumer defect
