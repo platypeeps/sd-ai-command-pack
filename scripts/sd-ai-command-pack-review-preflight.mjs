@@ -522,7 +522,12 @@ function checkCompletedTrellisTaskLocation() {
   let entries;
   try {
     entries = readdirSync(taskRoot, { withFileTypes: true })
-      .filter((entry) => entry.name !== 'archive' && entry.isDirectory())
+      .filter(
+        (entry) =>
+          entry.name !== 'archive' &&
+          !entry.isSymbolicLink() &&
+          entry.isDirectory(),
+      )
       .sort((left, right) => left.name.localeCompare(right.name));
   } catch (error) {
     fail(`.trellis/tasks could not be inspected for completed active-root tasks: ${thrownValueMessage(error)}`);
