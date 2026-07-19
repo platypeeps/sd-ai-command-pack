@@ -1427,3 +1427,45 @@ Narrowed structured-input split detection to explicit parsers and direct CLI, en
 ### Next Steps
 
 - None - task complete
+
+
+## Session 138: Add positional primary inputs to SD commands
+
+**Date**: 2026-07-18
+**Task**: Add positional primary inputs to SD commands
+**Branch**: `codex/positional-primary-command-inputs`
+
+### Summary
+
+Added concise positional primary-subject forms to five SD commands while preserving explicit options and fail-closed validation.
+
+### Main Changes
+
+- Added positional subject normalization and conflict rejection for sd-retro, sd-test-gaps, sd-fleet-refresh, sd-audit-repo, and sd-status.
+- Synchronized canonical templates, platform adapters, help, documentation, release metadata, and the fleet candidate ledger for version 0.20.0.
+- Addressed two Copilot documentation-contract findings and completed a clean third review round.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `749f420` | feat: add positional primary command inputs |
+| `f519f84` | test: cover positional status path boundaries |
+| `654c30e` | fix: clarify explicit status invocation |
+| `78ba06d` | fix: document exclusive status target forms |
+
+### Testing
+
+- [OK] make check passed, including 100% installer coverage and 85% shipped-script coverage.
+- [OK] 33 focused command and status tests passed.
+- [OK] All seven fleet candidate installs, audits, preparation steps, and checks passed.
+- [OK] Deterministic full-check passed with Prism and Gito intentionally disabled; all required GitHub CI jobs passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
