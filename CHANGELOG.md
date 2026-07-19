@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.21.1 - 2026-07-19
+
+- Pin strict UTF-8 decoding for work-loop candidate files so consumer defect
+  scanners and locale-independent file-boundary policy agree.
+- Document intentional best-effort permission and cleanup suppression in the
+  work-loop helper without changing its atomic-write behavior.
+
 ## 0.21.0 - 2026-07-18
 
 - Make `sd-work-backlog` a resumable autonomous plan-to-merge controller and

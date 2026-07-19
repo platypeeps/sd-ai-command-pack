@@ -246,6 +246,7 @@ def ensure_private_directory(path: Path) -> None:
     try:
         path.chmod(0o700)
     except OSError:
+        # Permission tightening is best-effort on filesystems without chmod support.
         pass
 
 
@@ -428,15 +429,18 @@ def atomic_write_json(path: Path, value: Mapping[str, Any]) -> None:
         try:
             path.chmod(0o600)
         except OSError:
+            # The atomic write succeeded; unsupported chmod must not discard it.
             pass
     except Exception:
         try:
             os.close(descriptor)
         except OSError:
+            # Cleanup failures must not hide the original write failure.
             pass
         try:
             temporary.unlink()
         except OSError:
+            # Cleanup failures must not hide the original write failure.
             pass
         raise
 
@@ -1253,7 +1257,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             state, _state_path, _lock_path, _identity = load_state_for_repo(
                 args.repo, state_root=state_root
             )
-            payload = json.loads(args.candidates_file.read_text(encoding="utf-8"))
+            payload = json.loads(
+                args.candidates_file.read_text(encoding="utf-8", errors="strict")
+            )
             if not isinstance(payload, list):
                 raise WorkLoopError("candidate file must contain a JSON array")
             ranked = rank_candidates(payload, state["focus"])
