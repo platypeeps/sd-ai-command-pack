@@ -61,9 +61,10 @@ can inspect both the working tree and recent GitHub review comments.
   focused regression tests, exact-head comment-clean review gates, fast-first
   sequential fleet rollout, stop-and-release behavior for pack defects, and a
   post-cycle review-learning pass.
-- The only non-blocking rollout hardening idea is already tracked by
-  `status-snapshot-contract-validation`; no duplicate task or shipped
-  behavior change is justified by this review.
+- The rollout's non-blocking status hardening idea is already tracked by
+  `status-snapshot-contract-validation`. This review also identified the
+  distinct `review-learning-remote-path-rendering` tooling defect and recorded
+  it as its own shipped-payload task; no duplicate task is justified.
 
 ## Out Of Scope
 
