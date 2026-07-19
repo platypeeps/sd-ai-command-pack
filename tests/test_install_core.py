@@ -3128,13 +3128,13 @@ class InstallCoreTests(InstallTestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("name: sd-work-backlog", work_backlog)
         self.assertIn("# SD Work Backlog", work_backlog)
-        self.assertIn("one implementation-ready task", work_backlog)
-        self.assertIn("Work exactly one backlog task per iteration", work_backlog)
+        self.assertIn("Work exactly one task, branch, and PR at a time", work_backlog)
+        self.assertIn("sd-ship until=merge", work_backlog)
+        self.assertIn("user-local work-loop ledger", work_backlog)
         self.assertIn("sd-create-pr", work_backlog)
         self.assertIn("sd-housekeeping", work_backlog)
-        self.assertIn("Parked by sd-work-backlog", work_backlog)
-        self.assertIn("follow-ups or learnings", work_backlog)
-        self.assertIn("Do not create pull requests in the upstream `Trellis`", work_backlog)
+        self.assertIn("record each follow-up", work_backlog)
+        self.assertIn("upstream Trellis pull request", work_backlog)
 
         work_designs = (
             install.ROOT / "templates/.agents/skills/sd-work-designs/SKILL.md"
@@ -3143,8 +3143,9 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("# SD Work Designs", work_designs)
         self.assertIn("design.md", work_designs)
         self.assertIn("implement.md", work_designs)
-        self.assertIn("Do not run `task.py start`", work_designs)
-        self.assertIn("Parked by sd-work-designs", work_designs)
+        self.assertIn("selector: needs-design", work_designs)
+        self.assertIn("until=merge", work_designs)
+        self.assertIn("until=design", work_designs)
         self.assertIn("numbered list", work_designs)
 
         review_local = (

@@ -318,6 +318,61 @@ class SdlcCommandsTests(InstallTestCase):
                 ):
                     self.assertNotIn(internal_control, normalized_content)
 
+    def test_work_backlog_is_the_single_resumable_full_cycle_controller(self) -> None:
+        backlog = self._skill_text("sd-work-backlog")
+        designs = self._skill_text("sd-work-designs")
+        ship = self._skill_text("sd-ship")
+        backlog_text = " ".join(backlog.split())
+        designs_text = " ".join(designs.split())
+        ship_text = " ".join(ship.split())
+
+        for pin in (
+            "canonical autonomous work-loop controller",
+            "sd-ai-command-pack-work-loop.py",
+            "focus-only=",
+            "focused_backlog_exhausted",
+            "Around a natural clean boundary between approximately eight and twelve",
+            "caller: sd-work-backlog",
+            "return-after: merge-result",
+            "A clean nested housekeeping report is a return value",
+            "Do not emit the overall final response while the helper remains active",
+        ):
+            self.assertIn(pin, backlog_text)
+
+        for pin in (
+            "thin selector entry point",
+            "selector: needs-design",
+            "until=design",
+            "until=merge",
+            "Pass the user's invocation text unchanged",
+        ):
+            self.assertIn(pin, designs_text)
+        self.assertNotIn("task.py start", designs)
+        self.assertIn("SD_SHIP_MERGE_RESULT", ship_text)
+        self.assertIn("trusted `sd-work-backlog` context", ship_text)
+        self.assertIn("does not change stage order", ship_text)
+
+    def test_work_loop_adapters_forward_arguments_and_do_not_duplicate_policy(self) -> None:
+        for name in ("sd-work-backlog", "sd-work-designs"):
+            adapter = install.ROOT / f"templates/.commands/{name}.md"
+            content = " ".join(adapter.read_text(encoding="utf-8").split())
+            with self.subTest(command=name):
+                self.assertIn("Pass all invocation arguments unchanged", content)
+                self.assertIn("focus=", content)
+                self.assertIn("focus-only=", content)
+                self.assertIn("until=design|merge", content)
+                self.assertIn(f"Resolve the `{name}` skill by name", content)
+
+    def test_status_skill_declares_read_only_work_loop_inventory(self) -> None:
+        status = " ".join(self._skill_text("sd-status").split())
+        for pin in (
+            "user-local autonomous work-loop state",
+            "run ID, mode, selector/focus, iteration, phase",
+            "Do not acquire or refresh its lock",
+            "absent state is `none`",
+        ):
+            self.assertIn(pin, status)
+
     def test_usage_guide_documents_ship_lifecycle_ownership(self) -> None:
         guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")
         guide_text = " ".join(guide.split())

@@ -584,6 +584,7 @@ SHARED_SKILL_REFERENCES: dict[str, tuple[str, ...]] = {
         "references/command-catalog.md",
         "references/examples.md",
     ),
+    "sd-work-backlog": ("references/autonomous-loop.md",),
 }
 
 

@@ -128,6 +128,91 @@ Examples: bare text can identify an `sd-retro` topic, `sd-test-gaps` file,
 repository path. Keep `sd-ship` stop points, housekeeping merge controls,
 timeouts, retries, dry-run behavior, and output formats explicit.
 
+## Scenario: Resumable Autonomous Orchestration
+
+### 1. Scope / Trigger
+
+- Trigger: a command repeats multi-phase work across tasks or must survive
+  context compaction, interruption, external PR changes, or process restart.
+- Use one canonical controller with selector-specific entry points; do not let
+  two public skills maintain competing lifecycle loops.
+
+### 2. Signatures
+
+- Canonical controller: `sd-work-backlog [FOCUS] [focus=...] [focus-only=...]
+  [until=design|merge]`.
+- Design selector: `sd-work-designs ...` resolves the controller with trusted
+  `mode: designs`, `selector: needs-design` context.
+- Nested ship context: `caller: sd-work-backlog`, ledger run ID, positive
+  iteration, and `return-after: merge-result`.
+- Durable helper: `scripts/sd-ai-command-pack-work-loop.py` owns the user-local
+  ledger, lock, focus ranking, transitions, reconciliation, and snapshots.
+
+### 3. Contracts
+
+- Platform adapters preserve invocation text unchanged. The canonical skill
+  validates bare focus, repeatable ordered focus, strict focus-only, lifecycle
+  controls, and conflicts before acquiring a lock or mutating repo state.
+- Work exactly one task, branch, and PR at a time. Reconcile ledger state with
+  live Trellis, Git, and GitHub evidence before every phase or iteration
+  transition and before retrying any side effect.
+- User-local state stores only bounded coordination metadata and uses atomic
+  writes, versioned JSON, private permissions where supported, and a
+  recoverable run lock. It never becomes a tracked repository artifact.
+- Existing lifecycle owners remain authoritative. The outer loop invokes
+  `sd-ship until=merge` once; it never separately invokes create-pr, review-pr,
+  watch-pr, finish-work, or housekeeping.
+- A nested ship report is data returned to the controller. It must not become
+  the parent session's final response or start another iteration itself.
+- Context health is evidence-based: green agrees, amber rehydrates and
+  reconciles, red checkpoints and stops or safely parks.
+- Follow-ups are addressed, tasked, captured, parked, or blocked before
+  re-inventory. PR-scoped review learnings remain owned exactly once by the
+  existing review lifecycle.
+
+### 4. Validation & Error Matrix
+
+- Bare plus explicit focus, mixed focus/focus-only, unknown selectors, unknown
+  option-shaped input, or invalid lifecycle values -> usage error before lock.
+- Concurrent active lock -> stop; stale lock -> reconcile live state, then use
+  explicit recovery only when the prior process is gone.
+- Ledger behind verified live state -> advance with amber rehydration; ledger
+  ahead of evidence or duplicate-side-effect attempt -> red checkpoint.
+- Task-local pre-mutation blocker -> park and continue from clean state;
+  uncommitted work, blocking PR, unexplained dirty path, or repository-wide
+  contradiction -> stop the run.
+- Missing/contradictory nested result -> blocked iteration, never a guessed
+  successful merge.
+
+### 5. Good / Base / Bad Cases
+
+- Good: `sd-work-backlog CI pipeline` persists one preferred focus, completes
+  matching tasks first, then continues normal deterministic ranking.
+- Base: no focus retains status/priority/readiness/age/lexical ranking.
+- Bad: a design adapter implements its own loop, or housekeeping prints a clean
+  report and the parent agent exits without re-inventorying or recording a stop.
+
+### 6. Tests Required
+
+- Cover state-root precedence, POSIX/Windows paths, repository identity, private
+  atomic writes, secret-like key rejection, lock concurrency/staleness,
+  transition legality, bounded history, pause/resume, and invalid state.
+- Cover natural and structured focus evidence, ordered bands, preferred
+  fallback, focus-only exhaustion, and pre-mutation argument rejection.
+- Cover green/amber/red reconciliation and verified versus unverified live
+  advancement.
+- Pin canonical-controller, thin-selector, nested-return, status visibility,
+  generated adapter, reference fanout, manifest, and template/root parity.
+
+### 7. Wrong vs Correct
+
+Wrong: duplicate the task loop in `sd-work-designs`, call `sd-create-pr` and
+housekeeping around `sd-ship`, or use retained chat history as phase evidence.
+
+Correct: one state-backed controller composes a selector, delegates one full
+ship lifecycle, reconciles the compact result, processes follow-ups, and emits
+an overall final response only after persisting a verified stop reason.
+
 ## Scenario: Registry-Backed Command Discovery
 
 ### 1. Scope / Trigger

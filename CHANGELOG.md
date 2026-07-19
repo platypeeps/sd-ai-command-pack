@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.21.0 - 2026-07-18
+
+- Make `sd-work-backlog` a resumable autonomous plan-to-merge controller and
+  make `sd-work-designs` its `needs-design` selector, with ordered focus,
+  strict focus-only, planning-only stops, operator controls, and bounded
+  iteration checkpoints.
+- Ship a standard-library, user-local work-loop ledger and lock helper with
+  atomic state, repository identity, legal transitions, conservative focus
+  evidence, context-health reconciliation, and interruption-safe resume.
+- Add trusted nested `sd-ship` results and read-only loop visibility to
+  `sd-status` without changing existing review, finish-work, merge, or cleanup
+  ownership.
+
 ## 0.20.0 - 2026-07-18
 
 - Accept bare primary subjects for retrospective topics, coverage target files,

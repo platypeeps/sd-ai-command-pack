@@ -107,9 +107,12 @@ separate explicit request.
 
 Reports repository delivery state without changing it: branch and working-tree
 counts, cached upstream divergence, pack/Trellis versions, GitHub PR and issue
-inventory, current/open Trellis work, anomalies, and numbered next steps. Use
-`fleet` from any installed checkout to collect a rollout-priority summary for
-every configured consumer after creating the machine-local fleet profile.
+inventory, current/open Trellis work, user-local autonomous loop progress,
+anomalies, and numbered next steps. Loop status includes its run ID, selector
+and focus, iteration, phase, task/PR, counters, heartbeat, context health, and
+checkpoint without mutating the ledger or lock. Use `fleet` from any installed
+checkout to collect a rollout-priority summary for every configured consumer
+after creating the machine-local fleet profile.
 
 ```text
 /sd:status
@@ -164,17 +167,30 @@ ship workflow can own review exactly once in Stage 2.
 
 ### sd-work-backlog
 
-Processes Trellis backlog tasks sequentially: pick one implementation-ready
-task, implement it, publish through `sd-create-pr`, merge and clean up through
-`sd-housekeeping`, then address or record follow-ups before selecting another
-task.
+Runs a resumable autonomous loop over Trellis tasks. It plans missing artifacts,
+implements and validates one task at a time, delegates the complete PR lifecycle
+to `sd-ship until=merge`, processes follow-ups, verifies clean state, then
+re-inventories until a documented stop condition. A user-local atomic ledger
+and lock make it safe to resume after interruption or context compaction.
+
+```text
+/sd:work-backlog
+/sd:work-backlog CI pipeline
+/sd:work-backlog focus="CI pipeline" focus="release automation"
+/sd:work-backlog focus-only="priority:P1"
+```
 
 ### sd-work-designs
 
-Reviews existing Trellis tasks that have real PRDs but still need `design.md`
-and/or `implement.md`, writes implementation proposals and execution guidance
-into those task artifacts, parks tasks that need user input, and reports links
-to every planning document it created or updated.
+Uses the same autonomous controller with a `needs-design` selector. It starts
+with tasks whose real PRDs still need `design.md` or `implement.md`, then carries
+them through implementation and green merge by default. Use `until=design` to
+stop after creating and validating planning artifacts.
+
+```text
+/sd:work-designs CI pipeline
+/sd:work-designs until=design focus-only="scope:ci"
+```
 
 ### sd-full-check
 
@@ -301,6 +317,7 @@ classification, and next steps to `sd-status` in strict mode.
 | `SD_AI_COMMAND_PACK_TOOLCHAIN_PLATFORM` | Advanced/test override for toolchain platform detection. | `uname -s` |
 | `SD_AI_COMMAND_PACK_TOOLCHAIN_HOMEBREW_PREFIXES` | Advanced/test override for colon-separated Homebrew Python prefixes. | `/opt/homebrew:/usr/local` |
 | `SD_AI_COMMAND_PACK_REPO_ROOT` | Advanced/test override for the repository root inspected by the toolchain helper. | Git top-level directory |
+| `SD_AI_COMMAND_PACK_STATE_HOME` | Absolute user-local root for resumable autonomous work-loop ledgers and locks. | XDG state, Windows local app data, or `~/.local/state/sd-ai-command-pack` |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND` | Extra repo-local preflight command for full-check. | unset |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS` | Package scripts to run when a compatible package runner is available. | `typecheck lint test:unit test:integration build test:e2e` |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS` | Boolean flag to skip all package-script checks. | unset |

@@ -703,8 +703,8 @@ class GeneratedParityTests(InstallTestCase):
                 [
                     "Resolve the `sd-work-backlog` skill by name",
                     "one task per iteration",
-                    "sd-create-pr",
-                    "sd-housekeeping",
+                    "sd-ship",
+                    "nested housekeeping report",
                 ],
                 [],
             ),
@@ -1735,8 +1735,8 @@ class GeneratedParityTests(InstallTestCase):
             elif "work-backlog" in file.target.name:
                 self.assertIn("Resolve the `sd-work-backlog` skill by name", content)
                 self.assertIn("one task per iteration", content)
-                self.assertIn("sd-create-pr", content)
-                self.assertIn("sd-housekeeping", content)
+                self.assertIn("sd-ship", content)
+                self.assertIn("nested housekeeping report", content)
             elif "full-check" in file.target.name:
                 self.assertIn("Resolve the `sd-full-check` skill by name", content)
                 self.assertIn("source of truth for the exact checks", content)
@@ -1965,8 +1965,8 @@ class GeneratedParityTests(InstallTestCase):
             "continue": "Resume the current Trellis task or workflow state.",
             "finish-work": "Wrap up the current Trellis coding session.",
             "create-pr": "Create or reuse a PR after SD spec refresh, commit, and push, then run the SD PR review loop.",
-            "work-backlog": "Work through the Trellis backlog one task at a time through SD PR review and housekeeping.",
-            "work-designs": "Add Trellis design and implementation-plan artifacts for tasks that need planning before implementation.",
+            "work-backlog": "Autonomously work the Trellis backlog one task at a time through planning, green merge, follow-ups, and resumable checkpoints.",
+            "work-designs": "Run the autonomous work loop for Trellis tasks that still need design or implementation planning, optionally stopping after design.",
             "audit-repo": "Run a formal multi-dimension repository audit that produces a canonical report and updates the committed findings ledger.",
             "watch-pr": "Watch the current branch's open pull request until it settles, then hand off to the housekeeping merge gate or report the blockers.",
             "fix-ci": "Triage failing CI runs, classify each failure, and drive the run back to green without weakening tests or bypassing guards.",

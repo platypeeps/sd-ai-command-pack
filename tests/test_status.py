@@ -41,11 +41,18 @@ class StatusTests(InstallTestCase):
             "status_test_fleet_lib",
         )
 
+    def load_work_loop_module(self):
+        return self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-work-loop.py",
+            "status_test_work_loop",
+        )
+
     def make_portable_status_install(self, root: Path) -> Path:
         scripts = root / "scripts"
         scripts.mkdir(parents=True)
         for name in (
             "sd-ai-command-pack-status.py",
+            "sd-ai-command-pack-work-loop.py",
             "sd_ai_command_pack_fleet_lib.py",
         ):
             shutil.copyfile(PACK_ROOT / "templates/scripts" / name, scripts / name)
@@ -105,7 +112,10 @@ class StatusTests(InstallTestCase):
         return root
 
     def run_status(
-        self, root: Path, *args: str
+        self,
+        root: Path,
+        *args: str,
+        extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
@@ -117,12 +127,47 @@ class StatusTests(InstallTestCase):
                 *args,
             ],
             cwd=root,
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            env={
+                **os.environ,
+                "PYTHONDONTWRITEBYTECODE": "1",
+                **(extra_env or {}),
+            },
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=False,
         )
+
+    def start_loop_state(
+        self,
+        root: Path,
+        state_root: Path,
+        *,
+        status: str = "active",
+        phase: str = "implementing",
+    ) -> dict[str, object]:
+        loop = self.load_work_loop_module()
+        identity = loop.repository_identity(root)
+        state = loop.new_state(
+            identity,
+            mode="backlog",
+            selector="all",
+            focus=loop.normalize_focus(preferred=["CI pipeline"]),
+            until="merge",
+            run_id="status-loop-run",
+        )
+        state["status"] = status
+        state["phase"] = phase
+        state["current"]["task"] = "ci-pipeline-task"
+        state["current"]["branch"] = "codex/ci-pipeline-task"
+        state["current"]["prNumber"] = 42
+        state["counters"]["completed"] = 2
+        state_path, lock_path = loop.state_paths(identity, state_root)
+        if status == "active":
+            loop.acquire_lock(lock_path, state)
+        loop.validate_state(state)
+        loop.atomic_write_json(state_path, state)
+        return state
 
     def working_files_snapshot(self, root: Path) -> dict[str, str]:
         snapshot: dict[str, str] = {}
@@ -195,6 +240,129 @@ class StatusTests(InstallTestCase):
             self.git_output(root, "for-each-ref", "--format=%(refname) %(objectname)"),
             before_refs,
         )
+
+    def test_local_status_reports_active_work_loop_in_json_and_human_output(
+        self,
+    ) -> None:
+        root = self.make_status_repo()
+        state_root = root.parent / "loop-state"
+        self.start_loop_state(root, state_root)
+        env = {"SD_AI_COMMAND_PACK_STATE_HOME": str(state_root)}
+
+        machine = self.run_status(root, "--json", extra_env=env)
+        human = self.run_status(root, extra_env=env)
+
+        self.assertEqual(machine.returncode, 0, machine.stdout)
+        loop = json.loads(machine.stdout)["workLoop"]
+        self.assertEqual(loop["status"], "active")
+        self.assertEqual(loop["runId"], "status-loop-run")
+        self.assertEqual(loop["iteration"], 1)
+        self.assertEqual(loop["phase"], "implementing")
+        self.assertEqual(loop["task"], "ci-pipeline-task")
+        self.assertEqual(loop["prNumber"], 42)
+        self.assertEqual(loop["focusMode"], "prefer")
+        self.assertEqual(loop["focus"], ["CI pipeline"])
+        self.assertEqual(loop["contextHealth"]["level"], "green")
+        self.assertEqual(loop["counters"]["completed"], 2)
+        self.assertEqual(human.returncode, 0, human.stdout)
+        self.assertIn("==> Work Loop", human.stdout)
+        self.assertIn("status-loop-run [active]", human.stdout)
+        self.assertIn("context health green", human.stdout)
+        self.assertIn("Resume active SD work loop status-loop-run", human.stdout)
+
+    def test_local_status_reports_paused_stopped_and_completed_loop_states(
+        self,
+    ) -> None:
+        root = self.make_status_repo()
+        for loop_status in ("paused", "stopped", "completed"):
+            with self.subTest(status=loop_status):
+                state_root = root.parent / f"loop-state-{loop_status}"
+                self.start_loop_state(
+                    root,
+                    state_root,
+                    status=loop_status,
+                    phase="stopped",
+                )
+                result = self.run_status(
+                    root,
+                    "--json",
+                    extra_env={"SD_AI_COMMAND_PACK_STATE_HOME": str(state_root)},
+                )
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertEqual(json.loads(result.stdout)["workLoop"]["status"], loop_status)
+
+    def test_invalid_work_loop_state_is_an_explicit_status_anomaly(self) -> None:
+        root = self.make_status_repo()
+        loop = self.load_work_loop_module()
+        state_root = root.parent / "loop-state-invalid"
+        identity = loop.repository_identity(root)
+        state_path, _lock_path = loop.state_paths(identity, state_root)
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text("not-json\n", encoding="utf-8")
+
+        result = self.run_status(
+            root,
+            extra_env={"SD_AI_COMMAND_PACK_STATE_HOME": str(state_root)},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("SD status: attention", result.stdout)
+        self.assertIn("- state: invalid", result.stdout)
+        self.assertIn("work-loop state is invalid", result.stdout)
+
+    def test_collect_work_loop_handles_helper_contract_and_syntax_failures(self) -> None:
+        root = self.make_status_repo()
+        status = self.load_status_module()
+        spec = mock.Mock()
+        spec.loader = mock.Mock()
+
+        with (
+            mock.patch.object(
+                status.importlib.util,
+                "spec_from_file_location",
+                return_value=spec,
+            ),
+            mock.patch.object(
+                status.importlib.util,
+                "module_from_spec",
+                return_value=object(),
+            ),
+        ):
+            missing_contract = status.collect_work_loop(root)
+
+        self.assertEqual(missing_contract["status"], "invalid")
+        self.assertIn("status_snapshot", missing_contract["error"])
+
+        spec.loader.exec_module.side_effect = SyntaxError("corrupt helper")
+        with mock.patch.object(
+            status.importlib.util,
+            "spec_from_file_location",
+            return_value=spec,
+        ):
+            syntax_failure = status.collect_work_loop(root)
+
+        self.assertEqual(syntax_failure["status"], "invalid")
+        self.assertIn("corrupt helper", syntax_failure["error"])
+
+        module = mock.Mock()
+        module.status_snapshot.side_effect = KeyError("mode")
+        spec.loader.exec_module.side_effect = None
+        with (
+            mock.patch.object(
+                status.importlib.util,
+                "spec_from_file_location",
+                return_value=spec,
+            ),
+            mock.patch.object(
+                status.importlib.util,
+                "module_from_spec",
+                return_value=module,
+            ),
+        ):
+            malformed_state = status.collect_work_loop(root)
+
+        self.assertEqual(malformed_state["status"], "invalid")
+        self.assertIn("mode", malformed_state["error"])
 
     def test_local_status_counts_stashes_without_marking_attention(self) -> None:
         root = self.make_status_repo()

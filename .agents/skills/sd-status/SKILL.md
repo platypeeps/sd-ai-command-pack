@@ -56,9 +56,12 @@ reinterpret them as shell text.
    local refs and reports them as `cached`; do not fetch merely to make the
    report fresher.
 4. For local mode, report repository identity, branch and working-tree counts,
-   Git stash count, cached upstream divergence, default/local/remote branches, installed pack
-   and Trellis versions, relevant PR, open PRs/issues, current and queued
-   Trellis work, anomalies, and numbered next steps.
+   Git stash count, cached upstream divergence, default/local/remote branches,
+   installed pack and Trellis versions, relevant PR, open PRs/issues, current
+   and queued Trellis work, the user-local autonomous work-loop state,
+   anomalies, and numbered next steps. Loop state includes run ID, mode,
+   selector/focus, iteration, phase, task, PR, counters, heartbeat, context
+   health, checkpoint, lock status, and stop reason when present.
 5. For fleet mode, preserve registry rollout order and show one bounded row per
    consumer with checkout availability, branch/tree/upstream state, stash count, installed
    versus target pack version, PR counts, and task counts. Put missing, dirty,
@@ -76,6 +79,9 @@ reinterpret them as shell text.
   a status request. Recommend a separate next invocation when action is useful.
 - Do not expose credentials or raw authenticated remote URLs. Repository
   identity is limited to a validated GitHub owner/name slug.
+- Read work-loop state through the installed helper's read-only snapshot. Do
+  not acquire or refresh its lock, heartbeat, checkpoint, or ledger. Invalid
+  loop state is an explicit anomaly; absent state is `none`, not an error.
 - Report unavailable optional sources explicitly. Do not silently convert
   failed GitHub or version discovery into an empty healthy result.
 - Keep human output bounded. Use `--json` when the caller needs the complete
