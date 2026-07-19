@@ -173,8 +173,11 @@ class SdlcCommandsTests(InstallTestCase):
 
         fleet = self._skill_text("sd-fleet-refresh")
         audit = self._skill_text("sd-audit-repo")
+        status = self._skill_text("sd-status")
         self.assertIn("normalized", fleet.split("## Workflow", 1)[0].lower())
         self.assertIn("normalized", audit.split("## Pipeline", 1)[0].lower())
+        self.assertNotIn("[fleet|REPO_PATH] [--repo PATH]", status)
+        self.assertIn("sd-ai-command-pack-status.py --repo PATH", status)
 
         guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")
         self.assertIn("`sd-status --repo /path/to/repo`", guide)

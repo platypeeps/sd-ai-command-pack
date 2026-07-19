@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-19T02:30:41Z",
+  "validatedAt": "2026-07-19T02:39:16Z",
   "packVersion": "0.20.0",
-  "payloadDigest": "sha256:7135c5a14bdcfb06df52b3d5aef0ab8f1a591d8da0a2ff778808b778a2c6e378",
+  "payloadDigest": "sha256:35328e07ca3d44f63e08aaefb0bbbe59f7527fe7b62cad4ec105b4e0bbf75a94",
   "fleetManifestDigest": "sha256:1776b0a45d7faa3b20fc61ff0ef8587f7fc577eebc503b7ddce0563479ef247a",
   "consumers": [
     {
@@ -121,7 +121,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "deb89077f19c99fd9ab3175cf4022e9f73c8bb9c",
+      "baseCommit": "850d51bcba55010c190e9f4b41f5fd6f8aca3ef0",
       "status": "passed",
       "prepares": [
         [

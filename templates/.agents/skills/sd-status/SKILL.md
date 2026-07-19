@@ -44,7 +44,11 @@ reinterpret them as shell text.
 
    ```bash
    bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-     scripts/sd-ai-command-pack-status.py [fleet|REPO_PATH] [--repo PATH] \
+     scripts/sd-ai-command-pack-status.py [fleet|REPO_PATH] \
+       [--fleet-manifest PATH] [--json] [--no-network]
+   # Or, for explicit local repository selection:
+   bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+     scripts/sd-ai-command-pack-status.py --repo PATH \
        [--fleet-manifest PATH] [--json] [--no-network]
    ```
 
