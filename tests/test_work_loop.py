@@ -537,6 +537,67 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(resumed["phase"], "checkpoint")
         self.assertFalse((root / ".sd-ai-command-pack/work-loop.json").exists())
 
+    def test_cli_resume_rejects_conflicting_configuration_and_focus(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, _state_path, _lock_path = self.make_state(
+            module,
+            root,
+            state_root,
+            focus=module.normalize_focus(preferred=["CI pipeline"]),
+        )
+        module.release_lock(_lock_path, state["runId"])
+        state["status"] = "paused"
+        module.atomic_write_json(_state_path, state)
+
+        conflicts = (
+            (["--mode", "designs"], "--mode"),
+            (["--selector", "needs-design"], "--selector"),
+            (["--until", "design"], "--until"),
+            (["--focus-only", "release"], "focus subcommand"),
+        )
+        for extra_args, expected in conflicts:
+            with self.subTest(extra_args=extra_args):
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    result = module.main(
+                        [
+                            "--state-home",
+                            str(state_root),
+                            "start",
+                            "--repo",
+                            str(root),
+                            *extra_args,
+                        ]
+                    )
+                self.assertEqual(result, 2)
+                self.assertIn(expected, stderr.getvalue())
+                self.assertEqual(module.read_json(_state_path)["status"], "paused")
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "start",
+                    "--repo",
+                    str(root),
+                    "--mode",
+                    "backlog",
+                    "--selector",
+                    "all",
+                    "--until",
+                    "merge",
+                    "--focus",
+                    "CI pipeline",
+                    "--json",
+                ]
+            )
+        self.assertEqual(result, 0, stdout.getvalue())
+        self.assertEqual(json.loads(stdout.getvalue())["runId"], state["runId"])
+
     def test_cli_focus_changes_require_an_explicit_mode_and_task_boundary(self) -> None:
         module = self.load_module()
         root = self.make_repo()

@@ -1027,9 +1027,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     start = subparsers.add_parser("start", help="start or safely resume a loop")
     start.add_argument("--repo", type=Path, default=Path.cwd())
-    start.add_argument("--mode", choices=("backlog", "designs"), default="backlog")
-    start.add_argument("--selector", choices=("all", "needs-design"), default="all")
-    start.add_argument("--until", choices=("design", "merge"), default="merge")
+    start.add_argument("--mode", choices=("backlog", "designs"))
+    start.add_argument("--selector", choices=("all", "needs-design"))
+    start.add_argument("--until", choices=("design", "merge"))
     start.add_argument("--focus", action="append", default=[])
     start.add_argument("--focus-only", action="append", default=[])
     start.add_argument("--bare-focus")
@@ -1132,6 +1132,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 preferred=args.focus,
                 only=args.focus_only,
             )
+            focus_requested = bool(
+                args.bare_focus is not None or args.focus or args.focus_only
+            )
             if state_path.is_file():
                 state = read_json(state_path)
                 validate_state(state)
@@ -1143,6 +1146,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if args.run_id and args.run_id != state["runId"]:
                         raise WorkLoopError(
                             f"resumable loop already exists as run {state['runId']}"
+                        )
+                    conflicting_options = [
+                        name
+                        for name, requested, persisted in (
+                            ("--mode", args.mode, state["mode"]),
+                            ("--selector", args.selector, state["selector"]),
+                            ("--until", args.until, state["until"]),
+                        )
+                        if requested is not None and requested != persisted
+                    ]
+                    if conflicting_options:
+                        raise WorkLoopError(
+                            "resume arguments conflict with the persisted loop: "
+                            + ", ".join(conflicting_options)
+                        )
+                    if focus_requested and focus != state["focus"]:
+                        raise WorkLoopError(
+                            "resume focus conflicts with the persisted loop; use the "
+                            "focus subcommand at a task boundary"
                         )
                     acquire_lock(
                         lock_path,
@@ -1157,10 +1179,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     return 0
             state = new_state(
                 identity,
-                mode=args.mode,
-                selector=args.selector,
+                mode=args.mode or "backlog",
+                selector=args.selector or "all",
                 focus=focus,
-                until=args.until,
+                until=args.until or "merge",
                 run_id=args.run_id,
             )
             acquire_lock(
