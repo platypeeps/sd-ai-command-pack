@@ -29,14 +29,14 @@ Remove the expired REVIEW_PREFLIGHT_PR_BODY fallback from current shipped guidan
 
 ## Acceptance Criteria
 
-- [ ] No current shipped command, skill, guide, or reference advertises
+- [x] No current shipped command, skill, guide, or reference advertises
       `REVIEW_PREFLIGHT_PR_BODY` as supported configuration.
-- [ ] Historical changelog and Trellis task/audit records remain intact.
-- [ ] A focused regression fails when the retired variable is reintroduced in
+- [x] Historical changelog and Trellis task/audit records remain intact.
+- [x] A focused regression fails when the retired variable is reintroduced in
       any current shipped documentation or skill surface.
-- [ ] The canonical template and installed `sd-full-check` skill are
+- [x] The canonical template and installed `sd-full-check` skill are
       byte-identical.
-- [ ] Focused review-scope tests, source/template parity checks, and full-check
+- [x] Focused review-scope tests, source/template parity checks, and full-check
       pass.
 
 ## Out of Scope

@@ -3,7 +3,7 @@
   "name": "remove-retired-review-body-skill-doc",
   "title": "Remove retired review-body fallback from shipped skill documentation",
   "description": "Remove the expired REVIEW_PREFLIGHT_PR_BODY fallback from current shipped guidance and extend regression coverage across shipped documentation surfaces.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
