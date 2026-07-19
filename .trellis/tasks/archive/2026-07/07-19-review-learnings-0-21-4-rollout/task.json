@@ -1,0 +1,29 @@
+{
+  "id": "review-learnings-0-21-4-rollout",
+  "name": "review-learnings-0-21-4-rollout",
+  "title": "Refresh review learnings after 0.21.4 rollout",
+  "description": "Scan the completed 0.21.4 source and fleet review cycle, refresh the managed repository review-learning block, and ensure durable preventive actions are implemented or tracked without duplicating existing tasks.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-19",
+  "completedAt": "2026-07-19",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "docs/review-learnings.md",
+    "scripts/sd-ai-command-pack-review-learnings.py"
+  ],
+  "notes": "Two-day scan inspected 25 PRs and 54 Copilot comments. All signals are historical after resolving three verified stale threads from merged PR #154. Existing prevention was confirmed; the distinct generated remote-path validation defect is tracked by 07-19-review-learning-remote-path-rendering.",
+  "meta": {}
+}
