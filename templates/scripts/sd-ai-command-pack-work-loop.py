@@ -966,6 +966,8 @@ def validated_evidence(
         {"branch", "head"} & set(updates)
     )
     if verify_branch:
+        if not isinstance(candidate_branch, str):
+            raise WorkLoopError("branch evidence must be a non-empty string")
         branch_head = _branch_commit(evidence_repo, candidate_branch)
         if branch_head is None:
             raise WorkLoopError(
