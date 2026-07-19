@@ -877,6 +877,7 @@ assert.deepEqual(
 
         (task / "implement.jsonl").write_text(context, encoding="utf-8")
         (task / "check.jsonl").write_text(context, encoding="utf-8")
+        task_json.write_text('{"status":"in_progress"}\n', encoding="utf-8")
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
@@ -962,6 +963,91 @@ assert.deepEqual(
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
             "checked 1 changed in-progress, completed, or archived Trellis task context file(s)",
+            result.stdout,
+        )
+
+    def test_review_preflight_rejects_completed_task_outside_archive(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        task = root / ".trellis/tasks/07-19-stranded"
+        task.mkdir(parents=True)
+        (task / "task.json").write_text(
+            '{"id":"stranded","status":"completed"}\n', encoding="utf-8"
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "FAIL .trellis/tasks/07-19-stranded/task.json has status completed outside",
+            result.stdout,
+        )
+        self.assertIn(
+            "task.py archive 07-19-stranded",
+            result.stdout,
+        )
+
+    def test_review_preflight_allows_archived_noncompleted_and_symlinked_tasks(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        for name, status in (("07-19-planned", "planning"), ("07-19-active", "in_progress")):
+            task = root / ".trellis/tasks" / name
+            task.mkdir(parents=True)
+            (task / "task.json").write_text(
+                json.dumps({"id": name, "status": status}) + "\n",
+                encoding="utf-8",
+            )
+        archived = root / ".trellis/tasks/archive/2026-07/07-19-complete"
+        archived.mkdir(parents=True)
+        (archived / "task.json").write_text(
+            '{"id":"archived","status":"completed"}\n', encoding="utf-8"
+        )
+        outside = root / "outside-completed-task"
+        outside.mkdir()
+        (outside / "task.json").write_text(
+            '{"id":"symlinked","status":"completed"}\n', encoding="utf-8"
+        )
+        try:
+            (root / ".trellis/tasks/07-19-symlinked").symlink_to(
+                outside, target_is_directory=True
+            )
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"symlinks are not available: {exc}")
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "checked 2 active-root Trellis task record(s); none is completed outside archive",
+            result.stdout,
+        )
+
+    def test_review_preflight_rejects_malformed_active_root_task_record(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        task = root / ".trellis/tasks/07-19-malformed"
+        task.mkdir(parents=True)
+        (task / "task.json").write_text("{malformed\n", encoding="utf-8")
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            ".trellis/tasks/07-19-malformed/task.json could not be parsed as JSON while checking completed-task location",
             result.stdout,
         )
 

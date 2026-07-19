@@ -413,8 +413,9 @@ bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
 `sd-status` is the read-only delivery snapshot for a repository. It reports the
 branch, staged/unstaged/untracked counts, Git stash count, upstream ahead/behind state, default
 and local/remote branches, installed SD pack and Trellis versions, relevant PR,
-open PRs/issues, current/in-progress/planned Trellis work, user-local autonomous
-loop state, anomalies, and numbered next steps. Loop state includes run ID,
+open PRs/issues, current/in-progress/planned Trellis work, completed tasks
+stranded outside the Trellis archive, user-local autonomous loop state,
+anomalies, and numbered next steps. Loop state includes run ID,
 mode/selector/focus, iteration, phase, task/PR, counters, heartbeat, context
 health, checkpoint, lock, and stop reason. Reading it never refreshes the
 ledger or lock. The status adapter accepts terminal `none`, `invalid`, and
@@ -527,7 +528,10 @@ Planning scaffolds, untouched legacy archives, and
 symlinked context files are skipped. Journal history is append-only: newly
 added/current sessions remain editable, but an older session must be restored
 and the intended current session edited by its explicit `## Session <n>:`
-heading. Target repos can tune roots,
+heading. A separate repository-wide task-location check fails when a direct
+child of `.trellis/tasks/` has completed status, names the offending record,
+and provides the Trellis archive command; archived, non-completed, and
+symlinked task entries are ignored. Target repos can tune roots,
 path-reference prefixes, integration paths, optional paths, copied-template
 paths, and the `diffSizeWarningLines`, `largeFileWarningLines`,
 `sourceReviewWarningLines`, and `untrackedFileReadLimitBytes` warning thresholds

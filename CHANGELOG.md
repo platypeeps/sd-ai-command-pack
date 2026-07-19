@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.21.7 - 2026-07-19
+
+- Report completed Trellis tasks stranded outside the archive in `sd-status`
+  and fail review preflight with the exact `task.py archive` remediation.
+- Ignore archived, non-completed, nested, and symlinked task entries while
+  keeping the recurrence scan bounded to direct active-task records.
+
 ## 0.21.6 - 2026-07-19
 
 - Validate dynamically loaded work-loop status snapshots before rendering and

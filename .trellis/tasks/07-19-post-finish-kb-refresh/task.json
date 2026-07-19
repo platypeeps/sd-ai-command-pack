@@ -1,0 +1,33 @@
+{
+  "id": "post-finish-kb-refresh",
+  "name": "post-finish-kb-refresh",
+  "title": "Refresh generated KB after post-review Trellis lifecycle mutations",
+  "description": "Keep an existing generated Obsidian KB fresh after task archival and post-merge follow-up mutations without creating the KB in repositories that do not use it.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-19",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "templates/.agents/skills/sd-ship/SKILL.md",
+    "templates/.agents/skills/sd-work-backlog/SKILL.md",
+    "templates/.agents/skills/sd-housekeeping/SKILL.md",
+    "templates/scripts/sd-ai-command-pack-update-spec-kb.py",
+    "templates/scripts/sd-ai-command-pack-full-check.sh",
+    "tests/test_full_check.py"
+  ],
+  "notes": "",
+  "meta": {}
+}

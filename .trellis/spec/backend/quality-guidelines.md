@@ -95,6 +95,10 @@ that exercise the generic JavaScript review preflight.
   sibling context files. Parsed records with an own `_example` key fail;
   planning scaffolds, untouched historical archives, and symlinked context
   files remain outside the check.
+- A repository-wide bounded scan inspects regular `task.json` files in direct
+  `.trellis/tasks/` children. A record with `status: completed` fails with the
+  Trellis archive command; the `archive/` subtree, non-completed records,
+  nested paths, and symlinks remain outside the scan.
 
 ### 4. Validation & Error Matrix
 
@@ -114,6 +118,9 @@ that exercise the generic JavaScript review preflight.
   current workspace disappears.
 - Changed in-progress/completed/archived context owns `_example` -> fail with
   the exact file and line plus replacement/removal guidance.
+- Completed direct active-root task -> fail with the exact `task.json` path and
+  `task.py archive` remediation; archived, planning, in-progress, and symlinked
+  records -> pass.
 - Planning context, untouched archived context, or symlinked context -> skip
   without reading outside the repository.
 - Added boundary-sensitive code -> warn with stable risk categories and the

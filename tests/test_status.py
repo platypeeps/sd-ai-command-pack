@@ -270,6 +270,65 @@ class StatusTests(InstallTestCase):
         self.assertIn("context health green", human.stdout)
         self.assertIn("Resume active SD work loop status-loop-run", human.stdout)
 
+    def test_completed_active_root_tasks_are_anomalous_and_archived_tasks_are_ignored(
+        self,
+    ) -> None:
+        root = self.make_status_repo()
+        stranded = root / ".trellis/tasks/completed-fixture"
+        stranded.mkdir()
+        (stranded / "task.json").write_text(
+            json.dumps(
+                {
+                    "id": "completed-fixture",
+                    "title": "Completed fixture",
+                    "status": "completed",
+                    "priority": "P2",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        archived = root / ".trellis/tasks/archive/2026-07/archived-fixture"
+        archived.mkdir(parents=True)
+        (archived / "task.json").write_text(
+            '{"id":"archived-fixture","status":"completed"}\n',
+            encoding="utf-8",
+        )
+        outside = root / "outside-completed-task"
+        outside.mkdir()
+        (outside / "task.json").write_text(
+            '{"id":"symlinked-fixture","status":"completed"}\n',
+            encoding="utf-8",
+        )
+        try:
+            (root / ".trellis/tasks/symlinked-fixture").symlink_to(
+                outside, target_is_directory=True
+            )
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"symlinks are not available: {exc}")
+
+        machine = self.run_status(root, "--json")
+        human = self.run_status(root)
+
+        self.assertEqual(machine.returncode, 0, machine.stdout)
+        report = json.loads(machine.stdout)
+        completed = report["trellis"]["completedOutsideArchive"]
+        self.assertEqual([task["id"] for task in completed], ["completed-fixture"])
+        self.assertTrue(
+            any(
+                "1 completed Trellis task(s) remain outside" in anomaly
+                and "completed-fixture" in anomaly
+                for anomaly in report["anomalies"]
+            )
+        )
+        self.assertTrue(
+            any("task.py archive <task-dir>" in step for step in report["nextSteps"])
+        )
+        self.assertEqual(human.returncode, 0, human.stdout)
+        self.assertIn("SD status: attention", human.stdout)
+        self.assertIn("completed Trellis tasks outside archive (1)", human.stdout)
+        self.assertIn("completed-fixture", human.stdout)
+
     def test_local_status_reports_paused_stopped_and_completed_loop_states(
         self,
     ) -> None:
