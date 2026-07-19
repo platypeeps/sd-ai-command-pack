@@ -378,6 +378,8 @@ class StatusTests(InstallTestCase):
 
         positional = status.parse_args([str(root), "--json", "--no-network"])
         explicit = status.parse_args(["--repo", str(root), "--json"])
+        relative = status.parse_args(["../status-repo"])
+        option_like = status.parse_args(["--", "-status-repo"])
         fleet = status.parse_args(["fleet", "--no-network"])
         current = status.parse_args([])
 
@@ -387,6 +389,8 @@ class StatusTests(InstallTestCase):
         self.assertTrue(positional.no_network)
         self.assertIsNone(explicit.mode)
         self.assertEqual(explicit.repo, root)
+        self.assertEqual(relative.repo, Path("../status-repo"))
+        self.assertEqual(option_like.repo, Path("-status-repo"))
         self.assertEqual(fleet.mode, "fleet")
         self.assertEqual(current.repo, Path.cwd())
 
