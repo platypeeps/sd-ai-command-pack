@@ -116,6 +116,13 @@ reported as bounded `invalid` anomalies instead of rendering absent metadata.
 The shared preflight fails when a completed task remains directly under
 `.trellis/tasks/` and reports the `task.py archive` remediation; `sd-status`
 surfaces the same condition without mutating it.
+
+Autonomous work loops keep lifecycle phases separate from mutable Git/PR facts.
+The shipped work-loop helper's `evidence` subcommand records verified commit,
+PR, review-fix, finish-work, and merge facts atomically without an artificial
+checkpoint transition. Stable task/base identity and Git ancestry checks keep
+real contradictions fail-closed, while successful recovery clears obsolete
+ready or blocked checkpoints.
 Use `fleet` from any installed
 checkout to collect a rollout-priority summary for every configured consumer
 after creating the machine-local fleet profile.

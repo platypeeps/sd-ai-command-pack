@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Defines the canonical resumable orchestration, generated-skill ownership, lifecycle transition, and evidence reconciliation contracts."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Guides the state flow across helper CLI, durable ledger, shared skill, generated mirrors, and status consumers."}

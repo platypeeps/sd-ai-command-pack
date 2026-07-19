@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.23.0 - 2026-07-19
+
+- Add an atomic work-loop `evidence` operation for verified same-phase commit,
+  pull-request, review-fix, finish-work, and merge updates.
+- Keep stable task/base identity and invalid Git ancestry, branch, or PR changes
+  fail-closed while letting successful recovery clear obsolete checkpoints.
+
 ## 0.22.0 - 2026-07-19
 
 - Add `--if-present` to the shipped Obsidian KB helper so lifecycle workflows
