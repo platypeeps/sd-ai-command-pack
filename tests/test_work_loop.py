@@ -286,6 +286,27 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"value": "before"})
         self.assertEqual(list(target.parent.glob("*.tmp")), [])
 
+    def test_validation_and_persistence_use_the_same_size_limit(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(preferred=["CI pipeline"]),
+            until="merge",
+            run_id="run-1",
+        )
+        compact_size = len(json.dumps(state, sort_keys=True).encode("utf-8"))
+        disk_size = len(module._json_payload(state).encode("utf-8"))
+        self.assertGreater(disk_size, compact_size)
+
+        with mock.patch.object(module, "MAX_LEDGER_BYTES", disk_size - 1):
+            with self.assertRaisesRegex(module.WorkLoopError, "exceeds"):
+                module.validate_state(state)
+            with self.assertRaisesRegex(module.WorkLoopError, "oversized"):
+                module.atomic_write_json(root.parent / "state/state.json", state)
+
     def test_lock_rejects_concurrency_and_requires_explicit_stale_recovery(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -313,6 +334,16 @@ class WorkLoopTests(InstallTestCase):
             module.acquire_lock(lock_path, second)
         module.acquire_lock(lock_path, second, recover_stale=True)
         self.assertEqual(module.read_json(lock_path)["runId"], "run-2")
+
+        module.release_lock(lock_path, second["runId"])
+        lock_path.write_text("{broken\n", encoding="utf-8")
+        corrupt_lock = lock_path.read_bytes()
+        with self.assertRaisesRegex(module.WorkLoopError, "unreadable"):
+            module.acquire_lock(lock_path, first)
+        self.assertEqual(lock_path.read_bytes(), corrupt_lock)
+
+        module.acquire_lock(lock_path, first, recover_stale=True)
+        self.assertEqual(module.read_json(lock_path)["runId"], first["runId"])
 
     def test_legal_transitions_increment_iteration_and_clear_current_state(self) -> None:
         module = self.load_module()

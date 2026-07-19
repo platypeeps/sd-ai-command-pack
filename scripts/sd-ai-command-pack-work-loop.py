@@ -259,6 +259,13 @@ def _reject_secret_keys(value: object, *, path: str = "state") -> None:
             _reject_secret_keys(item, path=f"{path}[{index}]")
 
 
+def _json_payload(value: Mapping[str, Any]) -> str:
+    try:
+        return json.dumps(value, indent=2, sort_keys=True) + "\n"
+    except (TypeError, ValueError) as error:
+        raise WorkLoopError(f"work-loop state is not JSON serializable: {error}") from error
+
+
 def validate_state(state: Mapping[str, Any]) -> None:
     if state.get("schemaVersion") != SCHEMA_VERSION:
         raise WorkLoopError(
@@ -382,7 +389,7 @@ def validate_state(state: Mapping[str, Any]) -> None:
     ):
         raise WorkLoopError("work-loop stop reason is malformed")
     _reject_secret_keys(state)
-    encoded = json.dumps(state, sort_keys=True).encode("utf-8")
+    encoded = _json_payload(state).encode("utf-8")
     if len(encoded) > MAX_LEDGER_BYTES:
         raise WorkLoopError(
             f"work-loop state exceeds {MAX_LEDGER_BYTES} bytes; compact it before writing"
@@ -403,7 +410,7 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def atomic_write_json(path: Path, value: Mapping[str, Any]) -> None:
     ensure_private_directory(path.parent)
-    payload = json.dumps(value, indent=2, sort_keys=True) + "\n"
+    payload = _json_payload(value)
     if len(payload.encode("utf-8")) > MAX_LEDGER_BYTES:
         raise WorkLoopError(f"refusing to write oversized work-loop state: {path}")
     descriptor, temporary_name = tempfile.mkstemp(
@@ -704,7 +711,21 @@ def acquire_lock(
         try:
             descriptor = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError:
-            current = read_json(lock_path)
+            try:
+                current = read_json(lock_path)
+            except WorkLoopError as error:
+                if not recover_stale:
+                    raise WorkLoopError(
+                        "work-loop lock is unreadable; inspect it or retry with "
+                        "--recover-stale-lock"
+                    ) from error
+                try:
+                    lock_path.unlink()
+                except OSError as unlink_error:
+                    raise WorkLoopError(
+                        f"cannot recover unreadable work-loop lock: {unlink_error}"
+                    ) from unlink_error
+                continue
             if current.get("runId") == state["runId"]:
                 current["heartbeatAt"] = utc_now()
                 atomic_write_json(lock_path, current)
@@ -722,8 +743,7 @@ def acquire_lock(
                 raise WorkLoopError(f"cannot recover stale work-loop lock: {error}") from error
             continue
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            json.dump(payload, stream, indent=2, sort_keys=True)
-            stream.write("\n")
+            stream.write(_json_payload(payload))
             stream.flush()
             os.fsync(stream.fileno())
         return
