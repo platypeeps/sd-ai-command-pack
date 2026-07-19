@@ -31,6 +31,32 @@ SECRET_KEY_RE = re.compile(
     r"(?:token|secret|password|credential|api[_-]?key)", re.IGNORECASE
 )
 STATUSES = frozenset({"active", "paused", "stopped", "completed"})
+MODES = frozenset({"backlog", "designs"})
+SELECTORS = frozenset({"all", "needs-design"})
+UNTIL_VALUES = frozenset({"design", "merge"})
+CURRENT_FIELDS = frozenset(
+    {
+        "task",
+        "branch",
+        "head",
+        "baseBranch",
+        "prNumber",
+        "prUrl",
+        "lastShippedSha",
+    }
+)
+COUNTER_FIELDS = frozenset(
+    {
+        "completed",
+        "parked",
+        "blocked",
+        "skipped",
+        "failures",
+        "mergedPrs",
+        "reviewRounds",
+        "ciRetries",
+    }
+)
 PHASES = (
     "inventory",
     "selected",
@@ -246,18 +272,27 @@ def validate_state(state: Mapping[str, Any]) -> None:
         for key in ("root", "digest", "label")
     ):
         raise WorkLoopError("work-loop repository identity is malformed")
-    if state.get("status") not in STATUSES:
+    if not isinstance(state.get("status"), str) or state["status"] not in STATUSES:
         raise WorkLoopError(f"invalid work-loop status: {state.get('status')!r}")
-    if state.get("phase") not in PHASE_ORDER:
+    if not isinstance(state.get("mode"), str) or state["mode"] not in MODES:
+        raise WorkLoopError(f"invalid work-loop mode: {state.get('mode')!r}")
+    if (
+        not isinstance(state.get("selector"), str)
+        or state["selector"] not in SELECTORS
+    ):
+        raise WorkLoopError(f"invalid work-loop selector: {state.get('selector')!r}")
+    if not isinstance(state.get("until"), str) or state["until"] not in UNTIL_VALUES:
+        raise WorkLoopError(f"invalid work-loop until value: {state.get('until')!r}")
+    if not isinstance(state.get("phase"), str) or state["phase"] not in PHASE_ORDER:
         raise WorkLoopError(f"invalid work-loop phase: {state.get('phase')!r}")
     if not isinstance(state.get("iteration"), int) or state["iteration"] < 1:
         raise WorkLoopError("work-loop iteration must be a positive integer")
     focus = state.get("focus")
-    if not isinstance(focus, dict) or focus.get("mode") not in {
-        "none",
-        "prefer",
-        "only",
-    }:
+    if (
+        not isinstance(focus, dict)
+        or not isinstance(focus.get("mode"), str)
+        or focus["mode"] not in {"none", "prefer", "only"}
+    ):
         raise WorkLoopError("work-loop focus is malformed")
     originals = focus.get("original")
     selectors = focus.get("selectors")
@@ -277,7 +312,8 @@ def validate_state(state: Mapping[str, Any]) -> None:
         field = selector.get("field")
         value = selector.get("value")
         if (
-            kind not in {"natural", "structured"}
+            not isinstance(kind, str)
+            or kind not in {"natural", "structured"}
             or not isinstance(field, str)
             or not isinstance(value, str)
             or not value
@@ -285,11 +321,66 @@ def validate_state(state: Mapping[str, Any]) -> None:
             or (kind == "structured" and field not in FOCUS_FIELDS)
         ):
             raise WorkLoopError("work-loop focus selector is malformed")
+    current = state.get("current")
+    if not isinstance(current, dict) or not CURRENT_FIELDS.issubset(current):
+        raise WorkLoopError("work-loop current state is malformed")
+    if any(
+        value is not None and not isinstance(value, str)
+        for key, value in current.items()
+        if key != "prNumber"
+    ) or (
+        current.get("prNumber") is not None
+        and (
+            not isinstance(current["prNumber"], int)
+            or isinstance(current["prNumber"], bool)
+            or current["prNumber"] < 1
+        )
+    ):
+        raise WorkLoopError("work-loop current state is malformed")
     counters = state.get("counters")
-    if not isinstance(counters, dict) or any(
-        not isinstance(value, int) or value < 0 for value in counters.values()
+    if (
+        not isinstance(counters, dict)
+        or not COUNTER_FIELDS.issubset(counters)
+        or any(
+            not isinstance(value, int) or isinstance(value, bool) or value < 0
+            for value in counters.values()
+        )
     ):
         raise WorkLoopError("work-loop counters are malformed")
+    context_health = state.get("contextHealth")
+    if (
+        not isinstance(context_health, dict)
+        or context_health.get("level") not in {"green", "amber", "red"}
+        or not isinstance(context_health.get("epoch"), int)
+        or isinstance(context_health.get("epoch"), bool)
+        or context_health["epoch"] < 0
+        or not isinstance(context_health.get("reasons"), list)
+        or any(not isinstance(item, str) for item in context_health["reasons"])
+    ):
+        raise WorkLoopError("work-loop context health is malformed")
+    checkpoint = state.get("checkpoint")
+    if (
+        not isinstance(checkpoint, dict)
+        or not {"state", "target", "reason"}.issubset(checkpoint)
+        or not isinstance(checkpoint.get("state"), str)
+        or checkpoint["state"]
+        not in {"none", "ready", "paused", "blocked", "stopped", "completed"}
+        or checkpoint.get("target") is not None
+        and not isinstance(checkpoint["target"], str)
+        or checkpoint.get("reason") is not None
+        and not isinstance(checkpoint["reason"], str)
+    ):
+        raise WorkLoopError("work-loop checkpoint is malformed")
+    for timestamp_key in ("createdAt", "updatedAt", "heartbeatAt"):
+        if parse_utc(state.get(timestamp_key)) is None:
+            raise WorkLoopError(f"work-loop {timestamp_key} timestamp is malformed")
+    for list_key in ("iterations", "decisions", "followups"):
+        if not isinstance(state.get(list_key), list):
+            raise WorkLoopError(f"work-loop {list_key} history is malformed")
+    if state.get("stopReason") is not None and not isinstance(
+        state["stopReason"], str
+    ):
+        raise WorkLoopError("work-loop stop reason is malformed")
     _reject_secret_keys(state)
     encoded = json.dumps(state, sort_keys=True).encode("utf-8")
     if len(encoded) > MAX_LEDGER_BYTES:
@@ -882,7 +973,7 @@ def status_snapshot(
                 "runId": lock.get("runId") if lock else None,
             },
         }
-    except WorkLoopError as error:
+    except (KeyError, TypeError, WorkLoopError) as error:
         return {"status": "invalid", "error": compact_text(error, limit=500)}
 
 

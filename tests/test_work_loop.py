@@ -245,6 +245,34 @@ class WorkLoopTests(InstallTestCase):
                 with self.assertRaisesRegex(module.WorkLoopError, "focus"):
                     module.validate_state(candidate)
 
+    def test_validate_state_rejects_missing_or_wrong_typed_snapshot_fields(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        invalid_updates = (
+            ("mode", None),
+            ("selector", ["all"]),
+            ("until", "release"),
+            ("current", {}),
+            ("contextHealth", {"level": "green"}),
+            ("checkpoint", {"state": "none"}),
+            ("heartbeatAt", 123),
+        )
+
+        for key, value in invalid_updates:
+            with self.subTest(key=key, value=value):
+                candidate = dict(state)
+                candidate[key] = value
+                with self.assertRaises(module.WorkLoopError):
+                    module.validate_state(candidate)
+
     def test_atomic_write_preserves_prior_state_when_replace_fails(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -438,6 +466,12 @@ class WorkLoopTests(InstallTestCase):
         invalid = module.status_snapshot(root, state_root=state_root)
         self.assertEqual(invalid["status"], "invalid")
         self.assertIn("cannot read", invalid["error"])
+
+        state["mode"] = None
+        module.atomic_write_json(state_path, state)
+        malformed = module.status_snapshot(root, state_root=state_root)
+        self.assertEqual(malformed["status"], "invalid")
+        self.assertIn("mode", malformed["error"])
 
     def test_cli_resumes_paused_run_and_does_not_create_repo_state(self) -> None:
         module = self.load_module()

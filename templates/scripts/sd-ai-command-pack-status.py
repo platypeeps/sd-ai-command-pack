@@ -415,9 +415,11 @@ def collect_work_loop(repo: Path) -> dict[str, Any]:
     except (
         AttributeError,
         ImportError,
+        KeyError,
         OSError,
         RuntimeError,
         SyntaxError,
+        TypeError,
         ValueError,
     ) as error:
         return {"status": "invalid", "error": safe_text(error, limit=500)}

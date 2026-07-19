@@ -344,6 +344,26 @@ class StatusTests(InstallTestCase):
         self.assertEqual(syntax_failure["status"], "invalid")
         self.assertIn("corrupt helper", syntax_failure["error"])
 
+        module = mock.Mock()
+        module.status_snapshot.side_effect = KeyError("mode")
+        spec.loader.exec_module.side_effect = None
+        with (
+            mock.patch.object(
+                status.importlib.util,
+                "spec_from_file_location",
+                return_value=spec,
+            ),
+            mock.patch.object(
+                status.importlib.util,
+                "module_from_spec",
+                return_value=module,
+            ),
+        ):
+            malformed_state = status.collect_work_loop(root)
+
+        self.assertEqual(malformed_state["status"], "invalid")
+        self.assertIn("mode", malformed_state["error"])
+
     def test_local_status_counts_stashes_without_marking_attention(self) -> None:
         root = self.make_status_repo()
         for index in range(2):
