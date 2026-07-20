@@ -132,7 +132,7 @@ install/audit, or compatibility blocker:
    CLI exposure, human and JSON output, failure behavior, and generated or
    template mirrors where applicable. Record excluded adjacent surfaces.
 4. Iterate with focused source tests and optional partial candidate diagnostics
-   using `sd-ai-command-pack-fleet-candidate-check.py --consumer <name>`.
+   using `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-fleet-candidate-check.py --consumer <name>`.
    Partial runs are diagnostic and must never replace the canonical candidate
    ledger.
 5. After the finding ledger and regressions converge, freeze the payload,

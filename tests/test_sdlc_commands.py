@@ -213,6 +213,7 @@ class SdlcCommandsTests(InstallTestCase):
             "ID | Contract family | Evidence | Severity | Disposition | Fix | Regression",
             "bounded contract-surface sweep",
             "partial candidate diagnostics",
+            "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-fleet-candidate-check.py --consumer <name>",
             "must never replace the canonical candidate ledger",
             "select one corrective version",
             "one canonical full-fleet candidate validation",
