@@ -123,3 +123,40 @@ Added deterministic owner-level fleet finding timing so only blocker evidence pa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 155: Terminal Work-Loop Reconciliation
+
+**Date**: 2026-07-20
+**Task**: Terminal Work-Loop Reconciliation
+**Branch**: `codex/terminal-work-loop-reconciliation-task`
+
+### Summary
+
+Implemented, validated, and published fail-closed terminal reconciliation for stopped/completed work-loop ledgers.
+
+### Main Changes
+
+- Added a dedicated short-lived-lock reconciliation command with archive, Git, PR-evidence, idempotency, and unchanged-history safeguards.
+- Integrated verified historical completion into status, housekeeping, backlog orchestration, docs, specs, generated mirrors, and the 0.24.0 release ledger.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e65b0a9` | feat: reconcile terminal work-loop completion |
+
+### Testing
+
+- [OK] 87 focused work-loop and status tests passed; Ruff and mypy passed.
+- [OK] Full seven-consumer candidate validation passed and the 0.24.0 ledger is current.
+- [OK] make check test, coverage, lint, mypy, and security lanes passed; final full-check passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -270,6 +270,72 @@ class StatusTests(InstallTestCase):
         self.assertIn("context health green", human.stdout)
         self.assertIn("Resume active SD work loop status-loop-run", human.stdout)
 
+    def test_status_reports_verified_terminal_reconciliation_as_historical(self) -> None:
+        root = self.make_status_repo()
+        state_root = root.parent / "loop-state"
+        state = self.start_loop_state(
+            root, state_root, status="stopped", phase="stopped"
+        )
+        loop = self.load_work_loop_module()
+        head = self.git_output(root, "rev-parse", "HEAD")
+        state["contextHealth"] = {"level": "green", "epoch": 2, "reasons": []}
+        state["checkpoint"] = {
+            "state": "completed",
+            "target": "terminal-reconciliation",
+            "reason": "verified external completion",
+        }
+        state["terminalReconciliation"] = {
+            "status": "verified",
+            "reconciledAt": "2026-07-20T12:00:00Z",
+            "archivedTask": ".trellis/tasks/archive/2026-07/07-20-status-fixture",
+            "taskId": "status-fixture",
+            "delivery": {
+                "prNumber": 147,
+                "prUrl": "https://example.test/pull/147",
+                "head": head,
+                "mergeCommit": head,
+            },
+            "bookkeeping": {
+                "prNumber": 148,
+                "prUrl": "https://example.test/pull/148",
+                "head": head,
+                "mergeCommit": head,
+            },
+            "observed": {"branch": "main", "head": head},
+        }
+        identity = loop.repository_identity(root)
+        state_path, _lock_path = loop.state_paths(identity, state_root)
+        loop.atomic_write_json(state_path, state)
+        env = {"SD_AI_COMMAND_PACK_STATE_HOME": str(state_root)}
+
+        machine = self.run_status(root, "--json", extra_env=env)
+        human = self.run_status(root, extra_env=env)
+
+        report = json.loads(machine.stdout)
+        terminal = report["workLoop"]["terminalReconciliation"]
+        self.assertEqual(terminal["status"], "verified")
+        self.assertEqual(terminal["delivery"]["prNumber"], 147)
+        self.assertFalse(
+            any("Reconcile the red SD work-loop" in step for step in report["nextSteps"])
+        )
+        red_historical = dict(report)
+        red_historical["workLoop"] = dict(report["workLoop"])
+        red_historical["workLoop"]["contextHealth"] = {
+            "level": "red",
+            "epoch": 3,
+            "reasons": ["stale historical reason"],
+        }
+        status = self.load_status_module()
+        self.assertFalse(
+            any(
+                "Reconcile the red SD work-loop" in step
+                for step in status.next_steps(red_historical)
+            )
+        )
+        self.assertIn("verified historical external completion", human.stdout)
+        self.assertIn("delivery PR #147; bookkeeping PR #148", human.stdout)
+        self.assertIn("counters (loop-owned)", human.stdout)
+
     def test_completed_active_root_tasks_are_anomalous_and_archived_tasks_are_ignored(
         self,
     ) -> None:

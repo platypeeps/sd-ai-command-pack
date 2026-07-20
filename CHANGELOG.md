@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.24.0 - 2026-07-20
+
+- Add a fail-closed `reconcile-terminal` work-loop operation that records
+  preverified external task and PR completion without reviving stopped runs or
+  rewriting their historical evidence and counters.
+- Surface verified terminal completion as historical in status and
+  housekeeping, with exact delivery/bookkeeping PR evidence and no obsolete
+  red-checkpoint recommendation.
+
 ## 0.23.16 - 2026-07-20
 
 - Record private, resumable fleet stage timing with monotonic elapsed evidence,

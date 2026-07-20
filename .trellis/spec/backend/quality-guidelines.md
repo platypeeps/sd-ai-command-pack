@@ -209,6 +209,12 @@ schema.
   `task`, `branch`, `head`, `baseBranch`, `prNumber`, `prUrl`, and
   `lastShippedSha`. Its human renderer prints each non-null field so direct
   work-loop status and `sd-status` observe the same ledger evidence.
+- A run snapshot may include a complete `terminalReconciliation` audit record
+  with verified status, timestamp, archived task path/ID, delivery PR evidence,
+  optional all-or-none bookkeeping PR evidence, and observed default
+  branch/head. The adapter validates and allowlists the entire nested shape.
+  Verified terminal evidence suppresses obsolete red-checkpoint guidance and
+  renders external completion separately from loop-owned counters.
 - Optional run-snapshot strings may be omitted or explicitly `null`, but when
   present as strings they must remain non-empty after bounded sanitization.
   This applies to top-level evidence and stop fields, checkpoint target/reason,
