@@ -1783,3 +1783,43 @@ Closed the remaining work-loop evidence boundary found during the fleet canary, 
 
 - Merge and tag source release 0.23.8 through housekeeping, then reactivate the
   in-progress fleet ledger and resume the seven-consumer rollout.
+
+
+## Session 147: Harden work-loop snapshot strings for 0.23.9
+
+**Date**: 2026-07-20
+**Task**: Harden work-loop snapshot strings for 0.23.9
+**Branch**: `codex/status-snapshot-blank-fields`
+
+### Summary
+
+Closed the malformed-helper boundary discovered during the Mezmo fleet review by rejecting optional snapshot strings and terminal diagnostics that sanitize to empty, while preserving explicit null values. Advanced the pack and fleet candidate evidence to 0.23.9 after all configured consumers passed disposable-clone validation.
+
+### Main Changes
+
+- Rejected blank-sanitizing optional top-level, checkpoint, and lock snapshot strings while preserving explicit null values.
+- Fail-closed blank terminal diagnostics and added focused regression coverage for whitespace and control-only values.
+- Updated the executable contract, release metadata, template mirrors, command catalog, and seven-consumer candidate ledger for 0.23.9.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4eac6a2` | fix: reject blank work-loop snapshot fields |
+
+### Testing
+
+- [OK] Focused status adapter suite: 30 tests passed.
+- [OK] Seven configured consumers passed disposable-clone candidate installation and audit validation.
+- [OK] make check passed, including all tests, coverage floors, Ruff, mypy, zizmor, install audit, KB freshness, template twins, release ledger, and full check.
+- [OK] GitHub CI passed on Linux Python 3.10/3.13 and macOS Python 3.13; Copilot reviewed all 14 files with zero comments.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge and tag source release 0.23.9 through housekeeping, reactivate the
+  in-progress fleet task, and resume the sequential consumer rollout.
