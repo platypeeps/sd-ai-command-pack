@@ -47,9 +47,10 @@ provenance, and audit process.
   repo-local backlog iteration.
 - The 2026-07-19 `0.23.7` preflight found all seven consumers available.
   Coordinator reached the pre-release payload through PR #129; Loadsmith PR
-  #100 was merged at `0.23.8`, and mezmo_benchmark PR #359 remains open for the
-  corrective refresh; every consumer must reach the finalized `0.23.11`
-  release.
+  #100 was merged at `0.23.8`, and mezmo_benchmark PR #359 carried the
+  corrective refresh through `0.23.10`. The final `0.23.11` pass completed all
+  seven consumers through green, comment-clean rollout PRs and post-merge
+  audits.
 
 ## Requirements
 
@@ -73,20 +74,43 @@ provenance, and audit process.
 
 ## Acceptance Criteria
 
-- [ ] rwbp-coordinator is installed at `0.23.11` and passes post-merge audit.
-- [ ] loadsmith is installed at `0.23.11` and passes post-merge audit.
-- [ ] hoa-manager is installed at `0.23.11` and passes post-merge audit.
-- [ ] rwbp-website is installed at `0.23.11` and passes post-merge audit.
-- [ ] mezmo_benchmark is installed at `0.23.11` and passes post-merge audit.
-- [ ] se-ai-command-pack is installed at `0.23.11` and passes post-merge audit.
-- [ ] anomaly-metric-creator is installed at `0.23.11` and passes post-merge
+- [x] rwbp-coordinator is installed at `0.23.11` and passes post-merge audit.
+- [x] loadsmith is installed at `0.23.11` and passes post-merge audit.
+- [x] hoa-manager is installed at `0.23.11` and passes post-merge audit.
+- [x] rwbp-website is installed at `0.23.11` and passes post-merge audit.
+- [x] mezmo_benchmark is installed at `0.23.11` and passes post-merge audit.
+- [x] se-ai-command-pack is installed at `0.23.11` and passes post-merge audit.
+- [x] anomaly-metric-creator is installed at `0.23.11` and passes post-merge
       audit.
-- [ ] Every mutated consumer passed its repository-owned validation before PR
+- [x] Every mutated consumer passed its repository-owned validation before PR
       creation and has no unresolved rollout review thread at merge.
-- [ ] No rollout PR remains open unless the final task results explicitly
+- [x] No rollout PR remains open unless the final task results explicitly
       identify its repository, state, and blocker.
-- [ ] The final results include a seven-consumer before/after table and confirm
+- [x] The final results include a seven-consumer before/after table and confirm
       the source fleet preflight reports every available consumer at target.
+
+## Final Results
+
+Release `v0.23.11` resolves to source commit
+`b8e66b3c0ae437d5e2efb4fb55bb34fd388fef2d`. Source PR #182, the main CI
+workflow, auto-tag workflow, and seven-consumer disposable candidate validation
+all passed before the final fleet pass.
+
+| Priority | Consumer | Before final pass | Rollout PR | Final audit |
+| --- | --- | --- | --- | --- |
+| P10 | `platypeeps/rwbp-coordinator` | `0.23.9` | #132 merged | `0.23.11`; preserved 1, unchanged 149 |
+| P20 | `platypeeps/loadsmith` | `0.23.9` | #102 merged | `0.23.11`; preserved 1, unchanged 149 |
+| P30 | `platypeeps/hoa-manager` | `0.23.9` | #127 merged | `0.23.11`; preserved 1, unchanged 149 |
+| P40 | `platypeeps/rwbp-website` | `0.23.9` | #146 merged | `0.23.11`; preserved 1, unchanged 149 |
+| P50 | `answerbook/mezmo_benchmark` | `0.23.10` | #360 merged | `0.23.11`; preserved 2, unchanged 148 |
+| P60 | `platypeeps/se-ai-command-pack` | `0.23.10` | #11 merged | `0.23.11`; unchanged 150 |
+| P90 | `platypeeps/anomaly-metric-creator` | `0.23.11` after canary PR #257 | #257 merged | `0.23.11`; preserved 2, unchanged 148 |
+
+Each rollout PR passed its repository-owned validation and GitHub checks,
+received a current-head Copilot review with zero comments, had no unresolved
+review threads, and merged through the consumer housekeeping gate. The final
+source fleet preflight reported all seven consumers `at-target`; no rollout PR
+or rollout branch remains open.
 
 ## Out Of Scope
 

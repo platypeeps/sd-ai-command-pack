@@ -1903,3 +1903,41 @@ Closed the status observability defect found during anomaly-metric-creator fleet
 ### Next Steps
 
 - Merge and verify tag v0.23.11 through housekeeping, then resume anomaly-metric-creator PR #257 and the sequential fleet rollout.
+
+
+## Session 150: Roll out SD pack 0.23.11 across consumer fleet
+
+**Date**: 2026-07-20
+**Task**: Roll out SD pack 0.23.11 across consumer fleet
+**Branch**: `codex/finalize-fleet-refresh-0-23-11`
+
+### Summary
+
+Released 0.23.11, refreshed all seven configured consumers through validated reviewed merged PRs, and confirmed final fleet preflight at target.
+
+### Main Changes
+
+- Released v0.23.11 with complete work-loop status evidence and validated it across all seven disposable candidates.
+- Merged green, comment-clean refresh PRs for every configured consumer and verified exact post-merge audits.
+- Recorded final seven-consumer acceptance evidence and all-at-target preflight results.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `96ed7ab` | docs(task): record 0.23.11 fleet rollout results |
+
+### Testing
+
+- [OK] Source make check and full-check passed after KB refresh.
+- [OK] All seven repository-owned local gates, GitHub checks, and Copilot reviews passed.
+- [OK] Final fleet preflight reported every consumer at 0.23.11.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
