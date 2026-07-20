@@ -1941,3 +1941,42 @@ Released 0.23.11, refreshed all seven configured consumers through validated rev
 ### Next Steps
 
 - None - task complete
+
+
+## Session 151: Batch fleet corrective releases
+
+**Date**: 2026-07-20
+**Task**: Batch fleet corrective releases
+**Branch**: `codex/fleet-corrective-defect-batching`
+
+### Summary
+
+Defined and shipped the corrective-campaign contract, published all six cycle-time tasks, and addressed two Copilot review findings in one batch.
+
+### Main Changes
+
+- Added a bounded corrective campaign with one finding ledger, one release identity, one canonical full-fleet validation, and resume semantics.
+- Recorded five remaining cycle-time recommendations as independent Trellis planning tasks.
+- Corrected the partial-candidate invocation and removed all placeholder task context rows found by review.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `04fbabb` | feat: batch fleet corrective releases |
+| `e248072` | fix: address review feedback round 1 |
+
+### Testing
+
+- [OK] make check
+- [OK] seven-consumer candidate validation for 0.23.12
+- [OK] PR #184 CI and two-round Copilot review clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
