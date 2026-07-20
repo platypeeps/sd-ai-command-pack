@@ -476,9 +476,7 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         error = snapshot.get("error")
         if status == "none":
             return terminal_snapshot
-        if status == "invalid" and (
-            error is None or (isinstance(error, str) and not error.strip())
-        ):
+        if status == "invalid" and error is None:
             return {
                 "status": "invalid",
                 "error": "work-loop helper reported invalid state without diagnostics",
@@ -490,7 +488,18 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
                 "status": "invalid",
                 "error": "work-loop helper returned invalid terminal snapshot field: error",
             }
-        terminal_snapshot["error"] = safe_text(error, limit=500)
+        normalized_error = safe_text(error, limit=500)
+        if not normalized_error:
+            if status == "invalid":
+                return {
+                    "status": "invalid",
+                    "error": "work-loop helper reported invalid state without diagnostics",
+                }
+            return {
+                "status": "invalid",
+                "error": "work-loop helper returned invalid terminal snapshot field: error",
+            }
+        terminal_snapshot["error"] = normalized_error
         return terminal_snapshot
     if status not in WORK_LOOP_RUN_STATUSES:
         return {
@@ -610,9 +619,13 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         value = checkpoint[field]
         if value is not None and not isinstance(value, str):
             return invalid_field(f"checkpoint.{field}")
-        normalized_checkpoint[field] = (
-            safe_text(value, limit=limit) if value is not None else None
-        )
+        if value is None:
+            normalized_checkpoint[field] = None
+            continue
+        normalized_value = safe_text(value, limit=limit)
+        if not normalized_value:
+            return invalid_field(f"checkpoint.{field}")
+        normalized_checkpoint[field] = normalized_value
     normalized["checkpoint"] = normalized_checkpoint
 
     for field, limit in (
@@ -630,9 +643,13 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         value = snapshot[field]
         if value is not None and not isinstance(value, str):
             return invalid_field(field)
-        normalized[field] = (
-            safe_text(value, limit=limit) if value is not None else None
-        )
+        if value is None:
+            normalized[field] = None
+            continue
+        normalized_value = safe_text(value, limit=limit)
+        if not normalized_value:
+            return invalid_field(field)
+        normalized[field] = normalized_value
 
     if "prNumber" in snapshot:
         pr_number = snapshot["prNumber"]
@@ -659,11 +676,13 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             lock_run_id = lock["runId"]
             if lock_run_id is not None and not isinstance(lock_run_id, str):
                 return invalid_field("lock.runId")
-            normalized_lock["runId"] = (
-                safe_text(lock_run_id, limit=120)
-                if lock_run_id is not None
-                else None
-            )
+            if lock_run_id is None:
+                normalized_lock["runId"] = None
+            else:
+                normalized_lock_run_id = safe_text(lock_run_id, limit=120)
+                if not normalized_lock_run_id:
+                    return invalid_field("lock.runId")
+                normalized_lock["runId"] = normalized_lock_run_id
         normalized["lock"] = normalized_lock
 
     return normalized

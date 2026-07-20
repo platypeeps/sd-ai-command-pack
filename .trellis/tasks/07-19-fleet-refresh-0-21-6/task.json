@@ -1,8 +1,8 @@
 {
   "id": "fleet-refresh-0-21-6",
   "name": "fleet-refresh-0-21-6",
-  "title": "Roll out SD pack 0.23.8 to the consumer fleet",
-  "description": "Refresh all configured consumers from their current installed version to release 0.23.8 through the canonical fleet preflight, sequential PR, review, merge, provenance, and audit process.",
+  "title": "Roll out SD pack 0.23.9 to the consumer fleet",
+  "description": "Refresh all configured consumers from their current installed version to release 0.23.9 through the canonical fleet preflight, sequential PR, review, merge, provenance, and audit process.",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Retargeted from 0.21.6 through corrective releases 0.23.1-0.23.7 as consumer reviews surfaced work-loop and status-boundary defects, then to 0.23.8 after loadsmith PR #100 found that blank persisted branch evidence could survive a head-only update; the task slug is retained for continuity.",
+  "notes": "Retargeted from 0.21.6 through corrective releases 0.23.1-0.23.8 as consumer reviews surfaced work-loop and status-boundary defects, most recently to 0.23.9 after mezmo_benchmark PR #359 found that optional snapshot strings could sanitize to blank without invalidating the helper result; the task slug is retained for continuity.",
   "meta": {}
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.9 - 2026-07-19
+
+- Reject optional work-loop snapshot strings that are present but become empty
+  after bounded sanitization, while preserving explicit `null` values and
+  fail-closing blank terminal diagnostics.
+
 ## 0.23.8 - 2026-07-19
 
 - Reject empty or whitespace-only persisted work-loop current-state strings,
