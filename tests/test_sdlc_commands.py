@@ -208,10 +208,7 @@ class SdlcCommandsTests(InstallTestCase):
 
     def test_fleet_refresh_batches_corrective_release_findings(self) -> None:
         fleet = self._skill_text("sd-fleet-refresh")
-        guide = install.ROOT / "docs/FLEET_ROLLOUT.md"
-        guide_text = guide.read_text(encoding="utf-8")
         fleet_text = " ".join(fleet.split())
-        guide_normalized = " ".join(guide_text.split())
 
         skill_pins = (
             "## Corrective campaign",
@@ -228,6 +225,55 @@ class SdlcCommandsTests(InstallTestCase):
         )
         for pin in skill_pins:
             self.assertIn(pin.casefold(), fleet_text.casefold())
+
+    def test_fleet_refresh_records_internal_timing_without_public_controls(self) -> None:
+        fleet = self._skill_text("sd-fleet-refresh")
+        fleet_text = " ".join(fleet.split())
+        guide_normalized = " ".join(
+            (install.ROOT / "docs/FLEET_ROLLOUT.md")
+            .read_text(encoding="utf-8")
+            .split()
+        )
+        arguments = fleet.split("## Arguments", 1)[1].split("## Timing evidence", 1)[0]
+        workflow = fleet.split("## Workflow", 1)[1].split(
+            "## Finding severity gate", 1
+        )[0]
+        normalized = " ".join(workflow.split())
+        normalized_folded = normalized.casefold()
+
+        for pin in (
+            "scripts/sd-ai-command-pack-fleet-timing.py",
+            "init --run-id <run-id>",
+            "start both `reviewer-wait` and `ci-wait`",
+            "report --run-id <run-id> --complete",
+            "never changes a delivery gate's authoritative result",
+        ):
+            self.assertIn(pin.casefold(), fleet_text.casefold())
+        self.assertLess(
+            normalized_folded.index("initialize the timing run"),
+            normalized_folded.index("run preflight"),
+        )
+        self.assertLess(
+            normalized_folded.index("immediately after the pr exists"),
+            normalized_folded.index("end `reviewer-wait`"),
+        )
+        self.assertLess(
+            normalized_folded.index("end `reviewer-wait`"),
+            normalized_folded.index("end `ci-wait`"),
+        )
+        for public_control in ("timing=", "run-id=", "state-home="):
+            self.assertNotIn(public_control, arguments)
+
+        for adapter in (
+            install.ROOT / "templates/.commands/sd-fleet-refresh.md",
+            install.ROOT / "templates/.claude/commands/sd/fleet-refresh.md",
+            install.ROOT / "templates/.gemini/commands/sd/fleet-refresh.toml",
+            install.ROOT / "templates/.github/prompts/sd-fleet-refresh.prompt.md",
+        ):
+            with self.subTest(adapter=adapter.name):
+                content = adapter.read_text(encoding="utf-8")
+                self.assertNotIn("fleet-timing", content)
+                self.assertNotIn("state-home", content)
 
         ordered_skill_pins = (
             "pause consumer mutation",

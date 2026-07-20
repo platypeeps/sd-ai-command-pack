@@ -957,6 +957,110 @@ Correct: generate it from COMMAND_NAMES, exclude it via SOURCE_ONLY_COMMAND_NAME
          retire vouched consumer copies, and preserve the verified source checkout
 ```
 
+## Scenario: Source-Only Fleet Timing Evidence
+
+### 1. Scope / Trigger
+
+Use this contract when `sd-fleet-refresh` measures a rollout's sequential
+baseline or resumes timing after an interruption. Timing observes the existing
+release, install, audit, review, CI, finding, and housekeeping gates; it never
+owns or changes their outcomes.
+
+### 2. Signatures
+
+- `scripts/sd-ai-command-pack-fleet-timing.py` is source-only and remains
+  absent from `manifest.json`.
+- Operations are `init`, `stage-start`, `stage-end`, `consumer-end`, and
+  `report`; all accept internal `--repo`, and tests/recovery may use internal
+  `--state-home`.
+- Schema version 1 owns one safe run ID, repository digest, target version,
+  fleet stages, rollout-priority consumers, sequential stage attempts, and
+  final consumer outcomes.
+- Fixed stages are `preflight`, `checkout-validation`, `install`, `audit`,
+  `local-gate`, `commit-push`, `pr-creation`, `reviewer-wait`, `ci-wait`,
+  `housekeeping`, and `post-merge-audit`.
+
+### 3. Contracts
+
+- State lives in the user's platform state directory under a repository digest
+  and safe run ID. It is owner-private, size-bounded, schema-validated before
+  and after mutation, protected by a bounded operation lock, and atomically
+  replaced.
+- Durable state and normal output never contain an absolute repository path,
+  remote URL, command output, review body, credential, private key, or arbitrary
+  environment value. Reasons are bounded and reject control characters,
+  absolute/home-relative paths, remote URLs, and common secret forms.
+- Stage elapsed time uses monotonic nanoseconds and rejects a backwards clock.
+  Wall-clock nanoseconds preserve boundaries and calculate interval union,
+  critical path, and reviewer/CI overlap without double-counting concurrency.
+- `preflight` is fleet-scoped; every other stage is consumer-scoped. Reviewer
+  and CI waits may be active together. Retry count derives from attempts after
+  the first rather than a second persisted counter.
+- Repeating initialization, an already-active start, an identical stage end,
+  or an identical consumer end is a no-op. A new attempt requires a new start
+  after the prior attempt closed. Completion requires no active attempts and a
+  final outcome for every selected consumer.
+- A telemetry error is visible and pauses new fleet mutation for correction;
+  it does not overwrite, erase, or reinterpret an authoritative delivery result.
+
+### 4. Validation & Error Matrix
+
+- Unknown fields, wrong types/schema, unsafe IDs, duplicate consumer names or
+  priorities, unordered consumers, duplicate stages, non-sequential attempts,
+  mismatched end fields, or an active attempt in completed state -> controlled
+  exit `2` with no traceback and no state replacement.
+- Failure-like stage/consumer outcome without a reason, success outcome with a
+  forbidden reason, secret/path/remote-URL/control content, or oversized state
+  -> reject.
+- A live lock -> bounded wait then busy error; a stale lock is recoverable only
+  when its owner process is absent. Symlinked state/lock paths -> reject.
+- Reinitialized run whose target or consumer identity differs -> reject rather
+  than overwrite. Missing/malformed state or repository mismatch -> reject.
+- Negative monotonic elapsed or completion with active/incomplete consumers ->
+  reject while retaining the last valid partial record.
+
+### 5. Good / Base / Bad Cases
+
+- Good: reviewer wait spans seconds 10-30 and CI wait spans 20-40; critical
+  path and active wall are 30 seconds, summed stage elapsed is 40 seconds, and
+  overlap is 10 seconds.
+- Base: a dry run records preflight, marks every selected consumer outcome,
+  completes, and performs no consumer stage mutation.
+- Bad: sum reviewer and CI durations and report 40 seconds as critical path, or
+  copy a consumer checkout path into a failure reason.
+
+### 6. Tests Required
+
+- Fake-clock coverage for init/resume, active and completed attempts, retries,
+  skips/failures, overlap, interval union, critical path, slowest rows, partial
+  report, completion, and backwards monotonic time.
+- Strict schema/privacy matrices plus missing/malformed/symlinked state,
+  private permissions, atomic-write errors, live/stale locks, and stable CLI
+  JSON/human errors.
+- Orchestration pins prove timing initializes before preflight, reviewer and CI
+  start after PR creation and end independently, completion is last, and no
+  public adapter exposes run ID or state controls.
+- Install-audit parity proves the helper is source-only; shipped-script
+  coverage keeps an explicit per-file floor of at least 88 percent.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: add fleet-timing.py to manifest.json and install it into every consumer
+Wrong: treat a telemetry write error as permission to ignore a failed install gate
+Wrong: reviewer 20s + CI 20s = 40s critical path when they overlap by 10s
+Correct: keep private source-only state, preserve the gate result, and report
+         30s critical path, 30s active wall, 40s summed time, and 10s overlap
+```
+
+Reference files:
+
+- `scripts/sd-ai-command-pack-fleet-timing.py`
+- `templates/.agents/skills/sd-fleet-refresh/SKILL.md`
+- `docs/FLEET_ROLLOUT.md`
+- `tests/test_fleet_timing.py`
+- `tests/test_sdlc_commands.py`
+
 ## Read-Only Status And Housekeeping Delegation
 
 `templates/scripts/sd-ai-command-pack-status.py` is the canonical collector for

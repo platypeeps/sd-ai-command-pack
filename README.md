@@ -296,7 +296,10 @@ before consumer inventory or mutation. Before review, a source-side classifier
 proves whether the exact consumer head contains only installer-managed refresh
 paths with current audit/provenance. Qualifying heads use integration-only
 review without a new Copilot request; ambiguity or consumer-owned changes use
-the normal remote-review loop. Bare consumer names select a subset, for example
+the normal remote-review loop. A source-only timing sidecar records the
+sequential baseline, per-stage retries, critical path, and reviewer/CI overlap
+in private local state without weakening a delivery gate or adding public
+adapter arguments. Bare consumer names select a subset, for example
 `/sd:fleet-refresh loadsmith rwbp-website`; `consumer=`, `dry-run`, and
 `no-merge` remain available explicitly, `remote-review` forces remote review,
 and `remote=<name>` selects a release remote other than `origin`.
@@ -723,6 +726,15 @@ follow-up per canonical owner. Exact duplicate observations share timing and a
 task but still receive separate replies and thread settlement. Invalid input
 pauses rather than silently deferring, and explicit overrides require recorded
 rationale.
+
+The fleet workflow records resumable stage boundaries with
+`scripts/sd-ai-command-pack-fleet-timing.py`. Its final report distinguishes
+critical path and interval-union active time from summed stage duration, and
+shows reviewer/CI overlap, retries, the slowest consumer, and the slowest
+stage. The source-only helper stores private atomic state outside repositories,
+never prints its state path, and rejects paths or secret-like material in
+reasons. Timing errors are visible and pause further mutation; they never
+reinterpret install, audit, review, CI, or housekeeping outcomes.
 
 ### Direct-to-main Chore Commits
 
