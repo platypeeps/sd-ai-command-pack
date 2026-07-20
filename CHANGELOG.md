@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.12 - 2026-07-20
+
+- Batch related fleet-rollout defects into one bounded corrective campaign,
+  one release identity, and one canonical full-fleet validation before the
+  original rollout resumes.
+
 ## 0.23.11 - 2026-07-19
 
 - Include base-branch and last-shipped-SHA evidence in canonical work-loop

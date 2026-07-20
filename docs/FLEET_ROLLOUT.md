@@ -123,6 +123,47 @@ consumer PR when appropriate, or record a Trellis follow-up for the next pack
 release. This keeps useful review feedback without turning every observation
 into another fleet-wide patch cycle.
 
+## Corrective Campaign
+
+When a consumer surfaces a verified pack-owned blocker, pause consumer mutation
+before selecting or preparing another release. Retain the original fleet task
+so it can resume after the correction; reuse or create one source-owned Trellis
+corrective task instead of creating a replacement fleet task for every finding.
+
+Record the campaign findings in the corrective task with this ledger shape:
+
+```text
+ID | Contract family | Evidence | Severity | Disposition | Fix | Regression
+```
+
+Every verified blocker owns one row. Exact duplicates reuse the owning row.
+Before selecting the corrective version, run a bounded contract-surface sweep
+around the failure. Cover equivalent producers and consumers, mutation paths,
+persisted and dynamically loaded data, normalization and nullability, CLI
+exposure, human and JSON output, failure behavior, and generated or template
+mirrors where they apply. Record excluded adjacent surfaces so the sweep cannot
+expand without a reason.
+
+Iterate with focused source tests and, when useful, partial candidate
+diagnostics:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-candidate-check.py --consumer <name>
+```
+
+Partial runs remain diagnostic and must never replace the canonical candidate
+ledger. After the finding ledger and regressions converge, freeze the payload,
+select one corrective version, update the release surfaces once, and run one
+canonical full-fleet candidate validation with the no-filter command. Only the
+no-filter canonical command may update `docs/fleet/candidate-validation.json`.
+
+Merge and tag the corrective release through the source lifecycle, then resume
+the original fleet task from a fresh preflight. If an urgent independent
+security defect would become riskier while waiting for the bounded sweep, it
+may ship immediately with that reason recorded; keep the remaining campaign
+open rather than silently discarding it.
+
 ## Review Ownership
 
 Pack-owned implementation is reviewed in the sd-ai-command-pack source PR.

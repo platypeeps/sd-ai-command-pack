@@ -112,6 +112,40 @@ merge behavior, and dry-run state.
 4. Aggregate the per-consumer outcomes into the fleet status table and the
    fleet version summary for the final report.
 
+## Corrective campaign
+
+When any rollout step surfaces a verified pack-owned correctness, security,
+install/audit, or compatibility blocker:
+
+1. Immediately pause consumer mutation before selecting or preparing another
+   release. Keep the original fleet task available to resume later.
+2. Reuse or create one source-owned Trellis corrective task. Record every
+   verified finding in a single ledger with this shape:
+
+   `ID | Contract family | Evidence | Severity | Disposition | Fix | Regression`
+
+   Exact duplicates reuse the owning row instead of creating another task or
+   release trigger.
+3. Run a bounded contract-surface sweep around the failure before choosing the
+   corrective version. Cover equivalent producers and consumers, mutation
+   paths, persisted and dynamically loaded data, normalization and nullability,
+   CLI exposure, human and JSON output, failure behavior, and generated or
+   template mirrors where applicable. Record excluded adjacent surfaces.
+4. Iterate with focused source tests and optional partial candidate diagnostics
+   using `sd-ai-command-pack-fleet-candidate-check.py --consumer <name>`.
+   Partial runs are diagnostic and must never replace the canonical candidate
+   ledger.
+5. After the finding ledger and regressions converge, freeze the payload,
+   select one corrective version, update release surfaces once, and run one
+   canonical full-fleet candidate validation with the no-filter command. Only
+   that canonical run may update `docs/fleet/candidate-validation.json`.
+6. Merge and tag through the source lifecycle, then resume the original fleet
+   task from a fresh preflight rather than creating a duplicate rollout task.
+
+An urgent independent security defect may ship before the broader campaign
+only when waiting would increase risk. Record that reason and keep the remaining
+campaign open.
+
 ## Safety rules
 
 - `docs/FLEET_ROLLOUT.md` is the procedure authority. Follow its refresh
