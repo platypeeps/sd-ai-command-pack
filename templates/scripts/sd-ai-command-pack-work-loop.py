@@ -65,7 +65,7 @@ COUNTER_FIELDS = frozenset(
         "ciRetries",
     }
 )
-PHASES = (
+LIFECYCLE_PHASES = (
     "inventory",
     "selected",
     "planning",
@@ -74,11 +74,13 @@ PHASES = (
     "shipping",
     "followups",
     "complete",
+)
+PHASES = (
+    *LIFECYCLE_PHASES,
     "checkpoint",
     "stopped",
 )
 PHASE_ORDER = {phase: index for index, phase in enumerate(PHASES)}
-LIFECYCLE_PHASES = PHASES[:8]
 LIFECYCLE_PHASE_ORDER = {
     phase: index for index, phase in enumerate(LIFECYCLE_PHASES)
 }

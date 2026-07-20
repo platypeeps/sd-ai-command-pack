@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-20T19:18:23Z",
+  "validatedAt": "2026-07-20T19:27:48Z",
   "packVersion": "0.24.1",
-  "payloadDigest": "sha256:f97aa613333833ff907b263c5f60a11db561669e921e5d4df7335be928f170a3",
+  "payloadDigest": "sha256:b04fea31fb2e38c60a85e2363bd6005535942c3170b945b7df0d0903efad3ccb",
   "fleetManifestDigest": "sha256:1776b0a45d7faa3b20fc61ff0ef8587f7fc577eebc503b7ddce0563479ef247a",
   "consumers": [
     {
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "f4d1bc64496e925b06aaa96307f540a7df156937",
+      "baseCommit": "2397899846c846f59f9a7aea571c4e0e1c9f3c63",
       "status": "passed",
       "prepares": [
         [
