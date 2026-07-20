@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~339 | Active |
+| `journal-4.md` | ~377 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,7 +32,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 160 | 2026-07-20 | Fix post-squash work-loop reconciliation | `91cbd72` | `codex/fix-squash-followup-reconcile` |
+| 161 | 2026-07-20 | Fix post-squash work-loop reconciliation | `91cbd72` | `codex/fix-squash-followup-reconcile` |
+| 160 | 2026-07-20 | Document source-only consumer contract | `8d27a86` | `main` |
 | 159 | 2026-07-20 | Harden PR URL validation | `ce8fd81` | `codex/harden-pr-url-validation` |
 | 158 | 2026-07-20 | Honor repository full-check preludes | `88fd0c3`, `63e319c` | `codex/review-full-check-prelude` |
 | 157 | 2026-07-20 | Converge PR #190 checkpoint recovery review | `fdf5e02`, `4cd055a`, `f8a5739`, `5ebbd19`, `52bb7be`, `20f50a0`, `746470a` | `codex/work-loop-checkpoint-recovery` |

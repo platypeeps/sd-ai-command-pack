@@ -1,10 +1,16 @@
 # Changelog
 
-## 0.24.4 - 2026-07-20
+## 0.24.5 - 2026-07-20
 
 - Fixed work-loop checkpoint recovery after a verified squash merge so a
   later default-branch advance can retain the historical shipped feature SHA
   without weakening merge-boundary or changed-SHA ancestry validation.
+
+## 0.24.4 - 2026-07-20
+
+- Teach Copilot that source-only fleet helpers and source-workflow documentation
+  are intentionally absent from consumer manifests, and require receipt,
+  provenance, and install-audit evidence before reporting a missing-file defect.
 
 ## 0.24.3 - 2026-07-20
 
