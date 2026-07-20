@@ -286,6 +286,79 @@ Wrong: validate `split.hostname`, then access `split.port` outside the parse gua
 Correct: parse and read all URL authority properties inside one fail-closed `ValueError` boundary
 ```
 
+## Work-Loop Evidence Reconciliation Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing `validated_evidence()`, `reconcile_state()`,
+merge-boundary evidence, or recovery-checkpoint behavior in
+`sd-ai-command-pack-work-loop.py` and its template twin.
+
+### 2. Signatures
+
+- Evidence validator:
+  `validated_evidence(state, updates, *, repo=None, phase=None) -> dict`
+- Recovery mutator:
+  `reconcile_state(state, observations, *, signal=None,
+  verified_live_advance=False, explicit_resume_phase=None, repo=None) -> None`
+
+### 3. Contracts
+
+- The feature-to-base branch transition is the merge boundary. A submitted
+  `lastShippedSha` must resolve locally and belong to the remembered feature
+  branch before branch evidence may change to the base branch.
+- After that verified transition, a squash merge intentionally leaves the
+  recorded feature SHA disconnected from base-branch ancestry. Complete
+  checkpoint recovery may retain that unchanged historical SHA while advancing
+  the already-recorded base-branch head.
+- The historical exception applies only when `lastShippedSha` resolves to the
+  remembered value, the branch is unchanged, and that branch equals
+  `baseBranch`. New or changed shipped-SHA evidence still requires descendant
+  and shipped-branch proof.
+- A later base-branch head must remain a descendant of the remembered head;
+  task, base branch, PR number, and PR URL remain immutable.
+
+### 4. Validation & Error Matrix
+
+- Feature branch -> base branch with an unrelated shipped SHA -> reject with
+  `lastShippedSha evidence must belong to the shipped branch`.
+- Already on base branch + unchanged historical shipped SHA + descendant head
+  -> accept and allow complete checkpoint recovery.
+- Already on base branch + changed shipped SHA not descending from the
+  remembered shipped SHA -> reject with the descendant error.
+- Already on base branch + non-descendant head -> reject with the head
+  descendant error.
+- Partial recovery evidence -> keep the checkpoint and report the existing
+  complete-evidence diagnostic.
+
+### 5. Good / Base / Bad Cases
+
+- Good: PR head `F` is squash-merged as `M`; later bookkeeping merge `B`
+  advances `main`; recovery records head `B` while retaining shipped SHA `F`.
+- Base: a normal merge makes `F` an ancestor of `M`; the same recovery path
+  remains valid.
+- Bad: after reaching `main`, recovery replaces `F` with unrelated head `B`
+  and calls it shipped evidence.
+
+### 6. Tests Required
+
+- Merge-boundary feature-to-base evidence, including squash delivery.
+- Paused or blocked same-phase recovery after a squash merge and later
+  base-branch commit, using every recorded current-state field.
+- Self-anchored or unrelated shipped-SHA rejection.
+- Changed shipped-SHA descendant enforcement and non-descendant head rejection.
+- Template twin byte identity.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: require an unchanged squash-delivered feature SHA to be an ancestor of every later main head
+Correct: prove it at the merge boundary, then retain it as immutable historical evidence
+
+Wrong: skip ancestry checks whenever the ledger branch is main
+Correct: skip only the repeated shipped-branch check for the unchanged recorded SHA; still validate head ancestry and all identities
+```
+
 ## Session Recorder Retry Contract
 
 ### 1. Scope / Trigger
