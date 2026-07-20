@@ -1641,7 +1641,7 @@ def validated_evidence(
                 _branch_commit(evidence_repo, remembered_branch)
                 if isinstance(remembered_branch, str)
                 else None
-            ) or candidate_shipped
+            ) or remembered_head or candidate_head
         resolved_tip = (
             _resolved_commit(evidence_repo, evidence_tip) if evidence_tip is not None else None
         )

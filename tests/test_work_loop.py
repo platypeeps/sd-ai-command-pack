@@ -1658,6 +1658,34 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["current"]["head"], merged_head)
         self.assertEqual(state["contextHealth"]["level"], "amber")
 
+    def test_merge_evidence_rejects_self_anchored_shipped_commit(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _main_head = self.make_shipping_state(module, root)
+        remembered_branch = state["current"]["branch"]
+        self.run_git(root, "switch", "main")
+        unrelated_head = self.commit_file(
+            module, root, "unrelated.txt", "unrelated\n", "unrelated main work"
+        )
+        self.run_git(root, "branch", "-D", remembered_branch)
+
+        with self.assertRaisesRegex(
+            module.WorkLoopError,
+            "lastShippedSha evidence must belong to the shipped branch",
+        ):
+            module.validated_evidence(
+                state,
+                {
+                    "branch": "main",
+                    "head": unrelated_head,
+                    "prNumber": 42,
+                    "prUrl": "https://example.test/pull/42",
+                    "lastShippedSha": unrelated_head,
+                },
+                phase="followups",
+                repo=root,
+            )
+
     def test_paused_checkpoint_recovers_verified_post_merge_advance_atomically(self) -> None:
         module = self.load_module()
         root = self.make_repo()
