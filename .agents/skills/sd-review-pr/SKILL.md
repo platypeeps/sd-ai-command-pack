@@ -215,13 +215,24 @@ This PR-review cycle must not run Prism or Gito implicitly, even if the
 environment would normally enable them for `sd-full-check`:
 
 ```bash
-SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 \
-SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 \
-bash scripts/sd-ai-command-pack-full-check.sh
+bash scripts/sd-ai-command-pack-review-full-check.sh
 ```
 
-If `scripts/sd-ai-command-pack-full-check.sh` is missing, stop and report that the review
-cycle pack is not fully installed. Do not fall back to remote-review-first
+The helper owns deterministic command selection. When the root
+`package.json` defines a non-empty string `scripts["check:full"]`, it runs
+`npm run check:full` (or the runner selected by
+`SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_RUNNER`) so repository-owned cleanup,
+database readiness, and test-environment setup execute before the pack gate.
+That package script may wrap
+`scripts/sd-ai-command-pack-full-check.sh`, but it must not invoke
+`sd-review-pr`, a review-pr platform adapter, or the helper itself.
+
+When no usable `check:full` package script is configured, the helper runs the
+existing `scripts/sd-ai-command-pack-full-check.sh` compatibility fallback.
+Both paths force `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0` and
+`SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0`. If the helper, selected package
+runner, or fallback script is missing, or the configured command would recurse,
+stop and report its exact diagnostic. Do not fall back to remote-review-first
 review.
 
 If full-check fails, fix the smallest correct set of issues, run the relevant

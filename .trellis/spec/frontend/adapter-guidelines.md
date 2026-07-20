@@ -27,6 +27,7 @@ Reference files:
 - `templates/.agents/skills/sd-continue/SKILL.md`
 - `templates/.agents/skills/sd-finish-work/SKILL.md`
 - `templates/.agents/skills/sd-update-spec/SKILL.md`
+- `templates/scripts/sd-ai-command-pack-review-full-check.sh`
 - `templates/scripts/sd-ai-command-pack-review-local.sh`
 - `templates/.commands/sd-review-local.md`
 - `templates/.commands/sd-review-local-all.md`
@@ -443,6 +444,86 @@ COMMAND_NAMES = tuple((item.name, item.short) for item in COMMAND_REGISTRY)
 
 The generator derives the compatibility view, catalog, adapters, and manifest
 fanout from the same validated row.
+
+## Scenario: Repository-Owned Review Full-Check Prelude
+
+### 1. Scope / Trigger
+
+- Trigger: `sd-review-pr` must run its deterministic local gate in a consumer
+  repository that may own prerequisites around the pack full-check, such as
+  generated-type cleanup, database readiness, or isolated browser-test setup.
+- Keep the shipped helper, shared skill, distributed docs, manifest, and tests
+  synchronized because the selection behavior is a consumer-facing command
+  contract.
+
+### 2. Signatures
+
+- Review helper: `scripts/sd-ai-command-pack-review-full-check.sh`.
+- Repository-owned entry point: package script `check:full` in the root
+  `package.json`.
+- Package runner override:
+  `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_RUNNER` (default `npm`).
+- Direct fallback: `bash scripts/sd-ai-command-pack-full-check.sh`.
+
+### 3. Contracts
+
+- Parse `package.json` with the pack toolchain helper, not shell text matching.
+- A nonempty string `scripts["check:full"]` is authoritative: execute the
+  package runner as `run check:full` so repository-owned preludes run before
+  the pack gate.
+- If the script is absent or invalid, execute the direct pack full-check
+  fallback. Do not treat a selected runner failure as permission to fall back
+  and run a second gate.
+- Force `PRISM=0` and `GITO=0` for both paths so the command-owned PR cycle does
+  not invoke optional local review providers.
+- Reject configured commands that invoke `sd-review-pr`, `sd:review-pr`,
+  `sd/review-pr`, or the review helper itself, preventing recursive review
+  loops.
+- Preserve the selected runner or fallback exit status exactly.
+
+### 4. Validation & Error Matrix
+
+- Missing `package.json`, malformed JSON, non-object top level, missing or
+  non-object `scripts`, or missing/empty/non-string `check:full` -> direct pack
+  full-check fallback.
+- Present but unreadable `package.json` -> fail with the filesystem diagnostic;
+  do not fall back and bypass repository-owned prerequisites.
+- Configured recursive command -> fail before runner execution.
+- Selected package runner missing -> exit `127`; do not fall back.
+- Toolchain helper missing or failing while configuration is being resolved ->
+  fail with its diagnostic; do not guess repository intent.
+- Direct fallback helper missing -> exit `127` with an actionable diagnostic.
+- Selected runner or fallback returns nonzero -> return the same status.
+
+### 5. Good / Base / Bad Cases
+
+- Good: a repository's `check:full` cleans generated types, verifies database
+  readiness, then invokes the pack full-check under `PRISM=0 GITO=0`.
+- Base: a repository without a valid `check:full` script runs the direct pack
+  full-check once.
+- Bad: `sd-review-pr` hardcodes the pack helper and bypasses repository-owned
+  prerequisites, or retries the fallback after the selected package script
+  fails.
+
+### 6. Tests Required
+
+- Assert configured selection, package-runner override, forced provider flags,
+  and selected exit-status propagation.
+- Assert fallback selection for every missing or invalid configuration shape
+  and fallback exit-status propagation.
+- Assert recursion rejection, missing runner, authoritative toolchain failure,
+  and missing fallback diagnostics.
+- Preserve root/template parity, install/audit coverage, manifest registration,
+  and shared-skill delegation assertions.
+
+### 7. Wrong vs Correct
+
+Wrong: `sd-review-pr` calls `sd-ai-command-pack-full-check.sh` directly in
+every consumer, bypassing repository prerequisites.
+
+Correct: `sd-review-pr` calls the review helper, which selects a valid root
+`check:full` script or the direct pack fallback exactly once while disabling
+Prism and Gito.
 
 The `sd-review-pr` shared skill should continue to define:
 

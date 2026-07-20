@@ -3082,7 +3082,9 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("# SD PR Review Loop", review_pr)
         self.assertIn("standing permission to reply", review_pr)
         self.assertIn("sd-ai-command-pack-toolchain.sh doctor", review_pr)
-        self.assertIn("bash scripts/sd-ai-command-pack-full-check.sh", review_pr)
+        self.assertIn(
+            "bash scripts/sd-ai-command-pack-review-full-check.sh", review_pr
+        )
         self.assertIn("Project checks:", review_pr)
         self.assertIn("Optional AI review:", review_pr)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0", review_pr)

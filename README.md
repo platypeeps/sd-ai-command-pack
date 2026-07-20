@@ -244,6 +244,14 @@ head-bound integration-only profile that skips only a new remote implementation
 review request after fail-closed release, audit, provenance, and diff
 classification; existing feedback, local checks, CI, and merge gates remain.
 
+The command-owned deterministic gate runs
+`scripts/sd-ai-command-pack-review-full-check.sh`. If the root
+`package.json` defines a non-empty `check:full` script, the helper runs that
+canonical repository wrapper with Prism and Gito disabled; otherwise it runs
+the installed pack full-check script directly. A canonical wrapper may add
+repository prerequisites before delegating to the pack script, but it must not
+invoke `sd-review-pr` or the helper itself.
+
 ### sd-review-local
 
 Runs configured local review providers against local changes, or against the
@@ -480,6 +488,7 @@ python3 scripts/sd-ai-command-pack-install-audit.py \
   --expected-platform claude --expected-platform gemini \
   --expected-platform github --expected-platform opencode
 bash -n scripts/sd-ai-command-pack-full-check.sh
+bash -n scripts/sd-ai-command-pack-review-full-check.sh
 bash -n scripts/sd-ai-command-pack-shell-lib.sh
 bash -n scripts/sd-ai-command-pack-toolchain.sh
 bash -n scripts/sd-ai-command-pack-review-local.sh
