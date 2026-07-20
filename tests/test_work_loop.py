@@ -90,10 +90,11 @@ class WorkLoopTests(InstallTestCase):
             updates={"task": "task-one", "baseBranch": "main"},
         )
         module.transition_state(state, "planning")
-        module.transition_state(
+        module.transition_state(state, "implementing")
+        module.update_evidence(
             state,
-            "implementing",
-            updates={"branch": "codex/task-one", "head": feature_head},
+            {"branch": "codex/task-one", "head": feature_head},
+            repo=root,
         )
         module.transition_state(state, "validating")
         module.transition_state(state, "shipping")
@@ -464,7 +465,8 @@ class WorkLoopTests(InstallTestCase):
 
         module.transition_state(state, "selected", updates={"task": "task-one"})
         module.transition_state(state, "planning")
-        module.transition_state(state, "implementing", updates={"branch": "codex/task"})
+        module.transition_state(state, "implementing")
+        module.update_evidence(state, {"branch": "main"}, repo=root)
         module.transition_state(state, "validating")
         module.transition_state(state, "shipping")
         module.transition_state(state, "followups")
@@ -485,9 +487,9 @@ class WorkLoopTests(InstallTestCase):
         transitions = (
             ("selected", {"task": "task-one"}),
             ("planning", None),
-            ("implementing", {"branch": "codex/task-one"}),
+            ("implementing", None),
             ("validating", None),
-            ("shipping", {"prNumber": 42}),
+            ("shipping", None),
             ("followups", None),
             ("complete", None),
             ("inventory", None),
@@ -496,6 +498,10 @@ class WorkLoopTests(InstallTestCase):
         for phase, updates in transitions:
             with self.subTest(phase=phase):
                 module.transition_state(state, phase, updates=updates)
+                if phase == "implementing":
+                    module.update_evidence(state, {"branch": "main"}, repo=root)
+                if phase == "shipping":
+                    module.update_evidence(state, {"prNumber": 42}, repo=root)
                 module.atomic_write_json(state_path, state)
                 state = module.read_json(state_path)
                 module.validate_state(state)
@@ -527,6 +533,31 @@ class WorkLoopTests(InstallTestCase):
 
         self.assertEqual(state["phase"], "planning")
         self.assertEqual(state["current"]["task"], "task-one")
+
+    def test_transition_rejects_mutable_evidence_updates(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        invalid_updates = (
+            {"branch": "main"},
+            {"head": "HEAD"},
+            {"prNumber": 42},
+            {"prUrl": "https://example.test/pull/42"},
+            {"lastShippedSha": "HEAD"},
+        )
+
+        for updates in invalid_updates:
+            with self.subTest(updates=updates):
+                state = module.new_state(
+                    module.repository_identity(root),
+                    mode="backlog",
+                    selector="all",
+                    focus=module.normalize_focus(),
+                    until="merge",
+                    run_id="run-1",
+                )
+                with self.assertRaisesRegex(module.WorkLoopError, "evidence command"):
+                    module.transition_state(state, "selected", updates=updates)
+                self.assertEqual(state["phase"], "inventory")
 
     def test_result_history_is_bounded_and_updates_cost_counters(self) -> None:
         module = self.load_module()
@@ -659,6 +690,59 @@ class WorkLoopTests(InstallTestCase):
         with self.assertRaisesRegex(module.WorkLoopError, "local Git commit"):
             module.update_evidence(state, {"head": "not-a-commit"}, repo=root)
 
+    def test_last_shipped_evidence_falls_back_to_recorded_branch_tip(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        head = module.run_git(root, "rev-parse", "HEAD")
+        self.assertIsNotNone(head)
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        module.transition_state(
+            state,
+            "selected",
+            updates={"task": "task-one", "baseBranch": "main"},
+        )
+        module.transition_state(state, "planning")
+        module.transition_state(state, "implementing")
+        module.update_evidence(state, {"branch": "main"}, repo=root)
+        module.transition_state(state, "validating")
+        module.transition_state(state, "shipping")
+
+        module.update_evidence(state, {"lastShippedSha": head}, repo=root)
+
+        self.assertEqual(state["current"]["lastShippedSha"], head)
+        self.assertIsNone(state["current"]["head"])
+
+    def test_last_shipped_evidence_requires_recorded_head_or_branch(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        head = module.run_git(root, "rev-parse", "HEAD")
+        self.assertIsNotNone(head)
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        module.transition_state(state, "selected", updates={"task": "task-one"})
+        module.transition_state(state, "planning")
+        module.transition_state(state, "implementing")
+        module.transition_state(state, "validating")
+        module.transition_state(state, "shipping")
+
+        with self.assertRaisesRegex(
+            module.WorkLoopError, "requires a verifiable recorded head or branch"
+        ):
+            module.update_evidence(state, {"lastShippedSha": head}, repo=root)
+
     def test_evidence_initializes_schema_one_state_and_rejects_idle_phase(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -774,6 +858,39 @@ class WorkLoopTests(InstallTestCase):
         self.assertIn("at least one", stderr.getvalue())
         self.assertEqual(state_path.read_bytes(), before)
 
+    def test_failed_cli_transition_evidence_update_preserves_ledger_bytes(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, state_path, _lock_path = self.make_state(module, root, state_root)
+        before = state_path.read_bytes()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "transition",
+                    "--repo",
+                    str(root),
+                    "--run-id",
+                    state["runId"],
+                    "--phase",
+                    "selected",
+                    "--task",
+                    "task-one",
+                    "--head",
+                    "HEAD",
+                ]
+            )
+
+        self.assertEqual(result, 2)
+        self.assertIn(
+            "head must be recorded with the evidence command", stderr.getvalue()
+        )
+        self.assertEqual(state_path.read_bytes(), before)
+
     def test_reconciliation_classifies_context_health_from_evidence(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -785,11 +902,8 @@ class WorkLoopTests(InstallTestCase):
             until="merge",
             run_id="run-1",
         )
-        module.transition_state(
-            state,
-            "selected",
-            updates={"task": "task-one", "branch": "codex/task-one"},
-        )
+        module.transition_state(state, "selected", updates={"task": "task-one"})
+        module.update_evidence(state, {"branch": "main"}, repo=root)
 
         module.reconcile_state(state, {}, signal="continuation-summary")
         self.assertEqual(state["contextHealth"]["level"], "amber")
@@ -797,7 +911,7 @@ class WorkLoopTests(InstallTestCase):
 
         module.reconcile_state(
             state,
-            {"task": "task-one   ", "branch": "codex/task-one   "},
+            {"task": "task-one   ", "branch": "main   "},
         )
         self.assertEqual(state["contextHealth"]["level"], "green")
         self.assertEqual(state["contextHealth"]["epoch"], 1)
@@ -1258,10 +1372,15 @@ class WorkLoopTests(InstallTestCase):
             "selected",
             "--task",
             "ci",
-            "--head",
-            initial_head,
             "--base-branch",
             "main",
+        )
+        invoke(
+            "evidence",
+            "--run-id",
+            state["runId"],
+            "--head",
+            initial_head,
         )
         reconciled = invoke(
             "reconcile",

@@ -45,6 +45,7 @@ CURRENT_FIELD_ORDER = (
 )
 CURRENT_FIELDS = frozenset(CURRENT_FIELD_ORDER)
 STABLE_CURRENT_FIELDS = ("task", "baseBranch")
+TRANSITION_CURRENT_FIELDS = frozenset(STABLE_CURRENT_FIELDS)
 ACTIVE_EVIDENCE_PHASES = frozenset(
     {"selected", "planning", "implementing", "validating", "shipping", "followups"}
 )
@@ -860,6 +861,10 @@ def transition_state(
         for key, value in updates.items():
             if key not in state["current"]:
                 raise WorkLoopError(f"unknown current-state field: {key}")
+            if key not in TRANSITION_CURRENT_FIELDS:
+                raise WorkLoopError(
+                    f"{key} must be recorded with the evidence command, not transition"
+                )
             normalized = compact_text(value) if isinstance(value, str) else value
             remembered = state["current"].get(key)
             if (
@@ -1013,7 +1018,15 @@ def validated_evidence(
         resolved_tip = (
             _resolved_commit(evidence_repo, evidence_tip) if evidence_tip is not None else None
         )
-        if resolved_tip is None or not _is_ancestor(
+        if resolved_tip is None:
+            tip_branch = remembered_branch if branch_changed else candidate_branch
+            if isinstance(tip_branch, str):
+                resolved_tip = _branch_commit(evidence_repo, tip_branch)
+        if resolved_tip is None:
+            raise WorkLoopError(
+                "lastShippedSha evidence requires a verifiable recorded head or branch"
+            )
+        if not _is_ancestor(
             evidence_repo, resolved_shipped, resolved_tip
         ):
             raise WorkLoopError("lastShippedSha evidence must belong to the shipped branch")

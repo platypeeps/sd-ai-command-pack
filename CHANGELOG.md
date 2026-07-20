@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.23.2 - 2026-07-19
+
+- Prevent phase transitions from bypassing work-loop branch, commit, PR, and
+  shipped-SHA evidence validation; mutable facts now require the dedicated
+  `evidence` operation.
+- Validate shipped SHA membership against the recorded branch tip when no HEAD
+  was recorded, with a targeted diagnostic when neither source is available.
+
 ## 0.23.1 - 2026-07-19
 
 - Remove the expired `REVIEW_PREFLIGHT_PR_BODY` compatibility fallback from
