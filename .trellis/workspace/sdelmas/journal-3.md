@@ -1864,3 +1864,42 @@ Patched the source-owned work-loop transition boundary found during Mezmo fleet 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 149: Release 0.23.11 complete work-loop status evidence
+
+**Date**: 2026-07-20
+**Task**: Release 0.23.11 complete work-loop status evidence
+**Branch**: `codex/fix-work-loop-status-current-fields`
+
+### Summary
+
+Closed the status observability defect found during anomaly-metric-creator fleet review by exposing every recorded current-state evidence field, validated the exact 0.23.11 payload across all consumers, and readied source PR #182 while keeping the fleet task active.
+
+### Main Changes
+
+- Expose baseBranch and lastShippedSha in canonical snapshots and render all non-null current-state evidence in direct human status output.
+- Add machine-readable and human-output regression coverage and update the executable status contract and shipped documentation.
+- Retarget the active fleet task and all-pass seven-consumer candidate ledger to 0.23.11.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6073670` | fix: expose complete work-loop status evidence |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_work_loop (45 tests)
+- [OK] disposable fleet candidate validation (7/7 consumers)
+- [OK] make check plus explicit lint, mypy, security, exact audit, release ledger, and full-check
+- [OK] source PR #182 GitHub Actions matrix and Copilot review (16/16 files, zero comments)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge and verify tag v0.23.11 through housekeeping, then resume anomaly-metric-creator PR #257 and the sequential fleet rollout.
