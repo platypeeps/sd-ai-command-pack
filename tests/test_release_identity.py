@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest import mock
+
 try:
     import install_test_support as _support
 except ModuleNotFoundError as exc:
@@ -137,6 +139,64 @@ class ReleaseIdentityTests(InstallTestCase):
             ledger_path=root / "docs/fleet/candidate-validation.json",
             remote="origin",
         )
+
+    def test_run_git_bounds_subprocess_and_reports_launch_failure(self) -> None:
+        identity = self.load_identity_module()
+        root = self.make_git_repo_without_trellis()
+
+        with mock.patch.object(
+            identity.subprocess,
+            "run",
+            side_effect=OSError("git unavailable"),
+        ) as runner:
+            with self.assertRaisesRegex(
+                identity.ReleaseIdentityError,
+                "git command failed to start or timed out",
+            ):
+                identity.run_git(root, ["status"])
+
+        self.assertEqual(
+            runner.call_args.kwargs["timeout"],
+            identity.GIT_TIMEOUT_SECONDS,
+        )
+
+    def test_option_like_remote_is_separated_from_git_options(self) -> None:
+        identity = self.load_identity_module()
+        root = self.make_git_repo_without_trellis()
+        object_id = "a" * 40
+
+        with mock.patch.object(
+            identity,
+            "git_text",
+            return_value=f"{object_id}\trefs/tags/v1.0.0\n",
+        ) as git_text:
+            result = identity._remote_tag_object(
+                root,
+                "--upload-pack=unexpected",
+                "v1.0.0",
+            )
+
+        self.assertEqual(result, object_id)
+        git_text.assert_called_once_with(
+            root,
+            "ls-remote",
+            "--refs",
+            "--",
+            "--upload-pack=unexpected",
+            "refs/tags/v1.0.0",
+        )
+
+    def test_rejects_manifest_source_traversal_at_commit(self) -> None:
+        identity = self.load_identity_module()
+
+        with self.assertRaisesRegex(
+            identity.ReleaseIdentityError,
+            "resolves outside the repository",
+        ):
+            identity.normalize_tree_path(
+                identity.PurePosixPath("../outside.txt"),
+                "../outside.txt",
+            )
 
     def test_verifies_release_and_allows_bookkeeping_commit(self) -> None:
         identity = self.load_identity_module()
