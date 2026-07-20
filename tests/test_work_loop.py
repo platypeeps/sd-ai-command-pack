@@ -1254,6 +1254,87 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["phase"], "shipping")
         self.assertEqual(state["contextHealth"]["level"], "green")
 
+    def test_checkpoint_recovery_allows_post_squash_base_advance(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _main_head = self.make_shipping_state(module, root)
+        feature_head = state["current"]["head"]
+        module.update_evidence(
+            state,
+            {
+                "prNumber": 42,
+                "prUrl": "https://example.test/pull/42",
+                "lastShippedSha": feature_head,
+            },
+            repo=root,
+        )
+
+        self.run_git(root, "switch", "main")
+        self.run_git(root, "merge", "--squash", "codex/task-one")
+        squash_head = self.commit_file(
+            module, root, "squash.txt", "merged\n", "squash merge result"
+        )
+        module.update_evidence(
+            state,
+            {"branch": "main", "head": squash_head},
+            repo=root,
+        )
+        module.transition_state(state, "followups")
+
+        state["checkpoint"] = {
+            "state": "blocked",
+            "target": "post-merge follow-up",
+            "reason": "default branch advanced",
+            "resumePhase": "followups",
+        }
+        state["contextHealth"] = {
+            "level": "red",
+            "epoch": 2,
+            "reasons": ["default branch advanced"],
+        }
+        followup_head = self.commit_file(
+            module, root, "followup.txt", "complete\n", "follow-up merge"
+        )
+        observations = {
+            "phase": "followups",
+            "task": state["current"]["task"],
+            "branch": "main",
+            "head": followup_head,
+            "baseBranch": "main",
+            "prNumber": 42,
+            "prUrl": "https://example.test/pull/42",
+            "lastShippedSha": feature_head,
+        }
+
+        module.reconcile_state(
+            state,
+            observations,
+            verified_live_advance=True,
+            repo=root,
+        )
+
+        self.assertEqual(state["current"]["head"], followup_head)
+        self.assertEqual(state["current"]["lastShippedSha"], feature_head)
+        self.assertEqual(state["checkpoint"]["state"], "none")
+        self.assertEqual(state["contextHealth"]["level"], "green")
+
+        forged_shipped_head = self.commit_file(
+            module, root, "forged.txt", "not shipped\n", "unrelated main work"
+        )
+        with self.assertRaisesRegex(
+            module.WorkLoopError,
+            "lastShippedSha evidence must advance to a descendant commit",
+        ):
+            module.validated_evidence(
+                state,
+                {
+                    "head": forged_shipped_head,
+                    "lastShippedSha": forged_shipped_head,
+                },
+                phase="followups",
+                repo=root,
+            )
+
     def test_evidence_rejects_identity_branch_pr_and_commit_conflicts(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -1375,6 +1456,12 @@ class WorkLoopTests(InstallTestCase):
         module.transition_state(state, "validating")
         module.transition_state(state, "shipping")
 
+        with self.assertRaisesRegex(
+            module.WorkLoopError, "requires a verifiable recorded head or branch"
+        ):
+            module.update_evidence(state, {"lastShippedSha": head}, repo=root)
+
+        state["current"]["lastShippedSha"] = head
         with self.assertRaisesRegex(
             module.WorkLoopError, "requires a verifiable recorded head or branch"
         ):

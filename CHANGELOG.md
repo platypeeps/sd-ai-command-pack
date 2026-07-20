@@ -1,10 +1,16 @@
 # Changelog
 
-## 0.24.5 - 2026-07-20
+## 0.24.6 - 2026-07-20
 
 - Distinguish active and stale terminal reconciliation locks so stale-lock
   failures point operators to explicit `reconcile-terminal
   --recover-stale-lock` recovery instead of waiting for an abandoned owner.
+
+## 0.24.5 - 2026-07-20
+
+- Fixed work-loop checkpoint recovery after a verified squash merge so a
+  later default-branch advance can retain the historical shipped feature SHA
+  without weakening merge-boundary or changed-SHA ancestry validation.
 
 ## 0.24.4 - 2026-07-20
 

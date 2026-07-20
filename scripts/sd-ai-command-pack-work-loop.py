@@ -1651,36 +1651,56 @@ def validated_evidence(
             )
         candidate["lastShippedSha"] = resolved_shipped
         candidate_shipped = resolved_shipped
-        if remembered_shipped is not None and candidate_shipped != remembered_shipped:
-            resolved_remembered = _resolved_commit(evidence_repo, remembered_shipped)
-            if resolved_remembered is None or not _is_ancestor(
-                evidence_repo, resolved_remembered, resolved_shipped
+        resolved_remembered_shipped = (
+            _resolved_commit(evidence_repo, remembered_shipped)
+            if remembered_shipped is not None
+            else None
+        )
+        if (
+            remembered_shipped is not None
+            and candidate_shipped != resolved_remembered_shipped
+        ):
+            if resolved_remembered_shipped is None or not _is_ancestor(
+                evidence_repo, resolved_remembered_shipped, resolved_shipped
             ):
                 raise WorkLoopError(
                     "lastShippedSha evidence must advance to a descendant commit"
                 )
-        evidence_tip = candidate_head
-        if branch_changed:
-            evidence_tip = (
-                _branch_commit(evidence_repo, remembered_branch)
-                if isinstance(remembered_branch, str)
-                else None
-            ) or remembered_head or candidate_head
-        resolved_tip = (
-            _resolved_commit(evidence_repo, evidence_tip) if evidence_tip is not None else None
+        unchanged_historical_shipped_evidence = (
+            resolved_remembered_shipped is not None
+            and candidate_shipped == resolved_remembered_shipped
+            and not branch_changed
+            and isinstance(candidate_branch, str)
+            and bool(candidate_branch.strip())
+            and candidate_branch == candidate.get("baseBranch")
         )
-        if resolved_tip is None:
-            tip_branch = remembered_branch if branch_changed else candidate_branch
-            if isinstance(tip_branch, str):
-                resolved_tip = _branch_commit(evidence_repo, tip_branch)
-        if resolved_tip is None:
-            raise WorkLoopError(
-                "lastShippedSha evidence requires a verifiable recorded head or branch"
+        if not unchanged_historical_shipped_evidence:
+            evidence_tip = candidate_head
+            if branch_changed:
+                evidence_tip = (
+                    _branch_commit(evidence_repo, remembered_branch)
+                    if isinstance(remembered_branch, str)
+                    else None
+                ) or remembered_head or candidate_head
+            resolved_tip = (
+                _resolved_commit(evidence_repo, evidence_tip)
+                if evidence_tip is not None
+                else None
             )
-        if not _is_ancestor(
-            evidence_repo, resolved_shipped, resolved_tip
-        ):
-            raise WorkLoopError("lastShippedSha evidence must belong to the shipped branch")
+            if resolved_tip is None:
+                tip_branch = remembered_branch if branch_changed else candidate_branch
+                if isinstance(tip_branch, str):
+                    resolved_tip = _branch_commit(evidence_repo, tip_branch)
+            if resolved_tip is None:
+                raise WorkLoopError(
+                    "lastShippedSha evidence requires a verifiable recorded head or branch"
+                )
+            if not _is_ancestor(
+                evidence_repo, resolved_shipped, resolved_tip
+            ):
+                raise WorkLoopError(
+                    "lastShippedSha evidence must belong to the shipped branch"
+                )
 
     return candidate
 
