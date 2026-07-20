@@ -197,7 +197,10 @@ it. Use a separate request to execute the recommendation.
    Prism/Gito.
 11. Request the configured remote reviewer, defaulting to GitHub Copilot, after
    a clean local pass and again after every pushed review-fix commit made
-   during the loop, unless the user explicitly asked for local-only review.
+   during the loop, unless the user explicitly asked for local-only review or
+   the trusted fleet workflow proves the exact consumer head qualifies for
+   integration-only review. That profile suppresses only a new request and
+   still inspects all existing feedback, local gates, and CI.
 12. Let the review-pr command reply to and resolve review threads as part of the
    normal loop once findings are fixed, rebutted with evidence, or confirmed
    already addressed.
@@ -935,16 +938,24 @@ with the
 deciding which consumers are stale. It processes one consumer at a time: verify a clean tree (dirty
 trees are skipped and reported, never touched), branch, install the
 release, run the consumer's full-check, open the consumer PR, watch it to
-settled, and merge through the consumer's housekeeping gate. Bare consumer
+settled, and merge through the consumer's housekeeping gate. Before review it
+runs the source-side fleet review classifier against the exact pre-refresh base
+and current head. A verified release/candidate ledger, exact installer
+inspection and audit, safe base/current receipts, and an installer-only diff
+select integration-only review; ambiguity or consumer-owned changes select the
+normal configured remote-review loop. Bare consumer
 names such as `loadsmith rwbp-website`, or `consumer=a,b`, filter the run;
 `no-merge` stops before merging, `dry-run` reports preflight only, and
-`remote=<name>` selects the release-authority Git remote (default `origin`).
+`remote-review` forces normal remote review, while `remote=<name>` selects the
+release-authority Git remote (default `origin`).
 Before it inventories consumers, preflight requires the matching local and
 remote `v<version>` tag identities, tagged version and payload, ancestry, and
 tagged plus current full-fleet candidate ledgers to agree. Missing, stale,
 mismatched, or rewritten release identity fails before mutation. Unknown
 consumer names also fail before mutation rather than broadening to the fleet.
 The report is a per-consumer status table plus a fleet version summary.
+Its consumer rows state `integration-only`, `remote`, or `n/a` review profile
+so avoided remote-review rounds remain visible rather than implicit.
 
 The `sd-test-gaps` command closes the worst coverage gaps with targeted
 tests. It runs the repository's coverage flow as a baseline (aborting if

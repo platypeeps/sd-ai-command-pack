@@ -97,6 +97,7 @@ class InstallAuditTests(InstallTestCase):
             - {
                 "scripts/sd-ai-command-pack-fleet-candidate-check.py",
                 "scripts/sd-ai-command-pack-fleet-preflight.py",
+                "scripts/sd-ai-command-pack-fleet-review-classify.py",
                 "scripts/sd_ai_command_pack_fleet_lib.py",
             },
             set(install.SOURCE_ONLY_COMMAND_TARGETS),

@@ -119,13 +119,19 @@ even when a faulty install also omitted them from receipts or provenance.
 
 For each `refresh-needed` repo:
 
-1. Create a PR-only branch in that consumer repo.
+1. Record the exact default-branch commit, then create a PR-only branch in that
+   consumer repo.
 2. Run the printed `python3 install.py <repo> --force --platform ...` command
    from this pack checkout.
 3. Run the printed `python3 scripts/sd-ai-command-pack-install-audit.py --repo
    <repo> --expected-platform ...` command.
-4. Commit, push, review, merge, and run housekeeping in the consumer repo.
-5. Confirm post-merge provenance reads the target version and the audit passes.
+4. Run the consumer's deterministic full-check and commit only the refresh.
+5. Run the source-side fleet review classifier against the exact base and
+   refresh head. Use integration-only review when it qualifies; otherwise use
+   the normal configured remote-review loop.
+6. Push, open the PR, inspect existing feedback, wait for required checks, and
+   merge through the consumer housekeeping gate.
+7. Confirm post-merge provenance reads the target version and the audit passes.
 
 Process consumers in manifest priority order. Do not move to AMC first merely
 because it appears in an operator's local list; the fast canaries are intended
@@ -184,6 +190,43 @@ security defect would become riskier while waiting for the bounded sweep, it
 may ship immediately with that reason recorded; keep the remaining campaign
 open rather than silently discarding it.
 
+## Integration-Only Review Classification
+
+After the refresh commit exists and before choosing its review profile, run
+this read-only command from the pack source checkout:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-review-classify.py \
+  --consumer <name> --repo <consumer-path> \
+  --base-commit <full-pre-refresh-sha> --remote origin --json
+```
+
+Exit `0` proves the exact head is eligible for integration-only review. The
+classifier reuses the release-identity guard, requires the canonical consumer
+and platform set, runs authoritative `install.py --check --json` inspection
+with the exact audit, validates safe installed-target receipts at both the base
+commit and current checkout, and requires every committed changed path to be in
+the union of those receipts plus receipt/provenance metadata. Rename detection
+is disabled so both sides remain visible, and retired pack targets stay
+classifiable through the historical receipt.
+
+Exit `1`, malformed output, unavailable proof, a dirty tree, stale release or
+candidate evidence, audit/provenance drift, a non-ancestor base, or any
+consumer-owned path means `remote-review-required`. This is a safe fallback,
+not a rollout failure. Use the normal `sd-review-pr` convergence loop. The
+`remote-review` fleet flag also forces that path for every selected consumer.
+
+For an eligible head, the trusted fleet invocation of `sd-review-pr` reruns the
+classifier and binds its result to the local and PR head before skipping a new
+configured remote implementation-review request. It still runs the consumer
+full-check, dispositions first-review advisories, fetches all existing reviews,
+comments, and unresolved threads, addresses valid findings, waits for required
+CI, performs the PR-scoped learning pass, and hands the PR to the normal watch
+and housekeeping gates. Any review fix changes the head and triggers another
+classification; a new ambiguous or consumer-owned path switches to remote
+review.
+
 ## Review Ownership
 
 Pack-owned implementation is reviewed in the sd-ai-command-pack source PR.
@@ -191,6 +234,11 @@ Consumer refresh PRs review the installed result: selected-platform wiring,
 receipt and provenance integrity, secrets, documentation accuracy, and any
 repo-owned migration or integration change. Do not repeat line-level review of
 unchanged vendored pack implementation in every consumer.
+
+This boundary is enforced, not inferred from a scope hint. A pure qualifying
+refresh records `integration-only` with zero new remote-review rounds. A mixed,
+ambiguous, explicitly overridden, or invalid refresh records `remote` and uses
+the configured reviewer. Existing reviewer feedback blocks both profiles.
 
 Do not include stale aliases such as `green-button-manager` or historical
 predecessors such as `trellis-review-pr-pack`; they are explicitly excluded in

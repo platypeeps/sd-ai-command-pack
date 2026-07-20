@@ -32,6 +32,7 @@ while read -r script floor; do
 done <<'EOF'
 scripts/sd-ai-command-pack-fleet-preflight.py 82
 scripts/sd-ai-command-pack-fleet-candidate-check.py 90
+scripts/sd-ai-command-pack-fleet-review-classify.py 80
 scripts/sd-ai-command-pack-install-audit.py 89
 scripts/sd-ai-command-pack-pr-body-scope.py 78
 scripts/sd-ai-command-pack-record-session.py 79

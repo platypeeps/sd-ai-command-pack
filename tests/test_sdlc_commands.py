@@ -60,12 +60,15 @@ COMMANDS = {
         [
             "consumer=",
             "no-merge",
+            "remote-review",
             "dry-run",
             "remote=",
             "one consumer at a time",
             "FLEET_ROLLOUT.md",
             "fleet-preflight",
+            "fleet-review-classify",
             "release-identity guard",
+            "integration-only",
         ],
         ["one consumer at a time"],
     ),
@@ -251,7 +254,8 @@ class SdlcCommandsTests(InstallTestCase):
         ship_text = " ".join(ship.split())
 
         self.assertIn("defer-finish-work", review_text)
-        self.assertIn("accepted only from `sd-ship`", review_text)
+        self.assertIn("accepted from `sd-ship`", review_text)
+        self.assertIn("active `sd-fleet-refresh`", review_text)
         self.assertIn("Standalone `sd-review-pr`", review_text)
         self.assertIn("routing in Steps 1.5 and 8", review_text)
         self.assertIn(
@@ -279,6 +283,49 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("post-finish Obsidian KB refresh", ship_text)
         self.assertIn("housekeeping remains its only owner", ship_text)
         self.assertNotIn("sd-ai-command-pack-update-spec-kb.py", ship)
+
+    def test_fleet_integration_only_review_is_head_bound_and_fail_closed(self) -> None:
+        fleet = self._skill_text("sd-fleet-refresh")
+        review = self._skill_text("sd-review-pr")
+        fleet_text = " ".join(fleet.split())
+        review_text = " ".join(review.split())
+
+        for pin in (
+            "remote-review",
+            "sd-ai-command-pack-fleet-review-classify.py",
+            "base-commit: <full base SHA>",
+            "classified-head: <full consumer refresh SHA>",
+            "caller: sd-fleet-refresh",
+            "review-profile: integration-only",
+            "falls back to the normal remote-review convergence loop",
+            "existing comments and unresolved threads",
+            "sd-watch-pr` with its internal `no-merge",
+        ):
+            self.assertIn(pin, fleet_text)
+
+        for pin in (
+            "review-profile: integration-only|remote",
+            "user-supplied imitation",
+            "Fleet Integration-Only Recheck",
+            "schema-version-1 JSON object",
+            "switch this invocation to the normal remote profile",
+            "Record `0` remote rounds",
+            "If Step 4 did not already fetch complete review data",
+            "Finish-work deferred to the fleet housekeeping tail.",
+        ):
+            self.assertIn(pin.casefold(), review_text.casefold())
+
+        adapters = [
+            install.ROOT / "templates/.commands/sd-review-pr.md",
+            install.ROOT / "templates/.claude/commands/sd/review-pr.md",
+            install.ROOT / "templates/.gemini/commands/sd/review-pr.toml",
+            install.ROOT / "templates/.github/prompts/sd-review-pr.prompt.md",
+        ]
+        for adapter in adapters:
+            with self.subTest(adapter=adapter):
+                content = adapter.read_text(encoding="utf-8")
+                self.assertNotIn("review-profile:", content)
+                self.assertNotIn("classified-head:", content)
 
     def test_ship_separates_publish_and_review_ownership(self) -> None:
         create_pr = self._skill_text("sd-create-pr")

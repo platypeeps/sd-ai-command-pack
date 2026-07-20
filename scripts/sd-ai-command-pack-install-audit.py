@@ -100,6 +100,7 @@ SOURCE_ONLY_ALLOWED_PACK_FILES = {
     ".zcode/commands/sd/fleet-refresh.md",
     "scripts/sd-ai-command-pack-fleet-candidate-check.py",
     "scripts/sd-ai-command-pack-fleet-preflight.py",
+    "scripts/sd-ai-command-pack-fleet-review-classify.py",
     "scripts/sd_ai_command_pack_fleet_lib.py",
 }
 
