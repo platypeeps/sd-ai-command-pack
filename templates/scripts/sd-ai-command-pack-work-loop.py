@@ -1516,7 +1516,7 @@ def _has_complete_recovery_evidence(
     recorded_fields = {
         key for key in CURRENT_FIELD_ORDER if current.get(key) is not None
     }
-    return bool(recorded_fields) and recorded_fields.issubset(observations)
+    return recorded_fields.issubset(observations)
 
 
 def validated_evidence(
@@ -1778,7 +1778,9 @@ def reconcile_state(
         and recovery_attempted
         and has_complete_recovery_evidence
     )
-    may_validate_recovery = should_validate_recovery and (
+    may_validate_recovery = should_validate_recovery and bool(
+        evidence_observations
+    ) and (
         not mismatches or verified_live_advance
     )
     if may_validate_recovery or (mismatches and verified_live_advance):
@@ -1840,7 +1842,7 @@ def reconcile_state(
                 "epoch": state["contextHealth"]["epoch"],
                 "reasons": [],
             }
-        if complete_recovery_evidence:
+        if recovery_attempted and complete_recovery_evidence:
             _clear_recovery_checkpoint(state)
 
 
@@ -2410,10 +2412,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                         raise WorkLoopError(
                             f"phase {resume_phase} cannot own a recovery checkpoint"
                         )
+                    checkpoint_target = (
+                        item["checkpoint"].get("target")
+                        if prior_phase == "checkpoint"
+                        else prior_phase
+                    )
+                    if checkpoint_target is None:
+                        checkpoint_target = resume_phase
                     item["phase"] = resume_phase
                     item["checkpoint"] = {
                         "state": "paused",
-                        "target": prior_phase,
+                        "target": checkpoint_target,
                         "reason": compact_text(args.reason),
                         "resumePhase": resume_phase,
                     }

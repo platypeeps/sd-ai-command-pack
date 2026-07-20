@@ -1814,6 +1814,37 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["checkpoint"], checkpoint)
         self.assertEqual(state["contextHealth"], context_health)
 
+    def test_boundary_checkpoint_requires_an_observation_before_clearing(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        state["checkpoint"] = {
+            "state": "paused",
+            "target": "inventory",
+            "reason": "operator requested pause",
+            "resumePhase": "inventory",
+        }
+        state["contextHealth"] = {
+            "level": "red",
+            "epoch": 2,
+            "reasons": ["operator requested pause"],
+        }
+
+        module.reconcile_state(state, {}, repo=root)
+        self.assertEqual(state["checkpoint"]["state"], "paused")
+        self.assertEqual(state["contextHealth"]["level"], "red")
+
+        module.reconcile_state(state, {"phase": "inventory"}, repo=root)
+        self.assertEqual(state["checkpoint"]["state"], "none")
+        self.assertEqual(state["contextHealth"]["level"], "green")
+
     def test_checkpoint_recovery_requires_verified_flag_for_changed_evidence(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -2058,6 +2089,45 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(resumed["status"], "active")
         self.assertEqual(resumed["phase"], "inventory")
         self.assertFalse((root / ".sd-ai-command-pack/work-loop.json").exists())
+
+    def test_cli_pause_preserves_legacy_checkpoint_target(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, state_path, _lock_path = self.make_state(module, root, state_root)
+        state["phase"] = "checkpoint"
+        state["checkpoint"] = {
+            "state": "paused",
+            "target": "wait for operator",
+            "reason": "legacy pause",
+            "resumePhase": "inventory",
+        }
+        module.atomic_write_json(state_path, state)
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "stop",
+                    "--repo",
+                    str(root),
+                    "--run-id",
+                    state["runId"],
+                    "--status",
+                    "paused",
+                    "--reason",
+                    "operator pause",
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(result, 0, stdout.getvalue())
+        paused = json.loads(stdout.getvalue())
+        self.assertEqual(paused["phase"], "inventory")
+        self.assertEqual(paused["checkpoint"]["target"], "wait for operator")
+        self.assertEqual(paused["checkpoint"]["resumePhase"], "inventory")
 
     def test_cli_resume_rejects_conflicting_configuration_and_focus(self) -> None:
         module = self.load_module()
