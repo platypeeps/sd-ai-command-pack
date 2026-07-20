@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 145
+- **Total Sessions**: 146
 - **Last Active**: 2026-07-19
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1744 | Active |
+| `journal-3.md` | ~1784 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 146 | 2026-07-19 | Correct work-loop contracts for 0.23.8 | `c965d9f`, `a989704`, `691adba` | `codex/work-loop-review-contract-fixes` |
 | 145 | 2026-07-19 | Retire review-body fallback guidance | `ded1b36` | `main` |
 | 144 | 2026-07-19 | Work-loop evidence updates | `b763591`, `a13b7b5`, `1b468fb`, `88af490`, `27875a1`, `bf45640` | `main` |
 | 143 | 2026-07-19 | Post-finish KB refresh | `bd09d60`, `0b5f2c0` | `codex/post-finish-kb-refresh` |
