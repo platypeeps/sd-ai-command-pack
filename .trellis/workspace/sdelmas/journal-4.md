@@ -304,3 +304,40 @@ Fail closed on malformed PR URL authorities and ports in work-loop and status va
 ### Next Steps
 
 - None - task complete
+
+
+## Session 160: Document source-only consumer contract
+
+**Date**: 2026-07-20
+**Task**: Document source-only consumer contract
+**Branch**: `main`
+
+### Summary
+
+Taught Copilot to distinguish source-only pack files from required consumer targets, added regressions, released pack 0.24.4, and merged PR #194.
+
+### Main Changes
+
+- Added canonical and synchronized Copilot guidance for source-only consumer boundaries.
+- Added consumer install-audit regressions and refreshed 0.24.4 release evidence.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8d27a86` | fix: document source-only consumer contract |
+
+### Testing
+
+- [OK] make check
+- [OK] fleet candidate validation passed for all seven configured consumers
+- [OK] Copilot reviewed all 14 changed files with no comments; CI passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
