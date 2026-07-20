@@ -546,6 +546,34 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["phase"], "planning")
         self.assertEqual(state["current"]["task"], "task-one")
 
+    def test_transition_rejects_blank_stable_identity_before_phase_change(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+
+        for field in module.STABLE_CURRENT_FIELDS:
+            for value in (" \t ", 42):
+                with self.subTest(field=field, value=value):
+                    state = module.new_state(
+                        module.repository_identity(root),
+                        mode="backlog",
+                        selector="all",
+                        focus=module.normalize_focus(),
+                        until="merge",
+                        run_id="run-1",
+                    )
+                    with self.assertRaisesRegex(
+                        module.WorkLoopError,
+                        rf"{field} must be a non-empty string or null",
+                    ):
+                        module.transition_state(
+                            state,
+                            "selected",
+                            updates={field: value},
+                        )
+
+                    self.assertEqual(state["phase"], "inventory")
+                    self.assertIsNone(state["current"][field])
+
     def test_transition_rejects_mutable_evidence_updates(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -954,6 +982,35 @@ class WorkLoopTests(InstallTestCase):
         self.assertNotIn("--last-shipped-sha", help_text)
         self.assertIn("--task", help_text)
         self.assertIn("--base-branch", help_text)
+
+    def test_transition_cli_rejects_blank_stable_identity_field(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, state_path, _lock_path = self.make_state(module, root, state_root)
+        before = state_path.read_bytes()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "transition",
+                    "--repo",
+                    str(root),
+                    "--run-id",
+                    state["runId"],
+                    "--phase",
+                    "selected",
+                    "--task",
+                    " \t ",
+                ]
+            )
+
+        self.assertEqual(result, 2)
+        self.assertIn("task must be a non-empty string or null", stderr.getvalue())
+        self.assertEqual(state_path.read_bytes(), before)
 
     def test_reconciliation_classifies_context_health_from_evidence(self) -> None:
         module = self.load_module()

@@ -1,4 +1,4 @@
-# Fleet Refresh 0.23.9 Design
+# Fleet Refresh 0.23.10 Design
 
 ## Ownership Boundary
 
@@ -34,6 +34,6 @@ not receive synthetic Trellis tasks solely for vendored refresh changes.
 
 ## Completion Evidence
 
-The final source preflight must report all seven consumers at `0.23.9`. Each
+The final source preflight must report all seven consumers at `0.23.10`. Each
 mutated consumer must be clean on its default branch, synchronized with origin,
 free of its rollout branch, and pass the post-merge install audit.

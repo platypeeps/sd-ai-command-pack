@@ -866,7 +866,11 @@ def transition_state(
                 raise WorkLoopError(
                     f"{key} must be recorded with the evidence command, not transition"
                 )
+            if value is not None and not isinstance(value, str):
+                raise WorkLoopError(f"{key} must be a non-empty string or null")
             normalized = compact_text(value) if isinstance(value, str) else value
+            if isinstance(value, str) and not normalized:
+                raise WorkLoopError(f"{key} must be a non-empty string or null")
             remembered = state["current"].get(key)
             if (
                 key in STABLE_CURRENT_FIELDS
