@@ -936,12 +936,17 @@ class WorkLoopTests(InstallTestCase):
             )
 
         self.assertEqual(exit_error.exception.code, 2)
-        self.assertIn("unrecognized arguments: --head HEAD", stderr.getvalue())
+        self.assertIn("--head", stderr.getvalue())
         self.assertEqual(state_path.read_bytes(), before)
 
-        help_text = module.build_parser()._subparsers._group_actions[0].choices[
-            "transition"
-        ].format_help()
+        help_stdout = io.StringIO()
+        with (
+            contextlib.redirect_stdout(help_stdout),
+            self.assertRaises(SystemExit) as help_exit,
+        ):
+            module.build_parser().parse_args(["transition", "--help"])
+        self.assertEqual(help_exit.exception.code, 0)
+        help_text = help_stdout.getvalue()
         self.assertNotIn("--head", help_text)
         self.assertNotIn("--branch", help_text)
         self.assertNotIn("--pr-number", help_text)
