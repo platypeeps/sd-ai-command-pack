@@ -1000,7 +1000,8 @@ def acquire_terminal_lock(
             stale = lock_is_stale(current, stale_after=stale_after)
             if not stale:
                 raise WorkLoopError(
-                    "repository has an active terminal reconciliation lock"
+                    "repository has an active terminal reconciliation lock; "
+                    "retry after reconciliation finishes"
                 ) from None
             if not recover_stale:
                 raise WorkLoopError(

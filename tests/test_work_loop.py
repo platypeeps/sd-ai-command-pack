@@ -610,6 +610,14 @@ class WorkLoopTests(InstallTestCase):
         ):
             module.acquire_lock(lock_path, state)
 
+        active_bytes = terminal_lock_path.read_bytes()
+        with self.assertRaisesRegex(
+            module.WorkLoopError,
+            "active terminal reconciliation lock; retry after reconciliation finishes",
+        ):
+            module.acquire_terminal_lock(terminal_lock_path, state)
+        self.assertEqual(terminal_lock_path.read_bytes(), active_bytes)
+
         stale = dict(active)
         stale.update(
             {
