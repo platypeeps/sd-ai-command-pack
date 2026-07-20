@@ -123,7 +123,8 @@ The shipped work-loop helper's `evidence` subcommand records verified commit,
 PR, review-fix, finish-work, and merge facts atomically without an artificial
 checkpoint transition. Stable task/base identity and Git ancestry checks keep
 real contradictions fail-closed, while successful recovery clears obsolete
-ready or blocked checkpoints.
+ready or blocked checkpoints. Recovery reconciliation must include matching
+current-state evidence; a matching phase alone cannot clear a contradiction.
 Use `fleet` from any installed
 checkout to collect a rollout-priority summary for every configured consumer
 after creating the machine-local fleet profile.

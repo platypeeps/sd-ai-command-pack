@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-20T01:38:06Z",
-  "packVersion": "0.23.4",
-  "payloadDigest": "sha256:b2be34b1b22983b1bb9f8277351cf81dc44e650ea42345e758b9340c4848e521",
+  "validatedAt": "2026-07-20T02:42:44Z",
+  "packVersion": "0.23.5",
+  "payloadDigest": "sha256:d3c79fefbdc1cbd86c00fe16316b509be681e87d28a208da6a46d717c97cdf60",
   "fleetManifestDigest": "sha256:1776b0a45d7faa3b20fc61ff0ef8587f7fc577eebc503b7ddce0563479ef247a",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "bc45b73ba9992ad8f2ed8ee64ad3f8874f02c0f1",
+      "baseCommit": "b0ae6216e0ef1ad692201901e3481efd800430b8",
       "status": "passed",
       "prepares": [
         [
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "1e4a1abbfd5eae8745f8059ed99904388cf4363d",
+      "baseCommit": "afc9ad0dd712a74a07774b82a40760b5f6a66de2",
       "status": "passed",
       "prepares": [
         [
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "34ca55356882c02965aa738cc84fac6ad5321a2d",
+      "baseCommit": "2e09469b5d8c17830a383595034d639349a14f67",
       "status": "passed",
       "prepares": [
         [
@@ -64,7 +64,7 @@
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
-      "baseCommit": "a70dd988943f7af173b50340fbdc3836651897b2",
+      "baseCommit": "4c56d9c43f556657827132c0ada72ec56d207398",
       "status": "passed",
       "prepares": [
         [
