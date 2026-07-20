@@ -723,6 +723,21 @@ class FleetTimingTests(InstallTestCase):
             self.assertTrue(store.lock_path.exists())
         self.assertFalse(store.lock_path.exists())
 
+    def test_lock_schema_rejects_boolean_version(self) -> None:
+        timing = self.load_timing()
+        _repo, _state_home, store = self.make_store(timing)
+        lock = {
+            "schemaVersion": True,
+            "runId": "run-1",
+            "repositoryDigest": store.repository_digest,
+            "pid": os.getpid(),
+            "hostname": "test-host",
+            "acquiredAtWallNs": SECOND,
+        }
+
+        with self.assertRaisesRegex(timing.FleetTimingError, "must be an integer"):
+            timing._validate_lock(lock, store, "run-1")
+
     def test_transient_invalid_lock_is_retried_until_writer_finishes(self) -> None:
         timing = self.load_timing()
         _repo, _state_home, store = self.make_store(timing)

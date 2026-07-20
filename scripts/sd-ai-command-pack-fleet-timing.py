@@ -485,7 +485,8 @@ def process_alive(pid: object) -> bool:
 def _validate_lock(value: object, store: TimingStore, run_id: str) -> dict[str, Any]:
     lock = _object(value, "timing lock")
     _strict_fields(lock, LOCK_FIELDS, "timing lock")
-    if lock["schemaVersion"] != SCHEMA_VERSION:
+    schema = _integer(lock["schemaVersion"], "timing lock schemaVersion")
+    if schema != SCHEMA_VERSION:
         raise FleetTimingError("timing lock schema is malformed")
     if lock["runId"] != run_id or lock["repositoryDigest"] != store.repository_digest:
         raise FleetTimingError("timing lock belongs to another run or repository")
