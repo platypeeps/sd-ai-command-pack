@@ -1,8 +1,8 @@
-# Fleet Refresh 0.23.5 Implementation Plan
+# Fleet Refresh 0.23.6 Implementation Plan
 
 ## Preparation
 
-1. Verify `manifest.json`, tag `v0.23.5`, and the full-fleet candidate ledger.
+1. Verify `manifest.json`, tag `v0.23.6`, and the full-fleet candidate ledger.
 2. Run source fleet preflight and preserve the reported before versions, exact
    install/audit commands, local paths, and priority order.
 3. Activate this task only after the PRD and design agree with the live report.
@@ -23,7 +23,7 @@ se-ai-command-pack, then anomaly-metric-creator:
 6. Wait for required checks and review state, address rollout-owned findings,
    and merge only through the consumer housekeeping gate.
 7. Confirm the consumer returns clean to its synchronized default branch with
-   installed version `0.23.5` and a passing post-merge audit.
+   installed version `0.23.6` and a passing post-merge audit.
 
 ## Finalization
 

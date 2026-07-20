@@ -272,8 +272,10 @@ Task and base branch are stable iteration identity; commit ancestry, PR
 identity, and the final feature-to-base branch switch are validated locally.
 Verified same-phase reconciliation uses the same rules and clears obsolete
 recovery checkpoints instead of routing through a synthetic checkpoint phase.
-A matching phase alone is not recovery evidence and cannot clear a ready or
-blocked checkpoint left by contradictory current-state observations.
+A matching phase or partial evidence is not recovery evidence and cannot clear
+a ready or blocked checkpoint left by contradictory current-state observations.
+Recovery through an evidence update or reconciliation must supply every
+non-null field in the recorded current-state ledger.
 
 The work-designs command is a thin `needs-design` selector for that same
 controller. Its default now carries selected tasks from planning through a

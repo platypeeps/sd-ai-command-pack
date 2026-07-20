@@ -603,12 +603,17 @@ class WorkLoopTests(InstallTestCase):
             "target": "shipping",
             "reason": "old recovery",
         }
+        module.update_evidence(state, {"head": "HEAD"}, repo=root)
+        self.assertEqual(state["checkpoint"]["state"], "ready")
         module.update_evidence(
             state,
             {
+                "task": state["current"]["task"],
+                "branch": state["current"]["branch"],
                 "prNumber": 42,
                 "prUrl": "https://example.test/pull/42",
                 "head": "HEAD",
+                "baseBranch": state["current"]["baseBranch"],
                 "lastShippedSha": "HEAD",
             },
             repo=root,
@@ -927,6 +932,9 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["contextHealth"]["level"], "red")
         self.assertEqual(state["checkpoint"]["state"], "blocked")
         module.reconcile_state(state, {"task": "task-one"})
+        self.assertEqual(state["contextHealth"]["level"], "red")
+        self.assertEqual(state["checkpoint"]["state"], "blocked")
+        module.reconcile_state(state, {"task": "task-one", "branch": "main"})
         self.assertEqual(state["contextHealth"]["level"], "green")
         self.assertEqual(state["checkpoint"]["state"], "none")
 
@@ -955,6 +963,38 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["phase"], "planning")
         self.assertEqual(state["contextHealth"]["level"], "red")
 
+    def test_reconcile_requires_complete_current_evidence_to_clear_checkpoint(
+        self,
+    ) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _main_head = self.make_shipping_state(module, root)
+        module.update_evidence(
+            state,
+            {
+                "prNumber": 42,
+                "prUrl": "https://example.test/pull/42",
+            },
+            repo=root,
+        )
+
+        module.reconcile_state(state, {"prNumber": 43}, repo=root)
+        self.assertEqual(state["contextHealth"]["level"], "red")
+        self.assertEqual(state["checkpoint"]["state"], "blocked")
+
+        module.reconcile_state(state, {"head": state["current"]["head"]}, repo=root)
+        self.assertEqual(state["contextHealth"]["level"], "red")
+        self.assertEqual(state["checkpoint"]["state"], "blocked")
+
+        complete_evidence = {
+            key: value
+            for key, value in state["current"].items()
+            if value is not None
+        }
+        module.reconcile_state(state, complete_evidence, repo=root)
+        self.assertEqual(state["contextHealth"]["level"], "green")
+        self.assertEqual(state["checkpoint"]["state"], "none")
+
     def test_verified_reconcile_updates_same_phase_evidence_and_clears_checkpoint(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -978,7 +1018,10 @@ class WorkLoopTests(InstallTestCase):
             state,
             {
                 "phase": "shipping",
+                "task": state["current"]["task"],
+                "branch": state["current"]["branch"],
                 "head": next_head,
+                "baseBranch": state["current"]["baseBranch"],
                 "prNumber": 42,
                 "prUrl": "https://example.test/pull/42",
                 "lastShippedSha": prior_head,
