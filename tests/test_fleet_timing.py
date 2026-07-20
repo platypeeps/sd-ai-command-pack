@@ -670,6 +670,43 @@ class FleetTimingTests(InstallTestCase):
             self.assertTrue(store.lock_path.exists())
         self.assertFalse(store.lock_path.exists())
 
+    def test_transient_invalid_lock_is_retried_until_writer_finishes(self) -> None:
+        timing = self.load_timing()
+        _repo, _state_home, store = self.make_store(timing)
+        timing.ensure_private_directory(store.lock_path.parent)
+        store.lock_path.write_text("{", encoding="utf-8")
+
+        def finish_interrupted_write(_seconds: float) -> None:
+            store.lock_path.unlink()
+
+        with mock.patch.object(
+            timing.time, "sleep", side_effect=finish_interrupted_write
+        ):
+            with timing.operation_lock(
+                store,
+                "run-1",
+                reading_fn=lambda: self.reading(timing, 100),
+                wait_seconds=1,
+            ):
+                self.assertTrue(store.lock_path.exists())
+        self.assertFalse(store.lock_path.exists())
+
+    def test_persistent_invalid_lock_uses_bounded_busy_error(self) -> None:
+        timing = self.load_timing()
+        _repo, _state_home, store = self.make_store(timing)
+        timing.ensure_private_directory(store.lock_path.parent)
+        store.lock_path.write_text("{", encoding="utf-8")
+
+        with self.assertRaisesRegex(timing.FleetTimingError, "busy"):
+            with timing.operation_lock(
+                store,
+                "run-1",
+                reading_fn=lambda: self.reading(timing, 100),
+                wait_seconds=0,
+            ):
+                self.fail("lock must not be acquired")
+        self.assertTrue(store.lock_path.exists())
+
     def test_live_lock_times_out_without_removing_owner(self) -> None:
         timing = self.load_timing()
         _repo, _state_home, store = self.make_store(timing)

@@ -521,10 +521,15 @@ def operation_lock(
                 lock = _validate_lock(
                     read_json_file(store.lock_path, "timing lock"), store, run_id
                 )
-            except FleetTimingError as exc:
+            except FleetTimingError:
                 if not store.lock_path.exists():
                     continue
-                raise exc
+                if time.monotonic() >= deadline:
+                    raise FleetTimingError(
+                        "timing state is busy; retry the same operation"
+                    ) from None
+                time.sleep(0.05)
+                continue
             age_ns = max(0, reading.wall_ns - lock["acquiredAtWallNs"])
             stale = age_ns > int(STALE_LOCK_SECONDS * 1_000_000_000)
             if stale and not process_alive(lock["pid"]):
