@@ -46,3 +46,41 @@ Merged PR #185 after proving fleet preflight now fails closed unless the immutab
 ### Next Steps
 
 - None - task complete
+
+
+## Session 153: Fleet integration-only review
+
+**Date**: 2026-07-20
+**Task**: Fleet integration-only review
+**Branch**: `codex/fleet-integration-only-review`
+
+### Summary
+
+Added exact-head classification so pure installer-managed consumer refreshes skip redundant remote implementation-review requests without weakening integration or merge gates.
+
+### Main Changes
+
+- Added a fail-closed source classifier bound to release identity, candidate evidence, canonical consumer platforms, exact audit, safe base/current receipts, and installer-only diffs.
+- Wired trusted fleet integration-only review with an explicit remote-review override while retaining existing feedback, local checks, CI, watch, and housekeeping.
+- Published the 0.23.14 payload contract, synchronized mirrors, and regenerated passing evidence for all seven disposable fleet consumers.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `09934b356da339ebdaf81b4a6e8df95a88e6c5e6` | feat: classify pure fleet refresh reviews |
+
+### Testing
+
+- [OK] make check
+- [OK] Full fleet candidate validation passed for 7 of 7 consumers
+- [OK] PR #186 required CI and exact-head review-thread gates passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
