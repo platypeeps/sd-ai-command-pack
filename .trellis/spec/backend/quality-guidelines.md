@@ -212,7 +212,9 @@ schema.
 - Optional run-snapshot strings may be omitted or explicitly `null`, but when
   present as strings they must remain non-empty after bounded sanitization.
   This applies to top-level evidence and stop fields, checkpoint target/reason,
-  and lock run identity.
+  checkpoint `resumePhase`, and lock run identity. The helper exposes
+  `resumePhase` so direct status and `sd-status` show the lifecycle owner of a
+  paused checkpoint consistently.
 - Terminal diagnostics must also remain non-empty after sanitization. Missing
   or blank `invalid` diagnostics receive the bounded adapter-owned fallback;
   a blank supplied `unavailable` diagnostic is a malformed terminal field.

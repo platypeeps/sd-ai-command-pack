@@ -339,6 +339,24 @@ class WorkLoopTests(InstallTestCase):
                 with self.assertRaises(module.WorkLoopError):
                     module.validate_state(candidate)
 
+        for resume_phase in ("checkpoint", "stopped", "", 7, []):
+            with self.subTest(resume_phase=resume_phase):
+                candidate = dict(state)
+                candidate["checkpoint"] = {
+                    **state["checkpoint"],
+                    "resumePhase": resume_phase,
+                }
+                with self.assertRaisesRegex(module.WorkLoopError, "checkpoint"):
+                    module.validate_state(candidate)
+
+        legacy = dict(state)
+        legacy["checkpoint"] = {
+            key: value
+            for key, value in state["checkpoint"].items()
+            if key != "resumePhase"
+        }
+        module.validate_state(legacy)
+
         text_fields = set(module.CURRENT_FIELDS) - {"prNumber"}
         for field in text_fields:
             for value in ("", "   "):
@@ -1187,6 +1205,242 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["current"]["head"], merged_head)
         self.assertEqual(state["contextHealth"]["level"], "amber")
 
+    def test_paused_checkpoint_recovers_verified_post_merge_advance_atomically(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _main_head = self.make_shipping_state(module, root)
+        feature_head = state["current"]["head"]
+        module.update_evidence(
+            state,
+            {
+                "prNumber": 42,
+                "prUrl": "https://example.test/pull/42",
+                "lastShippedSha": feature_head,
+            },
+            repo=root,
+        )
+        state["checkpoint"] = {
+            "state": "paused",
+            "target": "wait for remote review",
+            "reason": "operator pause",
+            "resumePhase": "shipping",
+        }
+        state["contextHealth"] = {
+            "level": "red",
+            "epoch": 2,
+            "reasons": ["stale checkpoint"],
+        }
+        shipped_head = self.commit_file(
+            module, root, "feature.txt", "reviewed\n", "review fix"
+        )
+        self.run_git(root, "switch", "main")
+        merged_head = self.commit_file(
+            module, root, "merged.txt", "merged\n", "merge result"
+        )
+        observations = {
+            "phase": "followups",
+            "task": state["current"]["task"],
+            "branch": "main",
+            "head": merged_head,
+            "baseBranch": state["current"]["baseBranch"],
+            "prNumber": 42,
+            "prUrl": "https://example.test/pull/42",
+            "lastShippedSha": shipped_head,
+        }
+
+        module.reconcile_state(
+            state,
+            observations,
+            verified_live_advance=True,
+            repo=root,
+        )
+
+        self.assertEqual(state["phase"], "followups")
+        self.assertEqual(state["current"]["branch"], "main")
+        self.assertEqual(state["current"]["head"], merged_head)
+        self.assertEqual(state["current"]["lastShippedSha"], shipped_head)
+        self.assertEqual(state["checkpoint"]["state"], "none")
+        self.assertIsNone(state["checkpoint"]["resumePhase"])
+        self.assertEqual(state["contextHealth"]["level"], "amber")
+
+        module.reconcile_state(state, observations, repo=root)
+        self.assertEqual(state["contextHealth"]["level"], "green")
+
+    def test_checkpoint_recovery_rejects_partial_evidence_without_partial_advance(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _main_head = self.make_shipping_state(module, root)
+        feature_head = state["current"]["head"]
+        module.update_evidence(
+            state,
+            {
+                "prNumber": 42,
+                "prUrl": "https://example.test/pull/42",
+                "lastShippedSha": feature_head,
+            },
+            repo=root,
+        )
+        state["checkpoint"] = {
+            "state": "paused",
+            "target": "wait for remote review",
+            "reason": "operator pause",
+            "resumePhase": "shipping",
+        }
+        before_current = dict(state["current"])
+
+        module.reconcile_state(
+            state,
+            {
+                "phase": "followups",
+                "task": state["current"]["task"],
+                "branch": state["current"]["branch"],
+                "head": state["current"]["head"],
+                "baseBranch": state["current"]["baseBranch"],
+                "prNumber": 42,
+                "lastShippedSha": feature_head,
+            },
+            verified_live_advance=True,
+            repo=root,
+        )
+
+        self.assertEqual(state["phase"], "shipping")
+        self.assertEqual(state["current"], before_current)
+        self.assertEqual(state["contextHealth"]["level"], "red")
+        self.assertEqual(state["checkpoint"]["state"], "blocked")
+        self.assertEqual(state["checkpoint"]["target"], "wait for remote review")
+        self.assertEqual(state["checkpoint"]["resumePhase"], "shipping")
+
+    def test_checkpoint_recovery_requires_verified_flag_for_changed_evidence(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _main_head = self.make_shipping_state(module, root)
+        prior_head = state["current"]["head"]
+        state["checkpoint"] = {
+            "state": "paused",
+            "target": "wait for remote review",
+            "reason": "operator pause",
+            "resumePhase": "shipping",
+        }
+        next_head = self.commit_file(
+            module, root, "feature.txt", "changed\n", "unrecorded review fix"
+        )
+        observations = {
+            "phase": "shipping",
+            "task": state["current"]["task"],
+            "branch": state["current"]["branch"],
+            "head": next_head,
+            "baseBranch": state["current"]["baseBranch"],
+        }
+
+        module.reconcile_state(state, observations, repo=root)
+
+        self.assertEqual(state["current"]["head"], prior_head)
+        self.assertEqual(state["phase"], "shipping")
+        self.assertEqual(state["contextHealth"]["level"], "red")
+        self.assertEqual(state["checkpoint"]["state"], "blocked")
+
+    def test_legacy_checkpoint_phase_uses_target_or_explicit_resume_phase(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _main_head = self.make_shipping_state(module, root)
+        complete_evidence = {
+            key: value for key, value in state["current"].items() if value is not None
+        }
+        state["phase"] = "checkpoint"
+        state["checkpoint"] = {
+            "state": "paused",
+            "target": "shipping",
+            "reason": "legacy pause",
+        }
+
+        module.reconcile_state(
+            state, {"phase": "shipping", **complete_evidence}, repo=root
+        )
+        self.assertEqual(state["phase"], "shipping")
+        self.assertEqual(state["checkpoint"]["state"], "none")
+        self.assertEqual(state["contextHealth"]["level"], "green")
+
+        state["phase"] = "checkpoint"
+        state["checkpoint"] = {
+            "state": "paused",
+            "target": "wait for operator",
+            "reason": "legacy human target",
+        }
+        module.reconcile_state(
+            state,
+            {"phase": "followups", **complete_evidence},
+            verified_live_advance=True,
+            repo=root,
+        )
+        self.assertEqual(state["phase"], "checkpoint")
+        self.assertEqual(state["contextHealth"]["level"], "red")
+        self.assertIn("--resume-phase", state["checkpoint"]["reason"])
+
+        module.reconcile_state(
+            state,
+            {"phase": "followups", **complete_evidence},
+            verified_live_advance=True,
+            explicit_resume_phase="shipping",
+            repo=root,
+        )
+        self.assertEqual(state["phase"], "followups")
+        self.assertEqual(state["checkpoint"]["state"], "none")
+        self.assertEqual(state["contextHealth"]["level"], "amber")
+
+    def test_cli_recovers_legacy_human_checkpoint_with_explicit_resume_phase(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, state_path, _lock_path = self.make_state(module, root, state_root)
+        module.transition_state(
+            state,
+            "selected",
+            updates={"task": "task-one", "baseBranch": "main"},
+        )
+        head = module.run_git(root, "rev-parse", "HEAD")
+        self.assertIsNotNone(head)
+        module.update_evidence(state, {"branch": "main", "head": head}, repo=root)
+        state["phase"] = "checkpoint"
+        state["checkpoint"] = {
+            "state": "paused",
+            "target": "wait for operator",
+            "reason": "legacy checkpoint",
+        }
+        module.atomic_write_json(state_path, state)
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "reconcile",
+                    "--repo",
+                    str(root),
+                    "--run-id",
+                    state["runId"],
+                    "--observed-phase",
+                    "selected",
+                    "--resume-phase",
+                    "selected",
+                    "--task",
+                    "task-one",
+                    "--branch",
+                    "main",
+                    "--head",
+                    head,
+                    "--base-branch",
+                    "main",
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(result, 0, stdout.getvalue())
+        recovered = json.loads(stdout.getvalue())
+        self.assertEqual(recovered["phase"], "selected")
+        self.assertEqual(recovered["checkpoint"]["state"], "none")
+        self.assertEqual(recovered["contextHealth"]["level"], "green")
+
     def test_status_snapshot_is_read_only_and_reports_active_paused_and_invalid(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -1277,8 +1531,9 @@ class WorkLoopTests(InstallTestCase):
             )
         self.assertEqual(result, 0, pause_stdout.getvalue())
         paused = json.loads(pause_stdout.getvalue())
-        self.assertEqual(paused["phase"], "checkpoint")
+        self.assertEqual(paused["phase"], "inventory")
         self.assertEqual(paused["checkpoint"]["target"], "inventory")
+        self.assertEqual(paused["checkpoint"]["resumePhase"], "inventory")
 
         resumed_stdout = io.StringIO()
         with contextlib.redirect_stdout(resumed_stdout):
@@ -1297,7 +1552,7 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(resumed["runId"], started["runId"])
         self.assertEqual(resumed["focus"], ["CI pipeline"])
         self.assertEqual(resumed["status"], "active")
-        self.assertEqual(resumed["phase"], "checkpoint")
+        self.assertEqual(resumed["phase"], "inventory")
         self.assertFalse((root / ".sd-ai-command-pack/work-loop.json").exists())
 
     def test_cli_resume_rejects_conflicting_configuration_and_focus(self) -> None:
@@ -1617,7 +1872,7 @@ class WorkLoopTests(InstallTestCase):
         invoke("transition", *transition_args, "inventory")
         focused = invoke("focus", "--run-id", state["runId"], "--clear")
         self.assertEqual(focused["focus"]["mode"], "none")
-        invoke(
+        checkpointed = invoke(
             "checkpoint",
             "--run-id",
             state["runId"],
@@ -1626,6 +1881,9 @@ class WorkLoopTests(InstallTestCase):
             "--reason",
             "iteration boundary",
         )
+        self.assertEqual(checkpointed["phase"], "inventory")
+        self.assertEqual(checkpointed["checkpoint"]["target"], "next task")
+        self.assertEqual(checkpointed["checkpoint"]["resumePhase"], "inventory")
         invoke("heartbeat", "--run-id", state["runId"])
         stopped = invoke(
             "stop",

@@ -111,7 +111,7 @@ inventory, current/open Trellis work, user-local autonomous loop progress,
 completed tasks stranded outside the Trellis archive, anomalies, and numbered
 next steps. Loop status includes its run ID, selector
 and focus, iteration, phase, task/PR, counters, heartbeat, context health, and
-checkpoint without mutating the ledger or lock. Dynamically loaded helper
+checkpoint lifecycle owner without mutating the ledger or lock. Dynamically loaded helper
 snapshots are reduced to a bounded, sanitized pack-owned contract; malformed
 snapshots are reported as `invalid` anomalies instead of rendering raw data.
 The shared preflight fails when a completed task remains directly under
@@ -122,10 +122,11 @@ Autonomous work loops keep lifecycle phases separate from mutable Git/PR facts.
 The shipped work-loop helper's `evidence` subcommand records verified commit,
 PR, review-fix, finish-work, and merge facts atomically without an artificial
 checkpoint transition. Stable task/base identity and Git ancestry checks keep
-real contradictions fail-closed, while successful recovery clears obsolete
-ready or blocked checkpoints. Clearing one through either an evidence update
-or reconciliation requires every non-null recorded current-state field;
-partial evidence or a matching phase alone cannot clear a contradiction.
+real contradictions fail-closed. Checkpoints retain their lifecycle owner in
+`resumePhase` while preserving a human target. Complete locally verified
+forward reconciliation atomically advances phase/evidence and clears ready,
+paused, or blocked checkpoints; partial evidence cannot partially mutate the
+ledger. Legacy human-only checkpoint targets require explicit `--resume-phase`.
 The transition CLI accepts only task and base-branch identity fields. A
 head-only evidence update still validates commit ancestry when its recorded
 branch no longer exists locally; explicit branch evidence must resolve to a

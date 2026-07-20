@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.17 - 2026-07-20
+
+- Keep work-loop checkpoints as lifecycle overlays and recover paused ledgers
+  atomically from complete, locally verified forward evidence, with explicit
+  schema-v1 fallback for legacy human-only checkpoint targets.
+
 ## 0.23.16 - 2026-07-20
 
 - Record private, resumable fleet stage timing with monotonic elapsed evidence,

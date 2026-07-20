@@ -540,11 +540,16 @@ class StatusTests(InstallTestCase):
 
         nullable_nested_snapshot = {
             **valid_run,
-            "checkpoint": {"state": "none", "target": None, "reason": None},
+            "checkpoint": {
+                "state": "none",
+                "target": None,
+                "reason": None,
+                "resumePhase": None,
+            },
             "lock": {"present": False, "stale": False, "runId": None},
         }
         self.assertEqual(collect(nullable_nested_snapshot), nullable_nested_snapshot)
-        for field in ("target", "reason"):
+        for field in ("target", "reason", "resumePhase"):
             for blank_value in ("", " \n\t ", "\x00"):
                 with self.subTest(
                     blank_checkpoint_string=field,
@@ -595,6 +600,7 @@ class StatusTests(InstallTestCase):
                     "state": "paused",
                     "target": unsafe_text,
                     "reason": unsafe_text,
+                    "resumePhase": unsafe_text,
                     "token": "do-not-render",
                 },
                 "lock": {
@@ -624,6 +630,7 @@ class StatusTests(InstallTestCase):
             sanitized_run["contextHealth"]["reasons"][0],
             sanitized_run["checkpoint"]["target"],
             sanitized_run["checkpoint"]["reason"],
+            sanitized_run["checkpoint"]["resumePhase"],
             sanitized_run["lock"]["runId"],
         ]
         for value in sanitized_strings:
