@@ -158,10 +158,14 @@ timeouts, retries, dry-run behavior, and output formats explicit.
   live Trellis, Git, and GitHub evidence before every phase or iteration
   transition and before retrying any side effect.
 - Keep phase progression separate from mutable evidence. `transition` changes
-  lifecycle phase; `evidence` atomically records locally verified commits, PR
-  publication, review/finish commits, and the final default-branch merge state
-  without a checkpoint detour. Task and base branch are stable identity;
-  conflicting PRs, unrelated branches, and non-descendant commits fail red.
+  lifecycle phase and accepts only task/base-branch identity fields; `evidence`
+  atomically records locally verified commits, PR publication, review/finish
+  commits, and the final default-branch merge state without a checkpoint
+  detour. Task and base branch are stable identity. A missing previously
+  recorded local branch ref does not block head-only ancestry evidence, while
+  explicit branch evidence must resolve and any resolvable recorded branch
+  must match the submitted head. Conflicting PRs, unrelated branches, and
+  non-descendant commits fail red.
 - User-local state stores only bounded coordination metadata and uses atomic
   writes, versioned JSON, private permissions where supported, and a
   recoverable run lock. It never becomes a tracked repository artifact.

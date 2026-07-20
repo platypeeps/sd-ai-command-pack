@@ -687,13 +687,28 @@ class WorkLoopTests(InstallTestCase):
         with self.assertRaisesRegex(module.WorkLoopError, "recorded branch"):
             module.update_evidence(state, {"head": sibling}, repo=root)
         self.run_git(root, "branch", "-D", "codex/task-one")
-        with self.assertRaisesRegex(module.WorkLoopError, "not a local Git branch"):
+        with self.assertRaisesRegex(module.WorkLoopError, "descendant"):
             module.update_evidence(state, {"head": sibling}, repo=root)
         self.run_git(root, "branch", "-f", "codex/task-one", sibling)
         with self.assertRaisesRegex(module.WorkLoopError, "descendant"):
             module.update_evidence(state, {"head": sibling}, repo=root)
         with self.assertRaisesRegex(module.WorkLoopError, "local Git commit"):
             module.update_evidence(state, {"head": "not-a-commit"}, repo=root)
+
+    def test_head_evidence_allows_missing_recorded_branch_ref(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _main_head = self.make_shipping_state(module, root)
+        descendant = self.commit_file(
+            module, root, "followup.txt", "followup\n", "followup commit"
+        )
+        self.run_git(root, "switch", "main")
+        self.run_git(root, "branch", "-D", "codex/task-one")
+
+        module.update_evidence(state, {"head": descendant}, repo=root)
+
+        self.assertEqual(state["current"]["branch"], "codex/task-one")
+        self.assertEqual(state["current"]["head"], descendant)
 
     def test_last_shipped_evidence_falls_back_to_recorded_branch_tip(self) -> None:
         module = self.load_module()
@@ -863,7 +878,7 @@ class WorkLoopTests(InstallTestCase):
         self.assertIn("at least one", stderr.getvalue())
         self.assertEqual(state_path.read_bytes(), before)
 
-    def test_failed_cli_transition_evidence_update_preserves_ledger_bytes(self) -> None:
+    def test_transition_cli_does_not_advertise_evidence_only_arguments(self) -> None:
         module = self.load_module()
         root = self.make_repo()
         state_root = root.parent / "state"
@@ -871,8 +886,11 @@ class WorkLoopTests(InstallTestCase):
         before = state_path.read_bytes()
         stderr = io.StringIO()
 
-        with contextlib.redirect_stderr(stderr):
-            result = module.main(
+        with (
+            contextlib.redirect_stderr(stderr),
+            self.assertRaises(SystemExit) as exit_error,
+        ):
+            module.main(
                 [
                     "--state-home",
                     str(state_root),
@@ -890,11 +908,20 @@ class WorkLoopTests(InstallTestCase):
                 ]
             )
 
-        self.assertEqual(result, 2)
-        self.assertIn(
-            "head must be recorded with the evidence command", stderr.getvalue()
-        )
+        self.assertEqual(exit_error.exception.code, 2)
+        self.assertIn("unrecognized arguments: --head HEAD", stderr.getvalue())
         self.assertEqual(state_path.read_bytes(), before)
+
+        help_text = module.build_parser()._subparsers._group_actions[0].choices[
+            "transition"
+        ].format_help()
+        self.assertNotIn("--head", help_text)
+        self.assertNotIn("--branch", help_text)
+        self.assertNotIn("--pr-number", help_text)
+        self.assertNotIn("--pr-url", help_text)
+        self.assertNotIn("--last-shipped-sha", help_text)
+        self.assertIn("--task", help_text)
+        self.assertIn("--base-branch", help_text)
 
     def test_reconciliation_classifies_context_health_from_evidence(self) -> None:
         module = self.load_module()
