@@ -168,7 +168,9 @@ timeouts, retries, dry-run behavior, and output formats explicit.
   non-descendant commits fail red.
 - User-local state stores only bounded coordination metadata and uses atomic
   writes, versioned JSON, private permissions where supported, and a
-  recoverable run lock. It never becomes a tracked repository artifact.
+  recoverable run lock. Every non-null current-state string must remain
+  nonblank; malformed persisted evidence fails validation before reconciliation
+  or mutation. The ledger never becomes a tracked repository artifact.
 - Existing lifecycle owners remain authoritative. The outer loop invokes
   `sd-ship until=merge` once; it never separately invokes create-pr, review-pr,
   watch-pr, finish-work, or housekeeping.
@@ -186,6 +188,11 @@ timeouts, retries, dry-run behavior, and output formats explicit.
   option-shaped input, or invalid lifecycle values -> usage error before lock.
 - Concurrent active lock -> stop; stale lock -> reconcile live state, then use
   explicit recovery only when the prior process is gone.
+- A non-null `task`, `branch`, `head`, `baseBranch`, `prUrl`, or
+  `lastShippedSha` that is not a string or becomes empty after trimming ->
+  malformed current state before reconciliation or mutation. A head-only
+  evidence update with a blank recorded branch -> non-empty branch evidence
+  error rather than preserving the malformed ledger value.
 - Ledger behind in the same phase -> validate and record the evidence, clear an
   obsolete recovery checkpoint, and return green. A verified later phase uses
   amber rehydration until exact reconciliation. Ledger ahead, invalid ancestry,
@@ -200,15 +207,18 @@ timeouts, retries, dry-run behavior, and output formats explicit.
 
 - Good: `sd-work-backlog CI pipeline` persists one preferred focus, completes
   matching tasks first, then continues normal deterministic ranking.
-- Base: no focus retains status/priority/readiness/age/lexical ranking.
-- Bad: a design adapter implements its own loop, or housekeeping prints a clean
-  report and the parent agent exits without re-inventorying or recording a stop.
+- Base: optional current-state evidence remains JSON `null` until observed; no
+  focus retains status/priority/readiness/age/lexical ranking.
+- Bad: a persisted current-state text field contains `""` or whitespace, a
+  design adapter implements its own loop, or housekeeping prints a clean report
+  and the parent agent exits without re-inventorying or recording a stop.
 
 ### 6. Tests Required
 
 - Cover state-root precedence, POSIX/Windows paths, repository identity, private
   atomic writes, secret-like key rejection, lock concurrency/staleness,
-  transition legality, bounded history, pause/resume, and invalid state.
+  transition legality, bounded history, pause/resume, invalid state, and blank
+  persisted current-state evidence.
 - Cover natural and structured focus evidence, ordered bands, preferred
   fallback, focus-only exhaustion, and pre-mutation argument rejection.
 - Cover green/amber/red reconciliation; verified versus unverified live

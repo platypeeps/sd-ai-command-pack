@@ -339,6 +339,18 @@ class WorkLoopTests(InstallTestCase):
                 with self.assertRaises(module.WorkLoopError):
                     module.validate_state(candidate)
 
+        text_fields = set(module.CURRENT_FIELDS) - {"prNumber"}
+        for field in text_fields:
+            for value in ("", "   "):
+                with self.subTest(field=field, value=value):
+                    candidate = dict(state)
+                    candidate["current"] = dict(state["current"])
+                    candidate["current"][field] = value
+                    with self.assertRaisesRegex(
+                        module.WorkLoopError, "current state is malformed"
+                    ):
+                        module.validate_state(candidate)
+
     def test_atomic_write_preserves_prior_state_when_replace_fails(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -709,6 +721,21 @@ class WorkLoopTests(InstallTestCase):
 
         self.assertEqual(state["current"]["branch"], "codex/task-one")
         self.assertEqual(state["current"]["head"], descendant)
+
+    def test_head_evidence_rejects_blank_recorded_branch(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _main_head = self.make_shipping_state(module, root)
+        state["current"]["branch"] = "   "
+
+        with self.assertRaisesRegex(
+            module.WorkLoopError, "branch evidence must be a non-empty string"
+        ):
+            module.update_evidence(
+                state,
+                {"head": state["current"]["head"]},
+                repo=root,
+            )
 
     def test_last_shipped_evidence_falls_back_to_recorded_branch_tip(self) -> None:
         module = self.load_module()

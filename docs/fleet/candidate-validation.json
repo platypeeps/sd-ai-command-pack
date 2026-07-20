@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-20T04:14:32Z",
-  "packVersion": "0.23.7",
-  "payloadDigest": "sha256:86e06a92d62371db5f8f28e8425edd104cc9b6673aa0db948bf581e817ee54b6",
+  "validatedAt": "2026-07-20T04:41:15Z",
+  "packVersion": "0.23.8",
+  "payloadDigest": "sha256:ef643fd42be7f70f4c5fcd4274553cda376234b9d9f9c224bc900df7ddc08a5d",
   "fleetManifestDigest": "sha256:1776b0a45d7faa3b20fc61ff0ef8587f7fc577eebc503b7ddce0563479ef247a",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "255f770e5935b4972276554a939d7f21d80637f0",
+      "baseCommit": "d172f11c9f62f8c89f425d40b694627f0a7559da",
       "status": "passed",
       "prepares": [
         [

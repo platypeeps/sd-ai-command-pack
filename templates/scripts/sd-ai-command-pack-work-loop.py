@@ -339,7 +339,8 @@ def validate_state(state: Mapping[str, Any]) -> None:
     if not isinstance(current, dict) or not CURRENT_FIELDS.issubset(current):
         raise WorkLoopError("work-loop current state is malformed")
     if any(
-        value is not None and not isinstance(value, str)
+        value is not None
+        and (not isinstance(value, str) or not value.strip())
         for key, value in current.items()
         if key != "prNumber"
     ) or (
@@ -980,7 +981,7 @@ def validated_evidence(
         {"branch", "head"} & set(updates)
     )
     if compare_branch_head:
-        if not isinstance(candidate_branch, str):
+        if not isinstance(candidate_branch, str) or not candidate_branch.strip():
             raise WorkLoopError("branch evidence must be a non-empty string")
         branch_head = _branch_commit(evidence_repo, candidate_branch)
         if branch_head is None and "branch" in updates:

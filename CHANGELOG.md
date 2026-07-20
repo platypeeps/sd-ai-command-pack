@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.8 - 2026-07-19
+
+- Reject empty or whitespace-only persisted work-loop current-state strings,
+  including recorded branch evidence, before a head-only evidence update can
+  preserve malformed ledger state.
+
 ## 0.23.7 - 2026-07-19
 
 - Preserve bounded diagnostics when a dynamically loaded work-loop helper
