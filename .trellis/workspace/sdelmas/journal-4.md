@@ -198,3 +198,42 @@ Implemented and validated lifecycle-owned checkpoint recovery with schema-v1 com
 ### Next Steps
 
 - None - task complete
+
+
+## Session 157: Converge PR #190 checkpoint recovery review
+
+**Date**: 2026-07-20
+**Task**: Converge PR #190 checkpoint recovery review
+**Branch**: `codex/work-loop-checkpoint-recovery`
+
+### Summary
+
+Integrated the terminal work-loop reconciliation baseline, preserved append-only journal history, and resolved all eight Copilot review findings for checkpoint recovery. Verified 97 focused tests, the canonical full check, the seven-repository candidate audit, clean review threads, and green CI.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fdf5e02` | (see git log) |
+| `4cd055a` | (see git log) |
+| `f8a5739` | (see git log) |
+| `5ebbd19` | (see git log) |
+| `52bb7be` | (see git log) |
+| `20f50a0` | (see git log) |
+| `746470a` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

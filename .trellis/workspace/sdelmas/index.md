@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 156
+- **Total Sessions**: 157
 - **Last Active**: 2026-07-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~200 | Active |
+| `journal-4.md` | ~239 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 157 | 2026-07-20 | Converge PR #190 checkpoint recovery review | `fdf5e02`, `4cd055a`, `f8a5739`, `5ebbd19`, `52bb7be`, `20f50a0`, `746470a` | `codex/work-loop-checkpoint-recovery` |
 | 156 | 2026-07-20 | Recover paused work-loop checkpoints | `6e9d773`, `0396352` | `codex/work-loop-checkpoint-recovery` |
 | 155 | 2026-07-20 | Terminal Work-Loop Reconciliation | `e65b0a9` | `codex/terminal-work-loop-reconciliation-task` |
 | 154 | 2026-07-20 | Gate fleet findings by interruption severity | `145806196ee3dfc6881bde830af992f40e31b7e4` | `codex/fleet-interruption-severity-gate` |
