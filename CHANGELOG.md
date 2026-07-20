@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.23.8 - 2026-07-19
+
+- Reject empty or whitespace-only persisted work-loop current-state strings,
+  including recorded branch evidence, before a head-only evidence update can
+  preserve malformed ledger state.
+
+## 0.23.7 - 2026-07-19
+
+- Preserve bounded diagnostics when a dynamically loaded work-loop helper
+  reports an invalid snapshot without an error.
+- Allow head-only evidence updates after a recorded local branch is removed,
+  while retaining branch-tip consistency checks whenever that ref is
+  available and requiring explicit branch evidence to resolve locally.
+- Limit the work-loop `transition` CLI to task and base-branch identity fields
+  so its help and accepted arguments match the transition contract.
+
 ## 0.23.6 - 2026-07-19
 
 - Require reconciliation to supply every non-null recorded current-state field

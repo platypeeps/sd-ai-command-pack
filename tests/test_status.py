@@ -448,10 +448,19 @@ class StatusTests(InstallTestCase):
             ):
                 return status.collect_work_loop(root)
 
-        for loop_status in ("none", "invalid", "unavailable"):
+        for loop_status in ("none", "unavailable"):
             with self.subTest(valid_terminal=loop_status):
                 snapshot = {"status": loop_status}
                 self.assertEqual(collect(snapshot), snapshot)
+
+        for missing_error in (None, "", "   "):
+            with self.subTest(invalid_without_diagnostics=missing_error):
+                snapshot = {"status": "invalid"}
+                if missing_error is not None:
+                    snapshot["error"] = missing_error
+                result = collect(snapshot)
+                self.assertEqual(result["status"], "invalid")
+                self.assertIn("without diagnostics", result["error"])
 
         terminal_error = "first line\nsecond\x00line" + ("x" * 600)
         for loop_status in ("invalid", "unavailable"):

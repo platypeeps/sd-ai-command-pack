@@ -1742,3 +1742,44 @@ Removed the expired REVIEW_PREFLIGHT_PR_BODY fallback from current shipped guida
 ### Next Steps
 
 - None - task complete
+
+
+## Session 146: Correct work-loop contracts for 0.23.8
+
+**Date**: 2026-07-19
+**Task**: Correct work-loop contracts for 0.23.8
+**Branch**: `codex/work-loop-review-contract-fixes`
+
+### Summary
+
+Closed the remaining work-loop evidence boundary found during the fleet canary, advanced the release to 0.23.8, and settled source PR review.
+
+### Main Changes
+
+- Aligned work-loop diagnostics, branch/head evidence, and transition CLI contracts.
+- Rejected blank persisted current-state strings and documented the executable validation boundary.
+- Regenerated the seven-consumer candidate ledger and addressed both final Copilot test-hardening comments.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c965d9f` | fix: align work-loop evidence and CLI contracts |
+| `a989704` | fix: reject blank work-loop evidence |
+| `691adba` | test: use public argparse help behavior |
+
+### Testing
+
+- [OK] 43 focused work-loop tests passed
+- [OK] make check passed with full coverage, lint, type, security, audit, parity, and release gates
+- [OK] all seven disposable fleet candidates passed for 0.23.8
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge and tag source release 0.23.8 through housekeeping, then reactivate the
+  in-progress fleet ledger and resume the seven-consumer rollout.

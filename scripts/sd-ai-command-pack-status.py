@@ -474,7 +474,16 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     if status in WORK_LOOP_TERMINAL_STATUSES:
         terminal_snapshot = {"status": status}
         error = snapshot.get("error")
-        if error is None or status == "none":
+        if status == "none":
+            return terminal_snapshot
+        if status == "invalid" and (
+            error is None or (isinstance(error, str) and not error.strip())
+        ):
+            return {
+                "status": "invalid",
+                "error": "work-loop helper reported invalid state without diagnostics",
+            }
+        if error is None:
             return terminal_snapshot
         if not isinstance(error, str):
             return {
