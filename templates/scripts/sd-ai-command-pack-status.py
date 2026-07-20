@@ -765,13 +765,20 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
                 ):
                     return None
                 safe_url = safe_text(url, limit=500)
-                split = urlsplit(safe_url)
+                try:
+                    split = urlsplit(safe_url)
+                    hostname = split.hostname
+                    _port_number = split.port
+                    username = split.username
+                    password = split.password
+                except ValueError:
+                    return None
                 final_component = split.path.rstrip("/").rsplit("/", 1)[-1]
                 if (
                     split.scheme not in {"http", "https"}
-                    or not split.hostname
-                    or split.username is not None
-                    or split.password is not None
+                    or not hostname
+                    or username is not None
+                    or password is not None
                     or split.query
                     or split.fragment
                     or not final_component.isdigit()

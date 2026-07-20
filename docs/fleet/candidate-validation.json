@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-20T21:52:03Z",
-  "packVersion": "0.24.2",
-  "payloadDigest": "sha256:8f28465256b07a6a271705e6ce971c1697ef9357a806dfc26605039e478e84ba",
+  "validatedAt": "2026-07-20T22:12:43Z",
+  "packVersion": "0.24.3",
+  "payloadDigest": "sha256:127cadbe4031afed1d130936e73b08526dd81b697f1b25e0f292c9913338b7bf",
   "fleetManifestDigest": "sha256:1776b0a45d7faa3b20fc61ff0ef8587f7fc577eebc503b7ddce0563479ef247a",
   "consumers": [
     {
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "b8a689ad02af67bb4e4440f5dab8e4bb57b4f6c0",
+      "baseCommit": "8e8686b5bce978cbd0b0d4e956c6998710aff98f",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "61d4a9b9255fc9a8a7500ac09de954f3b8b80dd2",
+      "baseCommit": "f2a8b13b06c9202a31deeb661e10d90167ea9fd1",
       "status": "passed",
       "prepares": [
         [

@@ -820,6 +820,23 @@ class WorkLoopTests(InstallTestCase):
             )
         self.assertEqual(state_path.read_bytes(), before)
 
+    def test_pr_url_validation_rejects_malformed_netlocs_without_traceback(self) -> None:
+        module = self.load_module()
+
+        for url in (
+            "https://example.test:bad/pull/42",
+            "https://[::1/pull/42",
+        ):
+            with self.subTest(url=url):
+                self.assertIsNone(module._normalized_pr_url(url))
+                with self.assertRaisesRegex(module.WorkLoopError, "PR evidence"):
+                    module.normalized_pr_record(
+                        pr_number=42,
+                        pr_url=url,
+                        head="a" * 40,
+                        merge_commit="b" * 40,
+                    )
+
     def test_terminal_reconciliation_rejects_incomplete_or_mismatched_task(self) -> None:
         module = self.load_module()
 
