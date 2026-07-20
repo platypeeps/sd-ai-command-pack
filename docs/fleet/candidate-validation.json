@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-20T20:08:22Z",
+  "validatedAt": "2026-07-20T21:52:03Z",
   "packVersion": "0.24.2",
-  "payloadDigest": "sha256:2b4d59283aa6d88d8cb7050a472556629a409274ad45c1172f3e7406ac22e5dc",
+  "payloadDigest": "sha256:8f28465256b07a6a271705e6ce971c1697ef9357a806dfc26605039e478e84ba",
   "fleetManifestDigest": "sha256:1776b0a45d7faa3b20fc61ff0ef8587f7fc577eebc503b7ddce0563479ef247a",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "069223dbbfa79d0497cd413b943657e0b48f9693",
+      "baseCommit": "588c5099f61ddd5d4aef73d01ac2d146c2419e42",
       "status": "passed",
       "prepares": [
         [
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "54f3273316375ec93cc7e89575c345a636e6befa",
+      "baseCommit": "b8a689ad02af67bb4e4440f5dab8e4bb57b4f6c0",
       "status": "passed",
       "prepares": [
         [
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "0e1ba71d8c7a2f2be8e7cc9f52bd30b4cdeca155",
+      "baseCommit": "d9317990f4968ee4aa2ea2069625a02928a2161f",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "16d8ce8e124860756f4f6342886a52893931dc62",
+      "baseCommit": "61d4a9b9255fc9a8a7500ac09de954f3b8b80dd2",
       "status": "passed",
       "prepares": [
         [
@@ -121,7 +121,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "5d803e20ea449a92fa18004842bd93b740d9b4af",
+      "baseCommit": "5b50487c5fdb3edb3627ace6d112416272c449b8",
       "status": "passed",
       "prepares": [
         [

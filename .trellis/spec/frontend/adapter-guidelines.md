@@ -486,6 +486,8 @@ fanout from the same validated row.
 - Missing `package.json`, malformed JSON, non-object top level, missing or
   non-object `scripts`, or missing/empty/non-string `check:full` -> direct pack
   full-check fallback.
+- Present but unreadable `package.json` -> fail with the filesystem diagnostic;
+  do not fall back and bypass repository-owned prerequisites.
 - Configured recursive command -> fail before runner execution.
 - Selected package runner missing -> exit `127`; do not fall back.
 - Toolchain helper missing or failing while configuration is being resolved ->

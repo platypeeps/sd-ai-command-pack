@@ -219,6 +219,23 @@ class ReviewFullCheckTests(InstallTestCase):
         self.assertFalse(runner_log.exists())
         self.assertFalse(fallback_log.exists())
 
+    def test_unreadable_package_json_is_reported_without_fallback(self) -> None:
+        root, runner_log, fallback_log = self.make_review_repo(
+            {"scripts": {"check:full": "project gate"}}
+        )
+        package_path = root / "package.json"
+        package_path.chmod(0)
+        try:
+            result = self.run_review_full_check(root, runner_log, fallback_log)
+        finally:
+            package_path.chmod(0o600)
+
+        self.assertEqual(result.returncode, 11, result.stdout)
+        self.assertIn("cannot read package.json", result.stdout)
+        self.assertIn("could not inspect package.json", result.stdout)
+        self.assertFalse(runner_log.exists())
+        self.assertFalse(fallback_log.exists())
+
     def test_missing_pack_fallback_is_reported(self) -> None:
         root, runner_log, fallback_log = self.make_review_repo(
             None, with_fallback=False

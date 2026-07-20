@@ -25,7 +25,10 @@ import sys
 try:
     with open(sys.argv[1], encoding="utf-8") as stream:
         payload = json.load(stream)
-except (OSError, ValueError):
+except OSError as exc:
+    print(f"cannot read {sys.argv[1]}: {exc}", file=sys.stderr)
+    raise SystemExit(11)
+except (UnicodeError, ValueError):
     raise SystemExit(10)
 
 if not isinstance(payload, dict):
