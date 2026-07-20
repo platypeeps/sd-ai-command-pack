@@ -31,7 +31,7 @@ SECRET_RE = re.compile(
     r"|(?:token|password|secret|api[_-]?key)\s*[:=]\s*\S+)"
 )
 ABSOLUTE_PATH_RE = re.compile(
-    r"(?:^|[\s(\[{\"'=,:;])(?:~[/\\]|/[A-Za-z0-9._~-]|[A-Za-z]:[/\\]|\\\\\S+)"
+    r"(?<![A-Za-z0-9/])(?:~[/\\]|/[A-Za-z0-9._~-]|[A-Za-z]:[/\\]|\\\\\S+)"
 )
 QUOTED_OUTPUT_PATH_RE = re.compile(
     r"(?P<quote>['\"])(?:~[/\\]|/[A-Za-z0-9._~-]|[A-Za-z]:[/\\]|\\\\)"

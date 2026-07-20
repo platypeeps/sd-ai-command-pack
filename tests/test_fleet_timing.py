@@ -615,6 +615,8 @@ class FleetTimingTests(InstallTestCase):
             ("see /Users/example/project", "absolute or home-relative"),
             ("see (/Users/example/project)", "absolute or home-relative"),
             ('see "/Users/example/project"', "absolute or home-relative"),
+            ("see-/Users/example/project", "absolute or home-relative"),
+            ("see)/Users/example/project", "absolute or home-relative"),
             (r"see C:\\Users\\example\\project", "absolute or home-relative"),
             (r"see \\\\server\\share", "absolute or home-relative"),
             ("token=ghp_abcdefghijklmnopqrstuvwxyz", "secret-like"),
@@ -628,6 +630,10 @@ class FleetTimingTests(InstallTestCase):
         self.assertEqual(
             timing.safe_reason("  bounded   operator reason  ", "reason"),
             "bounded operator reason",
+        )
+        self.assertEqual(
+            timing.safe_reason("relative/path reference", "reason"),
+            "relative/path reference",
         )
 
     def test_store_rejects_relative_state_home_and_symlinks(self) -> None:
