@@ -304,3 +304,36 @@ Fail closed on malformed PR URL authorities and ports in work-loop and status va
 ### Next Steps
 
 - None - task complete
+
+
+## Session 160: Fix post-squash work-loop reconciliation
+
+**Date**: 2026-07-20
+**Task**: Fix post-squash work-loop reconciliation
+**Branch**: `codex/fix-squash-followup-reconcile`
+
+### Summary
+
+Released sd-ai-command-pack 0.24.4 so complete checkpoint recovery can retain a verified squash-delivered feature SHA while advancing an already-recorded base branch; added regression, executable spec, and seven-consumer candidate evidence.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `91cbd72` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
