@@ -1764,12 +1764,19 @@ def reconcile_state(
     has_complete_recovery_evidence = _has_complete_recovery_evidence(
         current, evidence_observations
     )
-    if recovery_checkpoint_active and not has_complete_recovery_evidence:
+    recovery_attempted = observed_phase is not None or bool(evidence_observations)
+    if (
+        recovery_checkpoint_active
+        and recovery_attempted
+        and not has_complete_recovery_evidence
+    ):
         contradictions.append(
             "checkpoint recovery requires every recorded current-state field"
         )
     should_validate_recovery = (
-        recovery_checkpoint_active and has_complete_recovery_evidence
+        recovery_checkpoint_active
+        and recovery_attempted
+        and has_complete_recovery_evidence
     )
     may_validate_recovery = should_validate_recovery and (
         not mismatches or verified_live_advance

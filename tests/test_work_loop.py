@@ -1791,6 +1791,29 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["checkpoint"]["target"], "wait for remote review")
         self.assertEqual(state["checkpoint"]["resumePhase"], "shipping")
 
+    def test_checkpoint_recovery_noop_preserves_operator_pause(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _main_head = self.make_shipping_state(module, root)
+        checkpoint = {
+            "state": "paused",
+            "target": "wait for operator",
+            "reason": "operator requested pause",
+            "resumePhase": "shipping",
+        }
+        context_health = {
+            "level": "red",
+            "epoch": 2,
+            "reasons": ["operator requested pause"],
+        }
+        state["checkpoint"] = dict(checkpoint)
+        state["contextHealth"] = dict(context_health)
+
+        module.reconcile_state(state, {}, repo=root)
+
+        self.assertEqual(state["checkpoint"], checkpoint)
+        self.assertEqual(state["contextHealth"], context_health)
+
     def test_checkpoint_recovery_requires_verified_flag_for_changed_evidence(self) -> None:
         module = self.load_module()
         root = self.make_repo()
