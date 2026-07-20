@@ -237,3 +237,37 @@ Integrated the terminal work-loop reconciliation baseline, preserved append-only
 ### Next Steps
 
 - None - task complete
+
+
+## Session 158: Honor repository full-check preludes
+
+**Date**: 2026-07-20
+**Task**: Honor repository full-check preludes
+**Branch**: `codex/review-full-check-prelude`
+
+### Summary
+
+Published PR #191 to route sd-review-pr through a deterministic helper that honors repository-owned check:full preludes, preserves fallback compatibility, and fails closed on unreadable package configuration. Verified 212 focused tests, the canonical full check, all seven fleet candidates, two Copilot rounds with one resolved finding, and green CI.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `88fd0c3` | (see git log) |
+| `63e319c` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
