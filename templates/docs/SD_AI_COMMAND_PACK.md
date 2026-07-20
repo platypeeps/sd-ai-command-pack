@@ -428,9 +428,10 @@ and local/remote branches, installed SD pack and Trellis versions, relevant PR,
 open PRs/issues, current/in-progress/planned Trellis work, completed tasks
 stranded outside the Trellis archive, user-local autonomous loop state,
 anomalies, and numbered next steps. Loop state includes run ID,
-mode/selector/focus, iteration, phase, task/PR, counters, heartbeat, context
-health, checkpoint, lock, and stop reason. Reading it never refreshes the
-ledger or lock. The status adapter accepts terminal `none`, `invalid`, and
+mode/selector/focus, iteration, phase, task, branch/head/base-branch evidence,
+PR identity, last shipped SHA, counters, heartbeat, context health, checkpoint,
+lock, and stop reason. Reading it never refreshes the ledger or lock. The status
+adapter accepts terminal `none`, `invalid`, and
 `unavailable` snapshots plus complete `active`, `paused`, `stopped`, and
 `completed` run snapshots. Missing, unsupported, or incomplete helper results
 become bounded `invalid` anomalies without echoing helper-controlled values. A

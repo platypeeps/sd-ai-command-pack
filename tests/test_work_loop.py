@@ -1196,10 +1196,34 @@ class WorkLoopTests(InstallTestCase):
             module.status_snapshot(root, state_root=state_root), {"status": "none"}
         )
         state, state_path, _lock_path = self.make_state(module, root, state_root)
+        head = module.run_git(root, "rev-parse", "HEAD")
+        self.assertIsNotNone(head)
+        current = {
+            "task": "task-one",
+            "branch": "main",
+            "head": head,
+            "baseBranch": "main",
+            "prNumber": 7,
+            "prUrl": "https://github.com/example/repo/pull/7",
+            "lastShippedSha": head,
+        }
+        state["current"].update(current)
+        module.atomic_write_json(state_path, state)
         active = module.status_snapshot(root, state_root=state_root)
         self.assertEqual(active["runId"], state["runId"])
         self.assertEqual(active["status"], "active")
+        self.assertEqual(
+            {field: active[field] for field in current},
+            current,
+        )
         self.assertTrue(active["lock"]["present"])
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            module._print(active, as_json=False)
+        rendered = stdout.getvalue()
+        for field, value in current.items():
+            self.assertIn(f"{field}: {value}\n", rendered)
 
         state_path.write_text("not-json\n", encoding="utf-8")
         invalid = module.status_snapshot(root, state_root=state_root)
