@@ -45,6 +45,22 @@ class FleetPreflightTests(InstallTestCase):
             encoding="utf-8",
         )
 
+    def verified_identity(self, fleet, version: str = "0.8.5"):
+        identity = mock.Mock()
+        identity.status = "verified"
+        identity.version = version
+        identity.tag = f"v{version}"
+        identity.commit_sha = "1" * 40
+        identity.payload_digest = "sha256:" + "2" * 64
+        identity.as_json.return_value = {
+            "status": identity.status,
+            "version": identity.version,
+            "tag": identity.tag,
+            "commit": identity.commit_sha,
+            "payloadDigest": identity.payload_digest,
+        }
+        return identity
+
     def write_fleet_fixture(self, root: Path) -> tuple[Path, Path]:
         at_target = root / "at-target"
         outdated = root / "outdated"
@@ -192,33 +208,42 @@ class FleetPreflightTests(InstallTestCase):
         output = io.StringIO()
 
         with mock.patch.object(
-            sys,
-            "argv",
-            [
-                "sd-ai-command-pack-fleet-preflight.py",
-                "--fleet",
-                str(fleet_manifest),
-                "--manifest",
-                str(pack_manifest),
-                "--json",
-            ],
+            fleet,
+            "verify_release_identity",
+            return_value=self.verified_identity(fleet),
         ):
-            with contextlib.redirect_stdout(output):
-                exit_code = fleet.main()
+            with mock.patch.object(
+                sys,
+                "argv",
+                [
+                    "sd-ai-command-pack-fleet-preflight.py",
+                    "--fleet",
+                    str(fleet_manifest),
+                    "--manifest",
+                    str(pack_manifest),
+                    "--json",
+                ],
+            ):
+                with contextlib.redirect_stdout(output):
+                    exit_code = fleet.main()
 
         self.assertEqual(exit_code, 0)
         payload = json.loads(output.getvalue())
+        self.assertEqual(payload["schemaVersion"], 1)
+        self.assertEqual(payload["releaseIdentity"]["status"], "verified")
+        self.assertEqual(payload["releaseIdentity"]["tag"], "v0.8.5")
+        consumers = payload["consumers"]
         self.assertEqual(
-            [item["name"] for item in payload],
+            [item["name"] for item in consumers],
             ["at-target", "outdated", "missing"],
         )
-        self.assertEqual(payload[0]["status"], "at-target")
-        self.assertEqual(payload[1]["installedVersion"], "0.7.0")
-        self.assertEqual(payload[2]["status"], "missing-local-clone")
-        self.assertEqual(payload[0]["targetVersion"], "0.8.5")
-        self.assertEqual(payload[0]["rolloutPriority"], 10)
-        self.assertEqual(payload[0]["candidatePrepare"], [["bash", "prepare.sh"]])
-        self.assertEqual(payload[0]["candidateChecks"], [["node", "check.mjs"]])
+        self.assertEqual(consumers[0]["status"], "at-target")
+        self.assertEqual(consumers[1]["installedVersion"], "0.7.0")
+        self.assertEqual(consumers[2]["status"], "missing-local-clone")
+        self.assertEqual(consumers[0]["targetVersion"], "0.8.5")
+        self.assertEqual(consumers[0]["rolloutPriority"], 10)
+        self.assertEqual(consumers[0]["candidatePrepare"], [["bash", "prepare.sh"]])
+        self.assertEqual(consumers[0]["candidateChecks"], [["node", "check.mjs"]])
 
     def test_main_rejects_unknown_consumer(self) -> None:
         fleet = self.load_fleet_module()
@@ -228,64 +253,113 @@ class FleetPreflightTests(InstallTestCase):
         fleet_manifest, pack_manifest = self.write_fleet_fixture(root)
 
         with mock.patch.object(
-            sys,
-            "argv",
-            [
-                "sd-ai-command-pack-fleet-preflight.py",
-                "--fleet",
-                str(fleet_manifest),
-                "--manifest",
-                str(pack_manifest),
-                "--consumer",
-                "ghost",
-            ],
+            fleet,
+            "verify_release_identity",
+            return_value=self.verified_identity(fleet),
         ):
-            with self.assertRaises(SystemExit) as error:
-                fleet.main()
+            with mock.patch.object(
+                sys,
+                "argv",
+                [
+                    "sd-ai-command-pack-fleet-preflight.py",
+                    "--fleet",
+                    str(fleet_manifest),
+                    "--manifest",
+                    str(pack_manifest),
+                    "--consumer",
+                    "ghost",
+                ],
+            ):
+                with self.assertRaises(SystemExit) as error:
+                    fleet.main()
 
         self.assertIn("unknown fleet consumer(s): ghost", str(error.exception))
 
-    def test_subprocess_text_output_and_fail_on_refresh_needed(self) -> None:
+    def test_text_output_and_fail_on_refresh_needed(self) -> None:
+        fleet = self.load_fleet_module()
         tempdir = tempfile.TemporaryDirectory(prefix="sd-fleet-preflight-")
         self.addCleanup(tempdir.cleanup)
         root = Path(tempdir.name)
         fleet_manifest, pack_manifest = self.write_fleet_fixture(root)
-        command = [
-            sys.executable,
-            str(PACK_ROOT / "scripts/sd-ai-command-pack-fleet-preflight.py"),
+        argv = [
+            "sd-ai-command-pack-fleet-preflight.py",
             "--fleet",
             str(fleet_manifest),
             "--manifest",
             str(pack_manifest),
         ]
 
-        text_result = subprocess.run(
-            command,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
+        output = io.StringIO()
+        with mock.patch.object(
+            fleet,
+            "verify_release_identity",
+            return_value=self.verified_identity(fleet),
+        ):
+            with mock.patch.object(sys, "argv", argv):
+                with contextlib.redirect_stdout(output):
+                    exit_code = fleet.main()
+
+        text_output = output.getvalue()
+        self.assertEqual(exit_code, 0, text_output)
+        self.assertIn("release identity: verified v0.8.5", text_output)
+        self.assertIn("sd-ai-command-pack fleet target: 0.8.5", text_output)
+        self.assertIn("at-target", text_output)
+        self.assertIn("refresh-needed", text_output)
+        self.assertIn("missing-local-clone", text_output)
+        self.assertIn("install: python3 install.py", text_output)
+        self.assertIn("--platform claude", text_output)
+        self.assertIn(
+            "audit:   python3 scripts/sd-ai-command-pack-install-audit.py",
+            text_output,
         )
 
-        self.assertEqual(text_result.returncode, 0, text_result.stdout)
-        self.assertIn("sd-ai-command-pack fleet target: 0.8.5", text_result.stdout)
-        self.assertIn("at-target", text_result.stdout)
-        self.assertIn("refresh-needed", text_result.stdout)
-        self.assertIn("missing-local-clone", text_result.stdout)
-        self.assertIn("install: python3 install.py", text_result.stdout)
-        self.assertIn("--platform claude", text_result.stdout)
-        self.assertIn("audit:   python3 scripts/sd-ai-command-pack-install-audit.py", text_result.stdout)
+        fail_output = io.StringIO()
+        with mock.patch.object(
+            fleet,
+            "verify_release_identity",
+            return_value=self.verified_identity(fleet),
+        ):
+            with mock.patch.object(sys, "argv", [*argv, "--fail-on-refresh-needed"]):
+                with contextlib.redirect_stdout(fail_output):
+                    fail_code = fleet.main()
 
-        fail_result = subprocess.run(
-            [*command, "--fail-on-refresh-needed"],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
+        self.assertEqual(fail_code, 1, fail_output.getvalue())
+        self.assertIn("refresh-needed", fail_output.getvalue())
 
-        self.assertEqual(fail_result.returncode, 1, fail_result.stdout)
-        self.assertIn("refresh-needed", fail_result.stdout)
+    def test_release_identity_failure_stops_before_consumer_inventory(self) -> None:
+        fleet = self.load_fleet_module()
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-fleet-preflight-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        fleet_manifest, pack_manifest = self.write_fleet_fixture(root)
+        error_output = io.StringIO()
+
+        with mock.patch.object(
+            fleet,
+            "verify_release_identity",
+            side_effect=fleet.ReleaseIdentityError(
+                "local release tag refs/tags/v0.8.5 is missing; fetch tags and rerun"
+            ),
+        ):
+            with mock.patch.object(fleet, "load_fleet_consumers") as load_consumers:
+                with mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "sd-ai-command-pack-fleet-preflight.py",
+                        "--fleet",
+                        str(fleet_manifest),
+                        "--manifest",
+                        str(pack_manifest),
+                    ],
+                ):
+                    with contextlib.redirect_stderr(error_output):
+                        exit_code = fleet.main()
+
+        self.assertEqual(exit_code, 1)
+        load_consumers.assert_not_called()
+        self.assertIn("release identity error:", error_output.getvalue())
+        self.assertIn("fetch tags and rerun", error_output.getvalue())
 
     def test_fleet_manifest_rejects_duplicate_consumer_platforms(self) -> None:
         fleet = self.load_fleet_module()

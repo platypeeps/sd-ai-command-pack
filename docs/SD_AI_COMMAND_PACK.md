@@ -937,8 +937,13 @@ trees are skipped and reported, never touched), branch, install the
 release, run the consumer's full-check, open the consumer PR, watch it to
 settled, and merge through the consumer's housekeeping gate. Bare consumer
 names such as `loadsmith rwbp-website`, or `consumer=a,b`, filter the run;
-`no-merge` stops before merging and `dry-run` reports preflight only. Unknown
-consumer names fail before mutation rather than broadening to the whole fleet.
+`no-merge` stops before merging, `dry-run` reports preflight only, and
+`remote=<name>` selects the release-authority Git remote (default `origin`).
+Before it inventories consumers, preflight requires the matching local and
+remote `v<version>` tag identities, tagged version and payload, ancestry, and
+tagged plus current full-fleet candidate ledgers to agree. Missing, stale,
+mismatched, or rewritten release identity fails before mutation. Unknown
+consumer names also fail before mutation rather than broadening to the fleet.
 The report is a per-consumer status table plus a fleet version summary.
 
 The `sd-test-gaps` command closes the worst coverage gaps with targeted

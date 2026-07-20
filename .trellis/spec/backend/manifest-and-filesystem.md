@@ -129,6 +129,47 @@ a separate CI-only interpretation of shipped-payload paths.
             then refresh consumers in explicit fast-canary priority order
    ```
 
+### Fleet Release Identity Guard
+
+1. **Scope / Trigger**: Before fleet preflight reports any consumer as mutable,
+   prove the current source checkout is the published release named by
+   `manifest.json`.
+2. **Signature**:
+   `sd-ai-command-pack-fleet-preflight.py [--remote REMOTE] [--json]`.
+3. **Contracts**:
+   - The local `v<version>` raw tag object must equal the exact tag ref
+     advertised by the release remote, and the resolved tag commit must be an
+     ancestor of the current checkout.
+   - Tagged manifest version and exact-tree payload digest must equal the
+     current manifest version and filesystem payload digest.
+   - Candidate evidence validates at the tagged commit and again for the
+     current payload and fleet manifest.
+   - Later non-payload bookkeeping commits are allowed; `HEAD` need not equal
+     the tag.
+   - Preflight is read-only and does not fetch, create, move, or delete tags.
+   - JSON schema version 1 wraps `releaseIdentity` and `consumers`; no consumer
+     rows are emitted when identity verification fails.
+4. **Validation & Error Matrix**: missing local or remote tag, local/remote tag
+   mismatch, non-ancestor tag, version mismatch, payload mismatch, or stale
+   tagged/current ledger -> controlled exit `1` before consumer inventory.
+5. **Good / Base / Bad Cases**:
+   - Good: local and remote raw tag objects agree, the resolved tag is an
+     ancestor, and tagged/current manifest, payload, and candidate evidence all
+     verify before consumer classification.
+   - Base: the checkout contains later bookkeeping-only commits whose payload
+     and candidate evidence still match the published tag.
+   - Bad: a manifest version alone is treated as proof of release identity, or
+     preflight fetches or mutates tag state while attempting verification.
+6. **Tests Required**: cover valid identity, missing and rewritten tags,
+   tagged version and payload mismatch, stale evidence, and post-release
+   bookkeeping commits.
+7. **Wrong vs Correct**:
+
+   ```text
+   Wrong: trust manifest.json or silently fetch tags before classifying consumers
+   Correct: compare existing local and remote raw refs, then verify exact tagged and current evidence
+   ```
+
 ## Manifest Path Safety
 
 Validate manifest paths before any target-repo writes:

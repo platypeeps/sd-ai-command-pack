@@ -14,13 +14,21 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
+RELEASE_SCRIPT_DIR = ROOT / ".github/scripts"
+if str(RELEASE_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(RELEASE_SCRIPT_DIR))
 
 import sd_ai_command_pack_fleet_lib as fleet_lib  # noqa: E402
+from release_identity import (  # noqa: E402
+    ReleaseIdentityError,
+    verify_release_identity,
+)
 
 FleetConsumer = fleet_lib.FleetConsumer
 
 DEFAULT_FLEET_MANIFEST = ROOT / "docs/fleet/consumers.json"
 DEFAULT_PACK_MANIFEST = ROOT / "manifest.json"
+DEFAULT_CANDIDATE_LEDGER = ROOT / "docs/fleet/candidate-validation.json"
 PROVENANCE_FILE = Path(".sd-ai-command-pack/provenance.json")
 
 
@@ -140,6 +148,20 @@ def parse_args() -> argparse.Namespace:
         help="pack manifest JSON; defaults to manifest.json",
     )
     parser.add_argument(
+        "--ledger",
+        type=Path,
+        default=DEFAULT_CANDIDATE_LEDGER,
+        help=(
+            "full-fleet candidate ledger; defaults to "
+            "docs/fleet/candidate-validation.json"
+        ),
+    )
+    parser.add_argument(
+        "--remote",
+        default="origin",
+        help="Git remote whose immutable release tag must match; defaults to origin",
+    )
+    parser.add_argument(
         "--target-version",
         help="override the target version; defaults to manifest.json version",
     )
@@ -163,7 +185,24 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    target_version = args.target_version or pack_version(args.manifest)
+    try:
+        release_identity = verify_release_identity(
+            args.manifest.resolve().parent,
+            manifest_path=args.manifest,
+            fleet_path=args.fleet,
+            ledger_path=args.ledger,
+            remote=args.remote,
+        )
+    except ReleaseIdentityError as error:
+        print(f"release identity error: {error}", file=sys.stderr)
+        return 1
+
+    target_version = release_identity.version
+    if args.target_version and args.target_version != target_version:
+        raise SystemExit(
+            "error: --target-version must match the verified manifest release "
+            f"{target_version}"
+        )
     consumers = load_fleet_consumers(args.fleet)
     selected = set(args.consumer or [])
     if selected:
@@ -181,32 +220,41 @@ def main() -> int:
     if args.json:
         print(
             json.dumps(
-                [
-                    {
-                        "name": result.consumer.name,
-                        "github": result.consumer.github,
-                        "path": str(result.repo_path),
-                        "platforms": list(result.consumer.platforms),
-                        "rolloutPriority": result.consumer.rollout_priority,
-                        "candidatePrepare": [
-                            list(command)
-                            for command in result.consumer.candidate_prepare
-                        ],
-                        "candidateChecks": [
-                            list(command)
-                            for command in result.consumer.candidate_checks
-                        ],
-                        "status": result.status,
-                        "installedVersion": result.installed_version,
-                        "targetVersion": result.target_version,
-                        "detail": result.detail,
-                    }
-                    for result in results
-                ],
+                {
+                    "schemaVersion": 1,
+                    "releaseIdentity": release_identity.as_json(),
+                    "consumers": [
+                        {
+                            "name": result.consumer.name,
+                            "github": result.consumer.github,
+                            "path": str(result.repo_path),
+                            "platforms": list(result.consumer.platforms),
+                            "rolloutPriority": result.consumer.rollout_priority,
+                            "candidatePrepare": [
+                                list(command)
+                                for command in result.consumer.candidate_prepare
+                            ],
+                            "candidateChecks": [
+                                list(command)
+                                for command in result.consumer.candidate_checks
+                            ],
+                            "status": result.status,
+                            "installedVersion": result.installed_version,
+                            "targetVersion": result.target_version,
+                            "detail": result.detail,
+                        }
+                        for result in results
+                    ],
+                },
                 indent=2,
             )
         )
     else:
+        print(
+            f"release identity: {release_identity.status} "
+            f"{release_identity.tag} at {release_identity.commit_sha} "
+            f"({release_identity.payload_digest})"
+        )
         print(f"sd-ai-command-pack fleet target: {target_version}")
         for result in results:
             installed = result.installed_version or "unknown"

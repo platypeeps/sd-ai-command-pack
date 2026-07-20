@@ -50,6 +50,9 @@ reads no environment variables; every tuning knob is an argument.
   consumer PR, but do not merge it.
 - `dry-run` — bare flag. Run preflight and emit the report only; perform no
   consumer mutations.
+- `remote=<name>` — Git remote whose immutable `v<version>` tag must match the
+  local release tag. Defaults to `origin`. Use an explicit mirror remote when
+  `origin` is not the release authority.
 - Remaining bare values are consumer names. `sd-fleet-refresh loadsmith
   rwbp-website` is equivalent to `consumer=loadsmith,rwbp-website`. Split bare
   names on whitespace or commas, preserve their order, and de-duplicate exact
@@ -59,16 +62,25 @@ Reject bare consumers combined with `consumer=` before preflight. Validate
 every normalized consumer against the fleet manifest before mutation; an
 unknown name is an error and must never broaden the run to the whole fleet.
 Before preflight, report the normalized consumer set (`all` when unfiltered),
-merge behavior, and dry-run state.
+merge behavior, dry-run state, and release remote.
 
 ## Workflow
 
-1. Preflight first. From the pack checkout, run:
+1. Preflight first. The matching local `v<manifest-version>` tag must already
+   exist; if the release was tagged remotely after the last fetch, fetch tags
+   before this step. From the pack checkout, run:
 
    ```bash
    bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
      scripts/sd-ai-command-pack-fleet-preflight.py
    ```
+
+   Append `--remote <name>` when `remote=` is present. Preflight fails before
+   consumer inventory or mutation unless the local tag matches the remote tag,
+   the tag is an ancestor of the checkout, the tagged version and installable
+   payload match the current source payload, and both tagged and current
+   candidate ledgers validate. Do not bypass or substitute a manifest-version
+   check for this release-identity guard.
 
    Append `--consumer <name>` for each entry in the `consumer=` filter. The
    script reads the target version from `manifest.json`, reports consumers
@@ -170,6 +182,9 @@ campaign open.
 - Consumer review focuses on selected-platform wiring, provenance, secrets,
   docs accuracy, and repo-owned migrations. Pack-owned implementation is
   reviewed in the source PR, not line-by-line in every refresh PR.
+- Never begin consumer inventory or mutation after a failed release-identity
+  guard. Fetch missing tags or correct the release evidence, then rerun
+  preflight.
 - `dry-run` runs preflight only and performs zero consumer mutations.
 
 ## Final report

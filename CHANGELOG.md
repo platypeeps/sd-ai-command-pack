@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.13 - 2026-07-20
+
+- Fail fleet preflight before consumer inventory unless the local and remote
+  release tag, exact tagged payload, ancestry, and tagged/current full-fleet
+  candidate evidence agree.
+
 ## 0.23.12 - 2026-07-20
 
 - Batch related fleet-rollout defects into one bounded corrective campaign,
