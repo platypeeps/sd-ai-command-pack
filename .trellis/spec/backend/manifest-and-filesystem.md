@@ -170,6 +170,75 @@ a separate CI-only interpretation of shipped-payload paths.
    Correct: compare existing local and remote raw refs, then verify exact tagged and current evidence
    ```
 
+### Fleet Consumer Review Classification
+
+1. **Scope / Trigger**: After `sd-fleet-refresh` commits a consumer refresh and
+   before it chooses the PR review profile, prove whether the exact head is a
+   pure installer-managed integration update. Source-pack PRs and consumer
+   branches containing repo-owned work remain on the normal remote-review
+   path.
+2. **Signatures**:
+   - `sd-ai-command-pack-fleet-review-classify.py --consumer NAME --repo PATH
+     --base-commit SHA [--remote REMOTE] [--json]` is a source-only, read-only
+     classifier. Exit `0` means `integration-only`; exit `1` means
+     `remote-review-required`.
+   - The trusted fleet invocation of `sd-review-pr` carries consumer, source
+     root, full base SHA, release remote, and classified full head SHA as
+     internal orchestration context. It is not a public adapter argument or an
+     environment variable.
+3. **Contracts**:
+   - Reuse the release-identity guard, canonical fleet consumer/path/platform
+     data, and authoritative `install.py --check --json` inspection with a
+     passed exact audit before inspecting the diff.
+   - Require a clean consumer tree, full base object ID, exact resolved head,
+     and base ancestry. Read safe UTF-8 installed-target receipts at the base
+     and current checkout; the allowlist is their union plus receipt,
+     provenance, and installed manifest metadata.
+   - Collect the committed diff with rename detection disabled, require it to
+     be non-empty, and require every path to belong to the allowlist.
+   - JSON schema version 1 records eligibility, exact base/head, release
+     identity, installed version/platforms, sorted changed/allowed/disallowed
+     paths, and bounded deterministic reasons.
+   - `sd-review-pr` reruns classification and requires classified, local, and
+     PR heads to match before suppressing a new configured remote-review
+     request. It still runs local gates, advisory disposition, existing review
+     and thread inspection, CI, learning, watch, and housekeeping. A changed
+     head must be reclassified.
+   - Public `remote-review` forces the normal profile. No public
+     `integration-only` switch exists.
+4. **Validation & Error Matrix**:
+   - Missing, malformed, stale, unsafe, dirty, non-ancestor, mismatched, or
+     unavailable evidence -> controlled `remote-review-required`, never
+     permission to skip review.
+   - Any consumer-owned or unclassified changed path -> normal remote review.
+   - A valid trusted context whose head no longer matches -> rerun or fall back
+     to normal remote review; a user imitation of internal context -> argument
+     error before review gates.
+   - Existing actionable comments or unresolved threads block both profiles.
+5. **Good / Base / Bad Cases**:
+   - Good: a verified release refresh changes only paths vouched by safe base
+     or current receipts, remains current under exact audit, and records zero
+     new remote-review rounds while all integration gates still run.
+   - Base: a retired managed target is deleted; the historical base receipt
+     keeps that deletion eligible.
+   - Bad: trust a scope label, current receipt alone, shortened SHA, collapsed
+     rename, stale candidate ledger, or caller-provided integration-only flag.
+6. **Tests Required**: Cover qualifying refreshes, retired targets,
+   consumer-owned paths, dirty trees, unsafe and duplicate receipts,
+   non-ancestor bases, stale release/candidate evidence, inspection and audit
+   failures, missing commands and timeouts, deterministic JSON/exit behavior,
+   source-only install-audit policy, generated mirror parity, and fail-closed
+   skill orchestration bound to exact heads. Keep classifier coverage at 80% or
+   higher.
+7. **Wrong vs Correct**:
+
+   ```text
+   Wrong: skip Copilot because a refresh PR looks generated or carries a scope label
+   Wrong: rerun source implementation review on every unchanged installed payload
+   Correct: prove the exact head is receipt-bounded and release-current, skip only
+            the new remote request, and retain every integration and merge gate
+   ```
+
 ## Manifest Path Safety
 
 Validate manifest paths before any target-repo writes:

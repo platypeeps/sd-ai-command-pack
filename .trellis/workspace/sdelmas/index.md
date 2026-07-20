@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 152
+- **Total Sessions**: 153
 - **Last Active**: 2026-07-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~45 | Active |
+| `journal-4.md` | ~84 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 153 | 2026-07-20 | Fleet integration-only review | `09934b356da339ebdaf81b4a6e8df95a88e6c5e6` | `codex/fleet-integration-only-review` |
 | 152 | 2026-07-20 | Guard fleet release identity | `0ea2f195c0c9e21b0089b7f50d818a8c3f34062d`, `ac1b23d5067af224537ec3b643899e7f4814b5a4` | `main` |
 | 151 | 2026-07-20 | Batch fleet corrective releases | `04fbabb`, `e248072` | `codex/fleet-corrective-defect-batching` |
 | 150 | 2026-07-20 | Roll out SD pack 0.23.11 across consumer fleet | `96ed7ab` | `codex/finalize-fleet-refresh-0-23-11` |

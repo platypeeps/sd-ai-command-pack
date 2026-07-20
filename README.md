@@ -229,7 +229,10 @@ configured remote reviewer, addresses review comments or CI failures, and
 re-requests review after each pushed fix up to the configured round limit.
 Before remote review it dispositions deterministic boundary-risk and scope
 advisories; after the overall loop is clean it runs one read-only, PR-scoped
-review-learning pass.
+review-learning pass. The trusted source fleet workflow may select a
+head-bound integration-only profile that skips only a new remote implementation
+review request after fail-closed release, audit, provenance, and diff
+classification; existing feedback, local checks, CI, and merge gates remain.
 
 ### sd-review-local
 
@@ -289,10 +292,14 @@ fleet preflight, then one consumer at a time — clean-tree check, install,
 consumer full-check, PR, watch, gated merge — ending with a per-consumer
 status table. Preflight first proves that the local and remote release tag,
 tagged payload, ancestry, and candidate ledgers agree; any mismatch stops
-before consumer inventory or mutation. Bare consumer names select a subset, for example
+before consumer inventory or mutation. Before review, a source-side classifier
+proves whether the exact consumer head contains only installer-managed refresh
+paths with current audit/provenance. Qualifying heads use integration-only
+review without a new Copilot request; ambiguity or consumer-owned changes use
+the normal remote-review loop. Bare consumer names select a subset, for example
 `/sd:fleet-refresh loadsmith rwbp-website`; `consumer=`, `dry-run`, and
-`no-merge` remain available explicitly, while `remote=<name>` selects a release
-remote other than `origin`.
+`no-merge` remain available explicitly, `remote-review` forces remote review,
+and `remote=<name>` selects a release remote other than `origin`.
 
 ### sd-test-gaps
 
@@ -696,6 +703,16 @@ selected-platform files are caught even if a faulty install also omitted them
 from receipts and provenance. See [docs/FLEET_ROLLOUT.md](docs/FLEET_ROLLOUT.md)
 for the fast-canary order, interruption threshold, review ownership, and
 compact rollout runbook.
+
+After committing a consumer refresh, the source workflow runs
+`scripts/sd-ai-command-pack-fleet-review-classify.py` with the exact
+pre-refresh base commit. Eligibility requires the verified release and
+candidate ledger, canonical consumer/platform identity, current
+`install.py --check --json` plus exact audit, safe historical/current receipts,
+and a committed diff limited to their union. Integration-only review suppresses
+only a new remote implementation-review request; existing threads, consumer
+checks, GitHub CI, watch, and housekeeping remain mandatory. Use the
+`remote-review` fleet flag to force the configured reviewer.
 
 ### Direct-to-main Chore Commits
 

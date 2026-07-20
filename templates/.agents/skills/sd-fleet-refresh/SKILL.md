@@ -48,6 +48,9 @@ reads no environment variables; every tuning knob is an argument.
   the run covers every consumer in the fleet manifest.
 - `no-merge` — bare flag. Stop every consumer at PR-open: open and watch the
   consumer PR, but do not merge it.
+- `remote-review` — bare flag. Force the normal configured remote-review loop
+  for every refreshed consumer even when the source classifier proves the PR
+  qualifies for integration-only review.
 - `dry-run` — bare flag. Run preflight and emit the report only; perform no
   consumer mutations.
 - `remote=<name>` — Git remote whose immutable `v<version>` tag must match the
@@ -62,7 +65,8 @@ Reject bare consumers combined with `consumer=` before preflight. Validate
 every normalized consumer against the fleet manifest before mutation; an
 unknown name is an error and must never broaden the run to the whole fleet.
 Before preflight, report the normalized consumer set (`all` when unfiltered),
-merge behavior, dry-run state, and release remote.
+merge behavior, review behavior (`auto` or `remote-review`), dry-run state, and
+release remote.
 
 ## Workflow
 
@@ -101,7 +105,9 @@ merge behavior, dry-run state, and release remote.
       dirty, skip this consumer and record the reason. Never stash, reset,
       or clean it, and never install into it.
    2. Create a refresh branch in the consumer checkout from its current
-      default branch.
+      default branch. Record the exact full base commit before installation;
+      integration-only classification is bound to that commit, not a moving
+      branch name.
    3. Install the pack release per `docs/FLEET_ROLLOUT.md`: run the
       preflight-printed `python3 install.py <repo> --force --platform ...`
       command from the pack checkout, then the printed install-audit
@@ -110,14 +116,55 @@ merge behavior, dry-run state, and release remote.
       consumer-documented equivalent. If the gate fails, do not open a PR:
       record the consumer as skipped with the failure summary, leave the
       local branch for inspection, and continue to the next consumer.
-   5. Commit the refreshed files, push the branch, and open the consumer
-      PR.
-   6. Watch the PR to settled: required checks complete and review state
-      final.
-   7. Merge via the consumer's housekeeping gate: green, comment-clean,
+   5. Commit the refreshed files. Before pushing, run the source-side
+      classifier against the exact base and current head:
+
+      ```bash
+      bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+        scripts/sd-ai-command-pack-fleet-review-classify.py \
+        --consumer <name> --repo <consumer-path> \
+        --base-commit <full-base-sha> --remote <release-remote> --json
+      ```
+
+      Run this command from the pack source checkout. Exit `0` selects the
+      `integration-only` profile unless `remote-review` was supplied. Any
+      nonzero result, malformed output, head mismatch, or explicit override
+      selects the normal configured remote-review profile; never reinterpret a
+      classifier failure as permission to skip review.
+   6. Push the branch and open the consumer PR. Resolve `sd-review-pr` and run
+      it as the sole review owner. For an eligible auto-classified branch,
+      supply this exact trusted internal context:
+
+      ```text
+      caller: sd-fleet-refresh
+      review-profile: integration-only
+      source-root: <absolute pack source checkout>
+      consumer: <fleet manifest name>
+      base-commit: <full base SHA>
+      release-remote: <source release remote>
+      classified-head: <full consumer refresh SHA>
+      return-after: review-result
+      defer-finish-work: true
+      ```
+
+      This is internal orchestration context, not a user-facing argument. The
+      review owner reruns the classifier and suppresses only a new configured
+      remote implementation-review request. It still runs the deterministic
+      consumer gate, dispositions first-review advisories, inspects all
+      existing comments and unresolved threads, checks CI, addresses valid
+      findings, and performs the one PR-scoped learning pass. If
+      classification no longer matches the exact PR head, it falls back to the
+      normal remote-review convergence loop. For non-qualifying branches or
+      `remote-review`, invoke the normal `sd-review-pr` profile with trusted
+      `caller: sd-fleet-refresh`, `review-profile: remote`,
+      `return-after: review-result`, and `defer-finish-work: true` context, but
+      no integration-only classifier fields.
+   7. Run `sd-watch-pr` with its internal `no-merge` handoff so required
+      checks and review state settle without duplicating housekeeping.
+   8. Merge via the consumer's housekeeping gate: green, comment-clean,
       mergeable, heads identical. With `no-merge`, leave the PR open and
-      record the consumer as PR-open.
-   8. Confirm post-merge provenance reads the target version and the
+      record the consumer as PR-open instead of invoking housekeeping.
+   9. Confirm post-merge provenance reads the target version and the
       install audit passes, per the rollout doc. Finish the consumer's
       housekeeping cleanup — default branch checked out, refresh branch
       deleted, refs pruned — then move to the next consumer.
@@ -182,6 +229,12 @@ campaign open.
 - Consumer review focuses on selected-platform wiring, provenance, secrets,
   docs accuracy, and repo-owned migrations. Pack-owned implementation is
   reviewed in the source PR, not line-by-line in every refresh PR.
+- Integration-only review is allowed only after the source classifier returns
+  eligible for the exact consumer head and `sd-review-pr` rechecks it. The
+  profile skips only a new remote-review request; it never skips existing
+  feedback, deterministic gates, CI, watch, or housekeeping.
+- `remote-review` always forces the normal review path. Classifier ambiguity,
+  unavailable proof, or any consumer-owned path also falls back to that path.
 - Never begin consumer inventory or mutation after a failed release-identity
   guard. Fetch missing tags or correct the release evidence, then rerun
   preflight.
@@ -194,10 +247,11 @@ and an empty item states its emptiness explicitly (write `none`). Keep it
 scannable — bullets and short lines, one point per line, no paragraph blobs.
 
 - Per-consumer status table: one row per fleet consumer in the run —
-  consumer · before-version · result. Result is exactly one of `at-target`,
-  `refreshed+merged`, `PR-open`, or `skipped+<reason>`. The before-version
-  is the installed pack version preflight reported at run start, or
-  `unknown` when preflight could not read it.
+  consumer · before-version · review-profile · result. Review profile is
+  `integration-only`, `remote`, or `n/a`. Result is exactly one of
+  `at-target`, `refreshed+merged`, `PR-open`, or `skipped+<reason>`. The
+  before-version is the installed pack version preflight reported at run
+  start, or `unknown` when preflight could not read it.
 - Fleet version summary: the target version, how many consumers are at
   target after the run, and which consumers remain stale.
 - Follow-ups: open consumer PRs to watch, skipped consumers to revisit, and
@@ -208,11 +262,11 @@ Example shape for a mixed run:
 ```
 - Target: 0.12.0
 - Fleet:
-  - repo-a · 0.12.0 · at-target
-  - repo-b · 0.10.5 · refreshed+merged
-  - repo-c · 0.11.0 · PR-open (no-merge)
-  - repo-d · 0.11.0 · skipped+dirty working tree
-  - repo-e · unknown · skipped+no local clone
+  - repo-a · 0.12.0 · n/a · at-target
+  - repo-b · 0.10.5 · integration-only · refreshed+merged
+  - repo-c · 0.11.0 · remote · PR-open (no-merge)
+  - repo-d · 0.11.0 · n/a · skipped+dirty working tree
+  - repo-e · unknown · n/a · skipped+no local clone
 - Fleet versions: 2 of 5 at target; repo-c pending merge; repo-d and
   repo-e stale
 - Follow-ups:

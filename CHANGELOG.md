@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.23.14 - 2026-07-20
+
+- Classify exact fleet refresh heads against verified release, audit,
+  provenance, and receipt-bounded diffs so pure integrations skip redundant
+  remote implementation-review requests without skipping existing feedback,
+  consumer checks, CI, watch, or housekeeping.
+
 ## 0.23.13 - 2026-07-20
 
 - Fail fleet preflight before consumer inventory unless the local and remote
