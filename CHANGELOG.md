@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.11 - 2026-07-19
+
+- Include base-branch and last-shipped-SHA evidence in canonical work-loop
+  status snapshots, and render every non-null current-state field in the
+  direct human-readable status output.
+
 ## 0.23.10 - 2026-07-19
 
 - Reject transition task and base-branch values that are non-string or become

@@ -205,6 +205,10 @@ schema.
   `focusMode`, and `heartbeatAt`; integer-but-not-boolean `iteration`; string
   list `focus`; dictionary `counters`, `contextHealth`, and `checkpoint`; and
   non-empty `contextHealth.level` plus `checkpoint.state`.
+- The canonical helper snapshot emits every current-state evidence field:
+  `task`, `branch`, `head`, `baseBranch`, `prNumber`, `prUrl`, and
+  `lastShippedSha`. Its human renderer prints each non-null field so direct
+  work-loop status and `sd-status` observe the same ledger evidence.
 - Optional run-snapshot strings may be omitted or explicitly `null`, but when
   present as strings they must remain non-empty after bounded sanitization.
   This applies to top-level evidence and stop fields, checkpoint target/reason,
@@ -248,6 +252,8 @@ schema.
 - Missing string fields, boolean iteration, mixed-type focus, non-dictionary
   containers, and missing nested renderer members.
 - Existing real-ledger JSON and human-output tests plus template twin parity.
+- Canonical helper snapshots and human output include all non-null
+  current-state evidence, including base branch and last shipped SHA.
 
 ### 7. Wrong vs Correct
 
