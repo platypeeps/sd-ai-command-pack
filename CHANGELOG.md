@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.23.3 - 2026-07-19
+
+- Normalize dynamically loaded terminal work-loop snapshots before status
+  rendering, discarding untrusted fields and sanitizing bounded diagnostics.
+
 ## 0.23.2 - 2026-07-19
 
 - Prevent phase transitions from bypassing work-loop branch, commit, PR, and

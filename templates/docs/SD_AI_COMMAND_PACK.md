@@ -1054,6 +1054,10 @@ raw command/review output. A relative explicit state path is rejected. Use
 `sd-status --json` for read-only loop visibility; use the work-loop command to
 resume, record evidence, reconcile, checkpoint, or stop it. For example:
 
+`sd-status` treats the dynamically loaded work-loop helper as an input boundary:
+it validates active snapshots and normalizes terminal snapshots to pack-owned
+fields, sanitizing and bounding any optional diagnostic before rendering it.
+
 ```bash
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
   scripts/sd-ai-command-pack-work-loop.py evidence --repo . \

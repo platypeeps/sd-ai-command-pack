@@ -453,6 +453,30 @@ class StatusTests(InstallTestCase):
                 snapshot = {"status": loop_status}
                 self.assertEqual(collect(snapshot), snapshot)
 
+        terminal_error = "first line\nsecond\x00line" + ("x" * 600)
+        for loop_status in ("invalid", "unavailable"):
+            with self.subTest(sanitized_terminal=loop_status):
+                result = collect(
+                    {
+                        "status": loop_status,
+                        "error": terminal_error,
+                        "token": "do-not-render",
+                    }
+                )
+                self.assertEqual(result["status"], loop_status)
+                self.assertEqual(set(result), {"status", "error"})
+                self.assertNotRegex(result["error"], r"[\x00-\x1f\x7f]")
+                self.assertLessEqual(len(result["error"]), 500)
+                self.assertTrue(result["error"].endswith("..."))
+
+        self.assertEqual(
+            collect({"status": "none", "error": terminal_error, "token": "secret"}),
+            {"status": "none"},
+        )
+        invalid_terminal_error = collect({"status": "unavailable", "error": ["bad"]})
+        self.assertEqual(invalid_terminal_error["status"], "invalid")
+        self.assertIn("terminal snapshot field: error", invalid_terminal_error["error"])
+
         valid_run = {
             "status": "active",
             "runId": "run-1",
