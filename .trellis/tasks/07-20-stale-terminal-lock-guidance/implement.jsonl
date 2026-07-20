@@ -1,0 +1,1 @@
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Defines the durable work-loop helper contract, explicit stale-lock recovery, and template/root parity requirements."}

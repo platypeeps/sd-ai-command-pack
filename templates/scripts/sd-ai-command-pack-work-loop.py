@@ -891,8 +891,14 @@ def acquire_lock(
                 "terminal reconciliation lock is unreadable or malformed; "
                 "do not start a work loop until it is inspected"
             ) from error
+        if state_label == "stale":
+            raise WorkLoopError(
+                "repository has a stale terminal reconciliation lock; retry "
+                "reconcile-terminal with --recover-stale-lock after verifying "
+                "the prior reconciliation process is gone"
+            )
         raise WorkLoopError(
-            f"repository has a {state_label} terminal reconciliation lock; "
+            "repository has an active terminal reconciliation lock; "
             "retry after reconciliation finishes"
         )
     payload = lock_payload(state)
@@ -992,10 +998,14 @@ def acquire_terminal_lock(
                     "inspect it before retrying"
                 ) from error
             stale = lock_is_stale(current, stale_after=stale_after)
-            if not stale or not recover_stale:
-                state_label = "stale" if stale else "active"
+            if not stale:
                 raise WorkLoopError(
-                    f"repository has a {state_label} terminal reconciliation lock"
+                    "repository has an active terminal reconciliation lock"
+                ) from None
+            if not recover_stale:
+                raise WorkLoopError(
+                    "repository has a stale terminal reconciliation lock; "
+                    "retry with --recover-stale-lock"
                 ) from None
             try:
                 lock_path.unlink()

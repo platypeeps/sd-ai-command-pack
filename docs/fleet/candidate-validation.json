@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-20T22:23:26Z",
-  "packVersion": "0.24.3",
-  "payloadDigest": "sha256:f2a7677858d19c67bf026f21efb57f486200dd5e49b6dd53c9405c16db33c70d",
+  "validatedAt": "2026-07-20T23:06:21Z",
+  "packVersion": "0.24.4",
+  "payloadDigest": "sha256:8c8817617bc0aea8df267ef1a6439608db1c63e7ba67ebc07eae1d770ed94f50",
   "fleetManifestDigest": "sha256:1776b0a45d7faa3b20fc61ff0ef8587f7fc577eebc503b7ddce0563479ef247a",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "299259e06daab7f05ed18f56825cb1fc308b571e",
+      "baseCommit": "60a08fbf5c5d405fdc980e4aa9dca88dbd1a3675",
       "status": "passed",
       "prepares": [
         [
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "db533104d15f4202157a268d485e21c53739be47",
+      "baseCommit": "55ec105d75c03693f6ff542b043dba654011960a",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "a50816f420c54e3e06110fac03692d92530ba31e",
+      "baseCommit": "ab71907fde7cd4a8f7c7e06dd1bb6c076f2f9b76",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -121,7 +121,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "5b50487c5fdb3edb3627ace6d112416272c449b8",
+      "baseCommit": "fa6e63fa074c7877e7cd8d84d114e06d537e8f24",
       "status": "passed",
       "prepares": [
         [

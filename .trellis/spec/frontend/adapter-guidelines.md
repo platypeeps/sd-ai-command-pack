@@ -180,6 +180,11 @@ timeouts, retries, dry-run behavior, and output formats explicit.
   counters, accepts identical evidence as a byte-for-byte no-op, and rejects
   live owners, unsafe stale locks, or contradictory evidence without reviving
   the run.
+- Terminal-lock diagnostics must preserve that safety boundary: active owners
+  tell the operator to wait, while stale owners name `reconcile-terminal
+  --recover-stale-lock` and require verification that the prior process is
+  gone. A diagnostic must never imply an abandoned owner will finish itself or
+  silently remove its lock.
 - Existing lifecycle owners remain authoritative. The outer loop invokes
   `sd-ship until=merge` once; it never separately invokes create-pr, review-pr,
   watch-pr, finish-work, or housekeeping.
@@ -209,6 +214,9 @@ timeouts, retries, dry-run behavior, and output formats explicit.
   option-shaped input, or invalid lifecycle values -> usage error before lock.
 - Concurrent active lock -> stop; stale lock -> reconcile live state, then use
   explicit recovery only when the prior process is gone.
+- Active terminal reconciliation lock -> wait and retry after reconciliation
+  finishes. Stale terminal reconciliation lock -> fail without mutation and
+  require explicit `reconcile-terminal --recover-stale-lock` recovery.
 - A non-null `task`, `branch`, `head`, `baseBranch`, `prUrl`, or
   `lastShippedSha` that is not a string or becomes empty after trimming ->
   malformed current state before reconciliation or mutation. A head-only
@@ -253,6 +261,9 @@ timeouts, retries, dry-run behavior, and output formats explicit.
   recovery evidence with no partial mutation.
 - Pin canonical-controller, thin-selector, nested-return, status visibility,
   generated adapter, reference fanout, manifest, and template/root parity.
+- Assert active and stale terminal-lock diagnostics independently, including
+  the stale recovery flag and byte-for-byte preservation of the unrecovered
+  lock.
 
 ### 7. Wrong vs Correct
 
@@ -262,6 +273,12 @@ housekeeping around `sd-ship`, or use retained chat history as phase evidence.
 Correct: one state-backed controller composes a selector, delegates one full
 ship lifecycle, reconciles the compact result, processes follow-ups, and emits
 an overall final response only after persisting a verified stop reason.
+
+Wrong: tell an operator to wait for a stale terminal reconciliation owner that
+cannot finish.
+
+Correct: preserve the lock and direct the operator to verified, explicit
+`reconcile-terminal --recover-stale-lock` recovery.
 
 ## Scenario: Post-Finish KB Freshness Ownership
 

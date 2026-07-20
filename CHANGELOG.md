@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.4 - 2026-07-20
+
+- Distinguish active and stale terminal reconciliation locks so stale-lock
+  failures point operators to explicit `reconcile-terminal
+  --recover-stale-lock` recovery instead of waiting for an abandoned owner.
+
 ## 0.24.3 - 2026-07-20
 
 - Reject malformed pull-request URLs, including invalid ports and malformed
