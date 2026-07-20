@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check atomic failure behavior, focused state-machine regressions, and the repository's full validation gate."}
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Check template/root synchronization and consistent workflow guidance across shipped adapters."}

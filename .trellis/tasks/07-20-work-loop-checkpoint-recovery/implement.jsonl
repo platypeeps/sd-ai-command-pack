@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines focused regression, generated-surface parity, and shipped-script verification expectations for the work-loop helper."}
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Defines the canonical-template and mirrored skill/documentation contract for command-pack workflow surfaces."}
