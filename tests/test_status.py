@@ -496,6 +496,81 @@ class StatusTests(InstallTestCase):
                 snapshot = {**valid_run, "status": loop_status}
                 self.assertEqual(collect(snapshot), snapshot)
 
+        unsafe_text = "first\nsecond\x00line" + ("x" * 600)
+        sanitized_run = collect(
+            {
+                **valid_run,
+                "runId": unsafe_text,
+                "focus": [unsafe_text],
+                "task": unsafe_text,
+                "stopReason": unsafe_text,
+                "counters": {"completed\x00count": 1},
+                "contextHealth": {
+                    "level": "green",
+                    "epoch": 2,
+                    "reasons": [unsafe_text],
+                    "token": "do-not-render",
+                },
+                "checkpoint": {
+                    "state": "paused",
+                    "target": unsafe_text,
+                    "reason": unsafe_text,
+                    "token": "do-not-render",
+                },
+                "lock": {
+                    "present": True,
+                    "stale": False,
+                    "runId": unsafe_text,
+                    "token": "do-not-render",
+                },
+                "token": "do-not-render",
+            }
+        )
+        self.assertEqual(
+            set(sanitized_run),
+            {
+                *valid_run,
+                "task",
+                "stopReason",
+                "lock",
+            },
+        )
+        sanitized_strings = [
+            sanitized_run["runId"],
+            sanitized_run["focus"][0],
+            sanitized_run["task"],
+            sanitized_run["stopReason"],
+            next(iter(sanitized_run["counters"])),
+            sanitized_run["contextHealth"]["reasons"][0],
+            sanitized_run["checkpoint"]["target"],
+            sanitized_run["checkpoint"]["reason"],
+            sanitized_run["lock"]["runId"],
+        ]
+        for value in sanitized_strings:
+            self.assertNotRegex(value, r"[\x00-\x1f\x7f]")
+        self.assertLessEqual(len(sanitized_run["runId"]), 120)
+        self.assertLessEqual(len(sanitized_run["focus"][0]), 160)
+        self.assertLessEqual(len(sanitized_run["task"]), 160)
+        self.assertLessEqual(len(sanitized_run["stopReason"]), 500)
+        self.assertEqual(sanitized_run["counters"], {"completed count": 1})
+        self.assertNotIn("token", sanitized_run["contextHealth"])
+        self.assertNotIn("token", sanitized_run["checkpoint"])
+        self.assertNotIn("token", sanitized_run["lock"])
+
+        self.assertIn(
+            "prNumber",
+            collect({**valid_run, "prNumber": True})["error"],
+        )
+        self.assertIn(
+            "contextHealth.reasons",
+            collect(
+                {
+                    **valid_run,
+                    "contextHealth": {"level": "green", "reasons": [1]},
+                }
+            )["error"],
+        )
+
         missing_status = collect({})
         self.assertEqual(missing_status["status"], "invalid")
         self.assertIn("valid status", missing_status["error"])

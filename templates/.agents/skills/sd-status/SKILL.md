@@ -83,6 +83,8 @@ reinterpret them as shell text.
 - Read work-loop state through the installed helper's read-only snapshot. Do
   not acquire or refresh its lock, heartbeat, checkpoint, or ledger. Invalid
   loop state is an explicit anomaly; absent state is `none`, not an error.
+  Treat the dynamically loaded snapshot as untrusted input: retain only the
+  collector's validated, bounded, control-character-free output fields.
 - Report unavailable optional sources explicitly. Do not silently convert
   failed GitHub or version discovery into an empty healthy result.
 - Keep human output bounded. Use `--json` when the caller needs the complete
