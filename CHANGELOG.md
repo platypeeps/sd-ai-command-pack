@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.5 - 2026-07-19
+
+- Keep ready or blocked work-loop recovery checkpoints fail-closed until
+  reconciliation supplies matching current-state evidence; a phase-only
+  observation can no longer erase unresolved contradiction context.
+
 ## 0.23.4 - 2026-07-19
 
 - Normalize dynamically loaded active work-loop snapshots to an allowlisted,

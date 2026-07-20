@@ -1132,13 +1132,21 @@ def reconcile_state(
         apply_context_signal(state, signal, f"runtime signal: {signal}")
     elif not context_signal_applied:
         has_observations = bool(evidence_observations) or observed_phase is not None
-        if has_observations or state["contextHealth"]["level"] != "red":
+        recovery_checkpoint_active = state["checkpoint"].get("state") in {
+            "ready",
+            "blocked",
+        }
+        has_recovery_evidence = bool(evidence_observations)
+        may_restore_health = not recovery_checkpoint_active or has_recovery_evidence
+        if (
+            has_observations and may_restore_health
+        ) or state["contextHealth"]["level"] != "red":
             state["contextHealth"] = {
                 "level": "green",
                 "epoch": state["contextHealth"]["epoch"],
                 "reasons": [],
             }
-        if has_observations:
+        if has_recovery_evidence:
             _clear_recovery_checkpoint(state)
 
 

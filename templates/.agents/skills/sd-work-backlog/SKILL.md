@@ -125,7 +125,8 @@ accepted only from the feature branch to the recorded base branch at a verified
 merge boundary; commit advances must be locally verifiable. Never use a
 checkpoint transition merely to replace HEAD or PR evidence. A successful
 evidence update or exact verified reconciliation clears an obsolete recovery
-checkpoint; real identity, branch, ancestry, or PR conflicts remain red.
+checkpoint; a matching phase alone is not recovery evidence. Real identity,
+branch, ancestry, or PR conflicts remain red.
 
 ## Candidate Inventory And Focus
 
