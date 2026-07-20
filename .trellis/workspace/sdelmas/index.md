@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 154
+- **Total Sessions**: 155
 - **Last Active**: 2026-07-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~122 | Active |
+| `journal-4.md` | ~162 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 155 | 2026-07-20 | Recover paused work-loop checkpoints | `6e9d773`, `0396352` | `codex/work-loop-checkpoint-recovery` |
 | 154 | 2026-07-20 | Gate fleet findings by interruption severity | `145806196ee3dfc6881bde830af992f40e31b7e4` | `codex/fleet-interruption-severity-gate` |
 | 153 | 2026-07-20 | Fleet integration-only review | `09934b356da339ebdaf81b4a6e8df95a88e6c5e6` | `codex/fleet-integration-only-review` |
 | 152 | 2026-07-20 | Guard fleet release identity | `0ea2f195c0c9e21b0089b7f50d818a8c3f34062d`, `ac1b23d5067af224537ec3b643899e7f4814b5a4` | `main` |

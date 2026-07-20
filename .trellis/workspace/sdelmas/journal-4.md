@@ -123,3 +123,42 @@ Added deterministic owner-level fleet finding timing so only blocker evidence pa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 155: Recover paused work-loop checkpoints
+
+**Date**: 2026-07-20
+**Task**: Recover paused work-loop checkpoints
+**Branch**: `codex/work-loop-checkpoint-recovery`
+
+### Summary
+
+Implemented and validated lifecycle-owned checkpoint recovery with schema-v1 compatibility and complete evidence guards.
+
+### Main Changes
+
+- Keep ready and paused checkpoints as lifecycle overlays with persisted resumePhase ownership.
+- Recover complete verified post-merge advances atomically, preserve human targets, and fail closed on incomplete or conflicting evidence.
+- Expose resumePhase through status and document the exact backlog resume sequence in pack 0.23.17.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6e9d773` | chore(task): plan work-loop checkpoint recovery |
+| `0396352` | fix: recover paused work-loop checkpoints |
+
+### Testing
+
+- [OK] make check
+- [OK] canonical seven-consumer candidate validation for 0.23.17
+- [OK] 50 focused work-loop tests
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
