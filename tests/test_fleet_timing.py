@@ -213,6 +213,51 @@ class FleetTimingTests(InstallTestCase):
         self.assertEqual(consumer["reviewerCiOverlapNs"], 10 * SECOND)
         self.assertEqual(summary["aggregate"]["slowestStage"]["name"], "reviewer-wait")
 
+    def test_aggregate_overlap_intersects_run_wide_interval_unions(self) -> None:
+        timing = self.load_timing()
+        state = self.state(timing)
+
+        for consumer in ("canary", "alpha"):
+            timing.start_stage(
+                state,
+                consumer_name=consumer,
+                stage_name="reviewer-wait",
+                reading=self.reading(timing, 10),
+            )
+            timing.start_stage(
+                state,
+                consumer_name=consumer,
+                stage_name="ci-wait",
+                reading=self.reading(timing, 20),
+            )
+            timing.end_stage(
+                state,
+                consumer_name=consumer,
+                stage_name="reviewer-wait",
+                outcome="passed",
+                reason=None,
+                reading=self.reading(timing, 30),
+            )
+            timing.end_stage(
+                state,
+                consumer_name=consumer,
+                stage_name="ci-wait",
+                outcome="passed",
+                reason=None,
+                reading=self.reading(timing, 40),
+            )
+            timing.end_consumer(
+                state, name=consumer, outcome="refreshed-merged", reason=None
+            )
+
+        summary = timing.build_summary(state, self.reading(timing, 41))
+
+        self.assertEqual(
+            [item["reviewerCiOverlapNs"] for item in summary["consumers"]],
+            [10 * SECOND, 10 * SECOND],
+        )
+        self.assertEqual(summary["aggregate"]["reviewerCiOverlapNs"], 10 * SECOND)
+
     def test_active_summary_completion_and_consumer_rules_fail_closed(self) -> None:
         timing = self.load_timing()
         state = self.state(timing, ("canary", 10))
@@ -619,6 +664,8 @@ class FleetTimingTests(InstallTestCase):
             ("see)/Users/example/project", "absolute or home-relative"),
             (r"see C:\\Users\\example\\project", "absolute or home-relative"),
             (r"see \\\\server\\share", "absolute or home-relative"),
+            ("see https://github.com/org/repo", "remote URL"),
+            ("see git@github.com:org/repo", "remote URL"),
             ("token=ghp_abcdefghijklmnopqrstuvwxyz", "secret-like"),
             ("x" * 501, "exceeds"),
         ):
@@ -818,6 +865,8 @@ class FleetTimingTests(InstallTestCase):
             exit_code = timing.main([*common, "report", "--run-id", "run-1"])
         self.assertEqual(exit_code, 0)
         self.assertIn("fleet timing: active run run-1", human_output.getvalue())
+        self.assertIn("active wall: 0.000s", human_output.getvalue())
+        self.assertIn("critical 0.000s · active 0.000s", human_output.getvalue())
         self.assertIn("changed: no", human_output.getvalue())
 
     def test_cli_errors_are_stable_and_do_not_trace_back(self) -> None:

@@ -33,6 +33,9 @@ SECRET_RE = re.compile(
 ABSOLUTE_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9/])(?:~[/\\]|/[A-Za-z0-9._~-]|[A-Za-z]:[/\\]|\\\\\S+)"
 )
+REMOTE_URL_RE = re.compile(
+    r"(?i)(?:\b[a-z][a-z0-9+.-]*://\S+|\b[a-z0-9._-]+@[a-z0-9.-]+:\S+)"
+)
 QUOTED_OUTPUT_PATH_RE = re.compile(
     r"(?P<quote>['\"])(?:~[/\\]|/[A-Za-z0-9._~-]|[A-Za-z]:[/\\]|\\\\)"
     r"[^'\"]*(?P=quote)"
@@ -159,6 +162,8 @@ def safe_reason(value: object, label: str, *, required: bool = False) -> str | N
         raise FleetTimingError(f"{label} exceeds {MAX_REASON_LENGTH} characters")
     if SECRET_RE.search(normalized):
         raise FleetTimingError(f"{label} contains secret-like material")
+    if REMOTE_URL_RE.search(normalized):
+        raise FleetTimingError(f"{label} contains a remote URL")
     if ABSOLUTE_PATH_RE.search(normalized):
         raise FleetTimingError(f"{label} contains an absolute or home-relative path")
     return normalized
@@ -915,7 +920,8 @@ def build_summary(state: Mapping[str, Any], reading: ClockReading) -> dict[str, 
     all_intervals = list(fleet_intervals)
     summed_elapsed = fleet_elapsed
     retry_count = fleet_retries
-    reviewer_ci_overlap = 0
+    all_reviewer_intervals: list[tuple[int, int]] = []
+    all_ci_intervals: list[tuple[int, int]] = []
     for consumer in state["consumers"]:
         stage_summaries, intervals, elapsed, retries, consumer_totals = _stage_summary(
             consumer["stages"], reading
@@ -941,7 +947,8 @@ def build_summary(state: Mapping[str, Any], reading: ClockReading) -> dict[str, 
                     for attempt in stage["attempts"]
                 )
         overlap = _intersection_duration(reviewer_intervals, ci_intervals)
-        reviewer_ci_overlap += overlap
+        all_reviewer_intervals.extend(reviewer_intervals)
+        all_ci_intervals.extend(ci_intervals)
         critical_path = (
             max(end for _start, end in intervals)
             - min(start for start, _end in intervals)
@@ -989,7 +996,9 @@ def build_summary(state: Mapping[str, Any], reading: ClockReading) -> dict[str, 
             "criticalPathNs": critical_path,
             "activeWallNs": _union_duration(all_intervals),
             "summedStageElapsedNs": summed_elapsed,
-            "reviewerCiOverlapNs": reviewer_ci_overlap,
+            "reviewerCiOverlapNs": _intersection_duration(
+                all_reviewer_intervals, all_ci_intervals
+            ),
             "retryCount": retry_count,
             "activeAttempts": sum(
                 stage["active"] for stage in fleet_stage_summaries
@@ -1031,6 +1040,7 @@ def render_human(state: Mapping[str, Any], summary: Mapping[str, Any]) -> str:
         ),
         (
             f"critical path: {format_duration(aggregate['criticalPathNs'])}; "
+            f"active wall: {format_duration(aggregate['activeWallNs'])}; "
             f"stage elapsed: {format_duration(aggregate['summedStageElapsedNs'])}; "
             f"reviewer/CI overlap: {format_duration(aggregate['reviewerCiOverlapNs'])}; "
             f"retries: {aggregate['retryCount']}"
@@ -1057,6 +1067,7 @@ def render_human(state: Mapping[str, Any], summary: Mapping[str, Any]) -> str:
             f"- {consumer['name']} · priority {consumer['priority']} · "
             f"{consumer['outcome'] or 'active'} · "
             f"critical {format_duration(consumer['criticalPathNs'])} · "
+            f"active {format_duration(consumer['activeWallNs'])} · "
             f"retries {consumer['retryCount']}"
         )
     return "\n".join(lines)

@@ -189,7 +189,7 @@ consumer with `consumer-end` using `at-target`, `refreshed-merged`, `pr-open`,
 
 Failure-like stage and consumer outcomes require a short reason. Reasons reject
 control characters, absolute or home-relative paths, common credential forms,
-and private keys. The durable schema stores no repository path, remote URL,
+remote URLs, and private keys. The durable schema stores no repository path, remote URL,
 command output, review body, environment dump, or credential. The normal
 report exposes only a short repository digest key; do not publish or paste the
 local state path.

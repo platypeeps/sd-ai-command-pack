@@ -989,7 +989,7 @@ owns or changes their outcomes.
 - Durable state and normal output never contain an absolute repository path,
   remote URL, command output, review body, credential, private key, or arbitrary
   environment value. Reasons are bounded and reject control characters,
-  absolute/home-relative paths, and common secret forms.
+  absolute/home-relative paths, remote URLs, and common secret forms.
 - Stage elapsed time uses monotonic nanoseconds and rejects a backwards clock.
   Wall-clock nanoseconds preserve boundaries and calculate interval union,
   critical path, and reviewer/CI overlap without double-counting concurrency.
@@ -1010,7 +1010,8 @@ owns or changes their outcomes.
   mismatched end fields, or an active attempt in completed state -> controlled
   exit `2` with no traceback and no state replacement.
 - Failure-like stage/consumer outcome without a reason, success outcome with a
-  forbidden reason, secret/path/control content, or oversized state -> reject.
+  forbidden reason, secret/path/remote-URL/control content, or oversized state
+  -> reject.
 - A live lock -> bounded wait then busy error; a stale lock is recoverable only
   when its owner process is absent. Symlinked state/lock paths -> reject.
 - Reinitialized run whose target or consumer identity differs -> reject rather
