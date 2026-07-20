@@ -1,0 +1,30 @@
+{
+  "id": "planning-task-placeholder-gate",
+  "name": "planning-task-placeholder-gate",
+  "title": "Reject placeholder context in new planning tasks",
+  "description": "Extend deterministic review preflight so newly added planning-task check and implement context files cannot retain generated _example scaffold rows.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-20",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
+    "scripts/sd-ai-command-pack-review-preflight.mjs",
+    "tests/test_review_preflight.py"
+  ],
+  "notes": "",
+  "meta": {}
+}
