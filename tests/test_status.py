@@ -453,7 +453,7 @@ class StatusTests(InstallTestCase):
                 snapshot = {"status": loop_status}
                 self.assertEqual(collect(snapshot), snapshot)
 
-        for missing_error in (None, "", "   "):
+        for missing_error in (None, "", "   ", "\x00"):
             with self.subTest(invalid_without_diagnostics=missing_error):
                 snapshot = {"status": "invalid"}
                 if missing_error is not None:
@@ -485,6 +485,16 @@ class StatusTests(InstallTestCase):
         invalid_terminal_error = collect({"status": "unavailable", "error": ["bad"]})
         self.assertEqual(invalid_terminal_error["status"], "invalid")
         self.assertIn("terminal snapshot field: error", invalid_terminal_error["error"])
+        for blank_error in ("", " \n\t ", "\x00"):
+            with self.subTest(unavailable_blank_error=repr(blank_error)):
+                unavailable_blank_error = collect(
+                    {"status": "unavailable", "error": blank_error}
+                )
+                self.assertEqual(unavailable_blank_error["status"], "invalid")
+                self.assertIn(
+                    "terminal snapshot field: error",
+                    unavailable_blank_error["error"],
+                )
 
         valid_run = {
             "status": "active",
@@ -504,6 +514,67 @@ class StatusTests(InstallTestCase):
             with self.subTest(valid_run=loop_status):
                 snapshot = {**valid_run, "status": loop_status}
                 self.assertEqual(collect(snapshot), snapshot)
+
+        optional_string_fields = (
+            "until",
+            "task",
+            "branch",
+            "head",
+            "baseBranch",
+            "prUrl",
+            "lastShippedSha",
+            "stopReason",
+        )
+        for field in optional_string_fields:
+            nullable_snapshot = {**valid_run, field: None}
+            with self.subTest(nullable_optional_string=field):
+                self.assertEqual(collect(nullable_snapshot), nullable_snapshot)
+            for blank_value in ("", " \n\t ", "\x00"):
+                with self.subTest(
+                    blank_optional_string=field,
+                    value=repr(blank_value),
+                ):
+                    result = collect({**valid_run, field: blank_value})
+                    self.assertEqual(result["status"], "invalid")
+                    self.assertIn(field, result["error"])
+
+        nullable_nested_snapshot = {
+            **valid_run,
+            "checkpoint": {"state": "none", "target": None, "reason": None},
+            "lock": {"present": False, "stale": False, "runId": None},
+        }
+        self.assertEqual(collect(nullable_nested_snapshot), nullable_nested_snapshot)
+        for field in ("target", "reason"):
+            for blank_value in ("", " \n\t ", "\x00"):
+                with self.subTest(
+                    blank_checkpoint_string=field,
+                    value=repr(blank_value),
+                ):
+                    result = collect(
+                        {
+                            **valid_run,
+                            "checkpoint": {
+                                "state": "none",
+                                field: blank_value,
+                            },
+                        }
+                    )
+                    self.assertEqual(result["status"], "invalid")
+                    self.assertIn(f"checkpoint.{field}", result["error"])
+        for blank_value in ("", " \n\t ", "\x00"):
+            with self.subTest(blank_lock_run_id=repr(blank_value)):
+                result = collect(
+                    {
+                        **valid_run,
+                        "lock": {
+                            "present": True,
+                            "stale": False,
+                            "runId": blank_value,
+                        },
+                    }
+                )
+                self.assertEqual(result["status"], "invalid")
+                self.assertIn("lock.runId", result["error"])
 
         unsafe_text = "first\nsecond\x00line" + ("x" * 600)
         sanitized_run = collect(

@@ -205,6 +205,13 @@ schema.
   `focusMode`, and `heartbeatAt`; integer-but-not-boolean `iteration`; string
   list `focus`; dictionary `counters`, `contextHealth`, and `checkpoint`; and
   non-empty `contextHealth.level` plus `checkpoint.state`.
+- Optional run-snapshot strings may be omitted or explicitly `null`, but when
+  present as strings they must remain non-empty after bounded sanitization.
+  This applies to top-level evidence and stop fields, checkpoint target/reason,
+  and lock run identity.
+- Terminal diagnostics must also remain non-empty after sanitization. Missing
+  or blank `invalid` diagnostics receive the bounded adapter-owned fallback;
+  a blank supplied `unavailable` diagnostic is a malformed terminal field.
 - Missing, unsupported, and incomplete mappings become adapter-owned `invalid`
   snapshots. Diagnostics name only the structural field and never echo a
   helper-controlled value.
@@ -217,6 +224,8 @@ schema.
 - Unsupported status -> `unsupported status` anomaly without the supplied
   value.
 - Missing or malformed run field -> `invalid run snapshot field: <field>`.
+- Present-but-blank optional run string -> `invalid run snapshot field:
+  <field>`; explicit `null` remains valid.
 - Import, syntax, filesystem, or helper exception -> existing bounded
   `invalid` anomaly behavior.
 
@@ -225,8 +234,11 @@ schema.
 - Good: a complete paused snapshot renders the same run, focus, heartbeat,
   context, checkpoint, and counters as before.
 - Base: `{"status": "none"}` remains a valid no-loop result.
+- Base: an optional run field such as `branch` may be absent or `null`.
 - Bad: a drifted helper returns `{"status": "active"}` and the report prints
   `None` for required metadata.
+- Bad: an active helper returns `{"branch": "   "}` and the report treats the
+  sanitized empty value as valid evidence.
 
 ### 6. Tests Required
 
