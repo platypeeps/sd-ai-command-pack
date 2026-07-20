@@ -957,6 +957,20 @@ The report is a per-consumer status table plus a fleet version summary.
 Its consumer rows state `integration-only`, `remote`, or `n/a` review profile
 so avoided remote-review rounds remain visible rather than implicit.
 
+The fleet skill also records mandatory internal timing evidence with
+`scripts/sd-ai-command-pack-fleet-timing.py`. One resumable run brackets
+preflight and the fixed checkout, install, audit, local-gate, commit/push, PR,
+reviewer-wait, CI-wait, housekeeping, and post-merge-audit stages. Reviewer and
+CI waits start together after PR creation, so the report measures their overlap
+and interval-union active time instead of double-counting concurrent waits.
+The final summary includes critical path, summed stage time, slowest consumer,
+slowest stage, overlap, and retries. State is private and atomic in the user's
+local state directory; durable records and reports omit repository paths,
+credentials, command output, and review text. Timing has no public fleet
+argument and never changes an authoritative delivery-gate result. A telemetry
+error remains visible and pauses new mutation until the last valid record can
+resume.
+
 Every verified rollout finding is also classified before watch, merge, or the
 next consumer mutation with the source-only command:
 

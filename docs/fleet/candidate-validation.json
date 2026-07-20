@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-20T14:57:25Z",
-  "packVersion": "0.23.15",
-  "payloadDigest": "sha256:747f0f12145e56dd77627a2579bfe3c9f737dec5d6662861d699d83290ac37fb",
+  "validatedAt": "2026-07-20T15:41:04Z",
+  "packVersion": "0.23.16",
+  "payloadDigest": "sha256:2a773375a5fa7062103dc3634f1b3ae04e413a7a15c3ead7070fff1d452701d0",
   "fleetManifestDigest": "sha256:1776b0a45d7faa3b20fc61ff0ef8587f7fc577eebc503b7ddce0563479ef247a",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "8ee2bd4927a96c9d5f7a2b15a95946bc7777c79c",
+      "baseCommit": "511b71dcaa4225e4debf8d554553197f03ca8844",
       "status": "passed",
       "prepares": [
         [
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "c85863ff7bf29194e4431ee29a60800c96f000f6",
+      "baseCommit": "7f6b7cf91afb7dcd7623f2f2f3d3885a241b4a34",
       "status": "passed",
       "prepares": [
         [

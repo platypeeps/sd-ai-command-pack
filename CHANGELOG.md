@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.16 - 2026-07-20
+
+- Record private, resumable fleet stage timing with monotonic elapsed evidence,
+  reviewer/CI overlap, retry and critical-path summaries, and no change to the
+  authoritative rollout gates.
+
 ## 0.23.15 - 2026-07-20
 
 - Classify verified fleet findings by canonical owner so only blocker families
