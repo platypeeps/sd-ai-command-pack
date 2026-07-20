@@ -1,10 +1,16 @@
 # Changelog
 
-## 0.24.4 - 2026-07-20
+## 0.24.5 - 2026-07-20
 
 - Distinguish active and stale terminal reconciliation locks so stale-lock
   failures point operators to explicit `reconcile-terminal
   --recover-stale-lock` recovery instead of waiting for an abandoned owner.
+
+## 0.24.4 - 2026-07-20
+
+- Teach Copilot that source-only fleet helpers and source-workflow documentation
+  are intentionally absent from consumer manifests, and require receipt,
+  provenance, and install-audit evidence before reporting a missing-file defect.
 
 ## 0.24.3 - 2026-07-20
 

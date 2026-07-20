@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-20T23:16:56Z",
-  "packVersion": "0.24.4",
-  "payloadDigest": "sha256:094ad0880667199804270305927a2fb3c05f0d5f6ae7dd398af879ee0f6f3f3f",
+  "validatedAt": "2026-07-20T23:21:07Z",
+  "packVersion": "0.24.5",
+  "payloadDigest": "sha256:6450ce138aeac7ea703ee26ef48509491a0dda8ec5a8e1b8c59bb6ea05b08bb1",
   "fleetManifestDigest": "sha256:1776b0a45d7faa3b20fc61ff0ef8587f7fc577eebc503b7ddce0563479ef247a",
   "consumers": [
     {
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "55ec105d75c03693f6ff542b043dba654011960a",
+      "baseCommit": "baeac83a03bf6770ce12bd041608ed5125b1e951",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "2dd85d83bac780c54e8717e463b7d59c65f8b1a1",
+      "baseCommit": "c8dfda9405353c24cfe81ecfdce6ae8180061bb0",
       "status": "passed",
       "prepares": [
         [

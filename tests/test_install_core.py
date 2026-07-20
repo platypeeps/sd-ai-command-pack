@@ -469,6 +469,24 @@ class InstallCoreTests(InstallTestCase):
         ):
             self.assertIn(phrase, template, f"phrase wrapped or missing: {phrase!r}")
 
+    def test_copilot_guidance_explains_source_only_consumer_contract(self) -> None:
+        template = (
+            install.ROOT / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
+        ).read_text(encoding="utf-8")
+
+        for phrase in (
+            "Source-only SD pack surfaces are intentionally absent",
+            "`SOURCE_ONLY_ALLOWED_PACK_FILES` is an audit allowlist",
+            "not a required consumer-target list",
+            "`.sd-ai-command-pack/manifest.json`",
+            "`.sd-ai-command-pack/installed-targets.txt`",
+            "`.sd-ai-command-pack/provenance.json`",
+            "do not report its absence as a defect",
+            "source-checkout-only operator workflows",
+            "do not require those scripts to exist in a consumer checkout",
+        ):
+            self.assertIn(phrase, template)
+
     def test_tracked_full_check_skill_matches_template_and_documents_audit(self) -> None:
         installed = (install.ROOT / ".agents/skills/sd-full-check/SKILL.md").read_text(
             encoding="utf-8"
