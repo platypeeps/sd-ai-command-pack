@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.6 - 2026-07-19
+
+- Require reconciliation to supply every non-null recorded current-state field
+  before clearing a ready or blocked recovery checkpoint, preventing unrelated
+  partial evidence from erasing unresolved contradiction context.
+
 ## 0.23.5 - 2026-07-19
 
 - Keep ready or blocked work-loop recovery checkpoints fail-closed until

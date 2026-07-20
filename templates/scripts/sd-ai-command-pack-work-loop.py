@@ -902,6 +902,15 @@ def _clear_recovery_checkpoint(state: dict[str, Any]) -> None:
         state["checkpoint"] = {"state": "none", "target": None, "reason": None}
 
 
+def _has_complete_recovery_evidence(
+    current: Mapping[str, Any], observations: Mapping[str, Any]
+) -> bool:
+    recorded_fields = {
+        key for key in CURRENT_FIELD_ORDER if current.get(key) is not None
+    }
+    return bool(recorded_fields) and recorded_fields.issubset(observations)
+
+
 def validated_evidence(
     state: Mapping[str, Any],
     updates: Mapping[str, Any],
@@ -1041,7 +1050,15 @@ def update_evidence(
     repo: Path | None = None,
 ) -> None:
     candidate = validated_evidence(state, updates, repo=repo)
+    recovery_checkpoint_active = state["checkpoint"].get("state") in {
+        "ready",
+        "blocked",
+    }
     state["current"] = candidate
+    if recovery_checkpoint_active and not _has_complete_recovery_evidence(
+        candidate, updates
+    ):
+        return
     state["contextHealth"] = {
         "level": "green",
         "epoch": state["contextHealth"]["epoch"],
@@ -1136,8 +1153,13 @@ def reconcile_state(
             "ready",
             "blocked",
         }
-        has_recovery_evidence = bool(evidence_observations)
-        may_restore_health = not recovery_checkpoint_active or has_recovery_evidence
+        recovery_current = candidate_current or current
+        has_complete_recovery_evidence = _has_complete_recovery_evidence(
+            recovery_current, evidence_observations
+        )
+        may_restore_health = (
+            not recovery_checkpoint_active or has_complete_recovery_evidence
+        )
         if (
             has_observations and may_restore_health
         ) or state["contextHealth"]["level"] != "red":
@@ -1146,7 +1168,7 @@ def reconcile_state(
                 "epoch": state["contextHealth"]["epoch"],
                 "reasons": [],
             }
-        if has_recovery_evidence:
+        if has_complete_recovery_evidence:
             _clear_recovery_checkpoint(state)
 
 
