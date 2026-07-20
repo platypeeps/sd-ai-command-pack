@@ -992,12 +992,12 @@ def acquire_terminal_lock(
             try:
                 current = read_json(lock_path)
                 validate_lock(current)
+                stale = lock_is_stale(current, stale_after=stale_after)
             except WorkLoopError as error:
                 raise WorkLoopError(
                     "terminal reconciliation lock is unreadable or malformed; "
                     "inspect it before retrying"
                 ) from error
-            stale = lock_is_stale(current, stale_after=stale_after)
             if not stale:
                 raise WorkLoopError(
                     "repository has an active terminal reconciliation lock; "

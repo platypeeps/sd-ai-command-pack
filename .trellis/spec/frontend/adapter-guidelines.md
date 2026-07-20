@@ -217,6 +217,9 @@ timeouts, retries, dry-run behavior, and output formats explicit.
 - Active terminal reconciliation lock -> wait and retry after reconciliation
   finishes. Stale terminal reconciliation lock -> fail without mutation and
   require explicit `reconcile-terminal --recover-stale-lock` recovery.
+- Unreadable or malformed terminal reconciliation lock, including an invalid
+  heartbeat timestamp -> require inspection without mutation, even when stale
+  recovery was requested.
 - A non-null `task`, `branch`, `head`, `baseBranch`, `prUrl`, or
   `lastShippedSha` that is not a string or becomes empty after trimming ->
   malformed current state before reconciliation or mutation. A head-only

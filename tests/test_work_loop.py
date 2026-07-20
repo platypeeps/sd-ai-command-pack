@@ -618,6 +618,24 @@ class WorkLoopTests(InstallTestCase):
             module.acquire_terminal_lock(terminal_lock_path, state)
         self.assertEqual(terminal_lock_path.read_bytes(), active_bytes)
 
+        malformed = dict(active)
+        malformed["heartbeatAt"] = "not-a-timestamp"
+        module.atomic_write_json(terminal_lock_path, malformed)
+        malformed_bytes = terminal_lock_path.read_bytes()
+        for recover_stale in (False, True):
+            with self.subTest(recover_stale=recover_stale):
+                with self.assertRaisesRegex(
+                    module.WorkLoopError,
+                    "terminal reconciliation lock is unreadable or malformed; "
+                    "inspect it before retrying",
+                ):
+                    module.acquire_terminal_lock(
+                        terminal_lock_path,
+                        state,
+                        recover_stale=recover_stale,
+                    )
+                self.assertEqual(terminal_lock_path.read_bytes(), malformed_bytes)
+
         stale = dict(active)
         stale.update(
             {
