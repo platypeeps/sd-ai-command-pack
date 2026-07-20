@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify terminal snapshot allowlisting, validation, rendering, and next-step suppression."}
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Verify helper/orchestrator trust boundaries and template/root parity."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify every rejection remains actionable and leaves persisted ledger bytes unchanged."}
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Verify archive containment, symlink rejection, atomic persistence, release metadata, and provenance."}

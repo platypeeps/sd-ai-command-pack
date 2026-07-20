@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Defines shipped adapter, durable work-loop, generated-mirror, and orchestration ownership contracts."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines the dynamic status snapshot boundary and fail-closed validation contract."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Defines actionable diagnostics and unchanged-state failure behavior for tooling commands."}
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Defines path containment, symlink, atomic-write, manifest, and provenance requirements."}

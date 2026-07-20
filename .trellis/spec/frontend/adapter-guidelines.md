@@ -171,6 +171,14 @@ timeouts, retries, dry-run behavior, and output formats explicit.
   recoverable run lock. Every non-null current-state string must remain
   nonblank; malformed persisted evidence fails validation before reconciliation
   or mutation. The ledger never becomes a tracked repository artifact.
+- Terminal reconciliation is a separate local-only audit mutation for stopped
+  or completed ledgers. The canonical skill verifies exact merged GitHub PR
+  facts before invoking it; the helper validates archived-task identity,
+  locally available commits, a clean synchronized default branch, and a
+  distinct short-lived exclusive lock. It preserves lifecycle evidence and
+  counters, accepts identical evidence as a byte-for-byte no-op, and rejects
+  live owners, unsafe stale locks, or contradictory evidence without reviving
+  the run.
 - Existing lifecycle owners remain authoritative. The outer loop invokes
   `sd-ship until=merge` once; it never separately invokes create-pr, review-pr,
   watch-pr, finish-work, or housekeeping.

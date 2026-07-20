@@ -1138,6 +1138,35 @@ to turn the amber recovery into green exact agreement. Old ledgers with a
 human-only checkpoint target also require
 `--resume-phase <recorded-lifecycle-phase>`.
 
+A stopped or completed run may be reconciled with task and merge state that
+advanced after its execution lock was released. The orchestration layer must
+first verify exact merged PR state through GitHub, including URL, head SHA,
+merge commit SHA, and default base branch. The local helper deliberately makes
+no network calls:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-work-loop.py reconcile-terminal --repo . \
+  --run-id <run-id> \
+  --archived-task .trellis/tasks/archive/<month>/<task> \
+  --delivery-pr-number <n> --delivery-pr-url <url> \
+  --delivery-head <sha> --delivery-merge-commit <sha> \
+  --branch <default> --head <default-head> --json
+```
+
+The optional bookkeeping PR uses the parallel `--bookkeeping-pr-number`,
+`--bookkeeping-pr-url`, `--bookkeeping-head`, and
+`--bookkeeping-merge-commit` group; supply all four or none. The command
+requires a completed, identity-matching archived task, a clean checked-out
+default branch synchronized with its origin tracking ref, locally resolvable
+commits, no live owner, and an explicit flag for safe stale-lock recovery. It
+keeps phase/status terminal, preserves `current`, counters, focus, iteration,
+history, and stop reason, and stores external completion in
+`terminalReconciliation`. Identical normalized evidence does not rewrite the
+ledger; conflicting evidence fails without mutation. Status and housekeeping
+render a verified record as historical external completion and label the
+preserved counters as loop-owned.
+
 ### Full Check And Preflight
 
 Run the non-mutating toolchain doctor before dependency-sensitive SD workflows:
