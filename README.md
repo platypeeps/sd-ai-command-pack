@@ -287,9 +287,12 @@ registry, and rollout procedure. It rolls the pack release across consumer
 repos per `docs/FLEET_ROLLOUT.md`:
 fleet preflight, then one consumer at a time — clean-tree check, install,
 consumer full-check, PR, watch, gated merge — ending with a per-consumer
-status table. Bare consumer names select a subset, for example
+status table. Preflight first proves that the local and remote release tag,
+tagged payload, ancestry, and candidate ledgers agree; any mismatch stops
+before consumer inventory or mutation. Bare consumer names select a subset, for example
 `/sd:fleet-refresh loadsmith rwbp-website`; `consumer=`, `dry-run`, and
-`no-merge` remain available explicitly.
+`no-merge` remain available explicitly, while `remote=<name>` selects a release
+remote other than `origin`.
 
 ### sd-test-gaps
 

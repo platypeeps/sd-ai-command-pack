@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-20T13:03:39Z",
-  "packVersion": "0.23.12",
-  "payloadDigest": "sha256:47ce921e225bfbccc54a9aae912ae73094cb5d8868dac84b3440001bb15038de",
+  "validatedAt": "2026-07-20T13:36:12Z",
+  "packVersion": "0.23.13",
+  "payloadDigest": "sha256:febd2b31278406b6fcd08d0725343f95d923ff22f300db96d05cb66d2d9a525a",
   "fleetManifestDigest": "sha256:1776b0a45d7faa3b20fc61ff0ef8587f7fc577eebc503b7ddce0563479ef247a",
   "consumers": [
     {
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "29b7c13f07e653f3896e7b3a11e484d7852e46bd",
+      "baseCommit": "44c29ad261cceb9bf9a22b9608eb2da6e9ffc988",
       "status": "passed",
       "prepares": [
         [
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "c3dbd8c7bfeda6417d73843941f95340c91af598",
+      "baseCommit": "d2b9d64f83ddb3133788fa299279c56187b39209",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "1b4b7787ee942b1addf39fb88be4fd95814820ed",
+      "baseCommit": "e51c4fa05de6db9ef8913980656768dede75532b",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "a453ac37c63cce2f1cc2f3784c37524599f27e04",
+      "baseCommit": "16f6eacef1645b5ebc36bd0a93ad7d23c3db6102",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -121,7 +121,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "48b55fa68a4856838d7592e7dff75e7dce791cf2",
+      "baseCommit": "e969cf868ad7eb0f69135728672530203b807c40",
       "status": "passed",
       "prepares": [
         [

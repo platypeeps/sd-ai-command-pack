@@ -76,19 +76,39 @@ canonical full-fleet ledger.
 
 ## Preflight
 
-Run the source-owned preflight before opening consumer refresh PRs:
+Ensure the published tag is available locally, then run the source-owned
+preflight before opening consumer refresh PRs:
 
 ```bash
+git fetch --tags origin
 python3 scripts/sd-ai-command-pack-fleet-preflight.py
 ```
 
-The target version is read from `manifest.json`. Repos already at that version
-are reported as `at-target` and should be skipped, which prevents duplicate
-empty refresh PRs.
+Use `--remote <name>` when a remote other than `origin` is the release
+authority. Preflight is read-only and never fetches or rewrites tags itself.
 
-JSON preflight output includes both `candidatePrepare` and `candidateChecks`,
-so orchestration can inspect the complete candidate contract without parsing
-the source manifest independently.
+Before it evaluates consumers, preflight reads the target version from
+`manifest.json` and requires all release identity checks to pass:
+
+- the corresponding local `v<version>` tag exists and its raw object ID
+  matches the exact tag ref advertised by the release remote;
+- the tag commit is an ancestor of the current checkout;
+- the tagged manifest version and exact installable payload digest match the
+  current checkout; and
+- candidate evidence validates both at the tagged commit and against the
+  current fleet manifest and payload.
+
+A missing, mismatched, stale, or rewritten identity exits before consumer
+inventory or mutation. Later documentation and Trellis bookkeeping commits on
+`main` remain valid when the installable payload is byte-identical to the tag.
+
+Repos already at the verified target version are reported as `at-target` and
+should be skipped, which prevents duplicate empty refresh PRs.
+
+JSON preflight output is a schema-versioned object with `releaseIdentity` and
+`consumers`. Each consumer includes both `candidatePrepare` and
+`candidateChecks`, so orchestration can inspect the complete candidate contract
+without parsing the source manifest independently.
 
 For each repo that needs a refresh, the preflight prints the exact install and
 audit commands. The audit command passes the fleet manifest's explicit platform
