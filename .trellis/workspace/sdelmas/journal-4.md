@@ -377,7 +377,7 @@ Released sd-ai-command-pack 0.24.5 so complete checkpoint recovery can retain a 
 - None - task complete
 
 
-## Session 161: Clarify stale terminal lock recovery
+## Session 162: Clarify stale terminal lock recovery
 
 **Date**: 2026-07-20
 **Task**: Clarify stale terminal lock recovery
@@ -389,22 +389,27 @@ Published the 0.24.6 stale terminal-lock diagnostic contract, preserved active a
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Distinguished active terminal locks from stale locks and directed stale owners to explicit `reconcile-terminal --recover-stale-lock` recovery.
+- Wrapped malformed terminal-lock heartbeat validation in the actionable terminal-lock diagnostic while preserving the lock on every failing path.
+- Synchronized canonical and installed scripts, executable specs, the 0.24.6 release metadata, generated help, and seven-consumer candidate evidence.
 
 ### Git Commits
 
 | Hash | Message |
 |------|---------|
-| `54962ce` | (see git log) |
-| `efdb7a4` | (see git log) |
-| `e3b6638` | (see git log) |
-| `f649cca` | (see git log) |
-| `820b394` | (see git log) |
-| `d8421bf` | (see git log) |
+| `54962ce` | fix: clarify stale terminal lock recovery |
+| `efdb7a4` | fix: align active terminal lock guidance |
+| `e3b6638` | Merge remote-tracking branch 'origin/main' into codex/fix-stale-terminal-lock-guidance |
+| `f649cca` | chore: refresh 0.24.5 release evidence |
+| `820b394` | fix: wrap malformed terminal lock heartbeat |
+| `d8421bf` | Merge remote-tracking branch 'origin/main' into codex/fix-stale-terminal-lock-guidance |
 
 ### Testing
 
-- Validation was not recorded for this session.
+- [OK] 69 focused work-loop tests passed.
+- [OK] `make check` passed on the 0.24.6 implementation head.
+- [OK] Full-fleet candidate validation passed for all seven configured consumers.
+- [OK] GitHub CI passed and the final Copilot review reported no new comments.
 
 ### Status
 

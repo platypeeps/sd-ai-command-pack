@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 161
+- **Total Sessions**: 162
 - **Last Active**: 2026-07-20
 <!-- @@@/auto:current-status -->
 
@@ -32,7 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 161 | 2026-07-20 | Clarify stale terminal lock recovery | `54962ce`, `efdb7a4`, `e3b6638`, `f649cca`, `820b394`, `d8421bf` | `codex/fix-stale-terminal-lock-guidance` |
+| 162 | 2026-07-20 | Clarify stale terminal lock recovery | `54962ce`, `efdb7a4`, `e3b6638`, `f649cca`, `820b394`, `d8421bf` | `codex/fix-stale-terminal-lock-guidance` |
 | 161 | 2026-07-20 | Fix post-squash work-loop reconciliation | `91cbd72` | `codex/fix-squash-followup-reconcile` |
 | 160 | 2026-07-20 | Document source-only consumer contract | `8d27a86` | `main` |
 | 159 | 2026-07-20 | Harden PR URL validation | `ce8fd81` | `codex/harden-pr-url-validation` |
