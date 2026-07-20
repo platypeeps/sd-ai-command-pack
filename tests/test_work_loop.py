@@ -2100,7 +2100,6 @@ class WorkLoopTests(InstallTestCase):
             "state": "paused",
             "target": "wait for operator",
             "reason": "legacy pause",
-            "resumePhase": "inventory",
         }
         module.atomic_write_json(state_path, state)
 
@@ -2125,9 +2124,49 @@ class WorkLoopTests(InstallTestCase):
 
         self.assertEqual(result, 0, stdout.getvalue())
         paused = json.loads(stdout.getvalue())
-        self.assertEqual(paused["phase"], "inventory")
+        self.assertEqual(paused["phase"], "checkpoint")
         self.assertEqual(paused["checkpoint"]["target"], "wait for operator")
-        self.assertEqual(paused["checkpoint"]["resumePhase"], "inventory")
+        self.assertIsNone(paused["checkpoint"]["resumePhase"])
+
+    def test_cli_checkpoint_updates_legacy_human_target_without_owner(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, state_path, _lock_path = self.make_state(module, root, state_root)
+        state["phase"] = "checkpoint"
+        state["checkpoint"] = {
+            "state": "ready",
+            "target": "legacy human target",
+            "reason": "legacy checkpoint",
+        }
+        module.atomic_write_json(state_path, state)
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "checkpoint",
+                    "--repo",
+                    str(root),
+                    "--run-id",
+                    state["runId"],
+                    "--target",
+                    "updated human target",
+                    "--reason",
+                    "updated checkpoint",
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(result, 0, stdout.getvalue())
+        checkpointed = json.loads(stdout.getvalue())
+        self.assertEqual(checkpointed["phase"], "checkpoint")
+        self.assertEqual(
+            checkpointed["checkpoint"]["target"], "updated human target"
+        )
+        self.assertIsNone(checkpointed["checkpoint"]["resumePhase"])
 
     def test_cli_resume_rejects_conflicting_configuration_and_focus(self) -> None:
         module = self.load_module()

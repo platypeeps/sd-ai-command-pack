@@ -1468,10 +1468,7 @@ def _clear_recovery_checkpoint(state: dict[str, Any]) -> None:
         }
 
 
-def checkpoint_resume_phase(
-    state: Mapping[str, Any], *, explicit_resume_phase: str | None = None
-) -> str:
-    """Resolve the lifecycle phase owned by a checkpoint overlay."""
+def _known_checkpoint_resume_phase(state: Mapping[str, Any]) -> str | None:
     checkpoint = state["checkpoint"]
     resume_phase = checkpoint.get("resumePhase")
     if resume_phase is not None:
@@ -1479,6 +1476,16 @@ def checkpoint_resume_phase(
     target = checkpoint.get("target")
     if target in LIFECYCLE_PHASE_ORDER:
         return target
+    return None
+
+
+def checkpoint_resume_phase(
+    state: Mapping[str, Any], *, explicit_resume_phase: str | None = None
+) -> str:
+    """Resolve the lifecycle phase owned by a checkpoint overlay."""
+    resume_phase = _known_checkpoint_resume_phase(state)
+    if resume_phase is not None:
+        return resume_phase
     if explicit_resume_phase is not None:
         if explicit_resume_phase not in LIFECYCLE_PHASE_ORDER:
             raise WorkLoopError(
@@ -2371,15 +2378,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             def checkpoint(item: dict[str, Any]) -> None:
                 prior_phase = item["phase"]
                 resume_phase = (
-                    checkpoint_resume_phase(item)
+                    _known_checkpoint_resume_phase(item)
                     if prior_phase == "checkpoint"
                     else prior_phase
                 )
-                if resume_phase not in LIFECYCLE_PHASE_ORDER:
+                if (
+                    resume_phase is not None
+                    and resume_phase not in LIFECYCLE_PHASE_ORDER
+                ):
                     raise WorkLoopError(
                         f"phase {resume_phase} cannot own a recovery checkpoint"
                     )
-                item["phase"] = resume_phase
+                item["phase"] = resume_phase or "checkpoint"
                 item["checkpoint"] = {
                     "state": "paused" if args.pause else "ready",
                     "target": compact_text(args.target, limit=120),
@@ -2404,11 +2414,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if args.status == "paused":
                     prior_phase = item["phase"]
                     resume_phase = (
-                        checkpoint_resume_phase(item)
+                        _known_checkpoint_resume_phase(item)
                         if prior_phase == "checkpoint"
                         else prior_phase
                     )
-                    if resume_phase not in LIFECYCLE_PHASE_ORDER:
+                    if (
+                        resume_phase is not None
+                        and resume_phase not in LIFECYCLE_PHASE_ORDER
+                    ):
                         raise WorkLoopError(
                             f"phase {resume_phase} cannot own a recovery checkpoint"
                         )
@@ -2418,8 +2431,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         else prior_phase
                     )
                     if checkpoint_target is None:
-                        checkpoint_target = resume_phase
-                    item["phase"] = resume_phase
+                        checkpoint_target = resume_phase or "checkpoint"
+                    item["phase"] = resume_phase or "checkpoint"
                     item["checkpoint"] = {
                         "state": "paused",
                         "target": checkpoint_target,
