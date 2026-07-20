@@ -193,6 +193,9 @@ timeouts, retries, dry-run behavior, and output formats explicit.
   malformed current state before reconciliation or mutation. A head-only
   evidence update with a blank recorded branch -> non-empty branch evidence
   error rather than preserving the malformed ledger value.
+- A transition-supplied `task` or `baseBranch` that becomes empty after bounded
+  normalization -> field-specific non-empty string error before the phase or
+  persisted ledger changes.
 - Ledger behind in the same phase -> validate and record the evidence, clear an
   obsolete recovery checkpoint, and return green. A verified later phase uses
   amber rehydration until exact reconciliation. Ledger ahead, invalid ancestry,

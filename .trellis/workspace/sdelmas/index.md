@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 147
+- **Total Sessions**: 148
 - **Last Active**: 2026-07-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1821 | Active |
+| `journal-3.md` | ~1862 | Active |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 148 | 2026-07-20 | Release 0.23.10 transition identity validation | `f07720e`, `1485afc` | `codex/fix-transition-blank-fields` |
 | 147 | 2026-07-20 | Harden work-loop snapshot strings for 0.23.9 | `4eac6a2` | `codex/status-snapshot-blank-fields` |
 | 146 | 2026-07-19 | Correct work-loop contracts for 0.23.8 | `c965d9f`, `a989704`, `691adba` | `codex/work-loop-review-contract-fixes` |
 | 145 | 2026-07-19 | Retire review-body fallback guidance | `ded1b36` | `main` |

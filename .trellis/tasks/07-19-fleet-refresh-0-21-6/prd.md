@@ -1,9 +1,9 @@
-# Roll out SD pack 0.23.9 to the consumer fleet
+# Roll out SD pack 0.23.10 to the consumer fleet
 
 ## Goal
 
 Refresh all configured consumers from their current installed version to release
-0.23.9 through the canonical fleet preflight, sequential PR, review, merge,
+0.23.10 through the canonical fleet preflight, sequential PR, review, merge,
 provenance, and audit process.
 
 ## Confirmed Facts
@@ -29,9 +29,12 @@ provenance, and audit process.
   target advanced to `v0.23.8` rather than rewriting that version. During the
   corrective rollout, mezmo_benchmark PR #359 found that optional strings in
   the dynamically loaded run snapshot could sanitize to empty without
-  invalidating the boundary, advancing the target again to `v0.23.9`.
+  invalidating the boundary, advancing the target again to `v0.23.9`. The
+  refreshed Mezmo review then found that transition task and base-branch
+  values could sanitize to blank before failing later with a generic malformed
+  state error, advancing the final target to `v0.23.10`.
 - Disposable candidate validation passed for all seven configured consumers
-  for the corrective `0.23.9` payload, and the committed ledger matches the
+  for the corrective `0.23.10` payload, and the committed ledger matches the
   current payload and fleet manifest.
 - `docs/FLEET_ROLLOUT.md` owns the rollout procedure and
   `docs/fleet/consumers.json` owns fleet membership, platform selection, and
@@ -42,7 +45,7 @@ provenance, and audit process.
 - The 2026-07-19 `0.23.7` preflight found all seven consumers available.
   Coordinator reached the pre-release payload through PR #129; Loadsmith PR
   #100 was merged at `0.23.8`, and mezmo_benchmark PR #359 remains open for the
-  corrective refresh; every consumer must reach the finalized `0.23.9`
+  corrective refresh; every consumer must reach the finalized `0.23.10`
   release.
 
 ## Requirements
@@ -53,7 +56,7 @@ provenance, and audit process.
   anomaly-metric-creator last.
 - Require a clean consumer checkout before installation. Do not stash, reset,
   clean, clone, or overwrite unrelated work to force a refresh.
-- Install release `0.23.9` with the consumer's configured platforms, then run
+- Install release `0.23.10` with the consumer's configured platforms, then run
   install audit, provenance verification, and the repository-owned validation
   gate before opening a PR.
 - Commit only installer-managed payload, receipts, provenance, and managed
@@ -67,13 +70,13 @@ provenance, and audit process.
 
 ## Acceptance Criteria
 
-- [ ] rwbp-coordinator is installed at `0.23.9` and passes post-merge audit.
-- [ ] loadsmith is installed at `0.23.9` and passes post-merge audit.
-- [ ] hoa-manager is installed at `0.23.9` and passes post-merge audit.
-- [ ] rwbp-website is installed at `0.23.9` and passes post-merge audit.
-- [ ] mezmo_benchmark is installed at `0.23.9` and passes post-merge audit.
-- [ ] se-ai-command-pack is installed at `0.23.9` and passes post-merge audit.
-- [ ] anomaly-metric-creator is installed at `0.23.9` and passes post-merge
+- [ ] rwbp-coordinator is installed at `0.23.10` and passes post-merge audit.
+- [ ] loadsmith is installed at `0.23.10` and passes post-merge audit.
+- [ ] hoa-manager is installed at `0.23.10` and passes post-merge audit.
+- [ ] rwbp-website is installed at `0.23.10` and passes post-merge audit.
+- [ ] mezmo_benchmark is installed at `0.23.10` and passes post-merge audit.
+- [ ] se-ai-command-pack is installed at `0.23.10` and passes post-merge audit.
+- [ ] anomaly-metric-creator is installed at `0.23.10` and passes post-merge
       audit.
 - [ ] Every mutated consumer passed its repository-owned validation before PR
       creation and has no unresolved rollout review thread at merge.
@@ -86,7 +89,7 @@ provenance, and audit process.
 
 - Consumer product changes, dependency upgrades, and unrelated maintenance.
 - Modifying a dirty or missing checkout to make it eligible for rollout.
-- Retagging or rewriting releases `v0.23.1` through `v0.23.8`.
+- Retagging or rewriting releases `v0.23.1` through `v0.23.9`.
 - Creating a pull request in the upstream Trellis repository.
 
 ## Notes
