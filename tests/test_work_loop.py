@@ -1387,6 +1387,12 @@ class WorkLoopTests(InstallTestCase):
         ):
             module.update_evidence(state, {"lastShippedSha": head}, repo=root)
 
+        state["current"]["lastShippedSha"] = head
+        with self.assertRaisesRegex(
+            module.WorkLoopError, "requires a verifiable recorded head or branch"
+        ):
+            module.update_evidence(state, {"lastShippedSha": head}, repo=root)
+
     def test_evidence_initializes_schema_one_state_and_rejects_idle_phase(self) -> None:
         module = self.load_module()
         root = self.make_repo()
