@@ -68,9 +68,49 @@ Before preflight, report the normalized consumer set (`all` when unfiltered),
 merge behavior, review behavior (`auto` or `remote-review`), dry-run state, and
 release remote.
 
+## Timing evidence
+
+Timing is mandatory internal observability, not a public fleet option. Do not
+add timing arguments or environment variables to an adapter. Create one safe,
+unique run ID from the target version and UTC start time, record it in the
+active fleet task or session context, and reuse that exact ID after an
+interruption. Read selected consumer names and priorities from the fleet
+manifest, then initialize the local record before preflight:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-timing.py --repo <absolute-source-root> \
+  init --run-id <run-id> --target-version <version> \
+  --consumer <name>:<priority> [...]
+```
+
+The helper stores private, atomic state outside the repository and prints a
+repository digest rather than an absolute path. Bracket an authoritative
+operation with `stage-start` and `stage-end`, using `--fleet` only for
+`preflight` and `--consumer <name>` for the remaining stages. A failed,
+skipped, or interrupted stage requires a short bounded `--reason` without a
+path, credential, review body, or command output. Record each final consumer
+with `consumer-end`, then use `report --complete` only after every selected
+consumer has an outcome. Repeated identical commands are safe no-ops, and a
+new attempt begins only with another `stage-start` after the prior attempt
+closed.
+
+The fixed consumer stage mapping is `checkout-validation`, `install`, `audit`,
+`local-gate`, `commit-push`, `pr-creation`, `reviewer-wait`, `ci-wait`,
+`housekeeping`, and `post-merge-audit`. Start both `reviewer-wait` and
+`ci-wait` immediately after PR creation. End the reviewer interval when
+`sd-review-pr` returns and the CI interval when `sd-watch-pr` settles, so their
+natural overlap is measured instead of double-counted.
+
+If a timing command fails, report the telemetry anomaly and pause further
+fleet mutation until the last valid record can be resumed or its input can be
+corrected. Never change, erase, or reinterpret an install, audit, review, CI,
+finding, or housekeeping result to make telemetry succeed.
+
 ## Workflow
 
-1. Preflight first. The matching local `v<manifest-version>` tag must already
+1. Initialize the timing run, start its fleet-scoped `preflight` stage, then
+   run preflight. The matching local `v<manifest-version>` tag must already
    exist; if the release was tagged remotely after the last fetch, fetch tags
    before this step. From the pack checkout, run:
 
@@ -92,31 +132,37 @@ release remote.
    duplicate empty refresh PRs — and prints the exact install and audit
    commands for every stale consumer. A consumer without a local clone
    cannot be refreshed from this checkout: record it as skipped with that
-   reason.
+   reason. End the preflight timing stage as `passed`, or as `failed` with the
+   bounded preflight reason before stopping.
 2. With `dry-run`: emit the final report from the preflight results and
-   stop here. Zero consumer mutations.
+   stop here. Zero consumer mutations. Record `at-target` for consumers already
+   current and `skipped` with reason `dry-run did not mutate consumer` for each
+   remaining selected consumer, then complete the timing report.
 3. Refresh stale consumers strictly sequentially in the preflight's explicit
    priority order, one consumer at a time. Coordinator, loadsmith, and HOA are
    the fast canaries; AMC runs last. Do not reorder from incidental local path
    or manifest editing order.
    Start the next consumer only after the previous one resolves as
    refreshed+merged, PR-open under `no-merge`, or skipped:
-   1. Verify the consumer checkout has a clean working tree. If it is
-      dirty, skip this consumer and record the reason. Never stash, reset,
-      or clean it, and never install into it.
-   2. Create a refresh branch in the consumer checkout from its current
-      default branch. Record the exact full base commit before installation;
+   1. Start `checkout-validation`, verify the consumer checkout has a clean
+      working tree, and create a refresh branch from its current default
+      branch. If it is dirty, end the stage and consumer as skipped with the
+      reason. Never stash, reset, clean, or install over it.
+   2. Record the exact full base commit before installation;
       integration-only classification is bound to that commit, not a moving
       branch name.
-   3. Install the pack release per `docs/FLEET_ROLLOUT.md`: run the
+   3. Bracket `install` and `audit` separately. Install the pack release per
+      `docs/FLEET_ROLLOUT.md`: run the
       preflight-printed `python3 install.py <repo> --force --platform ...`
       command from the pack checkout, then the printed install-audit
       command with its `--expected-platform` set.
-   4. Run the consumer's full-check gate — its `make full-check` or the
+   4. Bracket `local-gate`. Run the consumer's full-check gate — its
+      `make full-check` or the
       consumer-documented equivalent. If the gate fails, do not open a PR:
       record the consumer as skipped with the failure summary, leave the
       local branch for inspection, and continue to the next consumer.
-   5. Commit the refreshed files. Before pushing, run the source-side
+   5. Bracket `commit-push`. Commit the refreshed files. Before pushing, run
+      the source-side
       classifier against the exact base and current head:
 
       ```bash
@@ -131,8 +177,10 @@ release remote.
       nonzero result, malformed output, head mismatch, or explicit override
       selects the normal configured remote-review profile; never reinterpret a
       classifier failure as permission to skip review.
-   6. Push the branch and open the consumer PR. Resolve `sd-review-pr` and run
-      it as the sole review owner. For an eligible auto-classified branch,
+   6. Push within `commit-push`, then bracket `pr-creation` while opening the
+      consumer PR. Immediately after the PR exists, start both `reviewer-wait`
+      and `ci-wait`. Resolve `sd-review-pr` and run it as the sole review owner,
+      then end `reviewer-wait`. For an eligible auto-classified branch,
       supply this exact trusted internal context:
 
       ```text
@@ -167,16 +215,23 @@ release remote.
       capture are complete. Exit `1` or `2` pauses before this PR or another
       consumer can be merged or mutated.
    8. Run `sd-watch-pr` with its internal `no-merge` handoff so required
-      checks and review state settle without duplicating housekeeping.
-   9. Merge via the consumer's housekeeping gate: green, comment-clean,
+      checks and review state settle without duplicating housekeeping. End
+      `ci-wait` with the exact settled outcome.
+   9. Bracket `housekeeping`, then merge via the consumer's housekeeping gate:
+      green, comment-clean,
       mergeable, heads identical. With `no-merge`, leave the PR open and
       record the consumer as PR-open instead of invoking housekeeping.
-   10. Confirm post-merge provenance reads the target version and the
+   10. Bracket `post-merge-audit`. Confirm post-merge provenance reads the
+      target version and the
       install audit passes, per the rollout doc. Finish the consumer's
       housekeeping cleanup — default branch checked out, refresh branch
-      deleted, refs pruned — then move to the next consumer.
+      deleted, refs pruned — then record `refreshed-merged` and move to the
+      next consumer. `no-merge` records `pr-open`; unavailable, dirty, blocked,
+      or failed consumers use their matching timing outcome and bounded reason.
 4. Aggregate the per-consumer outcomes into the fleet status table and the
-   fleet version summary for the final report.
+   fleet version summary for the final report. Render a partial timing report
+   after an interruption. When every selected consumer has an outcome, run
+   `report --run-id <run-id> --complete` and include its summary.
 
 ## Finding severity gate
 
@@ -290,6 +345,10 @@ campaign open.
   guard. Fetch missing tags or correct the release evidence, then rerun
   preflight.
 - `dry-run` runs preflight only and performs zero consumer mutations.
+- Timing state is internal, local, and mandatory. Never print its filesystem
+  path or store secrets, absolute paths, command output, or review text in a
+  reason. A telemetry anomaly pauses new mutation but never changes a delivery
+  gate's authoritative result.
 
 ## Final report
 
@@ -308,6 +367,9 @@ scannable — bullets and short lines, one point per line, no paragraph blobs.
 - Finding disposition summary: blocker owners, deferred owners, duplicate
   observation count, explicit overrides with rationale, and follow-up task
   identifiers — or `none` for each empty category.
+- Timing summary: run ID and state, aggregate critical path, active wall time,
+  summed stage elapsed, slowest consumer, slowest stage, reviewer/CI overlap,
+  retry count, and telemetry anomalies — or `none` for every empty category.
 - Follow-ups: open consumer PRs to watch, skipped consumers to revisit, and
   any anomalies — or `none`.
 
@@ -325,6 +387,10 @@ Example shape for a mixed run:
   repo-e stale
 - Findings: blockers none; deferred F-12 -> task 07-20-doc-follow-up;
   duplicates 1 (F-13 -> F-12); overrides none
+- Timing: run fleet-0.12.0-20260720T153000Z completed; critical path 31m;
+  active wall 29m; stage elapsed 38m; slowest consumer repo-c 16m;
+  slowest stage ci-wait 18m; reviewer/CI overlap 7m; retries 0;
+  anomalies none
 - Follow-ups:
   1. Merge repo-c PR #12 via its housekeeping gate once review settles.
   2. Clean repo-d's working tree, then rerun with consumer=repo-d.

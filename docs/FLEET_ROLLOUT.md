@@ -139,6 +139,89 @@ Process consumers in manifest priority order. Do not move to AMC first merely
 because it appears in an operator's local list; the fast canaries are intended
 to expose cross-repo issues before the longest CI cycle begins.
 
+## Timing Evidence
+
+Every `sd-fleet-refresh` run records a local, resumable timing baseline with
+the source-only helper. This is observability around the existing gates, not a
+new pass/fail authority and not a hosted telemetry service. The record lives
+under the user's platform state directory, keyed by a digest of this source
+checkout and a safe run ID; it never dirties either the source or consumer
+repository.
+
+Initialize one run before preflight using the target version and the selected
+consumer names plus rollout priorities:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-timing.py --repo <absolute-source-root> \
+  init --run-id <run-id> --target-version <version> \
+  --consumer <name>:<priority> [...]
+```
+
+Record the run ID in the active rollout task or session and reuse it after an
+interruption. Repeating `init`, an already-active start, an identical end, or
+an identical consumer outcome is a no-op. A retry is explicit: close the prior
+attempt, then start the same stage again. Atomic private writes and a bounded
+operation lock preserve the last valid record if the process is interrupted.
+
+Use `stage-start` and `stage-end` around these exact boundaries:
+
+| Scope | Stage | Boundary |
+| --- | --- | --- |
+| Fleet | `preflight` | Release identity, candidate evidence, and consumer preflight |
+| Consumer | `checkout-validation` | Clean-tree check, base capture, and refresh branch creation |
+| Consumer | `install` | Installer mutation only |
+| Consumer | `audit` | Printed structural install audit |
+| Consumer | `local-gate` | Consumer full-check |
+| Consumer | `commit-push` | Refresh commit, review classification, and push |
+| Consumer | `pr-creation` | Consumer PR publication |
+| Consumer | `reviewer-wait` | `sd-review-pr` convergence |
+| Consumer | `ci-wait` | Required-check settle through `sd-watch-pr` |
+| Consumer | `housekeeping` | Merge gate and branch cleanup |
+| Consumer | `post-merge-audit` | Installed-version and audit confirmation |
+
+Start `reviewer-wait` and `ci-wait` together immediately after PR creation.
+End reviewer wait when review returns and CI wait when watch settles. GitHub
+checks run independently of review work, so these intervals overlap naturally;
+serially summing them would exaggerate cycle time. Finish each selected
+consumer with `consumer-end` using `at-target`, `refreshed-merged`, `pr-open`,
+`skipped`, `failed`, or `blocked` as appropriate.
+
+Failure-like stage and consumer outcomes require a short reason. Reasons reject
+control characters, absolute or home-relative paths, common credential forms,
+remote URLs, and private keys. The durable schema stores no repository path, remote URL,
+command output, review body, environment dump, or credential. The normal
+report exposes only a short repository digest key; do not publish or paste the
+local state path.
+
+Render a partial report after an interruption:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-timing.py --repo <absolute-source-root> \
+  report --run-id <run-id>
+```
+
+After all selected consumers have final outcomes, add `--complete`. The shared
+JSON and human summary reports per-stage attempt duration, retries, per-
+consumer critical path, interval-union active wall time, reviewer/CI overlap,
+slowest consumer, slowest stage, and aggregate fleet critical path. Elapsed
+durations come from a monotonic clock; wall time is retained only for auditable
+boundaries and overlap math. An active partial record uses the current clock
+for a provisional summary.
+
+A telemetry command error is reported separately and pauses new fleet mutation
+until the last valid record or input is corrected. It must never erase,
+reinterpret, or turn an install, audit, review, CI, finding, or housekeeping
+failure into success. `dry-run` records preflight, marks current consumers
+`at-target`, marks the remaining selected consumers skipped without mutation,
+then completes the record.
+
+Treat the first sequential full-fleet result as the baseline. Compare later
+integration-only review and post-canary wave runs using critical path and
+overlap, not summed stage time alone. This distinguishes real waiting removed
+from work merely shifted into a concurrent interval.
+
 ## Interruption Policy
 
 Stop a rollout for a correctness, security, installation/audit, or
