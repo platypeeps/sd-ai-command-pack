@@ -159,22 +159,71 @@ release remote.
       `caller: sd-fleet-refresh`, `review-profile: remote`,
       `return-after: review-result`, and `defer-finish-work: true` context, but
       no integration-only classifier fields.
-   7. Run `sd-watch-pr` with its internal `no-merge` handoff so required
+   7. Before watch or merge, apply the finding severity gate below to every
+      verified finding surfaced by install, audit, consumer checks, review, or
+      existing feedback. If there are no verified findings, record zero
+      finding observations and continue. Exit `0` permits the run to continue
+      only after observation replies, allowed thread resolution, and follow-up
+      capture are complete. Exit `1` or `2` pauses before this PR or another
+      consumer can be merged or mutated.
+   8. Run `sd-watch-pr` with its internal `no-merge` handoff so required
       checks and review state settle without duplicating housekeeping.
-   8. Merge via the consumer's housekeeping gate: green, comment-clean,
+   9. Merge via the consumer's housekeeping gate: green, comment-clean,
       mergeable, heads identical. With `no-merge`, leave the PR open and
       record the consumer as PR-open instead of invoking housekeeping.
-   9. Confirm post-merge provenance reads the target version and the
+   10. Confirm post-merge provenance reads the target version and the
       install audit passes, per the rollout doc. Finish the consumer's
       housekeeping cleanup — default branch checked out, refresh branch
       deleted, refs pruned — then move to the next consumer.
 4. Aggregate the per-consumer outcomes into the fleet status table and the
    fleet version summary for the final report.
 
+## Finding severity gate
+
+For every batch of verified findings, construct a temporary schema-version-1
+JSON file and run this source-only, read-only command from the pack checkout:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-finding-classify.py \
+  --input <temporary-findings.json> --json
+```
+
+The input has a non-empty `findings` array. Every row contains a unique safe
+`id`, `contractFamily`, `summary`, `evidence`, and `reviewer`, with optional
+repository-relative `path` and positive `line`. Contract family is exactly one
+of `correctness`, `security`, `install-audit`, `compatibility`, `hardening`,
+`style`, `test-implementation`, `documentation`, `diagnostics`, or
+`consumer-unrelated`. Use `impact: blocker` plus concrete `impactEvidence` to
+escalate a normally deferred family. An operator may explicitly set
+`overrideDisposition` only together with `overrideRationale`; never infer an
+override from prose, a public flag, or an environment variable.
+
+Interpret the result by owner rows, not raw observation count:
+
+- Exit `0`, `continue-with-follow-ups`: correctness is not being dismissed.
+  Reply with evidence to every observation and resolve its thread only when
+  repository policy permits. Create or reuse one source or consumer Trellis
+  follow-up per deferred owner when work remains, record its task identifier,
+  then continue the rollout.
+- Exit `1`, `pause-corrective-release`: stop before watch, merge, or the next
+  consumer mutation. Feed all blocker owners into one corrective campaign;
+  do not create one release or task per observation.
+- Exit `2`, `invalid-pause`, malformed output, or unavailable command: fail
+  closed and pause for input correction. Never reinterpret an invalid result
+  as deferred work.
+
+Exact duplicates have the same normalized reviewer, path, line, and summary.
+The first observation owns their timing disposition, release trigger, and
+follow-up task. Every duplicate still receives its own evidence-backed reply
+and allowed thread resolution. Conflicting duplicate policy is invalid input.
+Delete the temporary file after capturing the deterministic result, and retain
+the owner, duplicate, escalation, and override evidence in the fleet report.
+
 ## Corrective campaign
 
-When any rollout step surfaces a verified pack-owned correctness, security,
-install/audit, or compatibility blocker:
+When the finding severity gate returns `pause-corrective-release` for a
+verified pack-owned blocker:
 
 1. Immediately pause consumer mutation before selecting or preparing another
    release. Keep the original fleet task available to resume later.
@@ -183,8 +232,8 @@ install/audit, or compatibility blocker:
 
    `ID | Contract family | Evidence | Severity | Disposition | Fix | Regression`
 
-   Exact duplicates reuse the owning row instead of creating another task or
-   release trigger.
+   Use classifier owner rows for this ledger. Exact duplicates reuse the
+   owning row instead of creating another task or release trigger.
 3. Run a bounded contract-surface sweep around the failure before choosing the
    corrective version. Cover equivalent producers and consumers, mutation
    paths, persisted and dynamically loaded data, normalization and nullability,
@@ -223,9 +272,11 @@ campaign open.
   is a defect.
 - Change only the files the pack installer writes, plus its receipts and
   provenance. Never edit consumer product code.
-- Stop the rollout for correctness, security, install/audit, or compatibility
-  defects in the released pack. Record low-risk hardening, style, or unrelated
-  consumer findings as follow-up work instead of forcing a patch release.
+- Run the finding severity gate for verified findings before watch, merge, or
+  another consumer mutation. Invalid classification pauses. Default blocker
+  families are correctness, security, install/audit, and compatibility;
+  normally deferred findings still require replies, allowed thread resolution,
+  and one recorded follow-up per owner when work remains.
 - Consumer review focuses on selected-platform wiring, provenance, secrets,
   docs accuracy, and repo-owned migrations. Pack-owned implementation is
   reviewed in the source PR, not line-by-line in every refresh PR.
@@ -254,6 +305,9 @@ scannable — bullets and short lines, one point per line, no paragraph blobs.
   start, or `unknown` when preflight could not read it.
 - Fleet version summary: the target version, how many consumers are at
   target after the run, and which consumers remain stale.
+- Finding disposition summary: blocker owners, deferred owners, duplicate
+  observation count, explicit overrides with rationale, and follow-up task
+  identifiers — or `none` for each empty category.
 - Follow-ups: open consumer PRs to watch, skipped consumers to revisit, and
   any anomalies — or `none`.
 
@@ -269,6 +323,8 @@ Example shape for a mixed run:
   - repo-e · unknown · n/a · skipped+no local clone
 - Fleet versions: 2 of 5 at target; repo-c pending merge; repo-d and
   repo-e stale
+- Findings: blockers none; deferred F-12 -> task 07-20-doc-follow-up;
+  duplicates 1 (F-13 -> F-12); overrides none
 - Follow-ups:
   1. Merge repo-c PR #12 via its housekeeping gate once review settles.
   2. Clean repo-d's working tree, then rerun with consumer=repo-d.

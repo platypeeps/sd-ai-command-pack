@@ -239,6 +239,74 @@ a separate CI-only interpretation of shipped-payload paths.
             the new remote request, and retain every integration and merge gate
    ```
 
+### Fleet Finding Interruption Classification
+
+1. **Scope / Trigger**: After any verified finding appears during a fleet
+   install, audit, consumer gate, review, or existing-feedback pass, classify
+   rollout timing before watch, merge, or another consumer mutation. This gate
+   chooses corrective-release timing; it never dismisses feedback or replaces
+   thread settlement.
+2. **Signatures**:
+   - `sd-ai-command-pack-fleet-finding-classify.py --input PATH [--json]` is a
+     source-only, read-only classifier. Input is strict schema-version-1 JSON
+     with a non-empty `findings` array.
+   - Each finding has unique safe ID, contract family, summary, evidence,
+     reviewer, optional repository-relative path and positive line, optional
+     blocker impact plus evidence, and optional explicit override plus
+     rationale.
+   - Exit `0` means `continue-with-follow-ups`; exit `1` means
+     `pause-corrective-release`; exit `2` means `invalid-pause`.
+3. **Contracts**:
+   - Correctness, security, install/audit, and compatibility block by default.
+     Hardening, style, test implementation, documentation, diagnostics, and
+     consumer-unrelated findings defer by default. Concrete blocker impact may
+     escalate; only explicit override data with rationale may replace the
+     computed disposition.
+   - Normalize reviewer, path, line, and summary into an exact-duplicate
+     signature. The first observation owns timing and task identity. Duplicate
+     observations inherit that policy but each remains visible for reply and
+     allowed thread resolution.
+   - JSON schema version 1 records owner rows, observation-to-owner mapping,
+     default/computed/final dispositions, rationale, escalation and override
+     evidence, counts, decision, and deterministic exit code.
+   - Exit `0` still requires feedback replies, allowed thread resolution, and
+     one follow-up per deferred owner when work remains. Exit `1` feeds blocker
+     owners into one corrective campaign. The final fleet report records both
+     owner classes, duplicates, overrides, and follow-up task identifiers.
+   - The classifier never creates tasks, mutates repositories, posts replies,
+     or writes candidate evidence. It remains outside the install manifest and
+     is allowlisted only for source-checkout audit.
+4. **Validation & Error Matrix**:
+   - Unknown fields or families, empty or oversized text, unsafe IDs or paths,
+     invalid lines, duplicate IDs, missing paired evidence/rationale, more than
+     200 observations, malformed JSON, symlink input, or conflicting duplicate
+     policy -> exit `2` and pause.
+   - Any blocker owner -> exit `1`, including an explicitly upgraded default-
+     deferred owner. All-deferred owners -> exit `0`, including an explicitly
+     downgraded blocker whose rationale remains visible.
+   - Missing command or malformed classifier output -> orchestration pauses;
+     it never guesses a deferred result.
+5. **Good / Base / Bad Cases**:
+   - Good: three equivalent diagnostics observations map to one deferred owner
+     and one follow-up while all three review threads receive replies.
+   - Base: a documentation issue with proven destructive install impact
+     escalates to a blocker and joins the single corrective campaign.
+   - Bad: keyword-match reviewer prose, silently downgrade a blocker, create a
+     patch release for every duplicate, or continue after invalid input.
+6. **Tests Required**: Cover every family default, escalation, explicit
+   upgrade and downgrade, exact duplicate ownership, conflicting duplicates,
+   strict schema and path boundaries, symlink and malformed input, stable JSON
+   and human output, exit codes, source-only audit policy, skill ordering, and
+   generated mirror parity. Keep classifier coverage at 85% or higher.
+7. **Wrong vs Correct**:
+
+   ```text
+   Wrong: every reviewer observation forces another fleet-wide patch release
+   Wrong: deferred timing means ignore or auto-resolve the review thread
+   Correct: classify canonical owners, settle every observation, and interrupt
+            only for blocker owners or invalid evidence
+   ```
+
 ## Manifest Path Safety
 
 Validate manifest paths before any target-repo writes:

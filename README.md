@@ -714,6 +714,16 @@ only a new remote implementation-review request; existing threads, consumer
 checks, GitHub CI, watch, and housekeeping remain mandatory. Use the
 `remote-review` fleet flag to force the configured reviewer.
 
+Verified findings then pass through
+`scripts/sd-ai-command-pack-fleet-finding-classify.py` before watch, merge, or
+the next consumer mutation. Correctness, security, install/audit, and
+compatibility block by default; bounded hardening, style, testing,
+documentation, diagnostics, and unrelated-consumer observations become one
+follow-up per canonical owner. Exact duplicate observations share timing and a
+task but still receive separate replies and thread settlement. Invalid input
+pauses rather than silently deferring, and explicit overrides require recorded
+rationale.
+
 ### Direct-to-main Chore Commits
 
 Branch protection on `main` requires pull requests with the `CI Result`

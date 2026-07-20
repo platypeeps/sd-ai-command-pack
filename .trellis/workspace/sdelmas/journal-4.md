@@ -84,3 +84,42 @@ Added exact-head classification so pure installer-managed consumer refreshes ski
 ### Next Steps
 
 - None - task complete
+
+
+## Session 154: Gate fleet findings by interruption severity
+
+**Date**: 2026-07-20
+**Task**: Gate fleet findings by interruption severity
+**Branch**: `codex/fleet-interruption-severity-gate`
+
+### Summary
+
+Added deterministic owner-level fleet finding timing so only blocker evidence pauses the rollout while every observation remains accountable.
+
+### Main Changes
+
+- Added a strict source-only classifier for family defaults, evidence escalation, explicit overrides, and exact-duplicate ownership.
+- Wired the fleet workflow to pause before watch or merge for blocker or invalid results and to retain replies, thread settlement, and one follow-up per deferred owner.
+- Updated source-only audit policy, coverage gates, release documentation, executable specs, mirrors, version 0.23.15, and canonical candidate evidence.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `145806196ee3dfc6881bde830af992f40e31b7e4` | feat: gate fleet findings by interruption severity |
+
+### Testing
+
+- [OK] make check
+- [OK] all seven canonical fleet candidates passed install, audit, and configured checks
+- [OK] classifier branch coverage 93 percent against an 85 percent floor
+- [OK] PR 187 CI green with zero unresolved review threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

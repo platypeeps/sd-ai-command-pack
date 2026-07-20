@@ -129,9 +129,11 @@ For each `refresh-needed` repo:
 5. Run the source-side fleet review classifier against the exact base and
    refresh head. Use integration-only review when it qualifies; otherwise use
    the normal configured remote-review loop.
-6. Push, open the PR, inspect existing feedback, wait for required checks, and
-   merge through the consumer housekeeping gate.
-7. Confirm post-merge provenance reads the target version and the audit passes.
+6. Push, open the PR, inspect existing feedback, and classify every verified
+   finding with the source finding-severity gate before watch or merge.
+7. Wait for required checks and merge through the consumer housekeeping gate
+   only when finding disposition permits the rollout to continue.
+8. Confirm post-merge provenance reads the target version and the audit passes.
 
 Process consumers in manifest priority order. Do not move to AMC first merely
 because it appears in an operator's local list; the fast canaries are intended
@@ -149,12 +151,49 @@ consumer PR when appropriate, or record a Trellis follow-up for the next pack
 release. This keeps useful review feedback without turning every observation
 into another fleet-wide patch cycle.
 
+The source-owned gate makes this policy executable. After any verified finding
+from install, audit, full-check, review, or existing feedback, create a
+temporary schema-version-1 JSON document and run:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-finding-classify.py \
+  --input <temporary-findings.json> --json
+```
+
+The document has a non-empty `findings` array. Each row supplies a unique safe
+`id`, one `contractFamily`, non-empty `summary`, `evidence`, and `reviewer`,
+plus optional repository-relative `path` and positive `line`. Families are
+`correctness`, `security`, `install-audit`, `compatibility`, `hardening`,
+`style`, `test-implementation`, `documentation`, `diagnostics`, and
+`consumer-unrelated`. The first four block by default; the remaining six defer
+to follow-up by default. Concrete `impact: blocker` plus `impactEvidence`
+escalates a deferred family. An explicit `overrideDisposition` requires an
+`overrideRationale` and remains visible in output; there is no public flag or
+environment-variable override.
+
+Exit `0` (`continue-with-follow-ups`) means every canonical owner is deferred.
+Reply to every observation with evidence, resolve each thread only when policy
+permits, and create or reuse one Trellis follow-up per owner when work remains
+before continuing. Exit `1` (`pause-corrective-release`) pauses before watch,
+merge, or another consumer mutation and sends all blocker owners into one
+corrective campaign. Exit `2` (`invalid-pause`), malformed output, or an
+unavailable command fails closed for operator correction.
+
+Duplicate reviewer observations with the same normalized reviewer, path,
+line, and summary share the first row's owner, timing disposition, follow-up,
+and release trigger. They never share feedback bookkeeping: reply to and settle
+every observation separately. Conflicting family, impact, or override policy
+on an exact duplicate is invalid input. Delete the temporary input after
+capturing the result.
+
 ## Corrective Campaign
 
-When a consumer surfaces a verified pack-owned blocker, pause consumer mutation
-before selecting or preparing another release. Retain the original fleet task
-so it can resume after the correction; reuse or create one source-owned Trellis
-corrective task instead of creating a replacement fleet task for every finding.
+When the severity gate returns `pause-corrective-release` for a verified
+pack-owned blocker, pause consumer mutation before selecting or preparing
+another release. Retain the original fleet task so it can resume after the
+correction; reuse or create one source-owned Trellis corrective task instead of
+creating a replacement fleet task for every finding.
 
 Record the campaign findings in the corrective task with this ledger shape:
 
@@ -162,7 +201,7 @@ Record the campaign findings in the corrective task with this ledger shape:
 ID | Contract family | Evidence | Severity | Disposition | Fix | Regression
 ```
 
-Every verified blocker owns one row. Exact duplicates reuse the owning row.
+Every canonical blocker owner owns one row. Exact duplicates reuse the owning row.
 Before selecting the corrective version, run a bounded contract-surface sweep
 around the failure. Cover equivalent producers and consumers, mutation paths,
 persisted and dynamically loaded data, normalization and nullability, CLI
@@ -239,6 +278,10 @@ This boundary is enforced, not inferred from a scope hint. A pure qualifying
 refresh records `integration-only` with zero new remote-review rounds. A mixed,
 ambiguous, explicitly overridden, or invalid refresh records `remote` and uses
 the configured reviewer. Existing reviewer feedback blocks both profiles.
+
+The final rollout report records blocker owners, deferred owners, duplicate
+observation counts, explicit overrides with rationale, and follow-up task IDs;
+every empty category is reported as `none`.
 
 Do not include stale aliases such as `green-button-manager` or historical
 predecessors such as `trellis-review-pr-pack`; they are explicitly excluded in
