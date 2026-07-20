@@ -130,6 +130,15 @@ The transition CLI accepts only task and base-branch identity fields. A
 head-only evidence update still validates commit ancestry when its recorded
 branch no longer exists locally; explicit branch evidence must resolve to a
 local branch, and a resolvable recorded branch must match the submitted head.
+For a stopped or completed ledger whose verified task and merge state advanced
+after lock release, `reconcile-terminal` records a separate bounded audit
+record without reviving the run or changing its historical evidence and
+counters. It requires a completed archived Trellis task, locally available PR
+head/merge commits preverified by the orchestration layer, and a clean,
+synchronized checked-out default branch. Repeating identical evidence is a
+byte-for-byte no-op; conflicting evidence fails closed. `sd-status` reports the
+result as historical external completion and keeps loop-owned counters labeled
+separately.
 Use `fleet` from any installed
 checkout to collect a rollout-priority summary for every configured consumer
 after creating the machine-local fleet profile.

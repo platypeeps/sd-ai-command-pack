@@ -100,6 +100,118 @@ class WorkLoopTests(InstallTestCase):
         module.transition_state(state, "shipping")
         return state, initial
 
+    def make_terminal_fixture(self, module, *, squash_delivery: bool = False):
+        root = self.make_repo()
+        remote = root.parent / "origin.git"
+        self.run_git(root.parent, "init", "--bare", str(remote))
+        self.run_git(remote, "symbolic-ref", "HEAD", "refs/heads/main")
+        self.run_git(root, "remote", "add", "origin", str(remote))
+        self.run_git(root, "push", "-u", "origin", "main")
+        self.run_git(root, "remote", "set-head", "origin", "main")
+
+        self.run_git(root, "switch", "-c", "codex/task-one")
+        delivery_head = self.commit_file(
+            module, root, "feature.txt", "complete\n", "complete delivery"
+        )
+        self.run_git(root, "switch", "main")
+        if squash_delivery:
+            self.run_git(root, "merge", "--squash", "codex/task-one")
+            self.run_git(root, "commit", "-m", "squash delivery")
+        else:
+            self.run_git(
+                root, "merge", "--no-ff", "codex/task-one", "-m", "merge delivery"
+            )
+        delivery_merge = module.run_git(root, "rev-parse", "HEAD")
+        self.assertIsNotNone(delivery_merge)
+
+        self.run_git(root, "switch", "-c", "codex/task-one-bookkeeping")
+        archived_task = ".trellis/tasks/archive/2026-07/07-20-task-one"
+        task_path = root / archived_task / "task.json"
+        task_path.parent.mkdir(parents=True)
+        task_path.write_text(
+            json.dumps(
+                {
+                    "id": "task-one",
+                    "name": "task-one",
+                    "status": "completed",
+                    "completedAt": "2026-07-20",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", archived_task)
+        self.run_git(root, "commit", "-m", "archive task")
+        bookkeeping_head = module.run_git(root, "rev-parse", "HEAD")
+        self.assertIsNotNone(bookkeeping_head)
+        self.run_git(root, "switch", "main")
+        self.run_git(
+            root,
+            "merge",
+            "--no-ff",
+            "codex/task-one-bookkeeping",
+            "-m",
+            "merge bookkeeping",
+        )
+        bookkeeping_merge = module.run_git(root, "rev-parse", "HEAD")
+        self.assertIsNotNone(bookkeeping_merge)
+        self.run_git(root, "push", "origin", "main")
+
+        state_root = root.parent / "state"
+        identity = module.repository_identity(root)
+        state = module.new_state(
+            identity,
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(preferred=["task:task-one"]),
+            until="merge",
+            run_id="terminal-run",
+        )
+        state["status"] = "stopped"
+        state["phase"] = "stopped"
+        state["current"].update(
+            {
+                "task": ".trellis/tasks/07-20-task-one",
+                "branch": "codex/task-one",
+                "head": delivery_head,
+                "baseBranch": "main",
+                "prNumber": 10,
+                "prUrl": "https://example.test/pull/10",
+                "lastShippedSha": delivery_head,
+            }
+        )
+        state["contextHealth"] = {
+            "level": "red",
+            "epoch": 3,
+            "reasons": ["external state advanced"],
+        }
+        state["checkpoint"] = {
+            "state": "blocked",
+            "target": "shipping",
+            "reason": "ledger stopped before merge",
+        }
+        state["stopReason"] = "operator stopped the loop"
+        state_path, lock_path = module.state_paths(identity, state_root)
+        module.atomic_write_json(state_path, state)
+        evidence = {
+            "archived_task": archived_task,
+            "delivery": {
+                "prNumber": 10,
+                "prUrl": "https://example.test/pull/10",
+                "head": delivery_head,
+                "mergeCommit": delivery_merge,
+            },
+            "bookkeeping": {
+                "prNumber": 11,
+                "prUrl": "https://example.test/pull/11",
+                "head": bookkeeping_head,
+                "mergeCommit": bookkeeping_merge,
+            },
+            "branch": "main",
+            "head": bookkeeping_merge,
+        }
+        return root, state_root, state_path, lock_path, state, evidence
+
     def test_state_root_precedence_and_platform_fallbacks(self) -> None:
         module = self.load_module()
 
@@ -462,6 +574,347 @@ class WorkLoopTests(InstallTestCase):
 
         module.acquire_lock(lock_path, first, recover_stale=True)
         self.assertEqual(module.read_json(lock_path)["runId"], first["runId"])
+
+    def test_terminal_reconciliation_supports_merge_and_squash_delivery(self) -> None:
+        module = self.load_module()
+
+        for squash_delivery in (False, True):
+            with self.subTest(squash_delivery=squash_delivery):
+                (
+                    root,
+                    state_root,
+                    state_path,
+                    _lock_path,
+                    original,
+                    evidence,
+                ) = self.make_terminal_fixture(
+                    module, squash_delivery=squash_delivery
+                )
+                reconciled = module.reconcile_terminal_state(
+                    root,
+                    original["runId"],
+                    state_root=state_root,
+                    **evidence,
+                )
+
+                self.assertEqual(reconciled["status"], "stopped")
+                self.assertEqual(reconciled["phase"], "stopped")
+                self.assertEqual(reconciled["current"], original["current"])
+                self.assertEqual(reconciled["counters"], original["counters"])
+                self.assertEqual(reconciled["focus"], original["focus"])
+                self.assertEqual(reconciled["iteration"], original["iteration"])
+                self.assertEqual(reconciled["stopReason"], original["stopReason"])
+                self.assertEqual(reconciled["contextHealth"], {
+                    "level": "green",
+                    "epoch": 3,
+                    "reasons": [],
+                })
+                self.assertEqual(reconciled["checkpoint"]["state"], "completed")
+                terminal = reconciled["terminalReconciliation"]
+                self.assertEqual(terminal["status"], "verified")
+                self.assertEqual(terminal["taskId"], "task-one")
+                self.assertEqual(terminal["delivery"]["prNumber"], 10)
+                self.assertEqual(terminal["bookkeeping"]["prNumber"], 11)
+
+                persisted = state_path.read_bytes()
+                repeated = module.reconcile_terminal_state(
+                    root,
+                    original["runId"],
+                    state_root=state_root,
+                    **evidence,
+                )
+                self.assertEqual(repeated, reconciled)
+                self.assertEqual(state_path.read_bytes(), persisted)
+                snapshot = module.status_snapshot(root, state_root=state_root)
+                self.assertEqual(
+                    snapshot["terminalReconciliation"]["status"], "verified"
+                )
+
+    def test_terminal_reconciliation_rejects_conflicting_repeat_unchanged(self) -> None:
+        module = self.load_module()
+        root, state_root, state_path, _lock, state, evidence = (
+            self.make_terminal_fixture(module)
+        )
+        module.reconcile_terminal_state(
+            root, state["runId"], state_root=state_root, **evidence
+        )
+        before = state_path.read_bytes()
+        conflicting = dict(evidence)
+        conflicting["delivery"] = dict(evidence["delivery"])
+        conflicting["delivery"].update(
+            {"prNumber": 12, "prUrl": "https://example.test/pull/12"}
+        )
+
+        with self.assertRaisesRegex(module.WorkLoopError, "conflicts"):
+            module.reconcile_terminal_state(
+                root, state["runId"], state_root=state_root, **conflicting
+            )
+
+        self.assertEqual(state_path.read_bytes(), before)
+
+    def test_terminal_reconciliation_rejects_nonterminal_state_unchanged(self) -> None:
+        module = self.load_module()
+
+        for status in ("active", "paused"):
+            with self.subTest(status=status):
+                root, state_root, state_path, _lock, state, evidence = (
+                    self.make_terminal_fixture(module)
+                )
+                state["status"] = status
+                state["phase"] = "checkpoint" if status == "paused" else "shipping"
+                module.atomic_write_json(state_path, state)
+                before = state_path.read_bytes()
+
+                with self.assertRaisesRegex(
+                    module.WorkLoopError, "stopped or completed"
+                ):
+                    module.reconcile_terminal_state(
+                        root, state["runId"], state_root=state_root, **evidence
+                    )
+
+                self.assertEqual(state_path.read_bytes(), before)
+
+    def test_terminal_reconciliation_rejects_live_and_ambiguous_locks(self) -> None:
+        module = self.load_module()
+        root, state_root, state_path, lock_path, state, evidence = (
+            self.make_terminal_fixture(module)
+        )
+        module.acquire_lock(lock_path, state)
+        before = state_path.read_bytes()
+        with self.assertRaisesRegex(module.WorkLoopError, "live work-loop run lock"):
+            module.reconcile_terminal_state(
+                root, state["runId"], state_root=state_root, **evidence
+            )
+        self.assertEqual(state_path.read_bytes(), before)
+        module.release_lock(lock_path, state["runId"])
+
+        operation_lock = state_path.parent / module.TERMINAL_LOCK_NAME
+        operation_lock.write_text("{broken\n", encoding="utf-8")
+        with self.assertRaisesRegex(module.WorkLoopError, "unreadable or malformed"):
+            module.reconcile_terminal_state(
+                root, state["runId"], state_root=state_root, **evidence
+            )
+        self.assertEqual(state_path.read_bytes(), before)
+
+    def test_terminal_reconciliation_requires_explicit_safe_stale_recovery(self) -> None:
+        module = self.load_module()
+        root, state_root, state_path, lock_path, state, evidence = (
+            self.make_terminal_fixture(module)
+        )
+        stale = module.lock_payload(state)
+        stale.update(
+            {
+                "pid": 99999999,
+                "hostname": "different-host",
+                "heartbeatAt": "2000-01-01T00:00:00Z",
+            }
+        )
+        module.atomic_write_json(lock_path, stale)
+        before = state_path.read_bytes()
+
+        with self.assertRaisesRegex(module.WorkLoopError, "requires --recover"):
+            module.reconcile_terminal_state(
+                root, state["runId"], state_root=state_root, **evidence
+            )
+        self.assertEqual(state_path.read_bytes(), before)
+        self.assertTrue(lock_path.exists())
+
+        reconciled = module.reconcile_terminal_state(
+            root,
+            state["runId"],
+            state_root=state_root,
+            recover_stale=True,
+            **evidence,
+        )
+        self.assertEqual(reconciled["terminalReconciliation"]["status"], "verified")
+        self.assertFalse(lock_path.exists())
+
+    def test_terminal_reconciliation_rejects_unsafe_repository_state_unchanged(self) -> None:
+        module = self.load_module()
+
+        root, state_root, state_path, _lock, state, evidence = (
+            self.make_terminal_fixture(module)
+        )
+        (root / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+        before = state_path.read_bytes()
+        with self.assertRaisesRegex(module.WorkLoopError, "clean worktree"):
+            module.reconcile_terminal_state(
+                root, state["runId"], state_root=state_root, **evidence
+            )
+        self.assertEqual(state_path.read_bytes(), before)
+
+        root, state_root, state_path, _lock, state, evidence = (
+            self.make_terminal_fixture(module)
+        )
+        self.run_git(root, "switch", "codex/task-one-bookkeeping")
+        before = state_path.read_bytes()
+        with self.assertRaisesRegex(module.WorkLoopError, "default branch"):
+            module.reconcile_terminal_state(
+                root, state["runId"], state_root=state_root, **evidence
+            )
+        self.assertEqual(state_path.read_bytes(), before)
+
+        root, state_root, state_path, _lock, state, evidence = (
+            self.make_terminal_fixture(module)
+        )
+        local_head = self.commit_file(
+            module, root, "local.txt", "ahead\n", "local divergence"
+        )
+        divergent = dict(evidence)
+        divergent["head"] = local_head
+        before = state_path.read_bytes()
+        with self.assertRaisesRegex(module.WorkLoopError, "remote-tracking"):
+            module.reconcile_terminal_state(
+                root, state["runId"], state_root=state_root, **divergent
+            )
+        self.assertEqual(state_path.read_bytes(), before)
+
+    def test_terminal_reconciliation_rejects_bad_task_and_pr_evidence_unchanged(self) -> None:
+        module = self.load_module()
+
+        root, state_root, state_path, _lock, state, evidence = (
+            self.make_terminal_fixture(module)
+        )
+        bad_path = dict(evidence)
+        bad_path["archived_task"] = ".trellis/tasks/archive/../task-one"
+        before = state_path.read_bytes()
+        with self.assertRaisesRegex(module.WorkLoopError, "normalized path"):
+            module.reconcile_terminal_state(
+                root, state["runId"], state_root=state_root, **bad_path
+            )
+        self.assertEqual(state_path.read_bytes(), before)
+
+        bad_pr = dict(evidence)
+        bad_pr["delivery"] = dict(evidence["delivery"])
+        bad_pr["delivery"]["prUrl"] = "https://example.test/pull/999"
+        with self.assertRaisesRegex(module.WorkLoopError, "PR evidence"):
+            module.reconcile_terminal_state(
+                root, state["runId"], state_root=state_root, **bad_pr
+            )
+        self.assertEqual(state_path.read_bytes(), before)
+
+        missing_commit = dict(evidence)
+        missing_commit["delivery"] = dict(evidence["delivery"])
+        missing_commit["delivery"]["head"] = "f" * 40
+        with self.assertRaisesRegex(module.WorkLoopError, "not a local Git commit"):
+            module.reconcile_terminal_state(
+                root, state["runId"], state_root=state_root, **missing_commit
+            )
+        self.assertEqual(state_path.read_bytes(), before)
+
+    def test_terminal_reconciliation_rejects_incomplete_or_mismatched_task(self) -> None:
+        module = self.load_module()
+
+        for task_update, expected in (
+            ({"status": "in_progress"}, "not completed"),
+            ({"id": "other-task", "name": "other-task"}, "does not match"),
+        ):
+            with self.subTest(task_update=task_update):
+                root, state_root, state_path, _lock, state, evidence = (
+                    self.make_terminal_fixture(module)
+                )
+                task_path = root / evidence["archived_task"] / "task.json"
+                task = json.loads(task_path.read_text(encoding="utf-8"))
+                task.update(task_update)
+                task_path.write_text(json.dumps(task) + "\n", encoding="utf-8")
+                self.run_git(root, "add", str(task_path.relative_to(root)))
+                self.run_git(root, "commit", "-m", "change archived task fixture")
+                self.run_git(root, "push", "origin", "main")
+                before = state_path.read_bytes()
+
+                with self.assertRaisesRegex(module.WorkLoopError, expected):
+                    module.reconcile_terminal_state(
+                        root, state["runId"], state_root=state_root, **evidence
+                    )
+
+                self.assertEqual(state_path.read_bytes(), before)
+
+    def test_terminal_reconciliation_rejects_unrelated_shipped_evidence(self) -> None:
+        module = self.load_module()
+        root, state_root, state_path, _lock, state, evidence = (
+            self.make_terminal_fixture(module)
+        )
+        root_commit = self.git_output(root, "rev-list", "--max-parents=0", "HEAD")
+        self.run_git(root, "switch", "-c", "unrelated", root_commit)
+        unrelated_head = self.commit_file(
+            module, root, "unrelated.txt", "other\n", "unrelated history"
+        )
+        self.run_git(root, "switch", "main")
+        unrelated = dict(evidence)
+        unrelated["delivery"] = dict(evidence["delivery"])
+        unrelated["delivery"]["head"] = unrelated_head
+        before = state_path.read_bytes()
+
+        with self.assertRaisesRegex(
+            module.WorkLoopError, "does not contain|match or descend"
+        ):
+            module.reconcile_terminal_state(
+                root, state["runId"], state_root=state_root, **unrelated
+            )
+
+        self.assertEqual(state_path.read_bytes(), before)
+
+    def test_terminal_reconciliation_atomic_failure_preserves_ledger_and_unlocks(self) -> None:
+        module = self.load_module()
+        root, state_root, state_path, _lock, state, evidence = (
+            self.make_terminal_fixture(module)
+        )
+        before = state_path.read_bytes()
+
+        with mock.patch.object(
+            module, "atomic_write_json", side_effect=OSError("replace blocked")
+        ):
+            with self.assertRaisesRegex(OSError, "replace blocked"):
+                module.reconcile_terminal_state(
+                    root, state["runId"], state_root=state_root, **evidence
+                )
+
+        self.assertEqual(state_path.read_bytes(), before)
+        self.assertFalse((state_path.parent / module.TERMINAL_LOCK_NAME).exists())
+
+    def test_terminal_reconciliation_validates_schema_and_cli_groups(self) -> None:
+        module = self.load_module()
+        root, state_root, state_path, _lock, state, evidence = (
+            self.make_terminal_fixture(module)
+        )
+        old_schema_state = module.read_json(state_path)
+        module.validate_state(old_schema_state)
+        malformed = dict(old_schema_state)
+        malformed["terminalReconciliation"] = {"status": "verified"}
+        with self.assertRaisesRegex(module.WorkLoopError, "malformed"):
+            module.validate_state(malformed)
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "reconcile-terminal",
+                    "--repo",
+                    str(root),
+                    "--run-id",
+                    state["runId"],
+                    "--archived-task",
+                    evidence["archived_task"],
+                    "--delivery-pr-number",
+                    "10",
+                    "--delivery-pr-url",
+                    evidence["delivery"]["prUrl"],
+                    "--delivery-head",
+                    evidence["delivery"]["head"],
+                    "--delivery-merge-commit",
+                    evidence["delivery"]["mergeCommit"],
+                    "--bookkeeping-pr-number",
+                    "11",
+                    "--branch",
+                    "main",
+                    "--head",
+                    evidence["head"],
+                ]
+            )
+        self.assertEqual(result, 2)
+        self.assertIn("complete group", stderr.getvalue())
 
     def test_legal_transitions_increment_iteration_and_clear_current_state(self) -> None:
         module = self.load_module()
