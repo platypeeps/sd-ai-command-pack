@@ -2,9 +2,9 @@
 
 ## 0.23.10 - 2026-07-19
 
-- Reject transition task and base-branch values that become empty after
-  normalization, preserving field-specific diagnostics and leaving the phase
-  and persisted ledger unchanged.
+- Reject transition task and base-branch values that are non-string or become
+  empty after normalization, preserving field-specific diagnostics and leaving
+  the phase and persisted ledger unchanged.
 
 ## 0.23.9 - 2026-07-19
 
