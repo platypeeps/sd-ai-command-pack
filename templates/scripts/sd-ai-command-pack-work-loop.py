@@ -65,7 +65,7 @@ COUNTER_FIELDS = frozenset(
         "ciRetries",
     }
 )
-PHASES = (
+LIFECYCLE_PHASES = (
     "inventory",
     "selected",
     "planning",
@@ -74,10 +74,17 @@ PHASES = (
     "shipping",
     "followups",
     "complete",
+)
+PHASES = (
+    *LIFECYCLE_PHASES,
     "checkpoint",
     "stopped",
 )
 PHASE_ORDER = {phase: index for index, phase in enumerate(PHASES)}
+LIFECYCLE_PHASE_ORDER = {
+    phase: index for index, phase in enumerate(LIFECYCLE_PHASES)
+}
+RECOVERY_CHECKPOINT_STATES = frozenset({"ready", "paused", "blocked"})
 LEGAL_TRANSITIONS: dict[str, frozenset[str]] = {
     "inventory": frozenset({"selected", "checkpoint", "stopped"}),
     "selected": frozenset(
@@ -482,6 +489,7 @@ def validate_state(state: Mapping[str, Any]) -> None:
     ):
         raise WorkLoopError("work-loop context health is malformed")
     checkpoint = state.get("checkpoint")
+    resume_phase = checkpoint.get("resumePhase") if isinstance(checkpoint, dict) else None
     if (
         not isinstance(checkpoint, dict)
         or not {"state", "target", "reason"}.issubset(checkpoint)
@@ -492,6 +500,11 @@ def validate_state(state: Mapping[str, Any]) -> None:
         and not isinstance(checkpoint["target"], str)
         or checkpoint.get("reason") is not None
         and not isinstance(checkpoint["reason"], str)
+        or resume_phase is not None
+        and (
+            not isinstance(resume_phase, str)
+            or resume_phase not in LIFECYCLE_PHASE_ORDER
+        )
     ):
         raise WorkLoopError("work-loop checkpoint is malformed")
     for timestamp_key in ("createdAt", "updatedAt", "heartbeatAt"):
@@ -776,7 +789,12 @@ def new_state(
         "iterations": [],
         "decisions": [],
         "followups": [],
-        "checkpoint": {"state": "none", "target": None, "reason": None},
+        "checkpoint": {
+            "state": "none",
+            "target": None,
+            "reason": None,
+            "resumePhase": None,
+        },
         "stopReason": None,
     }
     validate_state(state)
@@ -1443,8 +1461,62 @@ def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
 
 
 def _clear_recovery_checkpoint(state: dict[str, Any]) -> None:
-    if state["checkpoint"].get("state") in {"ready", "blocked"}:
-        state["checkpoint"] = {"state": "none", "target": None, "reason": None}
+    if state["checkpoint"].get("state") in RECOVERY_CHECKPOINT_STATES:
+        state["checkpoint"] = {
+            "state": "none",
+            "target": None,
+            "reason": None,
+            "resumePhase": None,
+        }
+
+
+def _known_checkpoint_resume_phase(state: Mapping[str, Any]) -> str | None:
+    checkpoint = state["checkpoint"]
+    resume_phase = checkpoint.get("resumePhase")
+    if resume_phase is not None:
+        return resume_phase
+    target = checkpoint.get("target")
+    if target in LIFECYCLE_PHASE_ORDER:
+        return target
+    return None
+
+
+def checkpoint_resume_phase(
+    state: Mapping[str, Any], *, explicit_resume_phase: str | None = None
+) -> str:
+    """Resolve the lifecycle phase owned by a checkpoint overlay."""
+    resume_phase = _known_checkpoint_resume_phase(state)
+    if resume_phase is not None:
+        return resume_phase
+    if explicit_resume_phase is not None:
+        if explicit_resume_phase not in LIFECYCLE_PHASE_ORDER:
+            raise WorkLoopError(
+                f"invalid checkpoint resume phase: {explicit_resume_phase}"
+            )
+        return explicit_resume_phase
+    raise WorkLoopError(
+        "checkpoint recovery requires --resume-phase because its target is not "
+        "a lifecycle phase"
+    )
+
+
+def checkpoint_owner_phase(
+    state: Mapping[str, Any], *, explicit_resume_phase: str | None = None
+) -> str:
+    """Return the lifecycle owner without treating checkpoint as progress."""
+    phase = state["phase"]
+    if phase == "checkpoint":
+        return checkpoint_resume_phase(
+            state, explicit_resume_phase=explicit_resume_phase
+        )
+    if phase not in LIFECYCLE_PHASE_ORDER:
+        raise WorkLoopError(f"phase {phase} cannot own a recovery checkpoint")
+    resume_phase = state["checkpoint"].get("resumePhase")
+    if resume_phase is not None and resume_phase != phase:
+        raise WorkLoopError(
+            f"checkpoint resume phase {resume_phase} differs from ledger {phase}"
+        )
+    return phase
 
 
 def _has_complete_recovery_evidence(
@@ -1453,7 +1525,7 @@ def _has_complete_recovery_evidence(
     recorded_fields = {
         key for key in CURRENT_FIELD_ORDER if current.get(key) is not None
     }
-    return bool(recorded_fields) and recorded_fields.issubset(observations)
+    return recorded_fields.issubset(observations)
 
 
 def validated_evidence(
@@ -1572,7 +1644,13 @@ def validated_evidence(
                 raise WorkLoopError(
                     "lastShippedSha evidence must advance to a descendant commit"
                 )
-        evidence_tip = remembered_head if branch_changed else candidate_head
+        evidence_tip = candidate_head
+        if branch_changed:
+            evidence_tip = (
+                _branch_commit(evidence_repo, remembered_branch)
+                if isinstance(remembered_branch, str)
+                else None
+            ) or remembered_head or candidate_head
         resolved_tip = (
             _resolved_commit(evidence_repo, evidence_tip) if evidence_tip is not None else None
         )
@@ -1599,10 +1677,9 @@ def update_evidence(
     repo: Path | None = None,
 ) -> None:
     candidate = validated_evidence(state, updates, repo=repo)
-    recovery_checkpoint_active = state["checkpoint"].get("state") in {
-        "ready",
-        "blocked",
-    }
+    recovery_checkpoint_active = (
+        state["checkpoint"].get("state") in RECOVERY_CHECKPOINT_STATES
+    )
     state["current"] = candidate
     if recovery_checkpoint_active and not _has_complete_recovery_evidence(
         candidate, updates
@@ -1632,6 +1709,7 @@ def reconcile_state(
     *,
     signal: str | None = None,
     verified_live_advance: bool = False,
+    explicit_resume_phase: str | None = None,
     repo: Path | None = None,
 ) -> None:
     contradictions: list[str] = []
@@ -1639,16 +1717,44 @@ def reconcile_state(
     current = state["current"]
     observed_phase = observations.get("phase")
     advanced_phase: str | None = None
+    recovery_checkpoint_active = (
+        state["checkpoint"].get("state") in RECOVERY_CHECKPOINT_STATES
+    )
+    ledger_phase = state["phase"]
+    try:
+        owner_phase = (
+            checkpoint_owner_phase(
+                state, explicit_resume_phase=explicit_resume_phase
+            )
+            if recovery_checkpoint_active
+            else ledger_phase
+        )
+    except WorkLoopError as error:
+        contradictions.append(str(error))
+        owner_phase = ledger_phase
     if observed_phase is not None:
         if observed_phase not in PHASE_ORDER:
             raise WorkLoopError(f"invalid observed phase: {observed_phase}")
-        ledger_order = PHASE_ORDER[state["phase"]]
-        observed_order = PHASE_ORDER[observed_phase]
-        if observed_order > ledger_order and verified_live_advance:
+        observed_is_lifecycle = observed_phase in LIFECYCLE_PHASE_ORDER
+        owner_is_lifecycle = owner_phase in LIFECYCLE_PHASE_ORDER
+        observed_is_forward = (
+            observed_is_lifecycle
+            and owner_is_lifecycle
+            and LIFECYCLE_PHASE_ORDER[observed_phase]
+            > LIFECYCLE_PHASE_ORDER[owner_phase]
+        )
+        recovering_legacy_owner = (
+            recovery_checkpoint_active
+            and ledger_phase == "checkpoint"
+            and observed_phase == owner_phase
+        )
+        if observed_is_forward and verified_live_advance:
             advanced_phase = observed_phase
-        elif observed_phase != state["phase"]:
+        elif recovering_legacy_owner:
+            advanced_phase = observed_phase
+        elif observed_phase != ledger_phase:
             contradictions.append(
-                f"observed phase {observed_phase} differs from ledger {state['phase']}"
+                f"observed phase {observed_phase} differs from ledger owner {owner_phase}"
             )
     evidence_observations: dict[str, Any] = {}
     for key in CURRENT_FIELD_ORDER:
@@ -1664,10 +1770,35 @@ def reconcile_state(
         if current.get(key) != value
     }
     candidate_current: dict[str, Any] | None = None
-    if mismatches and verified_live_advance:
+    has_complete_recovery_evidence = _has_complete_recovery_evidence(
+        current, evidence_observations
+    )
+    recovery_attempted = observed_phase is not None or bool(evidence_observations)
+    if (
+        recovery_checkpoint_active
+        and recovery_attempted
+        and not has_complete_recovery_evidence
+    ):
+        contradictions.append(
+            "checkpoint recovery requires every recorded current-state field"
+        )
+    should_validate_recovery = (
+        recovery_checkpoint_active
+        and recovery_attempted
+        and has_complete_recovery_evidence
+    )
+    may_validate_recovery = should_validate_recovery and bool(
+        evidence_observations
+    ) and (
+        not mismatches or verified_live_advance
+    )
+    if may_validate_recovery or (mismatches and verified_live_advance):
         try:
             candidate_current = validated_evidence(
-                state, mismatches, repo=repo, phase=advanced_phase
+                state,
+                evidence_observations if should_validate_recovery else mismatches,
+                repo=repo,
+                phase=advanced_phase or owner_phase,
             )
         except WorkLoopError as error:
             contradictions.append(str(error))
@@ -1678,36 +1809,39 @@ def reconcile_state(
         )
     if contradictions:
         apply_context_signal(state, "contradiction", "; ".join(contradictions))
+        checkpoint_target = state["checkpoint"].get("target")
+        if checkpoint_target is None:
+            checkpoint_target = owner_phase
+        resume_phase = owner_phase if owner_phase in LIFECYCLE_PHASE_ORDER else None
         state["checkpoint"] = {
             "state": "blocked",
-            "target": state["phase"],
+            "target": checkpoint_target,
             "reason": compact_text("; ".join(contradictions)),
+            "resumePhase": resume_phase,
         }
         return
     if candidate_current is not None:
         state["current"] = candidate_current
     if advanced_phase is not None:
         state["phase"] = advanced_phase
-        apply_context_signal(
-            state,
-            "continuation-summary",
-            f"verified live state advanced to {advanced_phase}",
-        )
-        context_signal_applied = True
+        if advanced_phase != owner_phase:
+            apply_context_signal(
+                state,
+                "continuation-summary",
+                f"verified live state advanced to {advanced_phase}",
+            )
+            context_signal_applied = True
+        _clear_recovery_checkpoint(state)
     if signal:
         apply_context_signal(state, signal, f"runtime signal: {signal}")
     elif not context_signal_applied:
         has_observations = bool(evidence_observations) or observed_phase is not None
-        recovery_checkpoint_active = state["checkpoint"].get("state") in {
-            "ready",
-            "blocked",
-        }
         recovery_current = candidate_current or current
-        has_complete_recovery_evidence = _has_complete_recovery_evidence(
+        complete_recovery_evidence = _has_complete_recovery_evidence(
             recovery_current, evidence_observations
         )
         may_restore_health = (
-            not recovery_checkpoint_active or has_complete_recovery_evidence
+            not recovery_checkpoint_active or complete_recovery_evidence
         )
         if (
             has_observations and may_restore_health
@@ -1717,7 +1851,7 @@ def reconcile_state(
                 "epoch": state["contextHealth"]["epoch"],
                 "reasons": [],
             }
-        if has_complete_recovery_evidence:
+        if recovery_attempted and complete_recovery_evidence:
             _clear_recovery_checkpoint(state)
 
 
@@ -1976,6 +2110,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_current_arguments(reconcile)
     reconcile.add_argument("--signal", choices=sorted(CONTEXT_SIGNALS))
     reconcile.add_argument("--verified-live-advance", action="store_true")
+    reconcile.add_argument("--resume-phase", choices=LIFECYCLE_PHASES)
     reconcile.add_argument("--json", action="store_true")
 
     terminal = subparsers.add_parser(
@@ -2167,6 +2302,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     observations,
                     signal=args.signal,
                     verified_live_advance=args.verified_live_advance,
+                    explicit_resume_phase=args.resume_phase,
                     repo=args.repo,
                 ),
                 state_root=state_root,
@@ -2243,12 +2379,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "checkpoint":
             def checkpoint(item: dict[str, Any]) -> None:
                 prior_phase = item["phase"]
-                if prior_phase != "checkpoint":
-                    transition_state(item, "checkpoint")
+                resume_phase = (
+                    _known_checkpoint_resume_phase(item)
+                    if prior_phase == "checkpoint"
+                    else prior_phase
+                )
+                if (
+                    resume_phase is not None
+                    and resume_phase not in LIFECYCLE_PHASE_ORDER
+                ):
+                    raise WorkLoopError(
+                        f"phase {resume_phase} cannot own a recovery checkpoint"
+                    )
+                item["phase"] = resume_phase or "checkpoint"
                 item["checkpoint"] = {
                     "state": "paused" if args.pause else "ready",
                     "target": compact_text(args.target, limit=120),
                     "reason": compact_text(args.reason),
+                    "resumePhase": resume_phase,
                 }
                 if args.pause:
                     item["status"] = "paused"
@@ -2267,12 +2415,31 @@ def main(argv: Sequence[str] | None = None) -> int:
                 item["stopReason"] = compact_text(args.reason)
                 if args.status == "paused":
                     prior_phase = item["phase"]
-                    if prior_phase != "checkpoint":
-                        transition_state(item, "checkpoint")
+                    resume_phase = (
+                        _known_checkpoint_resume_phase(item)
+                        if prior_phase == "checkpoint"
+                        else prior_phase
+                    )
+                    if (
+                        resume_phase is not None
+                        and resume_phase not in LIFECYCLE_PHASE_ORDER
+                    ):
+                        raise WorkLoopError(
+                            f"phase {resume_phase} cannot own a recovery checkpoint"
+                        )
+                    checkpoint_target = (
+                        item["checkpoint"].get("target")
+                        if prior_phase == "checkpoint"
+                        else prior_phase
+                    )
+                    if checkpoint_target is None:
+                        checkpoint_target = resume_phase or "checkpoint"
+                    item["phase"] = resume_phase or "checkpoint"
                     item["checkpoint"] = {
                         "state": "paused",
-                        "target": prior_phase,
+                        "target": checkpoint_target,
                         "reason": compact_text(args.reason),
+                        "resumePhase": resume_phase,
                     }
                     return
                 item["phase"] = "stopped"
@@ -2280,6 +2447,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "state": "completed" if args.status == "completed" else args.status,
                     "target": None,
                     "reason": compact_text(args.reason),
+                    "resumePhase": None,
                 }
 
             state = mutate_state(args.repo, args.run_id, stop, state_root=state_root)

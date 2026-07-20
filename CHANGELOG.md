@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.1 - 2026-07-20
+
+- Keep work-loop checkpoints as lifecycle overlays and recover paused ledgers
+  atomically from complete, locally verified forward evidence, with explicit
+  schema-v1 fallback for legacy human-only checkpoint targets.
+
 ## 0.24.0 - 2026-07-20
 
 - Add a fail-closed `reconcile-terminal` work-loop operation that records

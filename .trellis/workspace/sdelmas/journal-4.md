@@ -160,3 +160,80 @@ Implemented, validated, and published fail-closed terminal reconciliation for st
 ### Next Steps
 
 - None - task complete
+
+
+## Session 156: Recover paused work-loop checkpoints
+
+**Date**: 2026-07-20
+**Task**: Recover paused work-loop checkpoints
+**Branch**: `codex/work-loop-checkpoint-recovery`
+
+### Summary
+
+Implemented and validated lifecycle-owned checkpoint recovery with schema-v1 compatibility and complete evidence guards.
+
+### Main Changes
+
+- Keep ready and paused checkpoints as lifecycle overlays with persisted resumePhase ownership.
+- Recover complete verified post-merge advances atomically, preserve human targets, and fail closed on incomplete or conflicting evidence.
+- Expose resumePhase through status and document the exact backlog resume sequence.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6e9d773` | chore(task): plan work-loop checkpoint recovery |
+| `0396352` | fix: recover paused work-loop checkpoints |
+
+### Testing
+
+- [OK] make check
+- [OK] canonical seven-consumer candidate validation for the checkpoint recovery payload
+- [OK] 50 focused work-loop tests
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 157: Converge PR #190 checkpoint recovery review
+
+**Date**: 2026-07-20
+**Task**: Converge PR #190 checkpoint recovery review
+**Branch**: `codex/work-loop-checkpoint-recovery`
+
+### Summary
+
+Integrated the terminal work-loop reconciliation baseline, preserved append-only journal history, and resolved all eight Copilot review findings for checkpoint recovery. Verified 97 focused tests, the canonical full check, the seven-repository candidate audit, clean review threads, and green CI.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fdf5e02` | (see git log) |
+| `4cd055a` | (see git log) |
+| `f8a5739` | (see git log) |
+| `5ebbd19` | (see git log) |
+| `52bb7be` | (see git log) |
+| `20f50a0` | (see git log) |
+| `746470a` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

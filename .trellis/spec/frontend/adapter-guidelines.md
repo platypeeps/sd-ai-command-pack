@@ -186,6 +186,18 @@ timeouts, retries, dry-run behavior, and output formats explicit.
   the parent session's final response or start another iteration itself.
 - Context health is evidence-based: green agrees, amber rehydrates and
   reconciles, red checkpoints and stops or safely parks.
+- A checkpoint is an overlay on its owning lifecycle phase. New ready and
+  paused checkpoints retain the lifecycle phase in both `phase` and
+  `checkpoint.resumePhase`; their human `target` remains descriptive rather
+  than becoming phase state. Schema-v1 ledgers with literal `phase=checkpoint`
+  recover from a phase-valued target, or require explicit `--resume-phase`
+  when the target is human-only.
+- Verified checkpoint recovery supplies every recorded non-null current field,
+  validates the complete candidate at the observed lifecycle phase, then
+  atomically advances phase/evidence and clears the checkpoint. A forward
+  recovery is amber until the same complete evidence reconciles exactly to
+  green. Partial evidence, regressions, or identity, PR, Git, and branch
+  conflicts remain red without a partial candidate update.
 - Follow-ups are addressed, tasked, captured, parked, or blocked before
   re-inventory. PR-scoped review learnings remain owned exactly once by the
   existing review lifecycle.
@@ -235,7 +247,9 @@ timeouts, retries, dry-run behavior, and output formats explicit.
 - Cover green/amber/red reconciliation; verified versus unverified live
   advancement; create/push/review-fix/finish/merge evidence; invalid identity,
   ancestry, branch, and PR updates; atomic failure; old ledgers; and obsolete
-  checkpoint clearing.
+  checkpoint clearing. Include paused lifecycle-overlay recovery after merge,
+  legacy checkpoint targets, explicit legacy resume phases, and incomplete
+  recovery evidence with no partial mutation.
 - Pin canonical-controller, thin-selector, nested-return, status visibility,
   generated adapter, reference fanout, manifest, and template/root parity.
 

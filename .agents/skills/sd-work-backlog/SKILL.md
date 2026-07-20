@@ -141,6 +141,29 @@ If live state is verifiably ahead, record a verified live advance. If the
 ledger claims work that live state cannot prove, record red context health and
 stop instead of replaying it.
 
+A checkpoint is an overlay on its owning lifecycle phase, not a later phase.
+New checkpoints persist `checkpoint.resumePhase` while keeping a human target
+unchanged. After resuming a paused checkpoint, reconcile before inventorying or
+selecting more work. Supply every non-null current-state field shown by status;
+for a verified later phase, use the exact locally observed values:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-work-loop.py reconcile --repo . \
+  --run-id <run-id> --observed-phase <observed-lifecycle-phase> \
+  --task <task> --branch <branch> --head <sha> \
+  --base-branch <base-branch> --pr-number <n> --pr-url <url> \
+  --last-shipped-sha <sha> --verified-live-advance --json
+```
+
+Omit fields that are `null`, but never omit a recorded non-null field. A
+successful later-phase recovery clears the checkpoint and records amber
+rehydration; repeat the same complete reconcile without
+`--verified-live-advance` to reach green exact agreement. Schema-v1 ledgers
+whose phase is literally `checkpoint` use a phase-valued checkpoint target as
+the owner. When a legacy target is human-only, add
+`--resume-phase <recorded-lifecycle-phase>`; do not guess it.
+
 Phase transitions and same-phase evidence have separate owners. Use
 `transition` only when the lifecycle phase changes. After a commit, PR
 publication, pushed review fix, finish-work commit, or verified merge changes
@@ -308,8 +331,9 @@ Classify failures as transient, task-local, user-input, or repository-wide.
   it; persist the parked result and continue only from a clean boundary.
 
 At every boundary, check for newer operator instructions. `skip current` is
-allowed only before mutation. `pause` writes a resumable checkpoint and
-releases the lock. `stop now` checkpoints at the next safe transition.
+allowed only before mutation. `pause` writes a resumable checkpoint overlay,
+retains the owning lifecycle phase, and releases the lock. `stop now`
+checkpoints at the next safe transition.
 `stop after current` completes follow-ups and cleanup before stopping. Focus
 updates replace/add/clear the helper's focus and immediately re-inventory.
 

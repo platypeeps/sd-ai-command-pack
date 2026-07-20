@@ -273,12 +273,16 @@ advances a phase, while the helper's `evidence` subcommand records verified
 same-phase commit, PR, review-fix, finish-work, and merge facts atomically.
 Task and base branch are stable iteration identity; commit ancestry, PR
 identity, and the final feature-to-base branch switch are validated locally.
-Verified same-phase reconciliation uses the same rules and clears obsolete
-recovery checkpoints instead of routing through a synthetic checkpoint phase.
-A matching phase or partial evidence is not recovery evidence and cannot clear
-a ready or blocked checkpoint left by contradictory current-state observations.
+Verified same-phase reconciliation uses the same rules. A checkpoint is an
+overlay that retains its owning lifecycle phase in `checkpoint.resumePhase`,
+instead of becoming a synthetic later phase; its human target remains intact.
 Recovery through an evidence update or reconciliation must supply every
-non-null field in the recorded current-state ledger.
+non-null field in the recorded current-state ledger. A complete verified
+forward recovery advances evidence and phase atomically, clears the checkpoint,
+and remains amber until exact reconciliation turns green. Partial evidence and
+identity, PR, Git, branch, or regression conflicts stay red without a partial
+update. Legacy schema-v1 ledgers use a phase-valued target as the owner, or
+require explicit `--resume-phase` when the target is human-only.
 
 The work-designs command is a thin `needs-design` selector for that same
 controller. Its default now carries selected tasks from planning through a
@@ -1126,6 +1130,13 @@ bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
   scripts/sd-ai-command-pack-work-loop.py evidence --repo . \
   --run-id <run-id> --head <sha> --pr-number <n> --pr-url <url>
 ```
+
+After resuming a paused checkpoint, reconcile its complete locally observed
+state before selecting more work. Add `--verified-live-advance` when the live
+lifecycle is ahead, then repeat the same complete reconcile without that flag
+to turn the amber recovery into green exact agreement. Old ledgers with a
+human-only checkpoint target also require
+`--resume-phase <recorded-lifecycle-phase>`.
 
 A stopped or completed run may be reconciled with task and merge state that
 advanced after its execution lock was released. The orchestration layer must

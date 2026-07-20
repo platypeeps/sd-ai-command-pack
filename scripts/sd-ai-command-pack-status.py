@@ -616,7 +616,11 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
     if not normalized_checkpoint["state"]:
         return invalid_field("checkpoint.state")
-    for field, limit in (("target", 240), ("reason", 500)):
+    for field, limit in (
+        ("target", 240),
+        ("reason", 500),
+        ("resumePhase", 40),
+    ):
         if field not in checkpoint:
             continue
         value = checkpoint[field]
