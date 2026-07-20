@@ -613,6 +613,8 @@ class FleetTimingTests(InstallTestCase):
         for value, message in (
             ("contains\na newline", "control character"),
             ("see /Users/example/project", "absolute or home-relative"),
+            ("see (/Users/example/project)", "absolute or home-relative"),
+            ('see "/Users/example/project"', "absolute or home-relative"),
             (r"see C:\\Users\\example\\project", "absolute or home-relative"),
             (r"see \\\\server\\share", "absolute or home-relative"),
             ("token=ghp_abcdefghijklmnopqrstuvwxyz", "secret-like"),
@@ -830,6 +832,27 @@ class FleetTimingTests(InstallTestCase):
         self.assertEqual(payload["status"], "error")
         self.assertIn("secret-like", payload["error"])
         self.assertNotIn("Traceback", output.getvalue())
+
+    def test_cli_redacts_paths_from_wrapped_os_errors(self) -> None:
+        timing = self.load_timing()
+        repo = self.make_git_repo_without_trellis()
+        leaked_path = repo / "private state" / "run-1.json"
+        failure = timing.FleetTimingError(
+            f"cannot read timing state: [Errno 13] Permission denied: '{leaked_path}'"
+        )
+        output = io.StringIO()
+        with mock.patch.object(
+            timing, "timing_store", side_effect=failure
+        ), contextlib.redirect_stdout(output):
+            exit_code = timing.main(
+                ["--repo", str(repo), "--json", "report", "--run-id", "run-1"]
+            )
+
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertIn("<path>", payload["error"])
+        self.assertNotIn(str(repo), output.getvalue())
+        self.assertNotIn("private state", output.getvalue())
 
 
 if __name__ == "__main__":

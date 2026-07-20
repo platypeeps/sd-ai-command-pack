@@ -31,7 +31,15 @@ SECRET_RE = re.compile(
     r"|(?:token|password|secret|api[_-]?key)\s*[:=]\s*\S+)"
 )
 ABSOLUTE_PATH_RE = re.compile(
-    r"(?:^|\s)(?:~[/\\]|/[A-Za-z0-9._~-]|[A-Za-z]:[/\\]|\\\\\S+)"
+    r"(?:^|[\s(\[{\"'=,:;])(?:~[/\\]|/[A-Za-z0-9._~-]|[A-Za-z]:[/\\]|\\\\\S+)"
+)
+QUOTED_OUTPUT_PATH_RE = re.compile(
+    r"(?P<quote>['\"])(?:~[/\\]|/[A-Za-z0-9._~-]|[A-Za-z]:[/\\]|\\\\)"
+    r"[^'\"]*(?P=quote)"
+)
+UNQUOTED_OUTPUT_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:~[/\\]|/[A-Za-z0-9._~-]|[A-Za-z]:[/\\]|\\\\)"
+    r"[^\s'\"<>]*"
 )
 
 STAGES = (
@@ -154,6 +162,13 @@ def safe_reason(value: object, label: str, *, required: bool = False) -> str | N
     if ABSOLUTE_PATH_RE.search(normalized):
         raise FleetTimingError(f"{label} contains an absolute or home-relative path")
     return normalized
+
+
+def public_error(value: BaseException) -> str:
+    """Remove local path material before an error crosses the CLI boundary."""
+    redacted = QUOTED_OUTPUT_PATH_RE.sub("<path>", str(value))
+    redacted = UNQUOTED_OUTPUT_PATH_RE.sub("<path>", redacted)
+    return " ".join(redacted.split())
 
 
 def _optional_outcome(value: object, allowed: frozenset[str], label: str) -> str | None:
@@ -1162,6 +1177,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             state = load_state(store, args.run_id)
         output = operation_output(state, operation, changed, reading)
     except FleetTimingError as exc:
+        error = public_error(exc)
         if getattr(args, "json", False):
             print(
                 json.dumps(
@@ -1169,14 +1185,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "schemaVersion": SCHEMA_VERSION,
                         "operation": operation,
                         "status": "error",
-                        "error": str(exc),
+                        "error": error,
                     },
                     indent=2,
                     sort_keys=True,
                 )
             )
         else:
-            print(f"fleet timing error: {exc}", file=sys.stderr)
+            print(f"fleet timing error: {error}", file=sys.stderr)
         return 2
     if args.json:
         print(json.dumps(output, indent=2, sort_keys=True))
