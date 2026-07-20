@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify canonical Copilot guidance remains synchronized with its tracked generated copy."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify the consumer install and audit behavior with focused regression coverage and the canonical repository gate."}

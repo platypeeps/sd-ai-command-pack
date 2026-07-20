@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Follow the repository's canonical template and generated-copy parity requirements while updating Copilot guidance."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Apply the repository's test and verification expectations to the new consumer-boundary contract."}
