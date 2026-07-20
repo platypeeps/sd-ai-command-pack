@@ -768,7 +768,7 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
                 try:
                     split = urlsplit(safe_url)
                     hostname = split.hostname
-                    _port_number = split.port
+                    _ = split.port
                     username = split.username
                     password = split.password
                 except ValueError:
