@@ -108,6 +108,11 @@ Phase transitions and same-phase evidence have separate owners. Use
 publication, pushed review fix, finish-work commit, or verified merge changes
 the facts inside the current phase, record them atomically with `evidence`:
 
+Transition updates are limited to the stable iteration identity fields `task`
+and `baseBranch`. Record `branch`, `head`, `prNumber`, `prUrl`, and
+`lastShippedSha` only through `evidence`, including when establishing those
+facts immediately after a phase change.
+
 ```bash
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
   scripts/sd-ai-command-pack-work-loop.py evidence --repo . \

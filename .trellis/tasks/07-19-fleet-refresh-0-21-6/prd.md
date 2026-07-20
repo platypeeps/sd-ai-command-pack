@@ -1,15 +1,17 @@
-# Roll out SD pack 0.21.6 to the consumer fleet
+# Roll out SD pack 0.23.2 to the consumer fleet
 
 ## Goal
 
 Refresh all configured consumers from their current installed version to release
-0.21.6 through the canonical fleet preflight, sequential PR, review, merge,
+0.23.2 through the canonical fleet preflight, sequential PR, review, merge,
 provenance, and audit process.
 
 ## Confirmed Facts
 
-- Source release `v0.21.6` was created from merged PR #169 after the complete
-  `main` workflow passed.
+- Source release `v0.23.1` was created from merged PR #173 after the complete
+  `main` workflow passed. Canary PR #126 then found two source-owned work-loop
+  evidence defects, so the fleet target advanced to corrective release
+  `v0.23.2` before any consumer merge.
 - Disposable candidate validation passed for all seven configured consumers
   before the source release was merged.
 - `docs/FLEET_ROLLOUT.md` owns the rollout procedure and
@@ -18,6 +20,8 @@ provenance, and audit process.
 - This is a cross-repository operation. Start it through the explicit
   `sd-fleet-refresh` workflow rather than as an implicit side effect of a
   repo-local backlog iteration.
+- The 2026-07-19 preflight found all seven consumers available and installed at
+  `0.21.4`, so every consumer requires a refresh.
 
 ## Requirements
 
@@ -27,7 +31,7 @@ provenance, and audit process.
   anomaly-metric-creator last.
 - Require a clean consumer checkout before installation. Do not stash, reset,
   clean, clone, or overwrite unrelated work to force a refresh.
-- Install release `0.21.6` with the consumer's configured platforms, then run
+- Install release `0.23.2` with the consumer's configured platforms, then run
   install audit, provenance verification, and the repository-owned validation
   gate before opening a PR.
 - Commit only installer-managed payload, receipts, provenance, and managed
@@ -41,13 +45,13 @@ provenance, and audit process.
 
 ## Acceptance Criteria
 
-- [ ] rwbp-coordinator is installed at `0.21.6` and passes post-merge audit.
-- [ ] loadsmith is installed at `0.21.6` and passes post-merge audit.
-- [ ] hoa-manager is installed at `0.21.6` and passes post-merge audit.
-- [ ] rwbp-website is installed at `0.21.6` and passes post-merge audit.
-- [ ] mezmo_benchmark is installed at `0.21.6` and passes post-merge audit.
-- [ ] se-ai-command-pack is installed at `0.21.6` and passes post-merge audit.
-- [ ] anomaly-metric-creator is installed at `0.21.6` and passes post-merge
+- [ ] rwbp-coordinator is installed at `0.23.2` and passes post-merge audit.
+- [ ] loadsmith is installed at `0.23.2` and passes post-merge audit.
+- [ ] hoa-manager is installed at `0.23.2` and passes post-merge audit.
+- [ ] rwbp-website is installed at `0.23.2` and passes post-merge audit.
+- [ ] mezmo_benchmark is installed at `0.23.2` and passes post-merge audit.
+- [ ] se-ai-command-pack is installed at `0.23.2` and passes post-merge audit.
+- [ ] anomaly-metric-creator is installed at `0.23.2` and passes post-merge
       audit.
 - [ ] Every mutated consumer passed its repository-owned validation before PR
       creation and has no unresolved rollout review thread at merge.
@@ -60,10 +64,12 @@ provenance, and audit process.
 
 - Consumer product changes, dependency upgrades, and unrelated maintenance.
 - Modifying a dirty or missing checkout to make it eligible for rollout.
-- Retagging or rewriting release `v0.21.6`.
+- Retagging or rewriting releases `v0.23.1` or `v0.23.2`.
 - Creating a pull request in the upstream Trellis repository.
 
 ## Notes
 
 - Resume with `sd-fleet-refresh` after explicit operator selection of this
   cross-repository task.
+- The directory slug retains `0-21-6` because this task was retargeted in place
+  rather than duplicated; `task.json` and this PRD define the current target.

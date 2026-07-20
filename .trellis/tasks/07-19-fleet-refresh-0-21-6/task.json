@@ -1,9 +1,9 @@
 {
   "id": "fleet-refresh-0-21-6",
   "name": "fleet-refresh-0-21-6",
-  "title": "Roll out SD pack 0.21.6 to the consumer fleet",
-  "description": "Refresh all configured consumers from their current installed version to release 0.21.6 through the canonical fleet preflight, sequential PR, review, merge, provenance, and audit process.",
-  "status": "planning",
+  "title": "Roll out SD pack 0.23.2 to the consumer fleet",
+  "description": "Refresh all configured consumers from their current installed version to release 0.23.2 through the canonical fleet preflight, sequential PR, review, merge, provenance, and audit process.",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "Retargeted from 0.21.6 to 0.23.1 after explicit operator selection, then to patch release 0.23.2 after rwbp-coordinator PR #126 surfaced source evidence-validation defects; the task slug is retained for continuity.",
   "meta": {}
 }
