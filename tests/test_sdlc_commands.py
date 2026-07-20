@@ -66,6 +66,7 @@ COMMANDS = {
             "one consumer at a time",
             "FLEET_ROLLOUT.md",
             "fleet-preflight",
+            "fleet-finding-classify",
             "fleet-review-classify",
             "release-identity guard",
             "integration-only",
@@ -246,6 +247,56 @@ class SdlcCommandsTests(InstallTestCase):
             "original fleet task",
         ):
             self.assertIn(pin.casefold(), guide_normalized.casefold())
+
+    def test_fleet_finding_severity_gate_is_fail_closed_and_observation_complete(
+        self,
+    ) -> None:
+        fleet = self._skill_text("sd-fleet-refresh")
+        guide = (install.ROOT / "docs/FLEET_ROLLOUT.md").read_text(encoding="utf-8")
+        fleet_text = " ".join(fleet.split())
+        guide_text = " ".join(guide.split())
+
+        for pin in (
+            "## Finding severity gate",
+            "sd-ai-command-pack-fleet-finding-classify.py",
+            "continue-with-follow-ups",
+            "pause-corrective-release",
+            "invalid-pause",
+            "Reply with evidence to every observation",
+            "one source or consumer Trellis follow-up per deferred owner",
+            "Every duplicate still receives its own evidence-backed reply",
+            "overrideDisposition",
+            "overrideRationale",
+            "before watch or merge",
+        ):
+            self.assertIn(pin.casefold(), fleet_text.casefold())
+
+        ordered_pins = (
+            "apply the finding severity gate",
+            "Run `sd-watch-pr`",
+            "Merge via the consumer's housekeeping gate",
+        )
+        positions = [fleet_text.casefold().index(pin.casefold()) for pin in ordered_pins]
+        self.assertEqual(positions, sorted(positions))
+
+        for pin in (
+            "contractFamily",
+            "impactEvidence",
+            "Conflicting family, impact, or override policy",
+            "follow-up task IDs",
+        ):
+            self.assertIn(pin.casefold(), guide_text.casefold())
+
+        for adapter in (
+            install.ROOT / "templates/.commands/sd-fleet-refresh.md",
+            install.ROOT / "templates/.claude/commands/sd/fleet-refresh.md",
+            install.ROOT / "templates/.gemini/commands/sd/fleet-refresh.toml",
+            install.ROOT / "templates/.github/prompts/sd-fleet-refresh.prompt.md",
+        ):
+            with self.subTest(adapter=adapter):
+                content = adapter.read_text(encoding="utf-8")
+                self.assertNotIn("overrideDisposition", content)
+                self.assertNotIn("impactEvidence", content)
 
     def test_ship_assigns_lifecycle_side_effects_to_one_stage(self) -> None:
         review = self._skill_text("sd-review-pr")

@@ -1046,6 +1046,7 @@ class GeneratedParityTests(InstallTestCase):
         self.assertIn("--fail-under=76", coverage_gate)
         for expected in (
             "scripts/sd-ai-command-pack-fleet-candidate-check.py 90",
+            "scripts/sd-ai-command-pack-fleet-finding-classify.py 85",
             "scripts/sd-ai-command-pack-fleet-review-classify.py 80",
         ):
             self.assertIn(expected, coverage_gate)

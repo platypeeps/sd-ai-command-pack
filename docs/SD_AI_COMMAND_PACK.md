@@ -957,6 +957,33 @@ The report is a per-consumer status table plus a fleet version summary.
 Its consumer rows state `integration-only`, `remote`, or `n/a` review profile
 so avoided remote-review rounds remain visible rather than implicit.
 
+Every verified rollout finding is also classified before watch, merge, or the
+next consumer mutation with the source-only command:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-finding-classify.py \
+  --input <temporary-findings.json> --json
+```
+
+Schema version 1 requires a non-empty `findings` array. Each row contains a
+safe unique `id`, `contractFamily`, `summary`, `evidence`, and `reviewer`, plus
+optional repository-relative `path` and positive `line`. Correctness,
+security, install/audit, and compatibility block by default. Hardening, style,
+test implementation, documentation, diagnostics, and consumer-unrelated work
+defer by default. `impact: blocker` requires concrete `impactEvidence`; an
+explicit `overrideDisposition` requires `overrideRationale`. No public adapter
+argument or environment variable can downgrade a blocker.
+
+Exit `0` means continue only after every observation receives an evidence-
+backed reply, allowed thread resolution, and one follow-up per canonical owner
+when work remains. Exit `1` pauses all further fleet mutation and batches
+blocker owners into one corrective campaign. Exit `2`, malformed output, or an
+unavailable command fails closed. Exact duplicate observations share their
+first owner's timing decision and task, while each observation remains visible
+for reply and resolution. The fleet report includes blocker and deferred
+owners, duplicates, overrides with rationale, and follow-up task identifiers.
+
 The `sd-test-gaps` command closes the worst coverage gaps with targeted
 tests. It runs the repository's coverage flow as a baseline (aborting if
 the baseline itself fails), ranks shipped files by per-file coverage ascending
