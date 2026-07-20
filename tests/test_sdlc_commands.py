@@ -200,6 +200,48 @@ class SdlcCommandsTests(InstallTestCase):
                         self.assertIn(pin, content)
                     self.assertIn("final-report format", content)
 
+    def test_fleet_refresh_batches_corrective_release_findings(self) -> None:
+        fleet = self._skill_text("sd-fleet-refresh")
+        guide = install.ROOT / "docs/FLEET_ROLLOUT.md"
+        guide_text = guide.read_text(encoding="utf-8")
+        fleet_text = " ".join(fleet.split())
+        guide_normalized = " ".join(guide_text.split())
+
+        skill_pins = (
+            "## Corrective campaign",
+            "pause consumer mutation",
+            "ID | Contract family | Evidence | Severity | Disposition | Fix | Regression",
+            "bounded contract-surface sweep",
+            "partial candidate diagnostics",
+            "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-fleet-candidate-check.py --consumer <name>",
+            "must never replace the canonical candidate ledger",
+            "select one corrective version",
+            "one canonical full-fleet candidate validation",
+            "urgent independent security defect",
+            "resume the original fleet task",
+        )
+        for pin in skill_pins:
+            self.assertIn(pin.casefold(), fleet_text.casefold())
+
+        ordered_skill_pins = (
+            "pause consumer mutation",
+            "bounded contract-surface sweep",
+            "select one corrective version",
+            "one canonical full-fleet candidate validation",
+            "resume the original fleet task",
+        )
+        positions = [fleet_text.casefold().index(pin) for pin in ordered_skill_pins]
+        self.assertEqual(positions, sorted(positions))
+
+        for pin in (
+            "## Corrective Campaign",
+            "Exact duplicates reuse the owning row",
+            "Partial runs remain diagnostic",
+            "Only the no-filter canonical command",
+            "original fleet task",
+        ):
+            self.assertIn(pin.casefold(), guide_normalized.casefold())
+
     def test_ship_assigns_lifecycle_side_effects_to_one_stage(self) -> None:
         review = self._skill_text("sd-review-pr")
         ship = self._skill_text("sd-ship")
