@@ -375,3 +375,41 @@ Released sd-ai-command-pack 0.24.5 so complete checkpoint recovery can retain a 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 161: Clarify stale terminal lock recovery
+
+**Date**: 2026-07-20
+**Task**: Clarify stale terminal lock recovery
+**Branch**: `codex/fix-stale-terminal-lock-guidance`
+
+### Summary
+
+Published the 0.24.6 stale terminal-lock diagnostic contract, preserved active and malformed lock safety, added regression coverage, synchronized generated payloads, validated all seven consumers, and settled Copilot review and CI on PR #195.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `54962ce` | (see git log) |
+| `efdb7a4` | (see git log) |
+| `e3b6638` | (see git log) |
+| `f649cca` | (see git log) |
+| `820b394` | (see git log) |
+| `d8421bf` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
