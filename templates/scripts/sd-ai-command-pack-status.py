@@ -472,7 +472,17 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             "error": "work-loop helper returned snapshot without a valid status",
         }
     if status in WORK_LOOP_TERMINAL_STATUSES:
-        return snapshot
+        normalized = {"status": status}
+        error = snapshot.get("error")
+        if error is None or status == "none":
+            return normalized
+        if not isinstance(error, str):
+            return {
+                "status": "invalid",
+                "error": "work-loop helper returned invalid terminal snapshot field: error",
+            }
+        normalized["error"] = safe_text(error, limit=500)
+        return normalized
     if status not in WORK_LOOP_RUN_STATUSES:
         return {
             "status": "invalid",
