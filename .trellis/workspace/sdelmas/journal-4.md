@@ -271,3 +271,36 @@ Published PR #191 to route sd-review-pr through a deterministic helper that hono
 ### Next Steps
 
 - None - task complete
+
+
+## Session 159: Harden PR URL validation
+
+**Date**: 2026-07-20
+**Task**: Harden PR URL validation
+**Branch**: `codex/harden-pr-url-validation`
+
+### Summary
+
+Fail closed on malformed PR URL authorities and ports in work-loop and status validation; ship 0.24.3 with regressions, spec guidance, and all-pass fleet evidence.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ce8fd81` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

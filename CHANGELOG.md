@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.3 - 2026-07-20
+
+- Reject malformed pull-request URLs, including invalid ports and malformed
+  IPv6 authorities, without leaking `urllib.parse` exceptions from work-loop
+  ledger or status-snapshot validation.
+
 ## 0.24.2 - 2026-07-20
 
 - Route `sd-review-pr` through a deterministic helper that honors a

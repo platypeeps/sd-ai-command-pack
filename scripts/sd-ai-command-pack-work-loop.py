@@ -286,21 +286,25 @@ def _json_payload(value: Mapping[str, Any]) -> str:
 def _normalized_pr_url(value: object) -> str | None:
     if not isinstance(value, str) or not value.strip() or len(value) > 500:
         return None
-    split = urlsplit(value.strip())
+    try:
+        split = urlsplit(value.strip())
+        hostname = split.hostname
+        port_number = split.port
+        username = split.username
+        password = split.password
+    except ValueError:
+        return None
     if (
         split.scheme not in {"http", "https"}
-        or not split.hostname
-        or split.username is not None
-        or split.password is not None
+        or not hostname
+        or username is not None
+        or password is not None
         or split.query
         or split.fragment
     ):
         return None
-    try:
-        port = f":{split.port}" if split.port is not None else ""
-    except ValueError:
-        return None
-    netloc = f"{split.hostname.casefold()}{port}"
+    port = f":{port_number}" if port_number is not None else ""
+    netloc = f"{hostname.casefold()}{port}"
     path = split.path.rstrip("/")
     if not path:
         return None

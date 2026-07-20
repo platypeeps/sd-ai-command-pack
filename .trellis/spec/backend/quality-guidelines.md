@@ -227,6 +227,10 @@ schema.
 - Missing, unsupported, and incomplete mappings become adapter-owned `invalid`
   snapshots. Diagnostics name only the structural field and never echo a
   helper-controlled value.
+- Terminal pull-request URLs are bounded parsed input at both the helper and
+  status-adapter boundaries. Access to `urlsplit()`, `SplitResult.hostname`,
+  and `SplitResult.port` must stay inside a `ValueError` boundary so malformed
+  authorities and ports fail closed instead of escaping as tracebacks.
 - Valid helper snapshots and their human/JSON rendering remain unchanged.
 
 ### 4. Validation & Error Matrix
@@ -238,6 +242,9 @@ schema.
 - Missing or malformed run field -> `invalid run snapshot field: <field>`.
 - Present-but-blank optional run string -> `invalid run snapshot field:
   <field>`; explicit `null` remains valid.
+- Invalid terminal PR URL syntax, malformed IPv6 authority, or invalid port ->
+  helper rejects the PR evidence with its controlled validation error; status
+  adapter returns `invalid run snapshot field: terminalReconciliation.<field>`.
 - Import, syntax, filesystem, or helper exception -> existing bounded
   `invalid` anomaly behavior.
 
@@ -262,6 +269,9 @@ schema.
 - Existing real-ledger JSON and human-output tests plus template twin parity.
 - Canonical helper snapshots and human output include all non-null
   current-state evidence, including base branch and last shipped SHA.
+- Invalid-port and malformed-IPv6 PR URL regressions at both the work-loop
+  normalizer and status terminal-record boundary, asserting no raw
+  `ValueError` escapes.
 
 ### 7. Wrong vs Correct
 
@@ -271,6 +281,9 @@ Correct: validate its status and renderer-required fields at the load boundary
 
 Wrong: include an unsupported helper value in the diagnostic
 Correct: report only that the status is unsupported
+
+Wrong: validate `split.hostname`, then access `split.port` outside the parse guard
+Correct: parse and read all URL authority properties inside one fail-closed `ValueError` boundary
 ```
 
 ## Session Recorder Retry Contract

@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Owns work-loop and status snapshot validation contracts and required regression coverage."}
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Owns the shipped autonomous work-loop helper and template/root parity contract."}

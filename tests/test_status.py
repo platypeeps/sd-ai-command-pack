@@ -581,6 +581,41 @@ class StatusTests(InstallTestCase):
                 snapshot = {**valid_run, "status": loop_status}
                 self.assertEqual(collect(snapshot), snapshot)
 
+        terminal_pr = {
+            "prNumber": 42,
+            "prUrl": "https://example.test/pull/42",
+            "head": "a" * 40,
+            "mergeCommit": "b" * 40,
+        }
+        terminal = {
+            "status": "verified",
+            "reconciledAt": "2026-07-20T12:00:00Z",
+            "archivedTask": ".trellis/tasks/archive/2026-07/07-20-task",
+            "taskId": "task",
+            "delivery": terminal_pr,
+            "bookkeeping": None,
+            "observed": {"branch": "main", "head": "b" * 40},
+        }
+        for url in (
+            "https://example.test:bad/pull/42",
+            "https://[::1/pull/42",
+        ):
+            with self.subTest(malformed_terminal_pr_url=url):
+                malformed_pr = {**terminal_pr, "prUrl": url}
+                result = collect(
+                    {
+                        **valid_run,
+                        "status": "completed",
+                        "phase": "stopped",
+                        "terminalReconciliation": {
+                            **terminal,
+                            "delivery": malformed_pr,
+                        },
+                    }
+                )
+                self.assertEqual(result["status"], "invalid")
+                self.assertIn("terminalReconciliation.delivery", result["error"])
+
         optional_string_fields = (
             "until",
             "task",
