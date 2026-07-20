@@ -1638,6 +1638,7 @@ class InstallAuditTests(InstallTestCase):
         )
         self.assertTrue(current_scripts)
         post_rename_scripts = {
+            "sd-ai-command-pack-review-full-check.sh",
             "sd-ai-command-pack-status.py",
             "sd-ai-command-pack-toolchain.sh",
         }

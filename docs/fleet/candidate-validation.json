@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-20T19:27:48Z",
-  "packVersion": "0.24.1",
-  "payloadDigest": "sha256:b04fea31fb2e38c60a85e2363bd6005535942c3170b945b7df0d0903efad3ccb",
+  "validatedAt": "2026-07-20T20:08:22Z",
+  "packVersion": "0.24.2",
+  "payloadDigest": "sha256:2b4d59283aa6d88d8cb7050a472556629a409274ad45c1172f3e7406ac22e5dc",
   "fleetManifestDigest": "sha256:1776b0a45d7faa3b20fc61ff0ef8587f7fc577eebc503b7ddce0563479ef247a",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "b539af9f6305fce164373beb4142f9dc7c417b27",
+      "baseCommit": "069223dbbfa79d0497cd413b943657e0b48f9693",
       "status": "passed",
       "prepares": [
         [
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "2397899846c846f59f9a7aea571c4e0e1c9f3c63",
+      "baseCommit": "54f3273316375ec93cc7e89575c345a636e6befa",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "83412c08be5cbc2edb342a53178042a941c37034",
+      "baseCommit": "16d8ce8e124860756f4f6342886a52893931dc62",
       "status": "passed",
       "prepares": [
         [

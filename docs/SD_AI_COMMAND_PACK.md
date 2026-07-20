@@ -65,6 +65,9 @@ Quick links:
 - `.agents/skills/sd-update-spec/SKILL.md`: Trellis update-spec workflow plus
   pack-managed repository knowledge refresh.
 - `scripts/sd-ai-command-pack-full-check.sh`: canonical full-check script.
+- `scripts/sd-ai-command-pack-review-full-check.sh`: deterministic
+  `sd-review-pr` selector for a repository-owned `check:full` wrapper or the
+  canonical pack-script fallback.
 - `scripts/sd-ai-command-pack-shell-lib.sh`: shared Bash helpers sourced by
   the full-check, review-local, and review-scope scripts.
 - `scripts/sd-ai-command-pack-toolchain.sh`: non-mutating toolchain doctor and
@@ -194,7 +197,15 @@ it. Use a separate request to execute the recommendation.
    review, then disposition any first-review boundary-risk, authored-source
    size, or multi-task scope advisory before round one. Run `sd-full-check` or
    `sd-review-local` (optionally with `all`) explicitly when you want
-   Prism/Gito.
+   Prism/Gito. The review gate delegates to
+   `scripts/sd-ai-command-pack-review-full-check.sh`. When the root
+   `package.json` defines a non-empty `check:full` script, the helper runs
+   that repository-owned wrapper through
+   `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_RUNNER` (default `npm`);
+   otherwise it invokes the installed pack full-check script directly. The
+   wrapper may perform repository prerequisites before calling the pack script,
+   but it must not invoke `sd-review-pr`, a review-pr adapter, or the helper
+   itself.
 11. Request the configured remote reviewer, defaulting to GitHub Copilot, after
    a clean local pass and again after every pushed review-fix commit made
    during the loop, unless the user explicitly asked for local-only review or
@@ -1707,6 +1718,7 @@ export UV_TOOL_DIR="${UV_TOOL_DIR:-$SANDBOX_TMP/sd-ai-command-pack-uv-tools}"
 export RUFF_CACHE_DIR="${RUFF_CACHE_DIR:-$SANDBOX_TMP/sd-ai-command-pack-ruff-cache}"
 python3 scripts/sd-ai-command-pack-install-audit.py
 bash -n scripts/sd-ai-command-pack-full-check.sh
+bash -n scripts/sd-ai-command-pack-review-full-check.sh
 bash -n scripts/sd-ai-command-pack-shell-lib.sh
 bash -n scripts/sd-ai-command-pack-toolchain.sh
 bash -n scripts/sd-ai-command-pack-review-local.sh

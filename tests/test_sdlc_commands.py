@@ -381,6 +381,24 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("housekeeping remains its only owner", ship_text)
         self.assertNotIn("sd-ai-command-pack-update-spec-kb.py", ship)
 
+    def test_review_pr_delegates_full_check_selection_to_shipped_helper(self) -> None:
+        review = self._skill_text("sd-review-pr")
+        local_gate = review.split("## Step 2: Run Local Full Check", 1)[1].split(
+            "## Step 2.5", 1
+        )[0]
+
+        for pin in (
+            "bash scripts/sd-ai-command-pack-review-full-check.sh",
+            'scripts["check:full"]',
+            "SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_RUNNER",
+            "scripts/sd-ai-command-pack-full-check.sh",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0",
+            "SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0",
+            "must not invoke",
+            "compatibility fallback",
+        ):
+            self.assertIn(pin, local_gate)
+
     def test_fleet_integration_only_review_is_head_bound_and_fail_closed(self) -> None:
         fleet = self._skill_text("sd-fleet-refresh")
         review = self._skill_text("sd-review-pr")

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.2 - 2026-07-20
+
+- Route `sd-review-pr` through a deterministic helper that honors a
+  repository-owned `check:full` prelude, preserves the direct pack-script
+  fallback, disables Prism/Gito on both paths, and rejects recursive wrappers.
+
 ## 0.24.1 - 2026-07-20
 
 - Keep work-loop checkpoints as lifecycle overlays and recover paused ledgers
