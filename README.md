@@ -111,8 +111,9 @@ inventory, current/open Trellis work, user-local autonomous loop progress,
 completed tasks stranded outside the Trellis archive, anomalies, and numbered
 next steps. Loop status includes its run ID, selector
 and focus, iteration, phase, task/PR, counters, heartbeat, context health, and
-checkpoint without mutating the ledger or lock. Malformed helper snapshots are
-reported as bounded `invalid` anomalies instead of rendering absent metadata.
+checkpoint without mutating the ledger or lock. Dynamically loaded helper
+snapshots are reduced to a bounded, sanitized pack-owned contract; malformed
+snapshots are reported as `invalid` anomalies instead of rendering raw data.
 The shared preflight fails when a completed task remains directly under
 `.trellis/tasks/` and reports the `task.py archive` remediation; `sd-status`
 surfaces the same condition without mutating it.

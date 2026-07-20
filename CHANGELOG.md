@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.23.4 - 2026-07-19
+
+- Normalize dynamically loaded active work-loop snapshots to an allowlisted,
+  bounded output contract before status JSON or terminal rendering.
+
 ## 0.23.3 - 2026-07-19
 
 - Normalize dynamically loaded terminal work-loop snapshots before status

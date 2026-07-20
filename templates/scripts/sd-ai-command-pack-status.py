@@ -472,17 +472,17 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             "error": "work-loop helper returned snapshot without a valid status",
         }
     if status in WORK_LOOP_TERMINAL_STATUSES:
-        normalized = {"status": status}
+        terminal_snapshot = {"status": status}
         error = snapshot.get("error")
         if error is None or status == "none":
-            return normalized
+            return terminal_snapshot
         if not isinstance(error, str):
             return {
                 "status": "invalid",
                 "error": "work-loop helper returned invalid terminal snapshot field: error",
             }
-        normalized["error"] = safe_text(error, limit=500)
-        return normalized
+        terminal_snapshot["error"] = safe_text(error, limit=500)
+        return terminal_snapshot
     if status not in WORK_LOOP_RUN_STATUSES:
         return {
             "status": "invalid",
@@ -495,26 +495,169 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             "error": f"work-loop helper returned invalid run snapshot field: {field}",
         }
 
+    normalized: dict[str, Any] = {"status": status}
+    required_string_limits = {
+        "runId": 120,
+        "mode": 40,
+        "selector": 120,
+        "phase": 80,
+        "focusMode": 40,
+        "heartbeatAt": 80,
+    }
     for field in WORK_LOOP_REQUIRED_STRING_FIELDS:
         value = snapshot.get(field)
         if not isinstance(value, str) or not value:
             return invalid_field(field)
+        normalized_value = safe_text(value, limit=required_string_limits[field])
+        if not normalized_value:
+            return invalid_field(field)
+        normalized[field] = normalized_value
     iteration = snapshot.get("iteration")
-    if isinstance(iteration, bool) or not isinstance(iteration, int):
+    if (
+        isinstance(iteration, bool)
+        or not isinstance(iteration, int)
+        or iteration < 1
+    ):
         return invalid_field("iteration")
+    normalized["iteration"] = iteration
     focus = snapshot.get("focus")
     if not isinstance(focus, list) or not all(
         isinstance(value, str) for value in focus
     ):
         return invalid_field("focus")
-    for field in ("counters", "contextHealth", "checkpoint"):
-        if not isinstance(snapshot.get(field), dict):
+    if len(focus) > MAX_ITEMS:
+        return invalid_field("focus")
+    normalized_focus = [safe_text(value, limit=160) for value in focus]
+    if any(not value for value in normalized_focus):
+        return invalid_field("focus")
+    normalized["focus"] = normalized_focus
+
+    counters = snapshot.get("counters")
+    if (
+        not isinstance(counters, dict)
+        or len(counters) > MAX_ITEMS
+        or any(
+            not isinstance(key, str)
+            or not key
+            or isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+            for key, value in counters.items()
+        )
+    ):
+        return invalid_field("counters")
+    normalized_counters: dict[str, int] = {}
+    for key, value in counters.items():
+        normalized_key = safe_text(key, limit=80)
+        if not normalized_key or normalized_key in normalized_counters:
+            return invalid_field("counters")
+        normalized_counters[normalized_key] = value
+    normalized["counters"] = normalized_counters
+
+    context_health = snapshot.get("contextHealth")
+    if not isinstance(context_health, dict):
+        return invalid_field("contextHealth")
+    health_level = context_health.get("level")
+    if not isinstance(health_level, str) or not health_level:
+        return invalid_field("contextHealth.level")
+    normalized_health: dict[str, Any] = {
+        "level": safe_text(health_level, limit=40)
+    }
+    if not normalized_health["level"]:
+        return invalid_field("contextHealth.level")
+    if "epoch" in context_health:
+        epoch = context_health["epoch"]
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 0:
+            return invalid_field("contextHealth.epoch")
+        normalized_health["epoch"] = epoch
+    if "reasons" in context_health:
+        reasons = context_health["reasons"]
+        if (
+            not isinstance(reasons, list)
+            or len(reasons) > MAX_ITEMS
+            or not all(isinstance(value, str) for value in reasons)
+        ):
+            return invalid_field("contextHealth.reasons")
+        normalized_reasons = [safe_text(value, limit=240) for value in reasons]
+        if any(not value for value in normalized_reasons):
+            return invalid_field("contextHealth.reasons")
+        normalized_health["reasons"] = normalized_reasons
+    normalized["contextHealth"] = normalized_health
+
+    checkpoint = snapshot.get("checkpoint")
+    if not isinstance(checkpoint, dict):
+        return invalid_field("checkpoint")
+    checkpoint_state = checkpoint.get("state")
+    if not isinstance(checkpoint_state, str) or not checkpoint_state:
+        return invalid_field("checkpoint.state")
+    normalized_checkpoint: dict[str, Any] = {
+        "state": safe_text(checkpoint_state, limit=40)
+    }
+    if not normalized_checkpoint["state"]:
+        return invalid_field("checkpoint.state")
+    for field, limit in (("target", 240), ("reason", 500)):
+        if field not in checkpoint:
+            continue
+        value = checkpoint[field]
+        if value is not None and not isinstance(value, str):
+            return invalid_field(f"checkpoint.{field}")
+        normalized_checkpoint[field] = (
+            safe_text(value, limit=limit) if value is not None else None
+        )
+    normalized["checkpoint"] = normalized_checkpoint
+
+    for field, limit in (
+        ("until", 40),
+        ("task", 160),
+        ("branch", 200),
+        ("head", 120),
+        ("baseBranch", 200),
+        ("prUrl", 240),
+        ("lastShippedSha", 80),
+        ("stopReason", 500),
+    ):
+        if field not in snapshot:
+            continue
+        value = snapshot[field]
+        if value is not None and not isinstance(value, str):
             return invalid_field(field)
-    for container, member in (("contextHealth", "level"), ("checkpoint", "state")):
-        value = snapshot[container].get(member)
-        if not isinstance(value, str) or not value:
-            return invalid_field(f"{container}.{member}")
-    return snapshot
+        normalized[field] = (
+            safe_text(value, limit=limit) if value is not None else None
+        )
+
+    if "prNumber" in snapshot:
+        pr_number = snapshot["prNumber"]
+        if pr_number is not None and (
+            isinstance(pr_number, bool)
+            or not isinstance(pr_number, int)
+            or pr_number < 1
+        ):
+            return invalid_field("prNumber")
+        normalized["prNumber"] = pr_number
+
+    if "lock" in snapshot:
+        lock = snapshot["lock"]
+        if not isinstance(lock, dict):
+            return invalid_field("lock")
+        normalized_lock: dict[str, Any] = {}
+        for field in ("present", "stale"):
+            if field not in lock:
+                continue
+            if not isinstance(lock[field], bool):
+                return invalid_field(f"lock.{field}")
+            normalized_lock[field] = lock[field]
+        if "runId" in lock:
+            lock_run_id = lock["runId"]
+            if lock_run_id is not None and not isinstance(lock_run_id, str):
+                return invalid_field("lock.runId")
+            normalized_lock["runId"] = (
+                safe_text(lock_run_id, limit=120)
+                if lock_run_id is not None
+                else None
+            )
+        normalized["lock"] = normalized_lock
+
+    return normalized
 
 
 def parse_gh_lines(output: str, *, kind: str) -> list[dict[str, Any]]:

@@ -1055,8 +1055,9 @@ raw command/review output. A relative explicit state path is rejected. Use
 resume, record evidence, reconcile, checkpoint, or stop it. For example:
 
 `sd-status` treats the dynamically loaded work-loop helper as an input boundary:
-it validates active snapshots and normalizes terminal snapshots to pack-owned
-fields, sanitizing and bounding any optional diagnostic before rendering it.
+it normalizes active and terminal snapshots to pack-owned fields, validates
+nested run metadata, and sanitizes and bounds every retained string before JSON
+or terminal rendering.
 
 ```bash
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
