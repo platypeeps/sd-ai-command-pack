@@ -105,6 +105,42 @@ class InstallAuditTests(InstallTestCase):
             set(install.SOURCE_ONLY_COMMAND_TARGETS),
         )
 
+    def test_consumer_audit_does_not_require_source_only_fleet_helpers(self) -> None:
+        audit = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            "sd_install_audit_consumer_source_only",
+        )
+        root = self.make_repo()
+        install_result = self.run_install(root)
+        self.assertEqual(install_result.returncode, 0, install_result.stdout)
+
+        targets = set(
+            (root / ".sd-ai-command-pack/installed-targets.txt")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        source_only_helpers = {
+            path
+            for path in audit.SOURCE_ONLY_ALLOWED_PACK_FILES
+            if path.startswith("scripts/sd-ai-command-pack-fleet-")
+        }
+        self.assertTrue(source_only_helpers)
+        for path in source_only_helpers:
+            self.assertNotIn(path, targets)
+            self.assertFalse((root / path).exists())
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("SD AI command pack install audit passed", result.stdout)
+
     def test_install_audit_detects_missing_current_targets(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)

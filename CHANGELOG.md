@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.4 - 2026-07-20
+
+- Teach Copilot that source-only fleet helpers and source-workflow documentation
+  are intentionally absent from consumer manifests, and require receipt,
+  provenance, and install-audit evidence before reporting a missing-file defect.
+
 ## 0.24.3 - 2026-07-20
 
 - Reject malformed pull-request URLs, including invalid ports and malformed
