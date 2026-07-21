@@ -63,7 +63,7 @@ COMMANDS = {
             "remote-review",
             "dry-run",
             "remote=",
-            "one consumer at a time",
+            "bounded post-canary waves",
             "FLEET_ROLLOUT.md",
             "fleet-preflight",
             "fleet-finding-classify",
@@ -71,7 +71,7 @@ COMMANDS = {
             "release-identity guard",
             "integration-only",
         ],
-        ["one consumer at a time"],
+        ["bounded isolated waves"],
     ),
     "sd-test-gaps": (
         "test-gaps",
@@ -343,6 +343,49 @@ class SdlcCommandsTests(InstallTestCase):
                 content = adapter.read_text(encoding="utf-8")
                 self.assertNotIn("overrideDisposition", content)
                 self.assertNotIn("impactEvidence", content)
+
+    def test_fleet_refresh_uses_bounded_manifest_ordered_waves(self) -> None:
+        fleet = self._skill_text("sd-fleet-refresh")
+        fleet_text = " ".join(fleet.split())
+        guide = " ".join(
+            (install.ROOT / "docs/FLEET_ROLLOUT.md")
+            .read_text(encoding="utf-8")
+            .split()
+        )
+
+        for pin in (
+            "## Wave planning",
+            "sd-ai-command-pack-fleet-wave-plan.py",
+            "canaries run sequentially",
+            "canStart",
+            "maxConcurrency",
+            "mergeCandidate",
+            "packBlocker",
+            "one existing checkout, branch, and PR",
+            "controller alone invokes housekeeping",
+            "terminal consumers are never restarted",
+        ):
+            self.assertIn(pin.casefold(), fleet_text.casefold())
+
+        for pin in (
+            "schema-version-4 manifest",
+            "bounded post-canary cohort with concurrency two",
+            "one at a time in manifest order",
+            "pack blocker stops new starts and holds unsettled merges",
+        ):
+            self.assertIn(pin.casefold(), guide.casefold())
+
+        arguments = fleet.split("## Arguments", 1)[1].split("## Timing evidence", 1)[0]
+        for public_adapter in (
+            install.ROOT / "templates/.commands/sd-fleet-refresh.md",
+            install.ROOT / "templates/.claude/commands/sd/fleet-refresh.md",
+            install.ROOT / "templates/.gemini/commands/sd/fleet-refresh.toml",
+            install.ROOT / "templates/.github/prompts/sd-fleet-refresh.prompt.md",
+        ):
+            content = public_adapter.read_text(encoding="utf-8")
+            self.assertNotIn("--state", content)
+            self.assertNotIn("maxConcurrency=", content)
+        self.assertNotIn("--state", arguments)
 
     def test_ship_assigns_lifecycle_side_effects_to_one_stage(self) -> None:
         review = self._skill_text("sd-review-pr")
@@ -628,7 +671,7 @@ class SdlcCommandsTests(InstallTestCase):
             "whose gate remains the only merge authority",
             "never deletes, skips, or weakens tests",
             "Majors are\nalways manual",
-            "one consumer at a time",
+            "manifest-defined canaries\nsequentially",
             "test files and fixtures only",
             "auto-creates tasks and makes no code changes",
         ]:

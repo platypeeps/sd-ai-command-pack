@@ -11,6 +11,7 @@ contextlib = _support.contextlib
 hashlib = _support.hashlib
 io = _support.io
 json = _support.json
+fleet_manifest = _support.fleet_manifest
 os = _support.os
 shutil = _support.shutil
 subprocess = _support.subprocess
@@ -1118,9 +1119,8 @@ class StatusTests(InstallTestCase):
         manifest = current.parent / "fleet.json"
         manifest.write_text(
             json.dumps(
-                {
-                    "schemaVersion": 3,
-                    "consumers": [
+                fleet_manifest(
+                    [
                         {
                             "name": "slow-current",
                             "github": "example/slow-current",
@@ -1151,8 +1151,8 @@ class StatusTests(InstallTestCase):
                             "candidatePrepare": [],
                             "candidateChecks": [["bash", "check.sh"]],
                         },
-                    ],
-                }
+                    ]
+                )
             )
             + "\n",
             encoding="utf-8",
@@ -1309,9 +1309,8 @@ class StatusTests(InstallTestCase):
         manifest = root.parent / "portable-fleet.json"
         manifest.write_text(
             json.dumps(
-                {
-                    "schemaVersion": 3,
-                    "consumers": [
+                fleet_manifest(
+                    [
                         {
                             "name": "portable",
                             "github": "example/portable",
@@ -1322,8 +1321,8 @@ class StatusTests(InstallTestCase):
                             "candidatePrepare": [],
                             "candidateChecks": [["bash", "check.sh"]],
                         }
-                    ],
-                }
+                    ]
+                )
             )
             + "\n",
             encoding="utf-8",

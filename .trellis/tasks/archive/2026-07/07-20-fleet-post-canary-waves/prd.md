@@ -38,14 +38,14 @@ after the manifest-defined canary cohort proves the released payload is healthy.
 
 ## Acceptance Criteria
 
-- [ ] Canary consumers remain strictly sequential and gate later waves.
-- [ ] At least two eligible post-canary consumers can have validation or CI in
+- [x] Canary consumers remain strictly sequential and gate later waves.
+- [x] At least two eligible post-canary consumers can have validation or CI in
       flight concurrently without sharing mutable checkout state.
-- [ ] A pack-owned blocker prevents new work and later merges across the wave.
-- [ ] Housekeeping and post-merge audit remain per-consumer mandatory gates.
-- [ ] Interrupted runs resume without duplicate branches or PRs.
-- [ ] The final report preserves manifest order and every consumer outcome.
-- [ ] Tests demonstrate the concurrency bound and deterministic failure
+- [x] A pack-owned blocker prevents new work and later merges across the wave.
+- [x] Housekeeping and post-merge audit remain per-consumer mandatory gates.
+- [x] Interrupted runs resume without duplicate branches or PRs.
+- [x] The final report preserves manifest order and every consumer outcome.
+- [x] Tests demonstrate the concurrency bound and deterministic failure
       handling.
 
 ## Dependencies

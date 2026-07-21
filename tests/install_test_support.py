@@ -40,6 +40,7 @@ __all__ = [
     "PACK_ROOT",
     "INSTALLER",
     "SECRET_MARKER_PATTERNS",
+    "fleet_manifest",
     "InstallTestCase",
 ]
 
@@ -54,6 +55,31 @@ SECRET_MARKER_PATTERNS = (
     re.compile(r"(?m)(^|[\s'\"=(:])/(?:Users|home)/[^/\s]+/"),
     re.compile(r"(?i)(^|[\s'\"=(:])[A-Z]:\\Users\\[^\\\s]+\\"),
 )
+
+
+def fleet_manifest(consumers: list[dict[str, object]]) -> dict[str, object]:
+    """Build the smallest valid schema-4 fleet around test consumer rows."""
+    ordered = sorted(
+        consumers,
+        key=lambda consumer: (
+            consumer["rolloutPriority"],
+            str(consumer["name"]).casefold(),
+        ),
+    )
+    return {
+        "schemaVersion": 4,
+        "rolloutPolicy": {
+            "defaultConcurrency": 1,
+            "cohorts": [
+                {
+                    "name": "canary",
+                    "strategy": "sequential",
+                    "consumers": [consumer["name"] for consumer in ordered],
+                }
+            ],
+        },
+        "consumers": consumers,
+    }
 
 
 class InstallTestCase(unittest.TestCase):

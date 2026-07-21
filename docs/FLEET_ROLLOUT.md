@@ -4,10 +4,12 @@ This repository tracks the known sd-ai-command-pack consumer fleet in
 `docs/fleet/consumers.json`. The manifest is operator-triggered inventory, not
 an unattended rollout system.
 
-The manifest owns rollout order explicitly. The current fast-first order is
-rwbp-coordinator, loadsmith, hoa-manager, rwbp-website, mezmo_benchmark,
-se-ai-command-pack, then anomaly-metric-creator. The first three are the canary
-group; AMC remains last because its CI feedback loop is materially slower.
+The schema-version-4 manifest owns rollout order and cohort policy explicitly.
+The current fast-first order is rwbp-coordinator, loadsmith, hoa-manager,
+rwbp-website, mezmo_benchmark, se-ai-command-pack, then
+anomaly-metric-creator. The first three are sequential canaries. The next three
+form a bounded post-canary cohort with concurrency two. AMC remains a solo
+final cohort because its CI feedback loop is materially slower.
 
 Use the read-only fleet status report before or after rollout activity:
 
@@ -135,9 +137,38 @@ For each `refresh-needed` repo:
    only when finding disposition permits the rollout to continue.
 8. Confirm post-merge provenance reads the target version and the audit passes.
 
-Process consumers in manifest priority order. Do not move to AMC first merely
-because it appears in an operator's local list; the fast canaries are intended
-to expose cross-repo issues before the longest CI cycle begins.
+Process consumers through the manifest policy. Run the canary cohort strictly
+sequentially and do not start later work until every canary is merged, audited,
+and free of pack-owned blockers. After that gate, independent consumer lanes
+may overlap only within the active cohort's configured bound. Each lane owns
+one checkout, branch, and PR; never interleave writes to the same checkout.
+Review and CI may settle concurrently, but housekeeping merges remain one at a
+time in manifest order. Do not move AMC first merely because it appears in an
+operator's local list.
+
+Use the read-only source scheduler before every start or merge decision. Build
+a temporary schema-version-1 snapshot with every manifest consumer exactly
+once and an observed state of `pending`, `in-flight`, `ready`, `at-target`,
+`merged`, `pr-open`, `skipped`, `failed`, or `blocked`:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-wave-plan.py \
+  --fleet docs/fleet/consumers.json --state <temporary-wave-state.json> --json
+```
+
+Pass `--no-merge` to the planner when the fleet command is running in that
+mode. Only then does `pr-open` satisfy the canary gate; the planner also holds
+all merges and returns no `mergeCandidate`. Normal rollouts continue to require
+every canary to be `at-target` or `merged` before later cohorts start.
+
+Start only `canStart`, never exceed `maxConcurrency`, and send only
+`mergeCandidate` through housekeeping. A later ready PR waits for earlier
+unsettled consumers. Set `packBlocker` only from a verified finding-severity
+classification; any pack blocker stops new starts and holds unsettled merges.
+Delete the temporary snapshot after parsing the plan. On interruption, rebuild
+it from live preflight, branch, PR, review, CI, and merge evidence; terminal
+consumers are not restarted.
 
 ## Timing Evidence
 

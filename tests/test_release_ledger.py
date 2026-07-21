@@ -8,6 +8,7 @@ except ModuleNotFoundError as exc:
     from . import install_test_support as _support
 
 json = _support.json
+fleet_manifest = _support.fleet_manifest
 os = _support.os
 subprocess = _support.subprocess
 sys = _support.sys
@@ -69,9 +70,8 @@ class ReleaseLedgerTests(InstallTestCase):
         fleet_path.parent.mkdir(parents=True)
         fleet_path.write_text(
             json.dumps(
-                {
-                    "schemaVersion": 3,
-                    "consumers": [
+                fleet_manifest(
+                    [
                         {
                             "name": "fixture",
                             "github": "example/fixture",
@@ -82,8 +82,8 @@ class ReleaseLedgerTests(InstallTestCase):
                             "candidatePrepare": [],
                             "candidateChecks": [["node", "check.mjs"]],
                         }
-                    ],
-                },
+                    ]
+                ),
                 indent=2,
             )
             + "\n",

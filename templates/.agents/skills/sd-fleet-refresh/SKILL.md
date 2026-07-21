@@ -1,13 +1,15 @@
 ---
 name: sd-fleet-refresh
-description: Use when a pack release must roll across the consumer fleet — run the fleet preflight, then refresh each stale consumer sequentially (branch, install, full-check, PR, watch, gated merge) per docs/FLEET_ROLLOUT.md.
+description: Use when a pack release must roll across the consumer fleet — run fleet preflight, sequential canaries, then bounded post-canary waves with deterministic gated merges per docs/FLEET_ROLLOUT.md.
 ---
 
 # SD Fleet Refresh
 
 Run this project-local skill for `sd-fleet-refresh` and `/sd:fleet-refresh`
 style work, from the sd-ai-command-pack source checkout. It rolls the current
-pack release across the known consumer repositories, one consumer at a time.
+pack release across the known consumer repositories: canaries run sequentially,
+then manifest-configured post-canary cohorts may overlap within a conservative
+bound while merge decisions remain serialized.
 
 `docs/FLEET_ROLLOUT.md` is the procedure authority. This skill orchestrates
 exactly that documented procedure — preflight, then per-consumer branch,
@@ -107,6 +109,52 @@ fleet mutation until the last valid record can be resumed or its input can be
 corrected. Never change, erase, or reinterpret an install, audit, review, CI,
 finding, or housekeeping result to make telemetry succeed.
 
+## Wave planning
+
+The main fleet controller owns the observation snapshot, scheduler calls,
+finding classification, merge order, timing report, and final report. Each
+dispatched consumer lane owns exactly one existing checkout, branch, and PR;
+no second lane may touch that checkout. Consumer lanes may overlap through
+checkout validation, install, audit, local validation, commit/push, PR
+creation, review, and CI wait. The controller alone invokes housekeeping and
+post-merge audit, one merge candidate at a time.
+
+Before every dispatch or merge decision, write a temporary schema-version-1
+snapshot containing every manifest consumer exactly once:
+
+```json
+{
+  "schemaVersion": 1,
+  "consumers": [
+    {"name": "rwbp-coordinator", "state": "at-target", "packBlocker": false}
+  ]
+}
+```
+
+Use live preflight, local branch, PR, review, CI, finding, and merge evidence to
+assign `pending`, `in-flight`, `ready`, `at-target`, `merged`, `pr-open`,
+`skipped`, `failed`, or `blocked`. Never infer `packBlocker`; set it only after
+the finding severity gate verifies a pack-owned blocker. Run:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-wave-plan.py \
+  --fleet docs/fleet/consumers.json --state <temporary-wave-state.json> --json
+```
+
+Append `--no-merge` when that fleet mode is active. In that explicit mode,
+`pr-open` canaries unlock the next consumer while the planner holds all merges
+and emits no `mergeCandidate`; normal runs still require canaries to be
+`at-target` or `merged`.
+
+Delete the temporary snapshot after parsing the result. Start only names in
+`canStart`, never exceed `maxConcurrency`, and consider only `mergeCandidate`
+for housekeeping. A later ready PR waits for earlier manifest-order consumers.
+Any `stopStarting` or `holdMerges` result pauses those actions; a controlled
+planner error is an invalid-pause, not permission to fall back to unbounded or
+completion-order work. Rerunning the planner from refreshed live evidence is
+the resume mechanism: terminal consumers are never restarted.
+
 ## Workflow
 
 1. Initialize the timing run, start its fleet-scoped `preflight` stage, then
@@ -138,12 +186,19 @@ finding, or housekeeping result to make telemetry succeed.
    stop here. Zero consumer mutations. Record `at-target` for consumers already
    current and `skipped` with reason `dry-run did not mutate consumer` for each
    remaining selected consumer, then complete the timing report.
-3. Refresh stale consumers strictly sequentially in the preflight's explicit
-   priority order, one consumer at a time. Coordinator, loadsmith, and HOA are
-   the fast canaries; AMC runs last. Do not reorder from incidental local path
+3. Initialize the wave snapshot from preflight and drive every start and merge
+   decision through the wave planner. The manifest's canary cohort remains
+   strictly sequential and must be fully merged, audited, and free of
+   pack-owned blockers before a later cohort starts. After that gate, dispatch
+   only the planner's bounded `canStart` set. AMC remains in its configured solo
+   final cohort. Do not reorder from incidental local paths, completion time,
    or manifest editing order.
-   Start the next consumer only after the previous one resolves as
-   refreshed+merged, PR-open under `no-merge`, or skipped:
+
+   For each dispatched consumer, run steps 1-8 below in its isolated lane.
+   Those lanes may overlap only when the planner permits it. A lane reports
+   `ready` after review, finding disposition, and CI settle. The controller
+   then runs steps 9-10 only for the planner's single `mergeCandidate`, refreshes
+   live observations, and asks the planner again:
    1. Start `checkout-validation`, verify the consumer checkout has a clean
       working tree, and create a refresh branch from its current default
       branch. If it is dirty, end the stage and consumer as skipped with the
@@ -160,7 +215,8 @@ finding, or housekeeping result to make telemetry succeed.
       `make full-check` or the
       consumer-documented equivalent. If the gate fails, do not open a PR:
       record the consumer as skipped with the failure summary, leave the
-      local branch for inspection, and continue to the next consumer.
+      local branch for inspection, classify the finding, record the precise
+      outcome, and refresh the wave plan.
    5. Bracket `commit-push`. Commit the refreshed files. Before pushing, run
       the source-side
       classifier against the exact base and current head:
@@ -217,7 +273,9 @@ finding, or housekeeping result to make telemetry succeed.
    8. Run `sd-watch-pr` with its internal `no-merge` handoff so required
       checks and review state settle without duplicating housekeeping. End
       `ci-wait` with the exact settled outcome.
-   9. Bracket `housekeeping`, then merge via the consumer's housekeeping gate:
+   9. After the lane reports `ready`, return control to the controller. Only
+      when the planner returns this consumer as `mergeCandidate`, bracket
+      `housekeeping`, then merge via the consumer's housekeeping gate:
       green, comment-clean,
       mergeable, heads identical. With `no-merge`, leave the PR open and
       record the consumer as PR-open instead of invoking housekeeping.
@@ -226,8 +284,9 @@ finding, or housekeeping result to make telemetry succeed.
       install audit passes, per the rollout doc. Finish the consumer's
       housekeeping cleanup — default branch checked out, refresh branch
       deleted, refs pruned — then record `refreshed-merged` and move to the
-      next consumer. `no-merge` records `pr-open`; unavailable, dirty, blocked,
-      or failed consumers use their matching timing outcome and bounded reason.
+      next planner decision. `no-merge` records `pr-open`; unavailable, dirty,
+      blocked, or failed consumers use their matching timing outcome and
+      bounded reason.
 4. Aggregate the per-consumer outcomes into the fleet status table and the
    fleet version summary for the final report. Render a partial timing report
    after an interruption. When every selected consumer has an outcome, run
@@ -315,8 +374,9 @@ campaign open.
   shape exactly; do not invent steps it does not document.
 - This skill never touches a dirty consumer tree. Dirty means skip and
   report — never stash, reset, clean, or install over local changes.
-- Refresh one consumer at a time. Never run parallel consumer refreshes and
-  never interleave consumer branches.
+- Keep canaries sequential. After they succeed, overlap only the scheduler's
+  bounded `canStart` set. Never share a checkout, branch, or PR between lanes,
+  and keep housekeeping merges serialized in manifest order.
 - Consumer merges go only through the green + comment-clean housekeeping
   gate. Never merge a red, commented, or behind consumer PR, and never
   force a merge that GitHub refuses.

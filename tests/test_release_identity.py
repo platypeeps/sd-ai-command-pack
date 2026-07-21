@@ -10,6 +10,7 @@ except ModuleNotFoundError as exc:
     from . import install_test_support as _support
 
 json = _support.json
+fleet_manifest = _support.fleet_manifest
 Path = _support.Path
 unittest = _support.unittest
 PACK_ROOT = _support.PACK_ROOT
@@ -78,7 +79,7 @@ class ReleaseIdentityTests(InstallTestCase):
         path = root / "docs/fleet/consumers.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            json.dumps({"schemaVersion": 3, "consumers": consumers}, indent=2)
+            json.dumps(fleet_manifest(consumers), indent=2)
             + "\n",
             encoding="utf-8",
         )

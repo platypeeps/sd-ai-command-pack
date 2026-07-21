@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.25.0 - 2026-07-20
+
+- Keep fleet canaries sequential, then schedule independent post-canary
+  refresh work in manifest-configured bounded waves while serializing gated
+  merges in deterministic manifest order.
+
 ## 0.24.8 - 2026-07-20
 
 - Report a verified terminal reconciliation attached to a non-terminal run as

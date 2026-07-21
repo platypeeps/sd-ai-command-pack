@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-21T00:34:25Z",
-  "packVersion": "0.24.8",
-  "payloadDigest": "sha256:e6a2042278a589d5daa816492ab89644d2f0974d384bb0c21da1f81032315f87",
-  "fleetManifestDigest": "sha256:1776b0a45d7faa3b20fc61ff0ef8587f7fc577eebc503b7ddce0563479ef247a",
+  "validatedAt": "2026-07-21T02:55:28Z",
+  "packVersion": "0.25.0",
+  "payloadDigest": "sha256:1e83e172de734926ae3093c36756e7796dcc55a9d30cb5ec38a9ac3ea5196ab6",
+  "fleetManifestDigest": "sha256:bf3d4349f6150bf6d2bb1ec03604e50b54596ca024b96363aa7cc5cc7393458f",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "282c07711ee83bb9499b7e8a333193ca63b3be0c",
+      "baseCommit": "39a1296f3fa5fde7ce902e77b54eaf7c7034f8a6",
       "status": "passed",
       "prepares": [
         [
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "b4d2d377a479869e16d1067ed3d12348c8a54ac4",
+      "baseCommit": "6d8229ac5475336553257d228fd74b7605daf45a",
       "status": "passed",
       "prepares": [
         [
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "0b3434c1f6162e507e1fba2e8b83c370c7095c70",
+      "baseCommit": "c8576724e02e099b2c6ab56592fb62d304715c5f",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "4b5462284fa06c7baa1d69e71635a1bdfcae052c",
+      "baseCommit": "e6c69ae634b7b312e97f9b37b7f330d8c551ed58",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "ab71907fde7cd4a8f7c7e06dd1bb6c076f2f9b76",
+      "baseCommit": "f003d66ec99fde44c273da229272c2238301ba09",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -121,7 +121,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "fa6e63fa074c7877e7cd8d84d114e06d537e8f24",
+      "baseCommit": "258f62d3cf8734616e8278a027c9c8e5ccec2b56",
       "status": "passed",
       "prepares": [
         [

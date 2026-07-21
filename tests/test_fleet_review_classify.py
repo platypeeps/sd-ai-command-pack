@@ -10,6 +10,7 @@ except ModuleNotFoundError as exc:
 contextlib = _support.contextlib
 io = _support.io
 json = _support.json
+fleet_manifest = _support.fleet_manifest
 mock = _support.mock
 Path = _support.Path
 unittest = _support.unittest
@@ -35,9 +36,8 @@ class FleetReviewClassifyTests(InstallTestCase):
         path = root.parent / f"{root.name}-fleet.json"
         path.write_text(
             json.dumps(
-                {
-                    "schemaVersion": 3,
-                    "consumers": [
+                fleet_manifest(
+                    [
                         {
                             "name": "fixture",
                             "github": "example/fixture",
@@ -48,8 +48,8 @@ class FleetReviewClassifyTests(InstallTestCase):
                             "candidatePrepare": [],
                             "candidateChecks": [["node", "check.mjs"]],
                         }
-                    ],
-                },
+                    ]
+                ),
                 indent=2,
             )
             + "\n",

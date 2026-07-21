@@ -11,6 +11,7 @@ contextlib = _support.contextlib
 hashlib = _support.hashlib
 io = _support.io
 json = _support.json
+fleet_manifest = _support.fleet_manifest
 mock = _support.mock
 os = _support.os
 Path = _support.Path
@@ -58,9 +59,8 @@ class FleetCandidateTests(InstallTestCase):
         path = root / "fleet.json"
         path.write_text(
             json.dumps(
-                {
-                    "schemaVersion": 3,
-                    "consumers": [
+                fleet_manifest(
+                    [
                         {
                             "name": "fixture",
                             "github": "example/fixture",
@@ -71,8 +71,8 @@ class FleetCandidateTests(InstallTestCase):
                             "candidatePrepare": [[sys.executable, "prepare.py"]],
                             "candidateChecks": [[sys.executable, "check.py"]],
                         }
-                    ],
-                },
+                    ]
+                ),
                 indent=2,
             )
             + "\n",
@@ -443,61 +443,81 @@ class FleetCandidateTests(InstallTestCase):
         }
         missing_prepare = dict(valid)
         missing_prepare.pop("candidatePrepare")
+        malformed_consumer = fleet_manifest([valid])
+        malformed_consumer["consumers"] = ["bad"]
         invalid_manifests = [
-            {},
-            {"schemaVersion": 3, "consumers": []},
-            {"schemaVersion": 3, "consumers": ["bad"]},
-            {"schemaVersion": 3, "consumers": [{**valid, "name": ""}]},
-            {"schemaVersion": 3, "consumers": [{**valid, "name": ".."}]},
-            {"schemaVersion": 3, "consumers": [{**valid, "name": "../escape"}]},
-            {"schemaVersion": 3, "consumers": [{**valid, "name": "nested/name"}]},
-            {"schemaVersion": 3, "consumers": [{**valid, "name": "nested\\name"}]},
-            {"schemaVersion": 3, "consumers": [{**valid, "name": "/absolute"}]},
-            {
-                "schemaVersion": 3,
-                "consumers": [valid, {**valid, "name": "FIXTURE", "rolloutPriority": 20}],
-            },
-            {"schemaVersion": 3, "consumers": [{**valid, "github": "fixture"}]},
-            {"schemaVersion": 3, "consumers": [{**valid, "rolloutPriority": 0}]},
-            {
-                "schemaVersion": 3,
-                "consumers": [valid, {**valid, "name": "two"}],
-            },
-            {
-                "schemaVersion": 3,
-                "consumers": [{**valid, "candidateTimeoutSeconds": 0}],
-            },
-            {"schemaVersion": 3, "consumers": [{**valid, "platforms": []}]},
-            {
-                "schemaVersion": 3,
-                "consumers": [{**valid, "platforms": [1]}],
-            },
-            {"schemaVersion": 3, "consumers": [missing_prepare]},
-            {
-                "schemaVersion": 3,
-                "consumers": [{**valid, "candidatePrepare": "python prepare.py"}],
-            },
-            {
-                "schemaVersion": 3,
-                "consumers": [{**valid, "candidatePrepare": [[""]]}],
-            },
-            {
-                "schemaVersion": 3,
-                "consumers": [{**valid, "candidateChecks": []}],
-            },
-            {
-                "schemaVersion": 3,
-                "consumers": [{**valid, "candidateChecks": [[""]]}],
-            },
+            ({}, "schemaVersion must be 4"),
+            ({"schemaVersion": 3, "consumers": []}, "schemaVersion must be 4"),
+            (malformed_consumer, "consumers[0] must be an object"),
+            (fleet_manifest([{**valid, "name": ""}]), "has invalid name"),
+            (fleet_manifest([{**valid, "name": ".."}]), "name must be a non-path"),
+            (
+                fleet_manifest([{**valid, "name": "../escape"}]),
+                "name must be a non-path",
+            ),
+            (
+                fleet_manifest([{**valid, "name": "nested/name"}]),
+                "name must be a non-path",
+            ),
+            (
+                fleet_manifest([{**valid, "name": "nested\\name"}]),
+                "name must be a non-path",
+            ),
+            (
+                fleet_manifest([{**valid, "name": "/absolute"}]),
+                "name must be a non-path",
+            ),
+            (
+                fleet_manifest(
+                    [valid, {**valid, "name": "FIXTURE", "rolloutPriority": 20}]
+                ),
+                "duplicate fleet consumer name",
+            ),
+            (
+                fleet_manifest([{**valid, "github": "fixture"}]),
+                "invalid github slug",
+            ),
+            (
+                fleet_manifest([{**valid, "rolloutPriority": 0}]),
+                "invalid rolloutPriority",
+            ),
+            (
+                fleet_manifest([valid, {**valid, "name": "two"}]),
+                "duplicate fleet rolloutPriority",
+            ),
+            (
+                fleet_manifest([{**valid, "candidateTimeoutSeconds": 0}]),
+                "candidateTimeoutSeconds must be between",
+            ),
+            (fleet_manifest([{**valid, "platforms": []}]), "must list platforms"),
+            (fleet_manifest([{**valid, "platforms": [1]}]), "has invalid platform"),
+            (fleet_manifest([missing_prepare]), "must list candidatePrepare"),
+            (
+                fleet_manifest(
+                    [{**valid, "candidatePrepare": "python prepare.py"}]
+                ),
+                "must list candidatePrepare",
+            ),
+            (
+                fleet_manifest([{**valid, "candidatePrepare": [[""]]}]),
+                "candidatePrepare[0] must contain non-empty string arguments",
+            ),
+            (
+                fleet_manifest([{**valid, "candidateChecks": []}]),
+                "must list candidateChecks",
+            ),
+            (
+                fleet_manifest([{**valid, "candidateChecks": [[""]]}]),
+                "candidateChecks[0] must contain non-empty string arguments",
+            ),
         ]
-        for manifest in invalid_manifests:
+        for manifest, expected_error in invalid_manifests:
             with self.subTest(manifest=manifest):
-                with self.assertRaises(candidate.FleetConfigError):
+                with self.assertRaises(candidate.FleetConfigError) as raised:
                     fleet_lib.parse_fleet_consumers(manifest)
+                self.assertIn(expected_error, str(raised.exception))
 
-        consumer = fleet_lib.parse_fleet_consumers(
-            {"schemaVersion": 3, "consumers": [valid]}
-        )[0]
+        consumer = fleet_lib.parse_fleet_consumers(fleet_manifest([valid]))[0]
         malformed_ledger = {
             "schemaVersion": 0,
             "packVersion": "old",

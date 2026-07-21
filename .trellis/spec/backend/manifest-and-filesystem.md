@@ -69,11 +69,14 @@ a separate CI-only interpretation of shipped-payload paths.
    - `create-release-tag.py --base REF --head REF` validates the ledger from the
      exact committed head tree before creating `v<manifest-version>`.
 3. **Contracts**:
-   - `docs/fleet/consumers.json` schema version 3 requires unique consumer
+   - `docs/fleet/consumers.json` schema version 4 requires unique consumer
    names that are safe non-path identifiers, GitHub slugs, rollout priorities,
    bounded positive timeouts,
      platform lists, explicit `candidatePrepare` argv arrays that may be empty,
      and `candidateChecks` as non-empty argv arrays.
+   - Schema version 4 also requires `rolloutPolicy`: a bounded default
+     concurrency, a first sequential `canary` cohort, and ordered cohorts that
+     include every consumer exactly once in rollout-priority order.
    - `docs/fleet/candidate-validation.json` schema version 2 records
      `packVersion`, `payloadDigest`, `fleetManifestDigest`, and one passing row
      per consumer with its checked base commit plus exact preparation and check
@@ -1060,6 +1063,93 @@ Reference files:
 - `docs/FLEET_ROLLOUT.md`
 - `tests/test_fleet_timing.py`
 - `tests/test_sdlc_commands.py`
+
+## Scenario: Controlled Post-Canary Fleet Waves
+
+### 1. Scope / Trigger
+
+Use this contract after release preflight identifies stale consumers. It
+reduces rollout critical path by overlapping independent post-canary work while
+preserving the existing release, review, finding, CI, and housekeeping gates.
+
+### 2. Signatures
+
+- Fleet manifest schema version 4 adds `rolloutPolicy.defaultConcurrency` and
+  ordered cohorts with `name`, `strategy`, optional `maxConcurrency`, and
+  `consumers`.
+- `parse_fleet_rollout_policy(...) -> FleetRolloutPolicy` is the shared strict
+  parser.
+- `sd-ai-command-pack-fleet-wave-plan.py --fleet PATH --state PATH
+  [--no-merge] [--json]` reads one schema-version-1 observation snapshot and
+  emits one plan.
+
+### 3. Contracts
+
+- The first cohort is a sequential `canary`; later cohorts remain locked until
+  every canary is `at-target` or `merged`. Explicit `--no-merge` mode also
+  accepts `pr-open`, holds merges, and suppresses merge candidates; normal mode
+  does not.
+- Cohorts include every manifest consumer exactly once and preserve canonical
+  rollout-priority order. Sequential concurrency is one; bounded-parallel
+  concurrency is at least two and no greater than the configured default or
+  global maximum four.
+- `canStart` fills only the active cohort's remaining slots. `mergeCandidate`
+  is at most the first non-terminal manifest-order consumer and only when it is
+  `ready`. A later ready PR waits.
+- Each concurrent lane owns one checkout, branch, and PR. The controller owns
+  scheduler calls, finding classification, serialized housekeeping merges,
+  timing, resume observations, and the final manifest-order report.
+- A verified `packBlocker` stops starts and holds unsettled merges. Terminal
+  consumers are not restarted when live evidence reconstructs an interrupted
+  run.
+
+### 4. Validation & Error Matrix
+
+- Missing/unknown policy fields, invalid strategy/concurrency, unsafe or
+  duplicate cohort names, missing/repeated/unknown/reordered consumers ->
+  controlled configuration error.
+- Wrong state schema or fields, unknown/duplicate/missing consumers, invalid
+  state, non-boolean blocker, unsafe input file, or active count above the
+  cohort bound -> exit `2` without traceback or mutation.
+- Canary terminal state other than the active mode's accepted states -> stop
+  starts and hold merges with a bounded canary-health reason.
+
+### 5. Good / Base / Bad Cases
+
+- Good: sequential canaries merge; two post-canary lanes start; the remaining
+  lane starts when one slot clears; ready PRs merge in manifest order; the solo
+  final cohort starts last.
+- Base: on resume one wave consumer is merged, one is in flight, and one is
+  pending; only the pending consumer may fill the free slot.
+- Bad: dispatch every stale consumer, share a checkout, or merge whichever CI
+  completes first.
+
+### 6. Tests Required
+
+- Parser matrices cover schema, concurrency, strategy, cohort identity,
+  complete membership, and order.
+- Scheduler and CLI tests cover normal and `--no-merge` canary gating, bounded
+  starts, deterministic merge hold, partial failure, blocker propagation,
+  completion, resume, controlled errors, privacy, and human/JSON output.
+- Skill, adapter, install-audit, generated-parity, and per-file coverage tests
+  prove the helper stays source-only and public adapters expose no state knob.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: start every stale consumer and merge in CI completion order
+Wrong: infer a pack blocker from an unclassified consumer failure
+Correct: start only canStart, set packBlocker from verified classification,
+         and merge only mergeCandidate through housekeeping
+```
+
+Reference files:
+
+- `docs/fleet/consumers.json`
+- `scripts/sd-ai-command-pack-fleet-wave-plan.py`
+- `templates/scripts/sd_ai_command_pack_fleet_lib.py`
+- `templates/.agents/skills/sd-fleet-refresh/SKILL.md`
+- `tests/test_fleet_wave_plan.py`
 
 ## Read-Only Status And Housekeeping Delegation
 
