@@ -240,6 +240,21 @@ class ToolingBodyPreparationTests(unittest.TestCase):
             self.assertEqual(status, 0, messages)
             self.assertEqual(body_file.read_text(encoding="utf-8"), original)
 
+    def test_empty_diff_returns_not_applicable_without_rewriting_body(self) -> None:
+        original = "Commit-derived summary.\n"
+        with tempfile.TemporaryDirectory() as raw:
+            root, changed_file, body_file = self._fixture_root(
+                Path(raw),
+                changed="",
+                body=original,
+            )
+
+            status, messages = self._prepare(root, changed_file, body_file)
+
+            self.assertEqual(status, self.mod.PREPARE_NOT_APPLICABLE, messages)
+            self.assertEqual(body_file.read_text(encoding="utf-8"), original)
+            self.assertTrue(any("branch diff is empty" in item for item in messages))
+
     def test_mixed_scope_returns_not_applicable_without_rewriting_body(self) -> None:
         original = "Commit-derived summary.\n"
         with tempfile.TemporaryDirectory() as raw:
