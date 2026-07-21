@@ -275,7 +275,7 @@ def ensure_kb_root(root: Path, *, create: bool) -> Path:
         return kb_root
 
     if create:
-        kb_root.mkdir(parents=True)
+        kb_root.mkdir(parents=True, exist_ok=True)
     return kb_root
 
 

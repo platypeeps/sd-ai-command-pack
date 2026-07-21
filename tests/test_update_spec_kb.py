@@ -906,7 +906,7 @@ class UpdateSpecKbTests(InstallTestCase):
                 [
                     "git",
                     "-c",
-                    "core.excludesFile=/dev/null",
+                    f"core.excludesFile={os.devnull}",
                     "check-ignore",
                     "-q",
                     "--",
@@ -922,6 +922,33 @@ class UpdateSpecKbTests(InstallTestCase):
                 "/.obsidian-kb\n",
                 (root / ".gitignore").read_text(encoding="utf-8"),
             )
+
+    def test_update_spec_kb_root_creation_tolerates_concurrent_directory(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        module = self.load_module_from_path(
+            install.ROOT
+            / "templates/scripts/sd-ai-command-pack-update-spec-kb.py",
+            "update_spec_kb_concurrent_root",
+        )
+        original_mkdir = Path.mkdir
+
+        def concurrent_mkdir(path: Path, *args: object, **kwargs: object) -> None:
+            if not path.exists():
+                original_mkdir(path, parents=True)
+            original_mkdir(path, *args, **kwargs)
+
+        with mock.patch.object(
+            Path,
+            "mkdir",
+            autospec=True,
+            side_effect=concurrent_mkdir,
+        ):
+            kb_root = module.ensure_kb_root(root, create=True)
+
+        self.assertEqual(kb_root, root / ".obsidian-kb")
+        self.assertTrue(kb_root.is_dir())
 
     def test_update_spec_kb_managed_ignore_covers_real_directory(self) -> None:
         root = self.make_repo()
@@ -948,7 +975,7 @@ class UpdateSpecKbTests(InstallTestCase):
             [
                 "git",
                 "-c",
-                "core.excludesFile=/dev/null",
+                f"core.excludesFile={os.devnull}",
                 "check-ignore",
                 "-q",
                 "--",
