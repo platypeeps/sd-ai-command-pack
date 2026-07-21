@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 175
+- **Total Sessions**: 176
 - **Last Active**: 2026-07-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~926 | Active |
+| `journal-4.md` | ~965 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 176 | 2026-07-21 | Enforce journal validation consistency | `eb4e61e`, `fc51ac9`, `60ebd64`, `1a5666f` | `codex/journal-validation-consistency` |
 | 175 | 2026-07-21 | Harden Trellis task metadata review preflight | `b877110`, `f47bd15`, `f67d60b`, `b992879`, `47a0c71`, `9e509f9` | `codex/review-learning-task-metadata-integrity` |
 | 174 | 2026-07-21 | Rename upstream Trellis OpenCode task | `dac3fa3` | `codex/rename-upstream-trellis-task` |
 | 173 | 2026-07-21 | Review PR #206 | `1aed497`, `a650c75` | `codex/avoid-redundant-prism-scans` |
