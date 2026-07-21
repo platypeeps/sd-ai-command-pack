@@ -271,7 +271,10 @@ bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
 
 case "$PREPARE_STATUS" in
   0)
-    gh pr edit --body-file "$PR_BODY_FILE"
+    if ! gh pr edit --body-file "$PR_BODY_FILE"; then
+      printf '%s\n' "error: automatic PR-body update failed; stop before Step 6." >&2
+      exit 1
+    fi
     ;;
   3)
     : # The helper already reported the bounded non-error result on stdout.

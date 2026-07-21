@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-21T21:39:04Z",
+  "validatedAt": "2026-07-21T22:01:53Z",
   "packVersion": "0.27.0",
-  "payloadDigest": "sha256:c19165192812976472d6254265bb501a36b75c8a1223dffebe18c72a0981b216",
+  "payloadDigest": "sha256:8976b08af864c50255e91e8f165e8c419671247c577f404e832921c11587308e",
   "fleetManifestDigest": "sha256:bf3d4349f6150bf6d2bb1ec03604e50b54596ca024b96363aa7cc5cc7393458f",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "1edec2f6ddc2a9c86246e513ad44aa690fe2d780",
+      "baseCommit": "86dc0bb117d90ac12ab02a5f749a5d88d0ed7071",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "28a540da1d60532323d94f490b36da387e0e65f1",
+      "baseCommit": "1ec77d14abca6be6c43f3bf788e46a1b823352ad",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "3bc404180dddede0b3228ff02f5ce2aa9a16a5d8",
+      "baseCommit": "cb5a57345859ae26b911eb1be7cbbf94949b3739",
       "status": "passed",
       "prepares": [],
       "checks": [
