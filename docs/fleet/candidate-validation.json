@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-21T21:09:21Z",
+  "validatedAt": "2026-07-21T21:19:38Z",
   "packVersion": "0.27.0",
-  "payloadDigest": "sha256:01e902a4386b5964d586182687d469e813a7e6087947a55a07cb9ffada46fe03",
+  "payloadDigest": "sha256:b55609cf6242e86f455e00be105fe8eaf36b4de4af1a92d368099f82eb567803",
   "fleetManifestDigest": "sha256:bf3d4349f6150bf6d2bb1ec03604e50b54596ca024b96363aa7cc5cc7393458f",
   "consumers": [
     {
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "2b6b2637aaf5c52e8874ef332867e47c9525a184",
+      "baseCommit": "6df59e4d6036d7a1852943631d4d3df55119dd97",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "a24926b62e95af48576433757e7a00a1c2d41f3f",
+      "baseCommit": "28a540da1d60532323d94f490b36da387e0e65f1",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "35c8b5dfde81bd1fce46dbb88c2d6ea7965f1ae5",
+      "baseCommit": "da80feb4070a6fe5f1ef6e34de2f09a85a3d80d4",
       "status": "passed",
       "prepares": [],
       "checks": [

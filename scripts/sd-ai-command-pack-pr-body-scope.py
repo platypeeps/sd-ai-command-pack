@@ -632,9 +632,12 @@ def prepare_tooling_body(
     if tooling_error is not None:
         return 2, [tooling_error]
     if unmatched:
+        rendered_unmatched = ", ".join(
+            json.dumps(path, ensure_ascii=True) for path in unmatched[:5]
+        )
         return PREPARE_NOT_APPLICABLE, [
             "info: PR body left unchanged because the branch diff is not "
-            f"tooling/generated-only: {', '.join(unmatched[:5])}"
+            f"tooling/generated-only: {rendered_unmatched}"
         ]
 
     body, mode, body_error = _load_regular_utf8_file(body_file)

@@ -178,6 +178,19 @@ class ToolingBodyPreparationTests(unittest.TestCase):
             ],
         )
 
+        with tempfile.TemporaryDirectory() as raw:
+            root, changed_file, body_file = self._fixture_root(
+                Path(raw),
+                changed=changed,
+            )
+
+            status, messages = self._prepare(root, changed_file, body_file)
+
+            self.assertEqual(status, self.mod.PREPARE_NOT_APPLICABLE, messages)
+            diagnostic = "\n".join(messages)
+            self.assertNotIn("option-like\nname.py", diagnostic)
+            self.assertIn(r"option-like\nname.py", diagnostic)
+
     def test_bookkeeping_only_body_preserves_fill_content_and_appends_scope(self) -> None:
         original = "Commit-derived summary with `code`, $VALUE, and $(literal).\n"
         with tempfile.TemporaryDirectory() as raw:
