@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 163
+- **Total Sessions**: 164
 - **Last Active**: 2026-07-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~453 | Active |
+| `journal-4.md` | ~495 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 164 | 2026-07-20 | Fix terminal reconciliation diagnostic | `a117861`, `b079dff` | `codex/fix-terminal-reconciliation-status-diagnostic` |
 | 163 | 2026-07-20 | Require remembered branch evidence | `0cb6e81` | `codex/require-remembered-branch-evidence` |
 | 162 | 2026-07-20 | Clarify stale terminal lock recovery | `54962ce`, `efdb7a4`, `e3b6638`, `f649cca`, `820b394`, `d8421bf` | `codex/fix-stale-terminal-lock-guidance` |
 | 161 | 2026-07-20 | Fix post-squash work-loop reconciliation | `91cbd72` | `codex/fix-squash-followup-reconcile` |

@@ -459,3 +459,37 @@ Released sd-ai-command-pack 0.24.7 so the post-squash historical shipped-SHA exc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 164: Fix terminal reconciliation diagnostic
+
+**Date**: 2026-07-20
+**Task**: Fix terminal reconciliation diagnostic
+**Branch**: `codex/fix-terminal-reconciliation-status-diagnostic`
+
+### Summary
+
+Corrected terminal reconciliation cross-field diagnostic attribution, released candidate payload 0.24.8, validated all seven fleet consumers, and resolved upstream PR 197 review feedback with green CI.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a117861` | (see git log) |
+| `b079dff` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
