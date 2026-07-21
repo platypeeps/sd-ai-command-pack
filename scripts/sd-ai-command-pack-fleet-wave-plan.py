@@ -35,6 +35,7 @@ TERMINAL_STATES = frozenset(
     {"at-target", "merged", "pr-open", "skipped", "failed", "blocked"}
 )
 CANARY_SUCCESS_STATES = frozenset({"at-target", "merged"})
+NO_MERGE_CANARY_SUCCESS_STATES = CANARY_SUCCESS_STATES | {"pr-open"}
 
 
 class FleetWavePlanError(ValueError):
@@ -160,6 +161,8 @@ def _result(
 def plan_rollout(
     policy: fleet_lib.FleetRolloutPolicy,
     observations: Mapping[str, Mapping[str, Any]],
+    *,
+    no_merge: bool = False,
 ) -> dict[str, Any]:
     blockers = [
         name for name, row in observations.items() if row.get("packBlocker") is True
@@ -172,6 +175,9 @@ def plan_rollout(
             reason=f"pack blocker reported by {blockers[0]}",
         )
 
+    canary_success_states = (
+        NO_MERGE_CANARY_SUCCESS_STATES if no_merge else CANARY_SUCCESS_STATES
+    )
     active_cohort: fleet_lib.FleetRolloutCohort | None = None
     for index, cohort in enumerate(policy.cohorts):
         states = [str(observations[name]["state"]) for name in cohort.consumers]
@@ -179,7 +185,7 @@ def plan_rollout(
             failed_canaries = [
                 name
                 for name, state in zip(cohort.consumers, states, strict=True)
-                if state in TERMINAL_STATES and state not in CANARY_SUCCESS_STATES
+                if state in TERMINAL_STATES and state not in canary_success_states
             ]
             if failed_canaries:
                 return _result(
@@ -188,7 +194,7 @@ def plan_rollout(
                     hold_merges=True,
                     reason=f"canary health is incomplete at {failed_canaries[0]}",
                 )
-            if all(state in CANARY_SUCCESS_STATES for state in states):
+            if all(state in canary_success_states for state in states):
                 continue
         elif all(state in TERMINAL_STATES for state in states):
             continue
@@ -196,7 +202,7 @@ def plan_rollout(
         break
 
     if active_cohort is None:
-        return _result(cohort=None, complete=True)
+        return _result(cohort=None, hold_merges=no_merge, complete=True)
 
     active_names = [
         name
@@ -215,13 +221,14 @@ def plan_rollout(
     ][:capacity]
 
     merge_candidate: str | None = None
-    for name in active_cohort.consumers:
-        state = observations[name]["state"]
-        if state in TERMINAL_STATES:
-            continue
-        if state == "ready":
-            merge_candidate = name
-        break
+    if not no_merge:
+        for name in active_cohort.consumers:
+            state = observations[name]["state"]
+            if state in TERMINAL_STATES:
+                continue
+            if state == "ready":
+                merge_candidate = name
+            break
 
     reason: str | None = None
     if not can_start and merge_candidate is None:
@@ -230,6 +237,7 @@ def plan_rollout(
         cohort=active_cohort,
         can_start=can_start,
         merge_candidate=merge_candidate,
+        hold_merges=no_merge,
         reason=reason,
     )
 
@@ -245,6 +253,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="schema-versioned fleet manifest",
     )
     parser.add_argument("--state", type=Path, required=True, help="observed wave state")
+    parser.add_argument(
+        "--no-merge",
+        action="store_true",
+        help="treat PR-open canaries as settled and suppress merge candidates",
+    )
     parser.add_argument("--json", action="store_true")
     return parser
 
@@ -276,7 +289,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _load_json_object(args.state, "wave state"),
             consumers,
         )
-        plan = plan_rollout(policy, observations)
+        plan = plan_rollout(policy, observations, no_merge=args.no_merge)
     except (FleetWavePlanError, fleet_lib.FleetConfigError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

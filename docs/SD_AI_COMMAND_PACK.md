@@ -965,6 +965,9 @@ names such as `loadsmith rwbp-website`, or `consumer=a,b`, filter the run;
 `no-merge` stops before merging, `dry-run` reports preflight only, and
 `remote-review` forces normal remote review, while `remote=<name>` selects the
 release-authority Git remote (default `origin`).
+In `no-merge` mode the source scheduler accepts PR-open canaries as settled,
+holds all merges, and emits no merge candidate; normal mode still requires
+canaries to be at-target or merged.
 Before it inventories consumers, preflight requires the matching local and
 remote `v<version>` tag identities, tagged version and payload, ancestry, and
 tagged plus current full-fleet candidate ledgers to agree. Missing, stale,

@@ -118,9 +118,11 @@ appear exactly once. `packBlocker` is a boolean.
 }
 ```
 
-- Canaries start one at a time. Later cohorts remain locked until every canary
-  is `at-target` or `merged`; `pr-open`, `skipped`, `failed`, or `blocked`
-  cannot prove canary health.
+- Canaries start one at a time. In normal mode, later cohorts remain locked
+  until every canary is `at-target` or `merged`; `pr-open`, `skipped`,
+  `failed`, or `blocked` cannot prove canary health. Explicit `--no-merge`
+  mode additionally accepts `pr-open`, holds all merges, and never emits a
+  merge candidate.
 - A later cohort begins only after the preceding cohort has terminal outcomes.
   Consumer-owned `skipped` or `failed` outcomes remain reportable and do not
   become pack blockers by inference.
@@ -128,7 +130,8 @@ appear exactly once. `packBlocker` is a boolean.
   remaining concurrency slots.
 - `mergeCandidate` is at most one consumer: the first non-terminal consumer in
   canonical manifest order, and only when its state is `ready`. A later ready
-  PR waits behind an earlier unsettled consumer.
+  PR waits behind an earlier unsettled consumer. It is always null in explicit
+  `--no-merge` mode.
 - Any `packBlocker: true` sets both `stopStarting` and `holdMerges`, returns no
   starts or merge candidate, and identifies the blocker state without echoing
   review bodies, paths, credentials, or command output.
@@ -207,4 +210,3 @@ infer it is consumer-owned and continue.
 
 Correct: preserve the observed failure, run the existing finding severity gate,
 and set `packBlocker` only from its verified blocker disposition.
-

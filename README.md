@@ -321,7 +321,9 @@ in private local state without weakening a delivery gate or adding public
 adapter arguments. Bare consumer names select a subset, for example
 `/sd:fleet-refresh loadsmith rwbp-website`; `consumer=`, `dry-run`, and
 `no-merge` remain available explicitly, `remote-review` forces remote review,
-and `remote=<name>` selects a release remote other than `origin`.
+and `remote=<name>` selects a release remote other than `origin`. The scheduler
+receives the explicit `no-merge` mode so PR-open canaries may unlock later
+consumer work without ever producing a merge candidate.
 
 ### sd-test-gaps
 

@@ -1079,13 +1079,16 @@ preserving the existing release, review, finding, CI, and housekeeping gates.
   `consumers`.
 - `parse_fleet_rollout_policy(...) -> FleetRolloutPolicy` is the shared strict
   parser.
-- `sd-ai-command-pack-fleet-wave-plan.py --fleet PATH --state PATH [--json]`
-  reads one schema-version-1 observation snapshot and emits one plan.
+- `sd-ai-command-pack-fleet-wave-plan.py --fleet PATH --state PATH
+  [--no-merge] [--json]` reads one schema-version-1 observation snapshot and
+  emits one plan.
 
 ### 3. Contracts
 
 - The first cohort is a sequential `canary`; later cohorts remain locked until
-  every canary is `at-target` or `merged`.
+  every canary is `at-target` or `merged`. Explicit `--no-merge` mode also
+  accepts `pr-open`, holds merges, and suppresses merge candidates; normal mode
+  does not.
 - Cohorts include every manifest consumer exactly once and preserve canonical
   rollout-priority order. Sequential concurrency is one; bounded-parallel
   concurrency is at least two and no greater than the configured default or
@@ -1108,8 +1111,8 @@ preserving the existing release, review, finding, CI, and housekeeping gates.
 - Wrong state schema or fields, unknown/duplicate/missing consumers, invalid
   state, non-boolean blocker, unsafe input file, or active count above the
   cohort bound -> exit `2` without traceback or mutation.
-- Canary terminal state other than `at-target` or `merged` -> stop starts and
-  hold merges with a bounded canary-health reason.
+- Canary terminal state other than the active mode's accepted states -> stop
+  starts and hold merges with a bounded canary-health reason.
 
 ### 5. Good / Base / Bad Cases
 
@@ -1125,9 +1128,9 @@ preserving the existing release, review, finding, CI, and housekeeping gates.
 
 - Parser matrices cover schema, concurrency, strategy, cohort identity,
   complete membership, and order.
-- Scheduler and CLI tests cover canary gating, bounded starts, deterministic
-  merge hold, partial failure, blocker propagation, completion, resume,
-  controlled errors, privacy, and human/JSON output.
+- Scheduler and CLI tests cover normal and `--no-merge` canary gating, bounded
+  starts, deterministic merge hold, partial failure, blocker propagation,
+  completion, resume, controlled errors, privacy, and human/JSON output.
 - Skill, adapter, install-audit, generated-parity, and per-file coverage tests
   prove the helper stays source-only and public adapters expose no state knob.
 

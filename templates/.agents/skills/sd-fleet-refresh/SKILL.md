@@ -142,6 +142,11 @@ bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
   --fleet docs/fleet/consumers.json --state <temporary-wave-state.json> --json
 ```
 
+Append `--no-merge` when that fleet mode is active. In that explicit mode,
+`pr-open` canaries unlock the next consumer while the planner holds all merges
+and emits no `mergeCandidate`; normal runs still require canaries to be
+`at-target` or `merged`.
+
 Delete the temporary snapshot after parsing the result. Start only names in
 `canStart`, never exceed `maxConcurrency`, and consider only `mergeCandidate`
 for housekeeping. A later ready PR waits for earlier manifest-order consumers.

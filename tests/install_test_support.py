@@ -61,7 +61,10 @@ def fleet_manifest(consumers: list[dict[str, object]]) -> dict[str, object]:
     """Build the smallest valid schema-4 fleet around test consumer rows."""
     ordered = sorted(
         consumers,
-        key=lambda consumer: (consumer["rolloutPriority"], consumer["name"]),
+        key=lambda consumer: (
+            consumer["rolloutPriority"],
+            str(consumer["name"]).casefold(),
+        ),
     )
     return {
         "schemaVersion": 4,

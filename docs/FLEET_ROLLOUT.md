@@ -157,6 +157,11 @@ bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
   --fleet docs/fleet/consumers.json --state <temporary-wave-state.json> --json
 ```
 
+Pass `--no-merge` to the planner when the fleet command is running in that
+mode. Only then does `pr-open` satisfy the canary gate; the planner also holds
+all merges and returns no `mergeCandidate`. Normal rollouts continue to require
+every canary to be `at-target` or `merged` before later cohorts start.
+
 Start only `canStart`, never exceed `maxConcurrency`, and send only
 `mergeCandidate` through housekeeping. A later ready PR waits for earlier
 unsettled consumers. Set `packBlocker` only from a verified finding-severity

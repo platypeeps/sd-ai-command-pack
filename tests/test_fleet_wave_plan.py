@@ -130,12 +130,42 @@ class FleetWavePlanTests(InstallTestCase):
         canary_failure = planner.plan_rollout(
             policy, self.observations(**{"canary-a": "failed"})
         )
+        pr_open_normal = planner.plan_rollout(
+            policy, self.observations(**{"canary-a": "pr-open"})
+        )
+        pr_open_no_merge = planner.plan_rollout(
+            policy,
+            self.observations(**{"canary-a": "pr-open"}),
+            no_merge=True,
+        )
 
         self.assertEqual(initial["canStart"], ["canary-a"])
         self.assertEqual(after_first["canStart"], ["canary-b"])
         self.assertEqual(canary_failure["canStart"], [])
         self.assertTrue(canary_failure["stopStarting"])
         self.assertTrue(canary_failure["holdMerges"])
+        self.assertTrue(pr_open_normal["stopStarting"])
+        self.assertEqual(pr_open_no_merge["canStart"], ["canary-b"])
+        self.assertTrue(pr_open_no_merge["holdMerges"])
+
+    def test_no_merge_mode_unlocks_pr_open_canaries_and_suppresses_merges(self) -> None:
+        planner = self.load_planner()
+        policy = self.policy(planner)
+        plan = planner.plan_rollout(
+            policy,
+            self.observations(
+                **{
+                    "canary-a": "pr-open",
+                    "canary-b": "pr-open",
+                    "wave-a": "ready",
+                }
+            ),
+            no_merge=True,
+        )
+
+        self.assertEqual(plan["canStart"], ["wave-b"])
+        self.assertIsNone(plan["mergeCandidate"])
+        self.assertTrue(plan["holdMerges"])
 
     def test_post_canary_starts_are_bounded_and_resumable(self) -> None:
         planner = self.load_planner()
@@ -538,6 +568,28 @@ class FleetWavePlanTests(InstallTestCase):
                 result = planner.main(["--fleet", str(fleet), "--state", str(state), *extra])
             self.assertEqual(result, 0)
             self.assertIn(expected, output.getvalue())
+
+        state.write_text(
+            json.dumps(
+                self.state_payload(**{"canary-a": "pr-open", "canary-b": "pr-open"})
+            ),
+            encoding="utf-8",
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = planner.main(
+                [
+                    "--fleet",
+                    str(fleet),
+                    "--state",
+                    str(state),
+                    "--no-merge",
+                    "--json",
+                ]
+            )
+        self.assertEqual(result, 0)
+        self.assertIn('"canStart":["wave-a","wave-b"]', output.getvalue())
+        self.assertIn('"holdMerges":true', output.getvalue())
 
     def test_cli_errors_are_controlled_and_do_not_echo_paths(self) -> None:
         planner = self.load_planner()
