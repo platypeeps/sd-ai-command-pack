@@ -185,7 +185,7 @@ keeps `ready_for_review` workflows from starting before local review is clean.
 ## Step 1.5: Post-Merge Handoff
 
 If the PR is already merged, do not continue the review loop. If authorized
-`defer-finish-work` mode is active, cancel the deferral and run the Trellis
+`defer-finish-work` mode is active, cancel the deferral and run the SD
 finish-work procedure from Step 8 first; the deferred merge tail cannot own
 finish-work after an external merge has already ended the normal chain. Then
 run housekeeping inside the current command run:
@@ -671,16 +671,23 @@ PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq .state)
   `Finish-work deferred to the fleet housekeeping tail.` and return the compact
   review result to that workflow.
 - Otherwise, including standalone `sd-review-pr`, `sd-ship until=review`, and
-  a PR that became merged during the review loop, run the Trellis finish-work
+  a PR that became merged during the review loop, run the SD finish-work
   flow automatically. Do not ask whether to run it; a clean review loop is the
   trigger.
 
 When finish-work is not deferred:
 
-1. Read `.agents/skills/trellis-finish-work/SKILL.md`.
-2. Use that skill as the primary instructions to archive completed task state
-   and record the session journal.
-3. If finish-work creates archive or journal commits, push the current branch
+1. Resolve the `sd-finish-work` skill by name using the agent's trusted skill
+   discovery mechanism for installed skills.
+2. If that skill is missing, unreadable, empty, resolves to more than one
+   candidate, fails validation, defines contradictory steps that violate this
+   command's safety rules, or requires unavailable tools, stop and report the
+   exact blocker.
+3. Execute `sd-finish-work` as the primary instructions. That wrapper owns
+   resolving `trellis-finish-work` and recording the journal through
+   `scripts/sd-ai-command-pack-record-session.py`; do not bypass it with a
+   direct Trellis finish-work invocation.
+4. If finish-work creates archive or journal commits, push the current branch
    after those commits are created:
 
 ```bash
@@ -689,7 +696,7 @@ git push
 ```
 
 If non-deferred finish-work detects uncommitted PR work or ambiguous unrelated
-files, follow the routing in `trellis-finish-work` rather than forcing a
+files, follow the routing in `sd-finish-work` rather than forcing a
 commit. The standalone or review-stop loop is complete only after finish-work
 has either completed successfully or reported a concrete blocker. In deferred
 mode, the review loop is complete only after the handoff is explicit and the
