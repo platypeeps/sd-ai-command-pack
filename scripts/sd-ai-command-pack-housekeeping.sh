@@ -247,7 +247,7 @@ refresh_obsidian_kb() {
     return 0
   fi
 
-  add_anomaly "Obsidian KB refresh failed; resolve the reported conflict, then run: bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-update-spec-kb.py"
+  add_anomaly "Obsidian KB refresh failed; resolve the reported issue, then run: bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-update-spec-kb.py"
   return 1
 }
 

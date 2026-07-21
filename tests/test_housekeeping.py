@@ -227,6 +227,8 @@ class HousekeepingTests(InstallTestCase):
         ]:
             self.assertIn(text, script)
         self.assertNotIn("--if-present", script)
+        self.assertNotIn("resolve the reported conflict", script)
+        self.assertIn("resolve the reported issue", script)
         self.assertIn("An absent `.obsidian-kb` is\n   created", skill)
 
         refresh_index = script.index("if ! refresh_obsidian_kb; then")
