@@ -1209,9 +1209,13 @@ class FullCheckTests(InstallTestCase):
         (root / "README.md").write_text(
             "# Unverifiable stale project\n", encoding="utf-8"
         )
+        inherited_path = os.environ.get("PATH") or os.defpath
+        runtime_path = os.pathsep.join(
+            [str(stub_bin), str(Path(sys.executable).parent), inherited_path]
+        )
         result = self._run_full_check_kb_lane(
             root,
-            {"PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"},
+            {"PATH": runtime_path},
         )
 
         self.assertNotEqual(result.returncode, 0, result.stdout)
