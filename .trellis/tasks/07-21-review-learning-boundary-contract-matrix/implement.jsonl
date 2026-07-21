@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Use the executable boundary contracts and sd-review-pr advisory disposition rules as the matrix source of truth."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Cover repository path, symlink, strict-schema, subprocess, and fail-closed filesystem boundaries."}

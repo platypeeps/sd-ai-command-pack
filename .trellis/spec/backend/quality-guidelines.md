@@ -95,6 +95,15 @@ that exercise the generic JavaScript review preflight.
   context into scope. Parsed records with an own `_example` key fail; empty and
   grounded context pass, while untouched historical and symlinked context files
   remain outside the check.
+- Diff-scoped Trellis task metadata checks inspect every added or modified
+  `.trellis/tasks/**/task.json` without migrating untouched history. Records
+  must use the active or dated archive layout; keep `id`, `name`, and the dated
+  directory suffix aligned, lifecycle timestamps coherent with `status`,
+  `base_branch` non-empty, an optional `branch` distinct from its base, and
+  parent/child links present and reciprocal. Stacked branch bases are valid.
+  Missing/deleted old paths are ignored during moves, while malformed JSON,
+  oversized or unreadable files, unsafe symlinks, invalid layouts, and
+  unverifiable linked records fail closed with path- and field-specific output.
 - A repository-wide bounded scan inspects regular `task.json` files in direct
   `.trellis/tasks/` children. A record with `status: completed` fails with the
   Trellis archive command; the `archive/` subtree, non-completed records,
@@ -118,6 +127,12 @@ that exercise the generic JavaScript review preflight.
   current workspace disappears.
 - Changed planning/in-progress/completed/archived context owns `_example` ->
   fail with the exact file and line plus grounded-context-or-empty guidance.
+- Changed task metadata violates identity, lifecycle, branch, layout, or
+  reciprocal-link invariants -> fail with the exact `task.json` path and field;
+  unchanged historical metadata -> remain grandfathered.
+- Changed task metadata is malformed, oversized, unreadable, symlinked, or
+  depends on an unsafe/missing/ambiguous linked record -> fail closed rather
+  than following the path or accepting unverifiable state.
 - Completed direct active-root task -> fail with the exact `task.json` path and
   `task.py archive` remediation; archived, planning, in-progress, and symlinked
   records -> pass.
@@ -157,6 +172,9 @@ that exercise the generic JavaScript review preflight.
 - Planning scaffold rejection, multi-file aggregation, empty and grounded
   context acceptance, newly archived seed rejection, untouched historical
   grandfathering, and symlink skipping.
+- Valid active, archived, parent/child, and stacked-base task metadata;
+  unchanged-history grandfathering; identity, lifecycle, branch, and layout
+  rejection; reciprocal-link failures; malformed JSON; and symlink rejection.
 - Stable first-review risk categorization, authored-source exclusions, and
   multi-task directory extraction, plus a real Git fixture covering all three
   advisory types.

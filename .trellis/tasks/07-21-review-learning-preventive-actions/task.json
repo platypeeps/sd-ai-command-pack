@@ -1,0 +1,30 @@
+{
+  "id": "review-learning-preventive-actions",
+  "name": "review-learning-preventive-actions",
+  "title": "Implement preventive actions from review learnings",
+  "description": "Turn repeated recent review findings into deterministic local guards and higher-signal review-learning output without duplicating protections already present.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-21",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-21-review-learning-task-metadata-integrity",
+    "07-21-review-learning-boundary-contract-matrix",
+    "07-21-review-learning-signal-clustering"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
