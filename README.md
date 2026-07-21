@@ -379,7 +379,7 @@ classification, and next steps to `sd-status` in strict mode.
 | `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND` | Extra repo-local preflight command for full-check. | unset |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS` | Package scripts to run when a compatible package runner is available. | `typecheck lint test:unit test:integration build test:e2e` |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS` | Boolean flag to skip all package-script checks. | unset |
-| `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM` | Prism mode for full-check; use `0` to skip or `required` to fail when unavailable. | `auto` |
+| `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM` | Prism mode for full-check; dirty trees review staged/unstaged layers and skip the committed range, while clean trees review the branch range. Use `0` to skip or `required` to fail when unavailable. | `auto` |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_GITO` | Enables Gito during full-check. | `0` |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR` | Gito report directory for full-check. | `.build/review/gito` |
 | `SD_AI_COMMAND_PACK_INSTALL_AUDIT` | Controls structural post-install audit; unset warns and continues, `0` skips, and `required` fails when unavailable. | unset |

@@ -48,6 +48,8 @@ The script runs:
    for common entries: `typecheck`, `lint`, `test:unit`, `test:integration`,
    `build`, and `test:e2e`.
 9. Prism local review when `prism` is on `PATH` and Prism is not disabled.
+   Dirty trees review each non-empty staged or unstaged layer and skip the
+   committed branch range; clean trees review the committed branch range.
 10. Gito review only when explicitly enabled.
 
 ## Safety Rules
@@ -70,6 +72,9 @@ The script runs:
   `.codex/`, `.gemini/`, `.opencode/`, `.agents/`, `.build/`, `.git/`,
   `.pytest_cache/`, `.obsidian-kb/`, `.trellis/`, `.ruff_cache/`, `.venv/`,
   `.sd-ai-command-pack/`, and `node_modules/`.
+- Prism scope is local-first to avoid redundant paid scans. When staged or
+  unstaged changes exist, full-check reviews those distinct Git layers and
+  defers the committed branch range until the tree is clean.
 - If the script reports skipped checks, include those skips in the final report.
 
 ## Useful Environment Variables

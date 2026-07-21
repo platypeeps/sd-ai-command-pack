@@ -850,6 +850,65 @@ parallel except for review scope:
   through its cleanup trap, including paths created by Prism chunking, Gito
   output capture, and review path/filter generation.
 
+## Scenario: Full-Check Prism Local-First Scope
+
+### 1. Scope / Trigger
+
+- Trigger: full-check selects Prism targets while committed branch work and
+  local staged or unstaged work coexist.
+- Apply only to the full-check Prism lane; `sd-review-local`, Gito, and
+  full-codebase review retain their existing owners and contracts.
+
+### 2. Signatures
+
+- Lane owner: `run_prism_reviews` in
+  `scripts/sd-ai-command-pack-full-check.sh`.
+- Local targets: `prism review unstaged` and `prism review staged`.
+- Clean-tree fallback: `prism review range <merge-base>..HEAD`.
+
+### 3. Contracts
+
+- Detect staged and unstaged Git layers before invoking Prism.
+- If either local layer is non-empty, review every non-empty local layer and
+  return without resolving or reviewing the committed branch range.
+- If both local layers are empty, resolve the merge base and review the
+  non-empty committed branch range exactly once.
+- Print why the committed range is skipped after local review.
+- Preserve `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM` availability, required-mode,
+  argument, exclusion, and exit-code handling unchanged.
+
+### 4. Validation & Error Matrix
+
+- Staged plus unstaged plus committed work -> two local reviews, no range
+  review, success/failure determined by the existing Prism exit contract.
+- Exactly one local layer -> one matching local review, no range review.
+- Clean tree plus committed work -> one range review.
+- Clean tree plus no committed work -> existing no-range warning.
+- Clean tree plus unresolved merge base -> existing merge-base warning.
+
+### 5. Good / Base / Bad Cases
+
+- Good: an operator iterates with staged and unstaged work on a feature branch;
+  full-check reviews both local Git layers without paying for a third committed
+  range scan.
+- Base: the final clean-tree gate reviews the complete committed branch range.
+- Bad: always run all three targets, or choose only one local layer and silently
+  omit the other.
+
+### 6. Tests Required
+
+- Exercise mixed committed/staged/unstaged state with a logging Prism stub.
+- Exercise clean-tree committed state and both single-local-layer states.
+- Preserve optional/required provider-error tests and template/root parity.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: review unstaged, staged, and committed range in every dirty feature tree
+Wrong: review only staged changes when unstaged changes are also present
+Correct: review every non-empty local layer, then review the committed range on a clean tree
+```
+
 ## Scenario: Bounded Local Review Provider Execution
 
 ### 1. Scope / Trigger
