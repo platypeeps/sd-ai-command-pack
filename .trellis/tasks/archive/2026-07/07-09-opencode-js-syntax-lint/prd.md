@@ -17,7 +17,7 @@ trellis-context) plus their `templates/` twins — has no syntax gate and no
 behavioral test (they are Trellis-vendored). A syntax error there would ship to
 consumers and only fail at OpenCode session start.
 
-This pairs naturally with `07-09-opencode-trellis-context-exec-hardening`
+This pairs naturally with `07-09-upstream-trellis-opencode-context-exec-hardening`
 (which changes one of these files) — the lint gate protects the change.
 
 ## Requirements
