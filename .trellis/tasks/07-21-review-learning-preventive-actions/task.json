@@ -21,7 +21,8 @@
   "children": [
     "07-21-review-learning-task-metadata-integrity",
     "07-21-review-learning-boundary-contract-matrix",
-    "07-21-review-learning-signal-clustering"
+    "07-21-review-learning-signal-clustering",
+    "07-21-review-learning-journal-validation-consistency"
   ],
   "parent": null,
   "relatedFiles": [],

@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify shared skill precision, thin-adapter consistency, manifest coverage, and generated parity."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify preflight behavior, historical boundaries, reusable helper coverage, and exact diagnostics."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Verify patch release metadata, candidate ledger freshness, and dogfood mirror integrity."}
