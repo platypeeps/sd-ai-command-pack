@@ -623,3 +623,41 @@ Rejected generated context scaffolds in diff-changed planning tasks and shipped 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 168: Refine first-review boundary-risk scan
+
+**Date**: 2026-07-20
+**Task**: Refine first-review boundary-risk scan
+**Branch**: `codex/refine-first-review-risk`
+
+### Summary
+
+Prevent test harness code from triggering production boundary-risk advisories while preserving warnings for runtime source changes.
+
+### Main Changes
+
+- Excluded conventional test directories and filenames from the first-review boundary-risk token scan.
+- Preserved production-source warnings, including mixed production and test diffs, with focused regression coverage.
+- Documented the classifier contract, released pack version 0.25.2, synchronized generated surfaces, and refreshed fleet validation.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c75f77d` | fix: ignore test-only first-review boundary risks |
+
+### Testing
+
+- [OK] make check VENV=/Users/sven/repos/platypeeps/sd-ai-command-pack/.venv
+- [OK] Fleet candidate validation passed all seven consumers
+- [OK] Template/root parity, task validation, and candidate ledger checks passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
