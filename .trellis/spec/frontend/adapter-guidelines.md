@@ -1066,7 +1066,65 @@ skills are wrappers around Trellis-provided skills. Do not copy, fork, or
 modify Trellis' built-in `trellis-start`, `trellis-continue`,
 `trellis-finish-work`, or `trellis-update-spec` skills in `templates/`. Each
 shared wrapper should locate the matching Trellis-provided skill in the target
-repo and follow it as-is.
+repo and use it as the primary workflow. Any pack-owned extension must be
+explicit and tested; `sd-finish-work` currently replaces only the journal
+write step with the safe pack recorder.
+
+## Scenario: Wrapper-preserving lifecycle chaining
+
+### 1. Scope / Trigger
+
+- Trigger: one SD lifecycle skill delegates to a phase whose SD wrapper adds
+  pack-owned behavior around a Trellis skill.
+
+### 2. Signatures
+
+- Non-deferred `sd-review-pr` finish step -> resolved `sd-finish-work` skill.
+- `sd-finish-work` -> resolved `trellis-finish-work` skill plus
+  `scripts/sd-ai-command-pack-record-session.py` at journal time.
+
+### 3. Contracts
+
+- The outer lifecycle resolves the SD wrapper by trusted installed-skill
+  discovery; it does not resolve the underlying Trellis skill directly.
+- The wrapper retains ownership of pack-specific validation and journal
+  recording while the Trellis skill retains archive and session-finalization
+  policy.
+- Internal defer modes preserve the existing single lifecycle owner.
+
+### 4. Validation & Error Matrix
+
+- Missing, ambiguous, unreadable, invalid, or unavailable SD wrapper -> stop
+  with the exact blocker before attempting the underlying Trellis phase.
+- Deferred review -> return to the documented merge-tail owner without running
+  finish-work.
+- Non-deferred review -> run `sd-finish-work`; direct
+  `trellis-finish-work` resolution is a contract failure.
+
+### 5. Good / Base / Bad Cases
+
+- Good: standalone review resolves `sd-finish-work`, which delegates to
+  Trellis and records concrete change/test journal lines.
+- Base: merge-through ship review defers finish-work to housekeeping exactly as
+  before.
+- Bad: review resolves `trellis-finish-work` directly and leaves the default
+  Testing fallback beside a positive validation claim.
+
+### 6. Tests Required
+
+- Assert the review skill resolves `sd-finish-work`, names the pack recorder,
+  and contains no direct Trellis finish-work resolution in Step 8.
+- Assert deferred lifecycle wording and single-owner behavior remain intact.
+- Assert preflight rejects a completed contradictory journal record while
+  accepting incomplete, planning-only, failed/skipped, and concrete records.
+
+### 7. Wrong vs Correct
+
+Wrong: `sd-review-pr` invokes `trellis-finish-work` directly because Trellis
+owns the underlying archive phase.
+
+Correct: `sd-review-pr` invokes `sd-finish-work`, and that wrapper composes the
+Trellis phase with the pack's safe journal recorder.
 
 The `sd-update-spec` shared skill should locate the existing Trellis
 `trellis-update-spec` skill, follow that skill as-is for its `.trellis/spec/`

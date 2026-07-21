@@ -924,3 +924,44 @@ Added diff-scoped Trellis task metadata integrity checks, hardened invalid task 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 176: Enforce journal validation consistency
+
+**Date**: 2026-07-21
+**Task**: Enforce journal validation consistency
+**Branch**: `codex/journal-validation-consistency`
+
+### Summary
+
+Prevented contradictory Trellis journal validation records and preserved the SD finish-work wrapper lifecycle.
+
+### Main Changes
+
+- Added section-aware preflight detection for positive validation claims paired with supported no-validation Testing fallbacks while grandfathering unchanged history.
+- Routed non-deferred sd-review-pr completion through sd-finish-work so the pack-owned safe recorder stays in the lifecycle chain.
+- Published the synchronized 0.26.1 payload with durable specs, documentation, generated mirrors, and fleet evidence.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eb4e61e` | fix: reject contradictory journal validation records |
+| `fc51ac9` | fix: preserve finish-work wrapper routing |
+| `60ebd64` | chore: release command pack 0.26.1 |
+| `1a5666f` | chore(task): track journal validation consistency |
+
+### Testing
+
+- [OK] make check passed with unit, coverage, lint, typing, security, and deterministic full-check gates.
+- [OK] The exact-payload seven-consumer candidate ledger is valid.
+- [OK] PR #209 CI passed and Copilot review round 1 reported no comments.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

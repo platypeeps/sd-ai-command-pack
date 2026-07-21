@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Defines shared-skill lifecycle ownership, SD wrapper delegation, and generated adapter parity."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Defines the review-preflight runtime contract, baseline grandfathering, diagnostics, and focused test requirements."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Defines compatible release versioning, candidate ledger, and source-checkout dogfood synchronization requirements."}

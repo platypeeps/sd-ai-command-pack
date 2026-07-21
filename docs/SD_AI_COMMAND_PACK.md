@@ -139,8 +139,11 @@ Codex exposes the pack entry points as skills named `sd-help`, `sd-status`,
 `sd-test-gaps`, `sd-retro`, and `sd-update-spec`; type
 `/sd` in Codex command completion or invoke them with
 `$sd-review-pr`-style skill mentions.
-The start, continue, and finish-work wrappers run Trellis' existing
-`trellis-start`, `trellis-continue`, and `trellis-finish-work` skills as-is.
+The start and continue wrappers run Trellis' existing `trellis-start` and
+`trellis-continue` skills as-is. The finish-work wrapper uses
+`trellis-finish-work` as its primary workflow while replacing the journal
+write step with the pack session recorder so concrete change and validation
+evidence is recorded atomically.
 On Claude Code — where Trellis ships a SessionStart hook instead of a
 `trellis-start` skill — the start wrapper derives the same session context
 from `.trellis/scripts/get_context.py` directly, and the continue and
@@ -205,7 +208,9 @@ it. Use a separate request to execute the recommendation.
    otherwise it invokes the installed pack full-check script directly. The
    wrapper may perform repository prerequisites before calling the pack script,
    but it must not invoke `sd-review-pr`, a review-pr adapter, or the helper
-   itself.
+   itself. After a clean non-deferred review, review-pr resolves
+   `sd-finish-work`; that wrapper owns Trellis finish-work and records concrete
+   journal change/test evidence through the pack session recorder.
 11. Request the configured remote reviewer, defaulting to GitHub Copilot, after
    a clean local pass and again after every pushed review-fix commit made
    during the loop, unless the user explicitly asked for local-only review or
@@ -225,7 +230,9 @@ it. Use a separate request to execute the recommendation.
    updated.
 15. Run the finish-work command when the coding session is complete and you need
    the Trellis finish-work skill's quality gate, archive, journal, and commit
-   reminder behavior.
+   reminder behavior. Lifecycle commands must chain through `sd-finish-work`
+   rather than invoking Trellis directly so the pack's concrete session
+   recorder remains in the path.
 16. After the PR merges, run the housekeeping command to get back to the default
    branch, prune/delete the merged development stream, and see the condensed
    clean-state/anomaly report.

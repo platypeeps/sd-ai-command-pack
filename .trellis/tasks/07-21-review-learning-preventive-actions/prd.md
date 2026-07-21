@@ -22,10 +22,11 @@ do not need duplicate tasks:
 
 ## Requirements
 
-- Deliver the preventive work through the three linked child tasks:
+- Deliver the preventive work through the four linked child tasks:
   - `review-learning-task-metadata-integrity`
   - `review-learning-boundary-contract-matrix`
   - `review-learning-signal-clustering`
+  - `review-learning-journal-validation-consistency`
 - Keep each child independently implementable, reviewable, and verifiable.
 - Preserve template/root parity for every shipped script, skill, prompt, or
   instruction changed by a child.
@@ -45,7 +46,7 @@ do not need duplicate tasks:
 
 ## Acceptance Criteria
 
-- [ ] All three child tasks have converged PRDs, technical designs, and
+- [ ] All four child tasks have converged PRDs, technical designs, and
       implementation plans with evidence-backed acceptance criteria.
 - [ ] Existing current-thread and generated-surface protections are cited as
       covered rather than duplicated.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.26.1 - 2026-07-21
+
+- Reject completed Trellis journal sessions that claim successful validation
+  while retaining the default no-validation Testing fallback, and route
+  non-deferred PR review through the safe SD finish-work recorder wrapper.
+
 ## 0.26.0 - 2026-07-21
 
 - Add a diff-scoped review-preflight guard for Trellis task identity,

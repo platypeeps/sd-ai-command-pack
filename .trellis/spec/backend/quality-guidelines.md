@@ -83,6 +83,11 @@ that exercise the generic JavaScript review preflight.
   current session are append-only. Compare normalized session blocks against
   the base and fail when an older block changes, disappears, or is renumbered;
   newly appended/current sessions remain editable.
+- Completed journal sessions added or amended after the review base must not
+  pair a positive validation claim in Summary or Main Changes with Trellis'
+  exact `Validation (was )?not recorded for this session.` Testing fallback.
+  Point failures at the fallback line and grandfather byte-equivalent baseline
+  sessions so a new guard does not require historical journal rewrites.
 - Documentation scans intentionally inspect regular files only; symlinked docs
   are skipped so local or generated links do not expand outside the repo.
 - Documentation-path checks mask only complete managed `sd-review-learnings`
@@ -128,6 +133,9 @@ that exercise the generic JavaScript review preflight.
 - Review-base Trellis journal session is deleted or renumbered -> fail as a
   historical-session removal, including when its journal file or the entire
   current workspace disappears.
+- New or amended completed session claims successful validation while Testing
+  retains an exact no-validation fallback -> fail with the session, fallback
+  line, and corrective action; unchanged baseline sessions remain accepted.
 - Changed planning/in-progress/completed/archived context owns `_example` ->
   fail with the exact file and line plus grounded-context-or-empty guidance.
 - Changed task metadata violates identity, lifecycle, branch, layout, or
@@ -159,9 +167,15 @@ that exercise the generic JavaScript review preflight.
   preflight and still runs the checks.
 - Good: a new session is appended while all base sessions remain byte-equivalent
   after line-ending and trailing-whitespace normalization.
+- Good: a completed new session records concrete Testing evidence that agrees
+  with its positive Summary validation claim.
 - Base: a clean repo with no changed paths reports a no-current-diff pass.
+- Base: an untouched baseline session with the legacy no-validation
+  contradiction remains grandfathered.
 - Bad: a broad replacement updates a repeated fallback line in an older journal
   session while adding the intended current session.
+- Bad: a new completed session says the full gate passed while Testing retains
+  `Validation was not recorded for this session.`.
 
 ### 6. Tests Required
 
@@ -172,6 +186,10 @@ that exercise the generic JavaScript review preflight.
 - Historical-session comparison in a real Git fixture, including an appended
   session that leaves prior history unchanged, per-line trailing whitespace,
   renumbering, and deletion of a baseline journal file.
+- Positive and negative journal-validation fixtures covering new
+  contradictions, both exact fallback forms, incomplete/planning-only records,
+  failure/skip wording, concrete Testing evidence, line-specific diagnostics,
+  and unchanged baseline grandfathering.
 - Planning scaffold rejection, multi-file aggregation, empty and grounded
   context acceptance, newly archived seed rejection, untouched historical
   grandfathering, and symlink skipping.
@@ -200,6 +218,9 @@ Correct: currentChangedPaths unions staged, branch, working-tree, and untracked 
 
 Wrong: replace the first repeated fallback sentence in a whole journal file
 Correct: edit content inside the explicit current `## Session <n>:` block
+
+Wrong: reject every historical no-validation fallback when adding a new guard
+Correct: reject new/amended contradictions and grandfather unchanged baseline sessions
 
 Wrong: declare a helper-used `const` below the module-level main invocation
 Correct: declare non-hoisted bindings above that invocation

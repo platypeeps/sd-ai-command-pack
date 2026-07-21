@@ -1,0 +1,33 @@
+{
+  "id": "review-learning-journal-validation-consistency",
+  "name": "review-learning-journal-validation-consistency",
+  "title": "Enforce journal validation consistency",
+  "description": "Fail preflight on contradictory journal validation claims and route PR review finish-work through the pack's safe recorder wrapper.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "review preflight journal validation finish-work routing",
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-21",
+  "completedAt": "2026-07-21",
+  "branch": "codex/journal-validation-consistency",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "07-21-review-learning-preventive-actions",
+  "relatedFiles": [
+    "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
+    "templates/.agents/skills/sd-review-pr/SKILL.md",
+    "templates/.agents/skills/sd-finish-work/SKILL.md",
+    "tests/test_review_preflight.py",
+    "tests/test_sdlc_commands.py",
+    "docs/SD_AI_COMMAND_PACK.md"
+  ],
+  "notes": "",
+  "meta": {}
+}
