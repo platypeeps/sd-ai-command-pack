@@ -1166,6 +1166,63 @@ class FullCheckTests(InstallTestCase):
         self.assertEqual(copied_readme.read_bytes(), copied_before)
         self.assertEqual(gitignore.read_bytes(), gitignore_before)
 
+    def test_full_check_kb_auto_repair_refuses_unverifiable_ignore_state(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        real_git = shutil.which("git")
+        if real_git is None:
+            self.skipTest("git is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Fresh Project\n", encoding="utf-8")
+        kb_refresh = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(kb_refresh.returncode, 0, kb_refresh.stdout)
+
+        stub_bin = root / "stub-bin"
+        stub_bin.mkdir()
+        git_stub = stub_bin / "git"
+        git_stub.write_text(
+            "#!/bin/sh\n"
+            "if [ \"$1\" = \"check-ignore\" ]; then\n"
+            "  exit 2\n"
+            "fi\n"
+            f"exec {json.dumps(real_git)} \"$@\"\n",
+            encoding="utf-8",
+        )
+        git_stub.chmod(0o755)
+
+        copied_readme = root / ".obsidian-kb/Repository Overview/README.md"
+        gitignore = root / ".gitignore"
+        copied_before = copied_readme.read_bytes()
+        gitignore_before = gitignore.read_bytes()
+        (root / "README.md").write_text(
+            "# Unverifiable stale project\n", encoding="utf-8"
+        )
+        result = self._run_full_check_kb_lane(
+            root,
+            {"PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"},
+        )
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "ignored state could not be verified; refusing automatic refresh",
+            result.stdout,
+        )
+        self.assertIn("git check-ignore -q -- .obsidian-kb", result.stdout)
+        self.assertEqual(copied_readme.read_bytes(), copied_before)
+        self.assertEqual(gitignore.read_bytes(), gitignore_before)
+
     def test_full_check_kb_auto_repair_reports_refresh_failure(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
