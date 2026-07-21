@@ -695,3 +695,41 @@ Removed the unused terminal-reconciliation PR normalizer parameter in canonical 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 170: Self-heal stale Obsidian KB during full-check
+
+**Date**: 2026-07-21
+**Task**: Self-heal stale Obsidian KB during full-check
+**Branch**: `codex/self-heal-stale-obsidian-kb`
+
+### Summary
+
+Implemented issue #204 so default full-check repairs an existing ignored stale Obsidian KB once and verifies the refreshed output, while required, absent, disabled, unignored, and error paths remain safe and explicit.
+
+### Main Changes
+
+- Added bounded check-refresh-check behavior with fail-closed ignore verification.
+- Updated shipped documentation, adapter code-spec, release 0.25.4 metadata, generated mirrors, and task evidence.
+- Added coverage for fresh, stale, required, disabled, unignored, refresh-failure, and post-refresh-failure behavior.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bdaec76` | fix: self-heal stale Obsidian KB in full-check |
+
+### Testing
+
+- [OK] make check
+- [OK] seven-consumer fleet candidate validation
+- [OK] focused KB tests, template parity, ledger check, KB freshness, and git diff check
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
