@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 164
+- **Total Sessions**: 165
 - **Last Active**: 2026-07-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~495 | Active |
+| `journal-4.md` | ~537 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 165 | 2026-07-20 | Fleet rollout timing telemetry | `07c2e4288fef6eda18865e300961e6cdd381f54a`, `3444317acfe8d9b8ddcd332d247316e02bd6eb8f`, `f03f8cd34868cc8dad4a84aca48d2bc602ad0494`, `050c9cb79bf1e7a4236f2ef8196466e4e760f173`, `19a6f9ddf70802d65c54a479015a12264903e046`, `a29ce9732a835e64d9db6969bc812e95654d4612` | `codex/fleet-rollout-timing-telemetry-bookkeeping` |
 | 164 | 2026-07-20 | Fix terminal reconciliation diagnostic | `a117861`, `b079dff` | `codex/fix-terminal-reconciliation-status-diagnostic` |
 | 163 | 2026-07-20 | Require remembered branch evidence | `0cb6e81` | `codex/require-remembered-branch-evidence` |
 | 162 | 2026-07-20 | Clarify stale terminal lock recovery | `54962ce`, `efdb7a4`, `e3b6638`, `f649cca`, `820b394`, `d8421bf` | `codex/fix-stale-terminal-lock-guidance` |
