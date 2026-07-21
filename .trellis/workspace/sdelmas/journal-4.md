@@ -539,3 +539,48 @@ Delivered and closed the fleet rollout timing telemetry work, including resumabl
 ### Next Steps
 
 - None - task complete
+
+
+## Session 166: Controlled post-canary fleet waves
+
+**Date**: 2026-07-20
+**Task**: Controlled post-canary fleet waves
+**Branch**: `codex/fleet-post-canary-waves`
+
+### Summary
+
+Implemented schema-4 fleet rollout policy and a read-only bounded-wave planner, converged all review findings, and prepared PR #199 for housekeeping.
+
+### Main Changes
+
+- Added explicit sequential canary, bounded post-canary, and final cohort policy with controller-owned deterministic scheduling.
+- Hardened manifest/state parsing, canonical-name validation, no-merge progression, and single-pass consumer/policy parsing.
+- Updated source docs, generated mirrors, release 0.25.0 metadata, candidate evidence, and focused regression coverage.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c58dd15` | feat: add controlled post-canary fleet waves |
+| `375ce32` | fix: preserve fleet parser diagnostic context |
+| `cc2cabd` | fix: harden fleet policy and state inputs |
+| `66ada16` | test: preserve fleet parser validation coverage |
+| `31d6689` | fix: require canonical fleet cohort names |
+| `0e4d821` | fix: preserve no-merge fleet progression |
+| `28d6b25` | refactor: parse fleet policy once |
+
+### Testing
+
+- [OK] make check
+- [OK] Full-fleet candidate validation passed for all seven configured consumers
+- [OK] PR #199 CI passed on implementation head 28d6b25
+- [OK] Copilot review round 9 produced no new comments and all threads are resolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #199 through sd-housekeeping, then resume the backlog loop with the next actionable task.
