@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-21T12:45:18Z",
+  "validatedAt": "2026-07-21T13:08:35Z",
   "packVersion": "0.25.5",
-  "payloadDigest": "sha256:bcf8a7ab625f3727f3acb67775a988055c29c87e3e437d0eb3d8f7e5870ee857",
+  "payloadDigest": "sha256:3468bc7a1ec7aa5fa14894d6f618dbd926c7d843880f6d646234283717b301f6",
   "fleetManifestDigest": "sha256:bf3d4349f6150bf6d2bb1ec03604e50b54596ca024b96363aa7cc5cc7393458f",
   "consumers": [
     {
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "a1a602ff4eb90d1bc698d0d907be615d793ac0fb",
+      "baseCommit": "e6f4e816a361ce02db8a0964bd23dddc1c883559",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "a336a6fe76c44c2a4696d482937a8ae752a8bf72",
+      "baseCommit": "45772a73fc5286a251e4c982fdc46d3e4a220c22",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -121,7 +121,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "c761f60c29052d2e4637061a7b859d91946dd916",
+      "baseCommit": "4f7d2e1a646085a15e9b75d3f8d638fe65b5ae0d",
       "status": "passed",
       "prepares": [
         [

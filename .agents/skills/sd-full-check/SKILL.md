@@ -48,8 +48,8 @@ The script runs:
    for common entries: `typecheck`, `lint`, `test:unit`, `test:integration`,
    `build`, and `test:e2e`.
 9. Prism local review when `prism` is on `PATH` and Prism is not disabled.
-   Dirty trees review each non-empty staged or unstaged layer and skip the
-   committed branch range; clean trees review the committed branch range.
+   When tracked staged or unstaged changes exist, review each non-empty local
+   layer and skip the committed branch range; otherwise, review that range.
 10. Gito review only when explicitly enabled.
 
 ## Safety Rules
