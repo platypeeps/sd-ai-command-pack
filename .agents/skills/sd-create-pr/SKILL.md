@@ -249,17 +249,40 @@ exact auto-filled body and the NUL-delimited branch diff. The same Step 5 flow
 applies to standalone publication and verified `sd-ship` Stage 1 publication:
 
 ```bash
-gh pr create --base "$BASE_BRANCH" --fill
+if ! gh pr create --base "$BASE_BRANCH" --fill; then
+  printf '%s\n' "error: PR creation failed; stop before Step 6." >&2
+  exit 1
+fi
 
-PR_BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-pr-body.XXXXXX")
-CHANGED_FILES_FILE=$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-pr-files.XXXXXX")
+PR_BODY_FILE=
+CHANGED_FILES_FILE=
 cleanup_generated_pr_body() {
-  rm -f -- "$PR_BODY_FILE" "$CHANGED_FILES_FILE"
+  if [ -n "$PR_BODY_FILE" ]; then
+    rm -f -- "$PR_BODY_FILE"
+  fi
+  if [ -n "$CHANGED_FILES_FILE" ]; then
+    rm -f -- "$CHANGED_FILES_FILE"
+  fi
 }
 trap cleanup_generated_pr_body EXIT HUP INT TERM
 
-git diff --name-only -z "$BASE_REF"...HEAD > "$CHANGED_FILES_FILE"
-gh pr view --json body --jq .body > "$PR_BODY_FILE"
+if ! PR_BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-pr-body.XXXXXX"); then
+  printf '%s\n' "error: cannot create secure PR-body temporary file; stop before Step 6." >&2
+  exit 1
+fi
+if ! CHANGED_FILES_FILE=$(mktemp "${TMPDIR:-/tmp}/sd-ai-command-pack-pr-files.XXXXXX"); then
+  printf '%s\n' "error: cannot create secure changed-files temporary file; stop before Step 6." >&2
+  exit 1
+fi
+
+if ! git diff --name-only -z "$BASE_REF"...HEAD > "$CHANGED_FILES_FILE"; then
+  printf '%s\n' "error: cannot capture NUL-delimited changed paths; stop before Step 6." >&2
+  exit 1
+fi
+if ! gh pr view --json body --jq .body > "$PR_BODY_FILE"; then
+  printf '%s\n' "error: cannot fetch GitHub's auto-filled PR body; stop before Step 6." >&2
+  exit 1
+fi
 
 PREPARE_STATUS=0
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \

@@ -560,11 +560,19 @@ class SdlcCommandsTests(InstallTestCase):
         normalized = " ".join(step_5.split())
 
         for pin in (
-            "gh pr create --base \"$BASE_BRANCH\" --fill",
-            "git diff --name-only -z \"$BASE_REF\"...HEAD",
-            "gh pr view --json body --jq .body",
+            "if ! gh pr create --base \"$BASE_BRANCH\" --fill; then",
+            "PR_BODY_FILE= CHANGED_FILES_FILE=",
+            "if ! PR_BODY_FILE=$(mktemp",
+            "if ! CHANGED_FILES_FILE=$(mktemp",
+            "if ! git diff --name-only -z \"$BASE_REF\"...HEAD",
+            "if ! gh pr view --json body --jq .body",
             "--prepare-tooling-body",
             "if ! gh pr edit --body-file \"$PR_BODY_FILE\"; then",
+            "PR creation failed; stop before Step 6.",
+            "cannot create secure PR-body temporary file; stop before Step 6.",
+            "cannot create secure changed-files temporary file; stop before Step 6.",
+            "cannot capture NUL-delimited changed paths; stop before Step 6.",
+            "cannot fetch GitHub's auto-filled PR body; stop before Step 6.",
             "automatic PR-body update failed; stop before Step 6.",
             "mixed-scope",
             "stop before Step 6",
