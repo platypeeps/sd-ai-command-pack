@@ -37,15 +37,15 @@ machine-readable stage timing and a concise human summary.
 
 ## Acceptance Criteria
 
-- [ ] A completed fleet run reports every applicable stage per consumer and the
+- [x] A completed fleet run reports every applicable stage per consumer and the
       aggregate critical path.
-- [ ] Concurrent reviewer and CI waits are represented as overlapping intervals
+- [x] Concurrent reviewer and CI waits are represented as overlapping intervals
       rather than summed wall time.
-- [ ] Interrupted and resumed runs retain one coherent timing record.
-- [ ] Reports contain no credentials or personal absolute paths.
-- [ ] Schema validation rejects malformed records with actionable diagnostics.
-- [ ] Fake-clock tests cover success, skip, failure, retry, overlap, and resume.
-- [ ] The human report makes the slowest consumer and slowest stage obvious.
+- [x] Interrupted and resumed runs retain one coherent timing record.
+- [x] Reports contain no credentials or personal absolute paths.
+- [x] Schema validation rejects malformed records with actionable diagnostics.
+- [x] Fake-clock tests cover success, skip, failure, retry, overlap, and resume.
+- [x] The human report makes the slowest consumer and slowest stage obvious.
 
 ## Dependencies
 
@@ -60,3 +60,10 @@ machine-readable stage timing and a concise human summary.
 ## Notes
 
 - Add `design.md` and `implement.md` before starting implementation.
+- Delivered in PR #188, merged on 2026-07-20 from final reviewed head
+  `a29ce9732a835e64d9db6969bc812e95654d4612`.
+- Validation recorded on the delivery PR: `make check`, canonical unfiltered
+  candidate validation across all seven consumers, and 133 focused timing,
+  orchestration, install, and parity tests.
+- All required GitHub checks passed on the final head, and the final configured
+  Copilot review reported no new comments.
