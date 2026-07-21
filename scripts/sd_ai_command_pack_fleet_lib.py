@@ -463,7 +463,11 @@ def parse_fleet_rollout_policy(
             raise FleetConfigError(f"{cohort_label} has invalid strategy")
         raw_max_concurrency = raw_cohort.get("maxConcurrency")
         if strategy == "sequential":
-            if raw_max_concurrency is not None and raw_max_concurrency != 1:
+            if raw_max_concurrency is not None and (
+                isinstance(raw_max_concurrency, bool)
+                or not isinstance(raw_max_concurrency, int)
+                or raw_max_concurrency != 1
+            ):
                 raise FleetConfigError(
                     f"{cohort_label} sequential maxConcurrency must be 1 when present"
                 )

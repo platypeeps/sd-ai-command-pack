@@ -10,6 +10,7 @@ except ModuleNotFoundError as exc:
 contextlib = _support.contextlib
 io = _support.io
 json = _support.json
+mock = _support.mock
 Path = _support.Path
 unittest = _support.unittest
 PACK_ROOT = _support.PACK_ROOT
@@ -289,6 +290,28 @@ class FleetWavePlanTests(InstallTestCase):
                     {
                         "name": "canary",
                         "strategy": "sequential",
+                        "maxConcurrency": True,
+                        "consumers": [consumer.name for consumer in consumers],
+                    }
+                ],
+            },
+            {
+                "defaultConcurrency": 2,
+                "cohorts": [
+                    {
+                        "name": "canary",
+                        "strategy": "sequential",
+                        "maxConcurrency": 1.0,
+                        "consumers": [consumer.name for consumer in consumers],
+                    }
+                ],
+            },
+            {
+                "defaultConcurrency": 2,
+                "cohorts": [
+                    {
+                        "name": "canary",
+                        "strategy": "sequential",
                         "consumers": ["canary-a"],
                     },
                     {
@@ -520,6 +543,27 @@ class FleetWavePlanTests(InstallTestCase):
             planner._load_json_object(large, "state")
         with self.assertRaisesRegex(planner.FleetWavePlanError, "JSON object"):
             planner._load_json_object(source, "state")
+
+    def test_json_loader_rejects_path_swapped_to_symlink_before_open(self) -> None:
+        planner = self.load_planner()
+        root = self.make_git_repo_without_trellis()
+        state = root / "state.json"
+        target = root / "target.json"
+        state.write_text("{}", encoding="utf-8")
+        target.write_text("{}", encoding="utf-8")
+        original_open = planner.os.open
+
+        def swap_then_open(path, flags):
+            state.unlink()
+            state.symlink_to(target)
+            return original_open(path, flags)
+
+        with mock.patch.object(planner.os, "open", side_effect=swap_then_open):
+            with self.assertRaisesRegex(
+                planner.FleetWavePlanError,
+                "cannot be opened safely",
+            ):
+                planner._load_json_object(state, "state")
 
 
 if __name__ == "__main__":

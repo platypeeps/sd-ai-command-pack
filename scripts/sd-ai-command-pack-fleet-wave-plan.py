@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import stat
 import sys
 from collections.abc import Mapping, Sequence
@@ -42,18 +43,42 @@ class FleetWavePlanError(ValueError):
 
 def _load_json_object(path: Path, label: str) -> dict[str, Any]:
     try:
-        node = path.lstat()
+        inspected = path.lstat()
     except FileNotFoundError:
         raise FleetWavePlanError(f"{label} is missing") from None
     except OSError:
         raise FleetWavePlanError(f"{label} cannot be inspected") from None
-    if stat.S_ISLNK(node.st_mode) or not stat.S_ISREG(node.st_mode):
+    if stat.S_ISLNK(inspected.st_mode) or not stat.S_ISREG(inspected.st_mode):
         raise FleetWavePlanError(f"{label} must be a regular file")
-    if node.st_size > MAX_STATE_BYTES:
+    if inspected.st_size > MAX_STATE_BYTES:
+        raise FleetWavePlanError(f"{label} exceeds {MAX_STATE_BYTES} bytes")
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(path, flags)
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or (opened.st_dev, opened.st_ino)
+            != (inspected.st_dev, inspected.st_ino)
+        ):
+            raise FleetWavePlanError(f"{label} changed during inspection")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = None
+            content = stream.read(MAX_STATE_BYTES + 1)
+    except FleetWavePlanError:
+        raise
+    except OSError:
+        raise FleetWavePlanError(f"{label} cannot be opened safely") from None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    if len(content) > MAX_STATE_BYTES:
         raise FleetWavePlanError(f"{label} exceeds {MAX_STATE_BYTES} bytes")
     try:
-        payload = json.loads(path.read_text(encoding="utf-8", errors="strict"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
+        payload = json.loads(content.decode("utf-8", errors="strict"))
+    except (UnicodeError, json.JSONDecodeError):
         raise FleetWavePlanError(f"{label} is not valid UTF-8 JSON") from None
     if not isinstance(payload, dict):
         raise FleetWavePlanError(f"{label} must be a JSON object")
