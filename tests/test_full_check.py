@@ -1051,7 +1051,7 @@ class FullCheckTests(InstallTestCase):
             result.stdout,
         )
 
-    def test_full_check_kb_freshness_passes_and_fails_on_stale_kb(self) -> None:
+    def test_full_check_kb_freshness_passes_repairs_and_stays_strict(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
         root = self.make_repo()
@@ -1073,14 +1073,45 @@ class FullCheckTests(InstallTestCase):
         self.assertIn(
             "SD AI command pack Obsidian KB freshness check", result.stdout
         )
+        self.assertNotIn("Obsidian KB refresh", result.stdout)
 
         (root / "README.md").write_text("# Fresh Project, edited\n", encoding="utf-8")
         result = self._run_full_check_kb_lane(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "Generated Obsidian KB is stale; refreshing ignored output automatically",
+            result.stdout,
+        )
+        self.assertIn(
+            "SD AI command pack Obsidian KB post-refresh check", result.stdout
+        )
+        refreshed_check = subprocess.run(
+            [
+                sys.executable,
+                "scripts/sd-ai-command-pack-update-spec-kb.py",
+                "--check",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(refreshed_check.returncode, 0, refreshed_check.stdout)
+
+        copied_readme = root / ".obsidian-kb/Repository Overview/README.md"
+        (root / "README.md").write_text("# Strict stale project\n", encoding="utf-8")
+        copied_before_required = copied_readme.read_bytes()
+        result = self._run_full_check_kb_lane(
+            root, {"SD_AI_COMMAND_PACK_FULL_CHECK_KB": "required"}
+        )
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("Generated Obsidian KB is stale or blocked", result.stdout)
         self.assertIn(
             "python3 scripts/sd-ai-command-pack-update-spec-kb.py", result.stdout
         )
+        self.assertNotIn("Obsidian KB refresh", result.stdout)
+        self.assertEqual(copied_readme.read_bytes(), copied_before_required)
 
         result = self._run_full_check_kb_lane(
             root, {"SD_AI_COMMAND_PACK_FULL_CHECK_KB": "0"}
@@ -1089,6 +1120,121 @@ class FullCheckTests(InstallTestCase):
         self.assertIn(
             "Skipping Obsidian KB freshness check because "
             "SD_AI_COMMAND_PACK_FULL_CHECK_KB=0",
+            result.stdout,
+        )
+
+    def test_full_check_kb_auto_repair_refuses_unignored_state(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Fresh Project\n", encoding="utf-8")
+        kb_refresh = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(kb_refresh.returncode, 0, kb_refresh.stdout)
+
+        gitignore = root / ".gitignore"
+        gitignore.write_text(
+            gitignore.read_text(encoding="utf-8").replace(".obsidian-kb/\n", ""),
+            encoding="utf-8",
+        )
+        ignored = subprocess.run(
+            ["git", "check-ignore", "-q", "--", ".obsidian-kb"],
+            cwd=root,
+            check=False,
+        )
+        self.assertNotEqual(ignored.returncode, 0)
+
+        copied_readme = root / ".obsidian-kb/Repository Overview/README.md"
+        copied_before = copied_readme.read_bytes()
+        gitignore_before = gitignore.read_bytes()
+        (root / "README.md").write_text("# Unignored stale project\n", encoding="utf-8")
+        result = self._run_full_check_kb_lane(root)
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            ".obsidian-kb is not ignored; refusing automatic refresh",
+            result.stdout,
+        )
+        self.assertEqual(copied_readme.read_bytes(), copied_before)
+        self.assertEqual(gitignore.read_bytes(), gitignore_before)
+
+    def test_full_check_kb_auto_repair_reports_refresh_failure(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Fresh Project\n", encoding="utf-8")
+        helper = root / "scripts/sd-ai-command-pack-update-spec-kb.py"
+        kb_refresh = subprocess.run(
+            [sys.executable, str(helper)],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(kb_refresh.returncode, 0, kb_refresh.stdout)
+        helper.write_text(
+            "import sys\n"
+            "if '--check' in sys.argv[1:]:\n"
+            "    print('synthetic stale check')\n"
+            "    raise SystemExit(1)\n"
+            "print('synthetic refresh failure')\n"
+            "raise SystemExit(9)\n",
+            encoding="utf-8",
+        )
+
+        result = self._run_full_check_kb_lane(root)
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("synthetic refresh failure", result.stdout)
+        self.assertIn("Automatic Obsidian KB refresh failed", result.stdout)
+        self.assertIn(
+            "python3 scripts/sd-ai-command-pack-update-spec-kb.py", result.stdout
+        )
+
+    def test_full_check_kb_auto_repair_requires_passing_recheck(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Fresh Project\n", encoding="utf-8")
+        helper = root / "scripts/sd-ai-command-pack-update-spec-kb.py"
+        kb_refresh = subprocess.run(
+            [sys.executable, str(helper)],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(kb_refresh.returncode, 0, kb_refresh.stdout)
+        helper.write_text(
+            "import sys\n"
+            "if '--check' in sys.argv[1:]:\n"
+            "    print('synthetic stale check')\n"
+            "    raise SystemExit(1)\n"
+            "print('synthetic refresh success')\n",
+            encoding="utf-8",
+        )
+
+        result = self._run_full_check_kb_lane(root)
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(result.stdout.count("synthetic stale check"), 2)
+        self.assertIn("synthetic refresh success", result.stdout)
+        self.assertIn(
+            "Generated Obsidian KB is still stale or blocked after refresh",
             result.stdout,
         )
 

@@ -383,7 +383,7 @@ classification, and next steps to `sd-status` in strict mode.
 | `SD_AI_COMMAND_PACK_FULL_CHECK_GITO` | Enables Gito during full-check. | `0` |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR` | Gito report directory for full-check. | `.build/review/gito` |
 | `SD_AI_COMMAND_PACK_INSTALL_AUDIT` | Controls structural post-install audit; unset warns and continues, `0` skips, and `required` fails when unavailable. | unset |
-| `SD_AI_COMMAND_PACK_FULL_CHECK_KB` | Obsidian KB freshness check in full-check; `auto` checks only when `.obsidian-kb/` exists, `0` skips, `required` fails when unavailable or stale. | `auto` |
+| `SD_AI_COMMAND_PACK_FULL_CHECK_KB` | Obsidian KB freshness lane; `auto` checks an existing KB and refreshes/rechecks stale output only when `.obsidian-kb/` is already ignored, `0` skips, and `required` remains read-only and fails when unavailable or stale. | `auto` |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF` | Base ref used by pack-source full-check to confirm shipped payload changes include a manifest version bump. | full-check base ref |
 | `SD_AI_COMMAND_PACK_CREATE_PR_BASE` | Base branch override for `sd-create-pr`; unset detects the GitHub default branch. | unset |
 | `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH` | Feature branch name for `sd-create-pr` when it starts on the repository default branch. | auto-derived `codex/<slug>` |

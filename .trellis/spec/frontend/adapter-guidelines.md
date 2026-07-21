@@ -350,6 +350,90 @@ failure, or copy task files in a lifecycle skill.
 Correct: call the canonical helper with `--if-present` once at each mutation
 boundary and stop the owning workflow when an existing KB cannot be refreshed.
 
+## Scenario: Full-Check KB Auto-Repair
+
+### 1. Scope / Trigger
+
+- Trigger: the full-check Obsidian KB lane finds an existing generated KB stale
+  in its default, non-required mode.
+- Auto-repair applies only to already-ignored `.obsidian-kb` output. A gate must
+  never make an unignored generated tree safe by editing `.gitignore` for the
+  operator.
+
+### 2. Signatures
+
+- Lane owner: `run_sd_ai_command_pack_kb_freshness_check` in
+  `scripts/sd-ai-command-pack-full-check.sh`.
+- Freshness and refresh helper:
+  `python3 scripts/sd-ai-command-pack-update-spec-kb.py [--check]`.
+- Mode: `SD_AI_COMMAND_PACK_FULL_CHECK_KB=auto|required|<disabled>`; unset is
+  equivalent to `auto`.
+
+### 3. Contracts
+
+- `auto` runs `--check` first. On failure it verifies the KB is ignored,
+  refreshes once through the canonical helper, then requires a passing second
+  `--check` before continuing.
+- `required` is read-only and fail-closed: a failed check reports the canonical
+  refresh command but never runs it.
+- An absent KB skips in `auto` without creating a generated tree or ignore
+  entry. Disabled mode skips before helper or KB discovery.
+- Ignore verification distinguishes exit `1` (not ignored) from operational
+  Git errors; neither state permits mutation.
+- Missing helper and Python behavior retains the existing mode-dependent skip
+  or required failure contract.
+
+The repair sequence is deliberately bounded:
+
+```sh
+python3 scripts/sd-ai-command-pack-update-spec-kb.py --check || {
+  git check-ignore -q -- .obsidian-kb
+  python3 scripts/sd-ai-command-pack-update-spec-kb.py
+  python3 scripts/sd-ai-command-pack-update-spec-kb.py --check
+}
+```
+
+### 4. Validation & Error Matrix
+
+- Fresh existing KB -> one read-only check, exit `0`, no refresh.
+- Stale ignored KB in `auto` -> one refresh and passing recheck, exit `0`.
+- Stale KB in `required` -> no refresh, actionable failure, nonzero exit.
+- Stale unignored KB -> refuse refresh, preserve KB and `.gitignore`, nonzero
+  exit.
+- Ignore-verification error -> report that ignored state could not be verified,
+  preserve KB, nonzero exit.
+- Refresh failure or failing post-refresh check -> preserve helper diagnostics,
+  report the exact recovery command, nonzero exit.
+
+### 5. Good / Base / Bad Cases
+
+- Good: documentation makes an ignored KB stale; full-check refreshes it once,
+  verifies the result, and resumes the remaining gates.
+- Base: the KB is fresh or absent, so full-check performs no generated-file
+  mutation.
+- Bad: refresh before checking, refresh in `required`, add an ignore entry from
+  the gate, or treat refresh success as freshness without a second check.
+
+### 6. Tests Required
+
+- Assert fresh and required modes never print or execute the refresh lane.
+- Assert default stale repair executes the check-refresh-check sequence and
+  leaves the helper's `--check` passing.
+- Assert absent and disabled modes remain no-op success paths.
+- Assert unignored state preserves the generated copy and `.gitignore`
+  byte-for-byte.
+- Inject refresh and post-refresh failures and assert helper diagnostics,
+  invocation count, recovery text, and nonzero status.
+- Keep template/root script and skill parity under generated validation.
+
+### 7. Wrong vs Correct
+
+Wrong: turn full-check into an unconditional generator or silently edit ignore
+configuration so a stale tracked tree can be overwritten.
+
+Correct: check first, repair only known ignored output once, recheck, and fail
+closed whenever safety or freshness cannot be proven.
+
 ## Scenario: First-Review Boundary-Risk Source Classification
 
 ### 1. Scope / Trigger

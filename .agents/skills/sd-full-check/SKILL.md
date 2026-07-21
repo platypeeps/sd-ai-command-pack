@@ -97,8 +97,9 @@ paths, and deprecated fallbacks.
   `python3` is unavailable. By default those availability problems warn and
   continue.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_KB=0` / `=required`: skip the Obsidian KB
-  freshness check, or fail when it cannot run. Default `auto` checks only
-  when a generated `.obsidian-kb/` folder exists.
+  freshness lane, or keep it read-only and fail when it cannot pass. Default
+  `auto` checks only when a generated `.obsidian-kb/` folder exists; if stale
+  output is already ignored, it refreshes once and requires a passing recheck.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS=1`: skip all package-script
   checks.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0` / `=required`: skip Prism, or fail when

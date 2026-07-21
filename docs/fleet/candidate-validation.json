@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-21T04:44:58Z",
-  "packVersion": "0.25.3",
-  "payloadDigest": "sha256:85e6fa4573fe8af3b874c837d59ff026d13eb59792ebae646172bb09adcbd997",
+  "validatedAt": "2026-07-21T08:28:17Z",
+  "packVersion": "0.25.4",
+  "payloadDigest": "sha256:c5c25497afdb073aad4326bd7a98e66ed76c1fc61d4bce3e87f2e43b922d686f",
   "fleetManifestDigest": "sha256:bf3d4349f6150bf6d2bb1ec03604e50b54596ca024b96363aa7cc5cc7393458f",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "e6ff1e4f70e4ced6b1a86989346a3779c748e099",
+      "baseCommit": "6a6d35c73684710c6b25c5fead0bf14d8d174b45",
       "status": "passed",
       "prepares": [
         [
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "ef12f3bd5304e90b9b2fceed300db0e2683c8ea6",
+      "baseCommit": "8229d932cc2c47ec1ff379391676be2826436e6a",
       "status": "passed",
       "prepares": [
         [
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "fb9f75de894075163686031dd54318e445feeece",
+      "baseCommit": "4808344444a33566dec4251855b86444b361b6b4",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "88cbadfe81a80703fdade92ef8080ff591fac289",
+      "baseCommit": "44e7eaa378efef9cea89e72d83d9830686ba8d2b",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "9b666721f7b6e5f4cf070de3bb91bf799d426246",
+      "baseCommit": "51a76cca93cb652c7cd369db5c55fb3299570797",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -121,7 +121,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "8e838ec1b6d35eeed69ab99d1f3e4d2fa92b8f11",
+      "baseCommit": "2e1a0e957e6465beccfb04ac2343b304c3a999bc",
       "status": "passed",
       "prepares": [
         [
