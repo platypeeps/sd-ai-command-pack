@@ -548,9 +548,9 @@ def parse_fleet_consumers(
     for index, item in enumerate(consumers):
         if not isinstance(item, dict):
             raise FleetConfigError(
-                f"fleet manifest consumers[{index}] must be an object"
+                f"{label} consumers[{index}] must be an object"
             )
-        consumer_label = f"fleet manifest consumer {item.get('name', index)}"
+        consumer_label = f"{label} consumer {item.get('name', index)}"
         name = _required_string(item, "name", consumer_label)
         if name in {".", ".."} or not CONSUMER_NAME_RE.fullmatch(name):
             raise FleetConfigError(

@@ -453,6 +453,28 @@ class FleetWavePlanTests(InstallTestCase):
         loaded = fleet_lib.load_fleet_rollout_policy(manifest_path)
         self.assertEqual(loaded.cohorts[1].name, "post-canary")
 
+    def test_consumer_parser_preserves_caller_label_in_errors(self) -> None:
+        planner = self.load_planner()
+        fleet_lib = planner.fleet_lib
+        manifest = self.manifest()
+
+        malformed_row = {**manifest, "consumers": ["bad"]}
+        with self.assertRaisesRegex(
+            fleet_lib.FleetConfigError,
+            r"custom fleet source consumers\[0\]",
+        ):
+            fleet_lib.parse_fleet_consumers(malformed_row, "custom fleet source")
+
+        invalid_consumer = {
+            **manifest,
+            "consumers": [{**manifest["consumers"][0], "github": "invalid"}],
+        }
+        with self.assertRaisesRegex(
+            fleet_lib.FleetConfigError,
+            "custom fleet source consumer canary-a",
+        ):
+            fleet_lib.parse_fleet_consumers(invalid_consumer, "custom fleet source")
+
     def test_cli_renders_json_and_human_plans(self) -> None:
         planner = self.load_planner()
         root = self.make_git_repo_without_trellis()
