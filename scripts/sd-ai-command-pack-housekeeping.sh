@@ -215,36 +215,39 @@ run_gh() {
   run_command_with_timeout "$HOUSEKEEPING_GH_TIMEOUT_SECONDS" gh "$@"
 }
 
-refresh_existing_kb() {
-  local kb_path=".obsidian-kb"
+refresh_obsidian_kb() {
   local toolchain="$SCRIPT_DIR/sd-ai-command-pack-toolchain.sh"
   local helper="$SCRIPT_DIR/sd-ai-command-pack-update-spec-kb.py"
-  local -a refresh_args
-  refresh_args=(--if-present)
+  local refresh_status
 
-  if [ ! -e "$kb_path" ] && [ ! -L "$kb_path" ]; then
-    printf 'Obsidian KB refresh: skipped (.obsidian-kb is not present)\n'
-    return 0
-  fi
-
-  section "Refresh existing Obsidian KB"
+  section "Refresh Obsidian KB"
   if [ ! -r "$toolchain" ] || [ ! -r "$helper" ]; then
-    add_anomaly "existing Obsidian KB refresh failed because the pack helper is missing; restore the pack install, then run: bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-update-spec-kb.py --if-present"
+    add_anomaly "Obsidian KB refresh failed because the pack helper is missing; restore the pack install, then run: bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-update-spec-kb.py"
     return 1
   fi
   if [ "$DRY_RUN" -eq 1 ]; then
-    refresh_args+=(--dry-run)
-  fi
-  if bash "$toolchain" run-python -- "$helper" "${refresh_args[@]}"; then
-    if [ "$DRY_RUN" -eq 1 ]; then
-      add_action "previewed refresh of existing .obsidian-kb"
+    if bash "$toolchain" run-python -- "$helper" --dry-run; then
+      refresh_status=0
     else
-      add_action "refreshed existing .obsidian-kb after finish-work"
+      refresh_status=$?
+    fi
+  else
+    if bash "$toolchain" run-python -- "$helper"; then
+      refresh_status=0
+    else
+      refresh_status=$?
+    fi
+  fi
+  if [ "$refresh_status" -eq 0 ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      add_action "previewed refresh of .obsidian-kb"
+    else
+      add_action "refreshed .obsidian-kb after finish-work"
     fi
     return 0
   fi
 
-  add_anomaly "existing Obsidian KB refresh failed; resolve the reported conflict, then run: bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-update-spec-kb.py --if-present"
+  add_anomaly "Obsidian KB refresh failed; resolve the reported conflict, then run: bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-update-spec-kb.py"
   return 1
 }
 
@@ -1040,7 +1043,7 @@ main() {
   START_BRANCH="$(current_branch)"
   printf 'start branch: %s\n' "${START_BRANCH:-detached HEAD}"
 
-  if ! refresh_existing_kb; then
+  if ! refresh_obsidian_kb; then
     run_status_report
     return 1
   fi

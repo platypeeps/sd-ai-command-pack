@@ -289,12 +289,14 @@ Correct: preserve the lock and direct the operator to verified, explicit
 
 - Trigger: a lifecycle archives Trellis task documentation or records follow-up
   tasks after the normal update-spec refresh has already run.
-- Apply only when the repository already has `.obsidian-kb`; lifecycle cleanup
-  must not opt an unrelated repository into generated knowledge.
+- Housekeeping creates or refreshes `.obsidian-kb` after finish-work. A later
+  backlog follow-up refresh remains guarded and only updates an existing KB.
 
 ### 2. Signatures
 
-- Guarded helper:
+- Archive owner helper:
+  `scripts/sd-ai-command-pack-update-spec-kb.py`.
+- Follow-up owner helper:
   `scripts/sd-ai-command-pack-update-spec-kb.py --if-present`.
 - Archive owner: the one `sd-housekeeping` run after finish-work and before
   fetch/merge side effects.
@@ -303,9 +305,12 @@ Correct: preserve the lock and direct the operator to verified, explicit
 
 ### 3. Contracts
 
-- `--if-present` composes with refresh, `--dry-run`, and `--check`.
-- An absent KB prints a skip reason, returns success, and writes neither the KB
-  nor an ignore entry.
+- Housekeeping invokes normal refresh, which creates an absent KB and its
+  managed ignore entry; housekeeping dry-run previews without creating either.
+- The backlog's `--if-present` refresh prints a skip reason, returns success,
+  and writes neither the KB nor an ignore entry when the KB is absent.
+- A valid root symlink to an existing directory is preserved and refreshed
+  through its target.
 - A regular file, directory, or symbolic link at `.obsidian-kb` counts as
   present so occupied and broken-link states reach normal validation.
 - Housekeeping blocks before merge when the post-finish refresh fails.
@@ -316,21 +321,21 @@ Correct: preserve the lock and direct the operator to verified, explicit
 
 ### 4. Validation & Error Matrix
 
-- KB absent plus any supported mode -> visible no-op, exit `0`, no writes.
+- KB absent plus housekeeping normal refresh -> create the KB and ignore entry.
+- KB absent plus backlog `--if-present` -> visible no-op, exit `0`, no writes.
 - Existing valid KB -> selected helper mode and existing exit-code contract.
 - Existing conflict or invalid path -> nonzero helper result; owning lifecycle
   reports the helper diagnostics and exact recovery command.
 - Dry-run housekeeping with an existing KB -> preview only; no generated-file
   mutation.
-- Missing helper or toolchain with an existing KB -> actionable lifecycle
-  failure before merge.
+- Missing helper or toolchain -> actionable housekeeping failure before merge.
 
 ### 5. Good / Base / Bad Cases
 
-- Good: finish-work archives a task, housekeeping refreshes the existing KB,
+- Good: finish-work archives a task, housekeeping creates or refreshes the KB,
   then merges after the refreshed branch passes its gate.
-- Base: no `.obsidian-kb` exists, so housekeeping and backlog each print the
-  guarded skip and continue without creating one.
+- Base: no `.obsidian-kb` exists, so housekeeping creates it; a later backlog
+  follow-up refresh uses the guarded mode and skips only if it is still absent.
 - Bad: `sd-ship` refreshes directly and housekeeping refreshes again, or the
   backlog reports completion after creating a follow-up task without a refresh.
 
@@ -344,11 +349,12 @@ Correct: preserve the lock and direct the operator to verified, explicit
 
 ### 7. Wrong vs Correct
 
-Wrong: create `.obsidian-kb` during every cleanup, silently ignore refresh
-failure, or copy task files in a lifecycle skill.
+Wrong: guard housekeeping with `--if-present`, silently ignore refresh failure,
+or copy task files in a lifecycle skill.
 
-Correct: call the canonical helper with `--if-present` once at each mutation
-boundary and stop the owning workflow when an existing KB cannot be refreshed.
+Correct: call normal refresh once from housekeeping, call guarded refresh once
+from the backlog follow-up boundary, and stop the owning workflow when the KB
+cannot be refreshed.
 
 ## Scenario: Full-Check KB Auto-Repair
 

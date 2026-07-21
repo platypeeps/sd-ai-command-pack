@@ -684,10 +684,11 @@ For docs, spec, README, or PRD edits, refresh the local KB before full-check:
 python3 scripts/sd-ai-command-pack-update-spec-kb.py
 ```
 
-Lifecycle owners use `--if-present` when they must refresh generated knowledge
-without creating a KB in repositories that have not opted into one. Missing
-KBs return success with a visible skip reason; existing invalid or conflicting
-KB paths still fail.
+Housekeeping uses the normal refresh so an absent KB is created after
+finish-work. Intentional guarded callers, such as the backlog loop's final
+follow-up refresh, use `--if-present` when they must refresh generated
+knowledge without creating a KB. Missing KBs then return success with a visible
+skip reason; existing invalid or conflicting KB paths still fail.
 
 Run the local release gate with local AI reviewers disabled unless the release
 is explicitly about Prism or Gito behavior:

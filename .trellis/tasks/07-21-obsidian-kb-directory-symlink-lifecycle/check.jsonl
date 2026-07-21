@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Requires focused boundary tests, lint, typing, and full repository validation."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Requires template and installed adapter mirrors to stay synchronized."}

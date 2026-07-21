@@ -1270,7 +1270,7 @@ class FullCheckTests(InstallTestCase):
 
         gitignore = root / ".gitignore"
         gitignore.write_text(
-            gitignore.read_text(encoding="utf-8").replace(".obsidian-kb/\n", ""),
+            gitignore.read_text(encoding="utf-8").replace("/.obsidian-kb\n", ""),
             encoding="utf-8",
         )
         isolated_home = root / "isolated-home"

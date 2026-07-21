@@ -41,8 +41,10 @@ This command performs this end-of-stream flow:
      and report that blocker instead of running cleanup
 3. Before any fetch or merge, the script performs the one post-finish Obsidian
    KB refresh through
-   `scripts/sd-ai-command-pack-update-spec-kb.py --if-present`. Repositories
-   without `.obsidian-kb` remain unchanged. A refresh failure blocks the merge
+   `scripts/sd-ai-command-pack-update-spec-kb.py`. An absent `.obsidian-kb` is
+   created, while a valid root symlink to a directory is preserved and
+   refreshed through its target. A broken symlink, symlink to a non-directory,
+   or occupied non-directory path blocks the merge before KB or ignore writes
    and reports the supported recovery command.
 4. The script fetches and prunes `origin` so local remote-tracking refs reflect
    GitHub.

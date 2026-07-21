@@ -32,7 +32,7 @@ from sd_ai_command_pack_lib import git_stdout as run_git_stdout
 KB_DIR = Path(".obsidian-kb")
 LEGACY_KB_DASHBOARD = Path("Dashboard.md")
 LEGACY_KB_OVERVIEW = Path("LLM-KB.md")
-GITIGNORE_ENTRY = ".obsidian-kb/"
+GITIGNORE_ENTRY = "/.obsidian-kb"
 LOCAL_ONLY_MARKER_FILE = Path(".sd-ai-command-pack/local-only.txt")
 KB_IGNORE_BLOCK_START = "# sd-ai-command-pack obsidian-kb start"
 KB_IGNORE_BLOCK_END = "# sd-ai-command-pack obsidian-kb end"
@@ -258,6 +258,25 @@ def is_within(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def ensure_kb_root(root: Path, *, create: bool) -> Path:
+    kb_root = root / KB_DIR
+    if kb_root.is_symlink():
+        if not kb_root.exists():
+            raise OSError(f"{KB_DIR} is a broken symlink")
+        if not kb_root.is_dir():
+            raise OSError(f"{KB_DIR} symlink target is not a directory")
+        return kb_root
+
+    if os.path.lexists(kb_root):
+        if not kb_root.is_dir():
+            raise OSError(f"{KB_DIR} is not a directory")
+        return kb_root
+
+    if create:
+        kb_root.mkdir(parents=True)
+    return kb_root
 
 
 def is_excluded(path: Path) -> bool:
@@ -1288,8 +1307,7 @@ def planned_overview_state(
 
 
 def create_copies(root: Path, sources: list[Path]) -> tuple[int, int, list[str]]:
-    kb_root = root / KB_DIR
-    kb_root.mkdir(parents=True, exist_ok=True)
+    kb_root = ensure_kb_root(root, create=True)
     entries = source_destination_entries(sources)
     wanted = {destination for _, destination in entries}
     legacy_sources = {source for source, _ in entries}
@@ -1394,6 +1412,7 @@ def report_kb_state(
 
 
 def dry_run(root: Path) -> int:
+    ensure_kb_root(root, create=False)
     sources = discover_sources(root)
     present, stale, copy_issues = collect_copy_state(root, sources)
     legacy_symlinks = legacy_generated_symlink_count(root)
@@ -1431,6 +1450,7 @@ def dry_run(root: Path) -> int:
 
 
 def check_current(root: Path) -> int:
+    ensure_kb_root(root, create=False)
     sources = discover_sources(root)
     present, stale, copy_issues = collect_copy_state(root, sources)
     legacy_symlinks = legacy_generated_symlink_count(root)
@@ -1477,6 +1497,7 @@ def check_current(root: Path) -> int:
 
 def refresh(root: Path) -> int:
     try:
+        ensure_kb_root(root, create=False)
         gitignore_state = ensure_gitignore(root)
         sources = discover_sources(root)
         legacy_symlinks = legacy_generated_symlink_count(root)

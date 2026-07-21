@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.28.0 - 2026-07-21
+
+- Make housekeeping create or refresh `.obsidian-kb`, preserve valid root
+  directory symlinks, reject invalid root paths before writes, and manage the
+  root with an anchored ignore rule that covers directories and symlinks.
+
 ## 0.27.0 - 2026-07-21
 
 - Preserve GitHub's auto-filled PR summary while automatically appending the
