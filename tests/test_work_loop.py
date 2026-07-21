@@ -593,6 +593,80 @@ class WorkLoopTests(InstallTestCase):
         module.acquire_lock(lock_path, first, recover_stale=True)
         self.assertEqual(module.read_json(lock_path)["runId"], first["runId"])
 
+    def test_terminal_lock_diagnostics_distinguish_active_and_stale(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, _state_path, lock_path = self.make_state(module, root, state_root)
+        module.release_lock(lock_path, state["runId"])
+
+        terminal_lock_path = lock_path.parent / module.TERMINAL_LOCK_NAME
+        active = module.lock_payload(state)
+        active["runId"] = "terminal-active"
+        module.atomic_write_json(terminal_lock_path, active)
+        with self.assertRaisesRegex(
+            module.WorkLoopError,
+            "active terminal reconciliation lock; retry after reconciliation finishes",
+        ):
+            module.acquire_lock(lock_path, state)
+
+        active_bytes = terminal_lock_path.read_bytes()
+        with self.assertRaisesRegex(
+            module.WorkLoopError,
+            "active terminal reconciliation lock; retry after reconciliation finishes",
+        ):
+            module.acquire_terminal_lock(terminal_lock_path, state)
+        self.assertEqual(terminal_lock_path.read_bytes(), active_bytes)
+
+        malformed = dict(active)
+        malformed["heartbeatAt"] = "not-a-timestamp"
+        module.atomic_write_json(terminal_lock_path, malformed)
+        malformed_bytes = terminal_lock_path.read_bytes()
+        for recover_stale in (False, True):
+            with self.subTest(recover_stale=recover_stale):
+                with self.assertRaisesRegex(
+                    module.WorkLoopError,
+                    "terminal reconciliation lock is unreadable or malformed; "
+                    "inspect it before retrying",
+                ):
+                    module.acquire_terminal_lock(
+                        terminal_lock_path,
+                        state,
+                        recover_stale=recover_stale,
+                    )
+                self.assertEqual(terminal_lock_path.read_bytes(), malformed_bytes)
+
+        stale = dict(active)
+        stale.update(
+            {
+                "pid": 99999999,
+                "hostname": "different-host",
+                "heartbeatAt": "2000-01-01T00:00:00Z",
+            }
+        )
+        module.atomic_write_json(terminal_lock_path, stale)
+        stale_bytes = terminal_lock_path.read_bytes()
+        with self.assertRaisesRegex(
+            module.WorkLoopError,
+            "stale terminal reconciliation lock; retry reconcile-terminal with "
+            "--recover-stale-lock",
+        ):
+            module.acquire_lock(lock_path, state)
+        self.assertEqual(terminal_lock_path.read_bytes(), stale_bytes)
+
+        with self.assertRaisesRegex(
+            module.WorkLoopError,
+            "stale terminal reconciliation lock; retry with --recover-stale-lock",
+        ):
+            module.acquire_terminal_lock(terminal_lock_path, state)
+        self.assertEqual(terminal_lock_path.read_bytes(), stale_bytes)
+
+        operation_id = module.acquire_terminal_lock(
+            terminal_lock_path, state, recover_stale=True
+        )
+        self.assertEqual(module.read_json(terminal_lock_path)["runId"], operation_id)
+        module.release_lock(terminal_lock_path, operation_id)
+
     def test_terminal_reconciliation_supports_merge_and_squash_delivery(self) -> None:
         module = self.load_module()
 
