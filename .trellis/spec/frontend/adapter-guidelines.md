@@ -350,6 +350,82 @@ failure, or copy task files in a lifecycle skill.
 Correct: call the canonical helper with `--if-present` once at each mutation
 boundary and stop the owning workflow when an existing KB cannot be refreshed.
 
+## Scenario: First-Review Boundary-Risk Source Classification
+
+### 1. Scope / Trigger
+
+- Trigger: changing which diff paths feed the preflight's parser, subprocess,
+  filesystem, environment, or integrity token scan.
+- The advisory identifies new production boundary behavior; test harnesses may
+  exercise those APIs without adding the behavior under review.
+
+### 2. Signatures
+
+- Path classifier: `isBoundaryRiskReviewPath(path) -> boolean`.
+- Token classifier: `reviewRiskCategories(text) -> string[]`.
+- Diff owner: `checkReviewRiskSweep()` reads added lines only from paths
+  accepted by the path classifier.
+
+### 3. Contracts
+
+- Normalize path separators before classification.
+- Accept executable source extensions `cjs`, `js`, `mjs`, `py`, `sh`, `ts`,
+  and `tsx` unless the normalized path is a conventional test path.
+- Exclude directory segments `test`, `tests`, and `__tests__`, plus filename
+  stems matching `test_*`, `*_test`, `*.test`, or `*.spec`.
+- Do not infer a test from a merely similar production name such as
+  `test-runner.sh` under the `scripts/` directory.
+- Test-path exclusion affects only the boundary-risk content scan. Authored
+  source sizing, task scope, unreadable/oversized production warnings, and the
+  category regexes keep their existing contracts.
+- Declarative manifests such as `package.json` remain outside the executable
+  source-extension set.
+
+### 4. Validation & Error Matrix
+
+- Test-only diff with boundary tokens -> no boundary-risk behavior warning.
+- Production-only diff with boundary tokens -> existing categorized warning.
+- Mixed diff -> categories derive only from production added lines.
+- Windows separators -> normalize and apply the same directory/filename rules.
+- Oversized or unreadable production source -> preserve the bounded explicit
+  warning without reading the file in full.
+
+### 5. Good / Base / Bad Cases
+
+- Good: a test stubs `subprocess.run` and modifies `os.environ` while the
+  production wrapper is declarative, so no production-risk warning appears.
+- Base: a production script adds no risk token and the sweep reports a pass.
+- Bad: concatenate production and test diffs before classification, causing
+  test-only tokens to demand runtime boundary evidence.
+
+### 6. Tests Required
+
+- Unit-test directory, filename, Windows-path, non-test-name, and unsupported-
+  extension classification.
+- Integration-test test-only, production-only, and mixed diffs with assertions
+  on the exact warning categories.
+- Preserve large/unreadable untracked-source tests, root/template parity, Node
+  syntax checks, and the full repository quality gate.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```javascript
+const codePaths = changed.paths.filter((path) => REVIEW_CODE_PATH_PATTERN.test(path));
+```
+
+This scans test harness tokens as though they were new runtime behavior.
+
+#### Correct
+
+```javascript
+const codePaths = changed.paths.filter(isBoundaryRiskReviewPath);
+```
+
+The shared classifier preserves production advisories while removing test-only
+noise.
+
 ## Scenario: Registry-Backed Command Discovery
 
 ### 1. Scope / Trigger
