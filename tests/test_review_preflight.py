@@ -176,6 +176,8 @@ assert.deepEqual(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/07
 });
 assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/task.json'), null);
 assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/not-a-month/07-17-demo/task.json'), null);
+assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/not-dated/check.jsonl'), null);
+assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/not-dated/check.jsonl'), null);
 assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/07-17-demo/prd.md'), null);
 assert.deepEqual(validateTrellisTaskMetadata({
   id: 'demo',
@@ -1244,12 +1246,19 @@ assert.deepEqual(
         present = root / ".trellis/tasks/archive/not-a-month/07-21-present"
         present.mkdir(parents=True)
         (present / "implement.jsonl").write_text("", encoding="utf-8")
+        undated = root / ".trellis/tasks/archive/2026-07/not-dated"
+        undated.mkdir(parents=True)
+        (undated / "check.jsonl").write_text("", encoding="utf-8")
 
         result = self.run_review_preflight(node, root)
 
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
             "archive/not-a-month/07-21-present/implement.jsonl is not in a supported Trellis task layout",
+            result.stdout,
+        )
+        self.assertIn(
+            "archive/2026-07/not-dated/check.jsonl is not in a supported Trellis task layout",
             result.stdout,
         )
         self.assertNotIn("07-20-deleted/check.jsonl is not in", result.stdout)

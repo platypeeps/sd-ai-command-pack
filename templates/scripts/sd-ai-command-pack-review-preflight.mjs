@@ -903,7 +903,7 @@ function checkCompletedTrellisTaskLocation() {
 
 export function parseTrellisTaskArtifactPath(path) {
   const normalized = normalizePathSeparators(path).replace(/^\.\//, '');
-  const match = /^\.trellis\/tasks\/((?:archive\/\d{4}-\d{2}\/[^/]+)|[^/]+)\/(task\.json|implement\.jsonl|check\.jsonl)$/.exec(normalized);
+  const match = /^\.trellis\/tasks\/((?:archive\/\d{4}-\d{2}\/\d{2}-\d{2}-[^/]+)|\d{2}-\d{2}-[^/]+)\/(task\.json|implement\.jsonl|check\.jsonl)$/.exec(normalized);
   if (!match || match[1] === 'archive') {
     return null;
   }
