@@ -42,6 +42,14 @@ const DIRECT_BOUNDARY_SPLIT_PATTERNS = [
   /\b(?:[A-Za-z_$][A-Za-z0-9_$]*\.)?(?:readFileSync|readFile)\s*\([^\r\n]*\)\s*(?:\?\.|\.)\s*split\s*\(/,
   /\.\s*read_text\s*\([^\r\n]*\)\s*\.\s*split\s*\(/,
 ];
+const JOURNAL_VALIDATION_FALLBACK_PATTERN =
+  /^[ \t]*(?:[-*]\s*)?(?:\[OK\]\s*)?(Validation (?:was )?not recorded for this session\.)[ \t]*$/gim;
+const JOURNAL_VALIDATION_SURFACE_PATTERN =
+  /\b(?:quality gate|full[- ]check|tests?|test suite|lint|type[- ]?check|build|ci|codeql|playwright|validation|verification)\b/i;
+const JOURNAL_VALIDATION_SUCCESS_PATTERN =
+  /\b(?:pass(?:ed|es|ing)?|verified|validated|green|successful(?:ly)?|succeeded|completed)\b/i;
+const JOURNAL_VALIDATION_NEGATION_PATTERN =
+  /\b(?:fail(?:ed|ing|ure|ures)?|skip(?:ped|ping)?|pending|not|never|without|no)\b|\b(?:wasn't|weren't|didn't|isn't)\b/i;
 
 // Declared before the module-level main run below: unlike function
 // declarations, class bindings are not hoisted out of the temporal dead
@@ -1013,6 +1021,7 @@ function checkTrellisJournalRecords() {
     }
 
     const validation = validateTrellisJournalSessions({
+      baselineJournalSessions,
       developerRelative,
       indexFile,
       indexSessions,
@@ -1033,7 +1042,7 @@ function checkTrellisJournalRecords() {
   }
 
   pass(
-    `checked ${completedSessions} completed Trellis journal session(s) for placeholders, ` +
+    `checked ${completedSessions} completed Trellis journal session(s) for placeholders and validation consistency, ` +
       `${comparedSessions} journal/index commit list(s), and ${baselineSessionsCompared} baseline session(s) for historical edits.`,
   );
 }
@@ -1950,6 +1959,7 @@ function parseNumstatZ(output) {
 }
 
 export function validateTrellisJournalSessions({
+  baselineJournalSessions = [],
   developerRelative,
   indexFile,
   indexSessions,
@@ -1961,6 +1971,9 @@ export function validateTrellisJournalSessions({
 
   const validationFailures = [];
   const sessions = new Map();
+  const baselineSessions = new Map(
+    baselineJournalSessions.map((session) => [session.number, session]),
+  );
   let completedSessions = 0;
   let comparedSessions = 0;
 
@@ -1982,6 +1995,20 @@ export function validateTrellisJournalSessions({
       for (const index of findStringIndexes(session.content, placeholder)) {
         const line = session.startLine + lineNumberAt(session.content, index) - 1;
         validationFailures.push(`${session.file}:${line} completed Session ${session.number} still contains placeholder ${placeholder}.`);
+      }
+    }
+
+    const baselineSession = baselineSessions.get(session.number);
+    const unchangedFromBaseline =
+      baselineSession &&
+      normalizeJournalSessionContent(baselineSession.content) ===
+        normalizeJournalSessionContent(session.content);
+    if (!unchangedFromBaseline) {
+      for (const fallback of findContradictoryJournalValidationFallbacks(session)) {
+        validationFailures.push(
+          `${session.file}:${fallback.line} completed Session ${session.number} claims successful validation in Summary or Main Changes, ` +
+            `but Testing still says "${fallback.text}"; record concrete validation evidence or remove the positive validation claim.`,
+        );
       }
     }
   }
@@ -2040,6 +2067,43 @@ export function parseJournalSessionsFromText(file, text) {
       completed: /^\s*(?:[-*]\s*)?(?:\[OK\]\s*)?\*\*Completed\*\*\s*$/im.test(status),
       commits: extractCommitHashes(extractMarkdownSection(content, 'Git Commits')),
     };
+  });
+}
+
+export function findContradictoryJournalValidationFallbacks(session) {
+  if (!session?.completed || !hasPositiveJournalValidationClaim(session.content)) {
+    return [];
+  }
+
+  const testing = extractMarkdownSectionRange(session.content, 'Testing');
+  if (!testing) {
+    return [];
+  }
+
+  return [...testing.content.matchAll(JOURNAL_VALIDATION_FALLBACK_PATTERN)].map((match) => ({
+    line:
+      session.startLine +
+      lineNumberAt(session.content, testing.startIndex + (match.index ?? 0)) -
+      1,
+    text: match[1],
+  }));
+}
+
+function hasPositiveJournalValidationClaim(content) {
+  return ['Summary', 'Main Changes'].some((heading) => {
+    const section = extractMarkdownSectionRange(content, heading);
+    if (!section) {
+      return false;
+    }
+
+    return section.content.split(/\r?\n/).some((line) => {
+      const claim = line.replace(/\bno failures?\b/gi, '');
+      return (
+        JOURNAL_VALIDATION_SURFACE_PATTERN.test(claim) &&
+        JOURNAL_VALIDATION_SUCCESS_PATTERN.test(claim) &&
+        !JOURNAL_VALIDATION_NEGATION_PATTERN.test(claim)
+      );
+    });
   });
 }
 
@@ -2114,16 +2178,24 @@ export function parseWorkspaceIndexSessionsFromText(file, text, options = {}) {
 }
 
 function extractMarkdownSection(markdown, heading) {
+  return extractMarkdownSectionRange(markdown, heading)?.content || '';
+}
+
+function extractMarkdownSectionRange(markdown, heading) {
   const headingMatch = new RegExp(`^###\\s+${escapeRegExp(heading)}\\s*$`, 'm').exec(markdown);
 
   if (!headingMatch) {
-    return '';
+    return null;
   }
 
-  const rest = markdown.slice((headingMatch.index ?? 0) + headingMatch[0].length);
+  const startIndex = (headingMatch.index ?? 0) + headingMatch[0].length;
+  const rest = markdown.slice(startIndex);
   const nextHeading = /^###\s+/m.exec(rest);
 
-  return nextHeading ? rest.slice(0, nextHeading.index) : rest;
+  return {
+    content: nextHeading ? rest.slice(0, nextHeading.index) : rest,
+    startIndex,
+  };
 }
 
 export function extractCommitHashes(text) {

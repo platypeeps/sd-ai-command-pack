@@ -69,6 +69,7 @@ import assert from 'node:assert/strict';
 import {
   copiedTemplateKind,
   extractDocumentationPathReferences,
+  findContradictoryJournalValidationFallbacks,
   findHistoricalTrellisJournalSessionEdits,
   findTrellisTaskContextSeedRows,
   isBoundaryRiskReviewPath,
@@ -319,6 +320,77 @@ const validation = validateTrellisJournalSessions({
 assert.equal(validation.completedSessions, 1);
 assert.ok(validation.failures.some((failure) => failure.includes('(Add details)')));
 assert.ok(validation.failures.some((failure) => failure.includes('commits `1234567` do not match')));
+const contradictoryJournal = parseJournalSessionsFromText('.trellis/workspace/dev/journal-2.md', [
+  '## Session 2: Contradictory',
+  '### Summary',
+  '- Full quality gate passed with no failures.',
+  '### Status',
+  '- [OK] **Completed**',
+  '### Main Changes',
+  '- Preserved concrete implementation details.',
+  '### Testing',
+  '- Validation was not recorded for this session.',
+  '### Git Commits',
+  '- abcdef2',
+].join('\\n'))[0];
+assert.deepEqual(
+  findContradictoryJournalValidationFallbacks(contradictoryJournal),
+  [{ line: 9, text: 'Validation was not recorded for this session.' }],
+);
+assert.deepEqual(
+  validateTrellisJournalSessions({
+    baselineJournalSessions: [contradictoryJournal],
+    developerRelative: '.trellis/workspace/dev',
+    indexFile: '.trellis/workspace/dev/index.md',
+    indexSessions: null,
+    journalSessions: [contradictoryJournal],
+  }).failures,
+  [],
+);
+for (const lines of [
+  [
+    '## Session 3: Incomplete',
+    '### Summary',
+    '- Tests passed.',
+    '### Status',
+    '- **In Progress**',
+    '### Testing',
+    '- Validation not recorded for this session.',
+  ],
+  [
+    '## Session 4: Planning only',
+    '### Summary',
+    '- Completed planning; no validation was run.',
+    '### Status',
+    '- [OK] **Completed**',
+    '### Testing',
+    '- Validation not recorded for this session.',
+  ],
+  [
+    '## Session 5: Explicit failure',
+    '### Main Changes',
+    '- Full check failed and tests were skipped.',
+    '### Status',
+    '- [OK] **Completed**',
+    '### Testing',
+    '- Validation was not recorded for this session.',
+  ],
+  [
+    '## Session 6: Concrete testing',
+    '### Summary',
+    '- CI passed.',
+    '### Status',
+    '- [OK] **Completed**',
+    '### Testing',
+    '- [OK] make check',
+  ],
+]) {
+  const candidate = parseJournalSessionsFromText(
+    '.trellis/workspace/dev/journal-boundary.md',
+    lines.join('\\n'),
+  )[0];
+  assert.deepEqual(findContradictoryJournalValidationFallbacks(candidate), []);
+}
 const currentJournal = parseJournalSessionsFromText('.trellis/workspace/dev/journal-1.md', [
   '## Session 1: Done',
   '### Main Changes',
@@ -1718,6 +1790,54 @@ assert.deepEqual(
         self.assertIn("completed Session 1 still contains placeholder (Add details)", result.stdout)
         self.assertIn("completed Session 1 still contains placeholder (Add test results)", result.stdout)
         self.assertIn("commits `1234567` do not match", result.stdout)
+
+    def test_review_preflight_rejects_contradictory_journal_validation(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        workspace = root / ".trellis/workspace/dev"
+        workspace.mkdir(parents=True)
+        (workspace / "journal-1.md").write_text(
+            "\n".join(
+                [
+                    "## Session 1: Contradictory fixture",
+                    "### Summary",
+                    "- Full quality gate passed.",
+                    "### Status",
+                    "- [OK] **Completed**",
+                    "### Main Changes",
+                    "- Added the implementation.",
+                    "### Testing",
+                    "- Validation not recorded for this session.",
+                    "### Git Commits",
+                    "- abcdef1",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (workspace / "index.md").write_text(
+            "| Session | Title | Status | Commits | Notes |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| 1 | Contradictory fixture | Completed | abcdef1 | done |\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            ".trellis/workspace/dev/journal-1.md:9 completed Session 1 claims successful validation",
+            result.stdout,
+        )
+        self.assertIn(
+            'Testing still says "Validation not recorded for this session."',
+            result.stdout,
+        )
+        self.assertIn("record concrete validation evidence", result.stdout)
 
     def test_review_preflight_rejects_historical_trellis_journal_edits(self) -> None:
         node = shutil.which("node")
