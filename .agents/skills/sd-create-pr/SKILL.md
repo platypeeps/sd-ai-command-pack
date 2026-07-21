@@ -274,7 +274,7 @@ case "$PREPARE_STATUS" in
     gh pr edit --body-file "$PR_BODY_FILE"
     ;;
   3)
-    printf '%s\n' "info: mixed-scope or empty diff; keeping GitHub's auto-filled body unchanged."
+    : # The helper already reported the bounded non-error result on stdout.
     ;;
   *)
     printf '%s\n' "error: automatic PR-body scope preparation failed; stop before Step 6." >&2

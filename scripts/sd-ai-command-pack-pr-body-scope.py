@@ -826,7 +826,8 @@ def main(argv: list[str]) -> int:
             actor=args.actor,
         )
     if messages:
-        print("\n".join(messages), file=sys.stderr if status else sys.stdout)
+        stream = sys.stderr if status not in (0, PREPARE_NOT_APPLICABLE) else sys.stdout
+        print("\n".join(messages), file=stream)
     return status
 
 

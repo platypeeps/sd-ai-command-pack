@@ -9,6 +9,7 @@ pack-owned behavior that must hold everywhere the script ships.
 from __future__ import annotations
 
 import importlib.util
+import io
 import sys
 import tempfile
 import unittest
@@ -245,6 +246,34 @@ class ToolingBodyPreparationTests(unittest.TestCase):
             self.assertEqual(status, self.mod.PREPARE_NOT_APPLICABLE, messages)
             self.assertEqual(body_file.read_text(encoding="utf-8"), original)
             self.assertTrue(any("not tooling/generated-only" in item for item in messages))
+
+    def test_mixed_scope_cli_reports_non_error_result_only_on_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root, changed_file, body_file = self._fixture_root(
+                Path(raw),
+                changed="src/runtime.py\n",
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with mock.patch.object(sys, "stdout", stdout), mock.patch.object(
+                sys, "stderr", stderr
+            ):
+                status = self.mod.main(
+                    [
+                        "sd-ai-command-pack-pr-body-scope.py",
+                        str(root),
+                        "--prepare-tooling-body",
+                        "--body-file",
+                        str(body_file),
+                        "--changed-files",
+                        str(changed_file),
+                    ]
+                )
+
+            self.assertEqual(status, self.mod.PREPARE_NOT_APPLICABLE)
+            self.assertIn("not tooling/generated-only", stdout.getvalue())
+            self.assertEqual(stderr.getvalue(), "")
 
     def test_missing_explicit_config_fails_without_rewriting_body(self) -> None:
         original = "Commit-derived summary.\n"

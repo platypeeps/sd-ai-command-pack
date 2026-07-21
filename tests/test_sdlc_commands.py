@@ -577,6 +577,7 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("verified `sd-ship` Stage 1", normalized)
         self.assertNotIn("gh pr edit --body ", step_5)
         self.assertNotIn("gh pr create --body ", step_5)
+        self.assertNotIn("keeping GitHub's auto-filled body unchanged", step_5)
 
     def test_create_pr_adapters_do_not_expose_internal_ship_context(self) -> None:
         adapters = [
