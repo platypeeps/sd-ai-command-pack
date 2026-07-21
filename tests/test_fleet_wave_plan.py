@@ -290,6 +290,32 @@ class FleetWavePlanTests(InstallTestCase):
                     {
                         "name": "canary",
                         "strategy": "sequential",
+                        "consumers": [
+                            "CANARY-A",
+                            *[consumer.name for consumer in consumers[1:]],
+                        ],
+                    }
+                ],
+            },
+            {
+                "defaultConcurrency": 2,
+                "cohorts": [
+                    {
+                        "name": "canary",
+                        "strategy": "sequential",
+                        "consumers": [
+                            " canary-a ",
+                            *[consumer.name for consumer in consumers[1:]],
+                        ],
+                    }
+                ],
+            },
+            {
+                "defaultConcurrency": 2,
+                "cohorts": [
+                    {
+                        "name": "canary",
+                        "strategy": "sequential",
                         "maxConcurrency": True,
                         "consumers": [consumer.name for consumer in consumers],
                     }

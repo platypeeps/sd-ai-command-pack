@@ -437,7 +437,7 @@ def parse_fleet_rollout_policy(
     cohorts: list[FleetRolloutCohort] = []
     seen_cohorts: set[str] = set()
     configured_consumers: list[str] = []
-    known_consumers = {consumer.name.casefold(): consumer.name for consumer in consumers}
+    known_consumers = {consumer.name: consumer.name for consumer in consumers}
     seen_consumers: set[str] = set()
     for index, raw_cohort in enumerate(raw_cohorts):
         cohort_label = f"{label} rolloutPolicy cohorts[{index}]"
@@ -493,11 +493,11 @@ def parse_fleet_rollout_policy(
                 raise FleetConfigError(
                     f"{cohort_label} consumers[{consumer_index}] must be a non-empty string"
                 )
-            consumer_key = raw_name.strip().casefold()
+            consumer_key = raw_name
             canonical_name = known_consumers.get(consumer_key)
             if canonical_name is None:
                 raise FleetConfigError(
-                    f"{cohort_label} names unknown consumer {raw_name.strip()}"
+                    f"{cohort_label} names unknown consumer {raw_name}"
                 )
             if consumer_key in seen_consumers:
                 raise FleetConfigError(
