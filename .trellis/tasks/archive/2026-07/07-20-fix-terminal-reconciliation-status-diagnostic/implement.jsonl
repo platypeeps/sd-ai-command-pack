@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines the status work-loop snapshot validation and diagnostic contract."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Requires concise deterministic CLI errors without leaking misleading values."}

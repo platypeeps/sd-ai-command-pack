@@ -710,7 +710,7 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             if terminal.get("status") != "verified":
                 return invalid_field("terminalReconciliation.status")
             if status not in {"stopped", "completed"}:
-                return invalid_field("terminalReconciliation.status")
+                return invalid_field("terminalReconciliation")
             normalized_terminal: dict[str, Any] = {"status": "verified"}
             for field, limit in (
                 ("reconciledAt", 80),
