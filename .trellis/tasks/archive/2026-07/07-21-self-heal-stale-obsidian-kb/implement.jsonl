@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Defines shipped adapter ownership, template parity, and the full-check KB auto-repair contract."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Defines template source-of-truth, manifest versioning, provenance, and generated payload synchronization."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Defines fail-closed shell behavior and actionable diagnostics for refresh and verification failures."}

@@ -1278,9 +1278,13 @@ ephemeral tool state and do not change what the checks validate.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_KB`: Obsidian KB freshness check mode.
   Default `auto` runs `scripts/sd-ai-command-pack-update-spec-kb.py --check`
   only when a generated `.obsidian-kb/` folder exists and skips with a warning
-  otherwise; `0` skips entirely; `required` fails when the helper, `python3`,
-  or a passing check is unavailable. A stale KB fails the full check with a
-  refresh hint.
+  otherwise. When the existing KB is stale and already ignored, `auto`
+  refreshes it once through the canonical helper, reruns `--check`, and
+  continues only after the recheck passes. Unignored state remains fail-closed
+  so full-check does not change tracked ignore configuration; missing `git` or
+  an ignore-verification error also fails with a targeted diagnostic. `0` skips
+  entirely; `required` stays read-only and fails when the helper, `python3`,
+  or a passing check is unavailable.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT=0`: skip the pack source drift
   gates (template twin parity, release-version coverage for shipped payload
   changes, and env-var documentation coverage). In `auto` mode, generic source

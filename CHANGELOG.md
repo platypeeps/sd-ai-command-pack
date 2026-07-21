@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.25.4 - 2026-07-21
+
+- Let the default full-check repair and recheck an existing ignored stale
+  Obsidian KB once, while keeping required mode and unignored state read-only
+  and fail-closed.
+
 ## 0.25.3 - 2026-07-20
 
 - Remove the unused terminal reconciliation pull-request normalizer parameter
