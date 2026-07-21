@@ -312,9 +312,10 @@ merge-boundary evidence, or recovery-checkpoint behavior in
   checkpoint recovery may retain that unchanged historical SHA while advancing
   the already-recorded base-branch head.
 - The historical exception applies only when `lastShippedSha` resolves to the
-  remembered value, the branch is unchanged, and that branch equals
-  `baseBranch`. New or changed shipped-SHA evidence still requires descendant
-  and shipped-branch proof.
+  remembered value and the ledger already records a non-empty branch that is
+  unchanged and equals both the submitted branch and `baseBranch`. First-time
+  branch/head evidence, and new or changed shipped-SHA evidence, still require
+  descendant and shipped-branch proof.
 - A later base-branch head must remain a descendant of the remembered head;
   task, base branch, PR number, and PR URL remain immutable.
 
@@ -322,6 +323,8 @@ merge-boundary evidence, or recovery-checkpoint behavior in
 
 - Feature branch -> base branch with an unrelated shipped SHA -> reject with
   `lastShippedSha evidence must belong to the shipped branch`.
+- Missing remembered branch + newly submitted base branch/head + unchanged
+  unrelated shipped SHA -> reject with the shipped-branch error.
 - Already on base branch + unchanged historical shipped SHA + descendant head
   -> accept and allow complete checkpoint recovery.
 - Already on base branch + changed shipped SHA not descending from the
@@ -346,6 +349,7 @@ merge-boundary evidence, or recovery-checkpoint behavior in
 - Paused or blocked same-phase recovery after a squash merge and later
   base-branch commit, using every recorded current-state field.
 - Self-anchored or unrelated shipped-SHA rejection.
+- First-time branch/head evidence cannot activate the historical exception.
 - Changed shipped-SHA descendant enforcement and non-descendant head rejection.
 - Template twin byte identity.
 
@@ -355,8 +359,8 @@ merge-boundary evidence, or recovery-checkpoint behavior in
 Wrong: require an unchanged squash-delivered feature SHA to be an ancestor of every later main head
 Correct: prove it at the merge boundary, then retain it as immutable historical evidence
 
-Wrong: skip ancestry checks whenever the ledger branch is main
-Correct: skip only the repeated shipped-branch check for the unchanged recorded SHA; still validate head ancestry and all identities
+Wrong: infer historical branch proof from newly submitted main-branch evidence
+Correct: require an already-recorded non-empty main branch before skipping the repeated shipped-branch check; still validate head ancestry and all identities
 ```
 
 ## Session Recorder Retry Contract

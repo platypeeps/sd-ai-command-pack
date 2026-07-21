@@ -418,3 +418,44 @@ Published the 0.24.6 stale terminal-lock diagnostic contract, preserved active a
 ### Next Steps
 
 - None - task complete
+
+
+## Session 163: Require remembered branch evidence
+
+**Date**: 2026-07-20
+**Task**: Require remembered branch evidence
+**Branch**: `codex/require-remembered-branch-evidence`
+
+### Summary
+
+Released sd-ai-command-pack 0.24.7 so the post-squash historical shipped-SHA exception requires an already-recorded concrete base branch; added the first-time branch-evidence regression, executable contract updates, and seven-consumer candidate proof.
+
+### Main Changes
+
+- Required an already-recorded non-empty branch matching the submitted and
+  base branches before retaining an unchanged shipped SHA as historical.
+- Added the first-time branch/head evidence regression and updated the
+  executable reconciliation contract.
+- Published synchronized 0.24.7 release metadata and seven-consumer candidate
+  evidence.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0cb6e81` | (see git log) |
+
+### Testing
+
+- [OK] focused remembered-branch and post-squash recovery regressions
+- [OK] Ruff on affected Python files
+- [OK] make check, including tests, coverage, lint, mypy, security, and full-check
+- [OK] full candidate validation passed for all seven configured consumers
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -1335,6 +1335,35 @@ class WorkLoopTests(InstallTestCase):
                 repo=root,
             )
 
+    def test_historical_shipped_evidence_requires_a_remembered_branch(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, main_head = self.make_shipping_state(module, root)
+        feature_head = state["current"]["head"]
+        module.update_evidence(
+            state,
+            {"lastShippedSha": feature_head},
+            repo=root,
+        )
+        state["current"]["branch"] = None
+        state["current"]["head"] = None
+        self.run_git(root, "switch", "main")
+
+        with self.assertRaisesRegex(
+            module.WorkLoopError,
+            "lastShippedSha evidence must belong to the shipped branch",
+        ):
+            module.validated_evidence(
+                state,
+                {
+                    "branch": "main",
+                    "head": main_head,
+                    "lastShippedSha": feature_head,
+                },
+                phase="followups",
+                repo=root,
+            )
+
     def test_evidence_rejects_identity_branch_pr_and_commit_conflicts(self) -> None:
         module = self.load_module()
         root = self.make_repo()

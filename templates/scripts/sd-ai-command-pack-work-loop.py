@@ -1670,8 +1670,11 @@ def validated_evidence(
             resolved_remembered_shipped is not None
             and candidate_shipped == resolved_remembered_shipped
             and not branch_changed
+            and isinstance(remembered_branch, str)
+            and bool(remembered_branch.strip())
             and isinstance(candidate_branch, str)
             and bool(candidate_branch.strip())
+            and candidate_branch == remembered_branch
             and candidate_branch == candidate.get("baseBranch")
         )
         if not unchanged_historical_shipped_evidence:
