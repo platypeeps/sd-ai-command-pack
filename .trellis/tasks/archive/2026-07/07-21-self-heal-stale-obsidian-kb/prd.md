@@ -86,4 +86,4 @@ strict verification non-mutating and fail-closed.
   Ruff, mypy, zizmor, install audit, KB freshness, and release gates green.
 - Fleet candidate validation passed for all seven configured consumers against
   pack `0.25.4` and payload digest
-  `sha256:c5c25497afdb073aad4326bd7a98e66ed76c1fc61d4bce3e87f2e43b922d686f`.
+  `sha256:b7c82feaa2d3a598f7d9e58070e24f61e800f74ee2a52a9a7eed2abd7fc798f5`.
