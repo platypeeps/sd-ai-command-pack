@@ -259,11 +259,13 @@ DEFAULT_RULES = (
 def _split_changed_files(text: str) -> list[str]:
     paths: list[str] = []
     seen: set[str] = set()
-    for raw_path in text.replace("\0", "\n").splitlines():
-        stripped_path = raw_path.strip()
-        if not stripped_path:
+    nul_delimited = "\0" in text
+    raw_paths = text.split("\0") if nul_delimited else text.splitlines()
+    for raw_path in raw_paths:
+        candidate = raw_path if nul_delimited else raw_path.strip()
+        if not candidate:
             continue
-        path = _normalize_path(stripped_path)
+        path = _normalize_path(candidate)
         if path and path not in seen:
             paths.append(path)
             seen.add(path)

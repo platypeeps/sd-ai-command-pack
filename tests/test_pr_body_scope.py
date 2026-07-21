@@ -164,6 +164,20 @@ class ToolingBodyPreparationTests(unittest.TestCase):
             config_path=config_path,
         )
 
+    def test_nul_delimited_paths_preserve_newlines_and_edge_whitespace(self) -> None:
+        changed = (
+            ".trellis/tasks/07-21-demo/task.json\0"
+            " src/option-like\nname.py \0"
+        )
+
+        self.assertEqual(
+            self.mod._split_changed_files(changed),
+            [
+                ".trellis/tasks/07-21-demo/task.json",
+                " src/option-like\nname.py ",
+            ],
+        )
+
     def test_bookkeeping_only_body_preserves_fill_content_and_appends_scope(self) -> None:
         original = "Commit-derived summary with `code`, $VALUE, and $(literal).\n"
         with tempfile.TemporaryDirectory() as raw:
