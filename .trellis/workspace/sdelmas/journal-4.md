@@ -965,3 +965,44 @@ Prevented contradictory Trellis journal validation records and preserved the SD 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 177: Honor Obsidian KB directory and symlink lifecycle
+
+**Date**: 2026-07-21
+**Task**: Honor Obsidian KB directory and symlink lifecycle
+**Branch**: `codex/obsidian-kb-directory-symlink-lifecycle`
+
+### Summary
+
+Implemented directory-aware Obsidian KB synchronization, hardened invalid-root and helper availability handling, and completed three clean PR review rounds.
+
+### Main Changes
+
+- Treat existing directory and directory-symlink KB roots as valid synchronization targets while preserving legacy empty-path initialization.
+- Return actionable recovery guidance for invalid roots and missing copy helpers across update-spec and housekeeping workflows.
+- Add regression coverage for concurrent directory creation, portable excludes-file handling, and recovery-message contracts.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ce56e99` | feat: support symlinked Obsidian KB roots |
+| `2df2b39` | fix: address review feedback round 1 |
+| `6ca6f84` | fix: address review feedback round 2 |
+
+### Testing
+
+- [OK] Focused update-spec and housekeeping test suites passed.
+- [OK] make check passed.
+- [OK] Seven-consumer candidate validation passed.
+- [OK] PR #212 deterministic local review gate, three Copilot rounds, and GitHub CI passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
