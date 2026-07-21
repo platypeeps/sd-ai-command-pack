@@ -1281,7 +1281,8 @@ ephemeral tool state and do not change what the checks validate.
   otherwise. When the existing KB is stale and already ignored, `auto`
   refreshes it once through the canonical helper, reruns `--check`, and
   continues only after the recheck passes. Unignored state remains fail-closed
-  so full-check does not change tracked ignore configuration. `0` skips
+  so full-check does not change tracked ignore configuration; missing `git` or
+  an ignore-verification error also fails with a targeted diagnostic. `0` skips
   entirely; `required` stays read-only and fails when the helper, `python3`,
   or a passing check is unavailable.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT=0`: skip the pack source drift

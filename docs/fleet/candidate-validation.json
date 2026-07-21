@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-21T08:28:17Z",
+  "validatedAt": "2026-07-21T08:59:32Z",
   "packVersion": "0.25.4",
-  "payloadDigest": "sha256:c5c25497afdb073aad4326bd7a98e66ed76c1fc61d4bce3e87f2e43b922d686f",
+  "payloadDigest": "sha256:b7c82feaa2d3a598f7d9e58070e24f61e800f74ee2a52a9a7eed2abd7fc798f5",
   "fleetManifestDigest": "sha256:bf3d4349f6150bf6d2bb1ec03604e50b54596ca024b96363aa7cc5cc7393458f",
   "consumers": [
     {
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "8229d932cc2c47ec1ff379391676be2826436e6a",
+      "baseCommit": "687d0b89dcc780a39c760af552953bb445c188db",
       "status": "passed",
       "prepares": [
         [
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "4808344444a33566dec4251855b86444b361b6b4",
+      "baseCommit": "9604c0f97af7ce55b3ada5a69a71b3ad3199f5c6",
       "status": "passed",
       "prepares": [
         [
@@ -64,7 +64,7 @@
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
-      "baseCommit": "e312d9b23e8afbd2f28af0e0d68da3da910dc184",
+      "baseCommit": "ef4747c1678b9cab25ac252d767dc7b27c41abcd",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "44e7eaa378efef9cea89e72d83d9830686ba8d2b",
+      "baseCommit": "bd98606424b8aaa412c200f75ea94a8fb16a8dc9",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "51a76cca93cb652c7cd369db5c55fb3299570797",
+      "baseCommit": "b78c2bb5e4d164a95c628909101cfbf63291cdd3",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -121,7 +121,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "2e1a0e957e6465beccfb04ac2343b304c3a999bc",
+      "baseCommit": "506bbbb622bacec568570ce479a824a7187ec296",
       "status": "passed",
       "prepares": [
         [

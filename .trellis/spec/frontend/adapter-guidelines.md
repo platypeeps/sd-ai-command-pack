@@ -400,6 +400,8 @@ python3 scripts/sd-ai-command-pack-update-spec-kb.py --check || {
 - Stale KB in `required` -> no refresh, actionable failure, nonzero exit.
 - Stale unignored KB -> refuse refresh, preserve KB and `.gitignore`, nonzero
   exit.
+- Missing `git` -> report the missing prerequisite and refuse refresh, exit
+  `127`.
 - Ignore-verification error -> report that ignored state could not be verified,
   preserve KB, nonzero exit.
 - Refresh failure or failing post-refresh check -> preserve helper diagnostics,

@@ -1145,9 +1145,20 @@ class FullCheckTests(InstallTestCase):
             gitignore.read_text(encoding="utf-8").replace(".obsidian-kb/\n", ""),
             encoding="utf-8",
         )
+        isolated_home = root / "isolated-home"
+        isolated_xdg = root / "isolated-xdg"
+        isolated_home.mkdir()
+        isolated_xdg.mkdir()
+        isolated_git_env = {
+            "HOME": str(isolated_home),
+            "XDG_CONFIG_HOME": str(isolated_xdg),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+        }
         ignored = subprocess.run(
             ["git", "check-ignore", "-q", "--", ".obsidian-kb"],
             cwd=root,
+            env={**os.environ, **isolated_git_env},
             check=False,
         )
         self.assertNotEqual(ignored.returncode, 0)
@@ -1156,7 +1167,7 @@ class FullCheckTests(InstallTestCase):
         copied_before = copied_readme.read_bytes()
         gitignore_before = gitignore.read_bytes()
         (root / "README.md").write_text("# Unignored stale project\n", encoding="utf-8")
-        result = self._run_full_check_kb_lane(root)
+        result = self._run_full_check_kb_lane(root, isolated_git_env)
 
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn(
@@ -1165,6 +1176,62 @@ class FullCheckTests(InstallTestCase):
         )
         self.assertEqual(copied_readme.read_bytes(), copied_before)
         self.assertEqual(gitignore.read_bytes(), gitignore_before)
+
+    def test_full_check_kb_auto_repair_reports_missing_git(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        (root / "README.md").write_text("# Fresh Project\n", encoding="utf-8")
+        kb_refresh = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-update-spec-kb.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(kb_refresh.returncode, 0, kb_refresh.stdout)
+
+        runtime_bin = root / "runtime-bin"
+        runtime_bin.mkdir()
+        (runtime_bin / "python3").symlink_to(sys.executable)
+        copied_readme = root / ".obsidian-kb/Repository Overview/README.md"
+        copied_before = copied_readme.read_bytes()
+        (root / "README.md").write_text(
+            "# Missing git stale project\n", encoding="utf-8"
+        )
+        result = subprocess.run(
+            [
+                self._bash_path,
+                "-c",
+                "source scripts/sd-ai-command-pack-full-check.sh; "
+                "PATH=\"$SD_AI_COMMAND_PACK_FULL_CHECK_TEST_RUNTIME_PATH\"; "
+                "run_sd_ai_command_pack_kb_freshness_check",
+            ],
+            cwd=root,
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE": "1",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_TEST_RUNTIME_PATH": str(runtime_bin),
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 127, result.stdout)
+        self.assertIn(
+            "git is not found on PATH; refusing automatic refresh", result.stdout
+        )
+        self.assertIn(
+            "Install git, then verify the ignored state with: git check-ignore",
+            result.stdout,
+        )
+        self.assertEqual(copied_readme.read_bytes(), copied_before)
 
     def test_full_check_kb_auto_repair_refuses_unverifiable_ignore_state(
         self,

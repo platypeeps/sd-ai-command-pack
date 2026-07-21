@@ -100,6 +100,7 @@ paths, and deprecated fallbacks.
   freshness lane, or keep it read-only and fail when it cannot pass. Default
   `auto` checks only when a generated `.obsidian-kb/` folder exists; if stale
   output is already ignored, it refreshes once and requires a passing recheck.
+  Missing `git` or unverifiable ignore state fails without refreshing.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS=1`: skip all package-script
   checks.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0` / `=required`: skip Prism, or fail when

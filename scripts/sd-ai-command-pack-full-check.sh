@@ -524,6 +524,12 @@ run_sd_ai_command_pack_kb_freshness_check() {
     exit 1
   fi
 
+  if ! have git; then
+    printf 'Generated Obsidian KB is stale or blocked, but git is not found on PATH; refusing automatic refresh.\n' >&2
+    printf 'Install git, then verify the ignored state with: git check-ignore -q -- .obsidian-kb\n' >&2
+    exit 127
+  fi
+
   git check-ignore -q -- ".obsidian-kb" || ignore_status=$?
   if [ "$ignore_status" -eq 1 ]; then
     printf 'Generated Obsidian KB is stale or blocked, but .obsidian-kb is not ignored; refusing automatic refresh.\n' >&2
