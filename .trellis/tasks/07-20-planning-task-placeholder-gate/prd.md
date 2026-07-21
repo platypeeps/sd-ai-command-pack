@@ -20,15 +20,15 @@ Extend deterministic review preflight so newly added planning-task check and imp
 
 ## Acceptance Criteria
 
-- [ ] A new planning task containing an `_example` row fails review preflight.
-- [ ] The failure identifies every affected context file in one pass.
-- [ ] An empty planning-task context file passes.
-- [ ] Grounded context rows continue to pass.
-- [ ] Unchanged historical planning tasks remain outside the new diff-scoped
+- [x] A new planning task containing an `_example` row fails review preflight.
+- [x] The failure identifies every affected context file in one pass.
+- [x] An empty planning-task context file passes.
+- [x] Grounded context rows continue to pass.
+- [x] Unchanged historical planning tasks remain outside the new diff-scoped
       failure boundary.
 
 ## Notes
 
 - Review-derived follow-up from PR #184.
-- Keep this PRD-only until implementation begins; the change is a focused
-  preflight/test update.
+- This is a focused preflight/test update; implementation begins in work-loop
+  iteration 8.

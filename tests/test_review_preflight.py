@@ -800,7 +800,7 @@ assert.deepEqual(
             ),
         )
 
-    def test_review_preflight_checks_context_after_task_leaves_planning(self) -> None:
+    def test_review_preflight_checks_changed_context_in_every_task_phase(self) -> None:
         node = shutil.which("node")
         if node is None:
             self.skipTest("node is not available on PATH")
@@ -821,14 +821,6 @@ assert.deepEqual(
         (task / "check.jsonl").write_text(seed, encoding="utf-8")
 
         result = self.run_review_preflight(node, root)
-        self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn(
-            "no changed in-progress, completed, or archived Trellis task context files",
-            result.stdout,
-        )
-
-        task_json.write_text('{"status":"in_progress"}\n', encoding="utf-8")
-        result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
             ".trellis/tasks/07-17-demo/implement.jsonl:1 still contains",
@@ -845,21 +837,26 @@ assert.deepEqual(
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
-            "checked 2 changed in-progress, completed, or archived Trellis task context file(s)",
+            "checked 2 changed Trellis task context file(s)",
             result.stdout,
         )
 
+        task_json.write_text('{"status":"in_progress"}\n', encoding="utf-8")
         (task / "implement.jsonl").write_text(seed, encoding="utf-8")
         (task / "check.jsonl").write_text(seed, encoding="utf-8")
-        task_json.write_text("{malformed\n", encoding="utf-8")
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
-            "task.json could not be parsed as JSON while checking task context state",
+            ".trellis/tasks/07-17-demo/check.jsonl:1 still contains",
             result.stdout,
         )
-        self.assertNotIn(
-            "no changed in-progress, completed, or archived Trellis task context files",
+        self.assertIn(
+            ".trellis/tasks/07-17-demo/implement.jsonl:1 still contains",
+            result.stdout,
+        )
+
+        self.assertIn(
+            'replace it with grounded {"file": "<path>", "reason": "<why>"} context or leave the file empty',
             result.stdout,
         )
 
@@ -881,9 +878,41 @@ assert.deepEqual(
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
-            "checked 2 changed in-progress, completed, or archived Trellis task context file(s)",
+            "checked 2 changed Trellis task context file(s)",
             result.stdout,
         )
+
+    def test_review_preflight_ignores_unchanged_planning_context(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        task = root / ".trellis/tasks/07-17-legacy-planning"
+        task.mkdir(parents=True)
+        task_json = task / "task.json"
+        task_json.write_text('{"status":"planning"}\n', encoding="utf-8")
+        seed = '{"_example":"legacy planning"}\n'
+        (task / "implement.jsonl").write_text(seed, encoding="utf-8")
+        (task / "check.jsonl").write_text(seed, encoding="utf-8")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline with planning task")
+
+        task_json.write_text(
+            '{"status":"planning","description":"metadata only"}\n',
+            encoding="utf-8",
+        )
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "no changed Trellis task context files require scaffold checks",
+            result.stdout,
+        )
+        self.assertNotIn("legacy-planning/implement.jsonl:1", result.stdout)
+        self.assertNotIn("legacy-planning/check.jsonl:1", result.stdout)
 
     def test_review_preflight_checks_new_but_not_untouched_archived_seeds(self) -> None:
         node = shutil.which("node")
@@ -962,7 +991,7 @@ assert.deepEqual(
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
-            "checked 1 changed in-progress, completed, or archived Trellis task context file(s)",
+            "checked 1 changed Trellis task context file(s)",
             result.stdout,
         )
 

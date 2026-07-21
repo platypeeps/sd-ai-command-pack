@@ -89,12 +89,12 @@ that exercise the generic JavaScript review preflight.
   blocks because their GitHub paths and comment snippets are remote provenance.
   Preserve newlines for accurate diagnostics, and keep surrounding human text
   plus incomplete marker pairs in the normal local-path check.
-- Diff-scoped Trellis task checks inspect changed `implement.jsonl` and
-  `check.jsonl` files after their task leaves planning: `in_progress`,
-  `completed`, or archived. A changed qualifying `task.json` checks both
-  sibling context files. Parsed records with an own `_example` key fail;
-  planning scaffolds, untouched historical archives, and symlinked context
-  files remain outside the check.
+- Diff-scoped Trellis task checks inspect every changed `implement.jsonl` and
+  `check.jsonl` file regardless of whether its task is planning, in progress,
+  completed, or archived. A changed `task.json` does not pull unchanged sibling
+  context into scope. Parsed records with an own `_example` key fail; empty and
+  grounded context pass, while untouched historical and symlinked context files
+  remain outside the check.
 - A repository-wide bounded scan inspects regular `task.json` files in direct
   `.trellis/tasks/` children. A record with `status: completed` fails with the
   Trellis archive command; the `archive/` subtree, non-completed records,
@@ -116,13 +116,13 @@ that exercise the generic JavaScript review preflight.
 - Review-base Trellis journal session is deleted or renumbered -> fail as a
   historical-session removal, including when its journal file or the entire
   current workspace disappears.
-- Changed in-progress/completed/archived context owns `_example` -> fail with
-  the exact file and line plus replacement/removal guidance.
+- Changed planning/in-progress/completed/archived context owns `_example` ->
+  fail with the exact file and line plus grounded-context-or-empty guidance.
 - Completed direct active-root task -> fail with the exact `task.json` path and
   `task.py archive` remediation; archived, planning, in-progress, and symlinked
   records -> pass.
-- Planning context, untouched archived context, or symlinked context -> skip
-  without reading outside the repository.
+- Untouched historical context or symlinked context -> skip without reading
+  outside the repository; changed empty or grounded context -> pass.
 - Added boundary-sensitive code -> warn with stable risk categories and the
   malformed input, command failure/timeout, path, environment, symlink/global
   state, and multiline/extension matrix; do not fail the gate.
@@ -154,8 +154,9 @@ that exercise the generic JavaScript review preflight.
 - Historical-session comparison in a real Git fixture, including an appended
   session that leaves prior history unchanged, per-line trailing whitespace,
   renumbering, and deletion of a baseline journal file.
-- Completed-status sibling checks, newly archived seed rejection, untouched
-  archive grandfathering, planning scaffold allowance, and symlink skipping.
+- Planning scaffold rejection, multi-file aggregation, empty and grounded
+  context acceptance, newly archived seed rejection, untouched historical
+  grandfathering, and symlink skipping.
 - Stable first-review risk categorization, authored-source exclusions, and
   multi-task directory extraction, plus a real Git fixture covering all three
   advisory types.
