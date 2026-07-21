@@ -3,7 +3,7 @@
   "name": "create-pr-generated-scope-body",
   "title": "Auto-add generated scope to sd-create-pr PR bodies",
   "description": "Teach sd-create-pr to include the required Tooling/generated scope section automatically for bookkeeping-only pull requests before review begins.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

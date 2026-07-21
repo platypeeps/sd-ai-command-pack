@@ -554,6 +554,30 @@ class SdlcCommandsTests(InstallTestCase):
             ship_safety_text,
         )
 
+    def test_create_pr_prepares_tooling_only_fill_body_before_handoff(self) -> None:
+        create_pr = self._skill_text("sd-create-pr")
+        step_5 = create_pr.split("## Step 5", 1)[1].split("## Step 6", 1)[0]
+        normalized = " ".join(step_5.split())
+
+        for pin in (
+            "gh pr create --base \"$BASE_BRANCH\" --fill",
+            "git diff --name-only -z \"$BASE_REF\"...HEAD",
+            "gh pr view --json body --jq .body",
+            "--prepare-tooling-body",
+            "gh pr edit --body-file \"$PR_BODY_FILE\"",
+            "mixed-scope",
+            "stop before Step 6",
+            "secure regular temporary",
+        ):
+            self.assertIn(pin, normalized)
+
+        self.assertIn("user-provided body", normalized)
+        self.assertIn("byte-for-byte", normalized)
+        self.assertIn("standalone", normalized)
+        self.assertIn("verified `sd-ship` Stage 1", normalized)
+        self.assertNotIn("gh pr edit --body ", step_5)
+        self.assertNotIn("gh pr create --body ", step_5)
+
     def test_create_pr_adapters_do_not_expose_internal_ship_context(self) -> None:
         adapters = [
             install.ROOT / "templates/.commands/sd-create-pr.md",

@@ -33,7 +33,9 @@ Quick links:
 - `.agents/skills/sd-finish-work/SKILL.md`: Codex-visible Trellis finish-work wrapper.
 - `.agents/skills/sd-create-pr/SKILL.md`: spec-refresh, commit, push, PR
   creation/reuse, and PR-review orchestration workflow; custom Markdown bodies
-  are materialized literally and passed to GitHub CLI with `--body-file`.
+  are materialized literally and passed to GitHub CLI with `--body-file`, while
+  tooling/generated-only auto-filled bodies gain the required scope section
+  before either standalone or `sd-ship` review handoff.
 - `.agents/skills/sd-work-backlog/SKILL.md`: sequential Trellis backlog work
   loop and canonical resumable controller for planning through clean merge.
 - `.agents/skills/sd-work-backlog/references/autonomous-loop.md`: shared
@@ -545,6 +547,15 @@ copied or generated surfaces. Markdown headings without the colon, such as
 `gh pr view` should not run, pass the PR body through
 `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`.
 
+The `sd-create-pr` no-custom-body path reuses the same classifier through
+`sd-ai-command-pack-pr-body-scope.py --prepare-tooling-body`. It captures the
+exact auto-filled GitHub body and NUL-delimited `base...HEAD` paths in secure
+regular temporary files. A fully tooling/generated or Trellis-bookkeeping diff
+gets the recognized section through `gh pr edit --body-file`; exit `3` means a
+mixed or empty diff and leaves the body unchanged. Other failures stop before
+review. User-provided bodies never enter this preparation mode and remain
+byte-for-byte subject to the existing validator.
+
 The review preflight is intentionally generic and safe to run without project
 dependencies. It checks for duplicate npm override sources of truth, changed
 copied Trellis or SD command-pack surfaces without companion repo-owned
@@ -655,9 +666,10 @@ needed. Configure third-party full-codebase scans with
 runner falls back to `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND`.
 
 The PR-body scope preflight is generic and config-driven. By default it checks
-pack/Trellis generated files, housekeeping automation files, and CI/review
-tooling files for matching `Tooling/generated scope:`, `Automation scope:`, or
-`CI/review scope:` sections when a PR body is provided. Target repos can add
+pack/Trellis generated and bookkeeping files, housekeeping automation files,
+and CI/review tooling files for matching `Tooling/generated scope:`,
+`Automation scope:`, or `CI/review scope:` sections when a PR body is provided.
+Target repos can add
 runtime, docs, or other categories by committing
 `.sd-ai-command-pack/pr-body-scope.json`:
 Each rule accepts `label`, `headings`, `patterns`, and optional
