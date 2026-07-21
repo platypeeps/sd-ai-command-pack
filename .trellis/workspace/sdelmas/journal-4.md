@@ -493,3 +493,49 @@ Corrected terminal reconciliation cross-field diagnostic attribution, released c
 ### Next Steps
 
 - None - task complete
+
+
+## Session 165: Fleet rollout timing telemetry
+
+**Date**: 2026-07-20
+**Task**: Fleet rollout timing telemetry
+**Branch**: `codex/fleet-rollout-timing-telemetry-bookkeeping`
+
+### Summary
+
+Delivered and closed the fleet rollout timing telemetry work, including resumable private timing state, overlap-aware critical-path reporting, strict privacy/schema validation, fleet workflow integration, and recovered Trellis bookkeeping after PR #188 merged.
+
+### Main Changes
+
+- Added source-only fleet stage timing with atomic private state, resume support, strict schema and privacy guards, and critical-path interval math.
+- Integrated timing around preflight, consumer delivery, reviewer and CI waits, housekeeping, and final manifest-ordered reporting without changing authoritative gates.
+- Addressed review findings across path redaction, interrupted locks, path boundaries, summary contracts, and lock schema validation before the final clean review.
+- Recovered the interrupted work-loop bookkeeping by archiving the completed telemetry task and preserving PR #188 delivery evidence.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `07c2e4288fef6eda18865e300961e6cdd381f54a` | feat: add fleet rollout timing telemetry |
+| `3444317acfe8d9b8ddcd332d247316e02bd6eb8f` | fix: redact fleet timing error paths |
+| `f03f8cd34868cc8dad4a84aca48d2bc602ad0494` | fix: tolerate incomplete fleet timing locks |
+| `050c9cb79bf1e7a4236f2ef8196466e4e760f173` | fix: harden fleet timing path boundary |
+| `19a6f9ddf70802d65c54a479015a12264903e046` | fix: complete fleet timing summary contracts |
+| `a29ce9732a835e64d9db6969bc812e95654d4612` | fix: validate fleet timing lock schema type |
+
+### Testing
+
+- [OK] make check passed on the delivery head.
+- [OK] Canonical unfiltered candidate validation passed across all seven consumers.
+- [OK] Focused timing, orchestration, install, and parity suite passed 133 tests.
+- [OK] PR #188 required GitHub checks passed and the final Copilot review reported no new comments.
+- [OK] PR #198 deterministic full-check and required CI passed for recovered task bookkeeping.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
