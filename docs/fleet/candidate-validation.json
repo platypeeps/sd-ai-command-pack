@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-21T18:38:14Z",
+  "validatedAt": "2026-07-21T19:04:18Z",
   "packVersion": "0.26.0",
-  "payloadDigest": "sha256:bd2871b0ef7bd53f775d15a2336aecb68d4dacc73942c86c1343a53f46694887",
+  "payloadDigest": "sha256:2cf905a1f67cba1d7887ce5155beff53f1eaa1ec0ba6d3912c2fadb458d61c61",
   "fleetManifestDigest": "sha256:bf3d4349f6150bf6d2bb1ec03604e50b54596ca024b96363aa7cc5cc7393458f",
   "consumers": [
     {
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "3bf4c25b603aa0b9c43544f9a8299a1161dfd33e",
+      "baseCommit": "263b62ee2161da58822d3e217737657eadd1fe92",
       "status": "passed",
       "prepares": [
         [
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "3a244c9d604c391cd0bd0dfe33f218d7f87ca2b7",
+      "baseCommit": "a56b0daea6b308c8aeef8e8f2a98a9291ef70af3",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "39fc183e930d5f5d0c98c319e6bf87f24a37d742",
+      "baseCommit": "f34ca79b46f5f328d65653fcbc2cb16d51a99057",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "24517fe65d2baf79e9042a9277368c95b6c5cc17",
+      "baseCommit": "fcf4e6aaf7ee5ea1007c172c7b67ba433d51e860",
       "status": "passed",
       "prepares": [],
       "checks": [

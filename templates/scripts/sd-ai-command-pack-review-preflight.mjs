@@ -2222,8 +2222,8 @@ function pathEntryExists(file) {
   try {
     lstatSync(resolve(rootDir, file));
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    return error?.code !== 'ENOENT';
   }
 }
 
