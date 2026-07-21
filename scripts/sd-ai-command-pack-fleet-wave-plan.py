@@ -283,8 +283,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         manifest = _load_json_object(args.fleet, "fleet manifest")
-        consumers = fleet_lib.parse_fleet_consumers(manifest)
-        policy = fleet_lib.parse_fleet_rollout_policy(manifest, consumers)
+        consumers, policy = fleet_lib.parse_fleet_manifest(manifest)
         observations = parse_observations(
             _load_json_object(args.state, "wave state"),
             consumers,

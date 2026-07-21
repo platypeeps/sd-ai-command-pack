@@ -529,8 +529,14 @@ class FleetWavePlanTests(InstallTestCase):
         root = self.make_git_repo_without_trellis()
         manifest_path = root / "fleet.json"
         manifest_path.write_text(json.dumps(valid), encoding="utf-8")
-        loaded = fleet_lib.load_fleet_rollout_policy(manifest_path)
+        with mock.patch.object(
+            fleet_lib,
+            "parse_fleet_rollout_policy",
+            wraps=fleet_lib.parse_fleet_rollout_policy,
+        ) as parse_policy:
+            loaded = fleet_lib.load_fleet_rollout_policy(manifest_path)
         self.assertEqual(loaded.cohorts[1].name, "post-canary")
+        self.assertEqual(parse_policy.call_count, 1)
 
     def test_consumer_parser_preserves_caller_label_in_errors(self) -> None:
         planner = self.load_planner()
@@ -590,6 +596,27 @@ class FleetWavePlanTests(InstallTestCase):
         self.assertEqual(result, 0)
         self.assertIn('"canStart":["wave-a","wave-b"]', output.getvalue())
         self.assertIn('"holdMerges":true', output.getvalue())
+
+    def test_cli_parses_consumers_and_policy_once(self) -> None:
+        planner = self.load_planner()
+        root = self.make_git_repo_without_trellis()
+        fleet = root / "fleet.json"
+        state = root / "state.json"
+        fleet.write_text(json.dumps(self.manifest()), encoding="utf-8")
+        state.write_text(json.dumps(self.state_payload()), encoding="utf-8")
+
+        with mock.patch.object(
+            planner.fleet_lib,
+            "parse_fleet_manifest",
+            wraps=planner.fleet_lib.parse_fleet_manifest,
+        ) as parse_manifest:
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = planner.main(
+                    ["--fleet", str(fleet), "--state", str(state), "--json"]
+                )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(parse_manifest.call_count, 1)
 
     def test_cli_errors_are_controlled_and_do_not_echo_paths(self) -> None:
         planner = self.load_planner()

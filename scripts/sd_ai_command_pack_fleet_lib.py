@@ -536,7 +536,7 @@ def parse_fleet_rollout_policy(
     )
 
 
-def parse_fleet_consumers(
+def _parse_fleet_consumers_without_policy(
     manifest: Mapping[str, Any],
     label: str = "fleet manifest",
 ) -> list[FleetConsumer]:
@@ -614,8 +614,23 @@ def parse_fleet_consumers(
         parsed,
         key=lambda consumer: (consumer.rollout_priority, consumer.name.casefold()),
     )
-    parse_fleet_rollout_policy(manifest, ordered, label)
     return ordered
+
+
+def parse_fleet_manifest(
+    manifest: Mapping[str, Any],
+    label: str = "fleet manifest",
+) -> tuple[list[FleetConsumer], FleetRolloutPolicy]:
+    consumers = _parse_fleet_consumers_without_policy(manifest, label)
+    return consumers, parse_fleet_rollout_policy(manifest, consumers, label)
+
+
+def parse_fleet_consumers(
+    manifest: Mapping[str, Any],
+    label: str = "fleet manifest",
+) -> list[FleetConsumer]:
+    consumers, _ = parse_fleet_manifest(manifest, label)
+    return consumers
 
 
 def load_fleet_consumers(path: Path) -> list[FleetConsumer]:
@@ -627,12 +642,11 @@ def load_fleet_consumers(path: Path) -> list[FleetConsumer]:
 
 def load_fleet_rollout_policy(path: Path) -> FleetRolloutPolicy:
     manifest = load_json_object(path, "fleet manifest")
-    consumers = parse_fleet_consumers(manifest, f"fleet manifest {path}")
-    return parse_fleet_rollout_policy(
+    _, policy = parse_fleet_manifest(
         manifest,
-        consumers,
         f"fleet manifest {path}",
     )
+    return policy
 
 
 def manifest_version(manifest: Mapping[str, Any], label: str = "pack manifest") -> str:
