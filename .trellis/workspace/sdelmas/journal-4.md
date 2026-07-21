@@ -661,3 +661,37 @@ Prevent test harness code from triggering production boundary-risk advisories wh
 ### Next Steps
 
 - None - task complete
+
+
+## Session 169: Remove unused PR normalizer parameter
+
+**Date**: 2026-07-20
+**Task**: Remove unused PR normalizer parameter
+**Branch**: `codex/remove-unused-normalize-pr-field`
+
+### Summary
+
+Removed the unused terminal-reconciliation PR normalizer parameter in canonical and template status scripts, prepared and fleet-validated v0.25.3, fixed the review-local fallback fixture, and published clean upstream PR #202.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `985957e` | (see git log) |
+| `1957102` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

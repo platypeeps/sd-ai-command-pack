@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Defines shipped-payload version, changelog, candidate-ledger, and full-check release gates."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Defines generated adapter parity and complete unit-test expectations."}

@@ -741,7 +741,7 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             ):
                 return invalid_field("terminalReconciliation.archivedTask")
 
-            def normalize_pr(value: object, field: str) -> dict[str, Any] | None:
+            def normalize_pr(value: object) -> dict[str, Any] | None:
                 if not isinstance(value, dict) or set(value) != {
                     "prNumber",
                     "prUrl",
@@ -792,9 +792,7 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
                     "mergeCommit": merge_commit,
                 }
 
-            delivery = normalize_pr(
-                terminal.get("delivery"), "terminalReconciliation.delivery"
-            )
+            delivery = normalize_pr(terminal.get("delivery"))
             if delivery is None:
                 return invalid_field("terminalReconciliation.delivery")
             normalized_terminal["delivery"] = delivery
@@ -802,9 +800,7 @@ def validate_work_loop_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             if bookkeeping is None:
                 normalized_terminal["bookkeeping"] = None
             else:
-                normalized_bookkeeping = normalize_pr(
-                    bookkeeping, "terminalReconciliation.bookkeeping"
-                )
+                normalized_bookkeeping = normalize_pr(bookkeeping)
                 if normalized_bookkeeping is None:
                     return invalid_field("terminalReconciliation.bookkeeping")
                 normalized_terminal["bookkeeping"] = normalized_bookkeeping

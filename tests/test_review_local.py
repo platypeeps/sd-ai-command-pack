@@ -932,15 +932,19 @@ class ReviewLocalTests(InstallTestCase):
         )
         gito.chmod(0o755)
         temp_root = root / "tmp"
+        temp_root.mkdir()
+        env = {
+            **os.environ,
+            "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+            "TMPDIR": str(temp_root),
+        }
+        for name in ("UV_CACHE_DIR", "UV_TOOL_DIR", "XDG_CACHE_HOME"):
+            env.pop(name, None)
 
         result = subprocess.run(
             [self._bash_path, "scripts/sd-ai-command-pack-review-local.sh", "--all", "gito"],
             cwd=root,
-            env={
-                **os.environ,
-                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
-                "TMPDIR": str(temp_root),
-            },
+            env=env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
