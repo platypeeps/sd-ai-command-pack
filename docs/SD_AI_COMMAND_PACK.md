@@ -950,10 +950,12 @@ pack source repository's
 [fleet rollout procedure](https://github.com/platypeeps/sd-ai-command-pack/blob/main/docs/FLEET_ROLLOUT.md)
 with the
 [fleet preflight helper](https://github.com/platypeeps/sd-ai-command-pack/blob/main/scripts/sd-ai-command-pack-fleet-preflight.py)
-deciding which consumers are stale. It processes one consumer at a time: verify a clean tree (dirty
-trees are skipped and reported, never touched), branch, install the
-release, run the consumer's full-check, open the consumer PR, watch it to
-settled, and merge through the consumer's housekeeping gate. Before review it
+deciding which consumers are stale. It runs manifest-defined canaries
+sequentially, then may overlap isolated post-canary consumer lanes within the
+configured bound: verify a clean tree (dirty trees are skipped and reported,
+never touched), branch, install the release, run the consumer's full-check,
+open the consumer PR, and watch it to settled. Housekeeping merges remain
+serialized in manifest order. Before review it
 runs the source-side fleet review classifier against the exact pre-refresh base
 and current head. A verified release/candidate ledger, exact installer
 inspection and audit, safe base/current receipts, and an installer-only diff
@@ -971,6 +973,14 @@ consumer names also fail before mutation rather than broadening to the fleet.
 The report is a per-consumer status table plus a fleet version summary.
 Its consumer rows state `integration-only`, `remote`, or `n/a` review profile
 so avoided remote-review rounds remain visible rather than implicit.
+
+The fleet controller obtains each allowed start and deterministic merge
+candidate from the source-only
+`scripts/sd-ai-command-pack-fleet-wave-plan.py`. It rebuilds the temporary
+observation snapshot from live evidence on resume, never shares a mutable
+checkout between lanes, stops new starts and holds merges for a verified
+pack-owned blocker, and never exposes scheduler state as a public adapter
+argument.
 
 The fleet skill also records mandatory internal timing evidence with
 `scripts/sd-ai-command-pack-fleet-timing.py`. One resumable run brackets

@@ -11,6 +11,7 @@ contextlib = _support.contextlib
 hashlib = _support.hashlib
 io = _support.io
 json = _support.json
+fleet_manifest = _support.fleet_manifest
 mock = _support.mock
 os = _support.os
 Path = _support.Path
@@ -58,9 +59,8 @@ class FleetCandidateTests(InstallTestCase):
         path = root / "fleet.json"
         path.write_text(
             json.dumps(
-                {
-                    "schemaVersion": 3,
-                    "consumers": [
+                fleet_manifest(
+                    [
                         {
                             "name": "fixture",
                             "github": "example/fixture",
@@ -71,8 +71,8 @@ class FleetCandidateTests(InstallTestCase):
                             "candidatePrepare": [[sys.executable, "prepare.py"]],
                             "candidateChecks": [[sys.executable, "check.py"]],
                         }
-                    ],
-                },
+                    ]
+                ),
                 indent=2,
             )
             + "\n",
@@ -495,9 +495,7 @@ class FleetCandidateTests(InstallTestCase):
                 with self.assertRaises(candidate.FleetConfigError):
                     fleet_lib.parse_fleet_consumers(manifest)
 
-        consumer = fleet_lib.parse_fleet_consumers(
-            {"schemaVersion": 3, "consumers": [valid]}
-        )[0]
+        consumer = fleet_lib.parse_fleet_consumers(fleet_manifest([valid]))[0]
         malformed_ledger = {
             "schemaVersion": 0,
             "packVersion": "old",

@@ -1,6 +1,27 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "description": "Known sd-ai-command-pack consumer repositories for operator-triggered fleet refreshes.",
+  "rolloutPolicy": {
+    "defaultConcurrency": 2,
+    "cohorts": [
+      {
+        "name": "canary",
+        "strategy": "sequential",
+        "consumers": ["rwbp-coordinator", "loadsmith", "hoa-manager"]
+      },
+      {
+        "name": "post-canary",
+        "strategy": "bounded-parallel",
+        "maxConcurrency": 2,
+        "consumers": ["rwbp-website", "mezmo_benchmark", "se-ai-command-pack"]
+      },
+      {
+        "name": "final",
+        "strategy": "sequential",
+        "consumers": ["anomaly-metric-creator"]
+      }
+    ]
+  },
   "consumers": [
     {
       "name": "rwbp-coordinator",

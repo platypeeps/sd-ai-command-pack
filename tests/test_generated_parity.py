@@ -1049,6 +1049,7 @@ class GeneratedParityTests(InstallTestCase):
             "scripts/sd-ai-command-pack-fleet-finding-classify.py 85",
             "scripts/sd-ai-command-pack-fleet-review-classify.py 80",
             "scripts/sd-ai-command-pack-fleet-timing.py 88",
+            "scripts/sd-ai-command-pack-fleet-wave-plan.py 85",
         ):
             self.assertIn(expected, coverage_gate)
         self.assertIn(
@@ -1480,13 +1481,17 @@ class GeneratedParityTests(InstallTestCase):
         )
         _, files = install.load_manifest()
         manifest_targets = {file.target.as_posix() for file in files}
-        timing_helper = "scripts/sd-ai-command-pack-fleet-timing.py"
+        source_only_helpers = {
+            "scripts/sd-ai-command-pack-fleet-timing.py",
+            "scripts/sd-ai-command-pack-fleet-wave-plan.py",
+        }
 
         self.assertTrue(
             set(install.SOURCE_ONLY_COMMAND_TARGETS).isdisjoint(manifest_targets)
         )
-        self.assertTrue((install.ROOT / timing_helper).is_file())
-        self.assertNotIn(timing_helper, manifest_targets)
+        for helper in source_only_helpers:
+            self.assertTrue((install.ROOT / helper).is_file())
+            self.assertNotIn(helper, manifest_targets)
         for path in (
             "templates/.agents/skills/sd-fleet-refresh/SKILL.md",
             "templates/.commands/sd-fleet-refresh.md",

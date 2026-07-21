@@ -8,6 +8,7 @@ except ModuleNotFoundError as exc:
     from . import install_test_support as _support
 
 json = _support.json
+fleet_manifest_payload = _support.fleet_manifest
 Path = _support.Path
 contextlib = _support.contextlib
 io = _support.io
@@ -73,9 +74,8 @@ class FleetPreflightTests(InstallTestCase):
         fleet_manifest = root / "fleet.json"
         fleet_manifest.write_text(
             json.dumps(
-                {
-                    "schemaVersion": 3,
-                    "consumers": [
+                fleet_manifest_payload(
+                    [
                         {
                             "name": "at-target",
                             "github": "example/at-target",
@@ -106,8 +106,8 @@ class FleetPreflightTests(InstallTestCase):
                             "candidatePrepare": [["python3", "prepare.py"]],
                             "candidateChecks": [["python3", "check.py"]],
                         },
-                    ],
-                }
+                    ]
+                )
             )
             + "\n",
             encoding="utf-8",
@@ -369,9 +369,8 @@ class FleetPreflightTests(InstallTestCase):
         fleet_manifest = root / "fleet.json"
         fleet_manifest.write_text(
             json.dumps(
-                {
-                    "schemaVersion": 3,
-                    "consumers": [
+                fleet_manifest_payload(
+                    [
                         {
                             "name": "duplicate",
                             "github": "example/duplicate",
@@ -382,8 +381,8 @@ class FleetPreflightTests(InstallTestCase):
                             "candidatePrepare": [],
                             "candidateChecks": [["node", "check.mjs"]],
                         },
-                    ],
-                }
+                    ]
+                )
             )
             + "\n",
             encoding="utf-8",
@@ -401,9 +400,8 @@ class FleetPreflightTests(InstallTestCase):
         fleet_manifest = Path(tempdir.name) / "fleet.json"
         fleet_manifest.write_text(
             json.dumps(
-                {
-                    "schemaVersion": 3,
-                    "consumers": [
+                fleet_manifest_payload(
+                    [
                         {
                             "name": "unsafe",
                             "github": "example/unsafe",
@@ -414,8 +412,8 @@ class FleetPreflightTests(InstallTestCase):
                             "candidatePrepare": [],
                             "candidateChecks": ["node check.mjs"],
                         }
-                    ],
-                }
+                    ]
+                )
             )
             + "\n",
             encoding="utf-8",

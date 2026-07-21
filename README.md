@@ -306,16 +306,17 @@ Source-checkout-only operator command; it is not installed into consumer
 repositories because it depends on this repository's installer, fleet
 registry, and rollout procedure. It rolls the pack release across consumer
 repos per `docs/FLEET_ROLLOUT.md`:
-fleet preflight, then one consumer at a time — clean-tree check, install,
-consumer full-check, PR, watch, gated merge — ending with a per-consumer
-status table. Preflight first proves that the local and remote release tag,
+fleet preflight, sequential canaries, then manifest-configured bounded
+post-canary lanes — clean-tree check, install, consumer full-check, PR, and
+watch — with gated merges serialized in manifest order, ending with a
+per-consumer status table. Preflight first proves that the local and remote release tag,
 tagged payload, ancestry, and candidate ledgers agree; any mismatch stops
 before consumer inventory or mutation. Before review, a source-side classifier
 proves whether the exact consumer head contains only installer-managed refresh
 paths with current audit/provenance. Qualifying heads use integration-only
 review without a new Copilot request; ambiguity or consumer-owned changes use
 the normal remote-review loop. A source-only timing sidecar records the
-sequential baseline, per-stage retries, critical path, and reviewer/CI overlap
+critical path, per-stage retries, bounded-wave overlap, and reviewer/CI overlap
 in private local state without weakening a delivery gate or adding public
 adapter arguments. Bare consumer names select a subset, for example
 `/sd:fleet-refresh loadsmith rwbp-website`; `consumer=`, `dry-run`, and
