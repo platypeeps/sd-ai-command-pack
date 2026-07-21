@@ -584,3 +584,42 @@ Implemented schema-4 fleet rollout policy and a read-only bounded-wave planner, 
 ### Next Steps
 
 - Merge PR #199 through sd-housekeeping, then resume the backlog loop with the next actionable task.
+
+
+## Session 167: Planning Task Context Scaffold Gate
+
+**Date**: 2026-07-20
+**Task**: Planning Task Context Scaffold Gate
+**Branch**: `main`
+
+### Summary
+
+Rejected generated context scaffolds in diff-changed planning tasks and shipped pack 0.25.1 through PR #200.
+
+### Main Changes
+
+- Made Trellis task context seed checks lifecycle-neutral and strictly diff-scoped.
+- Added planning, empty, grounded, historical, archive, and symlink regression coverage while preserving template/mirror parity.
+- Updated executable quality guidance, release metadata, generated catalog, provenance, and seven-consumer candidate evidence.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b1508d0` | fix: reject planning task context scaffolds |
+
+### Testing
+
+- [OK] make check
+- [OK] review-preflight unit tests (32 tests)
+- [OK] seven-consumer fleet candidate validation
+- [OK] Copilot reviewed 14 files with zero comments; CI passed 7 checks with 2 expected skips
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
