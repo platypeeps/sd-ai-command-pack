@@ -20,7 +20,7 @@ Remove the misleading unused `normalize_pr` field parameter from the canonical a
 - [x] Canonical/template parity and installer provenance checks pass.
 - [x] Manifest, dogfood manifest, changelog, and command catalog consistently report `0.25.3`.
 - [x] Release-candidate ledger and repository gates pass.
-- [ ] The focused upstream change is committed, pushed, and published as a PR targeting `main`.
+- [x] The focused upstream change is committed, pushed, and published as a PR targeting `main`.
 
 ## Notes
 

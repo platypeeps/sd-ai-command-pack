@@ -15,12 +15,12 @@
   "branch": "codex/remove-unused-normalize-pr-field",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "985957e",
+  "pr_url": "https://github.com/platypeeps/sd-ai-command-pack/pull/202",
   "subtasks": [],
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "Implementation and release evidence published in PR #202. Merge, tag, and downstream refresh remain outside this task turn.",
   "meta": {}
 }
