@@ -2,7 +2,7 @@
   "id": "avoid-redundant-prism-scans",
   "name": "avoid-redundant-prism-scans",
   "title": "Avoid redundant Prism scans in full-check",
-  "description": "",
+  "description": "Reduce full-check cycle time by reviewing staged and unstaged Prism targets locally and skipping the redundant committed-range scan until the working tree is clean.",
   "status": "completed",
   "dev_type": null,
   "scope": null,
