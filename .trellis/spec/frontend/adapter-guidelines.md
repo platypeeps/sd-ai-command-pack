@@ -767,6 +767,11 @@ review exactly once.
 - Internal orchestration context: `caller: sd-ship`, `stage: 1`,
   `return-after: pr`.
 - Composite stop-points: `sd-ship until=pr|review|merge`.
+- Auto-filled body preparation:
+  `sd-ai-command-pack-pr-body-scope.py --prepare-tooling-body --body-file <regular-file> --changed-files <nul-list>`.
+- Preparation exits: `0` means prepared/already compliant, `3` means an empty
+  or mixed diff was intentionally unchanged, and every other nonzero result is
+  an error.
 
 #### 3. Contracts
 
@@ -777,6 +782,14 @@ review exactly once.
 - Standalone mode keeps the normal non-deferred `sd-review-pr` handoff.
 - The context is not an environment variable or public argument, and thin
   platform adapters must not expose it.
+- The no-custom-body `--fill` path supplies the complete `base...HEAD` path set
+  as NUL-delimited data to the pack-owned helper; the skill never duplicates
+  its path rules.
+- The helper accepts a regular UTF-8 body file, preserves the auto-filled body
+  as an exact prefix, and writes only through an atomic regular-file
+  replacement. User-provided body bytes never enter this preparation mode.
+- A fully tooling/generated or Trellis-bookkeeping body is applied with
+  `gh pr edit --body-file` before standalone review or verified Stage 1 returns.
 
 #### 4. Validation & Error Matrix
 
@@ -787,6 +800,14 @@ review exactly once.
   before update-spec or Git/GitHub side effects.
 - Partial, mismatched, inferred, or stale internal context -> reject rather
   than skipping review.
+- Empty or mixed changed-path input -> exit `3`, leave the auto-filled body
+  unchanged, and continue with normal mixed-scope review.
+- Tooling-only input with an existing recognized heading -> exit `0` and
+  preserve the body byte-for-byte.
+- Tooling-only input without the heading -> append the canonical section,
+  atomically replace the body file, then edit the PR through `--body-file`.
+- Missing/malformed config, unreadable/non-regular body files, classifier
+  failure, or failed PR fetch/edit -> stop before the Step 6 review handoff.
 
 #### 5. Good / Base / Bad Cases
 
@@ -795,6 +816,12 @@ review exactly once.
 - Base: standalone `sd-create-pr` publishes and runs normal review once.
 - Bad: Stage 1 invokes standalone `sd-create-pr`, which reviews immediately,
   then Stage 2 reviews the same head a second time.
+- Good: a Trellis-bookkeeping-only fill retains the commit-derived summary and
+  gains the recognized tooling/generated scope section before review.
+- Base: a mixed authored/generated fill stays unchanged and follows the normal
+  review path.
+- Bad: a user-provided body is passed through automatic composition or
+  generated Markdown is interpolated into an inline `--body` argument.
 
 #### 6. Tests Required
 
@@ -804,6 +831,13 @@ review exactly once.
 - Assert public adapters do not expose the internal controls.
 - Assert user attempts to select the internal mode are rejected before side
   effects.
+- Assert bookkeeping/task/journal/map-only NUL paths append exactly one scope
+  section while preserving the original body prefix and special characters.
+- Assert mixed paths return `3`, custom bodies remain byte-for-byte unchanged,
+  and non-regular body files or missing configs fail without rewriting.
+- Assert both standalone publication and verified Stage 1 prepare the body
+  before their existing review/return handoffs, using secure temporary files
+  and no inline `--body` argument.
 
 #### 7. Wrong vs Correct
 
@@ -813,6 +847,9 @@ Correct: sd-ship Stage 1 supplies the internal context and Stage 2 owns review
 
 Wrong: expose publish-only as a public command argument or environment variable
 Correct: accept it only as verified in-process orchestration context from sd-ship
+
+Wrong: repeat tooling path globs in sd-create-pr or append Markdown in shell text
+Correct: delegate classification/composition to the helper and edit via --body-file
 ```
 
 When `sd-create-pr` supplies a custom or generated Markdown body, it must write

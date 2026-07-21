@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Provides the command-surface parity and deterministic validation checklist for the skill and adapter changes."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Provides the helper test, lint, typing, coverage, and release-validation expectations used by the quality gate."}

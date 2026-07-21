@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.27.0 - 2026-07-21
+
+- Preserve GitHub's auto-filled PR summary while automatically appending the
+  required tooling/generated scope section for fully classified bookkeeping
+  branches before standalone or `sd-ship` review handoff.
+
 ## 0.26.1 - 2026-07-21
 
 - Reject completed Trellis journal sessions that claim successful validation

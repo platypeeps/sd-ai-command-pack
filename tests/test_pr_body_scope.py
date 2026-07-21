@@ -9,6 +9,7 @@ pack-owned behavior that must hold everywhere the script ships.
 from __future__ import annotations
 
 import importlib.util
+import io
 import sys
 import tempfile
 import unittest
@@ -125,6 +126,223 @@ class ActorExemptionEndToEndTests(unittest.TestCase):
             with mock.patch.dict("os.environ", {}, clear=True):
                 status, _messages = self._check(root, actor=None)
             self.assertEqual(status, 1)
+
+
+class ToolingBodyPreparationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.mod = _load_script()
+
+    def _fixture_root(
+        self,
+        tmp: Path,
+        *,
+        changed: str,
+        body: str = "Commit-derived summary with `code`, $VALUE, and $(literal).\n",
+    ) -> tuple[Path, Path, Path]:
+        (tmp / ".sd-ai-command-pack").mkdir(parents=True)
+        (tmp / ".sd-ai-command-pack" / "installed-targets.txt").write_text(
+            "", encoding="utf-8"
+        )
+        changed_file = tmp / "changed.txt"
+        changed_file.write_text(changed, encoding="utf-8")
+        body_file = tmp / "body.md"
+        body_file.write_text(body, encoding="utf-8")
+        return tmp, changed_file, body_file
+
+    def _prepare(
+        self,
+        root: Path,
+        changed_file: Path,
+        body_file: Path,
+        *,
+        config_path: Path | None = None,
+    ):
+        return self.mod.prepare_tooling_body(
+            root,
+            body_file=body_file,
+            changed_files_path=changed_file,
+            config_path=config_path,
+        )
+
+    def test_prepare_help_documents_empty_and_mixed_exit_three(self) -> None:
+        stdout = io.StringIO()
+
+        with mock.patch.object(sys, "stdout", stdout), self.assertRaises(
+            SystemExit
+        ) as raised:
+            self.mod._parse_args(["--help"])
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertIn("empty or mixed scope exits 3", " ".join(stdout.getvalue().split()))
+
+    def test_nul_delimited_paths_preserve_newlines_and_edge_whitespace(self) -> None:
+        changed = (
+            ".trellis/tasks/07-21-demo/task.json\0"
+            " src/option-like\nname.py \0"
+        )
+
+        self.assertEqual(
+            self.mod._split_changed_files(changed),
+            [
+                ".trellis/tasks/07-21-demo/task.json",
+                " src/option-like\nname.py ",
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as raw:
+            root, changed_file, body_file = self._fixture_root(
+                Path(raw),
+                changed=changed,
+            )
+
+            status, messages = self._prepare(root, changed_file, body_file)
+
+            self.assertEqual(status, self.mod.PREPARE_NOT_APPLICABLE, messages)
+            diagnostic = "\n".join(messages)
+            self.assertNotIn("option-like\nname.py", diagnostic)
+            self.assertIn(r"option-like\nname.py", diagnostic)
+
+    def test_bookkeeping_only_body_preserves_fill_content_and_appends_scope(self) -> None:
+        original = "Commit-derived summary with `code`, $VALUE, and $(literal).\n"
+        with tempfile.TemporaryDirectory() as raw:
+            root, changed_file, body_file = self._fixture_root(
+                Path(raw),
+                changed=(
+                    ".trellis/tasks/07-21-demo/task.json\n"
+                    ".trellis/workspace/dev/journal-1.md\n"
+                    "docs/repomix-map.md\n"
+                ),
+                body=original,
+            )
+
+            status, messages = self._prepare(root, changed_file, body_file)
+
+            self.assertEqual(status, 0, messages)
+            prepared = body_file.read_text(encoding="utf-8")
+            self.assertTrue(prepared.startswith(original))
+            self.assertEqual(prepared.count("Tooling/generated scope:"), 1)
+            self.assertIn("repository-bookkeeping surfaces", prepared)
+            self.assertTrue(body_file.is_file())
+            self.assertFalse(body_file.is_symlink())
+
+    def test_existing_scope_heading_preserves_body_byte_for_byte(self) -> None:
+        original = "Summary.\n\nTooling/generated scope:\n\n- Already supplied.\n"
+        with tempfile.TemporaryDirectory() as raw:
+            root, changed_file, body_file = self._fixture_root(
+                Path(raw),
+                changed=".trellis/workspace/dev/journal-1.md\n",
+                body=original,
+            )
+
+            status, messages = self._prepare(root, changed_file, body_file)
+
+            self.assertEqual(status, 0, messages)
+            self.assertEqual(body_file.read_text(encoding="utf-8"), original)
+
+    def test_empty_diff_returns_not_applicable_without_rewriting_body(self) -> None:
+        original = "Commit-derived summary.\n"
+        with tempfile.TemporaryDirectory() as raw:
+            root, changed_file, body_file = self._fixture_root(
+                Path(raw),
+                changed="",
+                body=original,
+            )
+
+            status, messages = self._prepare(root, changed_file, body_file)
+
+            self.assertEqual(status, self.mod.PREPARE_NOT_APPLICABLE, messages)
+            self.assertEqual(body_file.read_text(encoding="utf-8"), original)
+            self.assertTrue(any("branch diff is empty" in item for item in messages))
+
+    def test_mixed_scope_returns_not_applicable_without_rewriting_body(self) -> None:
+        original = "Commit-derived summary.\n"
+        with tempfile.TemporaryDirectory() as raw:
+            root, changed_file, body_file = self._fixture_root(
+                Path(raw),
+                changed=(
+                    ".trellis/workspace/dev/journal-1.md\n"
+                    "src/runtime.py\n"
+                ),
+                body=original,
+            )
+
+            status, messages = self._prepare(root, changed_file, body_file)
+
+            self.assertEqual(status, self.mod.PREPARE_NOT_APPLICABLE, messages)
+            self.assertEqual(body_file.read_text(encoding="utf-8"), original)
+            self.assertTrue(any("not tooling/generated-only" in item for item in messages))
+
+    def test_mixed_scope_cli_reports_non_error_result_only_on_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root, changed_file, body_file = self._fixture_root(
+                Path(raw),
+                changed="src/runtime.py\n",
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with mock.patch.object(sys, "stdout", stdout), mock.patch.object(
+                sys, "stderr", stderr
+            ):
+                status = self.mod.main(
+                    [
+                        "sd-ai-command-pack-pr-body-scope.py",
+                        str(root),
+                        "--prepare-tooling-body",
+                        "--body-file",
+                        str(body_file),
+                        "--changed-files",
+                        str(changed_file),
+                    ]
+                )
+
+            self.assertEqual(status, self.mod.PREPARE_NOT_APPLICABLE)
+            self.assertIn("not tooling/generated-only", stdout.getvalue())
+            self.assertEqual(stderr.getvalue(), "")
+
+    def test_missing_explicit_config_fails_without_rewriting_body(self) -> None:
+        original = "Commit-derived summary.\n"
+        with tempfile.TemporaryDirectory() as raw:
+            root, changed_file, body_file = self._fixture_root(
+                Path(raw),
+                changed=".trellis/tasks/07-21-demo/task.json\n",
+                body=original,
+            )
+
+            status, messages = self._prepare(
+                root,
+                changed_file,
+                body_file,
+                config_path=Path("missing-scope-config.json"),
+            )
+
+            self.assertEqual(status, 2, messages)
+            self.assertEqual(body_file.read_text(encoding="utf-8"), original)
+            self.assertTrue(any("config not found" in item for item in messages))
+
+    def test_symlink_body_file_is_rejected_without_touching_target(self) -> None:
+        if not hasattr(Path, "symlink_to"):
+            self.skipTest("symlinks are unavailable")
+        original = "Commit-derived summary.\n"
+        with tempfile.TemporaryDirectory() as raw:
+            root, changed_file, body_file = self._fixture_root(
+                Path(raw),
+                changed=".trellis/tasks/07-21-demo/task.json\n",
+                body=original,
+            )
+            target = root / "body-target.md"
+            body_file.replace(target)
+            try:
+                body_file.symlink_to(target.name)
+            except OSError as exc:
+                self.skipTest(f"symlinks are unavailable: {exc}")
+
+            status, messages = self._prepare(root, changed_file, body_file)
+
+            self.assertEqual(status, 2, messages)
+            self.assertEqual(target.read_text(encoding="utf-8"), original)
+            self.assertTrue(any("regular file" in item for item in messages))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Defines template-first adapter ownership, literal body-file handling, and secure temporary-file requirements for sd-create-pr."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Defines shipped manifest/version, filesystem safety, and template-to-installed mirror contracts for the helper extension."}

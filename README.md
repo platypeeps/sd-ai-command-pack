@@ -191,6 +191,10 @@ feature branch, creates or reuses the branch PR, and hands off to `sd-review-pr`
 It detects the default branch instead of assuming `origin/main`, and sends
 custom Markdown PR bodies through a literal temporary file plus `--body-file`
 so shell expansion cannot execute content or inflate the submitted body.
+When no custom body is supplied and the complete branch diff is classified as
+tooling/generated or repository bookkeeping, it preserves GitHub's auto-filled
+summary and appends the required tooling/generated scope section before review;
+mixed-scope branches keep the normal auto-filled body unchanged.
 Standalone use still enters `sd-review-pr`; when `sd-ship` delegates its first
 stage, an internal composite-only context returns after PR publication so the
 ship workflow can own review exactly once in Stage 2.

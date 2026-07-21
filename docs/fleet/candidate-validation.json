@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-21T19:39:28Z",
-  "packVersion": "0.26.1",
-  "payloadDigest": "sha256:d52eeb69bb25133964e520b508c220ba7f6c78073891817db5c16082a5ee94bb",
+  "validatedAt": "2026-07-21T22:12:29Z",
+  "packVersion": "0.27.0",
+  "payloadDigest": "sha256:9f6bc395f393958944d13db486b59d2fc1bc23e7d23e1be5453166080dc7a13a",
   "fleetManifestDigest": "sha256:bf3d4349f6150bf6d2bb1ec03604e50b54596ca024b96363aa7cc5cc7393458f",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "e72c7b9665f2fce94dd71116d6482d2781fc6cc4",
+      "baseCommit": "86dc0bb117d90ac12ab02a5f749a5d88d0ed7071",
       "status": "passed",
       "prepares": [
         [
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "febff0b9542fa5571d354ac3832edb7350ce0170",
+      "baseCommit": "6df59e4d6036d7a1852943631d4d3df55119dd97",
       "status": "passed",
       "prepares": [
         [
@@ -64,7 +64,7 @@
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
-      "baseCommit": "79242f701d860fc4e313c35461b10977fa59f7e2",
+      "baseCommit": "c5e43753edf157ad77a1b6f39a803ff7df1642cb",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "d0fad61541db96fd1bc1584ca9d9087071287320",
+      "baseCommit": "841e00c5440bbf97906c00f4ed3e668f89d6ecf7",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "9ba140a3b6d2edf6497683d1cd670ed8fc547da7",
+      "baseCommit": "06478a54b796ad109dc5c1706e5864371368d7d7",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -121,7 +121,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "32574cf89253560196305606c695754da13b2686",
+      "baseCommit": "3434de40f299958f08b1055e88288a6ef2cf2574",
       "status": "passed",
       "prepares": [
         [
