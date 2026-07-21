@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Verify diagnostics, review lifecycle integration, and source/template synchronization."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Verify symlink, path, bounded-read, and shipped-payload safety contracts."}

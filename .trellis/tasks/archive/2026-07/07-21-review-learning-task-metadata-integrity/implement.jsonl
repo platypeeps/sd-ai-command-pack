@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Apply the repository review-preflight and shared adapter contracts while adding author-time task validation."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Preserve fail-closed bounded filesystem handling, template ownership, and installable payload parity."}

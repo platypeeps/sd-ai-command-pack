@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { closeSync, existsSync, fstatSync, lstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -19,6 +19,10 @@ const MIN_NODE_VERSION = { major: 16, minor: 9, label: '16.9.0' };
 // Git output ceiling for spawnSync calls that read diffs; Node's 1 MiB
 // default truncates large diffs and surfaces as a spawn error.
 const GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+const MAX_TRELLIS_TASK_LINKS = 100;
+const MAX_TRELLIS_TASK_REFERENCE_LENGTH = 255;
+const TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review', 'completed']);
+const ACTIVE_TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review']);
 const REVIEW_CODE_PATH_PATTERN = /\.(?:cjs|js|mjs|py|sh|ts|tsx)$/;
 const TEST_CODE_DIRECTORY_SEGMENTS = new Set(['test', 'tests', '__tests__']);
 const REVIEW_LEARNINGS_PATH_PROVENANCE_FILE = 'docs/review-learnings.md';
@@ -60,6 +64,7 @@ export function runReviewPreflight(options = {}) {
   runCheck('copied template diff disclosure', checkCopiedTemplateDiffDisclosure);
   runCheck('documentation path hygiene', checkDocumentationPathHygiene);
   runCheck('documentation path references', checkDocumentationPathReferences);
+  runCheck('changed Trellis task metadata integrity', checkChangedTrellisTaskMetadata);
   runCheck('completed Trellis task location', checkCompletedTrellisTaskLocation);
   runCheck('Trellis task context seeds', checkTrellisTaskContextSeeds);
   runCheck('Trellis journal records', checkTrellisJournalRecords);
@@ -444,6 +449,343 @@ function checkDocumentationPathHygiene() {
   pass(`checked ${scanned} documentation/prompt/spec file(s) for personal absolute paths.`);
 }
 
+function checkChangedTrellisTaskMetadata() {
+  const failureStart = failures.length;
+  const diff = currentChangedPaths();
+  if (diff === null) {
+    warn('could not inspect current diff for changed Trellis task metadata.');
+    return;
+  }
+
+  const taskFiles = new Set();
+  for (const path of diff.paths) {
+    const normalized = normalizePathSeparators(path).replace(/^\.\//, '');
+    if (normalized.startsWith('.trellis/tasks/') && normalized.endsWith('/task.json')) {
+      taskFiles.add(normalized);
+    }
+  }
+
+  let inspectedFiles = 0;
+  for (const file of [...taskFiles].sort()) {
+    const loaded = loadTrellisTaskMetadataFile(file, { deletedIsMissing: true });
+    if (loaded.status === 'missing') {
+      continue;
+    }
+
+    inspectedFiles += 1;
+    if (loaded.status !== 'loaded') {
+      fail(`${file} ${loaded.message}`);
+      continue;
+    }
+
+    const artifact = parseTrellisTaskArtifactPath(file);
+    if (!artifact) {
+      fail(
+        `${file} is not in a supported Trellis task layout; use ` +
+          '.trellis/tasks/MM-DD-name/task.json or .trellis/tasks/archive/YYYY-MM/MM-DD-name/task.json.',
+      );
+      continue;
+    }
+
+    let record;
+    try {
+      record = JSON.parse(loaded.text);
+    } catch (error) {
+      fail(
+        `${file} could not be parsed as JSON while checking task metadata integrity: ` +
+          thrownValueMessage(error),
+      );
+      continue;
+    }
+
+    if (!isPlainObject(record)) {
+      fail(`${file} must contain a JSON object while checking task metadata integrity.`);
+      continue;
+    }
+
+    for (const issue of validateTrellisTaskMetadata(record, artifact.taskDir, artifact.archived)) {
+      fail(`${file} field ${issue}.`);
+    }
+    validateTrellisTaskMetadataLinks(file, artifact.taskDir, record);
+  }
+
+  if (inspectedFiles === 0) {
+    if (failures.length === failureStart) {
+      pass('no changed Trellis task metadata records require integrity checks.');
+    }
+    return;
+  }
+
+  if (failures.length === failureStart) {
+    pass(`checked ${inspectedFiles} changed Trellis task metadata record(s) for identity, lifecycle, branch, and link integrity.`);
+  }
+}
+
+export function validateTrellisTaskMetadata(record, taskDir, archived) {
+  const issues = [];
+  const idValid = typeof record.id === 'string' && record.id.trim().length > 0;
+  const nameValid = typeof record.name === 'string' && record.name.trim().length > 0;
+
+  if (!idValid) {
+    issues.push('id must be a non-empty string');
+  }
+  if (!nameValid) {
+    issues.push('name must be a non-empty string');
+  }
+  if (idValid && nameValid && record.id !== record.name) {
+    issues.push('id must equal name');
+  }
+
+  const taskDirectoryName = taskDir.slice(taskDir.lastIndexOf('/') + 1);
+  const directoryMatch = /^\d{2}-\d{2}-(.+)$/.exec(taskDirectoryName);
+  if (!directoryMatch) {
+    issues.push('name cannot be verified because the task directory must use the MM-DD-name form');
+  } else if (nameValid && record.name !== directoryMatch[1]) {
+    issues.push(`name must match the dated task directory suffix "${directoryMatch[1]}"`);
+  }
+
+  if (!TRELLIS_TASK_STATUSES.has(record.status)) {
+    issues.push('status must be one of planning, in_progress, review, completed');
+  } else if (ACTIVE_TRELLIS_TASK_STATUSES.has(record.status)) {
+    if (record.completedAt !== null) {
+      issues.push(`completedAt must be null when status is ${record.status}`);
+    }
+  } else if (record.status === 'completed') {
+    if (typeof record.completedAt !== 'string' || record.completedAt.trim().length === 0) {
+      issues.push('completedAt must be a non-empty completion timestamp when status is completed');
+    }
+    if (!archived) {
+      issues.push('status completed requires the task record to be under .trellis/tasks/archive/');
+    }
+  }
+
+  if (typeof record.base_branch !== 'string' || record.base_branch.trim().length === 0) {
+    issues.push('base_branch must be a non-empty string');
+  }
+  if (record.branch !== null && record.branch !== undefined) {
+    if (typeof record.branch !== 'string' || record.branch.trim().length === 0) {
+      issues.push('branch must be null or a non-empty string');
+    } else if (
+      typeof record.base_branch === 'string' &&
+      record.branch.trim() === record.base_branch.trim()
+    ) {
+      issues.push('branch must differ from base_branch');
+    }
+  }
+
+  if (
+    record.parent !== null &&
+    record.parent !== undefined &&
+    !isTrellisTaskDirectoryName(record.parent)
+  ) {
+    issues.push('parent must be null or a safe MM-DD-name task directory reference');
+  }
+  if (record.children !== undefined) {
+    if (!Array.isArray(record.children)) {
+      issues.push('children must be an array of task directory references');
+    } else {
+      if (record.children.length > MAX_TRELLIS_TASK_LINKS) {
+        issues.push(`children must contain at most ${MAX_TRELLIS_TASK_LINKS} task directory references`);
+      }
+      const invalidChild = record.children.find((child) => !isTrellisTaskDirectoryName(child));
+      if (invalidChild !== undefined) {
+        issues.push('children must contain only safe MM-DD-name task directory references');
+      }
+    }
+  }
+
+  return issues;
+}
+
+function validateTrellisTaskMetadataLinks(file, taskDir, record) {
+  const taskDirectoryName = taskDir.slice(taskDir.lastIndexOf('/') + 1);
+
+  if (isTrellisTaskDirectoryName(record.parent)) {
+    const parent = loadReferencedTrellisTaskRecord(file, 'parent', record.parent);
+    if (parent && (!Array.isArray(parent.children) || !parent.children.includes(taskDirectoryName))) {
+      fail(
+        `${file} field parent references ${record.parent}, but its children field does not include ${taskDirectoryName}.`,
+      );
+    }
+  }
+
+  if (!Array.isArray(record.children)) {
+    return;
+  }
+  const childNames = record.children
+    .filter(isTrellisTaskDirectoryName)
+    .slice(0, MAX_TRELLIS_TASK_LINKS);
+  for (const childName of new Set(childNames)) {
+    const child = loadReferencedTrellisTaskRecord(file, 'children', childName);
+    if (child && child.parent !== taskDirectoryName) {
+      fail(
+        `${file} field children references ${childName}, but its parent field is not ${taskDirectoryName}.`,
+      );
+    }
+  }
+}
+
+function loadReferencedTrellisTaskRecord(sourceFile, field, taskDirectoryName) {
+  const located = locateTrellisTaskRecord(taskDirectoryName);
+  if (located.error) {
+    fail(`${sourceFile} field ${field} references ${taskDirectoryName}, but the record cannot be verified: ${located.error}.`);
+    return null;
+  }
+  if (located.paths.length === 0) {
+    fail(`${sourceFile} field ${field} references missing task ${taskDirectoryName}.`);
+    return null;
+  }
+  if (located.paths.length > 1) {
+    fail(
+      `${sourceFile} field ${field} references ambiguous task ${taskDirectoryName}: ${located.paths.join(', ')}.`,
+    );
+    return null;
+  }
+
+  const referencedFile = located.paths[0];
+  const loaded = loadTrellisTaskMetadataFile(referencedFile);
+  if (loaded.status !== 'loaded') {
+    fail(
+      `${sourceFile} field ${field} references ${taskDirectoryName}, but ${referencedFile} ${loaded.message}.`,
+    );
+    return null;
+  }
+
+  let record;
+  try {
+    record = JSON.parse(loaded.text);
+  } catch (error) {
+    fail(
+      `${sourceFile} field ${field} references ${taskDirectoryName}, but ${referencedFile} could not be parsed as JSON: ` +
+        thrownValueMessage(error),
+    );
+    return null;
+  }
+  if (!isPlainObject(record)) {
+    fail(`${sourceFile} field ${field} references ${taskDirectoryName}, but ${referencedFile} does not contain a JSON object.`);
+    return null;
+  }
+  return record;
+}
+
+function locateTrellisTaskRecord(taskDirectoryName) {
+  const paths = [];
+  const activeCandidate = `.trellis/tasks/${taskDirectoryName}`;
+  const activeResult = trellisTaskRecordCandidate(activeCandidate);
+  if (activeResult.error) {
+    return { paths, error: activeResult.error };
+  }
+  if (activeResult.path) {
+    paths.push(activeResult.path);
+  }
+
+  const archiveRoot = resolve(rootDir, '.trellis/tasks/archive');
+  let monthEntries;
+  try {
+    monthEntries = readdirSync(archiveRoot, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return { paths, error: '' };
+    }
+    return { paths, error: `.trellis/tasks/archive could not be inspected: ${thrownValueMessage(error)}` };
+  }
+
+  for (const monthEntry of monthEntries) {
+    if (
+      monthEntry.isSymbolicLink() ||
+      !monthEntry.isDirectory() ||
+      !/^\d{4}-\d{2}$/.test(monthEntry.name)
+    ) {
+      continue;
+    }
+    const archivedCandidate = `.trellis/tasks/archive/${monthEntry.name}/${taskDirectoryName}`;
+    const archivedResult = trellisTaskRecordCandidate(archivedCandidate);
+    if (archivedResult.error) {
+      return { paths, error: archivedResult.error };
+    }
+    if (archivedResult.path) {
+      paths.push(archivedResult.path);
+    }
+  }
+
+  return { paths, error: '' };
+}
+
+function trellisTaskRecordCandidate(taskDir) {
+  const absoluteTaskDir = resolve(rootDir, taskDir);
+  let directoryEntry;
+  try {
+    directoryEntry = lstatSync(absoluteTaskDir);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return { path: '', error: '' };
+    }
+    return { path: '', error: `${taskDir} could not be inspected: ${thrownValueMessage(error)}` };
+  }
+  if (directoryEntry.isSymbolicLink()) {
+    return { path: '', error: `${taskDir} is a symlink` };
+  }
+  if (!directoryEntry.isDirectory()) {
+    return { path: '', error: `${taskDir} is not a directory` };
+  }
+
+  const taskFile = `${taskDir}/task.json`;
+  try {
+    lstatSync(resolve(rootDir, taskFile));
+    return { path: taskFile, error: '' };
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return { path: '', error: '' };
+    }
+    return { path: '', error: `${taskFile} could not be inspected: ${thrownValueMessage(error)}` };
+  }
+}
+
+function loadTrellisTaskMetadataFile(file, options = {}) {
+  const absoluteFile = resolve(rootDir, file);
+  let pathEntry;
+  try {
+    pathEntry = lstatSync(absoluteFile);
+  } catch (error) {
+    if (options.deletedIsMissing && error?.code === 'ENOENT') {
+      return { status: 'missing', message: 'is missing' };
+    }
+    return { status: 'unreadable', message: `could not be inspected: ${thrownValueMessage(error)}` };
+  }
+  if (pathEntry.isSymbolicLink()) {
+    return { status: 'unsafe', message: 'is a symlink; task metadata must be a regular file' };
+  }
+  if (!pathEntry.isFile()) {
+    return { status: 'unsafe', message: 'is not a regular file; task metadata must be a regular file' };
+  }
+  if (pathEntry.size > config.untrackedFileReadLimitBytes) {
+    return {
+      status: 'oversized',
+      message: `exceeds the bounded task metadata read limit of ${config.untrackedFileReadLimitBytes} bytes`,
+    };
+  }
+
+  const content = boundedUntrackedFileText(file);
+  if (!content || content.status === 'unreadable') {
+    return { status: 'unreadable', message: 'could not be read safely as a regular file' };
+  }
+  if (content.status === 'oversized') {
+    return {
+      status: 'oversized',
+      message: `exceeds the bounded task metadata read limit of ${config.untrackedFileReadLimitBytes} bytes`,
+    };
+  }
+  return { status: 'loaded', text: content.text, message: '' };
+}
+
+function isTrellisTaskDirectoryName(value) {
+  return (
+    typeof value === 'string' &&
+    value.length <= MAX_TRELLIS_TASK_REFERENCE_LENGTH &&
+    /^\d{2}-\d{2}-[a-z0-9][a-z0-9._-]*$/i.test(value)
+  );
+}
+
 function checkTrellisTaskContextSeeds() {
   const failureStart = failures.length;
   const diff = currentChangedPaths();
@@ -454,11 +796,23 @@ function checkTrellisTaskContextSeeds() {
 
   const contextFiles = new Set();
   for (const path of diff.paths) {
-    const artifact = parseTrellisTaskArtifactPath(path);
-    if (
-      !artifact ||
-      (artifact.artifact !== 'implement.jsonl' && artifact.artifact !== 'check.jsonl')
-    ) {
+    const normalized = normalizePathSeparators(path).replace(/^\.\//, '');
+    const contextArtifact =
+      normalized.startsWith('.trellis/tasks/') &&
+      (normalized.endsWith('/implement.jsonl') || normalized.endsWith('/check.jsonl'));
+    if (!contextArtifact) {
+      continue;
+    }
+
+    const artifact = parseTrellisTaskArtifactPath(normalized);
+    if (!artifact) {
+      if (pathEntryExists(normalized)) {
+        fail(
+          `${normalized} is not in a supported Trellis task layout; use ` +
+            '.trellis/tasks/MM-DD-name/{implement,check}.jsonl or ' +
+            '.trellis/tasks/archive/YYYY-MM/MM-DD-name/{implement,check}.jsonl.',
+        );
+      }
       continue;
     }
     contextFiles.add(`${artifact.taskDir}/${artifact.artifact}`);
@@ -549,7 +903,7 @@ function checkCompletedTrellisTaskLocation() {
 
 export function parseTrellisTaskArtifactPath(path) {
   const normalized = normalizePathSeparators(path).replace(/^\.\//, '');
-  const match = /^\.trellis\/tasks\/((?:archive\/[^/]+\/[^/]+)|[^/]+)\/(task\.json|implement\.jsonl|check\.jsonl)$/.exec(normalized);
+  const match = /^\.trellis\/tasks\/((?:archive\/\d{4}-\d{2}\/\d{2}-\d{2}-[^/]+)|\d{2}-\d{2}-[^/]+)\/(task\.json|implement\.jsonl|check\.jsonl)$/.exec(normalized);
   if (!match || match[1] === 'archive') {
     return null;
   }
@@ -1420,9 +1774,14 @@ function boundedUntrackedFileText(path) {
 
   let descriptor;
   try {
-    descriptor = openSync(resolve(rootDir, path), 'r');
+    const noFollowFlag = typeof fsConstants.O_NOFOLLOW === 'number' ? fsConstants.O_NOFOLLOW : 0;
+    descriptor = openSync(resolve(rootDir, path), fsConstants.O_RDONLY | noFollowFlag);
     const openedEntry = fstatSync(descriptor);
-    if (!openedEntry.isFile()) {
+    if (
+      !openedEntry.isFile() ||
+      openedEntry.dev !== pathEntry.dev ||
+      openedEntry.ino !== pathEntry.ino
+    ) {
       return { status: 'unreadable', text: '' };
     }
     if (openedEntry.size > config.untrackedFileReadLimitBytes) {
@@ -1857,6 +2216,15 @@ function listFiles(directory) {
 
 function exists(file) {
   return existsSync(resolve(rootDir, file));
+}
+
+function pathEntryExists(file) {
+  try {
+    lstatSync(resolve(rootDir, file));
+    return true;
+  } catch (error) {
+    return error?.code !== 'ENOENT';
+  }
 }
 
 function isRegularFile(file) {

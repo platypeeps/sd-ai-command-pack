@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.26.0 - 2026-07-21
+
+- Add a diff-scoped review-preflight guard for Trellis task identity,
+  lifecycle, branch-target, layout, and reciprocal parent/child metadata while
+  grandfathering untouched historical records.
+
 ## 0.25.5 - 2026-07-21
 
 - Make full-check Prism review local-first: when tracked staged or unstaged

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Verify current-thread priority, historical clustering, managed-block compatibility, and adapter synchronization."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Verify deterministic bounded remote-input handling and shipped template parity."}

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Verify category coverage, author-time disposition, and non-duplication of review providers."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Verify the concrete error matrix for filesystem, environment, command, and structured-input boundaries."}

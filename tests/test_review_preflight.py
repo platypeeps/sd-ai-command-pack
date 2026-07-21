@@ -32,6 +32,28 @@ InstallTestCase = _support.InstallTestCase
 class ReviewPreflightTests(InstallTestCase):
     """Tests for review preflight, archived-task, and branch push guards."""
 
+    @staticmethod
+    def trellis_task_record(
+        name: str,
+        *,
+        status: str = "planning",
+        branch: str | None = None,
+        base_branch: str = "main",
+        completed_at: str | None = None,
+        parent: str | None = None,
+        children: list[str] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "id": name,
+            "name": name,
+            "status": status,
+            "completedAt": completed_at,
+            "branch": branch,
+            "base_branch": base_branch,
+            "parent": parent,
+            "children": children or [],
+        }
+
     def test_review_preflight_exports_reusable_helpers(self) -> None:
         node = shutil.which("node")
         if node is None:
@@ -61,6 +83,7 @@ import {
   trellisTaskDirectory,
   thrownValueMessage,
   unsupportedNodeVersionMessage,
+  validateTrellisTaskMetadata,
   validateTrellisJournalSessions,
 } from './scripts/sd-ai-command-pack-review-preflight.mjs';
 
@@ -152,7 +175,69 @@ assert.deepEqual(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/07
   archived: true,
 });
 assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/task.json'), null);
+assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/not-a-month/07-17-demo/task.json'), null);
+assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/not-dated/check.jsonl'), null);
+assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/not-dated/check.jsonl'), null);
 assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/07-17-demo/prd.md'), null);
+assert.deepEqual(validateTrellisTaskMetadata({
+  id: 'demo',
+  name: 'demo',
+  status: 'planning',
+  completedAt: null,
+  branch: 'codex/demo',
+  base_branch: 'codex/parent',
+}, '.trellis/tasks/07-17-demo', false), []);
+assert.deepEqual(validateTrellisTaskMetadata({
+  id: 'demo',
+  name: 'demo',
+  status: 'review',
+  completedAt: null,
+  branch: 'codex/demo',
+  base_branch: 'main',
+}, '.trellis/tasks/07-17-demo', false), []);
+assert.deepEqual(validateTrellisTaskMetadata({
+  id: 'demo',
+  name: 'demo',
+  completedAt: null,
+  branch: 'codex/demo',
+  base_branch: 'main',
+}, '.trellis/tasks/07-17-demo', false), [
+  'status must be one of planning, in_progress, review, completed',
+]);
+assert.deepEqual(validateTrellisTaskMetadata({
+  id: 'demo',
+  name: 'demo',
+  status: 'in-progress',
+  completedAt: null,
+  branch: 'codex/demo',
+  base_branch: 'main',
+}, '.trellis/tasks/07-17-demo', false), [
+  'status must be one of planning, in_progress, review, completed',
+]);
+assert.deepEqual(validateTrellisTaskMetadata({
+  id: 'wrong',
+  name: 'demo',
+  status: 'completed',
+  completedAt: null,
+  branch: 'main',
+  base_branch: 'main',
+}, '.trellis/tasks/07-17-demo', false), [
+  'id must equal name',
+  'completedAt must be a non-empty completion timestamp when status is completed',
+  'status completed requires the task record to be under .trellis/tasks/archive/',
+  'branch must differ from base_branch',
+]);
+assert.deepEqual(validateTrellisTaskMetadata({
+  id: 'demo',
+  name: 'demo',
+  status: 'planning',
+  completedAt: null,
+  branch: ' ',
+  base_branch: '',
+}, '.trellis/tasks/07-17-demo', false), [
+  'base_branch must be a non-empty string',
+  'branch must be null or a non-empty string',
+]);
 assert.deepEqual(findTrellisTaskContextSeedRows('check.jsonl', [
   '{"file":"spec.md","reason":"real"}',
   '{"_example":"remove me"}',
@@ -403,7 +488,11 @@ assert.deepEqual(
             task = root / ".trellis/tasks" / task_name
             task.mkdir(parents=True)
             (task / "task.json").write_text(
-                '{"status":"planning"}\n', encoding="utf-8"
+                json.dumps(
+                    self.trellis_task_record(task_name.removeprefix("07-18-"))
+                )
+                + "\n",
+                encoding="utf-8",
             )
 
         result = self.run_review_preflight(node, root)
@@ -889,6 +978,352 @@ assert.deepEqual(
             ),
         )
 
+    def test_review_preflight_accepts_valid_changed_task_metadata(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        parent_name = "07-21-parent"
+        child_name = "07-21-child"
+        parent = root / ".trellis/tasks" / parent_name
+        child = root / ".trellis/tasks" / child_name
+        archived = root / ".trellis/tasks/archive/2026-07/07-20-archived"
+        for task in (parent, child, archived):
+            task.mkdir(parents=True)
+        (parent / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record(
+                    "parent",
+                    branch="codex/parent",
+                    children=[child_name],
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (child / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record(
+                    "child",
+                    branch="codex/child",
+                    base_branch="codex/parent",
+                    parent=parent_name,
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (archived / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record(
+                    "archived",
+                    status="completed",
+                    branch="codex/archived",
+                    completed_at="2026-07-20",
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "checked 3 changed Trellis task metadata record(s)",
+            result.stdout,
+        )
+
+    def test_review_preflight_grandfathers_unchanged_task_metadata(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        legacy = root / ".trellis/tasks/07-17-legacy"
+        legacy.mkdir(parents=True)
+        legacy_record = self.trellis_task_record("legacy", branch="main")
+        legacy_record["id"] = "historical-mismatch"
+        (legacy / "task.json").write_text(
+            json.dumps(legacy_record) + "\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline with legacy metadata")
+        (root / ".trellis/config.yaml").write_text("# changed\n", encoding="utf-8")
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "no changed Trellis task metadata records require integrity checks",
+            result.stdout,
+        )
+        self.assertNotIn("historical-mismatch", result.stdout)
+
+    def test_review_preflight_rejects_invalid_changed_task_metadata_fields(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+        task = root / ".trellis/tasks/07-21-path-name"
+        task.mkdir(parents=True)
+        record = self.trellis_task_record(
+            "record-name",
+            status="in_progress",
+            branch="main",
+            base_branch="main",
+            completed_at="2026-07-21",
+        )
+        record["id"] = "different-id"
+        (task / "task.json").write_text(
+            json.dumps(record) + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("task.json field id must equal name", result.stdout)
+        self.assertIn(
+            "task.json field name must match the dated task directory suffix \"path-name\"",
+            result.stdout,
+        )
+        self.assertIn(
+            "task.json field completedAt must be null when status is in_progress",
+            result.stdout,
+        )
+        self.assertIn(
+            "task.json field branch must differ from base_branch",
+            result.stdout,
+        )
+
+    def test_review_preflight_rejects_nonreciprocal_task_links(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+        parent_name = "07-21-parent"
+        child_name = "07-21-child"
+        parent = root / ".trellis/tasks" / parent_name
+        child = root / ".trellis/tasks" / child_name
+        parent.mkdir(parents=True)
+        child.mkdir(parents=True)
+        (parent / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record(
+                    "parent", children=["07-21-missing"]
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (child / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record("child", parent=parent_name)
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            f'task.json field parent references {parent_name}, but its children field does not include {child_name}',
+            result.stdout,
+        )
+        self.assertIn(
+            "task.json field children references missing task 07-21-missing",
+            result.stdout,
+        )
+
+    def test_review_preflight_rejects_unverifiable_changed_task_metadata(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+        malformed = root / ".trellis/tasks/archive/2026-07/07-20-malformed"
+        malformed.mkdir(parents=True)
+        (malformed / "task.json").write_text("{malformed\n", encoding="utf-8")
+        misplaced = root / ".trellis/tasks/archive/07-20-misplaced"
+        misplaced.mkdir(parents=True)
+        (misplaced / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record(
+                    "misplaced", status="completed", completed_at="2026-07-20"
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        wrong_bucket = root / ".trellis/tasks/archive/not-a-month/07-20-wrong-bucket"
+        wrong_bucket.mkdir(parents=True)
+        (wrong_bucket / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record(
+                    "wrong-bucket", status="completed", completed_at="2026-07-20"
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        symlinked = root / ".trellis/tasks/07-21-symlinked"
+        symlinked.mkdir(parents=True)
+        outside = root / "outside-task.json"
+        outside.write_text(
+            json.dumps(self.trellis_task_record("symlinked")) + "\n",
+            encoding="utf-8",
+        )
+        try:
+            (symlinked / "task.json").symlink_to(outside)
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"symlinks are not available: {exc}")
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "07-20-malformed/task.json could not be parsed as JSON while checking task metadata integrity",
+            result.stdout,
+        )
+        self.assertIn(
+            "07-21-symlinked/task.json is a symlink; task metadata must be a regular file",
+            result.stdout,
+        )
+        self.assertIn(
+            "archive/07-20-misplaced/task.json is not in a supported Trellis task layout",
+            result.stdout,
+        )
+        self.assertIn(
+            "archive/not-a-month/07-20-wrong-bucket/task.json is not in a supported Trellis task layout",
+            result.stdout,
+        )
+
+    def test_review_preflight_rejects_present_misplaced_task_context_only(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        deleted = root / ".trellis/tasks/archive/not-a-month/07-20-deleted"
+        deleted.mkdir(parents=True)
+        (deleted / "check.jsonl").write_text("", encoding="utf-8")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline with misplaced context")
+        (deleted / "check.jsonl").unlink()
+        present = root / ".trellis/tasks/archive/not-a-month/07-21-present"
+        present.mkdir(parents=True)
+        (present / "implement.jsonl").write_text("", encoding="utf-8")
+        undated = root / ".trellis/tasks/archive/2026-07/not-dated"
+        undated.mkdir(parents=True)
+        (undated / "check.jsonl").write_text("", encoding="utf-8")
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "archive/not-a-month/07-21-present/implement.jsonl is not in a supported Trellis task layout",
+            result.stdout,
+        )
+        self.assertIn(
+            "archive/2026-07/not-dated/check.jsonl is not in a supported Trellis task layout",
+            result.stdout,
+        )
+        self.assertNotIn("07-20-deleted/check.jsonl is not in", result.stdout)
+
+    def test_review_preflight_rejects_broken_symlink_misplaced_task_context(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+        misplaced = root / ".trellis/tasks/archive/not-a-month/07-21-broken"
+        misplaced.mkdir(parents=True)
+        try:
+            (misplaced / "check.jsonl").symlink_to(root / "missing-context.jsonl")
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"symlinks are not available: {exc}")
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "archive/not-a-month/07-21-broken/check.jsonl is not in a supported Trellis task layout",
+            result.stdout,
+        )
+
+    def test_review_preflight_rejects_unstatable_misplaced_task_context(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        if os.name == "nt" or not hasattr(os, "geteuid") or os.geteuid() == 0:
+            self.skipTest("POSIX non-root permissions are required")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+        archive_bucket = root / ".trellis/tasks/archive/not-a-month"
+        misplaced = archive_bucket / "07-21-unstatable/check.jsonl"
+        misplaced.parent.mkdir(parents=True)
+        misplaced.write_text("", encoding="utf-8")
+        self.run_git(
+            root,
+            "add",
+            ".trellis/tasks/archive/not-a-month/07-21-unstatable/check.jsonl",
+        )
+
+        archive_bucket.chmod(0)
+        try:
+            result = self.run_review_preflight(node, root)
+        finally:
+            archive_bucket.chmod(0o755)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "archive/not-a-month/07-21-unstatable/check.jsonl is not in a supported Trellis task layout",
+            result.stdout,
+        )
+
     def test_review_preflight_checks_changed_context_in_every_task_phase(self) -> None:
         node = shutil.which("node")
         if node is None:
@@ -904,7 +1339,10 @@ assert.deepEqual(
         task = root / ".trellis/tasks/07-17-demo"
         task.mkdir(parents=True)
         task_json = task / "task.json"
-        task_json.write_text('{"status":"planning"}\n', encoding="utf-8")
+        task_json.write_text(
+            json.dumps(self.trellis_task_record("demo")) + "\n",
+            encoding="utf-8",
+        )
         seed = '{"_example":"replace me"}\n'
         (task / "implement.jsonl").write_text(seed, encoding="utf-8")
         (task / "check.jsonl").write_text(seed, encoding="utf-8")
@@ -930,7 +1368,11 @@ assert.deepEqual(
             result.stdout,
         )
 
-        task_json.write_text('{"status":"in_progress"}\n', encoding="utf-8")
+        task_json.write_text(
+            json.dumps(self.trellis_task_record("demo", status="in_progress"))
+            + "\n",
+            encoding="utf-8",
+        )
         (task / "implement.jsonl").write_text(seed, encoding="utf-8")
         (task / "check.jsonl").write_text(seed, encoding="utf-8")
         result = self.run_review_preflight(node, root)
@@ -949,7 +1391,15 @@ assert.deepEqual(
             result.stdout,
         )
 
-        task_json.write_text('{"status":"completed"}\n', encoding="utf-8")
+        task_json.write_text(
+            json.dumps(
+                self.trellis_task_record(
+                    "demo", status="completed", completed_at="2026-07-17"
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
@@ -963,7 +1413,11 @@ assert.deepEqual(
 
         (task / "implement.jsonl").write_text(context, encoding="utf-8")
         (task / "check.jsonl").write_text(context, encoding="utf-8")
-        task_json.write_text('{"status":"in_progress"}\n', encoding="utf-8")
+        task_json.write_text(
+            json.dumps(self.trellis_task_record("demo", status="in_progress"))
+            + "\n",
+            encoding="utf-8",
+        )
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
@@ -983,17 +1437,19 @@ assert.deepEqual(
         task = root / ".trellis/tasks/07-17-legacy-planning"
         task.mkdir(parents=True)
         task_json = task / "task.json"
-        task_json.write_text('{"status":"planning"}\n', encoding="utf-8")
+        planning_record = self.trellis_task_record("legacy-planning")
+        task_json.write_text(
+            json.dumps(planning_record) + "\n",
+            encoding="utf-8",
+        )
         seed = '{"_example":"legacy planning"}\n'
         (task / "implement.jsonl").write_text(seed, encoding="utf-8")
         (task / "check.jsonl").write_text(seed, encoding="utf-8")
         self.run_git(root, "add", "-A")
         self.run_git(root, "commit", "-m", "baseline with planning task")
 
-        task_json.write_text(
-            '{"status":"planning","description":"metadata only"}\n',
-            encoding="utf-8",
-        )
+        planning_record["description"] = "metadata only"
+        task_json.write_text(json.dumps(planning_record) + "\n", encoding="utf-8")
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
@@ -1012,10 +1468,16 @@ assert.deepEqual(
         self.assertEqual(self.run_install(root).returncode, 0)
         self.run_git(root, "config", "user.email", "test@example.com")
         self.run_git(root, "config", "user.name", "Test User")
-        legacy = root / ".trellis/tasks/archive/2026-07/legacy"
+        legacy = root / ".trellis/tasks/archive/2026-07/07-17-legacy"
         legacy.mkdir(parents=True)
         (legacy / "task.json").write_text(
-            '{"status":"completed"}\n', encoding="utf-8"
+            json.dumps(
+                self.trellis_task_record(
+                    "legacy", status="completed", completed_at="2026-07-17"
+                )
+            )
+            + "\n",
+            encoding="utf-8",
         )
         (legacy / "implement.jsonl").write_text(
             '{"_example":"legacy"}\n', encoding="utf-8"
@@ -1031,10 +1493,16 @@ assert.deepEqual(
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertNotIn("legacy/implement.jsonl:1", result.stdout)
 
-        current = root / ".trellis/tasks/archive/2026-07/current"
+        current = root / ".trellis/tasks/archive/2026-07/07-17-current"
         current.mkdir(parents=True)
         (current / "task.json").write_text(
-            '{"status":"completed"}\n', encoding="utf-8"
+            json.dumps(
+                self.trellis_task_record(
+                    "current", status="completed", completed_at="2026-07-17"
+                )
+            )
+            + "\n",
+            encoding="utf-8",
         )
         (current / "implement.jsonl").write_text(
             '{"_example":"current"}\n', encoding="utf-8"
@@ -1045,7 +1513,7 @@ assert.deepEqual(
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
-            ".trellis/tasks/archive/2026-07/current/implement.jsonl:1 still contains",
+            ".trellis/tasks/archive/2026-07/07-17-current/implement.jsonl:1 still contains",
             result.stdout,
         )
         self.assertNotIn("legacy/implement.jsonl:1", result.stdout)
@@ -1064,10 +1532,16 @@ assert.deepEqual(
 
         outside = root / "outside.jsonl"
         outside.write_text('{"_example":"outside"}\n', encoding="utf-8")
-        task = root / ".trellis/tasks/archive/2026-07/symlinked"
+        task = root / ".trellis/tasks/archive/2026-07/07-17-symlinked"
         task.mkdir(parents=True)
         (task / "task.json").write_text(
-            '{"status":"completed"}\n', encoding="utf-8"
+            json.dumps(
+                self.trellis_task_record(
+                    "symlinked", status="completed", completed_at="2026-07-17"
+                )
+            )
+            + "\n",
+            encoding="utf-8",
         )
         (task / "check.jsonl").write_text(
             '{"file":"spec.md","reason":"grounded"}\n', encoding="utf-8"
@@ -1094,7 +1568,13 @@ assert.deepEqual(
         task = root / ".trellis/tasks/07-19-stranded"
         task.mkdir(parents=True)
         (task / "task.json").write_text(
-            '{"id":"stranded","status":"completed"}\n', encoding="utf-8"
+            json.dumps(
+                self.trellis_task_record(
+                    "stranded", status="completed", completed_at="2026-07-19"
+                )
+            )
+            + "\n",
+            encoding="utf-8",
         )
 
         result = self.run_review_preflight(node, root)
@@ -1122,13 +1602,24 @@ assert.deepEqual(
             task = root / ".trellis/tasks" / name
             task.mkdir(parents=True)
             (task / "task.json").write_text(
-                json.dumps({"id": name, "status": status}) + "\n",
+                json.dumps(
+                    self.trellis_task_record(
+                        name.removeprefix("07-19-"), status=status
+                    )
+                )
+                + "\n",
                 encoding="utf-8",
             )
         archived = root / ".trellis/tasks/archive/2026-07/07-19-complete"
         archived.mkdir(parents=True)
         (archived / "task.json").write_text(
-            '{"id":"archived","status":"completed"}\n', encoding="utf-8"
+            json.dumps(
+                self.trellis_task_record(
+                    "complete", status="completed", completed_at="2026-07-19"
+                )
+            )
+            + "\n",
+            encoding="utf-8",
         )
         outside = root / "outside-completed-task"
         outside.mkdir()

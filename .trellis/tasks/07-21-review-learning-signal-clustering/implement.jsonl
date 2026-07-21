@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Preserve review-learning ownership, GitHub review lifecycle semantics, bounded output, and platform adapter parity."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Preserve bounded parsing, safe text handling, deterministic output, and template source-of-truth requirements."}

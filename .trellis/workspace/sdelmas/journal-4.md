@@ -886,3 +886,41 @@ Renamed the parked OpenCode context hardening task to the upstream-trellis namin
 ### Next Steps
 
 - None - task complete
+
+
+## Session 175: Harden Trellis task metadata review preflight
+
+**Date**: 2026-07-21
+**Task**: Harden Trellis task metadata review preflight
+**Branch**: `codex/review-learning-task-metadata-integrity`
+
+### Summary
+
+Added diff-scoped Trellis task metadata integrity checks, hardened invalid task context layouts and filesystem failure handling through nine remote review rounds, refreshed exact fleet evidence, and finished with all local and hosted checks green.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b877110` | (see git log) |
+| `f47bd15` | (see git log) |
+| `f67d60b` | (see git log) |
+| `b992879` | (see git log) |
+| `47a0c71` | (see git log) |
+| `9e509f9` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
