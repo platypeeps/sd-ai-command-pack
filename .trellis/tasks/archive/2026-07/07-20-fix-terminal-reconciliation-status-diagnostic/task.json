@@ -2,7 +2,7 @@
   "id": "fix-terminal-reconciliation-status-diagnostic",
   "name": "fix-terminal-reconciliation-status-diagnostic",
   "title": "Fix terminal reconciliation status diagnostic",
-  "description": "",
+  "description": "Fix cross-field terminal reconciliation diagnostics without weakening snapshot validation.",
   "status": "completed",
   "dev_type": null,
   "scope": null,
