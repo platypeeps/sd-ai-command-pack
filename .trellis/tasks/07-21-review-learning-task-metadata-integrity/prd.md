@@ -46,7 +46,9 @@ scaffolds, but it does not validate the broader changed-task metadata contract.
   - stacked work remains supported; do not require `base_branch` to equal
     `main`.
 - Fail closed with path- and field-specific diagnostics for malformed JSON,
-  unsafe symlink traversal, or unverifiable changed records.
+  unsafe symlink traversal, unverifiable changed records, or present changed
+  task context artifacts in an unsupported active/archive layout. Continue to
+  ignore deleted old artifact paths during moves.
 - Add regression coverage for valid active, archived, child, and stacked-task
   records plus every rejected invariant.
 - Keep root/template preflight copies byte-equivalent and update relevant

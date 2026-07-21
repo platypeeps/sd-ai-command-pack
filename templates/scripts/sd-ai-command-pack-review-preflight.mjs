@@ -796,11 +796,23 @@ function checkTrellisTaskContextSeeds() {
 
   const contextFiles = new Set();
   for (const path of diff.paths) {
-    const artifact = parseTrellisTaskArtifactPath(path);
-    if (
-      !artifact ||
-      (artifact.artifact !== 'implement.jsonl' && artifact.artifact !== 'check.jsonl')
-    ) {
+    const normalized = normalizePathSeparators(path).replace(/^\.\//, '');
+    const contextArtifact =
+      normalized.startsWith('.trellis/tasks/') &&
+      (normalized.endsWith('/implement.jsonl') || normalized.endsWith('/check.jsonl'));
+    if (!contextArtifact) {
+      continue;
+    }
+
+    const artifact = parseTrellisTaskArtifactPath(normalized);
+    if (!artifact) {
+      if (exists(normalized)) {
+        fail(
+          `${normalized} is not in a supported Trellis task layout; use ` +
+            '.trellis/tasks/MM-DD-name/{implement,check}.jsonl or ' +
+            '.trellis/tasks/archive/YYYY-MM/MM-DD-name/{implement,check}.jsonl.',
+        );
+      }
       continue;
     }
     contextFiles.add(`${artifact.taskDir}/${artifact.artifact}`);

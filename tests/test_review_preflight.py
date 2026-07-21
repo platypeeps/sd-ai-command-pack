@@ -1226,6 +1226,34 @@ assert.deepEqual(
             result.stdout,
         )
 
+    def test_review_preflight_rejects_present_misplaced_task_context_only(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        deleted = root / ".trellis/tasks/archive/not-a-month/07-20-deleted"
+        deleted.mkdir(parents=True)
+        (deleted / "check.jsonl").write_text("", encoding="utf-8")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline with misplaced context")
+        (deleted / "check.jsonl").unlink()
+        present = root / ".trellis/tasks/archive/not-a-month/07-21-present"
+        present.mkdir(parents=True)
+        (present / "implement.jsonl").write_text("", encoding="utf-8")
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "archive/not-a-month/07-21-present/implement.jsonl is not in a supported Trellis task layout",
+            result.stdout,
+        )
+        self.assertNotIn("07-20-deleted/check.jsonl is not in", result.stdout)
+
     def test_review_preflight_checks_changed_context_in_every_task_phase(self) -> None:
         node = shutil.which("node")
         if node is None:
