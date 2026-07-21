@@ -41,6 +41,8 @@ Source:
 
 - Do not start this task until the upstream trigger exists.
 - This is a parked task, not currently actionable backlog.
-- Live check on 2026-07-14: [mindfold-ai/Trellis#396](https://github.com/mindfold-ai/Trellis/issues/396)
-  remains open. Continue using the tested pack-owned marker inference until a
-  released machine-readable upstream contract exists.
+- Live check on 2026-07-20: [mindfold-ai/Trellis#396](https://github.com/mindfold-ai/Trellis/issues/396)
+  closed as completed through [PR #448](https://github.com/mindfold-ai/Trellis/pull/448),
+  whose migration manifest targets Trellis 0.6.8. This checkout still uses
+  Trellis 0.6.7. Continue using the tested pack-owned marker inference until
+  0.6.8 is available in the fleet, then evaluate the released contract.

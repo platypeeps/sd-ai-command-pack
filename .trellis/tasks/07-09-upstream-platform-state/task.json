@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Parked while upstream Trellis issue #396 remains open.",
+  "notes": "Parked until Trellis 0.6.8 is available; upstream issue #396 closed completed with the machine-readable platform-state work.",
   "meta": {}
 }

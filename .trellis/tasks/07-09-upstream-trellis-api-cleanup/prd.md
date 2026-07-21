@@ -41,7 +41,10 @@ Source:
 
 - Do not start this task until one of the upstream triggers exists.
 - This is a parked task, not currently actionable backlog.
-- Live check on 2026-07-14: [mindfold-ai/Trellis#394](https://github.com/mindfold-ai/Trellis/issues/394)
-  and [#395](https://github.com/mindfold-ai/Trellis/issues/395) remain open.
-  Keep the recorder and housekeeping wrappers unchanged until released
-  structured-content and JSON-output contracts replace their workarounds.
+- Live check on 2026-07-20: [mindfold-ai/Trellis#395](https://github.com/mindfold-ai/Trellis/issues/395)
+  closed as completed through [PR #448](https://github.com/mindfold-ai/Trellis/pull/448),
+  whose migration manifest targets Trellis 0.6.8. This checkout still uses
+  Trellis 0.6.7, and [#394](https://github.com/mindfold-ai/Trellis/issues/394)
+  remains open for structured session content. Keep the wrappers unchanged
+  until 0.6.8 is available, then scope the JSON-output cleanup independently
+  while leaving structured-content cleanup parked on #394.

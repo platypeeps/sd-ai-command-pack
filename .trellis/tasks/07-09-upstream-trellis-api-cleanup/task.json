@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Parked while upstream Trellis issues #394 and #395 remain open.",
+  "notes": "Parked until Trellis 0.6.8 is available for the completed #395 JSON-output work; #394 remains open for structured session content.",
   "meta": {}
 }

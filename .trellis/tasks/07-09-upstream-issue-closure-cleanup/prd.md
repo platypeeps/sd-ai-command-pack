@@ -41,8 +41,11 @@ Source:
 
 - Do not start this task until at least one listed issue closes.
 - This is a parked task, not currently actionable backlog.
-- Live check on 2026-07-14: issues #394, #395, and #396 remain open. Issue
-  #397 closed as completed on 2026-07-09. Trellis 0.6.7 now provides
-  `task.py create --no-start`, and this checkout's generated `task.py` is
-  byte-identical to that canonical source. The pack has no #397-specific
-  workaround to shrink or remove, so no local cleanup is warranted.
+- Live check on 2026-07-20: issues #395 and #396 closed as completed through
+  [PR #448](https://github.com/mindfold-ai/Trellis/pull/448), whose migration
+  manifest targets Trellis 0.6.8. This checkout still uses Trellis 0.6.7, so
+  the corresponding pack-side cleanup remains parked until 0.6.8 is available.
+  Issue #394 remains open. Issue #397 closed as completed on 2026-07-09;
+  Trellis 0.6.7 provides `task.py create --no-start`, and this checkout's
+  generated `task.py` is byte-identical to that canonical source. The pack has
+  no #397-specific workaround to shrink or remove.

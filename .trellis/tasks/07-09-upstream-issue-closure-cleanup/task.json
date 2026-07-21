@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Parked while upstream Trellis issues #394-#396 remain open; #397 required no pack cleanup.",
+  "notes": "Parked until Trellis 0.6.8 is available for completed issues #395 and #396; #394 remains open, and #397 required no pack cleanup.",
   "meta": {}
 }
