@@ -213,6 +213,9 @@ schema.
   with verified status, timestamp, archived task path/ID, delivery PR evidence,
   optional all-or-none bookkeeping PR evidence, and observed default
   branch/head. The adapter validates and allowlists the entire nested shape.
+  The record is valid only when the top-level run status is `stopped` or
+  `completed`; an otherwise valid record attached to `active` or `paused` is a
+  cross-field error on `terminalReconciliation`, not on its nested `status`.
   Verified terminal evidence suppresses obsolete red-checkpoint guidance and
   renders external completion separately from loop-owned counters.
 - Optional run-snapshot strings may be omitted or explicitly `null`, but when
@@ -242,6 +245,10 @@ schema.
 - Missing or malformed run field -> `invalid run snapshot field: <field>`.
 - Present-but-blank optional run string -> `invalid run snapshot field:
   <field>`; explicit `null` remains valid.
+- `terminalReconciliation` on an `active` or `paused` run -> `invalid run
+  snapshot field: terminalReconciliation`.
+- Nested reconciliation status other than `verified` -> `invalid run snapshot
+  field: terminalReconciliation.status`.
 - Invalid terminal PR URL syntax, malformed IPv6 authority, or invalid port ->
   helper rejects the PR evidence with its controlled validation error; status
   adapter returns `invalid run snapshot field: terminalReconciliation.<field>`.
@@ -254,10 +261,14 @@ schema.
   context, checkpoint, and counters as before.
 - Base: `{"status": "none"}` remains a valid no-loop result.
 - Base: an optional run field such as `branch` may be absent or `null`.
+- Good: a `completed` run carries a complete reconciliation with nested status
+  `verified`.
 - Bad: a drifted helper returns `{"status": "active"}` and the report prints
   `None` for required metadata.
 - Bad: an active helper returns `{"branch": "   "}` and the report treats the
   sanitized empty value as valid evidence.
+- Bad: an `active` or `paused` run carries an otherwise valid reconciliation;
+  report the invalid record presence, not its valid nested status.
 
 ### 6. Tests Required
 
@@ -272,6 +283,10 @@ schema.
 - Invalid-port and malformed-IPv6 PR URL regressions at both the work-loop
   normalizer and status terminal-record boundary, asserting no raw
   `ValueError` escapes.
+- Cross-field regressions for `active` and `paused` runs with an otherwise valid
+  reconciliation, asserting the diagnostic ends in `terminalReconciliation`;
+  separately assert an invalid nested status ends in
+  `terminalReconciliation.status`.
 
 ### 7. Wrong vs Correct
 
@@ -284,6 +299,9 @@ Correct: report only that the status is unsupported
 
 Wrong: validate `split.hostname`, then access `split.port` outside the parse guard
 Correct: parse and read all URL authority properties inside one fail-closed `ValueError` boundary
+
+Wrong: blame `terminalReconciliation.status` when the nested status is valid but the record is illegal for the top-level run state
+Correct: blame `terminalReconciliation` for cross-field presence errors and reserve `.status` for an invalid nested status
 ```
 
 ## Work-Loop Evidence Reconciliation Contract

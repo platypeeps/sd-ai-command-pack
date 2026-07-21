@@ -596,6 +596,37 @@ class StatusTests(InstallTestCase):
             "bookkeeping": None,
             "observed": {"branch": "main", "head": "b" * 40},
         }
+        for run_status in ("active", "paused"):
+            with self.subTest(terminal_reconciliation_on_live_run=run_status):
+                result = collect(
+                    {
+                        **valid_run,
+                        "status": run_status,
+                        "terminalReconciliation": terminal,
+                    }
+                )
+                self.assertEqual(result["status"], "invalid")
+                self.assertEqual(
+                    result["error"],
+                    "work-loop helper returned invalid run snapshot field: "
+                    "terminalReconciliation",
+                )
+
+        invalid_terminal_status = collect(
+            {
+                **valid_run,
+                "status": "completed",
+                "phase": "stopped",
+                "terminalReconciliation": {**terminal, "status": "pending"},
+            }
+        )
+        self.assertEqual(invalid_terminal_status["status"], "invalid")
+        self.assertEqual(
+            invalid_terminal_status["error"],
+            "work-loop helper returned invalid run snapshot field: "
+            "terminalReconciliation.status",
+        )
+
         for url in (
             "https://example.test:bad/pull/42",
             "https://[::1/pull/42",

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.8 - 2026-07-20
+
+- Report a verified terminal reconciliation attached to a non-terminal run as
+  an invalid `terminalReconciliation` record without mislabeling its valid
+  nested status.
+
 ## 0.24.7 - 2026-07-20
 
 - Require an already-recorded concrete base branch before treating an
