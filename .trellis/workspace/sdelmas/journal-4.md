@@ -432,7 +432,12 @@ Released sd-ai-command-pack 0.24.7 so the post-squash historical shipped-SHA exc
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Required an already-recorded non-empty branch matching the submitted and
+  base branches before retaining an unchanged shipped SHA as historical.
+- Added the first-time branch/head evidence regression and updated the
+  executable reconciliation contract.
+- Published synchronized 0.24.7 release metadata and seven-consumer candidate
+  evidence.
 
 ### Git Commits
 
@@ -442,7 +447,10 @@ Released sd-ai-command-pack 0.24.7 so the post-squash historical shipped-SHA exc
 
 ### Testing
 
-- Validation was not recorded for this session.
+- [OK] focused remembered-branch and post-squash recovery regressions
+- [OK] Ruff on affected Python files
+- [OK] make check, including tests, coverage, lint, mypy, security, and full-check
+- [OK] full candidate validation passed for all seven configured consumers
 
 ### Status
 
