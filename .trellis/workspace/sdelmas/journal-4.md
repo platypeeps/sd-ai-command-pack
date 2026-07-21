@@ -775,3 +775,41 @@ Addressed all Copilot feedback on the self-healing Obsidian KB full-check change
 ### Next Steps
 
 - Merge PR #205 after maintainer approval, then run housekeeping.
+
+
+## Session 172: Avoid redundant Prism scans in full-check
+
+**Date**: 2026-07-21
+**Task**: Avoid redundant Prism scans in full-check
+**Branch**: `codex/avoid-redundant-prism-scans`
+
+### Summary
+
+Implemented issue 203 with local-first Prism target selection, updated shipped contracts and release metadata, and validated the final payload across the configured fleet.
+
+### Main Changes
+
+- Review every non-empty staged and unstaged layer, then skip the committed branch range when local work exists.
+- Preserve the clean-tree merge-base range fallback and existing Prism availability and failure semantics.
+- Release pack version 0.25.5 with synchronized templates, installed mirrors, documentation, tests, and fleet candidate ledger.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `87a74b8` | fix: avoid redundant Prism scans in full-check |
+
+### Testing
+
+- [OK] make check
+- [OK] tests.test_full_check: 34 tests
+- [OK] all seven configured fleet candidates passed and the ledger is current
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
