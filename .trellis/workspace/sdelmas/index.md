@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 168
+- **Total Sessions**: 169
 - **Last Active**: 2026-07-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~661 | Active |
+| `journal-4.md` | ~697 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 169 | 2026-07-20 | Remove unused PR normalizer parameter | `985957e`, `1957102` | `codex/remove-unused-normalize-pr-field` |
 | 168 | 2026-07-20 | Refine first-review boundary-risk scan | `c75f77d` | `codex/refine-first-review-risk` |
 | 167 | 2026-07-20 | Planning Task Context Scaffold Gate | `b1508d0` | `main` |
 | 166 | 2026-07-20 | Controlled post-canary fleet waves | `c58dd15`, `375ce32`, `cc2cabd`, `66ada16`, `31d6689`, `0e4d821`, `28d6b25` | `codex/fleet-post-canary-waves` |
