@@ -853,3 +853,36 @@ Published the local-first Prism full-check change, fixed the archived-task CI in
 ### Next Steps
 
 - None - task complete
+
+
+## Session 174: Rename upstream Trellis OpenCode task
+
+**Date**: 2026-07-21
+**Task**: Rename upstream Trellis OpenCode task
+**Branch**: `codex/rename-upstream-trellis-task`
+
+### Summary
+
+Renamed the parked OpenCode context hardening task to the upstream-trellis naming convention, updated its archived cross-reference, removed generated context scaffolds, and published PR #207 after clean local and remote review.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dac3fa3` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

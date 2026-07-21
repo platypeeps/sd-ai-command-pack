@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 173
+- **Total Sessions**: 174
 - **Last Active**: 2026-07-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~852 | Active |
+| `journal-4.md` | ~888 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 174 | 2026-07-21 | Rename upstream Trellis OpenCode task | `dac3fa3` | `codex/rename-upstream-trellis-task` |
 | 173 | 2026-07-21 | Review PR #206 | `1aed497`, `a650c75` | `codex/avoid-redundant-prism-scans` |
 | 172 | 2026-07-21 | Avoid redundant Prism scans in full-check | `87a74b8` | `codex/avoid-redundant-prism-scans` |
 | 171 | 2026-07-21 | Review PR #205 | `aa9ad39`, `8957898`, `8191da4`, `81121fe` | `codex/self-heal-stale-obsidian-kb` |
