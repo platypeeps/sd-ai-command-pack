@@ -806,7 +806,7 @@ function checkTrellisTaskContextSeeds() {
 
     const artifact = parseTrellisTaskArtifactPath(normalized);
     if (!artifact) {
-      if (exists(normalized)) {
+      if (pathEntryExists(normalized)) {
         fail(
           `${normalized} is not in a supported Trellis task layout; use ` +
             '.trellis/tasks/MM-DD-name/{implement,check}.jsonl or ' +
@@ -2216,6 +2216,15 @@ function listFiles(directory) {
 
 function exists(file) {
   return existsSync(resolve(rootDir, file));
+}
+
+function pathEntryExists(file) {
+  try {
+    lstatSync(resolve(rootDir, file));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isRegularFile(file) {
