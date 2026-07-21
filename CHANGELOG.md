@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.24.7 - 2026-07-20
+
+- Require an already-recorded concrete base branch before treating an
+  unchanged shipped SHA as historical evidence during work-loop recovery.
+
 ## 0.24.6 - 2026-07-20
 
 - Distinguish active and stale terminal reconciliation locks so stale-lock
