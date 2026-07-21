@@ -20,6 +20,7 @@ const MIN_NODE_VERSION = { major: 16, minor: 9, label: '16.9.0' };
 // default truncates large diffs and surfaces as a spawn error.
 const GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 const REVIEW_CODE_PATH_PATTERN = /\.(?:cjs|js|mjs|py|sh|ts|tsx)$/;
+const TEST_CODE_DIRECTORY_SEGMENTS = new Set(['test', 'tests', '__tests__']);
 const REVIEW_LEARNINGS_PATH_PROVENANCE_FILE = 'docs/review-learnings.md';
 const REVIEW_LEARNINGS_MANAGED_BLOCK_PATTERN =
   /<!-- sd-review-learnings:start -->[\s\S]*?<!-- sd-review-learnings:end -->/g;
@@ -712,6 +713,27 @@ export function reviewRiskCategories(text) {
   return categories;
 }
 
+export function isBoundaryRiskReviewPath(path) {
+  const normalized = normalizePathSeparators(path).replace(/^\.\//, '');
+  if (!REVIEW_CODE_PATH_PATTERN.test(normalized)) {
+    return false;
+  }
+
+  const segments = normalized.split('/');
+  const basename = segments.pop() || '';
+  if (segments.some((segment) => TEST_CODE_DIRECTORY_SEGMENTS.has(segment))) {
+    return false;
+  }
+
+  const stem = basename.replace(REVIEW_CODE_PATH_PATTERN, '');
+  return !(
+    stem.startsWith('test_') ||
+    stem.endsWith('_test') ||
+    stem.endsWith('.test') ||
+    stem.endsWith('.spec')
+  );
+}
+
 export function trellisTaskDirectory(path) {
   const normalized = normalizePathSeparators(path).replace(/^\.\//, '');
   const match = /^\.trellis\/tasks\/((?:archive\/[^/]+\/[^/]+)|[^/]+)(?:\/|$)/.exec(normalized);
@@ -735,7 +757,7 @@ function checkReviewRiskSweep() {
     return;
   }
 
-  const codePaths = changed.paths.filter((path) => REVIEW_CODE_PATH_PATTERN.test(path));
+  const codePaths = changed.paths.filter(isBoundaryRiskReviewPath);
   if (codePaths.length === 0) {
     pass('no changed code paths require a first-review boundary-risk sweep.');
     return;

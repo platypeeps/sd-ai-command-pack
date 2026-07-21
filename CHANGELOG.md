@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.25.2 - 2026-07-20
+
+- Restrict the first-review boundary-risk token scan to production source so
+  conventional test harness files do not create subprocess, filesystem, or
+  environment advisories for behavior they only exercise.
+
 ## 0.25.1 - 2026-07-20
 
 - Reject generated `_example` scaffold rows in diff-changed Trellis task

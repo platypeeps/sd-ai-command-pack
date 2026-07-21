@@ -49,6 +49,7 @@ import {
   extractDocumentationPathReferences,
   findHistoricalTrellisJournalSessionEdits,
   findTrellisTaskContextSeedRows,
+  isBoundaryRiskReviewPath,
   isSourceReviewPath,
   maskGeneratedDocumentationPathProvenance,
   parseNumstat,
@@ -73,6 +74,17 @@ assert.equal(isSourceReviewPath('templates/scripts/sd-ai-command-pack-review-pre
 assert.equal(isSourceReviewPath('scripts/sd-ai-command-pack-review-preflight.mjs'), false);
 assert.equal(isSourceReviewPath('docs/repomix-map.md'), false);
 assert.equal(isSourceReviewPath('.trellis/tasks/07-17-demo/prd.md'), false);
+assert.equal(isBoundaryRiskReviewPath('tests/test_project_check.py'), false);
+assert.equal(isBoundaryRiskReviewPath('test/helpers/runner.sh'), false);
+assert.equal(isBoundaryRiskReviewPath('src/__tests__/runner.ts'), false);
+assert.equal(isBoundaryRiskReviewPath('src\\\\tests\\\\runner.ts'), false);
+assert.equal(isBoundaryRiskReviewPath('scripts/test_runner.py'), false);
+assert.equal(isBoundaryRiskReviewPath('scripts/runner_test.py'), false);
+assert.equal(isBoundaryRiskReviewPath('scripts/runner.test.mjs'), false);
+assert.equal(isBoundaryRiskReviewPath('scripts/runner.spec.ts'), false);
+assert.equal(isBoundaryRiskReviewPath('scripts/test-runner.sh'), true);
+assert.equal(isBoundaryRiskReviewPath('scripts/runtime.py'), true);
+assert.equal(isBoundaryRiskReviewPath('package.json'), false);
 assert.equal(trellisTaskDirectory('.trellis/tasks/07-17-demo/prd.md'), '.trellis/tasks/07-17-demo');
 assert.equal(
   trellisTaskDirectory('.trellis/tasks/archive/2026-07/07-17-demo/task.json'),
@@ -436,6 +448,83 @@ assert.deepEqual(
             result.stdout,
             r"PASS checked \d+ changed code path\(s\); no boundary-risk trigger was added",
         )
+
+    def test_review_preflight_ignores_boundary_tokens_added_only_in_tests(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        test_source = root / "tests/test_runtime_boundary.py"
+        test_source.parent.mkdir(parents=True)
+        test_source.write_text(
+            "import os\n"
+            "import subprocess\n"
+            "from pathlib import Path\n"
+            "subprocess.run(['tool'])\n"
+            "target = Path(os.environ.get('TARGET', '.'))\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("changed code adds", result.stdout)
+        self.assertIn(
+            "PASS no changed code paths require a first-review boundary-risk sweep",
+            result.stdout,
+        )
+
+    def test_review_preflight_mixed_diff_scans_only_production_source(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        production_source = root / "scripts/runtime_boundary.py"
+        production_source.write_text(
+            "import subprocess\nsubprocess.run(['tool'])\n",
+            encoding="utf-8",
+        )
+        test_source = root / "tests/test_runtime_boundary.py"
+        test_source.parent.mkdir(parents=True)
+        test_source.write_text(
+            "import hashlib\n"
+            "import json\n"
+            "import os\n"
+            "from pathlib import Path\n"
+            "parsed = json.loads(os.environ.get('VALUE', '{}'))\n"
+            "digest = hashlib.sha256(str(Path(parsed['path'])).encode()).hexdigest()\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "WARN changed code adds subprocess/external command behavior",
+            result.stdout,
+        )
+        self.assertNotIn("parser/structured input", result.stdout)
+        self.assertNotIn("path/filesystem boundary", result.stdout)
+        self.assertNotIn("environment/global state", result.stdout)
+        self.assertNotIn("digest/integrity framing", result.stdout)
 
     def test_review_preflight_ignores_upstream_only_changes_behind_base(self) -> None:
         node = shutil.which("node")

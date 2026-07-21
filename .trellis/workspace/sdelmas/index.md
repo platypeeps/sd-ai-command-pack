@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 167
+- **Total Sessions**: 168
 - **Last Active**: 2026-07-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~622 | Active |
+| `journal-4.md` | ~661 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 168 | 2026-07-20 | Refine first-review boundary-risk scan | `c75f77d` | `codex/refine-first-review-risk` |
 | 167 | 2026-07-20 | Planning Task Context Scaffold Gate | `b1508d0` | `main` |
 | 166 | 2026-07-20 | Controlled post-canary fleet waves | `c58dd15`, `375ce32`, `cc2cabd`, `66ada16`, `31d6689`, `0e4d821`, `28d6b25` | `codex/fleet-post-canary-waves` |
 | 165 | 2026-07-20 | Fleet rollout timing telemetry | `07c2e4288fef6eda18865e300961e6cdd381f54a`, `3444317acfe8d9b8ddcd332d247316e02bd6eb8f`, `f03f8cd34868cc8dad4a84aca48d2bc602ad0494`, `050c9cb79bf1e7a4236f2ef8196466e4e760f173`, `19a6f9ddf70802d65c54a479015a12264903e046`, `a29ce9732a835e64d9db6969bc812e95654d4612` | `codex/fleet-rollout-timing-telemetry-bookkeeping` |

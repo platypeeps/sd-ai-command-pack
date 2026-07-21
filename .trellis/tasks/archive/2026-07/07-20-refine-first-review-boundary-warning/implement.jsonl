@@ -1,0 +1,2 @@
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Defines the shipped review-preflight path-classification contract and template parity requirements."}
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Defines shipped-payload versioning, candidate ledger, and source dogfood synchronization requirements."}

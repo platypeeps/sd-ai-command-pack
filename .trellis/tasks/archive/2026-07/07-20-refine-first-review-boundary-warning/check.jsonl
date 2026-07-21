@@ -1,0 +1,2 @@
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Verify test-path exclusions remain narrow and production boundary-risk warnings stay intact."}
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Verify version, changelog, candidate ledger, and dogfood mirror consistency for the shipped patch."}
