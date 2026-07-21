@@ -21,6 +21,8 @@ const MIN_NODE_VERSION = { major: 16, minor: 9, label: '16.9.0' };
 const GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 const MAX_TRELLIS_TASK_LINKS = 100;
 const MAX_TRELLIS_TASK_REFERENCE_LENGTH = 255;
+const TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review', 'completed']);
+const ACTIVE_TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review']);
 const REVIEW_CODE_PATH_PATTERN = /\.(?:cjs|js|mjs|py|sh|ts|tsx)$/;
 const TEST_CODE_DIRECTORY_SEGMENTS = new Set(['test', 'tests', '__tests__']);
 const REVIEW_LEARNINGS_PATH_PROVENANCE_FILE = 'docs/review-learnings.md';
@@ -542,7 +544,9 @@ export function validateTrellisTaskMetadata(record, taskDir, archived) {
     issues.push(`name must match the dated task directory suffix "${directoryMatch[1]}"`);
   }
 
-  if (record.status === 'planning' || record.status === 'in_progress') {
+  if (!TRELLIS_TASK_STATUSES.has(record.status)) {
+    issues.push('status must be one of planning, in_progress, review, completed');
+  } else if (ACTIVE_TRELLIS_TASK_STATUSES.has(record.status)) {
     if (record.completedAt !== null) {
       issues.push(`completedAt must be null when status is ${record.status}`);
     }

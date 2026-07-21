@@ -34,7 +34,8 @@ scaffolds, but it does not validate the broader changed-task metadata contract.
   - parent/child links reference existing task directories and are reciprocal
     when both records are in the checkout.
 - Validate lifecycle invariants:
-  - `planning` and `in_progress` records have `completedAt: null`;
+  - `status` is one of `planning`, `in_progress`, `review`, or `completed`;
+  - `planning`, `in_progress`, and `review` records have `completedAt: null`;
   - `completed` records have a non-empty completion timestamp and remain under
     the archive tree;
   - the existing completed-active-root guard remains authoritative.

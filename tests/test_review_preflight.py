@@ -186,6 +186,33 @@ assert.deepEqual(validateTrellisTaskMetadata({
   base_branch: 'codex/parent',
 }, '.trellis/tasks/07-17-demo', false), []);
 assert.deepEqual(validateTrellisTaskMetadata({
+  id: 'demo',
+  name: 'demo',
+  status: 'review',
+  completedAt: null,
+  branch: 'codex/demo',
+  base_branch: 'main',
+}, '.trellis/tasks/07-17-demo', false), []);
+assert.deepEqual(validateTrellisTaskMetadata({
+  id: 'demo',
+  name: 'demo',
+  completedAt: null,
+  branch: 'codex/demo',
+  base_branch: 'main',
+}, '.trellis/tasks/07-17-demo', false), [
+  'status must be one of planning, in_progress, review, completed',
+]);
+assert.deepEqual(validateTrellisTaskMetadata({
+  id: 'demo',
+  name: 'demo',
+  status: 'in-progress',
+  completedAt: null,
+  branch: 'codex/demo',
+  base_branch: 'main',
+}, '.trellis/tasks/07-17-demo', false), [
+  'status must be one of planning, in_progress, review, completed',
+]);
+assert.deepEqual(validateTrellisTaskMetadata({
   id: 'wrong',
   name: 'demo',
   status: 'completed',

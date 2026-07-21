@@ -98,9 +98,10 @@ that exercise the generic JavaScript review preflight.
 - Diff-scoped Trellis task metadata checks inspect every added or modified
   `.trellis/tasks/**/task.json` without migrating untouched history. Records
   must use the active or dated archive layout; keep `id`, `name`, and the dated
-  directory suffix aligned, lifecycle timestamps coherent with `status`,
-  `base_branch` non-empty, an optional `branch` distinct from its base, and
-  parent/child links present and reciprocal. Stacked branch bases are valid.
+  directory suffix aligned; require `status` to be `planning`, `in_progress`,
+  `review`, or `completed`; keep lifecycle timestamps coherent with that
+  status; keep `base_branch` non-empty, an optional `branch` distinct from its
+  base, and parent/child links present and reciprocal. Stacked branch bases are valid.
   Missing/deleted old paths are ignored during moves, while malformed JSON,
   oversized or unreadable files, unsafe symlinks, invalid layouts, and
   unverifiable linked records fail closed with path- and field-specific output.
