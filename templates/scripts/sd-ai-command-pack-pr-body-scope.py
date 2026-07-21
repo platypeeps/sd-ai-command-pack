@@ -775,7 +775,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help=(
             f"append {TOOLING_SCOPE_LABEL} to --body-file only when every "
-            "path in --changed-files belongs to that category; mixed scope exits 3"
+            "path in --changed-files belongs to that category; empty or mixed "
+            "scope exits 3"
         ),
     )
     parser.add_argument(

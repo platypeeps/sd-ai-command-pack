@@ -165,6 +165,17 @@ class ToolingBodyPreparationTests(unittest.TestCase):
             config_path=config_path,
         )
 
+    def test_prepare_help_documents_empty_and_mixed_exit_three(self) -> None:
+        stdout = io.StringIO()
+
+        with mock.patch.object(sys, "stdout", stdout), self.assertRaises(
+            SystemExit
+        ) as raised:
+            self.mod._parse_args(["--help"])
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertIn("empty or mixed scope exits 3", " ".join(stdout.getvalue().split()))
+
     def test_nul_delimited_paths_preserve_newlines_and_edge_whitespace(self) -> None:
         changed = (
             ".trellis/tasks/07-21-demo/task.json\0"
