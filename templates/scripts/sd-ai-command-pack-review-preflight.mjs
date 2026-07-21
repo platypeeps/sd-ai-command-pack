@@ -451,63 +451,42 @@ function checkTrellisTaskContextSeeds() {
     return;
   }
 
-  const taskChanges = new Map();
+  const contextFiles = new Set();
   for (const path of diff.paths) {
     const artifact = parseTrellisTaskArtifactPath(path);
-    if (!artifact) {
+    if (
+      !artifact ||
+      (artifact.artifact !== 'implement.jsonl' && artifact.artifact !== 'check.jsonl')
+    ) {
       continue;
     }
-
-    const entry = taskChanges.get(artifact.taskDir) || {
-      archived: artifact.archived,
-      artifacts: new Set(),
-    };
-    entry.artifacts.add(artifact.artifact);
-    taskChanges.set(artifact.taskDir, entry);
+    contextFiles.add(`${artifact.taskDir}/${artifact.artifact}`);
   }
 
   let inspectedFiles = 0;
-  for (const [taskDir, change] of taskChanges) {
-    const taskFile = `${taskDir}/task.json`;
-    const requiresContext = change.archived || trellisTaskRequiresGroundedContext(taskFile);
-    if (!requiresContext) {
+  for (const file of contextFiles) {
+    if (!isRegularFile(file)) {
       continue;
     }
 
-    const contextFiles = new Set(
-      [...change.artifacts]
-        .filter((artifact) => artifact === 'implement.jsonl' || artifact === 'check.jsonl')
-        .map((artifact) => `${taskDir}/${artifact}`),
-    );
-    if (change.artifacts.has('task.json')) {
-      contextFiles.add(`${taskDir}/implement.jsonl`);
-      contextFiles.add(`${taskDir}/check.jsonl`);
-    }
-
-    for (const file of contextFiles) {
-      if (!isRegularFile(file)) {
-        continue;
-      }
-
-      inspectedFiles += 1;
-      for (const seed of findTrellisTaskContextSeedRows(file, readText(file))) {
-        fail(
-          `${seed.file}:${seed.line} still contains a generated _example seed after the task entered implementation; ` +
-            'replace it with grounded {"file": "<path>", "reason": "<why>"} context or remove the seed row.',
-        );
-      }
+    inspectedFiles += 1;
+    for (const seed of findTrellisTaskContextSeedRows(file, readText(file))) {
+      fail(
+        `${seed.file}:${seed.line} still contains a generated _example scaffold row; ` +
+          'replace it with grounded {"file": "<path>", "reason": "<why>"} context or leave the file empty.',
+      );
     }
   }
 
   if (inspectedFiles === 0) {
     if (failures.length === failureStart) {
-      pass('no changed in-progress, completed, or archived Trellis task context files require seed checks.');
+      pass('no changed Trellis task context files require scaffold checks.');
     }
     return;
   }
 
   if (failures.length === failureStart) {
-    pass(`checked ${inspectedFiles} changed in-progress, completed, or archived Trellis task context file(s) for generated _example seeds.`);
+    pass(`checked ${inspectedFiles} changed Trellis task context file(s) for generated _example scaffold rows.`);
   }
 }
 
@@ -564,20 +543,6 @@ function checkCompletedTrellisTaskLocation() {
 
   if (completed === 0 && failures.length === failureStart) {
     pass(`checked ${inspected} active-root Trellis task record(s); none is completed outside archive.`);
-  }
-}
-
-function trellisTaskRequiresGroundedContext(taskFile) {
-  if (!isRegularFile(taskFile)) {
-    return false;
-  }
-
-  try {
-    const status = readJson(taskFile)?.status;
-    return status === 'in_progress' || status === 'completed';
-  } catch (error) {
-    fail(`${taskFile} could not be parsed as JSON while checking task context state: ${thrownValueMessage(error)}`);
-    return false;
   }
 }
 

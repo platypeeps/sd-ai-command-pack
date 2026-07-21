@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.25.1 - 2026-07-20
+
+- Reject generated `_example` scaffold rows in diff-changed Trellis task
+  context files even while a task is still planning, without scanning
+  untouched historical context.
+
 ## 0.25.0 - 2026-07-20
 
 - Keep fleet canaries sequential, then schedule independent post-canary

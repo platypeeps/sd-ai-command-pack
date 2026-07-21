@@ -3,7 +3,7 @@
   "name": "planning-task-placeholder-gate",
   "title": "Reject placeholder context in new planning tasks",
   "description": "Extend deterministic review preflight so newly added planning-task check and implement context files cannot retain generated _example scaffold rows.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
