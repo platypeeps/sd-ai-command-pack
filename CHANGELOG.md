@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.25.3 - 2026-07-20
+
+- Remove the unused terminal reconciliation pull-request normalizer parameter
+  so the helper signature reflects its value-only validation contract.
+
 ## 0.25.2 - 2026-07-20
 
 - Restrict the first-review boundary-risk token scan to production source so

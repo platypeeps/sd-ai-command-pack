@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines status snapshot validation behavior, diagnostics, parity, and focused regression expectations."}
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Requires canonical/template parity for generated pack payload."}
