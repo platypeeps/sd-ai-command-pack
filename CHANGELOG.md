@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.25.5 - 2026-07-21
+
+- Make full-check Prism review local-first: when tracked staged or unstaged
+  changes exist, review each non-empty local layer and defer the committed
+  branch range, avoiding a redundant paid scan during iteration.
+
 ## 0.25.4 - 2026-07-21
 
 - Let the default full-check repair and recheck an existing ignored stale

@@ -775,3 +775,81 @@ Addressed all Copilot feedback on the self-healing Obsidian KB full-check change
 ### Next Steps
 
 - Merge PR #205 after maintainer approval, then run housekeeping.
+
+
+## Session 172: Avoid redundant Prism scans in full-check
+
+**Date**: 2026-07-21
+**Task**: Avoid redundant Prism scans in full-check
+**Branch**: `codex/avoid-redundant-prism-scans`
+
+### Summary
+
+Implemented issue 203 with local-first Prism target selection, updated shipped contracts and release metadata, and validated the final payload across the configured fleet.
+
+### Main Changes
+
+- Review every non-empty staged and unstaged layer, then skip the committed branch range when local work exists.
+- Preserve the clean-tree merge-base range fallback and existing Prism availability and failure semantics.
+- Release pack version 0.25.5 with synchronized templates, installed mirrors, documentation, tests, and fleet candidate ledger.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `87a74b8` | fix: avoid redundant Prism scans in full-check |
+
+### Testing
+
+- [OK] make check
+- [OK] tests.test_full_check: 34 tests
+- [OK] all seven configured fleet candidates passed and the ledger is current
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 173: Review PR #206
+
+**Date**: 2026-07-21
+**Task**: Review PR #206
+**Branch**: `codex/avoid-redundant-prism-scans`
+
+### Summary
+
+Published the local-first Prism full-check change, fixed the archived-task CI invariant, addressed all five Copilot wording comments, and completed a clean remote review loop.
+
+### Main Changes
+
+- Added the required description to the archived issue-203 task metadata after CI exposed the invariant.
+- Clarified every consumer-facing Prism scope reference to distinguish tracked staged or unstaged changes from untracked files.
+- Revalidated template mirrors, the complete seven-consumer fleet candidate ledger, repository checks, CI, and all review threads.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1aed497` | fix: describe archived Prism task |
+| `a650c75` | docs: clarify tracked Prism review scope |
+
+### Testing
+
+- [OK] Focused archived-task invariant test and tests.test_full_check (34 tests)
+- [OK] make check and deterministic PR full-check
+- [OK] all seven fleet candidates and all GitHub CI jobs passed
+- [OK] Copilot round 3 produced no new comments; all five prior threads resolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

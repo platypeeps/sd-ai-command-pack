@@ -382,12 +382,26 @@ run_prism_reviews() {
     return 0
   fi
 
+  local has_unstaged=0
+  local has_staged=0
   if ! git diff --quiet --; then
+    has_unstaged=1
+  fi
+  if ! git diff --cached --quiet --; then
+    has_staged=1
+  fi
+
+  if [ "$has_unstaged" -eq 1 ]; then
     run_prism_command "Prism review: unstaged changes" review unstaged
   fi
 
-  if ! git diff --cached --quiet --; then
+  if [ "$has_staged" -eq 1 ]; then
     run_prism_command "Prism review: staged changes" review staged
+  fi
+
+  if [ "$has_unstaged" -eq 1 ] || [ "$has_staged" -eq 1 ]; then
+    warn "Local changes were reviewed; skipping committed branch Prism review to avoid redundant scans."
+    return 0
   fi
 
   local merge_base

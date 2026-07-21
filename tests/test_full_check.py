@@ -32,6 +32,134 @@ InstallTestCase = _support.InstallTestCase
 class FullCheckTests(InstallTestCase):
     """Tests for full-check orchestration and optional review lanes."""
 
+    def _make_full_check_prism_repo(self) -> tuple[Path, Path, Path]:
+        root = self.make_repo()
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir()
+        for name in (
+            "sd-ai-command-pack-full-check.sh",
+            "sd-ai-command-pack-shell-lib.sh",
+        ):
+            shutil.copy2(install.ROOT / "templates/scripts" / name, scripts_dir / name)
+        for name in ("branch.txt", "staged.txt", "unstaged.txt"):
+            (root / name).write_text("base\n", encoding="utf-8")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-full-check-prism-")
+        self.addCleanup(tools_tempdir.cleanup)
+        stub_bin = Path(tools_tempdir.name) / "bin"
+        stub_bin.mkdir()
+        log_path = Path(tools_tempdir.name) / "prism.log"
+        prism = stub_bin / "prism"
+        prism.write_text(
+            "#!/usr/bin/env bash\n"
+            "printf 'prism %s\\n' \"$*\" >> \"$PRISM_LOG\"\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        prism.chmod(0o755)
+        return root, stub_bin, log_path
+
+    def _run_full_check_prism_reviews(
+        self,
+        root: Path,
+        stub_bin: Path,
+        log_path: Path,
+        *,
+        base_ref: str,
+    ) -> subprocess.CompletedProcess[str]:
+        assert self._bash_path is not None
+        inherited_path = os.environ.get("PATH") or os.defpath
+        return subprocess.run(
+            [
+                self._bash_path,
+                "-c",
+                "source scripts/sd-ai-command-pack-full-check.sh; run_prism_reviews",
+            ],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{inherited_path}",
+                "PRISM_LOG": str(log_path),
+                "SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF": base_ref,
+                "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM": "required",
+                "SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE": "1",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+    def test_full_check_prism_prefers_local_layers_over_committed_range(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root, stub_bin, log_path = self._make_full_check_prism_repo()
+        (root / "branch.txt").write_text("branch\n", encoding="utf-8")
+        self.run_git(root, "add", "branch.txt")
+        self.run_git(root, "commit", "-m", "branch change")
+        merge_base = self.git_output(root, "rev-parse", "HEAD~1")
+        (root / "staged.txt").write_text("staged\n", encoding="utf-8")
+        self.run_git(root, "add", "staged.txt")
+        (root / "unstaged.txt").write_text("unstaged\n", encoding="utf-8")
+
+        result = self._run_full_check_prism_reviews(
+            root, stub_bin, log_path, base_ref="HEAD~1"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertEqual(log.count("prism review unstaged"), 1, log)
+        self.assertEqual(log.count("prism review staged"), 1, log)
+        self.assertNotIn(f"prism review range {merge_base}..HEAD", log)
+        self.assertIn("skipping committed branch Prism review", result.stdout)
+
+    def test_full_check_prism_reviews_committed_range_when_tree_is_clean(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        root, stub_bin, log_path = self._make_full_check_prism_repo()
+        (root / "branch.txt").write_text("branch\n", encoding="utf-8")
+        self.run_git(root, "add", "branch.txt")
+        self.run_git(root, "commit", "-m", "branch change")
+        merge_base = self.git_output(root, "rev-parse", "HEAD~1")
+
+        result = self._run_full_check_prism_reviews(
+            root, stub_bin, log_path, base_ref="HEAD~1"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        log = log_path.read_text(encoding="utf-8")
+        self.assertEqual(log.count(f"prism review range {merge_base}..HEAD"), 1, log)
+        self.assertNotIn("prism review staged", log)
+        self.assertNotIn("prism review unstaged", log)
+
+    def test_full_check_prism_selects_each_local_layer_independently(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        for layer in ("staged", "unstaged"):
+            with self.subTest(layer=layer):
+                root, stub_bin, log_path = self._make_full_check_prism_repo()
+                (root / f"{layer}.txt").write_text(f"{layer}\n", encoding="utf-8")
+                if layer == "staged":
+                    self.run_git(root, "add", "staged.txt")
+
+                result = self._run_full_check_prism_reviews(
+                    root, stub_bin, log_path, base_ref="HEAD"
+                )
+
+                self.assertEqual(result.returncode, 0, result.stdout)
+                log = log_path.read_text(encoding="utf-8")
+                self.assertEqual(log.count(f"prism review {layer}"), 1, log)
+                other_layer = "unstaged" if layer == "staged" else "staged"
+                self.assertNotIn(f"prism review {other_layer}", log)
+                self.assertNotIn("prism review range", log)
+
     def test_full_check_script_writes_gito_reports_to_artifact_dir(self) -> None:
         script = (
             install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh"

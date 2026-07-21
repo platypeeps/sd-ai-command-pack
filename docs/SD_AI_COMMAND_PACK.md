@@ -481,7 +481,12 @@ runs the post-install audit, the tooling/generated file scope preflight, the
 PR-body scope preflight, current-diff CI classification when
 `scripts/classify-ci-changes.sh` exists, optional package-script checks when a
 `package.json`, Node.js, and the selected package runner are available, and
-local Prism review when `prism` is available and configured. For target repos
+local Prism review when `prism` is available and configured. The Prism lane is
+local-first: when tracked staged or unstaged changes exist, it reviews each
+non-empty Git layer and skips the committed branch range; otherwise, it reviews
+the branch range from the configured base. This avoids repeating committed
+review work during iteration without dropping either local diff layer. For
+target repos
 that provide a CI classifier, prefer `scripts/classify-ci-changes.sh` with
 support for `-- changed-file ...`; the full-check script also tolerates legacy
 `scripts/classify_ci_changes.sh` by passing a temp changed-files list directly.
@@ -1309,6 +1314,9 @@ ephemeral tool state and do not change what the checks validate.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0`: skip Prism review.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=required`: fail if Prism is missing,
   unauthenticated, or has provider/model configuration failures.
+  Full-check still uses local-first scope: when tracked staged or unstaged
+  changes exist, it reviews each non-empty local layer; otherwise, it reviews
+  the committed branch range.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_RULES`: explicit Prism rules file. Defaults to
   `.prism/rules.json` when present.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_FAIL_ON`: severity that fails the Prism
