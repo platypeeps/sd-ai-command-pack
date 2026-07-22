@@ -24,7 +24,7 @@ const MAX_TRELLIS_TASK_REFERENCE_LENGTH = 255;
 const TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review', 'completed']);
 const ACTIVE_TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review']);
 const REVIEW_CODE_PATH_PATTERN = /\.(?:cjs|js|mjs|py|sh|ts|tsx)$/;
-const REVIEW_WORKFLOW_PATH_PATTERN = /^\.github\/workflows\/[^/]+(?:\/[^/]+)*\.ya?ml$/;
+const REVIEW_WORKFLOW_PATH_PATTERN = /^\.github\/workflows\/[^/]+\.ya?ml$/;
 const NON_PRODUCTION_CODE_DIRECTORY_SEGMENTS = new Set([
   'test',
   'tests',

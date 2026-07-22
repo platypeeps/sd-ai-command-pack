@@ -114,6 +114,7 @@ assert.equal(isBoundaryRiskReviewPath('fixtures/runtime.py'), false);
 assert.equal(isBoundaryRiskReviewPath('vendor/runtime.js'), false);
 assert.equal(isBoundaryRiskReviewPath('generated/runtime.ts'), false);
 assert.equal(isBoundaryRiskReviewPath('.github/workflows/checks.yml'), true);
+assert.equal(isBoundaryRiskReviewPath('.github/workflows/nested/checks.yml'), false);
 assert.equal(isBoundaryRiskReviewPath('.github/dependabot.yml'), false);
 assert.equal(isBoundaryRiskReviewPath('package.json'), false);
 assert.equal(trellisTaskDirectory('.trellis/tasks/07-17-demo/prd.md'), '.trellis/tasks/07-17-demo');
