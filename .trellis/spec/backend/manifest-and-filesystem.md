@@ -995,7 +995,8 @@ owns or changes their outcomes.
   `--state-home`.
 - `system_reading() -> ClockReading` reads wall nanoseconds plus an elapsed-time
   clock. Prefer `time.clock_gettime_ns(time.CLOCK_MONOTONIC)` where those
-  symbols exist; use `time.monotonic_ns()` only as the cross-platform fallback.
+  symbols exist and the read succeeds; use `time.monotonic_ns()` as the
+  cross-platform fallback when the API is absent or rejects the clock read.
 - Schema version 1 owns one safe run ID, repository digest, target version,
   fleet stages, rollout-priority consumers, sequential stage attempts, and
   final consumer outcomes.
@@ -1014,10 +1015,10 @@ owns or changes their outcomes.
   environment value. Reasons are bounded and reject control characters,
   absolute/home-relative paths, remote URLs, and common secret forms.
 - Stage elapsed time uses process-independent platform monotonic nanoseconds
-  when available, falls back to the runtime monotonic clock on platforms
-  without that API, and rejects a backwards clock. Wall-clock nanoseconds
-  preserve boundaries and calculate interval union, critical path, and
-  reviewer/CI overlap without double-counting concurrency.
+  when available, falls back to the runtime monotonic clock when the platform
+  API is absent or rejects the read, and rejects a backwards clock. Wall-clock
+  nanoseconds preserve boundaries and calculate interval union, critical path,
+  and reviewer/CI overlap without double-counting concurrency.
 - `preflight` is fleet-scoped; every other stage is consumer-scoped. Reviewer
   and CI waits may be active together. Retry count derives from attempts after
   the first rather than a second persisted counter.
@@ -1043,6 +1044,8 @@ owns or changes their outcomes.
   than overwrite. Missing/malformed state or repository mismatch -> reject.
 - Negative monotonic elapsed or completion with active/incomplete consumers ->
   reject while retaining the last valid partial record.
+- Platform monotonic API absent or raising `OSError`/`ValueError` -> use the
+  runtime monotonic fallback without exposing a traceback.
 
 ### 5. Good / Base / Bad Cases
 
@@ -1059,9 +1062,9 @@ owns or changes their outcomes.
 ### 6. Tests Required
 
 - Fake-clock coverage for process-independent monotonic-clock selection and
-  fallback, init/resume, active and completed attempts, retries, skips/failures,
-  overlap, interval union, critical path, slowest rows, partial report,
-  completion, and backwards monotonic time.
+  absent/rejected-read fallback, init/resume, active and completed attempts,
+  retries, skips/failures, overlap, interval union, critical path, slowest rows,
+  partial report, completion, and backwards monotonic time.
 - Strict schema/privacy matrices plus missing/malformed/symlinked state,
   private permissions, atomic-write errors, live/stale locks, and stable CLI
   JSON/human errors.
