@@ -1227,7 +1227,11 @@ Added sd-github-review as the eighth fleet consumer at post-canary priority 70 w
 
 ### Testing
 
-- Validation was not recorded for this session.
+- `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-fleet-candidate-check.py --consumer sd-github-review`
+- `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-fleet-candidate-check.py`
+- `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-fleet-candidate-check.py --check-ledger`
+- `.venv/bin/python -m unittest tests.test_fleet_preflight`
+- `make check`
 
 ### Status
 
