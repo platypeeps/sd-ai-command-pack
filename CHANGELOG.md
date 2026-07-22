@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.30.7 - 2026-07-22
+
+- Keep the full-check Obsidian KB freshness lane strict for broken root
+  symlinks and occupied non-directory roots in auto mode.
+
 ## 0.30.6 - 2026-07-22
 
 - Make the missing finish-work attestation diagnostic resolve the tracked local
