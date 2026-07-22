@@ -2,7 +2,7 @@
   "id": "enforce-housekeeping-task-archive",
   "name": "enforce-housekeeping-task-archive",
   "title": "Roll out housekeeping finish-work gate",
-  "description": "Roll out sd-ai-command-pack 0.30.2 across the consumer fleet and verify the exact-head finish-work merge gate prevents post-merge Trellis bookkeeping recovery.",
+  "description": "Roll out sd-ai-command-pack 0.30.3 across the consumer fleet and verify the exact-head finish-work merge gate prevents post-merge Trellis bookkeeping recovery.",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,
@@ -19,10 +19,11 @@
   "pr_url": null,
   "subtasks": [],
   "children": [
-    "07-22-release-0302-codeql-cleanup"
+    "07-22-release-0302-codeql-cleanup",
+    "07-22-release-0303-task-context-sibling-check"
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Superseded pre-release timing run: fleet-0.30.1-20260722T154928Z (paused after CF-1); start a fresh 0.30.2 timing run after v0.30.2 is tagged.",
+  "notes": "Superseded timing runs: fleet-0.30.1-20260722T154928Z (CF-1) and fleet-0.30.2-20260722T164331Z (CF-2). Start a fresh 0.30.3 run only after v0.30.3 is tagged.",
   "meta": {}
 }

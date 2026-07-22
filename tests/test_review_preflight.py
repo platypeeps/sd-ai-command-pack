@@ -1673,6 +1673,45 @@ assert.deepEqual(
         self.assertNotIn("legacy-planning/implement.jsonl:1", result.stdout)
         self.assertNotIn("legacy-planning/check.jsonl:1", result.stdout)
 
+    def test_review_preflight_checks_sibling_context_for_changed_active_task(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        task = root / ".trellis/tasks/07-17-active"
+        task.mkdir(parents=True)
+        task_json = task / "task.json"
+        task_json.write_text(
+            json.dumps(self.trellis_task_record("active")) + "\n",
+            encoding="utf-8",
+        )
+        seed = '{"_example":"unchanged scaffold"}\n'
+        (task / "implement.jsonl").write_text(seed, encoding="utf-8")
+        (task / "check.jsonl").write_text(seed, encoding="utf-8")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline with active task")
+
+        task_json.write_text(
+            json.dumps(self.trellis_task_record("active", status="in_progress"))
+            + "\n",
+            encoding="utf-8",
+        )
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            ".trellis/tasks/07-17-active/implement.jsonl:1 still contains",
+            result.stdout,
+        )
+        self.assertIn(
+            ".trellis/tasks/07-17-active/check.jsonl:1 still contains",
+            result.stdout,
+        )
+
     def test_review_preflight_checks_new_but_not_untouched_archived_seeds(self) -> None:
         node = shutil.which("node")
         if node is None:

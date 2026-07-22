@@ -1402,3 +1402,46 @@ Prepared and reviewed the 0.30.2 source correction that documents intentional be
 ### Next Steps
 
 - None - task complete
+
+
+## Session 188: Release 0.30.3 task-context sibling validation
+
+**Date**: 2026-07-22
+**Task**: Release 0.30.3 task-context sibling validation
+**Branch**: `codex/release-0-30-3-task-context-sibling-check`
+
+### Summary
+
+Closed the shared review-preflight correctness gap, published a validated 0.30.3 candidate, and converged PR #219 to a green thread-clean head.
+
+### Main Changes
+
+- Changed non-planning Trellis task metadata now triggers both sibling context scaffold checks.
+- Synchronized the 0.30.3 shipped template, installed mirror, provenance, help catalog, and all-consumer candidate ledger.
+- Addressed both Copilot review findings and corrected the follow-up test-label mix-up before exact-head approval.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2a00a18` | fix: validate changed task context siblings |
+| `699e1a2` | chore: link corrective release PR |
+| `f8fc5a3` | fix: address task context review feedback |
+| `1840f54` | test: label task fixtures accurately |
+| `35d23f8` | chore: mark corrective release ready |
+
+### Testing
+
+- [OK] make check
+- [OK] 48 focused review-preflight tests
+- [OK] all 8 configured candidate consumers passed
+- [OK] PR #219 CI green and zero unresolved review threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
