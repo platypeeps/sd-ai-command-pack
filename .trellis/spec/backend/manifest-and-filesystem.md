@@ -993,6 +993,9 @@ owns or changes their outcomes.
 - Operations are `init`, `stage-start`, `stage-end`, `consumer-end`, and
   `report`; all accept internal `--repo`, and tests/recovery may use internal
   `--state-home`.
+- `system_reading() -> ClockReading` reads wall nanoseconds plus an elapsed-time
+  clock. Prefer `time.clock_gettime_ns(time.CLOCK_MONOTONIC)` where those
+  symbols exist; use `time.monotonic_ns()` only as the cross-platform fallback.
 - Schema version 1 owns one safe run ID, repository digest, target version,
   fleet stages, rollout-priority consumers, sequential stage attempts, and
   final consumer outcomes.
@@ -1048,6 +1051,8 @@ owns or changes their outcomes.
   overlap is 10 seconds.
 - Base: a dry run records preflight, marks every selected consumer outcome,
   completes, and performs no consumer stage mutation.
+- Bad: persist a process-relative monotonic reading, then attempt to close the
+  stage from an isolated process whose clock origin is lower.
 - Bad: sum reviewer and CI durations and report 40 seconds as critical path, or
   copy a consumer checkout path into a failure reason.
 
@@ -1071,6 +1076,8 @@ owns or changes their outcomes.
 ```text
 Wrong: add fleet-timing.py to manifest.json and install it into every consumer
 Wrong: treat a telemetry write error as permission to ignore a failed install gate
+Wrong: persist time.monotonic_ns() when an isolated runtime resets it per process
+Correct: prefer clock_gettime_ns(CLOCK_MONOTONIC) for persisted stage boundaries
 Wrong: reviewer 20s + CI 20s = 40s critical path when they overlap by 10s
 Correct: keep private source-only state, preserve the gate result, and report
          30s critical path, 30s active wall, 40s summed time, and 10s overlap
