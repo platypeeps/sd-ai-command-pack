@@ -1044,3 +1044,81 @@ Completed a fresh PR review cycle for #212, clarified missing-or-unreadable hous
 ### Next Steps
 
 - None - task complete
+
+
+## Session 179: Boundary contract regression matrix
+
+**Date**: 2026-07-21
+**Task**: Boundary contract regression matrix
+**Branch**: `codex/boundary-contract-regression-matrix`
+
+### Summary
+
+Added deterministic first-review boundary categories, evidence prompts, configuration, and production-path filtering with synchronized documentation and release metadata.
+
+### Main Changes
+
+- Added six stable boundary-risk category IDs with deterministic good, base, and failure regression prompts.
+- Added bounded repository-specific signals, workflow YAML classification, and production-path exclusions.
+- Updated tests, specifications, review guidance, generated mirrors, candidate validation, and release metadata for 0.29.0.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8eb38b2` | feat: add review boundary regression matrix |
+
+### Testing
+
+- [OK] make check
+- [OK] .venv/bin/python -m unittest tests.test_review_preflight tests.test_generated_parity (77 tests)
+- [OK] seven-consumer fleet candidate validation
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 180: Review PR #213 boundary contract regression matrix
+
+**Date**: 2026-07-21
+**Task**: Review PR #213 boundary contract regression matrix
+**Branch**: `codex/boundary-contract-regression-matrix`
+
+### Summary
+
+Created PR #213, resolved two Copilot findings with focused fixes, and converged deterministic local checks, fleet validation, review threads, and CI to green.
+
+### Main Changes
+
+- Trim configured boundary-risk signals so accepted whitespace-padded literals match consistently.
+- Restrict GitHub workflow classification to executable files directly under .github/workflows.
+- Replied to and resolved both Copilot review threads, then completed a clean third review round.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c378f2f` | fix: trim configured boundary signals |
+| `e1bb2fe` | fix: restrict workflow boundary scan |
+
+### Testing
+
+- [OK] make check
+- [OK] 77 focused review-preflight and parity tests
+- [OK] seven-consumer fleet candidate validation
+- [OK] PR #213 CI green and Copilot round 3 produced no new comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

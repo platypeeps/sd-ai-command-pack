@@ -80,6 +80,7 @@ import {
   parseTrellisTaskArtifactPath,
   parseWorkspaceIndexSessionsFromText,
   reviewRiskCategories,
+  reviewRiskMatrix,
   shouldCheckDocumentationPathReference,
   trellisTaskDirectory,
   thrownValueMessage,
@@ -108,6 +109,13 @@ assert.equal(isBoundaryRiskReviewPath('scripts/runner.test.mjs'), false);
 assert.equal(isBoundaryRiskReviewPath('scripts/runner.spec.ts'), false);
 assert.equal(isBoundaryRiskReviewPath('scripts/test-runner.sh'), true);
 assert.equal(isBoundaryRiskReviewPath('scripts/runtime.py'), true);
+assert.equal(isBoundaryRiskReviewPath('scripts/sd-ai-command-pack-status.py'), false);
+assert.equal(isBoundaryRiskReviewPath('fixtures/runtime.py'), false);
+assert.equal(isBoundaryRiskReviewPath('vendor/runtime.js'), false);
+assert.equal(isBoundaryRiskReviewPath('generated/runtime.ts'), false);
+assert.equal(isBoundaryRiskReviewPath('.github/workflows/checks.yml'), true);
+assert.equal(isBoundaryRiskReviewPath('.github/workflows/nested/checks.yml'), false);
+assert.equal(isBoundaryRiskReviewPath('.github/dependabot.yml'), false);
 assert.equal(isBoundaryRiskReviewPath('package.json'), false);
 assert.equal(trellisTaskDirectory('.trellis/tasks/07-17-demo/prd.md'), '.trellis/tasks/07-17-demo');
 assert.equal(
@@ -124,46 +132,69 @@ assert.deepEqual(
     'createHash("sha256").digest();',
   ].join('\\n')),
   [
-    'parser/structured input',
-    'subprocess/external command',
-    'path/filesystem boundary',
-    'environment/global state',
-    'digest/integrity framing',
+    'structured-input-types',
+    'subprocess-command',
+    'environment-global-state',
+    'path-filesystem',
+    'normalization-evidence',
   ],
+);
+const fullRiskMatrix = reviewRiskMatrix([
+  'const parsed = JSON.parse(text);',
+  'spawnSync(command);',
+  'const token = process.env.TOKEN;',
+  'const target = resolve(root, name);',
+  'const normalized = createHash("sha256").digest();',
+  'const detail = redact_error(str(error));',
+].join('\\n'));
+assert.deepEqual(fullRiskMatrix.map((entry) => entry.id), [
+  'structured-input-types',
+  'subprocess-command',
+  'environment-global-state',
+  'path-filesystem',
+  'normalization-evidence',
+  'diagnostic-redaction',
+]);
+assert.deepEqual(Object.keys(fullRiskMatrix[0].variants), ['good', 'base', 'failure']);
+assert.deepEqual(
+  reviewRiskCategories('customDiagnosticBoundary();', {
+    'diagnostic-redaction': ['customDiagnosticBoundary'],
+  }),
+  ['diagnostic-redaction'],
 );
 assert.deepEqual(reviewRiskCategories("const words = label.split(' ');"), []);
 assert.deepEqual(reviewRiskCategories("words = read_text(value).split(' ')"), []);
 assert.deepEqual(
   reviewRiskCategories("const values = process.argv[2].split(',');"),
-  ['parser/structured input'],
+  ['structured-input-types'],
 );
 assert.deepEqual(
   reviewRiskCategories("const values = process.env.VALUES?.split(',');"),
-  ['parser/structured input', 'environment/global state'],
+  ['structured-input-types', 'environment-global-state'],
 );
 assert.deepEqual(
   reviewRiskCategories("values = os.getenv('VALUES', default_values()).split(',')"),
-  ['parser/structured input', 'environment/global state'],
+  ['structured-input-types', 'environment-global-state'],
 );
 assert.deepEqual(
   reviewRiskCategories("values = os.environ.get('VALUES', default_values()).split(',')"),
-  ['parser/structured input', 'environment/global state'],
+  ['structured-input-types', 'environment-global-state'],
 );
 assert.deepEqual(
   reviewRiskCategories("const values = readFileSync(path, 'utf8').split('\\n');"),
-  ['parser/structured input', 'path/filesystem boundary'],
+  ['structured-input-types', 'path-filesystem'],
 );
 assert.deepEqual(
   reviewRiskCategories("const values = readFileSync(resolve(root, name), 'utf8').split('\\n');"),
-  ['parser/structured input', 'path/filesystem boundary'],
+  ['structured-input-types', 'path-filesystem'],
 );
 assert.deepEqual(
   reviewRiskCategories("const values = fs.readFileSync(resolve(root, name), 'utf8').split('\\n');"),
-  ['parser/structured input', 'path/filesystem boundary'],
+  ['structured-input-types', 'path-filesystem'],
 );
 assert.deepEqual(
   reviewRiskCategories("values = Path(resolve(root, name)).read_text(encoding='utf8').split('\\n')"),
-  ['parser/structured input', 'path/filesystem boundary'],
+  ['structured-input-types', 'path-filesystem'],
 );
 assert.deepEqual(parseTrellisTaskArtifactPath('.trellis/tasks/07-17-demo/check.jsonl'), {
   taskDir: '.trellis/tasks/07-17-demo',
@@ -550,6 +581,7 @@ assert.deepEqual(
                     "    subprocess.run(['tool'], timeout=1)",
                     "    target = Path(parsed['path'])",
                     "    token = os.environ.get('TOKEN', '')",
+                    "    detail = redact_error(str(error))",
                     "    return hashlib.sha256((str(target) + token).encode()).hexdigest()",
                 ]
             )
@@ -570,12 +602,26 @@ assert.deepEqual(
         result = self.run_review_preflight(node, root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("WARN changed code adds parser/structured input", result.stdout)
-        self.assertIn("subprocess/external command", result.stdout)
-        self.assertIn("path/filesystem boundary", result.stdout)
-        self.assertIn("environment/global state", result.stdout)
-        self.assertIn("digest/integrity framing", result.stdout)
-        self.assertIn("cover the applicable boundary matrix", result.stdout)
+        self.assertIn("WARN changed code adds boundary-risk categories", result.stdout)
+        for category in (
+            "structured-input-types",
+            "subprocess-command",
+            "environment-global-state",
+            "path-filesystem",
+            "normalization-evidence",
+            "diagnostic-redaction",
+        ):
+            self.assertIn(category, result.stdout)
+        self.assertIn("good=", result.stdout)
+        self.assertIn("base=", result.stdout)
+        self.assertIn("failure=", result.stdout)
+        self.assertIn("cover or disposition this regression matrix", result.stdout)
+        matrix_warning = next(
+            line
+            for line in result.stdout.splitlines()
+            if line.startswith("WARN changed code adds boundary-risk categories")
+        )
+        self.assertLess(len(matrix_warning), 2200)
         self.assertRegex(
             result.stdout,
             r"WARN .* changes \d+ authored source line\(s\) across \d+ file\(s\)",
@@ -604,11 +650,74 @@ assert.deepEqual(
         result = self.run_review_preflight(node, root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertNotIn("parser/structured input", result.stdout)
+        self.assertNotIn("structured-input-types", result.stdout)
         self.assertRegex(
             result.stdout,
             r"PASS checked \d+ changed code path\(s\); no boundary-risk trigger was added",
         )
+
+    def test_review_preflight_uses_configured_literal_category_signals(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        config = root / ".sd-ai-command-pack/review-preflight.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "reviewRiskCategorySignals": {
+                        "diagnostic-redaction": ["  customDiagnosticBoundary  "]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        source = root / "src/runtime.py"
+        source.parent.mkdir(parents=True)
+        source.write_text("customDiagnosticBoundary(detail)\n", encoding="utf-8")
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "boundary-risk categories diagnostic-redaction", result.stdout
+        )
+        self.assertNotIn("structured-input-types", result.stdout)
+
+    def test_review_preflight_scans_workflow_run_and_environment_boundaries(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        workflow = root / ".github/workflows/checks.yml"
+        workflow.parent.mkdir(parents=True, exist_ok=True)
+        workflow.write_text(
+            "jobs:\n  checks:\n    env:\n      TOKEN: value\n    steps:\n"
+            "      - run: python scripts/check.py\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("subprocess-command", result.stdout)
+        self.assertIn("environment-global-state", result.stdout)
 
     def test_review_preflight_ignores_boundary_tokens_added_only_in_tests(
         self,
@@ -679,13 +788,13 @@ assert.deepEqual(
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
-            "WARN changed code adds subprocess/external command behavior",
+            "WARN changed code adds boundary-risk categories subprocess-command",
             result.stdout,
         )
-        self.assertNotIn("parser/structured input", result.stdout)
-        self.assertNotIn("path/filesystem boundary", result.stdout)
-        self.assertNotIn("environment/global state", result.stdout)
-        self.assertNotIn("digest/integrity framing", result.stdout)
+        self.assertNotIn("structured-input-types", result.stdout)
+        self.assertNotIn("path-filesystem", result.stdout)
+        self.assertNotIn("environment-global-state", result.stdout)
+        self.assertNotIn("normalization-evidence", result.stdout)
 
     def test_review_preflight_ignores_upstream_only_changes_behind_base(self) -> None:
         node = shutil.which("node")
@@ -740,7 +849,7 @@ assert.deepEqual(
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertNotRegex(result.stdout, r"WARN .* authored source line\(s\)")
-        self.assertNotIn("changed code adds subprocess/external command", result.stdout)
+        self.assertNotIn("boundary-risk categories subprocess-command", result.stdout)
         self.assertRegex(
             result.stdout,
             r"PASS checked \d+ changed code path\(s\); no boundary-risk trigger was added",
@@ -871,12 +980,45 @@ assert.deepEqual(
             "file(s) above 8 bytes: scripts/large-untracked.py",
             result.stdout,
         )
-        self.assertNotIn("changed code adds subprocess/external command", result.stdout)
+        self.assertNotIn("boundary-risk categories subprocess-command", result.stdout)
         self.assertNotIn("no boundary-risk trigger was added", result.stdout)
         self.assertIn(
             "includes a large file diff (4 lines): scripts/large-untracked.py",
             result.stdout,
         )
+
+    def test_review_preflight_bounds_skipped_risk_path_details(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        config = root / ".sd-ai-command-pack/review-preflight.json"
+        config.write_text(
+            json.dumps({"untrackedFileReadLimitBytes": 8}), encoding="utf-8"
+        )
+        for index in range(7):
+            (root / f"scripts/risk-{index}.py").write_text(
+                "import subprocess\nsubprocess.run(['tool'])\n",
+                encoding="utf-8",
+            )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        skipped_warning = next(
+            line
+            for line in result.stdout.splitlines()
+            if "boundary-risk content scan skipped 7 oversized" in line
+        )
+        self.assertIn("(+2 more)", skipped_warning)
+        self.assertEqual(skipped_warning.count("scripts/risk-"), 5)
 
     @unittest.skipIf(os.name == "nt", "POSIX file permissions required")
     def test_review_preflight_warns_when_untracked_code_is_unreadable(self) -> None:
@@ -2346,6 +2488,47 @@ assert.deepEqual(
 
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("could not be parsed as JSON", result.stdout)
+
+    def test_review_preflight_rejects_unknown_boundary_category_config(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_repo()
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(
+            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
+        )
+        config_dir = root / ".sd-ai-command-pack"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "review-preflight.json").write_text(
+            json.dumps(
+                {
+                    "reviewRiskCategorySignals": {
+                        "unknown-category": ["customBoundary"]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "reviewRiskCategorySignals contains unknown category unknown-category",
+            result.stdout,
+        )
 
     def test_review_preflight_resolves_pytest_node_ids_to_files(self) -> None:
         # Regression: docs referencing pytest node ids (tests/x.py::test_y) must

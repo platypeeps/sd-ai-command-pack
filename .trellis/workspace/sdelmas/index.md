@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 178
+- **Total Sessions**: 180
 - **Last Active**: 2026-07-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1043 | Active |
+| `journal-4.md` | ~1121 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +32,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 180 | 2026-07-21 | Review PR #213 boundary contract regression matrix | `c378f2f`, `e1bb2fe` | `codex/boundary-contract-regression-matrix` |
+| 179 | 2026-07-21 | Boundary contract regression matrix | `8eb38b2` | `codex/boundary-contract-regression-matrix` |
 | 178 | 2026-07-21 | Clarify unreadable helper recovery during PR review | `040ffcc` | `codex/obsidian-kb-directory-symlink-lifecycle` |
 | 177 | 2026-07-21 | Honor Obsidian KB directory and symlink lifecycle | `ce56e99`, `2df2b39`, `6ca6f84` | `codex/obsidian-kb-directory-symlink-lifecycle` |
 | 176 | 2026-07-21 | Enforce journal validation consistency | `eb4e61e`, `fc51ac9`, `60ebd64`, `1a5666f` | `codex/journal-validation-consistency` |

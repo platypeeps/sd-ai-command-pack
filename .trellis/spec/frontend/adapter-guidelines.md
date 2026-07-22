@@ -454,7 +454,9 @@ closed whenever safety or freshness cannot be proven.
 ### 2. Signatures
 
 - Path classifier: `isBoundaryRiskReviewPath(path) -> boolean`.
-- Token classifier: `reviewRiskCategories(text) -> string[]`.
+- Token classifier: `reviewRiskCategories(text, extraSignals?) -> string[]`.
+- Matrix classifier: `reviewRiskMatrix(text, extraSignals?) -> Array<{ id,
+  label, variants: { good, base, failure } }>`.
 - Diff owner: `checkReviewRiskSweep()` reads added lines only from paths
   accepted by the path classifier.
 
@@ -462,22 +464,38 @@ closed whenever safety or freshness cannot be proven.
 
 - Normalize path separators before classification.
 - Accept executable source extensions `cjs`, `js`, `mjs`, `py`, `sh`, `ts`,
-  and `tsx` unless the normalized path is a conventional test path.
-- Exclude directory segments `test`, `tests`, and `__tests__`, plus filename
-  stems matching `test_*`, `*_test`, `*.test`, or `*.spec`.
+  and `tsx`, plus YAML under `.github/workflows/`, unless the normalized path
+  is non-production.
+- Exclude directory segments `test`, `tests`, `__tests__`, `fixture`,
+  `fixtures`, `vendor`, `vendored`, `third_party`, `node_modules`, and
+  `generated`, plus filename stems matching `test_*`, `*_test`, `*.test`, or
+  `*.spec`.
+- Exclude installed Trellis/pack payload mirrors and known generated review
+  paths. Canonical `templates/**` production sources remain eligible.
 - Do not infer a test from a merely similar production name such as
   `test-runner.sh` under the `scripts/` directory.
 - Test-path exclusion affects only the boundary-risk content scan. Authored
   source sizing, task scope, unreadable/oversized production warnings, and the
   category regexes keep their existing contracts.
-- Declarative manifests such as `package.json` remain outside the executable
-  source-extension set.
+- Declarative manifests and non-workflow YAML such as `package.json` and
+  `.github/dependabot.yml` remain outside the executable source set.
+- Emit stable category IDs in declarative table order. Every triggered entry
+  contains bounded good/base/failure prompts, and overlapping signals produce
+  one entry per category.
+- `reviewRiskCategorySignals` in `.sd-ai-command-pack/review-preflight.json`
+  may add bounded literal signals to known category IDs. Invalid category IDs,
+  types, counts, blank values, or oversized strings fail the preflight.
+- Category detection is advisory evidence for author disposition, never proof
+  that a test is present or missing.
 
 ### 4. Validation & Error Matrix
 
 - Test-only diff with boundary tokens -> no boundary-risk behavior warning.
 - Production-only diff with boundary tokens -> existing categorized warning.
 - Mixed diff -> categories derive only from production added lines.
+- Workflow `run:` / `env:` additions -> subprocess/environment categories.
+- Configured literal signal -> its known category in stable table order.
+- Invalid category configuration -> explicit preflight failure.
 - Windows separators -> normalize and apply the same directory/filename rules.
 - Oversized or unreadable production source -> preserve the bounded explicit
   warning without reading the file in full.
@@ -492,10 +510,12 @@ closed whenever safety or freshness cannot be proven.
 
 ### 6. Tests Required
 
-- Unit-test directory, filename, Windows-path, non-test-name, and unsupported-
-  extension classification.
+- Unit-test directory, filename, Windows-path, fixture/vendor/generated/copied
+  exclusions, workflow YAML, non-test-name, and unsupported-extension
+  classification.
 - Integration-test test-only, production-only, and mixed diffs with assertions
-  on the exact warning categories.
+  on exact category IDs, good/base/failure prompts, configured literal signals,
+  stable order, deduplication, and bounded output.
 - Preserve large/unreadable untracked-source tests, root/template parity, Node
   syntax checks, and the full repository quality gate.
 

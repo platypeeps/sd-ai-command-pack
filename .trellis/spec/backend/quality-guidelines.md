@@ -69,10 +69,18 @@ that exercise the generic JavaScript review preflight.
   tree and add untracked regular files. The authored-source threshold excludes
   installed pack/Trellis mirrors, task/workspace records, and known generated
   reports; canonical `templates/**` sources remain included.
-- Changed code that adds parser/structured-input, subprocess, path/filesystem,
-  environment/global-state, or digest/integrity behavior emits one advisory
-  naming the boundary-test matrix for author disposition. This sweep is
-  deterministic and must never invoke a review provider.
+- Changed production code that adds structured-input/strict-type, subprocess,
+  environment/global-state, path/filesystem, normalization/canonical-evidence,
+  or diagnostic/redaction behavior emits one advisory with stable category IDs
+  and bounded good/base/failure prompts. The sweep is deterministic, does not
+  infer coverage, and must never invoke a review provider.
+- Conventional tests and fixtures, vendored/generated directories, installed
+  payload mirrors, and known generated review paths remain outside the content
+  scan. GitHub workflow YAML participates as executable configuration; other
+  declarative YAML remains outside the scan.
+- Repositories may add at most 20 literal signals of at most 120 characters to
+  each known category through `reviewRiskCategorySignals` in the existing
+  preflight config. Invalid category configuration fails closed.
 - A routine string `.split(...)` call is not structured-input evidence by
   itself. Preserve explicit parser signals and direct splits of CLI arguments,
   environment values, or file-read results; keep the heuristic conservative
@@ -149,9 +157,13 @@ that exercise the generic JavaScript review preflight.
   records -> pass.
 - Untouched historical context or symlinked context -> skip without reading
   outside the repository; changed empty or grounded context -> pass.
-- Added boundary-sensitive code -> warn with stable risk categories and the
-  malformed input, command failure/timeout, path, environment, symlink/global
-  state, and multiline/extension matrix; do not fail the gate.
+- Added boundary-sensitive production code -> warn once with stable category
+  IDs and deterministic good/base/failure prompts; do not fail the gate or
+  claim that coverage exists.
+- Workflow `run:` and `env:` additions -> subprocess and environment entries;
+  non-workflow YAML -> no production-risk entry.
+- Unknown, malformed, blank, oversized, or over-count configured category
+  signals -> fail with the exact config field.
 - Routine string tokenization -> no parser/structured-input warning; direct
   `argv`, environment-value, and file-read splits -> retain the advisory.
 - A check reaches a lower `const` or class before initialization -> fail the
@@ -196,9 +208,11 @@ that exercise the generic JavaScript review preflight.
 - Valid active, archived, parent/child, and stacked-base task metadata;
   unchanged-history grandfathering; identity, lifecycle, branch, and layout
   rejection; reciprocal-link failures; malformed JSON; and symlink rejection.
-- Stable first-review risk categorization, authored-source exclusions, and
-  multi-task directory extraction, plus a real Git fixture covering all three
-  advisory types.
+- Stable first-review risk categorization, good/base/failure rendering,
+  overlap deduplication, output/path caps, configured literal signals,
+  production-source exclusions, workflow YAML, authored-source exclusions,
+  and multi-task directory extraction, plus a real Git fixture covering all
+  three advisory types.
 - Positive CLI/environment/file split cases and a negative routine string
   split case, exercised through both the exported helper and executable
   preflight path.

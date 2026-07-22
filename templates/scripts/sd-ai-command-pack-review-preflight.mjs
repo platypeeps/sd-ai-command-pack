@@ -24,7 +24,22 @@ const MAX_TRELLIS_TASK_REFERENCE_LENGTH = 255;
 const TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review', 'completed']);
 const ACTIVE_TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review']);
 const REVIEW_CODE_PATH_PATTERN = /\.(?:cjs|js|mjs|py|sh|ts|tsx)$/;
-const TEST_CODE_DIRECTORY_SEGMENTS = new Set(['test', 'tests', '__tests__']);
+const REVIEW_WORKFLOW_PATH_PATTERN = /^\.github\/workflows\/[^/]+\.ya?ml$/;
+const NON_PRODUCTION_CODE_DIRECTORY_SEGMENTS = new Set([
+  'test',
+  'tests',
+  '__tests__',
+  'fixture',
+  'fixtures',
+  'vendor',
+  'vendored',
+  'third_party',
+  'node_modules',
+  'generated',
+]);
+const MAX_REVIEW_RISK_PATHS = 5;
+const MAX_CONFIGURED_REVIEW_RISK_SIGNALS = 20;
+const MAX_CONFIGURED_REVIEW_RISK_SIGNAL_LENGTH = 120;
 const REVIEW_LEARNINGS_PATH_PROVENANCE_FILE = 'docs/review-learnings.md';
 const REVIEW_LEARNINGS_MANAGED_BLOCK_PATTERN =
   /<!-- sd-review-learnings:start -->[\s\S]*?<!-- sd-review-learnings:end -->/g;
@@ -42,6 +57,81 @@ const DIRECT_BOUNDARY_SPLIT_PATTERNS = [
   /\b(?:[A-Za-z_$][A-Za-z0-9_$]*\.)?(?:readFileSync|readFile)\s*\([^\r\n]*\)\s*(?:\?\.|\.)\s*split\s*\(/,
   /\.\s*read_text\s*\([^\r\n]*\)\s*\.\s*split\s*\(/,
 ];
+const REVIEW_RISK_CATEGORY_DEFINITIONS = [
+  {
+    id: 'structured-input-types',
+    label: 'structured input and strict types',
+    patterns: [STRUCTURED_INPUT_PATTERN, ...DIRECT_BOUNDARY_SPLIT_PATTERNS],
+    variants: {
+      good: 'valid structured input with exact scalar and container types',
+      base: 'documented empty or default input',
+      failure: 'malformed input and wrong types, including bool where an integer is required',
+    },
+  },
+  {
+    id: 'subprocess-command',
+    label: 'subprocess and command execution',
+    patterns: [
+      /(?:\bspawn(?:Sync)?\s*\(|\bexec(?:File|Sync)?\s*\(|subprocess\.(?:run|Popen|check_call|check_output)|os\.system\s*\()/,
+      /^\s*(?:-\s*)?run:\s*(?:[>|][-+]?\s*$|\S)/m,
+    ],
+    variants: {
+      good: 'available command exits successfully',
+      base: 'documented optional command is unavailable',
+      failure: 'missing command, nonzero exit, and timeout',
+    },
+  },
+  {
+    id: 'environment-global-state',
+    label: 'environment and process-global state',
+    patterns: [
+      /(?:process\.env|os\.environ|\bgetenv\s*\(|\bsetenv\s*\(|\bglobal\s+[A-Za-z_]|\bglobals\s*\()/,
+      /^\s*env:\s*$/m,
+    ],
+    variants: {
+      good: 'explicit environment value with state restored',
+      base: 'unset or empty environment value and PATH',
+      failure: 'success and exception paths restore process-global state',
+    },
+  },
+  {
+    id: 'path-filesystem',
+    label: 'path and filesystem boundaries',
+    patterns: [
+      /(?:\bPath\s*\(|\bresolve\s*\(|\brealpath|\blstat|\bsymlink|readFileSync|writeFileSync|os\.path|pathlib)/,
+    ],
+    variants: {
+      good: 'regular in-root path within size limits',
+      base: 'missing, option-like, or traversal path',
+      failure: 'symlink, oversized file, and TOCTOU replacement',
+    },
+  },
+  {
+    id: 'normalization-evidence',
+    label: 'normalization and canonical evidence',
+    patterns: [
+      /(?:\bnormaliz(?:e|ed|es|ing|ation)\b|\bcanonical(?:ize|ized|ization)?\b|\bcasefold\s*\(|\bcompact_text\s*\(|\brev-parse\b|\bresolve(?:Commit|Ref)\b|hashlib|createHash\s*\(|\bsha(?:1|224|256|384|512)\b|\bdigest\s*\(|\bhexdigest\s*\(|\bchecksum\b|\bintegrity\b)/i,
+    ],
+    variants: {
+      good: 'compare and persist one canonical value',
+      base: 'equivalent raw and normalized values',
+      failure: 'symbolic, missing, or noncanonical evidence',
+    },
+  },
+  {
+    id: 'diagnostic-redaction',
+    label: 'diagnostic fidelity and redaction',
+    patterns: [
+      /(?:\b(?:redact(?:ed|ion)?|sanitiz(?:e|ed|ation)|mask(?:ed|ing)?)(?:_[A-Za-z0-9_]+)?\b|str\s*\(\s*(?:exc|error)\s*\)|\b(?:error|diagnostic)_message\b|\b(?:stderr|stdout)_detail\b)/i,
+    ],
+    variants: {
+      good: 'actionable bounded diagnostic without secrets or host paths',
+      base: 'expected empty detail uses a stable fallback',
+      failure: 'raw exception, secret, or absolute-path material is redacted',
+    },
+  },
+];
+const REVIEW_RISK_CATEGORY_IDS = new Set(REVIEW_RISK_CATEGORY_DEFINITIONS.map((category) => category.id));
 const JOURNAL_VALIDATION_FALLBACK_PATTERN =
   /^[ \t]*(?:[-*]\s*)?(?:\[OK\]\s*)?(Validation (?:was )?not recorded for this session\.)[ \t]*$/gim;
 const JOURNAL_VALIDATION_SURFACE_PATTERN =
@@ -175,6 +265,7 @@ function defaultConfig() {
     ],
     copiedTemplateExtraPaths: [],
     allowedLinuxHomeUsers: [],
+    reviewRiskCategorySignals: {},
     diffSizeWarningLines: 20000,
     largeFileWarningLines: 5000,
     sourceReviewWarningLines: 1000,
@@ -221,7 +312,52 @@ function loadConfig(root, explicitPath) {
     }
   }
 
+  merged.reviewRiskCategorySignals = parseReviewRiskCategorySignals(raw.reviewRiskCategorySignals, configPath);
+
   return merged;
+}
+
+function parseReviewRiskCategorySignals(value, configPath) {
+  if (value === undefined) {
+    return {};
+  }
+  if (!isPlainObject(value)) {
+    fail(`${configPath} reviewRiskCategorySignals must be an object keyed by a known boundary-risk category.`);
+    return {};
+  }
+
+  const parsed = {};
+  for (const [categoryId, signals] of Object.entries(value)) {
+    if (!REVIEW_RISK_CATEGORY_IDS.has(categoryId)) {
+      fail(`${configPath} reviewRiskCategorySignals contains unknown category ${categoryId}.`);
+      continue;
+    }
+    if (!Array.isArray(signals) || signals.length > MAX_CONFIGURED_REVIEW_RISK_SIGNALS) {
+      fail(
+        `${configPath} reviewRiskCategorySignals.${categoryId} must be an array of at most ` +
+          `${MAX_CONFIGURED_REVIEW_RISK_SIGNALS} literal strings.`,
+      );
+      continue;
+    }
+
+    const validSignals = signals
+      .filter(
+        (signal) =>
+          typeof signal === 'string' &&
+          signal.trim().length > 0 &&
+          signal.length <= MAX_CONFIGURED_REVIEW_RISK_SIGNAL_LENGTH,
+      )
+      .map((signal) => signal.trim());
+    if (validSignals.length !== signals.length) {
+      fail(
+        `${configPath} reviewRiskCategorySignals.${categoryId} entries must be nonblank strings no longer than ` +
+          `${MAX_CONFIGURED_REVIEW_RISK_SIGNAL_LENGTH} characters.`,
+      );
+      continue;
+    }
+    parsed[categoryId] = [...new Set(validSignals)];
+  }
+  return parsed;
 }
 
 function printReviewPreflightResult(result) {
@@ -1047,45 +1183,48 @@ function checkTrellisJournalRecords() {
   );
 }
 
-function addsStructuredInputRisk(text) {
-  return (
-    STRUCTURED_INPUT_PATTERN.test(text) ||
-    DIRECT_BOUNDARY_SPLIT_PATTERNS.some((pattern) => pattern.test(text))
-  );
+export function reviewRiskMatrix(text, extraSignals = {}) {
+  return REVIEW_RISK_CATEGORY_DEFINITIONS.filter((category) => {
+    if (category.patterns.some((pattern) => pattern.test(text))) {
+      return true;
+    }
+    const categorySignals = Array.isArray(extraSignals?.[category.id]) ? extraSignals[category.id] : [];
+    return categorySignals.some((signal) => typeof signal === 'string' && text.includes(signal));
+  }).map((category) => ({
+    id: category.id,
+    label: category.label,
+    variants: { ...category.variants },
+  }));
 }
 
-export function reviewRiskCategories(text) {
-  const categories = [];
-  if (addsStructuredInputRisk(text)) {
-    categories.push('parser/structured input');
-  }
+export function reviewRiskCategories(text, extraSignals = {}) {
+  return reviewRiskMatrix(text, extraSignals).map((category) => category.id);
+}
 
-  const rules = [
-    ['subprocess/external command', /(?:\bspawn(?:Sync)?\s*\(|\bexec(?:File|Sync)?\s*\(|subprocess\.(?:run|Popen|check_call|check_output)|os\.system\s*\()/],
-    ['path/filesystem boundary', /(?:\bPath\s*\(|\bresolve\s*\(|\brealpath|\blstat|\bsymlink|readFileSync|writeFileSync|os\.path|pathlib)/],
-    ['environment/global state', /(?:process\.env|os\.environ|\bgetenv\s*\(|\bsetenv\s*\(|\bglobal\s+[A-Za-z_]|\bglobals\s*\()/],
-    ['digest/integrity framing', /(?:hashlib|createHash\s*\(|\bsha(?:1|224|256|384|512)\b|\bdigest\s*\(|\bhexdigest\s*\(|\bchecksum\b|\bintegrity\b)/i],
-  ];
-
-  for (const [category, pattern] of rules) {
-    if (pattern.test(text)) {
-      categories.push(category);
-    }
-  }
-
-  return categories;
+function boundedReviewRiskPaths(paths) {
+  const visible = paths.slice(0, MAX_REVIEW_RISK_PATHS);
+  const hiddenCount = paths.length - visible.length;
+  return hiddenCount > 0 ? `${visible.join(', ')} (+${hiddenCount} more)` : visible.join(', ');
 }
 
 export function isBoundaryRiskReviewPath(path) {
   const normalized = normalizePathSeparators(path).replace(/^\.\//, '');
-  if (!REVIEW_CODE_PATH_PATTERN.test(normalized)) {
+  if (
+    (!REVIEW_CODE_PATH_PATTERN.test(normalized) && !REVIEW_WORKFLOW_PATH_PATTERN.test(normalized)) ||
+    copiedTemplateKind(normalized) ||
+    GENERATED_REVIEW_PATHS.has(normalized)
+  ) {
     return false;
   }
 
   const segments = normalized.split('/');
   const basename = segments.pop() || '';
-  if (segments.some((segment) => TEST_CODE_DIRECTORY_SEGMENTS.has(segment))) {
+  if (segments.some((segment) => NON_PRODUCTION_CODE_DIRECTORY_SEGMENTS.has(segment))) {
     return false;
+  }
+
+  if (REVIEW_WORKFLOW_PATH_PATTERN.test(normalized)) {
+    return true;
   }
 
   const stem = basename.replace(REVIEW_CODE_PATH_PATTERN, '');
@@ -1130,27 +1269,31 @@ function checkReviewRiskSweep() {
   if (addedCode.oversizedUntrackedPaths.length > 0) {
     warn(
       `first-review boundary-risk content scan skipped ${addedCode.oversizedUntrackedPaths.length} oversized untracked code file(s) above ` +
-        `${config.untrackedFileReadLimitBytes} bytes: ${addedCode.oversizedUntrackedPaths.join(', ')}`,
+        `${config.untrackedFileReadLimitBytes} bytes: ${boundedReviewRiskPaths(addedCode.oversizedUntrackedPaths)}`,
     );
   }
   if (addedCode.unreadableUntrackedPaths.length > 0) {
     warn(
       `first-review boundary-risk content scan skipped ${addedCode.unreadableUntrackedPaths.length} unreadable untracked code file(s): ` +
-        addedCode.unreadableUntrackedPaths.join(', '),
+        boundedReviewRiskPaths(addedCode.unreadableUntrackedPaths),
     );
   }
-  const categories = reviewRiskCategories(addedCode.text);
-  if (categories.length === 0) {
+  const matrix = reviewRiskMatrix(addedCode.text, config.reviewRiskCategorySignals);
+  if (matrix.length === 0) {
     if (addedCode.oversizedUntrackedPaths.length === 0 && addedCode.unreadableUntrackedPaths.length === 0) {
       pass(`checked ${codePaths.length} changed code path(s); no boundary-risk trigger was added.`);
     }
     return;
   }
 
+  const matrixText = matrix.map(
+    (category) =>
+      `${category.id} (${category.label}): good=${category.variants.good}; ` +
+      `base=${category.variants.base}; failure=${category.variants.failure}`,
+  ).join(' | ');
   warn(
-    `changed code adds ${categories.join(', ')} behavior; before the first remote review, cover the applicable boundary matrix: ` +
-      'malformed or unhashable input; missing commands or timeouts; option-like or traversal path values; empty env/PATH; ' +
-      'symlink/TOCTOU behavior; global-state cleanup; and multiline syntax or extension variants.',
+    `changed code adds boundary-risk categories ${matrix.map((category) => category.id).join(', ')}; ` +
+      `before the first remote review, cover or disposition this regression matrix: ${matrixText}`,
   );
 }
 

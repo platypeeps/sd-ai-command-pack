@@ -243,19 +243,27 @@ unless the user explicitly asks for a remote diagnostic despite local failures.
 ## Step 2.5: Disposition First-Review Advisories
 
 Before the first remote-review request or integration-only decision for each PR
-head, inspect the preflight output from Step 2. When it warns about changed
-parser or structured-input logic, subprocess/external-command behavior,
-path/filesystem boundaries, environment or global state, or digest/integrity
-framing, cover every applicable boundary with a focused test or record why it
-does not apply:
+head, inspect the preflight output from Step 2. For every emitted boundary-risk
+category, use its bounded good/base/failure prompts to cite focused coverage or
+record why a variant does not apply. The stable categories cover:
 
-- malformed or unhashable input;
-- missing commands, nonzero exits, or timeouts;
-- option-like values and path traversal;
-- empty environment values or `PATH`;
-- symlink and time-of-check/time-of-use behavior;
-- process-global state restoration; and
-- multiline syntax and relevant file-extension variants.
+You must cover every applicable boundary category; do not silently disposition
+only the first matching entry.
+
+- `structured-input-types` — malformed input and exact scalar/container types;
+- `subprocess-command` — missing commands, nonzero exits, and timeouts;
+- `environment-global-state` — empty environment values or `PATH` and state
+  restoration;
+- `path-filesystem` — traversal, size limits, symlinks, and time-of-check/time-
+  of-use behavior;
+- `normalization-evidence` — raw/normalized comparisons and canonical persisted
+  evidence; and
+- `diagnostic-redaction` — accurate bounded diagnostics without secrets or host
+  paths.
+
+Treat category detection as an advisory prompt, not proof that a test is
+missing. Record the disposition against the exact emitted category IDs so a
+new PR head can be rechecked deterministically.
 
 Also disposition authored-source size and multiple-Trellis-task warnings:
 split unrelated outcomes, or record why the changed files form one reviewable

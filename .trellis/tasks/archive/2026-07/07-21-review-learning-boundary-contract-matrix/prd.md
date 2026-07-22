@@ -58,18 +58,18 @@ remote review.
 
 ## Acceptance Criteria
 
-- [ ] Representative changed production lines trigger the correct named
+- [x] Representative changed production lines trigger the correct named
       boundary categories and concrete regression variants.
-- [ ] Overlapping signals produce one deterministic matrix entry per category,
+- [x] Overlapping signals produce one deterministic matrix entry per category,
       with stable ordering and bounded output.
-- [ ] Test-only, generated, copied, and vendored changes do not create a false
+- [x] Test-only, generated, copied, and vendored changes do not create a false
       production boundary warning.
-- [ ] Unknown or unreadable diff state retains the current fail-safe diagnostic
+- [x] Unknown or unreadable diff state retains the current fail-safe diagnostic
       instead of reporting a false PASS.
-- [ ] `sd-review-pr` requires an evidence-backed category disposition before
+- [x] `sd-review-pr` requires an evidence-backed category disposition before
       its first remote request without turning the advisory into an unreliable
       automatic coverage gate.
-- [ ] Focused tests, adapter parity, install audit, and full-check pass.
+- [x] Focused tests, adapter parity, install audit, and full-check pass.
 
 ## Notes
 
