@@ -1,9 +1,14 @@
 # Changelog
 
-## 0.30.5 - 2026-07-22
+## 0.30.6 - 2026-07-22
 
 - Make the missing finish-work attestation diagnostic resolve the tracked local
   branch after finish-work instead of suggesting the stale pre-finish commit.
+
+## 0.30.5 - 2026-07-22
+
+- Accept legacy task directory names inside month-bucketed Trellis archives
+  while keeping active task directories date-prefixed.
 
 ## 0.30.4 - 2026-07-22
 

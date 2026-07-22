@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-22T22:17:06Z",
-  "packVersion": "0.30.5",
-  "payloadDigest": "sha256:3204ca84ff7933c26549d847401298cfc8c6e42ab20ea680f6411e514b66a553",
+  "validatedAt": "2026-07-22T22:24:39Z",
+  "packVersion": "0.30.6",
+  "payloadDigest": "sha256:258842b76bbe9f7106628003e4ae5ab7991afeb1a9e8a5cddb216c2d0217048e",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "7a2e11da7ba1c48c902ab18e41e1f67d9f9dbaf0",
+      "baseCommit": "05236694129b325a8a3f303c45abbb4a2f23b72e",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -121,7 +121,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "da848af2ccced0c9192b1c0c0041ff0d3f038482",
+      "baseCommit": "13a88aa44a79a03935e498ef568e441becf2bb2e",
       "status": "passed",
       "prepares": [
         [
