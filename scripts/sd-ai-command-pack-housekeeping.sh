@@ -140,13 +140,13 @@ parse_args() {
           exit 2
         fi
         case "$1" in
-          *[!0-9a-fA-F]*)
-            printf 'error: --finish-work-head must be a full 40-character commit OID\n' >&2
+          *[!0-9a-f]*)
+            printf 'error: --finish-work-head must be a full 40-character commit OID in lowercase\n' >&2
             exit 2
             ;;
         esac
         if [ "${#1}" -ne 40 ]; then
-          printf 'error: --finish-work-head must be a full 40-character commit OID\n' >&2
+          printf 'error: --finish-work-head must be a full 40-character commit OID in lowercase\n' >&2
           exit 2
         fi
         FINISH_WORK_HEAD="$1"

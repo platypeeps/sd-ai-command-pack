@@ -110,6 +110,25 @@ class HousekeepingTests(InstallTestCase):
         self.assertEqual(result.returncode, 2, result.stdout)
         self.assertIn("full 40-character commit OID", result.stdout)
 
+    def test_housekeeping_rejects_uppercase_finish_work_head(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        result = subprocess.run(
+            [
+                self._bash_path,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--finish-work-head",
+                "A" * 40,
+                "--self-test",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("commit OID in lowercase", result.stdout)
+
     def test_housekeeping_default_branch_ignores_gh_null(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
