@@ -68,12 +68,13 @@ Corrective finding ledger:
 | --- | --- | --- | --- | --- | --- | --- |
 | CF-1 | Generated Python payload quality | `rwbp-coordinator` PR #170 CodeQL thread on `_atomic_write_body` | Pack blocker | Fix in source before more consumer mutation | Add the explanatory best-effort cleanup comment to the template and mirror; release as `0.30.2` | Existing PR-body atomic-write tests plus source full check and full-fleet candidate validation |
 
-The bounded adjacent-surface sweep found the same empty cleanup pattern only
-in source-only fleet timing code; it is not part of the installed payload and
-was not the consumer finding. Other installed `except OSError` sites either
-return or raise explicit diagnostics. No runtime, schema, CLI, persistence, or
-normalization contract changes, so the correction is intentionally comment
-only.
+The bounded adjacent-surface sweep found other empty cleanup handlers in
+source-only fleet utilities and installed helpers, including candidate-ledger
+cleanup and best-effort KB directory removal. They are pre-existing handlers
+outside the changed `_atomic_write_body` hunk and did not produce this consumer
+finding, so they remain excluded from this corrective release. No runtime,
+schema, CLI, persistence, or normalization contract changes, so the correction
+is intentionally comment only.
 
 - Release identity or telemetry failure: stop before new mutation.
 - Dirty, missing, or ownership-ambiguous checkout: skip without mutation.
