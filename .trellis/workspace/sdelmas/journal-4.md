@@ -1240,3 +1240,44 @@ Added sd-github-review as the eighth fleet consumer at post-canary priority 70 w
 ### Next Steps
 
 - None - task complete
+
+
+## Session 184: Converge PR #215 fleet onboarding review
+
+**Date**: 2026-07-21
+**Task**: Converge PR #215 fleet onboarding review
+**Branch**: `codex/add-sd-github-review-to-fleet`
+
+### Summary
+
+Published PR #215, corrected deterministic review bookkeeping, addressed three Copilot findings across two fix rounds, and reached a clean third review with green CI.
+
+### Main Changes
+
+- Recorded concrete validation evidence for fleet onboarding session 183.
+- Made fleet preparation expectation drift fail with an explicit assertion instead of a raw KeyError.
+- Kept README fleet wording count-agnostic while retaining exact rollout details in the fleet runbook.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8a5b32a` | fix: record fleet validation evidence |
+| `edc5d3f` | fix: address review feedback round 1 |
+| `52551d5` | fix: address review feedback round 2 |
+
+### Testing
+
+- [OK] Focused fleet preflight unit tests passed.
+- [OK] Deterministic PR full-check passed with Prism and Gito disabled after each fix.
+- [OK] Copilot round 3 produced no new comments; all prior threads resolved.
+- [OK] GitHub CI matrix and aggregate CI Result passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
