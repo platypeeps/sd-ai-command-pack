@@ -3,7 +3,7 @@
 ## Goal
 
 Eliminate repeated post-merge Trellis bookkeeping recovery pull requests by
-rolling the tagged `sd-ai-command-pack` `0.30.2` release across the configured
+rolling the tagged `sd-ai-command-pack` `0.30.3` release across the configured
 consumer fleet and verifying that its exact-head finish-work handoff is present
 and enforced in every refreshed installation.
 
@@ -17,10 +17,10 @@ and enforced in every refreshed installation.
 - Both incidents occurred on installed pack `0.24.8`. Pack `0.30.1` added the
   executable `--finish-work-head` requirement specifically after observing
   delivery PRs merge before task archival.
-- The `0.30.2` source self-test covers missing, malformed, stale, and matching
+- The `0.30.3` source self-test covers missing, malformed, stale, and matching
   finish-work head evidence. Its candidate ledger records a full-fleet pass.
 - All eight configured consumers currently report a version different from
-  the `0.30.2` source target.
+  the `0.30.3` source target.
 - Cached fleet status found four consumers that need ownership or dirty-tree
   handling before refresh: `rwbp-website`, `mezmo_benchmark`,
   `sd-github-review`, and `anomaly-metric-creator`.
@@ -31,7 +31,7 @@ and enforced in every refreshed installation.
 ## Requirements
 
 - R1: Run the canonical release-identity and candidate-ledger preflight for
-  target `0.30.2`; do not mutate a consumer if that guard fails.
+  target `0.30.3`; do not mutate a consumer if that guard fails.
 - R2: Process every manifest consumer in rollout priority order. Keep the
   canaries sequential and use a conservative one-consumer-at-a-time execution
   even where the manifest permits bounded post-canary overlap.
@@ -62,30 +62,30 @@ and enforced in every refreshed installation.
 - R12: Record mandatory timing evidence and a complete per-consumer outcome.
   Reuse the same timing run after interruption.
 - R13: Do not add an independent task-state parser in this rollout. If a
-  consumer on `0.30.2` reproduces stranded bookkeeping, pause and create or
+  consumer on `0.30.3` reproduces stranded bookkeeping, pause and create or
   reuse one source corrective task with that evidence.
 
 ## Acceptance Criteria
 
 - [ ] Release identity, tagged/current payload equality, and both candidate
-  ledgers validate for `0.30.2` before consumer mutation.
+  ledgers validate for `0.30.3` before consumer mutation.
 - [ ] The source housekeeping self-test passes its missing, stale, malformed,
   and matching finish-work head scenarios.
-- [ ] `rwbp-coordinator` is at `0.30.2` or has an explicit skip reason.
-- [ ] `loadsmith` is at `0.30.2` or has an explicit skip reason.
-- [ ] `hoa-manager` is at `0.30.2` or has an explicit skip reason.
-- [ ] `rwbp-website` is at `0.30.2` or has an explicit skip reason.
-- [ ] `mezmo_benchmark` is at `0.30.2` or has an explicit skip reason.
-- [ ] `se-ai-command-pack` is at `0.30.2` or has an explicit skip reason.
-- [ ] `sd-github-review` is at `0.30.2` or has an explicit skip reason.
-- [ ] `anomaly-metric-creator` is at `0.30.2` or has an explicit skip reason.
+- [ ] `rwbp-coordinator` is at `0.30.3` or has an explicit skip reason.
+- [ ] `loadsmith` is at `0.30.3` or has an explicit skip reason.
+- [ ] `hoa-manager` is at `0.30.3` or has an explicit skip reason.
+- [ ] `rwbp-website` is at `0.30.3` or has an explicit skip reason.
+- [ ] `mezmo_benchmark` is at `0.30.3` or has an explicit skip reason.
+- [ ] `se-ai-command-pack` is at `0.30.3` or has an explicit skip reason.
+- [ ] `sd-github-review` is at `0.30.3` or has an explicit skip reason.
+- [ ] `anomaly-metric-creator` is at `0.30.3` or has an explicit skip reason.
 - [ ] Every refreshed consumer passes pre-PR and post-merge audit/provenance
   verification and ends clean on its default branch.
 - [ ] No consumer refresh contains product-code changes or bypasses review,
   CI, unresolved-thread, head-identity, or housekeeping safeguards.
 - [ ] The final fleet and timing reports identify every outcome, remaining
   stale consumer, finding disposition, retry, open PR, and anomaly.
-- [ ] No `0.30.2` consumer reproduces a merge followed by a Trellis
+- [ ] No `0.30.3` consumer reproduces a merge followed by a Trellis
   bookkeeping recovery PR; any reproduction pauses rollout and becomes a
   source corrective task rather than an improvised consumer fix.
 
@@ -93,6 +93,6 @@ and enforced in every refreshed installation.
 
 - Automatically archiving a consumer task from inside the shell merge gate.
 - Bypassing protected-branch policy or forcing Git operations.
-- Adding a second task-state parsing layer without a `0.30.2` reproduction.
+- Adding a second task-state parsing layer without a `0.30.3` reproduction.
 - Consumer product changes, dependency upgrades, or unrelated maintenance.
 - Opening a pull request in the upstream Trellis repository.

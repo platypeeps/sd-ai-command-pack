@@ -10,7 +10,7 @@
 ## Source Preconditions
 
 3. Run the pack toolchain doctor and the housekeeping hermetic self-test.
-4. Refresh and verify the canonical `0.30.2` candidate ledger.
+4. Refresh and verify the canonical `0.30.3` candidate ledger.
 5. Initialize one timing run for all eight manifest consumers, record its run
    ID in the task, and start the fleet preflight timing stage.
 6. Fetch the release tag only if required, then run the canonical fleet
@@ -38,7 +38,7 @@
      and merge only through housekeeping with that exact head;
    - verify post-merge provenance, audit, clean default branch, and branch
      cleanup before recording `refreshed-merged`.
-10. On a verified `0.30.2` reproduction of stranded task bookkeeping, record
+10. On a verified `0.30.3` reproduction of stranded task bookkeeping, record
     the evidence, classify it as a pack correctness blocker, pause the fleet,
     and create or reuse one source corrective task. Do not add an ad hoc
     consumer repair to this rollout.

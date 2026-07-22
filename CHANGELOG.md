@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.30.3 - 2026-07-22
+
+- Make changed non-planning Trellis task metadata trigger sibling context
+  scaffold validation, matching the documented review-preflight contract.
+
 ## 0.30.2 - 2026-07-22
 
 - Document the intentional best-effort cleanup in the installed PR-body scope

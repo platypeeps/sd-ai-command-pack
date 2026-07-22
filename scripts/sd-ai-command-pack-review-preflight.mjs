@@ -944,13 +944,15 @@ function checkTrellisTaskContextSeeds() {
     const contextArtifact =
       normalized.startsWith('.trellis/tasks/') &&
       (normalized.endsWith('/implement.jsonl') || normalized.endsWith('/check.jsonl'));
-    if (!contextArtifact) {
+    const taskMetadata =
+      normalized.startsWith('.trellis/tasks/') && normalized.endsWith('/task.json');
+    if (!contextArtifact && !taskMetadata) {
       continue;
     }
 
     const artifact = parseTrellisTaskArtifactPath(normalized);
     if (!artifact) {
-      if (pathEntryExists(normalized)) {
+      if (contextArtifact && pathEntryExists(normalized)) {
         fail(
           `${normalized} is not in a supported Trellis task layout; use ` +
             '.trellis/tasks/MM-DD-name/{implement,check}.jsonl or ' +
@@ -959,7 +961,29 @@ function checkTrellisTaskContextSeeds() {
       }
       continue;
     }
-    contextFiles.add(`${artifact.taskDir}/${artifact.artifact}`);
+
+    if (contextArtifact) {
+      contextFiles.add(`${artifact.taskDir}/${artifact.artifact}`);
+      continue;
+    }
+
+    const loaded = loadTrellisTaskMetadataFile(normalized, { deletedIsMissing: true });
+    if (loaded.status !== 'loaded') {
+      continue;
+    }
+    let record;
+    try {
+      record = JSON.parse(loaded.text);
+    } catch {
+      continue;
+    }
+    if (
+      isPlainObject(record) &&
+      ['in_progress', 'review', 'completed'].includes(record.status)
+    ) {
+      contextFiles.add(`${artifact.taskDir}/implement.jsonl`);
+      contextFiles.add(`${artifact.taskDir}/check.jsonl`);
+    }
   }
 
   let inspectedFiles = 0;
