@@ -49,6 +49,73 @@ class FleetTimingTests(InstallTestCase):
     def clone(self, value):
         return json.loads(json.dumps(value))
 
+    def test_system_reading_uses_process_independent_monotonic_clock(self) -> None:
+        timing = self.load_timing()
+
+        with (
+            mock.patch.object(timing.time, "time_ns", return_value=11),
+            mock.patch.object(
+                timing.time, "CLOCK_MONOTONIC", 17, create=True
+            ),
+            mock.patch.object(
+                timing.time,
+                "clock_gettime_ns",
+                return_value=23,
+                create=True,
+            ) as clock_gettime_ns,
+            mock.patch.object(timing.time, "monotonic_ns") as monotonic_ns,
+        ):
+            reading = timing.system_reading()
+
+        self.assertEqual(reading, timing.ClockReading(11, 23))
+        clock_gettime_ns.assert_called_once_with(17)
+        monotonic_ns.assert_not_called()
+
+    def test_system_reading_falls_back_when_clock_gettime_is_unavailable(self) -> None:
+        timing = self.load_timing()
+
+        with (
+            mock.patch.object(timing.time, "time_ns", return_value=11),
+            mock.patch.object(
+                timing.time, "clock_gettime_ns", None, create=True
+            ),
+            mock.patch.object(
+                timing.time, "CLOCK_MONOTONIC", None, create=True
+            ),
+            mock.patch.object(
+                timing.time, "monotonic_ns", return_value=29
+            ) as monotonic_ns,
+        ):
+            reading = timing.system_reading()
+
+        self.assertEqual(reading, timing.ClockReading(11, 29))
+        monotonic_ns.assert_called_once_with()
+
+    def test_system_reading_falls_back_when_clock_gettime_rejects_read(self) -> None:
+        timing = self.load_timing()
+
+        for error in (OSError("clock unavailable"), ValueError("bad clock")):
+            with (
+                self.subTest(error=type(error).__name__),
+                mock.patch.object(timing.time, "time_ns", return_value=11),
+                mock.patch.object(
+                    timing.time, "CLOCK_MONOTONIC", 17, create=True
+                ),
+                mock.patch.object(
+                    timing.time,
+                    "clock_gettime_ns",
+                    side_effect=error,
+                    create=True,
+                ),
+                mock.patch.object(
+                    timing.time, "monotonic_ns", return_value=31
+                ) as monotonic_ns,
+            ):
+                reading = timing.system_reading()
+
+            self.assertEqual(reading, timing.ClockReading(11, 31))
+            monotonic_ns.assert_called_once_with()
+
     def test_new_state_sorts_consumers_and_rejects_duplicate_identity(self) -> None:
         timing = self.load_timing()
 

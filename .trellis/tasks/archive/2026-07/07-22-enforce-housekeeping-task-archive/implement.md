@@ -10,7 +10,7 @@
 ## Source Preconditions
 
 3. Run the pack toolchain doctor and the housekeeping hermetic self-test.
-4. Refresh and verify the canonical `0.30.3` candidate ledger.
+4. Refresh and verify the canonical `0.30.4` candidate ledger.
 5. Initialize one timing run for all eight manifest consumers, record its run
    ID in the task, and start the fleet preflight timing stage.
 6. Fetch the release tag only if required, then run the canonical fleet
@@ -29,6 +29,7 @@
    - verify checkout ownership and a clean tree; otherwise record `skipped`;
    - capture the exact default-branch base and create one refresh branch;
    - run the preflight-printed install and expected-platform audit commands;
+   - run every preflight-printed `candidatePrepare` command from the consumer;
    - run the consumer's documented full-check;
    - inspect that the diff contains installer-owned paths only;
    - commit, classify the exact head, push, and create one refresh PR;
@@ -38,7 +39,7 @@
      and merge only through housekeeping with that exact head;
    - verify post-merge provenance, audit, clean default branch, and branch
      cleanup before recording `refreshed-merged`.
-10. On a verified `0.30.3` reproduction of stranded task bookkeeping, record
+10. On a verified `0.30.4` reproduction of stranded task bookkeeping, record
     the evidence, classify it as a pack correctness blocker, pause the fleet,
     and create or reuse one source corrective task. Do not add an ad hoc
     consumer repair to this rollout.
@@ -81,3 +82,18 @@ installed SD skills.
   later consumer is skipped.
 - On pack blocker: pause before another mutation, run one corrective campaign,
   release a patch, then resume this task from a fresh preflight.
+
+## Execution Result
+
+- Release `0.30.4` passed identity, candidate, self-test, and final preflight
+  verification.
+- `rwbp-coordinator`, `loadsmith`, `hoa-manager`, and `mezmo_benchmark` merged
+  through their exact finish-work heads and passed post-merge audits.
+- `rwbp-website`, `se-ai-command-pack`, `sd-github-review`, and
+  `anomaly-metric-creator` were skipped without mutation because their
+  checkouts were dirty or contained unpublished branch work.
+- CF-4 corrected the source-only timing helper's cross-process monotonic clock
+  selection; the original timing run resumed and completed without rewriting
+  its durable state.
+- Child task `07-22-rerun-skipped-fleet-refresh-0304` owns the bounded rerun for
+  all four preserved stale consumers.

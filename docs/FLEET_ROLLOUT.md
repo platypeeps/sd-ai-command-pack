@@ -243,9 +243,11 @@ After all selected consumers have final outcomes, add `--complete`. The shared
 JSON and human summary reports per-stage attempt duration, retries, per-
 consumer critical path, interval-union active wall time, reviewer/CI overlap,
 slowest consumer, slowest stage, and aggregate fleet critical path. Elapsed
-durations come from a monotonic clock; wall time is retained only for auditable
-boundaries and overlap math. An active partial record uses the current clock
-for a provisional summary.
+durations come from a process-independent platform monotonic clock when the
+platform exposes one and the read succeeds, with the runtime monotonic clock as
+a fallback when that API is absent or rejects the read; wall time is retained
+only for auditable boundaries and overlap math. An active partial record uses
+the current clock for a provisional summary.
 
 A telemetry command error is reported separately and pauses new fleet mutation
 until the last valid record or input is corrected. It must never erase,

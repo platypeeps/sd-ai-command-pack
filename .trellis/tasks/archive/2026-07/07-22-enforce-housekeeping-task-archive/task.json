@@ -1,0 +1,31 @@
+{
+  "id": "enforce-housekeeping-task-archive",
+  "name": "enforce-housekeeping-task-archive",
+  "title": "Roll out housekeeping finish-work gate",
+  "description": "Roll out sd-ai-command-pack 0.30.4 across the consumer fleet and verify the exact-head finish-work merge gate prevents post-merge Trellis bookkeeping recovery.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-22",
+  "completedAt": "2026-07-22",
+  "branch": "codex/rollout-housekeeping-finish-work-gate-0303",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": "https://github.com/platypeeps/sd-ai-command-pack/pull/221",
+  "subtasks": [],
+  "children": [
+    "07-22-release-0302-codeql-cleanup",
+    "07-22-release-0303-task-context-sibling-check",
+    "07-22-release-0304-kb-ignore-dedup",
+    "07-22-rerun-skipped-fleet-refresh-0304"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "Completed timing run: fleet-0.30.4-20260722T191841Z. Four consumers refreshed and merged; four preserved no-touch skips are owned by child task 07-22-rerun-skipped-fleet-refresh-0304. Superseded runs: fleet-0.30.1-20260722T154928Z (CF-1), fleet-0.30.2-20260722T164331Z (CF-2), and fleet-0.30.3-20260722T174106Z (CF-3). v0.30.4 was verified at source merge and tag 1dd8400b7585c749e1731ed0bf9f30001da35860; CF-4 corrected only the source-only timing helper and preserved tagged consumer payload identity.",
+  "meta": {}
+}

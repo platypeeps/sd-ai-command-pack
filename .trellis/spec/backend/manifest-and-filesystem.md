@@ -993,6 +993,10 @@ owns or changes their outcomes.
 - Operations are `init`, `stage-start`, `stage-end`, `consumer-end`, and
   `report`; all accept internal `--repo`, and tests/recovery may use internal
   `--state-home`.
+- `system_reading() -> ClockReading` reads wall nanoseconds plus an elapsed-time
+  clock. Prefer `time.clock_gettime_ns(time.CLOCK_MONOTONIC)` where those
+  symbols exist and the read succeeds; use `time.monotonic_ns()` as the
+  cross-platform fallback when the API is absent or rejects the clock read.
 - Schema version 1 owns one safe run ID, repository digest, target version,
   fleet stages, rollout-priority consumers, sequential stage attempts, and
   final consumer outcomes.
@@ -1010,9 +1014,11 @@ owns or changes their outcomes.
   remote URL, command output, review body, credential, private key, or arbitrary
   environment value. Reasons are bounded and reject control characters,
   absolute/home-relative paths, remote URLs, and common secret forms.
-- Stage elapsed time uses monotonic nanoseconds and rejects a backwards clock.
-  Wall-clock nanoseconds preserve boundaries and calculate interval union,
-  critical path, and reviewer/CI overlap without double-counting concurrency.
+- Stage elapsed time uses process-independent platform monotonic nanoseconds
+  when available, falls back to the runtime monotonic clock when the platform
+  API is absent or rejects the read, and rejects a backwards clock. Wall-clock
+  nanoseconds preserve boundaries and calculate interval union, critical path,
+  and reviewer/CI overlap without double-counting concurrency.
 - `preflight` is fleet-scoped; every other stage is consumer-scoped. Reviewer
   and CI waits may be active together. Retry count derives from attempts after
   the first rather than a second persisted counter.
@@ -1038,6 +1044,8 @@ owns or changes their outcomes.
   than overwrite. Missing/malformed state or repository mismatch -> reject.
 - Negative monotonic elapsed or completion with active/incomplete consumers ->
   reject while retaining the last valid partial record.
+- Platform monotonic API absent or raising `OSError`/`ValueError` -> use the
+  runtime monotonic fallback without exposing a traceback.
 
 ### 5. Good / Base / Bad Cases
 
@@ -1046,14 +1054,17 @@ owns or changes their outcomes.
   overlap is 10 seconds.
 - Base: a dry run records preflight, marks every selected consumer outcome,
   completes, and performs no consumer stage mutation.
+- Bad: persist a process-relative monotonic reading, then attempt to close the
+  stage from an isolated process whose clock origin is lower.
 - Bad: sum reviewer and CI durations and report 40 seconds as critical path, or
   copy a consumer checkout path into a failure reason.
 
 ### 6. Tests Required
 
-- Fake-clock coverage for init/resume, active and completed attempts, retries,
-  skips/failures, overlap, interval union, critical path, slowest rows, partial
-  report, completion, and backwards monotonic time.
+- Fake-clock coverage for process-independent monotonic-clock selection and
+  absent/rejected-read fallback, init/resume, active and completed attempts,
+  retries, skips/failures, overlap, interval union, critical path, slowest rows,
+  partial report, completion, and backwards monotonic time.
 - Strict schema/privacy matrices plus missing/malformed/symlinked state,
   private permissions, atomic-write errors, live/stale locks, and stable CLI
   JSON/human errors.
@@ -1068,6 +1079,8 @@ owns or changes their outcomes.
 ```text
 Wrong: add fleet-timing.py to manifest.json and install it into every consumer
 Wrong: treat a telemetry write error as permission to ignore a failed install gate
+Wrong: persist time.monotonic_ns() when an isolated runtime resets it per process
+Correct: prefer clock_gettime_ns(CLOCK_MONOTONIC) for persisted stage boundaries
 Wrong: reviewer 20s + CI 20s = 40s critical path when they overlap by 10s
 Correct: keep private source-only state, preserve the gate result, and report
          30s critical path, 30s active wall, 40s summed time, and 10s overlap

@@ -1487,3 +1487,49 @@ Corrected the shared KB ignore refresh defect and live fleet preparation gap sur
 ### Next Steps
 
 - None - task complete
+
+
+## Session 190: Complete 0.30.4 housekeeping-gate fleet rollout
+
+**Date**: 2026-07-22
+**Task**: Complete 0.30.4 housekeeping-gate fleet rollout
+**Branch**: `codex/rollout-housekeeping-finish-work-gate-0303`
+
+### Summary
+
+Rolled out immutable sd-ai-command-pack 0.30.4 across the configured fleet: four consumer refresh PRs merged and four checkouts were preserved as no-touch skips with a dedicated follow-up task. Corrected the source-only cross-process timing clock, converged PR 221 through exact-head CI and Copilot review, and archived the completed rollout task.
+
+### Main Changes
+
+- Merged v0.30.4 refreshes for rwbp-coordinator, loadsmith, hoa-manager, and mezmo_benchmark.
+- Preserved rwbp-website, se-ai-command-pack, sd-github-review, and anomaly-metric-creator unchanged and assigned their rerun to 07-22-rerun-skipped-fleet-refresh-0304.
+- Made fleet timing persistence stable across command processes, including fallback when the platform monotonic clock read is unavailable.
+- Resolved both PR 221 Copilot findings and archived 07-22-enforce-housekeeping-task-archive.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `adced33` | chore: start 0.30.3 fleet rollout record |
+| `a2148bc` | fix: persist fleet timing across command processes |
+| `f6e037a` | docs: record 0.30.4 fleet rollout results |
+| `fdfe382` | chore: link rollout task to PR 221 |
+| `aa737c5` | fix: use stable base for fleet follow-up |
+| `32fcfa3` | fix: fallback when platform monotonic read fails |
+
+### Testing
+
+- [OK] 27 focused fleet timing tests passed
+- [OK] Ruff and mypy passed for the timing helper and tests
+- [OK] make check and make full-check passed
+- [OK] Final fleet preflight verified immutable v0.30.4 at 1dd8400b7585c749e1731ed0bf9f30001da35860
+- [OK] PR 221 exact-head CI passed with zero unresolved review threads after the delayed final poll
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Rerun the four preserved fleet skips under task 07-22-rerun-skipped-fleet-refresh-0304 when their checkout blockers are cleared.

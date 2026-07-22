@@ -3,10 +3,11 @@
 ## Boundary
 
 The pack source checkout owns release identity and orchestration. Each consumer
-checkout is an independent mutation boundary. Release `0.30.3` supersedes the
-first two canary attempts by carrying both the CodeQL cleanup annotation and
-the task-context sibling-validation correction. After it is tagged, this task
-installs its immutable payload and does not change consumer product code.
+checkout is an independent mutation boundary. Release `0.30.4` supersedes the
+first three attempts by carrying the CodeQL cleanup annotation, task-context
+sibling validation, KB-ignore deduplication, and live `candidatePrepare`
+contract. After it is tagged, this task installs its immutable payload and does
+not change consumer product code.
 
 The safety claim is a three-link proof:
 
@@ -45,7 +46,7 @@ candidate decision.
 1. `pending`: preflight reports the consumer stale.
 2. `owned`: checkout exists, tree is clean, and no active stream would be
    disturbed by branch preparation.
-3. `installed`: the preflight-selected command installed `0.30.3`.
+3. `installed`: the preflight-selected command installed `0.30.4`.
 4. `validated`: expected-platform audit and consumer full-check passed.
 5. `published`: the installer-only commit is pushed and represented by one PR.
 6. `reviewed`: the exact head completed integration-only or remote review and
@@ -54,7 +55,7 @@ candidate decision.
 8. `finished`: `sd-finish-work` completed, any bookkeeping commit is pushed,
    and the exact final head is green.
 9. `merged`: housekeeping accepted that exact finish-work head and merged.
-10. `verified`: provenance and audit report `0.30.3`, the default branch is
+10. `verified`: provenance and audit report `0.30.4`, the default branch is
     clean, and refresh branches are absent according to policy.
 
 Terminal alternatives are `at-target`, `PR-open`, `skipped`, `failed`, or
@@ -68,6 +69,8 @@ Corrective finding ledger:
 | --- | --- | --- | --- | --- | --- | --- |
 | CF-1 | Generated Python payload quality | `rwbp-coordinator` PR #170 CodeQL thread on `_atomic_write_body` | Pack blocker | Fix in source before more consumer mutation | Add the explanatory best-effort cleanup comment to the template and mirror; release as `0.30.2` | Existing PR-body atomic-write tests plus source full check and full-fleet candidate validation |
 | CF-2 | Task-context validation correctness | `rwbp-coordinator` PR #170 Copilot thread on `docs/SD_AI_COMMAND_PACK.md` at finish-work head `bcf849e` | Pack blocker | Fix in source before merge or more consumer mutation | Make changed non-planning `task.json` files enqueue both sibling context files; release as `0.30.3` | Review-preflight regression where only `task.json` changes plus source full check and full-fleet candidate validation |
+| CF-3 | Generated-map preparation and managed KB ignore convergence | `mezmo_benchmark` PR #411 CI found a stale repo map and duplicate `/.obsidian-kb` entries | Pack blocker | Fix in source before merge or more consumer mutation | Run manifest `candidatePrepare` during live rollout and remove equivalent unmanaged KB ignore entries around the managed block; release as `0.30.4` | Fleet-preflight preparation-output tests, KB-ignore deduplication tests, source full check, and full-fleet candidate validation |
+| CF-4 | Cross-process fleet timing continuity | Closing the `mezmo_benchmark` reviewer stage reported `monotonic clock moved backwards during stage`; isolated command processes exposed a runtime-relative `time.monotonic_ns()` while persisted attempts used the platform clock | Source telemetry blocker | Pause new mutation, correct the source-only helper, and resume the unchanged timing state without a consumer payload release | Prefer explicit `clock_gettime_ns(CLOCK_MONOTONIC)` when available and retain `time.monotonic_ns()` as the platform fallback | Clock-selection/fallback unit tests, all 26 focused timing tests, Ruff, mypy, successful partial report, and successful closure of the original active attempts |
 
 The bounded adjacent-surface sweep found other empty cleanup handlers in
 source-only fleet utilities and installed helpers, including candidate-ledger
@@ -85,7 +88,7 @@ is intentionally comment only.
 - Red CI, unresolved feedback, head drift, or non-clean merge state: do not
   merge; leave the PR open and report it.
 - Pack correctness, security, install/audit, compatibility, or a reproduced
-  post-merge task gap on `0.30.3`: pause the fleet and enter one source-owned
+  post-merge task gap on `0.30.4`: pause the fleet and enter one source-owned
   corrective campaign.
 - Deferred low-risk findings: reply, resolve when allowed, and record one
   follow-up per canonical owner before continuing.
@@ -93,7 +96,7 @@ is intentionally comment only.
 ## Compatibility And Rollback
 
 This rollout changes only vendored pack payload and its receipts/provenance.
-Already merged consumers remain on `0.30.3` if a later consumer is skipped.
+Already merged consumers remain on `0.30.4` if a later consumer is skipped.
 Before PR creation, a failure remains isolated on the unmerged refresh branch;
 after PR creation, it remains an open PR. Never reset, force-push, or bypass a
 consumer gate. A confirmed released-pack defect requires a corrective release,
@@ -101,8 +104,10 @@ then a fresh preflight and resume of this same rollout task.
 
 ## Source Task Completion
 
-Publish and tag the bounded `0.30.3` source correction before resuming the
-fleet from a fresh preflight. After every selected consumer has a terminal
-outcome, update the PRD with the fleet table and evidence, complete the timing
-report, and publish any remaining source task bookkeeping through
-`sd-create-pr`, then use normal review, finish-work, and housekeeping.
+The tagged `0.30.4` payload completed four merges and four no-touch skips. CF-4
+changed only the source-only timing helper, its source-only rollout guide and
+spec, and tests; it intentionally left the immutable `0.30.4` consumer payload
+unchanged. The final preflight reverified tagged/current payload equality after
+that narrowing. Publish the remaining source task bookkeeping and CF-4 helper
+correction through `sd-create-pr`, then use normal review, finish-work, and
+housekeeping.
