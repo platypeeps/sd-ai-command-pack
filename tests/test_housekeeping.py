@@ -51,6 +51,7 @@ class HousekeepingTests(InstallTestCase):
                 script_index,
                 f"{adapter}: finish-work must run before housekeeping script",
             )
+            self.assertIn("--finish-work-head", content)
 
     def test_housekeeping_clean_check_fails_closed_on_git_failure(self) -> None:
         if self._bash_path is None:
@@ -89,6 +90,25 @@ class HousekeepingTests(InstallTestCase):
         )
         self.assertEqual(result.returncode, 2, result.stdout)
         self.assertIn('--remote value must not start with "-"', result.stdout)
+
+    def test_housekeeping_rejects_malformed_finish_work_head(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        result = subprocess.run(
+            [
+                self._bash_path,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--finish-work-head",
+                "not-a-commit",
+                "--self-test",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("full 40-character commit OID", result.stdout)
 
     def test_housekeeping_default_branch_ignores_gh_null(self) -> None:
         if self._bash_path is None:
@@ -181,10 +201,12 @@ class HousekeepingTests(InstallTestCase):
             "The current Trellis task (its id + status, or `none active`).",
             "PR review rounds:",
             "--no-auto-merge",
+            "--finish-work-head <oid>",
         ]:
             self.assertIn(text, skill)
         for text in [
             "--no-auto-merge",
+            "--finish-work-head",
             "--merge-strategy",
             "view_open_pr_readiness_for_branch()",
             "unresolved_review_thread_count()",
@@ -449,12 +471,17 @@ class HousekeepingTests(InstallTestCase):
     def test_housekeeping_auto_merges_green_comment_clean_pr_then_cleans_up(
         self,
     ) -> None:
-        repo, remote, stub_bin, _ = self.make_housekeeping_repo()
+        repo, remote, stub_bin, head_oid = self.make_housekeeping_repo()
         marker = repo.parent / "merged-pr"
         self.write_auto_merge_gh_stub(stub_bin, marker)
 
         result = subprocess.run(
-            ["bash", str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")],
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--finish-work-head",
+                head_oid,
+            ],
             cwd=repo,
             env={
                 **os.environ,
@@ -492,6 +519,68 @@ class HousekeepingTests(InstallTestCase):
         )
         self.assertEqual(remote_branch.returncode, 2, remote_branch.stdout)
 
+    def test_housekeeping_requires_finish_work_head_before_auto_merge(self) -> None:
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_merge_gh_stub(stub_bin, marker)
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+            ],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("SD finish-work completion was not attested", result.stdout)
+        self.assertIn(f'--finish-work-head "{head_oid}"', result.stdout)
+        self.assertFalse(marker.exists())
+
+    def test_housekeeping_rejects_stale_finish_work_head_before_auto_merge(
+        self,
+    ) -> None:
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_merge_gh_stub(stub_bin, marker)
+        stale_head = "0" * 40
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--finish-work-head",
+                stale_head,
+            ],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            f"SD finish-work was attested for {stale_head}, but local "
+            f"feature/cleanup is now at {head_oid}",
+            result.stdout,
+        )
+        self.assertFalse(marker.exists())
+
     def test_housekeeping_prunes_stale_tracking_ref_on_auto_delete_head_branch(
         self,
     ) -> None:
@@ -499,14 +588,19 @@ class HousekeepingTests(InstallTestCase):
         # branch at merge time, after housekeeping's initial fetch/prune. The
         # "already absent" cleanup path must prune the stale local tracking ref
         # so the final remote-branch-absent check does not flag a false anomaly.
-        repo, remote, stub_bin, _ = self.make_housekeeping_repo()
+        repo, remote, stub_bin, head_oid = self.make_housekeeping_repo()
         marker = repo.parent / "merged-pr"
         self.write_auto_merge_gh_stub(
             stub_bin, marker, auto_delete_remote_branch=True
         )
 
         result = subprocess.run(
-            ["bash", str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")],
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--finish-work-head",
+                head_oid,
+            ],
             cwd=repo,
             env={
                 **os.environ,
@@ -553,7 +647,7 @@ class HousekeepingTests(InstallTestCase):
     def test_housekeeping_rejects_undeterminable_check_counts_before_auto_merge(
         self,
     ) -> None:
-        repo, _, stub_bin, _ = self.make_housekeeping_repo()
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
         marker = repo.parent / "merged-pr"
         self.write_auto_merge_gh_stub(
             stub_bin,
@@ -562,7 +656,12 @@ class HousekeepingTests(InstallTestCase):
         )
 
         result = subprocess.run(
-            ["bash", str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")],
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--finish-work-head",
+                head_oid,
+            ],
             cwd=repo,
             env={
                 **os.environ,
@@ -658,6 +757,8 @@ class HousekeepingTests(InstallTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("self-test: all scenarios passed", result.stdout)
         for scenario in (
+            "finish-work head required",
+            "stale finish-work head refuses",
             "green executed checks merge",
             "single executed success suffices",
             "blocking checks refuse",
@@ -776,7 +877,7 @@ class HousekeepingTests(InstallTestCase):
     def test_housekeeping_counts_unresolved_review_threads_across_pages(
         self,
     ) -> None:
-        repo, _, stub_bin, _ = self.make_housekeeping_repo()
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
         marker = repo.parent / "merged-pr"
         self.write_auto_merge_gh_stub(
             stub_bin,
@@ -792,7 +893,12 @@ class HousekeepingTests(InstallTestCase):
         )
 
         result = subprocess.run(
-            ["bash", str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")],
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--finish-work-head",
+                head_oid,
+            ],
             cwd=repo,
             env={
                 **os.environ,
@@ -818,12 +924,17 @@ class HousekeepingTests(InstallTestCase):
         )
 
     def test_housekeeping_rejects_invalid_github_repo_override(self) -> None:
-        repo, _, stub_bin, _ = self.make_housekeeping_repo()
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
         marker = repo.parent / "merged-pr"
         self.write_auto_merge_gh_stub(stub_bin, marker)
 
         result = subprocess.run(
-            ["bash", str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")],
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--finish-work-head",
+                head_oid,
+            ],
             cwd=repo,
             env={
                 **os.environ,
@@ -882,7 +993,7 @@ class HousekeepingTests(InstallTestCase):
     def test_housekeeping_reports_review_thread_inspection_failure(
         self,
     ) -> None:
-        repo, _, stub_bin, _ = self.make_housekeeping_repo()
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
         marker = repo.parent / "merged-pr"
         self.write_auto_merge_gh_stub(
             stub_bin,
@@ -891,7 +1002,12 @@ class HousekeepingTests(InstallTestCase):
         )
 
         result = subprocess.run(
-            ["bash", str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")],
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--finish-work-head",
+                head_oid,
+            ],
             cwd=repo,
             env={
                 **os.environ,

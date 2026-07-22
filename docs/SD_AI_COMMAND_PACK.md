@@ -450,7 +450,7 @@ Use the script directly from any shell:
 bash scripts/sd-ai-command-pack-full-check.sh
 bash scripts/sd-ai-command-pack-review-local.sh
 bash scripts/sd-ai-command-pack-review-local.sh --full-codebase
-bash scripts/sd-ai-command-pack-housekeeping.sh
+bash scripts/sd-ai-command-pack-housekeeping.sh # cleanup-only or already merged
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-status.py
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-status.py fleet --json
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
@@ -827,7 +827,10 @@ Copy-Item -Recurse -Force -Path "C:\path\to\repo\.obsidian-kb\*" -Destination "C
 The housekeeping command ends a single active development stream. On an open
 PR, it runs the SD finish-work flow before actual cleanup and pushes any
 archive or journal commits that finish-work creates. It then runs the
-housekeeping script, which checks a strict auto-merge gate:
+housekeeping script with `--finish-work-head "$(git rev-parse HEAD)"`. The
+exact-head attestation is valid only after that lifecycle step and its required
+checks finish; without it, or if the branch advances afterward, the executable
+leaves an open PR unmerged. The script then checks a strict auto-merge gate:
 
 - the working tree is clean
 - the local branch head, remote branch head, and PR head all match
@@ -1111,8 +1114,10 @@ Lifecycle side effects have one owner. `until=review` keeps finish-work in
 watches with `no-merge` in Stage 3, and invokes housekeeping exactly once in
 Stage 4. A blocked or timed-out watch therefore leaves the active Trellis task
 available for a later resume instead of archiving it before the PR settles.
-After finish-work, housekeeping owns one normal KB refresh before its merge
-gate so archived task documentation is current. That refresh creates an absent
+After finish-work, housekeeping passes `--finish-work-head` with the exact
+current commit to the shell gate and owns one normal KB refresh before merge so
+archived task documentation is current. A missing handoff leaves the PR open.
+The refresh creates an absent
 KB and preserves a valid root directory symlink. `sd-ship` does not repeat that
 refresh.
 
@@ -1571,11 +1576,12 @@ checks.
 ## Housekeeping cadence
 
 Run housekeeping at the end of a development stream. From an open PR branch it
-owns finish-work before applying the merge gate; after an already-merged PR it
-performs the remaining cleanup and verification. If the command reports
-anomalies, treat them as the next manual action: dirty files, an unmerged PR,
-extra branches, open PRs/issues, or remaining Trellis tasks mean the repo is
-not yet in the expected clean state.
+owns finish-work before applying the merge gate and passes the exact current
+commit through `--finish-work-head` only after the lifecycle handoff succeeds;
+after an already-merged PR it performs the remaining cleanup and verification
+without the flag. If the command reports anomalies, treat them as the next
+manual action: dirty files, an unmerged PR, extra branches, open PRs/issues, or
+remaining Trellis tasks mean the repo is not yet in the expected clean state.
 
 ## Updating the pack
 
