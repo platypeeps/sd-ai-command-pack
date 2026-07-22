@@ -2,7 +2,7 @@
   "id": "obsidian-kb-directory-symlink-lifecycle",
   "name": "obsidian-kb-directory-symlink-lifecycle",
   "title": "Honor Obsidian KB directory and symlink lifecycle",
-  "description": "",
+  "description": "Make the pack-managed .obsidian-kb lifecycle predictable by creating missing knowledge-base directories, preserving valid directory symlinks, ignoring either root form, and rejecting unusable occupied paths before writes.",
   "status": "completed",
   "dev_type": null,
   "scope": null,
