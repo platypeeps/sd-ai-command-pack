@@ -114,10 +114,13 @@ JSON preflight output is a schema-versioned object with `releaseIdentity` and
 `candidateChecks`, so orchestration can inspect the complete candidate contract
 without parsing the source manifest independently.
 
-For each repo that needs a refresh, the preflight prints the exact install and
-audit commands. The audit command passes the fleet manifest's explicit platform
-set through `--expected-platform` so missing selected-platform files are caught
-even when a faulty install also omitted them from receipts or provenance.
+For each repo that needs a refresh, the preflight prints the exact install,
+audit, and repo-scoped `candidatePrepare` commands. The audit command passes the
+fleet manifest's explicit platform set through `--expected-platform` so missing
+selected-platform files are caught even when a faulty install also omitted them
+from receipts or provenance. Run preparation commands in declaration order
+after the audit and before the consumer full-check; deterministic generated
+artifacts must be part of the committed refresh.
 
 ## Refresh Shape
 
@@ -129,7 +132,8 @@ For each `refresh-needed` repo:
    from this pack checkout.
 3. Run the printed `python3 scripts/sd-ai-command-pack-install-audit.py --repo
    <repo> --expected-platform ...` command.
-4. Run the consumer's deterministic full-check and commit only the refresh.
+4. Run each printed `candidatePrepare` command from the consumer checkout, then
+   run the consumer's deterministic full-check and commit only the refresh.
 5. Run the source-side fleet review classifier against the exact base and
    refresh head. Use integration-only review when it qualifies; otherwise use
    the normal configured remote-review loop.

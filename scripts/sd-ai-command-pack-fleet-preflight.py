@@ -131,6 +131,14 @@ def install_command(result: FleetPreflightResult) -> str:
     return " ".join(shlex.quote(part) for part in command)
 
 
+def prepare_commands(result: FleetPreflightResult) -> list[str]:
+    repo = shlex.quote(str(result.repo_path))
+    return [
+        f"(cd {repo} && {shlex.join(command)})"
+        for command in result.consumer.candidate_prepare
+    ]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Check which fleet consumers need an sd-ai-command-pack refresh."
@@ -268,6 +276,8 @@ def main() -> int:
             if result.status != "at-target" and result.repo_path.is_dir():
                 print(f"  install: {install_command(result)}")
                 print(f"  audit:   {audit_command(result)}")
+                for index, command in enumerate(prepare_commands(result), start=1):
+                    print(f"  prepare[{index}]: {command}")
 
     if args.fail_on_refresh_needed and any(
         result.status != "at-target" for result in results
