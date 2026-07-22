@@ -270,8 +270,11 @@ retry behavior lives in the installed guide's
 Scans local diffs and optional recent GitHub review comments for repeated review
 patterns, then updates a managed learning block when requested. Time-window
 scans cover the complete window by default, while `--github-pr` supports a
-bounded single-PR analysis. Historical review paths remain readable remote
-provenance and are not treated as current checkout paths by the local preflight.
+bounded single-PR analysis. Current unresolved comments stay individually
+actionable; historical comments become deterministic bounded clusters with
+evidence counts and category-specific preventive actions. Historical review
+paths remain readable remote provenance and are not treated as current checkout
+paths by the local preflight.
 
 ### sd-audit-repo
 

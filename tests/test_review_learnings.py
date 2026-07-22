@@ -281,6 +281,223 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertIn("`docs/remote-missing.md`", rendered)
         self.assertNotIn("\n", rendered)
 
+    def test_historical_signals_cluster_while_current_comments_stay_individual(
+        self,
+    ) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_clusters",
+        )
+        current = learnings.PullRequestComment(
+            pr_number=212,
+            pr_title="current",
+            pr_url="https://github.com/owner/repo/pull/212",
+            path="scripts/current.py",
+            body="Validate the current boundary before publishing.",
+            is_resolved=False,
+            is_outdated=False,
+            created_at="2026-07-21T12:00:00Z",
+        )
+        historical = [
+            learnings.PullRequestComment(
+                pr_number=206,
+                pr_title="historical",
+                pr_url="https://github.com/owner/repo/pull/206",
+                path=f"docs/surface-{index}.md",
+                body=(
+                    "Use tracked-diff terminology in the documentation."
+                    if index < 3
+                    else "Align the tracked diff wording with the documented contract."
+                ),
+                is_resolved=True,
+                is_outdated=False,
+                created_at=f"2026-07-{10 + index:02d}T12:00:00Z",
+            )
+            for index in range(5)
+        ]
+
+        rendered = learnings.render_managed_block([], historical + [current])
+
+        self.assertLess(
+            rendered.index("#### Current Actionable Comments"),
+            rendered.index("#### Historical Signal Clusters"),
+        )
+        self.assertEqual(rendered.count("**current** PR #212"), 1)
+        self.assertEqual(rendered.count("**Contract/documentation drift**"), 2)
+        self.assertIn("5 historical comment(s) across 2 normalized signature(s)", rendered)
+        self.assertIn("observed 2026-07-10 to 2026-07-14", rendered)
+        self.assertIn("examples 2/5", rendered)
+        self.assertNotIn("**historical** PR #206", rendered)
+
+    def test_cluster_signature_examples_use_safe_markdown_code_spans(self) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_signature_markdown",
+        )
+        cluster = learnings.HistoricalSignalCluster(
+            category=learnings.SIGNAL_CONTRACT_DOCUMENTATION,
+            count=3,
+            signature_count=2,
+            pr_numbers=(214,),
+            path_families=("docs",),
+            first_seen="2026-07-21",
+            last_seen="2026-07-22",
+            signature_examples=(("Use `docs/a.md` and **bold**.", 2), ("Plain.", 1)),
+            examples=(),
+        )
+
+        rendered = "\n".join(cluster.markdown_items())
+
+        self.assertIn(
+            "Representative signatures: `` Use `docs/a.md` and **bold**. `` (x2); "
+            "`Plain.` (x1)",
+            rendered,
+        )
+
+    def test_cluster_rendering_is_deterministic_for_shuffled_input(self) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_cluster_order",
+        )
+        comments = [
+            learnings.PullRequestComment(
+                pr_number=number,
+                pr_title="historical",
+                pr_url=f"https://github.com/owner/repo/pull/{number}",
+                path=path,
+                body=body,
+                is_resolved=True,
+                is_outdated=False,
+                created_at=created_at,
+            )
+            for number, path, body, created_at in (
+                (3, "tests/a.py", "Add a failure fixture.", "2026-07-03T00:00:00Z"),
+                (1, "docs/a.md", "Align the contract wording.", "2026-07-01T00:00:00Z"),
+                (2, "docs/b.md", "Align the contract wording.", "2026-07-02T00:00:00Z"),
+            )
+        ]
+
+        forward = learnings.render_managed_block([], comments)
+        reversed_render = learnings.render_managed_block([], list(reversed(comments)))
+
+        self.assertEqual(forward, reversed_render)
+        self.assertLess(
+            forward.index("**Contract/documentation drift**"),
+            forward.index("**Reviewer/test harness quality**"),
+        )
+
+    def test_signal_category_recognizes_installed_generated_surfaces(self) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_generated_surfaces",
+        )
+        paths = (
+            ".claude/commands/sd/review-learnings.md",
+            ".github/agents/trellis-check.agent.md",
+            ".github/copilot/hooks/trellis-context.js",
+            ".github/hooks/trellis.json",
+            ".github/prompts/sd-review-learnings.prompt.md",
+            ".opencode/commands/sd-review-learnings.md",
+            ".gemini/commands/sd/review-learnings.toml",
+            ".agent/workflows/sd-review-learnings.md",
+            ".sd-ai-command-pack/manifest.json",
+            ".prism/rules.json",
+            "scripts/sd-ai-command-pack-review-learnings.py",
+            "scripts/sd_ai_command_pack_lib.py",
+            "docs/SD_AI_COMMAND_PACK.md",
+        )
+
+        for index, path in enumerate(paths, start=1):
+            with self.subTest(path=path):
+                comment = learnings.PullRequestComment(
+                    pr_number=index,
+                    pr_title="historical",
+                    pr_url=f"https://github.com/owner/repo/pull/{index}",
+                    path=path,
+                    body="Keep this installed surface aligned.",
+                    is_resolved=True,
+                    is_outdated=False,
+                )
+                self.assertEqual(
+                    learnings._signal_category(comment),
+                    learnings.SIGNAL_GENERATED_SURFACES,
+                )
+
+    def test_cluster_output_reports_all_evidence_bounds(self) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_cluster_bounds",
+        )
+        category_samples = (
+            (".trellis/tasks/x/task.json", "The task metadata has the wrong base branch."),
+            ("src/input.py", "Validate the untrusted boundary."),
+            ("docs/contract.md", "Align the documentation contract wording."),
+            ("templates/tool.py", "Keep the generated copy in sync."),
+            ("tests/test_tool.py", "Add a direct failure fixture."),
+            ("misc/note.txt", "Clarify this unusual edge case."),
+        )
+        comments = []
+        for category_index, (path, body) in enumerate(category_samples):
+            for observation in range(9):
+                comments.append(
+                    learnings.PullRequestComment(
+                        pr_number=100 + category_index * 10 + observation,
+                        pr_title="historical",
+                        pr_url=(
+                            "https://github.com/owner/repo/pull/"
+                            f"{100 + category_index * 10 + observation}"
+                        ),
+                        path=(
+                            path
+                            if observation == 0
+                            else f"{path.rsplit('/', 1)[0]}/surface-{observation}.md"
+                        ),
+                        body=f"{body} Observation {observation}.",
+                        is_resolved=True,
+                        is_outdated=False,
+                        created_at=f"2026-06-{observation + 1:02d}T00:00:00Z",
+                    )
+                )
+
+        rendered = learnings.render_managed_block([], comments)
+
+        self.assertIn("Historical clusters truncated: showing 5 of 6 categories", rendered)
+        self.assertIn("signatures 4/9", rendered)
+        self.assertIn("PRs 8/9", rendered)
+        self.assertIn("examples 3/9", rendered)
+        actions = rendered.split("### Suggested Preventive Actions", 1)[1]
+        self.assertNotIn("**Task metadata**", actions)
+
+    def test_preventive_actions_require_a_detected_recurring_category(self) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_preventive_actions",
+        )
+        comments = [
+            learnings.PullRequestComment(
+                pr_number=number,
+                pr_title="historical",
+                pr_url=f"https://github.com/owner/repo/pull/{number}",
+                path=path,
+                body=body,
+                is_resolved=True,
+                is_outdated=False,
+                created_at="2026-07-20T00:00:00Z",
+            )
+            for number, path, body in (
+                (1, "docs/a.md", "Align the contract wording."),
+                (2, "docs/b.md", "Align the contract wording."),
+                (3, ".trellis/tasks/x/task.json", "Fix the task metadata."),
+            )
+        ]
+
+        rendered = learnings.render_managed_block([], comments)
+        actions = rendered.split("### Suggested Preventive Actions", 1)[1]
+
+        self.assertIn("**Contract/documentation drift** (2 historical comments)", actions)
+        self.assertNotIn("**Task metadata**", actions)
+        self.assertNotIn("Move repeated mechanical findings", actions)
+
     def test_learnings_truncate_summaries_at_word_boundaries(self) -> None:
         learnings = self.load_module_from_path(
             PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",

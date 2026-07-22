@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.30.0 - 2026-07-21
+
+- Keep current unresolved review comments individually actionable while
+  deterministically deduplicating historical comments into bounded,
+  evidence-backed signal clusters with category-specific preventive actions.
+
 ## 0.29.0 - 2026-07-21
 
 - Replace the generic first-review boundary warning with a deterministic,

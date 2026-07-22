@@ -1122,3 +1122,84 @@ Created PR #213, resolved two Copilot findings with focused fixes, and converged
 ### Next Steps
 
 - None - task complete
+
+
+## Session 181: Cluster review-learning signals
+
+**Date**: 2026-07-21
+**Task**: Cluster review-learning signals
+**Branch**: `codex/review-learning-signal-clustering`
+
+### Summary
+
+Implemented deterministic historical review-comment deduplication and category clustering while preserving current unresolved comments; added bounded evidence and category-specific preventive actions; synchronized shipped surfaces, documented the contract, bumped the pack to 0.30.0, refreshed seven-consumer candidate evidence, and passed make check.
+
+### Main Changes
+
+- Partitioned current actionable comments from historical evidence and added
+  deterministic signature normalization, category clustering, ranking, and
+  bounded evidence rendering.
+- Added category-specific preventive actions, `createdAt` collection, and
+  focused regressions for deduplication, ordering, truncation, and idempotence.
+- Synchronized the shipped script, skill, docs, generated catalog, manifests,
+  Trellis contract, and seven-consumer 0.30.0 candidate ledger.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b6b1e87` | feat: cluster review-learning signals |
+
+### Testing
+
+- `.venv/bin/python -m unittest tests.test_review_learnings tests.test_generated_parity`
+- `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-fleet-candidate-check.py` (all seven consumers passed)
+- `make check`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 182: PR review convergence for review-learning signal clustering
+
+**Date**: 2026-07-21
+**Task**: PR review convergence for review-learning signal clustering
+**Branch**: `codex/review-learning-signal-clustering`
+
+### Summary
+
+Addressed both GitHub Copilot review rounds for PR #214, verified the review-learning clustering fixes across the pack and consumer fleet, and reached a clean remote review state.
+
+### Main Changes
+
+- Expanded generated-surface classification to cover installed adapter roots, including GitHub agents, hooks, Copilot hooks, prompts, and the other shipped platform surfaces.
+- Aligned preventive actions with the bounded historical clusters rendered in the report, and replaced Session 181 review placeholders with concrete change and validation evidence.
+- Replied to and resolved all five Copilot review comments across two fix rounds; the third remote review produced no new comments.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7ac3d3b` | fix: address review feedback round 1 |
+| `4f34747` | fix: address review feedback round 2 |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_review_learnings (32 tests)
+- [OK] bash scripts/sd-ai-command-pack-review-full-check.sh
+- [OK] .venv/bin/python scripts/sd-ai-command-pack-fleet-candidate-check.py (7 consumers)
+- [OK] GitHub CI Result and all required checks passed on 4f34747
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
