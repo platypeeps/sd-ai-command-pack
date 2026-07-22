@@ -605,7 +605,7 @@ def _atomic_write_body(path: Path, body: str, mode: int) -> str | None:
             try:
                 temporary_path.unlink(missing_ok=True)
             except OSError:
-                # Cleanup is best-effort after replace or concurrent removal.
+                # Temporary-file cleanup is best-effort after the write attempt.
                 pass
     return None
 
