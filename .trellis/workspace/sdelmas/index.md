@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 184
-- **Last Active**: 2026-07-21
+- **Total Sessions**: 185
+- **Last Active**: 2026-07-22
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1280 | Active |
+| `journal-4.md` | ~1322 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 185 | 2026-07-22 | Require finish-work head before housekeeping merge | `c3d9988`, `7a6b988`, `2b2d6c1`, `1572f48` | `codex/enforce-housekeeping-finish-work-head` |
 | 184 | 2026-07-21 | Converge PR #215 fleet onboarding review | `8a5b32a`, `edc5d3f`, `52551d5` | `codex/add-sd-github-review-to-fleet` |
 | 183 | 2026-07-21 | Add sd-github-review to fleet | `cb4eeb2` | `codex/add-sd-github-review-to-fleet` |
 | 182 | 2026-07-21 | PR review convergence for review-learning signal clustering | `7ac3d3b`, `4f34747` | `codex/review-learning-signal-clustering` |
