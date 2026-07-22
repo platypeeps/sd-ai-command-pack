@@ -46,18 +46,21 @@ do not need duplicate tasks:
 
 ## Acceptance Criteria
 
-- [ ] All four child tasks have converged PRDs, technical designs, and
+- [x] All four child tasks have converged PRDs, technical designs, and
       implementation plans with evidence-backed acceptance criteria.
-- [ ] Existing current-thread and generated-surface protections are cited as
+- [x] Existing current-thread and generated-surface protections are cited as
       covered rather than duplicated.
-- [ ] Each child identifies its deterministic validation and template/source
+- [x] Each child identifies its deterministic validation and template/source
       synchronization obligations.
-- [ ] No child is activated automatically; implementation begins only after a
+- [x] No child is activated automatically; implementation begins only after a
       separate user decision.
-- [ ] Trellis task validation and the repository full-check pass for the
+- [x] Trellis task validation and the repository full-check pass for the
       planning-only change set.
 
 ## Notes
 
 - Parent task only; implementation belongs to its independently verifiable
   children.
+- Delivery evidence: metadata integrity merged in PR #208, journal validation
+  consistency in PR #209, the boundary contract matrix in PR #213, and signal
+  clustering in PR #214. All four child tasks are completed and archived.
