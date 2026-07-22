@@ -329,6 +329,31 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertIn("examples 2/5", rendered)
         self.assertNotIn("**historical** PR #206", rendered)
 
+    def test_cluster_signature_examples_use_safe_markdown_code_spans(self) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_signature_markdown",
+        )
+        cluster = learnings.HistoricalSignalCluster(
+            category=learnings.SIGNAL_CONTRACT_DOCUMENTATION,
+            count=3,
+            signature_count=2,
+            pr_numbers=(214,),
+            path_families=("docs",),
+            first_seen="2026-07-21",
+            last_seen="2026-07-22",
+            signature_examples=(("Use `docs/a.md` and **bold**.", 2), ("Plain.", 1)),
+            examples=(),
+        )
+
+        rendered = "\n".join(cluster.markdown_items())
+
+        self.assertIn(
+            "Representative signatures: `` Use `docs/a.md` and **bold**. `` (x2); "
+            "`Plain.` (x1)",
+            rendered,
+        )
+
     def test_cluster_rendering_is_deterministic_for_shuffled_input(self) -> None:
         learnings = self.load_module_from_path(
             PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",

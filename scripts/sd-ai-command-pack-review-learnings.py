@@ -359,7 +359,8 @@ class HistoricalSignalCluster:
         ]
         if self.signature_examples:
             rendered_signatures = "; ".join(
-                f"{_neutralize_managed_markers(_one_line(text, limit=110))} (x{count})"
+                f"{_markdown_code_span(_neutralize_managed_markers(_one_line(text, limit=110)))} "
+                f"(x{count})"
                 for text, count in self.signature_examples
             )
             lines.append(f"  - Representative signatures: {rendered_signatures}")
