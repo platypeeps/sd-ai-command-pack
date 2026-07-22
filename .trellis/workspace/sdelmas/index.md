@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 187
+- **Total Sessions**: 188
 - **Last Active**: 2026-07-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1401 | Active |
+| `journal-4.md` | ~1444 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 188 | 2026-07-22 | Release 0.30.3 task-context sibling validation | `2a00a18`, `699e1a2`, `f8fc5a3`, `1840f54`, `35d23f8` | `codex/release-0-30-3-task-context-sibling-check` |
 | 187 | 2026-07-22 | Release 0.30.2 corrective cleanup | `8d044d9`, `a78f51e`, `5665bf2`, `fe8f577` | `codex/rollout-housekeeping-finish-work-gate` |
 | 186 | 2026-07-22 | Close review-learning preventive-actions parent task | - | `codex/close-review-learning-preventive-actions` |
 | 185 | 2026-07-22 | Require finish-work head before housekeeping merge | `c3d9988`, `7a6b988`, `2b2d6c1`, `1572f48` | `codex/enforce-housekeeping-finish-work-head` |
