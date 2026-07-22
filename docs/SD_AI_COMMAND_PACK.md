@@ -565,16 +565,22 @@ placeholder or journal/index commit drift, generated `_example` seed rows in
 changed task context after a task enters implementation, completes, or is
 archived, edits to historical
 journal sessions relative to the review base, and large diffs that are likely
-to skip remote AI review. It also emits soft first-review warnings when changed
-code adds parser/structured-input, subprocess, filesystem/path, environment or
-global-state, or digest/integrity behavior. The warning names a conservative
-boundary-test matrix for author disposition before remote review. Diff sizing
-uses the complete review-base-to-working-tree state plus untracked files; large
-untracked files are counted as large without reading the entire file. The same
-byte limit bounds the first-review boundary-risk content scan; skipped
-oversized untracked code files are named in an explicit warning. Its
-authored-source threshold excludes installed pack/Trellis mirrors, Trellis task
-and workspace records, and known generated reports. A separate warning calls
+to skip remote AI review. It also emits a soft first-review warning when changed
+production code matches the stable `structured-input-types`,
+`subprocess-command`, `environment-global-state`, `path-filesystem`,
+`normalization-evidence`, or `diagnostic-redaction` categories. Every triggered
+category includes bounded good/base/failure regression prompts for author
+disposition; detection remains advisory and does not claim that focused
+coverage exists or is missing. Diff sizing uses the complete review-base-to-
+working-tree state plus untracked files; large untracked files are counted as
+large without reading the entire file. The same byte limit bounds the first-
+review boundary-risk content scan; skipped
+oversized untracked code files are named in an explicit warning. Conventional
+test and fixture paths, vendored/generated directories, installed payload
+mirrors, and non-workflow YAML remain outside the production-risk scan, while
+`.github/workflows/*.yml` and `.yaml` participate as executable configuration.
+The authored-source threshold excludes installed pack/Trellis mirrors, Trellis
+task and workspace records, and known generated reports. A separate warning calls
 out changes spanning more than one Trellis task directory. The task-context
 check inspects `implement.jsonl` and
 `check.jsonl`; a changed qualifying `task.json` also checks both sibling files.
@@ -589,7 +595,11 @@ symlinked task entries are ignored. Target repos can tune roots,
 path-reference prefixes, integration paths, optional paths, copied-template
 paths, and the `diffSizeWarningLines`, `largeFileWarningLines`,
 `sourceReviewWarningLines`, and `untrackedFileReadLimitBytes` warning thresholds
-with `.sd-ai-command-pack/review-preflight.json`. Repos that intentionally
+with `.sd-ai-command-pack/review-preflight.json`. The config's additive
+`reviewRiskCategorySignals` object maps a stable category ID to at most 20
+literal, nonblank signals of at most 120 characters each; invalid or unknown
+category configuration fails the preflight instead of silently changing the
+matrix. Repos that intentionally
 document service-user paths under `/home/<user>/` can add those service users to
 `allowedLinuxHomeUsers` in that config. The script requires Node 16.9 or newer
 and scans regular documentation files only; symlinked docs are skipped

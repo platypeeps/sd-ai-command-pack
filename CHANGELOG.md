@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.29.0 - 2026-07-21
+
+- Replace the generic first-review boundary warning with a deterministic,
+  configurable six-category regression matrix that emits bounded
+  good/base/failure prompts, scans executable workflow YAML, and excludes
+  test, fixture, generated, vendored, and installed-mirror paths.
+
 ## 0.28.0 - 2026-07-21
 
 - Make housekeeping create or refresh `.obsidian-kb`, preserve valid root
