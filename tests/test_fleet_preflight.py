@@ -154,7 +154,12 @@ class FleetPreflightTests(InstallTestCase):
             "platypeeps/se-ai-command-pack": (),
         }
         for name, consumer in by_slug.items():
-            self.assertEqual(consumer.candidate_prepare, expected_prepares[name])
+            expected_prepare = expected_prepares.get(name)
+            self.assertIsNotNone(
+                expected_prepare,
+                f"missing candidate preparation expectation for {name}",
+            )
+            self.assertEqual(consumer.candidate_prepare, expected_prepare)
 
         github_review = by_slug["platypeeps/sd-github-review"]
         self.assertEqual(github_review.path_hint, "~/repos/platypeeps/sd-github-review")
