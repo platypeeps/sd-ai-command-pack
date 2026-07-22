@@ -1660,7 +1660,7 @@ assert.deepEqual(
         (task / "implement.jsonl").write_text(seed, encoding="utf-8")
         (task / "check.jsonl").write_text(seed, encoding="utf-8")
         self.run_git(root, "add", "-A")
-        self.run_git(root, "commit", "-m", "baseline with active task")
+        self.run_git(root, "commit", "-m", "baseline with planning task")
 
         planning_record["description"] = "metadata only"
         task_json.write_text(json.dumps(planning_record) + "\n", encoding="utf-8")
@@ -1693,7 +1693,7 @@ assert.deepEqual(
         (task / "implement.jsonl").write_text(seed, encoding="utf-8")
         (task / "check.jsonl").write_text(seed, encoding="utf-8")
         self.run_git(root, "add", "-A")
-        self.run_git(root, "commit", "-m", "baseline with planning task")
+        self.run_git(root, "commit", "-m", "baseline with active task")
 
         task_json.write_text(
             json.dumps(self.trellis_task_record("active", status="in_progress"))
