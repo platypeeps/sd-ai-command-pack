@@ -20,7 +20,8 @@
   "subtasks": [],
   "children": [
     "07-22-release-0302-codeql-cleanup",
-    "07-22-release-0303-task-context-sibling-check"
+    "07-22-release-0303-task-context-sibling-check",
+    "07-22-release-0304-kb-ignore-dedup"
   ],
   "parent": null,
   "relatedFiles": [],

@@ -499,7 +499,9 @@ def merge_kb_ignore_block(current: str) -> tuple[str, bool]:
         replace_end = end_index + len(KB_IGNORE_BLOCK_END)
         if replace_end < len(current) and current[replace_end] == "\n":
             replace_end += 1
-        return current[:start_index] + block + current[replace_end:], True
+        prefix, _ = _remove_unmanaged_kb_entries(current[:start_index])
+        suffix, _ = _remove_unmanaged_kb_entries(current[replace_end:])
+        return prefix + block + suffix, True
 
     prefix, had_unmanaged_entry = _remove_unmanaged_kb_entries(current)
     if not prefix:

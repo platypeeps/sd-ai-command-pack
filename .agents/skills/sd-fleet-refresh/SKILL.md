@@ -156,9 +156,13 @@ finding, or housekeeping result to make telemetry succeed.
       preflight-printed `python3 install.py <repo> --force --platform ...`
       command from the pack checkout, then the printed install-audit
       command with its `--expected-platform` set.
-   4. Bracket `local-gate`. Run the consumer's full-check gate — its
+   4. Run every `candidatePrepare` command reported by preflight, in manifest
+      order and from the consumer checkout. These deterministic generators are
+      part of the real refresh shape, not candidate-validation-only setup.
+      Then bracket `local-gate` and run the consumer's full-check gate — its
       `make full-check` or the
-      consumer-documented equivalent. If the gate fails, do not open a PR:
+      consumer-documented equivalent. If preparation or the gate fails, do not
+      open a PR:
       record the consumer as skipped with the failure summary, leave the
       local branch for inspection, and continue to the next consumer.
    5. Bracket `commit-push`. Commit the refreshed files. Before pushing, run
