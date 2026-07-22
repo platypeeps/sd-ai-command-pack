@@ -26,7 +26,7 @@ Make changed qualifying task.json files trigger sibling implement/check scaffold
   legacy planning scaffolds.
 - [x] Focused review-preflight tests pass for template and installed behavior.
 - [x] Full-fleet candidate validation and `make check` pass for `0.30.3`.
-- [ ] The source PR is reviewed, thread-clean, green, and ready for the
+- [x] The source PR is reviewed, thread-clean, green, and ready for the
   housekeeping merge gate; the parent rollout verifies merge and tag before
   consumer mutation resumes.
 
