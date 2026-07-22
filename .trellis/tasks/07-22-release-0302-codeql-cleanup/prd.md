@@ -22,7 +22,9 @@ Publish the source-owned comment-only correction surfaced by rwbp-coordinator PR
   declared checks against the exact `0.30.2` payload.
 - [x] `make check` passes, including release, twin, provenance, coverage, lint,
   type, workflow, and candidate-ledger gates.
-- [ ] The source pull request is reviewed, merged, and tagged `v0.30.2`.
+- [x] The source pull request is reviewed, thread-clean, green, and ready for
+  the housekeeping merge gate. The parent rollout verifies the merge and
+  `v0.30.2` tag before any consumer mutation resumes.
 
 ## Notes
 
