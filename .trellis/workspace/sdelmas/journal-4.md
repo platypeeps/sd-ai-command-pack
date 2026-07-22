@@ -1122,3 +1122,36 @@ Created PR #213, resolved two Copilot findings with focused fixes, and converged
 ### Next Steps
 
 - None - task complete
+
+
+## Session 181: Cluster review-learning signals
+
+**Date**: 2026-07-21
+**Task**: Cluster review-learning signals
+**Branch**: `codex/review-learning-signal-clustering`
+
+### Summary
+
+Implemented deterministic historical review-comment deduplication and category clustering while preserving current unresolved comments; added bounded evidence and category-specific preventive actions; synchronized shipped surfaces, documented the contract, bumped the pack to 0.30.0, refreshed seven-consumer candidate evidence, and passed make check.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b6b1e87` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
