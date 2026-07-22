@@ -361,6 +361,40 @@ class ReviewLearningsTests(InstallTestCase):
             forward.index("**Reviewer/test harness quality**"),
         )
 
+    def test_signal_category_recognizes_installed_generated_surfaces(self) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_generated_surfaces",
+        )
+        paths = (
+            ".claude/commands/sd/review-learnings.md",
+            ".github/prompts/sd-review-learnings.prompt.md",
+            ".opencode/commands/sd-review-learnings.md",
+            ".gemini/commands/sd/review-learnings.toml",
+            ".agent/workflows/sd-review-learnings.md",
+            ".sd-ai-command-pack/manifest.json",
+            ".prism/rules.json",
+            "scripts/sd-ai-command-pack-review-learnings.py",
+            "scripts/sd_ai_command_pack_lib.py",
+            "docs/SD_AI_COMMAND_PACK.md",
+        )
+
+        for index, path in enumerate(paths, start=1):
+            with self.subTest(path=path):
+                comment = learnings.PullRequestComment(
+                    pr_number=index,
+                    pr_title="historical",
+                    pr_url=f"https://github.com/owner/repo/pull/{index}",
+                    path=path,
+                    body="Keep this installed surface aligned.",
+                    is_resolved=True,
+                    is_outdated=False,
+                )
+                self.assertEqual(
+                    learnings._signal_category(comment),
+                    learnings.SIGNAL_GENERATED_SURFACES,
+                )
+
     def test_cluster_output_reports_all_evidence_bounds(self) -> None:
         learnings = self.load_module_from_path(
             PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",

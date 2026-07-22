@@ -66,6 +66,38 @@ SIGNAL_CATEGORY_LABELS = {
     SIGNAL_OTHER: "Other recurring signals",
 }
 
+GENERATED_SIGNAL_PATH_PREFIXES = (
+    "templates/",
+    ".agents/",
+    ".commands/",
+    ".claude/",
+    ".cursor/",
+    ".gemini/",
+    ".github/prompts/",
+    ".opencode/",
+    ".agent/",
+    ".codebuddy/",
+    ".devin/",
+    ".factory/",
+    ".kilocode/",
+    ".kiro/",
+    ".pi/",
+    ".qoder/",
+    ".reasonix/",
+    ".trae/",
+    ".zcode/",
+    ".sd-ai-command-pack/",
+    ".prism/",
+    ".gito/",
+    "scripts/sd-ai-command-pack-",
+    "scripts/sd_ai_command_pack_",
+)
+GENERATED_SIGNAL_PATHS = {
+    ".github/copilot-instructions.md",
+    ".github/pull_request_template.md",
+    "docs/sd_ai_command_pack.md",
+}
+
 SIGNAL_CATEGORY_PATTERNS = (
     (
         SIGNAL_TASK_METADATA,
@@ -858,7 +890,7 @@ def _signal_category(comment: PullRequestComment) -> str:
     path = comment.path.replace("\\", "/").lower()
     if path.startswith(".trellis/tasks/"):
         return SIGNAL_TASK_METADATA
-    if path.startswith(("templates/", ".agents/", ".commands/")):
+    if path.startswith(GENERATED_SIGNAL_PATH_PREFIXES) or path in GENERATED_SIGNAL_PATHS:
         return SIGNAL_GENERATED_SURFACES
     if path.startswith("tests/"):
         return SIGNAL_REVIEWER_TEST_HARNESS

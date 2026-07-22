@@ -1136,17 +1136,25 @@ Implemented deterministic historical review-comment deduplication and category c
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Partitioned current actionable comments from historical evidence and added
+  deterministic signature normalization, category clustering, ranking, and
+  bounded evidence rendering.
+- Added category-specific preventive actions, `createdAt` collection, and
+  focused regressions for deduplication, ordering, truncation, and idempotence.
+- Synchronized the shipped script, skill, docs, generated catalog, manifests,
+  Trellis contract, and seven-consumer 0.30.0 candidate ledger.
 
 ### Git Commits
 
 | Hash | Message |
 |------|---------|
-| `b6b1e87` | (see git log) |
+| `b6b1e87` | feat: cluster review-learning signals |
 
 ### Testing
 
-- Validation was not recorded for this session.
+- `.venv/bin/python -m unittest tests.test_review_learnings tests.test_generated_parity`
+- `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-fleet-candidate-check.py` (all seven consumers passed)
+- `make check`
 
 ### Status
 
