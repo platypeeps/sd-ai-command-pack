@@ -20,14 +20,15 @@ Remove equivalent unmanaged Obsidian KB ignore rules when refreshing an existing
 
 ## Acceptance Criteria
 
-- [ ] Refreshing a managed ignore block with equivalent entries before or after
+- [x] Refreshing a managed ignore block with equivalent entries before or after
   it leaves exactly one canonical `/.obsidian-kb` rule.
-- [ ] Focused KB-helper and fleet-preflight tests cover the reproduced Mezmo
+- [x] Focused KB-helper and fleet-preflight tests cover the reproduced Mezmo
   failure mode and the printed preparation command.
-- [ ] `make sync`, the full-fleet candidate validator, and `make check` pass for
+- [x] `make sync`, the full-fleet candidate validator, and `make check` pass for
   release `0.30.4`.
-- [ ] The source PR is reviewed, green, thread-clean, finished, and merged
-  before the fleet resumes from a fresh `0.30.4` preflight.
+- [x] The source PR is reviewed, green, thread-clean, and ready for the
+  exact-head housekeeping merge gate; the parent rollout verifies merge and
+  tag identity before resuming from a fresh `0.30.4` preflight.
 
 ## Notes
 
