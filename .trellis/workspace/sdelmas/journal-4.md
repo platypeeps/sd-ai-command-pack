@@ -1082,3 +1082,43 @@ Added deterministic first-review boundary categories, evidence prompts, configur
 ### Next Steps
 
 - None - task complete
+
+
+## Session 180: Review PR #213 boundary contract regression matrix
+
+**Date**: 2026-07-21
+**Task**: Review PR #213 boundary contract regression matrix
+**Branch**: `codex/boundary-contract-regression-matrix`
+
+### Summary
+
+Created PR #213, resolved two Copilot findings with focused fixes, and converged deterministic local checks, fleet validation, review threads, and CI to green.
+
+### Main Changes
+
+- Trim configured boundary-risk signals so accepted whitespace-padded literals match consistently.
+- Restrict GitHub workflow classification to executable files directly under .github/workflows.
+- Replied to and resolved both Copilot review threads, then completed a clean third review round.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c378f2f` | fix: trim configured boundary signals |
+| `e1bb2fe` | fix: restrict workflow boundary scan |
+
+### Testing
+
+- [OK] make check
+- [OK] 77 focused review-preflight and parity tests
+- [OK] seven-consumer fleet candidate validation
+- [OK] PR #213 CI green and Copilot round 3 produced no new comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
