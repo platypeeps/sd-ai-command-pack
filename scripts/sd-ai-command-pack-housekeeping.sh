@@ -222,7 +222,7 @@ refresh_obsidian_kb() {
 
   section "Refresh Obsidian KB"
   if [ ! -r "$toolchain" ] || [ ! -r "$helper" ]; then
-    add_anomaly "Obsidian KB refresh failed because the pack helper is missing; restore the pack install, then run: bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-update-spec-kb.py"
+    add_anomaly "Obsidian KB refresh failed because a required pack helper is missing or unreadable; restore the pack install, then run: bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-update-spec-kb.py"
     return 1
   fi
   if [ "$DRY_RUN" -eq 1 ]; then
