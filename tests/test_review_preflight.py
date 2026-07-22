@@ -206,10 +206,19 @@ assert.deepEqual(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/07
   artifact: 'implement.jsonl',
   archived: true,
 });
+assert.deepEqual(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-06/00-bootstrap-guidelines/task.json'), {
+  taskDir: '.trellis/tasks/archive/2026-06/00-bootstrap-guidelines',
+  artifact: 'task.json',
+  archived: true,
+});
 assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/task.json'), null);
 assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/not-a-month/07-17-demo/task.json'), null);
 assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/not-dated/check.jsonl'), null);
-assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/not-dated/check.jsonl'), null);
+assert.deepEqual(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/not-dated/check.jsonl'), {
+  taskDir: '.trellis/tasks/archive/2026-07/not-dated',
+  artifact: 'check.jsonl',
+  archived: true,
+});
 assert.equal(parseTrellisTaskArtifactPath('.trellis/tasks/archive/2026-07/07-17-demo/prd.md'), null);
 assert.deepEqual(validateTrellisTaskMetadata({
   id: 'demo',
@@ -227,6 +236,14 @@ assert.deepEqual(validateTrellisTaskMetadata({
   branch: 'codex/demo',
   base_branch: 'main',
 }, '.trellis/tasks/07-17-demo', false), []);
+assert.deepEqual(validateTrellisTaskMetadata({
+  id: '00-bootstrap-guidelines',
+  name: '00-bootstrap-guidelines',
+  status: 'completed',
+  completedAt: '2026-06-25',
+  branch: null,
+  base_branch: 'main',
+}, '.trellis/tasks/archive/2026-06/00-bootstrap-guidelines', true), []);
 assert.deepEqual(validateTrellisTaskMetadata({
   id: 'demo',
   name: 'demo',
@@ -1471,10 +1488,7 @@ assert.deepEqual(
             "archive/not-a-month/07-21-present/implement.jsonl is not in a supported Trellis task layout",
             result.stdout,
         )
-        self.assertIn(
-            "archive/2026-07/not-dated/check.jsonl is not in a supported Trellis task layout",
-            result.stdout,
-        )
+        self.assertNotIn("archive/2026-07/not-dated/check.jsonl is not in", result.stdout)
         self.assertNotIn("07-20-deleted/check.jsonl is not in", result.stdout)
 
     def test_review_preflight_rejects_broken_symlink_misplaced_task_context(self) -> None:
