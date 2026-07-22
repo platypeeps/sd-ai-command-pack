@@ -1044,3 +1044,41 @@ Completed a fresh PR review cycle for #212, clarified missing-or-unreadable hous
 ### Next Steps
 
 - None - task complete
+
+
+## Session 179: Boundary contract regression matrix
+
+**Date**: 2026-07-21
+**Task**: Boundary contract regression matrix
+**Branch**: `codex/boundary-contract-regression-matrix`
+
+### Summary
+
+Added deterministic first-review boundary categories, evidence prompts, configuration, and production-path filtering with synchronized documentation and release metadata.
+
+### Main Changes
+
+- Added six stable boundary-risk category IDs with deterministic good, base, and failure regression prompts.
+- Added bounded repository-specific signals, workflow YAML classification, and production-path exclusions.
+- Updated tests, specifications, review guidance, generated mirrors, candidate validation, and release metadata for 0.29.0.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8eb38b2` | feat: add review boundary regression matrix |
+
+### Testing
+
+- [OK] make check
+- [OK] .venv/bin/python -m unittest tests.test_review_preflight tests.test_generated_parity (77 tests)
+- [OK] seven-consumer fleet candidate validation
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
