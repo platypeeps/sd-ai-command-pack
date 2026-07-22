@@ -110,7 +110,13 @@ class ClockReading:
 
 
 def system_reading() -> ClockReading:
-    return ClockReading(wall_ns=time.time_ns(), monotonic_ns=time.monotonic_ns())
+    clock_gettime_ns = getattr(time, "clock_gettime_ns", None)
+    clock_monotonic = getattr(time, "CLOCK_MONOTONIC", None)
+    if callable(clock_gettime_ns) and isinstance(clock_monotonic, int):
+        monotonic_ns = clock_gettime_ns(clock_monotonic)
+    else:
+        monotonic_ns = time.monotonic_ns()
+    return ClockReading(wall_ns=time.time_ns(), monotonic_ns=monotonic_ns)
 
 
 def _strict_fields(value: Mapping[str, Any], allowed: frozenset[str], label: str) -> None:

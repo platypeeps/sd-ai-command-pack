@@ -1010,9 +1010,11 @@ owns or changes their outcomes.
   remote URL, command output, review body, credential, private key, or arbitrary
   environment value. Reasons are bounded and reject control characters,
   absolute/home-relative paths, remote URLs, and common secret forms.
-- Stage elapsed time uses monotonic nanoseconds and rejects a backwards clock.
-  Wall-clock nanoseconds preserve boundaries and calculate interval union,
-  critical path, and reviewer/CI overlap without double-counting concurrency.
+- Stage elapsed time uses process-independent platform monotonic nanoseconds
+  when available, falls back to the runtime monotonic clock on platforms
+  without that API, and rejects a backwards clock. Wall-clock nanoseconds
+  preserve boundaries and calculate interval union, critical path, and
+  reviewer/CI overlap without double-counting concurrency.
 - `preflight` is fleet-scoped; every other stage is consumer-scoped. Reviewer
   and CI waits may be active together. Retry count derives from attempts after
   the first rather than a second persisted counter.
@@ -1051,9 +1053,10 @@ owns or changes their outcomes.
 
 ### 6. Tests Required
 
-- Fake-clock coverage for init/resume, active and completed attempts, retries,
-  skips/failures, overlap, interval union, critical path, slowest rows, partial
-  report, completion, and backwards monotonic time.
+- Fake-clock coverage for process-independent monotonic-clock selection and
+  fallback, init/resume, active and completed attempts, retries, skips/failures,
+  overlap, interval union, critical path, slowest rows, partial report,
+  completion, and backwards monotonic time.
 - Strict schema/privacy matrices plus missing/malformed/symlinked state,
   private permissions, atomic-write errors, live/stale locks, and stable CLI
   JSON/human errors.
