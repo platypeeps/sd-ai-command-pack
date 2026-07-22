@@ -6,8 +6,8 @@ an unattended rollout system.
 
 The schema-version-4 manifest owns rollout order and cohort policy explicitly.
 The current fast-first order is rwbp-coordinator, loadsmith, hoa-manager,
-rwbp-website, mezmo_benchmark, se-ai-command-pack, then
-anomaly-metric-creator. The first three are sequential canaries. The next three
+rwbp-website, mezmo_benchmark, se-ai-command-pack, sd-github-review, then
+anomaly-metric-creator. The first three are sequential canaries. The next four
 form a bounded post-canary cohort with concurrency two. AMC remains a solo
 final cohort because its CI feedback loop is materially slower.
 
@@ -56,8 +56,10 @@ read-only. This keeps candidate validation representative of the real rollout
 without weakening or hiding mutation inside the consumer gate.
 
 The current six map-owning consumers run `bash scripts/update_repomix` during
-preparation. `se-ai-command-pack` explicitly declares no preparation because
-it owns neither that generator nor `docs/repomix-map.md`.
+preparation. `sd-github-review` runs `npm ci` so its locked YAML dependency is
+available to its tests and metadata validator. `se-ai-command-pack` explicitly
+declares no preparation because it owns neither that generator nor
+`docs/repomix-map.md`.
 The validator supplies disposable npm, uv, and Python bytecode cache paths to
 these commands so local cache permissions cannot make a candidate fail.
 
