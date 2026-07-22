@@ -85,6 +85,11 @@ a separate CI-only interpretation of shipped-payload paths.
      checks. Preparation may mutate only the disposable clone; candidate checks
      remain read-only. Repositories without a preparation step declare `[]`
      rather than relying on auto-detection.
+   - When onboarding a consumer, derive its declarations from the repository's
+     clean-clone CI contract. Put deterministic prerequisites such as a locked
+     dependency install in `candidatePrepare`, then declare the repository's
+     CI-equivalent read-only gates in `candidateChecks`; do not infer or inherit
+     another consumer's preparation command.
    - Candidate clone commands place `--` before the discovered origin URL so a
      malformed local remote beginning with `-` cannot inject Git options.
    - Candidate subprocess environments prepend the selected Python directory
@@ -119,8 +124,10 @@ a separate CI-only interpretation of shipped-payload paths.
    without shell interpolation, disposable origin clones, timeout and command
    failures, full-fleet continuation, atomic ledger preservation, every ledger
    drift dimension, source-only install-audit boundaries, full-check rejection,
-   and exact-commit tag-planner rejection. Keep per-file coverage floors for
-   the validator and shared fleet library at 90% or higher.
+   and exact-commit tag-planner rejection. For each newly onboarded consumer,
+   assert its exact identity, platforms, priority, cohort, timeout, preparation,
+   and checks in the checked-in inventory regression. Keep per-file coverage
+   floors for the validator and shared fleet library at 90% or higher.
 7. **Wrong vs Correct**:
 
    ```text

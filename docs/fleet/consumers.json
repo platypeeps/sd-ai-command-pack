@@ -13,7 +13,7 @@
         "name": "post-canary",
         "strategy": "bounded-parallel",
         "maxConcurrency": 2,
-        "consumers": ["rwbp-website", "mezmo_benchmark", "se-ai-command-pack"]
+        "consumers": ["rwbp-website", "mezmo_benchmark", "se-ai-command-pack", "sd-github-review"]
       },
       {
         "name": "final",
@@ -85,6 +85,20 @@
       "candidateTimeoutSeconds": 180,
       "candidatePrepare": [],
       "candidateChecks": [["bash", "scripts/sd-ai-command-pack-housekeeping.sh", "--self-test"]]
+    },
+    {
+      "name": "sd-github-review",
+      "github": "platypeeps/sd-github-review",
+      "pathHint": "~/repos/platypeeps/sd-github-review",
+      "platforms": ["claude", "gemini", "github", "opencode"],
+      "rolloutPriority": 70,
+      "candidateTimeoutSeconds": 180,
+      "candidatePrepare": [["npm", "ci"]],
+      "candidateChecks": [
+        ["npm", "test"],
+        ["npm", "run", "check"],
+        ["npm", "run", "validate:metadata"]
+      ]
     },
     {
       "name": "anomaly-metric-creator",

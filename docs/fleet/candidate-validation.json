@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-22T04:16:23Z",
+  "validatedAt": "2026-07-22T04:50:27Z",
   "packVersion": "0.30.0",
   "payloadDigest": "sha256:679386f690c285f0c8a090c999491b6dc661aa21bdff407c3b69a10a7a1f491c",
-  "fleetManifestDigest": "sha256:bf3d4349f6150bf6d2bb1ec03604e50b54596ca024b96363aa7cc5cc7393458f",
+  "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
       "name": "rwbp-coordinator",
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "51d6e840f60edc539eae8644272d28cc1ef2a27e",
+      "baseCommit": "13b42b373cf1593f4cdd060ed5facac6288cdac5",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -115,6 +115,34 @@
           "bash",
           "scripts/sd-ai-command-pack-housekeeping.sh",
           "--self-test"
+        ]
+      ]
+    },
+    {
+      "name": "sd-github-review",
+      "github": "platypeeps/sd-github-review",
+      "baseCommit": "da848af2ccced0c9192b1c0c0041ff0d3f038482",
+      "status": "passed",
+      "prepares": [
+        [
+          "npm",
+          "ci"
+        ]
+      ],
+      "checks": [
+        [
+          "npm",
+          "test"
+        ],
+        [
+          "npm",
+          "run",
+          "check"
+        ],
+        [
+          "npm",
+          "run",
+          "validate:metadata"
         ]
       ]
     },

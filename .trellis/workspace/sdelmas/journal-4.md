@@ -1203,3 +1203,81 @@ Addressed both GitHub Copilot review rounds for PR #214, verified the review-lea
 ### Next Steps
 
 - None - task complete
+
+
+## Session 183: Add sd-github-review to fleet
+
+**Date**: 2026-07-21
+**Task**: Add sd-github-review to fleet
+**Branch**: `codex/add-sd-github-review-to-fleet`
+
+### Summary
+
+Added sd-github-review as the eighth fleet consumer at post-canary priority 70 with npm clean-clone preparation and three repository-owned candidate gates; updated inventory tests, operator docs, fleet onboarding spec, and regenerated the all-pass candidate ledger after targeted and full disposable-clone validation.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cb4eeb2` | (see git log) |
+
+### Testing
+
+- `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-fleet-candidate-check.py --consumer sd-github-review`
+- `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-fleet-candidate-check.py`
+- `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-fleet-candidate-check.py --check-ledger`
+- `.venv/bin/python -m unittest tests.test_fleet_preflight`
+- `make check`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 184: Converge PR #215 fleet onboarding review
+
+**Date**: 2026-07-21
+**Task**: Converge PR #215 fleet onboarding review
+**Branch**: `codex/add-sd-github-review-to-fleet`
+
+### Summary
+
+Published PR #215, corrected deterministic review bookkeeping, addressed three Copilot findings across two fix rounds, and reached a clean third review with green CI.
+
+### Main Changes
+
+- Recorded concrete validation evidence for fleet onboarding session 183.
+- Made fleet preparation expectation drift fail with an explicit assertion instead of a raw KeyError.
+- Kept README fleet wording count-agnostic while retaining exact rollout details in the fleet runbook.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8a5b32a` | fix: record fleet validation evidence |
+| `edc5d3f` | fix: address review feedback round 1 |
+| `52551d5` | fix: address review feedback round 2 |
+
+### Testing
+
+- [OK] Focused fleet preflight unit tests passed.
+- [OK] Deterministic PR full-check passed with Prism and Gito disabled after each fix.
+- [OK] Copilot round 3 produced no new comments; all prior threads resolved.
+- [OK] GitHub CI matrix and aggregate CI Result passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

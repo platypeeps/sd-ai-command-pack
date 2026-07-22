@@ -130,6 +130,7 @@ class FleetPreflightTests(InstallTestCase):
                 "platypeeps/loadsmith",
                 "platypeeps/rwbp-coordinator",
                 "platypeeps/rwbp-website",
+                "platypeeps/sd-github-review",
                 "platypeeps/se-ai-command-pack",
                 "answerbook/mezmo_benchmark",
             },
@@ -142,11 +143,39 @@ class FleetPreflightTests(InstallTestCase):
             self.assertIn("opencode", consumer.platforms)
 
         expected_map_prepare = (("bash", "scripts/update_repomix"),)
+        expected_prepares = {
+            "answerbook/mezmo_benchmark": expected_map_prepare,
+            "platypeeps/anomaly-metric-creator": expected_map_prepare,
+            "platypeeps/hoa-manager": expected_map_prepare,
+            "platypeeps/loadsmith": expected_map_prepare,
+            "platypeeps/rwbp-coordinator": expected_map_prepare,
+            "platypeeps/rwbp-website": expected_map_prepare,
+            "platypeeps/sd-github-review": (("npm", "ci"),),
+            "platypeeps/se-ai-command-pack": (),
+        }
         for name, consumer in by_slug.items():
-            if name == "platypeeps/se-ai-command-pack":
-                self.assertEqual(consumer.candidate_prepare, ())
-            else:
-                self.assertEqual(consumer.candidate_prepare, expected_map_prepare)
+            expected_prepare = expected_prepares.get(name)
+            self.assertIsNotNone(
+                expected_prepare,
+                f"missing candidate preparation expectation for {name}",
+            )
+            self.assertEqual(consumer.candidate_prepare, expected_prepare)
+
+        github_review = by_slug["platypeeps/sd-github-review"]
+        self.assertEqual(github_review.path_hint, "~/repos/platypeeps/sd-github-review")
+        self.assertEqual(
+            github_review.platforms,
+            ("claude", "gemini", "github", "opencode"),
+        )
+        self.assertEqual(github_review.candidate_timeout_seconds, 180)
+        self.assertEqual(
+            github_review.candidate_checks,
+            (
+                ("npm", "test"),
+                ("npm", "run", "check"),
+                ("npm", "run", "validate:metadata"),
+            ),
+        )
 
         self.assertEqual(
             [consumer.name for consumer in consumers],
@@ -157,13 +186,37 @@ class FleetPreflightTests(InstallTestCase):
                 "rwbp-website",
                 "mezmo_benchmark",
                 "se-ai-command-pack",
+                "sd-github-review",
                 "anomaly-metric-creator",
             ],
         )
         self.assertEqual(
             [consumer.rollout_priority for consumer in consumers],
-            [10, 20, 30, 40, 50, 60, 90],
+            [10, 20, 30, 40, 50, 60, 70, 90],
         )
+
+        rollout_policy = fleet.fleet_lib.load_fleet_rollout_policy(
+            PACK_ROOT / "docs/fleet/consumers.json"
+        )
+        self.assertEqual(
+            [cohort.name for cohort in rollout_policy.cohorts],
+            ["canary", "post-canary", "final"],
+        )
+        self.assertEqual(
+            [cohort.consumers for cohort in rollout_policy.cohorts],
+            [
+                ("rwbp-coordinator", "loadsmith", "hoa-manager"),
+                (
+                    "rwbp-website",
+                    "mezmo_benchmark",
+                    "se-ai-command-pack",
+                    "sd-github-review",
+                ),
+                ("anomaly-metric-creator",),
+            ],
+        )
+        self.assertEqual(rollout_policy.cohorts[1].max_concurrency, 2)
+        self.assertEqual(rollout_policy.cohorts[-1].strategy, "sequential")
 
         manifest_text = (PACK_ROOT / "docs/fleet/consumers.json").read_text(
             encoding="utf-8"
