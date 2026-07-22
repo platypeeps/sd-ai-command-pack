@@ -368,6 +368,9 @@ class ReviewLearningsTests(InstallTestCase):
         )
         paths = (
             ".claude/commands/sd/review-learnings.md",
+            ".github/agents/trellis-check.agent.md",
+            ".github/copilot/hooks/trellis-context.js",
+            ".github/hooks/trellis.json",
             ".github/prompts/sd-review-learnings.prompt.md",
             ".opencode/commands/sd-review-learnings.md",
             ".gemini/commands/sd/review-learnings.toml",
@@ -437,6 +440,8 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertIn("signatures 4/9", rendered)
         self.assertIn("PRs 8/9", rendered)
         self.assertIn("examples 3/9", rendered)
+        actions = rendered.split("### Suggested Preventive Actions", 1)[1]
+        self.assertNotIn("**Task metadata**", actions)
 
     def test_preventive_actions_require_a_detected_recurring_category(self) -> None:
         learnings = self.load_module_from_path(

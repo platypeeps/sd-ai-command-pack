@@ -73,6 +73,9 @@ GENERATED_SIGNAL_PATH_PREFIXES = (
     ".claude/",
     ".cursor/",
     ".gemini/",
+    ".github/agents/",
+    ".github/copilot/",
+    ".github/hooks/",
     ".github/prompts/",
     ".opencode/",
     ".agent/",
@@ -1326,8 +1329,8 @@ def render_managed_block(findings: list[Finding], comments: list[PullRequestComm
         lines.append("- No current, non-outdated unresolved comments were included.")
 
     lines.extend(["", "#### Historical Signal Clusters"])
+    shown_clusters = clusters[:MAX_HISTORICAL_CLUSTERS]
     if clusters:
-        shown_clusters = clusters[:MAX_HISTORICAL_CLUSTERS]
         for cluster in shown_clusters:
             lines.extend(cluster.markdown_items())
         if len(clusters) > len(shown_clusters):
@@ -1339,7 +1342,7 @@ def render_managed_block(findings: list[Finding], comments: list[PullRequestComm
         lines.append("- No historical Copilot review comments were included.")
 
     lines.extend(["", "### Suggested Preventive Actions"])
-    actions = preventive_actions(clusters)
+    actions = preventive_actions(shown_clusters)
     if actions:
         lines.extend(actions)
     else:
