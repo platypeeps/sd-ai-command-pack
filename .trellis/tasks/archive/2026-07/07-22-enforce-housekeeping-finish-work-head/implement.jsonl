@@ -1,0 +1,3 @@
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Owns shared-skill and generated platform adapter synchronization."}
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Owns payload versioning, template mirrors, and release validation."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Guides explicit executable contracts across lifecycle layers."}

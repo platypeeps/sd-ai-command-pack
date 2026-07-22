@@ -1281,3 +1281,46 @@ Published PR #215, corrected deterministic review bookkeeping, addressed three C
 ### Next Steps
 
 - None - task complete
+
+
+## Session 185: Require finish-work head before housekeeping merge
+
+**Date**: 2026-07-22
+**Task**: Require finish-work head before housekeeping merge
+**Branch**: `codex/enforce-housekeeping-finish-work-head`
+
+### Summary
+
+Delivered and reviewed an exact-head finish-work attestation gate for housekeeping auto-merge, including locale-independent OID validation and cross-platform regression coverage.
+
+### Main Changes
+
+- Require --finish-work-head to match the local, remote, and PR head before housekeeping can auto-merge an open PR.
+- Align shipped templates, installed mirrors, adapters, documentation, release metadata, and candidate evidence for version 0.30.1.
+- Reject uppercase commit OIDs with locale-independent validation after macOS Bash 3.2 exposed range-matching behavior.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c3d9988` | fix: require finish-work head before housekeeping merge |
+| `7a6b988` | chore: link task to upstream PR |
+| `2b2d6c1` | fix: reject uppercase finish-work head attestations |
+| `1572f48` | fix: make OID validation locale-independent |
+
+### Testing
+
+- [OK] bash scripts/sd-ai-command-pack-review-full-check.sh
+- [OK] .venv/bin/python -m unittest tests.test_housekeeping (28 passed)
+- [OK] /bin/bash 3.2 uppercase OID regression probe
+- [OK] fleet candidate validation (8/8 consumers passed)
+- [OK] GitHub CI including macOS 3.13; Copilot round 3 clean; zero unresolved review threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

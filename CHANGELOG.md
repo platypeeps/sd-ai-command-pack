@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.30.1 - 2026-07-22
+
+- Require an exact current-head finish-work attestation before housekeeping can
+  auto-merge an open PR, while preserving cleanup-only and already-merged
+  operation without the attestation.
+
 ## 0.30.0 - 2026-07-21
 
 - Keep current unresolved review comments individually actionable while

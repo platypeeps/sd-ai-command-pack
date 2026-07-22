@@ -121,6 +121,28 @@ After implementation:
 - [ ] Checked that derived state points back to the source event identifier
       (`seq`, `id`, `version`) instead of inventing a second cursor
 
+## Executable Lifecycle Handoffs
+
+Natural-language orchestration and executable safety gates form a cross-layer
+contract. When one skill or workflow must complete a lifecycle step before a
+script can mutate external state, prose alone is not enforcement.
+
+- [ ] Define an explicit handoff value owned by the prerequisite step.
+- [ ] Validate the handoff in the executable immediately before the protected
+      side effect.
+- [ ] Fail closed with an actionable recovery message when it is absent.
+- [ ] Keep cleanup and inspection paths available when the protected side
+      effect is no longer relevant.
+- [ ] Test both the valid handoff and the missing-handoff negative path from a
+      layer that will survive generated or vendored-file refreshes.
+
+**Real-world example**: `sd-housekeeping` required an agent to run finish-work
+before merging, but its shell merge gate had no evidence of that prerequisite.
+Two delivery PRs merged before task archival and needed separate bookkeeping
+PRs. The fix added an explicit exact-head post-finish attestation at the shell
+boundary and a repository-owned regression outside the installed pack
+footprint.
+
 ---
 
 ## Cross-Platform Template Consistency

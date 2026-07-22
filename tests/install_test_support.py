@@ -970,11 +970,16 @@ class InstallTestCase(unittest.TestCase):
     ) -> tuple[subprocess.CompletedProcess[str], Path]:
         if shutil.which("jq") is None:
             self.skipTest("jq is not available on PATH")
-        repo, _, stub_bin, _ = self.make_housekeeping_repo()
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
         marker = repo.parent / "merged-pr"
         self.write_auto_merge_gh_stub(stub_bin, marker, rollup_json=rollup_json)
         result = subprocess.run(
-            ["bash", str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")],
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--finish-work-head",
+                head_oid,
+            ],
             cwd=repo,
             env={
                 **os.environ,
