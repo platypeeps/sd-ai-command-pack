@@ -524,7 +524,7 @@ run_sd_ai_command_pack_kb_freshness_check() {
     return 0
   fi
 
-  if [ "$mode" != "required" ] && [ ! -d ".obsidian-kb" ]; then
+  if [ "$mode" != "required" ] && [ ! -e ".obsidian-kb" ] && [ ! -L ".obsidian-kb" ]; then
     warn "No generated .obsidian-kb folder; skipping Obsidian KB freshness check. Run 'python3 $script' to generate it."
     return 0
   fi

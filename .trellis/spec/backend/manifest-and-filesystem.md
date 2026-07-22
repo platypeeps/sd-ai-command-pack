@@ -775,7 +775,8 @@ tracked `.gitignore`.
 
 1. Scope and trigger: use this contract whenever changing
    `scripts/sd-ai-command-pack-update-spec-kb.py`, the matching template script,
-   or documentation for `.obsidian-kb/` generation.
+   the full-check KB freshness lane, or documentation for `.obsidian-kb/`
+   generation.
 2. Signatures: `python3 scripts/sd-ai-command-pack-update-spec-kb.py`,
    `--dry-run`, and `--check` are the stable entry points. The normal command
    writes `.obsidian-kb/`, the managed ignore block,
@@ -790,9 +791,12 @@ tracked `.gitignore`.
    by normal refresh, not by `--dry-run`, `--check`, or guarded
    `--if-present`. A broken root symlink, a root symlink to a non-directory, or
    an occupied non-directory root fails before KB or ignore writes. The
-   helper copies selected repository knowledge files into visible semantic
-   category paths under `.obsidian-kb/` instead of mirroring hidden source
-   folders, writes dashboard and LLM overview links to those copied paths,
+   full-check freshness lane in auto mode skips only when the root is truly
+   absent; broken root symlinks and occupied non-directory roots must reach the
+   helper so its validation failure remains visible. The helper copies selected
+   repository knowledge files into visible semantic category paths under
+   `.obsidian-kb/` instead of mirroring hidden source folders, writes dashboard
+   and LLM overview links to those copied paths,
    includes one-line document descriptions in the dashboard, includes a GitHub
    repository link when `origin` is a GitHub remote, groups generated index
    links by semantic category rather than source folder name, normalizes
@@ -824,8 +828,9 @@ tracked `.gitignore`.
 6. Tests required: cover fresh copy generation, dry-run no writes, check mode
    stale detection and acceptance after refresh, local-only exclude behavior,
    real-root and valid root-directory-symlink refreshes, root-symlink
-   preservation, anchored ignore behavior for both root forms, broken root
-   symlinks, root symlinks to files, and occupied root files before writes,
+   preservation, anchored ignore behavior for both root forms, full-check auto
+   mode for truly absent and invalid existing roots, broken root symlinks, root
+   symlinks to files, and occupied root files before writes,
    custom dashboard conflicts, unmarked gitignore entry migration, invalid
    gitignore byte preservation, and replacement of legacy generated symlinks
    with real file copies, including nested existing symlink trees from the old

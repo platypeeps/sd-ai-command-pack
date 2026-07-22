@@ -1179,6 +1179,42 @@ class FullCheckTests(InstallTestCase):
             result.stdout,
         )
 
+    def test_full_check_kb_freshness_rejects_invalid_existing_roots(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        cases = (
+            ("occupied-file", ".obsidian-kb is not a directory"),
+            ("broken-symlink", ".obsidian-kb is a broken symlink"),
+        )
+        for case, expected in cases:
+            with self.subTest(case=case):
+                root = self.make_repo()
+                result = self.run_install(root)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                kb_root = root / ".obsidian-kb"
+                if case == "occupied-file":
+                    kb_root.write_text("occupied\n", encoding="utf-8")
+                else:
+                    try:
+                        kb_root.symlink_to(
+                            root / "missing-kb-target", target_is_directory=True
+                        )
+                    except OSError as error:
+                        self.skipTest(f"symlinks are not available: {error}")
+
+                result = self._run_full_check_kb_lane(root)
+
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn(
+                    "SD AI command pack Obsidian KB freshness check",
+                    result.stdout,
+                )
+                self.assertIn(expected, result.stdout)
+                self.assertNotIn(
+                    "No generated .obsidian-kb folder; skipping", result.stdout
+                )
+
     def test_full_check_kb_freshness_passes_repairs_and_stays_strict(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
