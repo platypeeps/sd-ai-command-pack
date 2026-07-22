@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.30.4 - 2026-07-22
+
+- Remove equivalent unmanaged Obsidian KB ignore rules when refreshing an
+  existing managed block, and make live fleet refreshes run each consumer's
+  declared deterministic preparation commands before the local gate.
+
 ## 0.30.3 - 2026-07-22
 
 - Make changed non-planning Trellis task metadata trigger sibling context

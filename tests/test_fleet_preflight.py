@@ -93,7 +93,7 @@ class FleetPreflightTests(InstallTestCase):
                             "platforms": ["claude", "github"],
                             "rolloutPriority": 20,
                             "candidateTimeoutSeconds": 60,
-                            "candidatePrepare": [],
+                            "candidatePrepare": [["bash", "prepare-outdated.sh"]],
                             "candidateChecks": [["bash", "check.sh"]],
                         },
                         {
@@ -252,6 +252,36 @@ class FleetPreflightTests(InstallTestCase):
         self.assertIn("--expected-platform claude", fleet.audit_command(results["outdated"]))
         self.assertIn("--platform claude", fleet.install_command(results["outdated"]))
 
+    def test_prepare_commands_are_scoped_to_the_consumer_checkout(self) -> None:
+        fleet = self.load_fleet_module()
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-fleet-preflight-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name) / "repo with spaces"
+        root.mkdir()
+        consumer = fleet.FleetConsumer(
+            name="prepared",
+            github="example/prepared",
+            path_hint=str(root),
+            platforms=("claude",),
+            rollout_priority=10,
+            candidate_timeout_seconds=60,
+            candidate_prepare=(("bash", "scripts/update map"),),
+            candidate_checks=(),
+        )
+        result = fleet.FleetPreflightResult(
+            consumer=consumer,
+            repo_path=root,
+            status="refresh-needed",
+            installed_version="0.7.0",
+            target_version="0.8.5",
+            detail="refresh needed",
+        )
+
+        self.assertEqual(
+            fleet.prepare_commands(result),
+            [f"(cd '{root}' && bash 'scripts/update map')"],
+        )
+
     def test_main_prints_json_output(self) -> None:
         fleet = self.load_fleet_module()
         tempdir = tempfile.TemporaryDirectory(prefix="sd-fleet-preflight-")
@@ -363,6 +393,10 @@ class FleetPreflightTests(InstallTestCase):
         self.assertIn("--platform claude", text_output)
         self.assertIn(
             "audit:   python3 scripts/sd-ai-command-pack-install-audit.py",
+            text_output,
+        )
+        self.assertIn(
+            f"prepare[1]: (cd {root / 'outdated'} && bash prepare-outdated.sh)",
             text_output,
         )
 
