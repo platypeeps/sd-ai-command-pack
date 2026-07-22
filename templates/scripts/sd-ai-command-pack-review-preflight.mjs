@@ -979,7 +979,8 @@ function checkTrellisTaskContextSeeds() {
     }
     if (
       isPlainObject(record) &&
-      ['in_progress', 'review', 'completed'].includes(record.status)
+      TRELLIS_TASK_STATUSES.has(record.status) &&
+      record.status !== 'planning'
     ) {
       contextFiles.add(`${artifact.taskDir}/implement.jsonl`);
       contextFiles.add(`${artifact.taskDir}/check.jsonl`);
