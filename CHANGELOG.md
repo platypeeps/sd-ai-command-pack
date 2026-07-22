@@ -2,8 +2,8 @@
 
 ## 0.30.5 - 2026-07-22
 
-- Make the missing finish-work attestation diagnostic resolve the current HEAD
-  after finish-work instead of suggesting the stale pre-finish commit.
+- Make the missing finish-work attestation diagnostic resolve the tracked local
+  branch after finish-work instead of suggesting the stale pre-finish commit.
 
 ## 0.30.4 - 2026-07-22
 

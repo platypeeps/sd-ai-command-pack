@@ -1543,11 +1543,11 @@ Rolled out immutable sd-ai-command-pack 0.30.4 across the configured fleet: four
 
 ### Summary
 
-Published the 0.30.5 corrective release candidate so housekeeping resolves finish-work attestation from the current post-finish HEAD instead of embedding a stale commit.
+Published the 0.30.5 corrective release candidate so housekeeping resolves finish-work attestation from the tracked local branch after finish-work instead of embedding a stale commit.
 
 ### Main Changes
 
-- Changed the missing-attestation hint to resolve HEAD when the rerun command executes.
+- Changed the missing-attestation hint to resolve the tracked local branch when the rerun command executes, independent of ambient HEAD.
 - Added regression coverage, bumped the pack to 0.30.5, synchronized generated mirrors, and refreshed fleet evidence.
 
 
@@ -1561,7 +1561,7 @@ Published the 0.30.5 corrective release candidate so housekeeping resolves finis
 
 - [OK] make check
 - [OK] all eight fleet candidate validations
-- [OK] Copilot reviewed all nine PR files with zero comments
+- [OK] Copilot review feedback covered the detached or different-branch rerun case
 
 ### Status
 
