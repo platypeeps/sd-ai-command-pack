@@ -107,13 +107,14 @@ that exercise the generic JavaScript review preflight.
   completed, or archived. A changed `task.json` does not pull unchanged sibling
   context into scope. Parsed records with an own `_example` key fail; empty and
   grounded context pass. Present changed context artifacts outside the active or
-  dated archive layout fail even when the directory entry is a broken symlink,
+  month-bucketed archive layout fail even when the directory entry is a broken symlink;
+  archive task directory names remain unrestricted for legacy Trellis compatibility,
   deleted old paths during moves are ignored, and untouched historical and
   symlinked valid-layout context files remain outside the check.
 - Diff-scoped Trellis task metadata checks inspect every added or modified
   `.trellis/tasks/**/task.json` without migrating untouched history. Records
-  must use the active or dated archive layout; keep `id`, `name`, and the dated
-  directory suffix aligned; require `status` to be `planning`, `in_progress`,
+  must use the active or month-bucketed archive layout; keep `id`, `name`, and
+  dated directory suffixes aligned; require `status` to be `planning`, `in_progress`,
   `review`, or `completed`; keep lifecycle timestamps coherent with that
   status; keep `base_branch` non-empty, an optional `branch` distinct from its
   base, and parent/child links present and reciprocal. Stacked branch bases are valid.

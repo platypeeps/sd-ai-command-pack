@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.30.5 - 2026-07-22
+
+- Accept legacy task directory names inside month-bucketed Trellis archives
+  while keeping active task directories date-prefixed.
+
 ## 0.30.4 - 2026-07-22
 
 - Remove equivalent unmanaged Obsidian KB ignore rules when refreshing an
