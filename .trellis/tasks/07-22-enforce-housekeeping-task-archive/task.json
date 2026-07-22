@@ -16,7 +16,7 @@
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
-  "pr_url": null,
+  "pr_url": "https://github.com/platypeeps/sd-ai-command-pack/pull/221",
   "subtasks": [],
   "children": [
     "07-22-release-0302-codeql-cleanup",
