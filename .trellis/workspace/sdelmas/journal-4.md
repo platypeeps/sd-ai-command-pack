@@ -1445,3 +1445,45 @@ Closed the shared review-preflight correctness gap, published a validated 0.30.3
 ### Next Steps
 
 - None - task complete
+
+
+## Session 189: Release 0.30.4 KB ignore deduplication
+
+**Date**: 2026-07-22
+**Task**: Release 0.30.4 KB ignore deduplication
+**Branch**: `codex/release-0-30-4-kb-ignore-dedup`
+
+### Summary
+
+Corrected the shared KB ignore refresh defect and live fleet preparation gap surfaced by Mezmo PR #411, published a validated 0.30.4 candidate, and converged source PR #220 to a green thread-clean exact head.
+
+### Main Changes
+
+- Removed equivalent unmanaged Obsidian KB rules around an existing managed block while preserving managed-block update semantics.
+- Printed and required manifest-declared candidatePrepare commands during live fleet refreshes.
+- Synchronized release 0.30.4, regenerated the help catalog, and refreshed the canonical eight-consumer candidate ledger.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `79fad84` | fix: deduplicate managed kb ignore rules |
+| `04dc21c` | chore: link corrective release PR |
+| `49d3d84` | chore: mark corrective release ready |
+
+### Testing
+
+- [OK] Focused KB helper and fleet preflight suite: 42 tests passed
+- [OK] Full fleet candidate validation: 8 consumers passed
+- [OK] make check: passed
+- [OK] PR #220 CI: release, lint, security, and Python 3.10/3.13 Linux/macOS passed
+- [OK] Copilot exact-head review 49d3d84: no comments; unresolved threads: 0
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
