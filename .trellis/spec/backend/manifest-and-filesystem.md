@@ -793,10 +793,10 @@ tracked `.gitignore`.
    an occupied non-directory root fails before KB or ignore writes. The
    full-check freshness lane in auto mode skips only when the root is truly
    absent; broken root symlinks and occupied non-directory roots must reach the
-   helper so its validation failure remains visible. The
-   helper copies selected repository knowledge files into visible semantic
-   category paths under `.obsidian-kb/` instead of mirroring hidden source
-   folders, writes dashboard and LLM overview links to those copied paths,
+   helper so its validation failure remains visible. The helper copies selected
+   repository knowledge files into visible semantic category paths under
+   `.obsidian-kb/` instead of mirroring hidden source folders, writes dashboard
+   and LLM overview links to those copied paths,
    includes one-line document descriptions in the dashboard, includes a GitHub
    repository link when `origin` is a GitHub remote, groups generated index
    links by semantic category rather than source folder name, normalizes
