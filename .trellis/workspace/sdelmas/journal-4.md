@@ -1324,3 +1324,39 @@ Delivered and reviewed an exact-head finish-work attestation gate for housekeepi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 186: Close review-learning preventive-actions parent task
+
+**Date**: 2026-07-22
+**Task**: Close review-learning preventive-actions parent task
+**Branch**: `codex/close-review-learning-preventive-actions`
+
+### Summary
+
+Closed the completed review-learning preventive-actions parent task after verifying its four child deliveries, archived the parent record, and published PR #217 through the deterministic review gate.
+
+### Main Changes
+
+- Verified the four child acceptance criteria were delivered by PRs #208, #209, #213, and #214.
+- Completed and archived the parent Trellis task without activating it or creating duplicate implementation work.
+- Published PR #217 and confirmed a clean Copilot review with zero review threads.
+
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] make check
+- [OK] bash scripts/sd-ai-command-pack-review-full-check.sh
+- [OK] PR #217 required GitHub Actions checks passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #217 after approval, then run housekeeping.
