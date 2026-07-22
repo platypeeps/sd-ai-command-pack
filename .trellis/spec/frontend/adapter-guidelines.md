@@ -767,6 +767,92 @@ The `sd-review-pr` shared skill should continue to define:
   composite Stage 4
 - the final report fields
 
+## Review-learning signal clustering
+
+### 1. Scope / Trigger
+
+- Trigger this contract when `sd-review-learnings` includes GitHub Copilot
+  review comments in a dry run or managed-block update.
+- Current, non-outdated unresolved feedback is action state and must remain
+  individually visible. Only resolved or outdated historical evidence may be
+  deduplicated and clustered.
+
+### 2. Signatures
+
+- CLI: `sd-ai-command-pack-review-learnings.py [--github-days N |
+  --github-pr NUMBER ...] [--github-limit N] [--dry-run | --update]
+  [--target PATH]`.
+- Collection: `PullRequestComment` retains PR identity, path, body, GitHub
+  resolution/outdated state, and `created_at`.
+- Pure analysis: `partition_review_comments(comments)`,
+  `cluster_historical_comments(comments)`, and
+  `preventive_actions(clusters)`.
+
+### 3. Contracts
+
+- Partition from GitHub thread state without local reinterpretation. Render
+  current actionable rows before all historical clusters.
+- Normalize exact historical signatures from bounded body text plus stable path
+  family, removing volatile PR/line numbers and Markdown decoration. Group
+  signatures under the ordered repository-owned categories `task-metadata`,
+  `boundary-validation`, `contract-documentation-drift`,
+  `generated-surfaces`, `reviewer-test-harness-quality`, and `other`.
+- Rank historical clusters by recurrence count, recency, then category ID.
+  Equivalent input order must produce byte-identical managed Markdown.
+- Each cluster retains total observations, signature count, PR numbers, path
+  families, observed date bounds, representative signatures, and original
+  comment examples. Bound rendered clusters, signatures, PRs, paths, and
+  examples independently and report every truncated dimension. Current
+  actionable rows are never clustered or hidden by historical caps.
+- Preventive actions are fixed category-owned text, emitted only when that
+  historical category meets the deterministic recurrence threshold. Never
+  synthesize advice with an LLM or emit generic actions for absent categories.
+- Preserve managed-marker neutralization, atomic update replacement, surrounding
+  human content, and root/template byte parity.
+
+### 4. Validation & Error Matrix
+
+- Negative GitHub days/limits, mixed day and explicit-PR selectors, or
+  non-positive PR numbers -> existing setup error and exit `2`.
+- Git/GitHub command, payload-shape, target-write, or managed-marker failure ->
+  existing phase-tagged diagnostic and exit `2`; no partial target write.
+- Missing or malformed `createdAt` -> retain the evidence with explicit
+  unavailable time bounds; never discard or invent a timestamp.
+- More evidence than a render cap -> deterministic prefix plus explicit
+  truncation counts, not silent omission or an unbounded block.
+
+### 5. Good / Base / Bad Cases
+
+- Good: five terminology comments across documentation surfaces render as one
+  counted contract/documentation cluster with bounded examples and one
+  evidence-counted preventive action.
+- Base: one current unresolved comment renders individually first while older
+  related comments collapse into a historical cluster.
+- Bad: cluster unresolved feedback, render one bullet per historical comment,
+  order by GraphQL response order, or recommend categories absent from the
+  scan.
+
+### 6. Tests Required
+
+- Assert current-versus-historical partitioning, exact signature deduplication,
+  related category clustering, retained PR/path/date evidence, and captured
+  multi-surface terminology comments.
+- Assert shuffled input produces identical Markdown and recurrence/recency/
+  lexical ranking is stable.
+- Assert every inner cap and the cluster cap report truncation, preventive
+  actions require recurrence, and absent categories produce no generic action.
+- Preserve CLI selector, pagination, Markdown-marker safety, dry-run,
+  idempotent atomic update, surrounding-content, generated-parity, install
+  audit, and full-check regressions.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: list every historical review comment and append the same generic advice
+Correct: keep current action rows complete, cluster only historical evidence,
+         and emit bounded category actions backed by visible recurrence counts
+```
+
 The `sd-full-check` shared skill should continue to define the canonical
 local verification script, deterministic checks, optional local review-provider
 behavior, skipped-check reporting, and no-edit safety rules.

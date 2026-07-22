@@ -98,7 +98,10 @@ Quick links:
   review-tool runner for the review-local loop, including its `all`
   full-codebase mode.
 - `scripts/sd-ai-command-pack-review-learnings.py`: local review feedback
-  pattern scanner and managed learning-block updater.
+  pattern scanner and managed learning-block updater. It preserves current,
+  non-outdated unresolved comments as individual actionable rows, clusters
+  historical signals deterministically with bounded evidence, and proposes
+  only category-specific actions backed by recurring observations.
 - `scripts/sd-ai-command-pack-install-audit.py`: structural post-install audit
   for missing installed targets and unlisted pack-like files.
 - `scripts/sd-ai-command-pack-pr-body-scope.py`: configurable PR-body scope
@@ -259,7 +262,12 @@ whether to keep going. Once the overall loop meets its stop conditions,
 review-pr runs
 `sd-ai-command-pack-review-learnings.py --github-pr <number> --dry-run`
 exactly once and reports any preventive follow-up without reopening the clean
-review cycle.
+review cycle. Time-window and repeated `--github-pr` scans render actionable
+comments first, then bounded historical clusters for task metadata, boundary
+validation, contract/documentation drift, generated surfaces, reviewer/test
+harness quality, and uncategorized evidence. Cluster summaries retain counts,
+PRs, path families, observed dates, and bounded examples, and explicitly report
+truncation. Preventive actions appear only for detected recurring categories.
 
 The create-pr wrapper honors `SD_AI_COMMAND_PACK_CREATE_PR_BASE` for a base
 branch override, `SD_AI_COMMAND_PACK_CREATE_PR_COMMIT_MESSAGE` when it creates
