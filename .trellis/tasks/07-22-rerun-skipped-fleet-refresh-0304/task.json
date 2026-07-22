@@ -13,7 +13,7 @@
   "createdAt": "2026-07-22",
   "completedAt": null,
   "branch": null,
-  "base_branch": "codex/rollout-housekeeping-finish-work-gate-0303",
+  "base_branch": "main",
   "worktree_path": null,
   "commit": null,
   "pr_url": null,
