@@ -1533,3 +1533,40 @@ Rolled out immutable sd-ai-command-pack 0.30.4 across the configured fleet: four
 ### Next Steps
 
 - Rerun the four preserved fleet skips under task 07-22-rerun-skipped-fleet-refresh-0304 when their checkout blockers are cleared.
+
+
+## Session 191: Fix stale finish-work head hint
+
+**Date**: 2026-07-22
+**Task**: Fix stale finish-work head hint
+**Branch**: `codex/fix-housekeeping-finish-work-head-hint`
+
+### Summary
+
+Published the 0.30.6 corrective release candidate so housekeeping resolves finish-work attestation from the tracked local branch after finish-work instead of embedding a stale commit.
+
+### Main Changes
+
+- Changed the missing-attestation hint to resolve the tracked local branch when the rerun command executes, independent of ambient HEAD.
+- Added regression coverage, bumped the pack to 0.30.6, synchronized generated mirrors, and refreshed fleet evidence.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `43a3f9ced3e3a17766fe4459a2d5ab277020e723` | fix: avoid stale finish-work head hint |
+
+### Testing
+
+- [OK] make check
+- [OK] all eight fleet candidate validations
+- [OK] Copilot review feedback covered the detached or different-branch rerun case
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

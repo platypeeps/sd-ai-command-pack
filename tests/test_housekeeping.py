@@ -562,7 +562,13 @@ class HousekeepingTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("SD finish-work completion was not attested", result.stdout)
-        self.assertIn(f'--finish-work-head "{head_oid}"', result.stdout)
+        self.assertIn(
+            '--finish-work-head "$(git rev-parse --verify '
+            'refs/heads/feature/cleanup)"',
+            result.stdout,
+        )
+        self.assertNotIn("git rev-parse HEAD", result.stdout)
+        self.assertNotIn(f'--finish-work-head "{head_oid}"', result.stdout)
         self.assertFalse(marker.exists())
 
     def test_housekeeping_rejects_stale_finish_work_head_before_auto_merge(

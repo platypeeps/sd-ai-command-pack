@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 190
+- **Total Sessions**: 191
 - **Last Active**: 2026-07-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1531 | Active |
+| `journal-4.md` | ~1570 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 191 | 2026-07-22 | Fix stale finish-work head hint | `43a3f9ced3e3a17766fe4459a2d5ab277020e723` | `codex/fix-housekeeping-finish-work-head-hint` |
 | 190 | 2026-07-22 | Complete 0.30.4 housekeeping-gate fleet rollout | `adced33`, `a2148bc`, `f6e037a`, `fdfe382`, `aa737c5`, `32fcfa3` | `codex/rollout-housekeeping-finish-work-gate-0303` |
 | 189 | 2026-07-22 | Release 0.30.4 KB ignore deduplication | `79fad84`, `04dc21c`, `49d3d84` | `codex/release-0-30-4-kb-ignore-dedup` |
 | 188 | 2026-07-22 | Release 0.30.3 task-context sibling validation | `2a00a18`, `699e1a2`, `f8fc5a3`, `1840f54`, `35d23f8` | `codex/release-0-30-3-task-context-sibling-check` |
