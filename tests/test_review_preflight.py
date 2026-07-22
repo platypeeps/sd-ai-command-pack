@@ -672,7 +672,7 @@ assert.deepEqual(
             json.dumps(
                 {
                     "reviewRiskCategorySignals": {
-                        "diagnostic-redaction": ["customDiagnosticBoundary"]
+                        "diagnostic-redaction": ["  customDiagnosticBoundary  "]
                     }
                 }
             ),

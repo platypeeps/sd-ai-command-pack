@@ -340,12 +340,14 @@ function parseReviewRiskCategorySignals(value, configPath) {
       continue;
     }
 
-    const validSignals = signals.filter(
-      (signal) =>
-        typeof signal === 'string' &&
-        signal.trim().length > 0 &&
-        signal.length <= MAX_CONFIGURED_REVIEW_RISK_SIGNAL_LENGTH,
-    );
+    const validSignals = signals
+      .filter(
+        (signal) =>
+          typeof signal === 'string' &&
+          signal.trim().length > 0 &&
+          signal.length <= MAX_CONFIGURED_REVIEW_RISK_SIGNAL_LENGTH,
+      )
+      .map((signal) => signal.trim());
     if (validSignals.length !== signals.length) {
       fail(
         `${configPath} reviewRiskCategorySignals.${categoryId} entries must be nonblank strings no longer than ` +
