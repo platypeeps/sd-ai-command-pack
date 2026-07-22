@@ -139,8 +139,10 @@ parse_args() {
           printf 'error: --finish-work-head requires a commit OID\n' >&2
           exit 2
         fi
+        # Enumerate lowercase hex digits because locale-aware ranges can treat
+        # uppercase letters as members of [a-f] on older macOS Bash versions.
         case "$1" in
-          *[!0-9a-f]*)
+          *[!0123456789abcdef]*)
             printf 'error: --finish-work-head must be a full 40-character commit OID in lowercase\n' >&2
             exit 2
             ;;
