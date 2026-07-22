@@ -1360,3 +1360,45 @@ Closed the completed review-learning preventive-actions parent task after verify
 ### Next Steps
 
 - Merge PR #217 after approval, then run housekeeping.
+
+
+## Session 187: Release 0.30.2 corrective cleanup
+
+**Date**: 2026-07-22
+**Task**: Release 0.30.2 corrective cleanup
+**Branch**: `codex/rollout-housekeeping-finish-work-gate`
+
+### Summary
+
+Prepared and reviewed the 0.30.2 source correction that documents intentional best-effort temporary-file cleanup, validated the full fleet candidate, and archived the corrective child task before merge.
+
+### Main Changes
+
+- Documented the intentional best-effort cleanup handler in the template source and installed mirror without changing runtime behavior.
+- Bumped the pack to 0.30.2, synchronized generated version/provenance surfaces, and validated every configured fleet candidate.
+- Resolved all PR review findings and aligned the child task lifecycle with the pre-merge finish-work gate.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8d044d9` | fix: release 0.30.2 CodeQL cleanup annotation |
+| `a78f51e` | docs: clarify corrective rollout evidence |
+| `5665bf2` | docs: clarify best-effort cleanup rationale |
+| `fe8f577` | docs: align release task with merge gate |
+
+### Testing
+
+- [OK] make check
+- [OK] focused PR-body scope tests (18 passed)
+- [OK] full-fleet candidate validation (8 consumers passed)
+- [OK] exact-head CI and Copilot review on fe8f577
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

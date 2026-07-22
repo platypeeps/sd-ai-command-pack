@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.30.2 - 2026-07-22
+
+- Document the intentional best-effort cleanup in the installed PR-body scope
+  helper so CodeQL accepts the copied payload without behavior changes.
+
 ## 0.30.1 - 2026-07-22
 
 - Require an exact current-head finish-work attestation before housekeeping can
