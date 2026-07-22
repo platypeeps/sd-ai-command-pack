@@ -720,7 +720,7 @@ consumer refresh PRs.
 ### Fleet Rollout
 
 The checked-in fleet manifest lives at `docs/fleet/consumers.json`. It lists
-the eight real consumer repositories, GitHub slugs, local path hints, explicit
+the real consumer repositories, GitHub slugs, local path hints, explicit
 platform sets, lightweight candidate checks, and rollout priorities. Run the
 source-owned preflight from this checkout:
 
