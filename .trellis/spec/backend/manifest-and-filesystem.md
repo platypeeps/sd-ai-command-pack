@@ -777,6 +777,12 @@ tracked `.gitignore`.
    without writing; `--check` exits nonzero when copies, dashboard, LLM
    overview, stale generated entries, or ignore state are not current.
 3. Contracts: generated KB entries are real file copies, not symlinks. The
+   root `.obsidian-kb` path may be either a real directory or a symlink to an
+   existing directory, including one outside the repository. A valid root
+   symlink is preserved and writes traverse it. An absent root is created only
+   by normal refresh, not by `--dry-run`, `--check`, or guarded
+   `--if-present`. A broken root symlink, a root symlink to a non-directory, or
+   an occupied non-directory root fails before KB or ignore writes. The
    helper copies selected repository knowledge files into visible semantic
    category paths under `.obsidian-kb/` instead of mirroring hidden source
    folders, writes dashboard and LLM overview links to those copied paths,
@@ -786,9 +792,10 @@ tracked `.gitignore`.
    platform-root `agents.md`/`AGENTS.md` guidance filenames case-insensitively
    to the same stable destination such as `codex-agents.md`, avoids generated
    KB file/folder names that start with `.` or use Trellis-specific naming, and
-   keeps `.obsidian-kb/` ignored through the managed
+   keeps the root path ignored with `/.obsidian-kb` through the managed
    `obsidian-kb` block in `.gitignore` or `.git/info/exclude` for local-only
-   installs.
+   installs. The root-anchored rule covers both a real directory and a root
+   symlink without ignoring nested paths with the same name.
 4. Validation and error matrix: user-owned symlinks that point outside the repo
    are conflicts and must not be overwritten; legacy tool-created relative
    symlinks that resolve inside the repo are replaced by copies; occupied
@@ -809,6 +816,9 @@ tracked `.gitignore`.
    `.obsidian-kb/` into an Obsidian vault would break those links.
 6. Tests required: cover fresh copy generation, dry-run no writes, check mode
    stale detection and acceptance after refresh, local-only exclude behavior,
+   real-root and valid root-directory-symlink refreshes, root-symlink
+   preservation, anchored ignore behavior for both root forms, broken root
+   symlinks, root symlinks to files, and occupied root files before writes,
    custom dashboard conflicts, unmarked gitignore entry migration, invalid
    gitignore byte preservation, and replacement of legacy generated symlinks
    with real file copies, including nested existing symlink trees from the old

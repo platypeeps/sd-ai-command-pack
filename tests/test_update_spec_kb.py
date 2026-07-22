@@ -104,6 +104,8 @@ class UpdateSpecKbTests(InstallTestCase):
             self.assertIn("folder names do not start with `.`", content)
             self.assertIn(".trellis/tasks/**/*.md", content)
             self.assertIn("older symlink-based helper", content)
+            self.assertIn("root `.obsidian-kb` path may itself be a symlink", content)
+            self.assertIn("root-anchored `/.obsidian-kb` ignore rule", content)
             self.assertIn("scripts/sd-ai-command-pack-update-spec-kb.py", content)
             self.assertIn('cp -R "$(pwd)/.obsidian-kb/."', content)
             self.assertIn("Copy-Item -Recurse -Force", content)
@@ -112,7 +114,7 @@ class UpdateSpecKbTests(InstallTestCase):
             self.assertNotIn("Developer Mode enabled", content)
 
         gitignore = (install.ROOT / ".gitignore").read_text(encoding="utf-8")
-        self.assertIn(".obsidian-kb/", gitignore)
+        self.assertIn("/.obsidian-kb", gitignore)
         self.assertIn(".sd-ai-command-pack/installed-targets.txt", gitignore)
         self.assertIn(".sd-ai-command-pack/local-only.txt", gitignore)
 
@@ -241,7 +243,7 @@ class UpdateSpecKbTests(InstallTestCase):
         self.assertIn("dist/\n", gitignore)
         self.assertIn("# sd-ai-command-pack obsidian-kb start", gitignore)
         self.assertIn("# sd-ai-command-pack obsidian-kb end", gitignore)
-        self.assertEqual(gitignore.count(".obsidian-kb/"), 1)
+        self.assertEqual(gitignore.count("/.obsidian-kb\n"), 1)
         expected_copies = {
             "README.md": "Repository Overview/README.md",
             "AGENTS.md": "Agent and Platform Guidance/AGENTS.md",
@@ -398,7 +400,9 @@ class UpdateSpecKbTests(InstallTestCase):
             overview.read_text(encoding="utf-8"),
         )
         self.assertEqual(
-            (root / ".gitignore").read_text(encoding="utf-8").count(".obsidian-kb/"),
+            (root / ".gitignore").read_text(encoding="utf-8").count(
+                "/.obsidian-kb\n"
+            ),
             1,
         )
 
@@ -865,6 +869,191 @@ class UpdateSpecKbTests(InstallTestCase):
             (root / ".gitignore").read_text(encoding="utf-8"),
         )
 
+    def test_update_spec_kb_preserves_root_directory_symlink_and_ignores_it(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "vault-kb"
+            target.mkdir()
+            kb_root = root / ".obsidian-kb"
+            try:
+                kb_root.symlink_to(target, target_is_directory=True)
+            except OSError as error:
+                self.skipTest(f"symlinks are not available: {error}")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(
+                        install.ROOT
+                        / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+                    ),
+                ],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertTrue(kb_root.is_symlink())
+            self.assertTrue((target / "Repository Overview/README.md").is_file())
+            ignored = subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    f"core.excludesFile={os.devnull}",
+                    "check-ignore",
+                    "-q",
+                    "--",
+                    ".obsidian-kb",
+                ],
+                cwd=root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(ignored.returncode, 0, ignored.stdout.decode())
+            self.assertIn(
+                "/.obsidian-kb\n",
+                (root / ".gitignore").read_text(encoding="utf-8"),
+            )
+
+    def test_update_spec_kb_root_creation_tolerates_concurrent_directory(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        module = self.load_module_from_path(
+            install.ROOT
+            / "templates/scripts/sd-ai-command-pack-update-spec-kb.py",
+            "update_spec_kb_concurrent_root",
+        )
+        original_mkdir = Path.mkdir
+
+        def concurrent_mkdir(path: Path, *args: object, **kwargs: object) -> None:
+            if not path.exists():
+                original_mkdir(path, parents=True)
+            original_mkdir(path, *args, **kwargs)
+
+        with mock.patch.object(
+            Path,
+            "mkdir",
+            autospec=True,
+            side_effect=concurrent_mkdir,
+        ):
+            kb_root = module.ensure_kb_root(root, create=True)
+
+        self.assertEqual(kb_root, root / ".obsidian-kb")
+        self.assertTrue(kb_root.is_dir())
+
+    def test_update_spec_kb_managed_ignore_covers_real_directory(self) -> None:
+        root = self.make_repo()
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        (root / ".obsidian-kb").mkdir()
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(
+                    install.ROOT
+                    / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+                ),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        ignored = subprocess.run(
+            [
+                "git",
+                "-c",
+                f"core.excludesFile={os.devnull}",
+                "check-ignore",
+                "-q",
+                "--",
+                ".obsidian-kb",
+            ],
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(ignored.returncode, 0, ignored.stdout.decode())
+
+    def test_update_spec_kb_rejects_invalid_root_paths_before_writes(self) -> None:
+        script = (
+            install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+        )
+        cases = (
+            ("occupied-file", ".obsidian-kb is not a directory"),
+            ("broken-symlink", ".obsidian-kb is a broken symlink"),
+            (
+                "file-symlink",
+                ".obsidian-kb symlink target is not a directory",
+            ),
+        )
+
+        for case, expected in cases:
+            for mode in ((), ("--dry-run",), ("--check",)):
+                with self.subTest(case=case, mode=mode or ("refresh",)):
+                    root = self.make_repo()
+                    (root / "README.md").write_text(
+                        "# Project\n", encoding="utf-8"
+                    )
+                    gitignore = root / ".gitignore"
+                    gitignore.write_text("dist/\n", encoding="utf-8")
+                    kb_root = root / ".obsidian-kb"
+                    target = root / "kb-target"
+
+                    if case == "occupied-file":
+                        kb_root.write_text("occupied\n", encoding="utf-8")
+                    elif case == "broken-symlink":
+                        try:
+                            kb_root.symlink_to(target, target_is_directory=True)
+                        except OSError as error:
+                            self.skipTest(f"symlinks are not available: {error}")
+                    else:
+                        target.write_text("target\n", encoding="utf-8")
+                        try:
+                            kb_root.symlink_to(target)
+                        except OSError as error:
+                            self.skipTest(f"symlinks are not available: {error}")
+
+                    result = subprocess.run(
+                        [sys.executable, str(script), *mode],
+                        cwd=root,
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        check=False,
+                    )
+
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertIn(expected, result.stdout)
+                    self.assertEqual(
+                        gitignore.read_text(encoding="utf-8"), "dist/\n"
+                    )
+                    if case == "occupied-file":
+                        self.assertEqual(
+                            kb_root.read_text(encoding="utf-8"), "occupied\n"
+                        )
+                    elif case == "broken-symlink":
+                        self.assertTrue(kb_root.is_symlink())
+                        self.assertFalse(target.exists())
+                    else:
+                        self.assertTrue(kb_root.is_symlink())
+                        self.assertEqual(
+                            target.read_text(encoding="utf-8"), "target\n"
+                        )
+
     def test_update_spec_kb_if_present_reflects_archive_and_followup_tasks(
         self,
     ) -> None:
@@ -1079,7 +1268,7 @@ class UpdateSpecKbTests(InstallTestCase):
         exclude_text = exclude.read_text(encoding="utf-8")
         self.assertIn("# sd-ai-command-pack obsidian-kb start", exclude_text)
         self.assertIn("# sd-ai-command-pack obsidian-kb end", exclude_text)
-        self.assertIn(".obsidian-kb/", exclude_text)
+        self.assertIn("/.obsidian-kb", exclude_text)
         copy = root / ".obsidian-kb/Repository Overview/README.md"
         self.assertTrue(copy.is_file())
         self.assertFalse(copy.is_symlink())
@@ -1110,7 +1299,7 @@ class UpdateSpecKbTests(InstallTestCase):
         self.assertIn("logs/\n", gitignore)
         self.assertIn("# sd-ai-command-pack obsidian-kb start", gitignore)
         self.assertIn("# sd-ai-command-pack obsidian-kb end", gitignore)
-        self.assertEqual(gitignore.count(".obsidian-kb/"), 1)
+        self.assertEqual(gitignore.count("/.obsidian-kb\n"), 1)
 
     def test_update_spec_kb_preserves_invalid_existing_gitignore_bytes(self) -> None:
         root = self.make_repo()

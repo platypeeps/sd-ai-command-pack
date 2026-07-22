@@ -760,6 +760,13 @@ entrypoint is intentionally maintained as repo documentation. If an existing
 `.obsidian-kb` folder was created by an older symlink-based helper, the refresh
 replaces pack-owned relative symlinks with real copies in the category layout
 and prunes the old mirrored generated paths.
+The root `.obsidian-kb` path may itself be a symlink when it resolves to an
+existing directory, including a directory outside the repository. Refreshes
+preserve that root symlink and write through it. A broken root symlink, a root
+symlink to a non-directory, or an occupied non-directory path fails before KB
+or ignore writes. The managed, root-anchored `/.obsidian-kb` ignore rule covers
+both a real directory and the root symlink without hiding nested paths of the
+same name.
 The helper also creates and refreshes `.obsidian-kb/Dashboard - <repo>.md`,
 a generated Markdown landing page that groups and links to the current KB
 copies, adds a brief one-line description for each linked document, points to
@@ -777,7 +784,8 @@ conflicts it could not bring current — automation should treat `3` as
 `python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run` to preview the
 refresh without writes, `--check` to verify the generated folder and ignore
 entry are current, or `--help` for the safe CLI summary. Add `--if-present` to
-any mode when automation should refresh only repositories that already have
+any mode only when an intentional guarded caller should refresh repositories
+that already have
 `.obsidian-kb`; an absent folder returns success with a visible skip reason and
 causes no writes, while an occupied or invalid path retains the normal failure.
 
@@ -1085,9 +1093,10 @@ Lifecycle side effects have one owner. `until=review` keeps finish-work in
 watches with `no-merge` in Stage 3, and invokes housekeeping exactly once in
 Stage 4. A blocked or timed-out watch therefore leaves the active Trellis task
 available for a later resume instead of archiving it before the PR settles.
-After finish-work, housekeeping owns one `--if-present` KB refresh before its
-merge gate so archived task documentation is current. `sd-ship` does not repeat
-that refresh.
+After finish-work, housekeeping owns one normal KB refresh before its merge
+gate so archived task documentation is current. That refresh creates an absent
+KB and preserves a valid root directory symlink. `sd-ship` does not repeat that
+refresh.
 
 When the canonical backlog controller invokes the merge-through chain, it adds
 a trusted internal `caller: sd-work-backlog` context bound to the active run,

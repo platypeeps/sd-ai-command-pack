@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Defines the Obsidian KB filesystem, ignore, symlink, and validation contracts."}
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Defines housekeeping and backlog ownership of post-finish KB refreshes."}

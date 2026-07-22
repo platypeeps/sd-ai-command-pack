@@ -221,20 +221,25 @@ class HousekeepingTests(InstallTestCase):
             "--refs-refreshed",
             "--prior-anomaly",
             "REFS_REFRESHED=1",
-            "refresh_existing_kb()",
+            "refresh_obsidian_kb()",
             "sd-ai-command-pack-update-spec-kb.py",
-            "--if-present",
-            "existing Obsidian KB refresh failed",
+            "Obsidian KB refresh failed",
         ]:
             self.assertIn(text, script)
+        self.assertNotIn("--if-present", script)
+        self.assertNotIn("the pack helper is missing;", script)
+        self.assertIn("a required pack helper is missing or unreadable;", script)
+        self.assertNotIn("resolve the reported conflict", script)
+        self.assertIn("resolve the reported issue", script)
+        self.assertIn("An absent `.obsidian-kb` is\n   created", skill)
 
-        refresh_index = script.index("if ! refresh_existing_kb; then")
+        refresh_index = script.index("if ! refresh_obsidian_kb; then")
         fetch_index = script.index("fetch_and_prune", refresh_index)
         merge_index = script.index("maybe_merge_ready_open_pr", refresh_index)
         self.assertLess(refresh_index, fetch_index)
         self.assertLess(refresh_index, merge_index)
 
-    def test_housekeeping_kb_refresh_contract_covers_skip_success_and_failure(
+    def test_housekeeping_kb_refresh_contract_covers_creation_success_and_failure(
         self,
     ) -> None:
         if self._bash_path is None:
@@ -243,7 +248,7 @@ class HousekeepingTests(InstallTestCase):
             install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"
         )
         function_source = (
-            f'eval "$(awk \'/^refresh_existing_kb\\(\\)/,/^}}/\' {script})";'
+            f'eval "$(awk \'/^refresh_obsidian_kb\\(\\)/,/^}}/\' {script})";'
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -267,7 +272,7 @@ class HousekeepingTests(InstallTestCase):
                 "add_action() { ACTIONS+=(\"$*\"); };"
                 "add_anomaly() { ANOMALIES+=(\"$*\"); };"
                 f"{function_source}"
-                "refresh_existing_kb; rc=$?;"
+                "refresh_obsidian_kb; rc=$?;"
                 'printf "rc=%s\\nactions=%s\\nanomalies=%s\\n" '
                 '"$rc" "${ACTIONS[*]-}" "${ANOMALIES[*]-}"'
             )
@@ -283,10 +288,14 @@ class HousekeepingTests(InstallTestCase):
             )
             self.assertEqual(absent.returncode, 0, absent.stdout)
             self.assertIn("rc=0", absent.stdout)
-            self.assertIn("skipped (.obsidian-kb is not present)", absent.stdout)
-            self.assertFalse(marker.exists())
+            self.assertIn("refreshed .obsidian-kb after finish-work", absent.stdout)
+            self.assertEqual(
+                marker.read_text(encoding="utf-8").strip(),
+                f"run-python -- {helper}",
+            )
 
             (root / ".obsidian-kb").mkdir()
+            marker.unlink()
             success = subprocess.run(
                 [self._bash_path, "-c", base_probe],
                 cwd=root,
@@ -298,10 +307,10 @@ class HousekeepingTests(InstallTestCase):
             )
             self.assertEqual(success.returncode, 0, success.stdout)
             self.assertIn("rc=0", success.stdout)
-            self.assertIn("refreshed existing .obsidian-kb", success.stdout)
+            self.assertIn("refreshed .obsidian-kb after finish-work", success.stdout)
             self.assertEqual(
                 marker.read_text(encoding="utf-8").strip(),
-                f"run-python -- {helper} --if-present",
+                f"run-python -- {helper}",
             )
 
             failure = subprocess.run(
@@ -319,10 +328,10 @@ class HousekeepingTests(InstallTestCase):
             )
             self.assertEqual(failure.returncode, 0, failure.stdout)
             self.assertIn("rc=1", failure.stdout)
-            self.assertIn("existing Obsidian KB refresh failed", failure.stdout)
+            self.assertIn("Obsidian KB refresh failed", failure.stdout)
             self.assertIn(
                 "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- "
-                "scripts/sd-ai-command-pack-update-spec-kb.py --if-present",
+                "scripts/sd-ai-command-pack-update-spec-kb.py",
                 failure.stdout,
             )
 
@@ -391,7 +400,10 @@ class HousekeepingTests(InstallTestCase):
         )
 
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("==> Tasks performed\nnone", result.stdout)
+        self.assertIn(
+            "==> Tasks performed\n- refreshed .obsidian-kb after finish-work",
+            result.stdout,
+        )
         self.assertIn("git fetch --prune origin failed", result.stdout)
         self.assertIn("git pull --ff-only origin main failed", result.stdout)
         self.assertNotIn("unbound variable", result.stdout)
