@@ -1203,3 +1203,36 @@ Addressed both GitHub Copilot review rounds for PR #214, verified the review-lea
 ### Next Steps
 
 - None - task complete
+
+
+## Session 183: Add sd-github-review to fleet
+
+**Date**: 2026-07-21
+**Task**: Add sd-github-review to fleet
+**Branch**: `codex/add-sd-github-review-to-fleet`
+
+### Summary
+
+Added sd-github-review as the eighth fleet consumer at post-canary priority 70 with npm clean-clone preparation and three repository-owned candidate gates; updated inventory tests, operator docs, fleet onboarding spec, and regenerated the all-pass candidate ledger after targeted and full disposable-clone validation.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cb4eeb2` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
