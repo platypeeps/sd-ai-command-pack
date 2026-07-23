@@ -286,7 +286,12 @@ retry behavior lives in the installed guide's
 ### sd-review-learnings
 
 Scans local diffs and optional recent GitHub review comments for repeated review
-patterns, then updates a managed learning block when requested. Time-window
+patterns in read-only `scan` mode, then updates a managed learning block only
+through explicit `--update` mode. Repository-local writes are canonicalized,
+validated, and atomically replaced; exceptional external writes require
+`--update-external` plus exact-path structured confirmation recorded through
+`--confirmed-external-target`. The command never stages, commits, or publishes
+the learning update. Time-window
 scans cover the complete window by default, while `--github-pr` supports a
 bounded single-PR analysis. Current unresolved comments stay individually
 actionable; historical comments become deterministic bounded clusters with

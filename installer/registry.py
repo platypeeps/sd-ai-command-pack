@@ -671,16 +671,16 @@ INTERACTION_DECISIONS: tuple[InteractionDecision, ...] = (
         "review-learnings.external-target",
         "external-path",
         "Write target",
-        "Where should the review-learning update be written?",
+        "Should the review-learning update use the exact resolved external path shown?",
         (
             _option(
                 "Repository local",
-                "Keep the update inside the current repository.",
+                "Keep the managed-block update inside the current repository.",
                 recommended=True,
             ),
             _option(
-                "Exact path",
-                "Use only an explicit external path supplied by the user.",
+                "Write exact path",
+                "Authorize only the displayed resolved external Markdown path for this invocation.",
             ),
         ),
     ),

@@ -897,6 +897,111 @@ The `sd-review-pr` shared skill should continue to define:
   composite Stage 4
 - the final report fields
 
+## Scenario: Bounded review-learning write modes
+
+### 1. Scope / Trigger
+
+- Trigger: changing `sd-review-learnings` target selection, managed-block
+  rendering, update flags, filesystem behavior, structured reporting, or
+  external-path interaction guidance.
+- The script owns deterministic validation and replacement. The skill owns the
+  structured external-path decision and passes only the confirmed exact path.
+
+### 2. Signatures
+
+- Default scan:
+  `sd-ai-command-pack-review-learnings.py [scan controls] [--target PATH]
+  [--json]`.
+- Repository update:
+  `sd-ai-command-pack-review-learnings.py [scan controls] --target PATH
+  --update [--json]`.
+- External update:
+  `sd-ai-command-pack-review-learnings.py [scan controls] --target ABSOLUTE_PATH
+  --update-external --confirmed-external-target RESOLVED_ABSOLUTE_PATH
+  [--json]`.
+- `--dry-run` emits the repository-local candidate Markdown and cannot combine
+  with either update mode or `--json`.
+
+### 3. Contracts
+
+- No update flag is observably read-only: no file/directory/task creation, Git
+  staging/commit/push, review request, or remote mutation. It still reports the
+  canonical repository root, target, containment, findings, proposed changes,
+  digests, and skipped write.
+- Resolve the root and target canonically, inspect every existing path
+  component, and classify the target as `repository-local` or `external`.
+  `--update` accepts only the former. `--update-external` accepts only the
+  latter and requires the confirmation argument to byte-match the displayed
+  canonical absolute path.
+- Existing targets and the nearest existing parent must satisfy regular-file,
+  strict UTF-8, current-user ownership, and directory expectations before
+  mutation. Preserve surrounding human content and replace or append only the
+  complete managed block.
+- Construct candidate content in memory. Before directory creation and again
+  before atomic replacement, re-resolve containment and compare target
+  identity plus content digest. Use a sibling temp file, flush/fsync, reject a
+  cross-filesystem replace, and clean the temp on failure.
+- JSON schema version 1 reports mode, root, requested/resolved target,
+  containment/existence, exact external authorization, findings, GitHub scan
+  counts, proposed/applied counts, write status/occurrence/reason, and
+  before/after SHA-256 digests. Human output derives from the same fields.
+- The skill always asks `review-learnings.external-target` for an external
+  write, names the resolved path and one-file managed-block impact, recommends
+  repository-local, and stops without writing when interactive confirmation is
+  unavailable. A prior or general update request is not exact-path consent.
+
+### 4. Validation & Error Matrix
+
+- Relative traversal, absolute external target in scan/local mode, or parent
+  symlink escape -> exit `2`, no target or parent creation.
+- Broken/final symlink, directory/non-regular target, invalid UTF-8, unreadable
+  content, or ownership mismatch -> exit `2`, prior bytes preserved.
+- `--update-external` without confirmation, with a relative confirmation, with
+  a noncanonical spelling, or with a different resolved path -> exit `2`.
+- Local target passed to external mode, external confirmation passed without
+  external mode, or dry-run combined with update/JSON -> usage/setup failure.
+- Identity, digest, or containment changes between planning and replacement ->
+  fail before replace and clean the sibling temp file.
+- Scan failure -> write status `skipped`; requested update failure -> write
+  status `failed`; an identical candidate -> `unchanged` with no replacement.
+
+### 5. Good / Base / Bad Cases
+
+- Good: an explicit local update preserves human notes, atomically replaces
+  one canonical managed block, and reports one applied change.
+- Base: default scan of a clean repository reports a proposed candidate and
+  skipped write while the filesystem, Git status, refs, and task state remain
+  unchanged.
+- Good: the skill displays `/absolute/path/to/review.md`, receives the exact
+  structured answer, and the script records that same path in external
+  authorization and target fields.
+- Bad: treat `--target ../notes.md --update` as a local convenience, infer
+  external consent from a prior turn, decode invalid bytes with replacement,
+  or fall back from atomic replace to a partial copy.
+
+### 6. Tests Required
+
+- Snapshot a real Git fixture before/after default scan and assert files,
+  branch/ref, index/status, target parents, and remote state do not change.
+- Cover local update/unchanged paths, surrounding content, strict JSON/human
+  fields, write-status distinctions, and no stage/commit/push behavior.
+- Cover traversal, external absolute, symlink escape, broken/existing final
+  symlink, directory, unreadable, invalid-UTF-8, owner mismatch, missing and
+  mismatched confirmation, target content/identity races, parent-symlink races,
+  replace interruption, temp cleanup, and cross-filesystem refusal.
+- Preserve template/root byte parity, generated structured-question adapters,
+  install/audit provenance, the per-file coverage floor, and `make check`.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: --target ../shared/review.md --update and assume the user's update request authorizes it
+Correct: reject local escape; require update-external plus the exact displayed-path confirmation
+
+Wrong: read with errors=replace, mkdir first, then overwrite the target directly
+Correct: validate strict UTF-8 and ownership, render in memory, revalidate identity/digest, and atomically replace
+```
+
 ## Review-learning signal clustering
 
 ### 1. Scope / Trigger

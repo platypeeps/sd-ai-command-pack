@@ -41,7 +41,7 @@ scripts/sd-ai-command-pack-install-audit.py 89
 scripts/sd-ai-command-pack-pr-body-scope.py 78
 scripts/sd-ai-command-pack-pr-eligibility.py 85
 scripts/sd-ai-command-pack-record-session.py 79
-scripts/sd-ai-command-pack-review-learnings.py 73
+scripts/sd-ai-command-pack-review-learnings.py 79
 scripts/sd-ai-command-pack-status.py 80
 scripts/sd-ai-command-pack-update-spec-kb.py 83
 scripts/sd-ai-command-pack-work-loop.py 80
