@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.34.0 - 2026-07-23
+
+- Generate a capability-driven, fail-closed checkout-trust preflight for every
+  execution-capable command adapter, with `sd-help` as the sole non-executing
+  trusted-static exemption.
+
 ## 0.33.0 - 2026-07-23
 
 - Centralize exact-head pull-request eligibility in a versioned read-only

@@ -126,6 +126,56 @@ class HelpCommandTests(InstallTestCase):
                 families,
             )
 
+    def test_command_capabilities_are_conservative_and_validated(self) -> None:
+        families = (registry.CommandFamily("one", "One", "One family."),)
+        default = registry.CommandInfo("sd-one", "one", "one")
+
+        self.assertTrue(default.executes_checkout_code)
+        self.assertFalse(default.trusted_static_only)
+        self.assertEqual(
+            [command.name for command in registry.COMMAND_REGISTRY if command.trusted_static_only],
+            ["sd-help"],
+        )
+
+        invalid = (
+            (
+                registry.CommandInfo(
+                    "sd-one",
+                    "one",
+                    "one",
+                    executes_checkout_code="yes",  # type: ignore[arg-type]
+                ),
+                "capability flags must be boolean",
+            ),
+            (
+                registry.CommandInfo(
+                    "sd-one",
+                    "one",
+                    "one",
+                    trusted_static_only=True,
+                ),
+                "trusted_static_only conflicts",
+            ),
+            (
+                registry.CommandInfo(
+                    "sd-one",
+                    "one",
+                    "one",
+                    executes_checkout_code=False,
+                ),
+                "must execute checkout code or be trusted_static_only",
+            ),
+            (
+                registry.CommandInfo("sd-one", "one", "one", safe_mode="../unsafe"),
+                "unsafe safe_mode",
+            ),
+        )
+        for command, message in invalid:
+            with self.subTest(message=message), self.assertRaisesRegex(
+                RuntimeError, message
+            ):
+                registry.validate_command_registry((command,), families)
+
     def test_shared_skill_reference_validation_rejects_unknown_and_unsafe(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "unknown skill"):
             registry.validate_shared_skill_references(

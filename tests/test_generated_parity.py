@@ -29,7 +29,7 @@ InstallTestCase = _support.InstallTestCase
 
 def _load_surface_generator():
     """Load the dev-side surface generator that single-sources adapter
-    transform data (alias rewrites, untrusted-PR note, body overrides)."""
+    transform data (alias rewrites, checkout-trust policy, body overrides)."""
     module = sys.modules.get("generate_command_surfaces")
     if module is not None:
         return module
@@ -46,7 +46,6 @@ def _load_surface_generator():
 
 
 _surface_generator = _load_surface_generator()
-GITHUB_UNTRUSTED_PR_NOTE = _surface_generator.GITHUB_UNTRUSTED_PR_NOTE
 CLAUDE_COMMAND_ALIAS_REWRITES = _surface_generator.CLAUDE_COMMAND_ALIAS_REWRITES
 BESPOKE_BODY_PARITY_EXEMPTIONS = _surface_generator.OVERRIDE_BODIES
 
@@ -193,8 +192,6 @@ def normalize_shared_command_body(content: str) -> str:
 
 
 def apply_platform_body_deviations(platform: str, command: str, body: str) -> str:
-    if platform == "github":
-        body = body.replace(f"\n{GITHUB_UNTRUSTED_PR_NOTE}", "")
     if platform == "claude" and command in CLAUDE_COMMAND_ALIAS_REWRITES:
         platform_text, neutral_text = CLAUDE_COMMAND_ALIAS_REWRITES[command]
         body = body.replace(platform_text, neutral_text)

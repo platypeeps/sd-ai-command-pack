@@ -14,7 +14,8 @@ Reference files:
 - `templates/.agents/skills/sd-help/SKILL.md`
 - `templates/.agents/skills/sd-help/references/command-catalog.md`
 - `templates/.agents/skills/sd-help/references/examples.md`
-- `templates/.commands/sd-help.md`
+- `.github/command-sources/sd-help.md`
+- `templates/.commands/sd-help.md` (generated guarded adapter)
 - `templates/.agents/skills/sd-status/SKILL.md`
 - `templates/.commands/sd-status.md`
 - `templates/.agents/skills/sd-review-pr/SKILL.md`
@@ -48,8 +49,11 @@ Reference files:
 - `templates/.github/prompts/sd-work-backlog.prompt.md`
 - `templates/.github/prompts/sd-work-designs.prompt.md`
 
-OpenCode command targets use the neutral `templates/.commands/sd-*.md` files
-as their source; do not add platform-owned OpenCode command source copies.
+Hand-authored neutral bodies live under `.github/command-sources/`. The
+generator inserts the canonical checkout-trust policy and writes the guarded
+neutral adapters under `templates/.commands/`; OpenCode and the other neutral
+platforms install from those generated files. Do not add platform-owned
+OpenCode command source copies or hand-edit the generated neutral adapters.
 The pack repo should not carry an OpenCode package manifest or Bun lockfile
 unless its checked-in OpenCode plugins or tools import external npm packages.
 The current dogfood plugins use Node builtins and sibling helpers only, so the
@@ -549,7 +553,10 @@ noise.
 
 ### 2. Signatures
 
-- Command row: `CommandInfo(name: str, short: str, family: str)`.
+- Command row: `CommandInfo(name: str, short: str, family: str,
+  executes_checkout_code: bool = True, mutates_local: bool = False,
+  mutates_remote: bool = False, trusted_static_only: bool = False,
+  safe_mode: str | None = None)`.
 - Family row: `CommandFamily(id: str, label: str, summary: str)`.
 - Compatibility view: `COMMAND_NAMES: tuple[tuple[str, str], ...]`, derived
   from `COMMAND_REGISTRY` rather than maintained separately.
@@ -565,6 +572,23 @@ noise.
 - Every pack-owned command appears exactly once in `COMMAND_REGISTRY` and
   belongs to exactly one declared family. `SOURCE_ONLY_COMMAND_NAMES` remains
   the single source for source-checkout-only availability.
+- Capability metadata is conservative: new commands execute checkout code by
+  default. A `trusted_static_only` command cannot execute checkout code, mutate
+  local or remote state, or declare a safe mode; non-executing commands must be
+  explicitly trusted-static.
+- The generator reads hand-authored neutral bodies only from
+  `.github/command-sources/`, inserts exactly one capability-driven
+  checkout-trust policy before skill resolution, and writes guarded neutral
+  adapters to `templates/.commands/`. Claude, Gemini, and GitHub adapters derive
+  from the same guarded body. Any declared hand-authored platform override must
+  pass the same marker and ordering validation; platform-specific sources
+  cannot opt out.
+- Checkout trust is classified using trusted host-provided, read-only Git and
+  GitHub metadata. Fork heads are untrusted; detached, unreadable, unavailable,
+  or contradictory identity is indeterminate. Both states stop before any
+  checkout-owned script, hook, package task, provider adapter, command-bearing
+  config, or changed skill instruction is loaded or run. User approval does not
+  override the stop.
 - The generator reads canonical skill frontmatter for descriptions and the
   root manifest for the bundled version. Do not hand-maintain those values in
   the help skill or catalog.
@@ -605,6 +629,10 @@ noise.
 - Missing/malformed canonical frontmatter or manifest version -> generation
   fails with the source path and field named.
 - Duplicate/case-folding manifest target -> generation fails.
+- Contradictory command capabilities or an unsafe safe-mode id -> registry
+  import fails.
+- Missing or duplicate skill-resolution anchor, or an authored checkout-trust
+  marker -> generation fails before writing any adapter.
 - Runtime skill missing from the catalog -> help labels it `unknown/external`.
 - Catalog command absent from runtime discovery -> help labels it bundled but
   unavailable instead of claiming it can run.
@@ -621,12 +649,15 @@ noise.
 ### 6. Tests Required
 
 - Assert registry uniqueness, family completeness, short-name consistency, and
-  source-only policy.
+  source-only policy, conservative capability defaults, and exemption safety.
 - Assert deterministic family/catalog order, canonical frontmatter
   descriptions, version binding, Markdown escaping, and no-write failure.
 - Assert reference path validation and manifest fanout to every skill root.
 - Assert adapter generation/parity, install/update/remove behavior, root
   dogfood parity, and manifest case-fold uniqueness.
+- Enumerate every live command and supported generated adapter, proving that
+  execution-capable commands have the canonical policy before skill resolution
+  and that only declared trusted-static commands receive the exemption.
 - Assert help's availability labels, bounded recommendation behavior,
   read-only boundary, failure guidance, and registry-valid authored examples.
 
@@ -645,7 +676,12 @@ This creates parallel command and help registries that can drift.
 
 ```python
 COMMAND_REGISTRY = (
-    CommandInfo("sd-example", "example", "orientation-knowledge"),
+    CommandInfo(
+        "sd-example",
+        "example",
+        "verification-improvement",
+        mutates_local=True,
+    ),
 )
 COMMAND_NAMES = tuple((item.name, item.short) for item in COMMAND_REGISTRY)
 ```
@@ -1204,10 +1240,13 @@ GitHub Copilot prompt adapters use `.github/prompts/sd-<command>.prompt.md`
 with YAML frontmatter descriptions and `mode: agent`, so prompt completion has
 explicit metadata and runs in agent mode. Cursor, OpenCode, and the generic
 Markdown adapters for Antigravity, CodeBuddy, Devin, Droid/Factory, Kilo Code,
-Pi, Qoder, Trae, and Zed Code are installed from the neutral
-`templates/.commands/sd-<command>.md` source files. Their installed target
-paths still use each platform's native command/workflow/prompt directory, but
-the shared source must not live under a platform-owned template directory.
+Pi, Qoder, Trae, and Zed Code install from the generated guarded
+`templates/.commands/sd-<command>.md` files. Hand-authored neutral bodies live
+under `.github/command-sources/`; the generator inserts the canonical trust
+policy before skill resolution and derives every generated platform adapter.
+Installed targets still use each platform's native command/workflow/prompt
+directory, but the authored shared source must not live under a platform-owned
+template directory.
 Do not add duplicate OpenCode command source files under
 `templates/.opencode/commands/`; if OpenCode ever needs wording that differs
 from the neutral source, record the deviation beside the parity test.

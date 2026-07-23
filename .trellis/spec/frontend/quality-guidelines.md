@@ -28,6 +28,11 @@ guessing.
   shared `sd-start`, `sd-continue`, `sd-finish-work`, and `sd-update-spec`
   skills may delegate to Trellis-provided skills from the target repo, but
   platform adapters should still read the pack-owned shared skill first.
+- Hand-authored neutral bodies live in `.github/command-sources/`. Generated
+  command, prompt, and workflow adapters that may execute checkout content must
+  contain the canonical checkout-trust policy before skill resolution; only a
+  registry-declared, non-executing `trusted_static_only` command may receive the
+  generated exemption.
 - Codex-visible `sd-*` wrappers live under `.agents/skills/` because Codex
   command completion surfaces enabled skills, not the other platforms' command
   adapter files. Keep their behavior aligned with the platform `sd` adapters.
@@ -61,8 +66,10 @@ Run:
 python3 -m unittest discover -s tests
 ```
 
-When adding or changing adapter templates, test that the installer copies the
-right file for the right platform and respects anchor/default behavior.
+When adding or changing adapter sources, run generation and test that every
+live command receives the capability-appropriate policy before skill
+resolution, then verify that the installer copies the right file for the right
+platform and respects anchor/default behavior.
 
 ## Code Review Checklist
 
@@ -72,3 +79,5 @@ right file for the right platform and respects anchor/default behavior.
 - Does README list the supported adapter and install behavior?
 - Does `git diff --check` pass after template changes?
 - Do all adapters still describe the same command behavior?
+- Does generation fail closed if capability metadata or the skill-resolution
+  anchor is missing or contradictory?
