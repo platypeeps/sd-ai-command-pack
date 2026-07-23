@@ -1,4 +1,4 @@
 {"file": "tests/test_review_local.py", "reason": "Extend local provider behavior tests with structured outcomes reuse and invalidation."}
-{"file": "tests/test_full_check.py", "reason": "Prove full-check delegates AI lanes without duplicate provider execution."}
-{"file": "tests/test_review_scope.py", "reason": "Verify shipped review-pr and local-review contracts and privacy boundaries."}
+{"file": "tests/test_full_check.py", "reason": "Prove sd-check classifies AI lanes without duplicate provider execution."}
+{"file": "tests/test_review_scope.py", "reason": "Verify shipped sd-review scope variants, provider contracts, and privacy boundaries."}
 {"file": "tests/test_generated_parity.py", "reason": "Keep source templates and generated installed review surfaces synchronized."}

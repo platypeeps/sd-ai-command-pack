@@ -1,5 +1,5 @@
 {"file": "templates/.agents/skills/sd-review-local/SKILL.md", "reason": "Preserve standalone local review scope and consent semantics while sharing execution."}
 {"file": "templates/scripts/sd-ai-command-pack-review-local.sh", "reason": "Extract the current Prism Gito and custom provider behavior into the shared coordinator."}
 {"file": "templates/scripts/sd-ai-command-pack-full-check.sh", "reason": "Remove duplicate provider invocation while preserving a separately classified local AI stage."}
-{"file": "templates/scripts/sd-ai-command-pack-review-full-check.sh", "reason": "Keep the sd-review-pr deterministic gate isolated from AI provider execution."}
+{"file": "templates/scripts/sd-ai-command-pack-review-full-check.sh", "reason": "Move deterministic sd-check orchestration into its canonical runner, isolated from AI provider execution."}
 {"file": "templates/.agents/skills/sd-review-pr/SKILL.md", "reason": "Integrate local receipts and routed remote receipts into one remediation lifecycle."}
