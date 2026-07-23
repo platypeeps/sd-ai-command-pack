@@ -917,22 +917,24 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
 )
 
 
+def _duplicates(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    repeated: set[str] = set()
+    for value in values:
+        if value in seen:
+            repeated.add(value)
+        else:
+            seen.add(value)
+    return sorted(repeated)
+
+
 def validate_command_registry(
     commands: tuple[CommandInfo, ...],
     families: tuple[CommandFamily, ...],
 ) -> None:
-    def duplicates(values: list[str]) -> list[str]:
-        seen: set[str] = set()
-        repeated: set[str] = set()
-        for value in values:
-            if value in seen:
-                repeated.add(value)
-            else:
-                seen.add(value)
-        return sorted(repeated)
 
     family_ids = [family.id for family in families]
-    duplicate_family_ids = duplicates(family_ids)
+    duplicate_family_ids = _duplicates(family_ids)
     errors: list[str] = []
     if duplicate_family_ids:
         errors.append("duplicate family id(s): " + ", ".join(duplicate_family_ids))
@@ -942,8 +944,8 @@ def validate_command_registry(
 
     names = [command.name for command in commands]
     shorts = [command.short for command in commands]
-    duplicate_names = duplicates(names)
-    duplicate_shorts = duplicates(shorts)
+    duplicate_names = _duplicates(names)
+    duplicate_shorts = _duplicates(shorts)
     if duplicate_names:
         errors.append("duplicate command name(s): " + ", ".join(duplicate_names))
     if duplicate_shorts:
@@ -1043,9 +1045,7 @@ def validate_interaction_registry(
 ) -> None:
     errors: list[str] = []
     decision_ids = [decision.id for decision in decisions]
-    duplicate_ids = sorted(
-        {decision_id for decision_id in decision_ids if decision_ids.count(decision_id) > 1}
-    )
+    duplicate_ids = _duplicates(decision_ids)
     if duplicate_ids:
         errors.append("duplicate interaction decision id(s): " + ", ".join(duplicate_ids))
 
