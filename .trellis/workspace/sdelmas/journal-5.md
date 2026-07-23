@@ -337,3 +337,43 @@ Made review-learnings read-only by default, added explicit atomic local and exac
 ### Next Steps
 
 - None - task complete
+
+
+## Session 210: Adaptive audit charter routing
+
+**Date**: 2026-07-23
+**Task**: Adaptive audit charter routing
+**Branch**: `codex/optimize-audit-charter-routing`
+
+### Summary
+
+Implemented deterministic repository fingerprinting and cost-aware audit charter routing, then tightened evidence bounds and documentation signals from remote review.
+
+### Main Changes
+
+- Added the versioned audit applicability router and standard/exhaustive workflow contract across shipped command surfaces.
+- Added calibration, boundary, parity, installer, coverage, and fleet candidate validation for the new router.
+- Applied Copilot feedback to bound evidence selection efficiently and prevent code filenames from becoming false documentation signals.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d9496cb5d9398b61d6655f4ed439ec22c2950e5a` | feat: add adaptive audit charter routing |
+| `08beea72af38bb34c99cb0f509350738122aa922` | fix: optimize bounded audit evidence |
+| `645aba5f4d3334ec8d97c50d39b58552582e5132` | fix: narrow audit documentation signals |
+
+### Testing
+
+- [OK] make check
+- [OK] all eight fleet candidate consumers passed
+- [OK] Copilot round 3 produced no new comments and all review threads are resolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
