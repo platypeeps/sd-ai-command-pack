@@ -1679,7 +1679,10 @@ Converted redundant program planning into explicit Trellis ownership, added the 
 
 ### Testing
 
-- Validation was not recorded for this session.
+- `make check`
+- `node scripts/sd-ai-command-pack-review-preflight.mjs`
+- `python3 ./.trellis/scripts/task.py validate 07-22-normalize-sd-workflow-program-task-topology`
+- `python3 ./.trellis/scripts/task.py validate 07-22-validate-sd-workflow-program-integration`
 
 ### Status
 
