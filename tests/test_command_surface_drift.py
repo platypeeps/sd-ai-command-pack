@@ -65,7 +65,10 @@ class CommandSurfaceDriftTests(unittest.TestCase):
             for target in registry.command_installed_targets("sd-one", "one")
         ]
         (root / "manifest.json").write_text(
-            json.dumps({"name": "fixture", "version": "1", "files": entries}),
+            json.dumps(
+                {"name": "fixture", "version": "1", "files": entries},
+                indent=2,
+            ),
             encoding="utf-8",
         )
         return command
@@ -182,6 +185,44 @@ class CommandSurfaceDriftTests(unittest.TestCase):
             )
             self.assertEqual(finding.category, "unregistered_public_target")
             self.assertEqual(finding.identifier, "sd-extra")
+
+    def test_unregistered_manifest_entries_use_unique_target_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            command = self.make_repo(root)
+            manifest_path = root / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            targets = (
+                ".cursor/commands/sd-extra.md",
+                ".opencode/commands/sd-extra.md",
+            )
+            manifest["files"].extend(
+                {
+                    "platform": "fixture",
+                    "kind": "command",
+                    "source": "templates/.commands/sd-extra.md",
+                    "target": target,
+                }
+                for target in targets
+            )
+            manifest_text = json.dumps(manifest, indent=2)
+            manifest_path.write_text(manifest_text, encoding="utf-8")
+
+            report = self.lint(root, command)
+
+            findings = [
+                finding
+                for finding in report.findings
+                if finding.path == "manifest.json"
+                and finding.identifier == "sd-extra"
+            ]
+            self.assertEqual(
+                [finding.line for finding in findings],
+                sorted(
+                    self.linter._line_for_literal(manifest_text, target)
+                    for target in targets
+                ),
+            )
 
     def test_stale_help_and_retired_manifest_target_fail(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

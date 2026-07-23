@@ -314,7 +314,7 @@ def _manifest_findings(
                     category=category,
                     identifier=command_name,
                     path="manifest.json",
-                    line=_line_for_literal(text, source),
+                    line=_line_for_literal(text, target),
                     message=f"manifest source {source} is not registered",
                     suggestion="register the command or remove the public target",
                 )
