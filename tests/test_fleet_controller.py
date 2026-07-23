@@ -244,6 +244,15 @@ class FleetControllerTests(InstallTestCase):
         self.pass_lane_action(controller, state)
         action = controller.issue_next(state)[0]
         self.assertEqual(action["stage"], "review")
+        with self.assertRaisesRegex(controller.FleetControllerError, "requires head"):
+            controller.record_result(
+                state,
+                action_id=action["actionId"],
+                release="0.37.0",
+                consumer="wave-a",
+                result="review-finding",
+                reason_code="review-finding",
+            )
         with self.assertRaisesRegex(controller.FleetControllerError, "current PR head"):
             controller.record_result(
                 state,
@@ -506,6 +515,23 @@ class FleetControllerTests(InstallTestCase):
 
         with self.assertRaisesRegex(controller.FleetControllerError, "changed"):
             controller.issue_next(state)
+
+    def test_wave_planner_errors_are_reported_as_controller_errors(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(controller)
+        self.pass_preflight(controller, state)
+
+        with mock.patch.object(
+            controller.WAVE_PLANNER,
+            "plan_rollout",
+            side_effect=controller.WAVE_PLANNER.FleetWavePlanError(
+                "cohort concurrency exceeded"
+            ),
+        ):
+            with self.assertRaisesRegex(
+                controller.FleetControllerError, "concurrency exceeded"
+            ):
+                controller.issue_next(state)
 
     def test_manifest_digest_uses_the_validated_read(self) -> None:
         controller = self.load_controller()

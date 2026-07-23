@@ -757,11 +757,14 @@ def _planner(state: Mapping[str, Any]) -> dict[str, Any]:
     _payload, _consumers, policy, digest = _manifest(path)
     if digest != state["fleetManifestDigest"]:
         raise FleetControllerError("fleet manifest changed during campaign")
-    return WAVE_PLANNER.plan_rollout(
-        policy,
-        _observations(state),
-        no_merge=state["noMerge"],
-    )
+    try:
+        return WAVE_PLANNER.plan_rollout(
+            policy,
+            _observations(state),
+            no_merge=state["noMerge"],
+        )
+    except WAVE_PLANNER.FleetWavePlanError as error:
+        raise FleetControllerError(str(error)) from None
 
 
 def _eligible_lanes(state: Mapping[str, Any], plan: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -843,6 +846,8 @@ def _build_receipt(
         raise FleetControllerError(f"result {result} forbids blocker evidence")
     if blocker is not None:
         blocker = safe_token(blocker, "blocker")
+    if action["stage"] in PR_HEAD_STAGES and head is None:
+        raise FleetControllerError(f"{action['stage']} receipt requires head")
     if head is not None:
         head = full_sha(head, "head")
     if pr_number is not None:

@@ -5,7 +5,7 @@
 - Add a private, atomic fleet campaign controller with deterministic
   `plan`/`next`/`record`/`status`/`resume`/`validate` operations, exact-release
   and exact-head receipts, bounded retries, interruption reconciliation,
-  canary/wave enforcement, and serialized merge eligibility.
+  canary/wave enforcement, and single-candidate merge execution.
 - Reduce `sd-fleet-refresh` to controller action ownership and exception
   interpretation, with rare recovery and corrective-release mechanics loaded
   only when needed instead of keeping the rollout state machine in prompt prose.
