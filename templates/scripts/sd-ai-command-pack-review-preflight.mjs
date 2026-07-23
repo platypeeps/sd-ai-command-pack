@@ -1281,6 +1281,13 @@ function checkTrellisTaskContextManifests() {
         );
         continue;
       }
+      if (issue.kind === 'malformed') {
+        fail(
+          `${issue.file}:${issue.line} is not valid JSONL; ` +
+            'replace the malformed non-empty row with one JSON object or remove it.',
+        );
+        continue;
+      }
       fail(
         `${issue.file}:${issue.line} contains a task context reference outside the allowed spec/research roots; ` +
           'use .trellis/spec/** or .trellis/tasks/**/research/** only, never code or test paths.',
@@ -1297,7 +1304,7 @@ function checkTrellisTaskContextManifests() {
 
   if (failures.length === failureStart) {
     pass(
-      `checked ${inspectedFiles} changed Trellis task context file(s) for generated _example scaffold rows and spec/research-only references.`,
+      `checked ${inspectedFiles} changed Trellis task context file(s) for valid JSONL, generated _example scaffold rows, and spec/research-only references.`,
     );
   }
 }
@@ -1413,6 +1420,7 @@ export function findTrellisTaskContextIssues(file, text) {
     try {
       record = JSON.parse(line);
     } catch {
+      issues.push({ file, line: index + 1, kind: 'malformed' });
       continue;
     }
 
