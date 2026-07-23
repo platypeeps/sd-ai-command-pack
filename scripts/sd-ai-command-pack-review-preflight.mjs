@@ -164,7 +164,7 @@ export function runReviewPreflight(options = {}) {
   runCheck('documentation path references', checkDocumentationPathReferences);
   runCheck('changed Trellis task metadata integrity', checkChangedTrellisTaskMetadata);
   runCheck('completed Trellis task location', checkCompletedTrellisTaskLocation);
-  runCheck('Trellis task context seeds', checkTrellisTaskContextSeeds);
+  runCheck('Trellis task context manifests', checkTrellisTaskContextManifests);
   runCheck('Trellis journal records', checkTrellisJournalRecords);
   runCheck('first-review risk sweep', checkReviewRiskSweep);
   runCheck('diff size warning', checkDiffSize);
@@ -930,11 +930,11 @@ function isTrellisTaskDirectoryName(value) {
   );
 }
 
-function checkTrellisTaskContextSeeds() {
+function checkTrellisTaskContextManifests() {
   const failureStart = failures.length;
   const diff = currentChangedPaths();
   if (diff === null) {
-    warn('could not inspect current diff for Trellis task context seeds.');
+    warn('could not inspect current diff for Trellis task context manifests.');
     return;
   }
 
@@ -994,23 +994,32 @@ function checkTrellisTaskContextSeeds() {
     }
 
     inspectedFiles += 1;
-    for (const seed of findTrellisTaskContextSeedRows(file, readText(file))) {
+    for (const issue of findTrellisTaskContextIssues(file, readText(file))) {
+      if (issue.kind === 'seed') {
+        fail(
+          `${issue.file}:${issue.line} still contains a generated _example scaffold row; ` +
+            'replace it with grounded {"file": "<path>", "reason": "<why>"} context or leave the file empty.',
+        );
+        continue;
+      }
       fail(
-        `${seed.file}:${seed.line} still contains a generated _example scaffold row; ` +
-          'replace it with grounded {"file": "<path>", "reason": "<why>"} context or leave the file empty.',
+        `${issue.file}:${issue.line} contains a task context reference outside the allowed spec/research roots; ` +
+          'use .trellis/spec/** or .trellis/tasks/**/research/** only, never code or test paths.',
       );
     }
   }
 
   if (inspectedFiles === 0) {
     if (failures.length === failureStart) {
-      pass('no changed Trellis task context files require scaffold checks.');
+      pass('no changed Trellis task context manifests require validation.');
     }
     return;
   }
 
   if (failures.length === failureStart) {
-    pass(`checked ${inspectedFiles} changed Trellis task context file(s) for generated _example scaffold rows.`);
+    pass(
+      `checked ${inspectedFiles} changed Trellis task context file(s) for generated _example scaffold rows and spec/research-only references.`,
+    );
   }
 }
 
@@ -1085,7 +1094,36 @@ export function parseTrellisTaskArtifactPath(path) {
 }
 
 export function findTrellisTaskContextSeedRows(file, text) {
-  const seeds = [];
+  return findTrellisTaskContextIssues(file, text)
+    .filter((issue) => issue.kind === 'seed')
+    .map(({ file: issueFile, line }) => ({ file: issueFile, line }));
+}
+
+export function isTrellisTaskContextReference(value) {
+  if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) {
+    return false;
+  }
+
+  const normalized = normalizePathSeparators(value).replace(/^\.\//, '');
+  const pathWithoutTrailingSlash = normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
+  const segments = pathWithoutTrailingSlash.split('/');
+  if (
+    URI_SCHEME_PATTERN.test(value) ||
+    normalized.startsWith('/') ||
+    segments.some((segment) => segment === '' || segment === '.' || segment === '..')
+  ) {
+    return false;
+  }
+
+  return (
+    pathWithoutTrailingSlash === '.trellis/spec' ||
+    pathWithoutTrailingSlash.startsWith('.trellis/spec/') ||
+    /^\.trellis\/tasks\/(?:archive\/\d{4}-\d{2}\/)?[^/]+\/research(?:\/.+)?$/.test(pathWithoutTrailingSlash)
+  );
+}
+
+export function findTrellisTaskContextIssues(file, text) {
+  const issues = [];
 
   for (const [index, line] of text.split(/\r?\n/).entries()) {
     if (!line.trim()) {
@@ -1100,11 +1138,19 @@ export function findTrellisTaskContextSeedRows(file, text) {
     }
 
     if (isPlainObject(record) && Object.prototype.hasOwnProperty.call(record, '_example')) {
-      seeds.push({ file, line: index + 1 });
+      issues.push({ file, line: index + 1, kind: 'seed' });
+      continue;
+    }
+    if (
+      isPlainObject(record) &&
+      Object.prototype.hasOwnProperty.call(record, 'file') &&
+      !isTrellisTaskContextReference(record.file)
+    ) {
+      issues.push({ file, line: index + 1, kind: 'reference' });
     }
   }
 
-  return seeds;
+  return issues;
 }
 
 function checkTrellisJournalRecords() {
