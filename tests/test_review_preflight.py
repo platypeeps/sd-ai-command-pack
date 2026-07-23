@@ -459,9 +459,11 @@ assert.deepEqual(findTrellisTaskContextIssues('implement.jsonl', [
   '{"file":".trellis/spec/backend/index.md","reason":"real"}',
   '{"file":"tests/test_app.py","reason":"wrong boundary"}',
   '{"_example":"remove me","file":"src/example.py"}',
+  'malformed',
 ].join('\\n')), [
   { file: 'implement.jsonl', line: 2, kind: 'reference' },
   { file: 'implement.jsonl', line: 3, kind: 'seed' },
+  { file: 'implement.jsonl', line: 4, kind: 'malformed' },
 ]);
 assert.deepEqual(parseNumstat('1\\t2\\tsrc/file\\tname.js\\0'), [
   { added: 1, deleted: 2, path: 'src/file\\tname.js' },
@@ -2272,6 +2274,16 @@ assert.deepEqual(
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
             "checked 2 changed Trellis task context file(s)",
+            result.stdout,
+        )
+
+        (task / "implement.jsonl").write_text(
+            context + "malformed non-empty row\n", encoding="utf-8"
+        )
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            ".trellis/tasks/07-17-demo/implement.jsonl:2 is not valid JSONL",
             result.stdout,
         )
 
