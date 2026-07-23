@@ -427,6 +427,10 @@ def validate_lane(value: object, label: str) -> None:
         raise FleetControllerError(f"{label} checkoutPath must be a string")
     if not isinstance(value["checkoutDigest"], str) or len(value["checkoutDigest"]) != 64:
         raise FleetControllerError(f"{label} checkoutDigest is invalid")
+    if value["checkoutDigest"] != _digest_path(Path(value["checkoutPath"])):
+        raise FleetControllerError(
+            f"{label} checkoutDigest does not match checkoutPath"
+        )
     if value["stage"] not in STAGE_INDEX:
         raise FleetControllerError(f"{label} stage is invalid")
     if value["status"] not in {"waiting", "issued", "reconcile", "terminal"}:

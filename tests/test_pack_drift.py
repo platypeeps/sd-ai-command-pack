@@ -238,13 +238,13 @@ class PackDriftTests(InstallTestCase):
         source_only_template_sources = set()
         for name in install.SOURCE_ONLY_COMMAND_NAMES:
             short = name.removeprefix("sd-")
-            skill_root = install.ROOT / f"templates/.agents/skills/{name}"
+            skill_root = (
+                install.ROOT / f"templates/.agents/skills/{name}"
+            ).resolve()
             source_only_template_sources.update(
-                {
-                    path.resolve()
-                    for path in skill_root.rglob("*")
-                    if path.is_file()
-                }
+                path
+                for path in tracked_template_sources
+                if path.is_relative_to(skill_root)
             )
             source_only_template_sources.update(
                 {

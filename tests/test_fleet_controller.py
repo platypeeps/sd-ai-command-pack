@@ -137,6 +137,15 @@ class FleetControllerTests(InstallTestCase):
         self.assertEqual(state["repositoryDigest"], controller._digest_path(root))
         controller.validate_state(state)
 
+        checkout_path = state["lanes"][0]["checkoutPath"]
+        state["lanes"][0]["checkoutPath"] = str(root / "redirected-checkout")
+        with self.assertRaisesRegex(
+            controller.FleetControllerError,
+            "checkoutDigest does not match checkoutPath",
+        ):
+            controller.validate_state(state)
+        state["lanes"][0]["checkoutPath"] = checkout_path
+
         manifest.write_text(json.dumps({"version": "0.38.0"}), encoding="utf-8")
         with self.assertRaisesRegex(controller.FleetControllerError, "does not match"):
             controller.new_state(
