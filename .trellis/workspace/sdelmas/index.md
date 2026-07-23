@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 206
+- **Total Sessions**: 207
 - **Last Active**: 2026-07-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~197 | Active |
+| `journal-5.md` | ~236 | Active |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 207 | 2026-07-23 | Portable structured question contracts | `deb5569bfeac98f85a9c1bf75b6d5728e3646aca`, `9f3618f07724a0c520b3e587918202a04dd8e388` | `codex/add-portable-structured-questions` |
 | 206 | 2026-07-23 | Expand sd-status selectable inventory | `af5f7e3`, `4b1664f`, `0c3c57d`, `247edda` | `codex/expand-sd-status-selectable-inventory` |
 | 205 | 2026-07-23 | Command surface drift lint | `3d5c03de85dfd7ef6e83a9f72daac0cc0a7b8670`, `886f8454026f30ded96ca71d4fd16d1ee305d73c`, `a35782f803198a6342a948ff00281d648dcebaca`, `75fc0948d29719f3c47b0ef8af94501a5b743fa0`, `e01bf8fc18faba39c86582cde4ecb355e9371dcc`, `87c575200425ba3e066882471a94d1881016ffda` | `codex/add-command-surface-drift-lint` |
 | 204 | 2026-07-23 | Enforce untrusted checkout preflight | `3d40d0e` | `codex/enforce-untrusted-checkout-preflight` |

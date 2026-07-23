@@ -197,3 +197,43 @@ Added selectable F/T/R status inventories, completed three Copilot review rounds
 ### Next Steps
 
 - None - task complete
+
+
+## Session 207: Portable structured question contracts
+
+**Date**: 2026-07-23
+**Task**: Portable structured question contracts
+**Branch**: `codex/add-portable-structured-questions`
+
+### Summary
+
+Added a validated host-neutral interaction registry, generated Claude AskUserQuestion guidance and portable fallbacks, synchronized the 0.36.0 payload across installed surfaces, and addressed remote review feedback.
+
+### Main Changes
+
+- Defined validated decision descriptors, host capability metadata, noninteractive dispositions, and safety boundaries in the canonical registry.
+- Generated the shared structured-question reference and capability-scoped adapter guidance, then synchronized templates, manifests, root mirrors, docs, specs, and fleet evidence.
+- Reused a linear duplicate detector after Copilot review and resolved the only review thread.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `deb5569bfeac98f85a9c1bf75b6d5728e3646aca` | feat: add portable structured question contracts |
+| `9f3618f07724a0c520b3e587918202a04dd8e388` | fix: use linear duplicate detection |
+
+### Testing
+
+- [OK] make check
+- [OK] make test with 100% installer coverage
+- [OK] full fleet candidate validation and current ledger check
+- [OK] PR #236 CI green and Copilot round 2 clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
