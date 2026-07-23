@@ -264,7 +264,7 @@ Normal installer refresh retires old pack-owned targets safely.
   correlation ID from causing duplicate provider spend.
 - [x] No implementation begins without separate approval after planning.
 
-## Out of Scope
+## Out Of Scope
 
 - Performing the consolidation or opening migration pull requests.
 - Changing the upstream Trellis repository.
