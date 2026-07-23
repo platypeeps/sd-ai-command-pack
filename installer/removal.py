@@ -36,11 +36,11 @@ from installer.registry import (
     LOCAL_ONLY_MARKER_FILE,
     PACK_MANIFEST_FILE,
     PROVENANCE_FILE,
-    RETIRED_COMMAND_SURFACES,
     ROOT,
     TRELLIS_GITIGNORE_END,
     TRELLIS_GITIGNORE_START,
     TRELLIS_GITIGNORE_TARGET,
+    retired_surface_targets,
 )
 from installer.status import WRITTEN_REMOVE_STATUSES, RemoveStatus
 
@@ -60,14 +60,14 @@ MANAGED_BLOCK_REMOVAL_TARGETS = frozenset(
 )
 
 # Compatibility aliases derive from the canonical registry so install-time
-# retirement and source drift lint cannot disagree about old footprints.
-_RETIRED_SURFACE_BY_ID = {surface.id: surface for surface in RETIRED_COMMAND_SURFACES}
-RETIRED_REVIEW_LOCAL_ALL_TARGETS = _RETIRED_SURFACE_BY_ID[
+# retirement and source drift lint cannot disagree about old footprints. The
+# helper keeps a renamed or missing registry row actionable at import time.
+RETIRED_REVIEW_LOCAL_ALL_TARGETS = retired_surface_targets(
     "review-local-all-command"
-].installed_targets
-SOURCE_ONLY_COMMAND_TARGETS = _RETIRED_SURFACE_BY_ID[
+)
+SOURCE_ONLY_COMMAND_TARGETS = retired_surface_targets(
     "fleet-refresh-consumer-targets"
-].installed_targets
+)
 
 RETIRED_TARGETS = (
     *RETIRED_REVIEW_LOCAL_ALL_TARGETS,

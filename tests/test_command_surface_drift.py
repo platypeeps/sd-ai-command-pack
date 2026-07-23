@@ -186,6 +186,33 @@ class CommandSurfaceDriftTests(unittest.TestCase):
             self.assertEqual(finding.category, "unregistered_public_target")
             self.assertEqual(finding.identifier, "sd-extra")
 
+    def test_registry_command_adapters_are_public_surfaces(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            command = self.make_repo(root)
+            adapter_paths = {
+                registry.PLATFORM_REGISTRY[platform]
+                .command_target_pattern.format(
+                    filename="sd-extra.md",
+                    name="extra",
+                )
+                for platform in registry.NEUTRAL_COMMAND_SOURCE_PLATFORMS
+            }
+            for relative in adapter_paths:
+                adapter = root / relative
+                adapter.parent.mkdir(parents=True, exist_ok=True)
+                adapter.write_text("# sd-extra\n", encoding="utf-8")
+
+            report = self.lint(root, command)
+
+            findings = {
+                finding.path
+                for finding in report.findings
+                if finding.identifier == "sd-extra"
+                and finding.category == "unregistered_public_target"
+            }
+            self.assertEqual(findings, adapter_paths)
+
     def test_unregistered_manifest_entries_use_unique_target_lines(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

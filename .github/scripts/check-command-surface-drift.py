@@ -66,6 +66,36 @@ SKILL_PUBLIC_ROOTS = tuple(
 SKILL_PUBLIC_ROOT_PATTERN = "|".join(
     re.escape(root) for root in SKILL_PUBLIC_ROOTS
 )
+
+
+def _registry_command_path_patterns() -> tuple[tuple[re.Pattern[str], bool], ...]:
+    """Compile installed command-adapter paths from the platform registry."""
+
+    patterns: list[tuple[re.Pattern[str], bool]] = []
+    for platform in NEUTRAL_COMMAND_SOURCE_PLATFORMS:
+        target_pattern = PLATFORM_REGISTRY[platform].command_target_pattern
+        if target_pattern is None:
+            raise RuntimeError(f"platform has no command target pattern: {platform}")
+        if "{filename}" in target_pattern:
+            marker = "__SD_COMMAND_FILENAME__"
+            expression = re.escape(target_pattern.replace("{filename}", marker))
+            expression = expression.replace(
+                re.escape(marker), r"(sd-[a-z0-9-]+)\.md"
+            )
+            patterns.append((re.compile(rf"^{expression}$"), False))
+        elif "{name}" in target_pattern:
+            marker = "__SD_COMMAND_NAME__"
+            expression = re.escape(target_pattern.replace("{name}", marker))
+            expression = expression.replace(re.escape(marker), r"([a-z0-9-]+)")
+            patterns.append((re.compile(rf"^{expression}$"), True))
+        else:
+            raise RuntimeError(
+                f"platform command target pattern has no name placeholder: {platform}"
+            )
+    return tuple(patterns)
+
+
+REGISTRY_COMMAND_PATH_PATTERNS = _registry_command_path_patterns()
 PUBLIC_PATH_PATTERNS: tuple[tuple[re.Pattern[str], bool], ...] = (
     (re.compile(r"^\.github/command-sources/(sd-[a-z0-9-]+)\.md$"), False),
     (
@@ -90,10 +120,7 @@ PUBLIC_PATH_PATTERNS: tuple[tuple[re.Pattern[str], bool], ...] = (
         ),
         False,
     ),
-    (
-        re.compile(r"^(?:templates/)?\.opencode/commands/(sd-[a-z0-9-]+)\.md$"),
-        False,
-    ),
+    *REGISTRY_COMMAND_PATH_PATTERNS,
 )
 MANIFEST_SOURCE_PATTERNS: tuple[tuple[re.Pattern[str], bool], ...] = (
     (

@@ -93,14 +93,14 @@ jobs:
         run: python3 -m pip install -r requirements-dev.txt
 
       - name: Ruff (pack Python)
-        run: python3 -m ruff check install.py installer scripts templates/scripts tests
+        run: python3 -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py
 
       # Mirrors the Makefile lint target's mypy scope: installer/, the
       # install.py facade, and shipped scripts/*.py. templates/scripts/
       # twins stay excluded (byte-identical mirrors; duplicate script
       # names would collide in one mypy run).
       - name: Mypy (pack Python)
-        run: python3 -m mypy installer install.py scripts
+        run: python3 -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py
 
       - name: Review preflight JavaScript syntax
         run: |

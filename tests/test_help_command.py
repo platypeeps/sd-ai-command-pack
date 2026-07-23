@@ -413,6 +413,12 @@ class HelpCommandTests(InstallTestCase):
         ), self.assertRaisesRegex(RuntimeError, "no command target pattern"):
             registry.command_installed_targets("sd-one", "one")
 
+    def test_retired_surface_lookup_reports_missing_id(self) -> None:
+        with self.assertRaisesRegex(
+            RuntimeError, "unknown retired command surface id: missing"
+        ):
+            registry.retired_surface_targets("missing")
+
     def test_shared_skill_reference_validation_rejects_unknown_and_unsafe(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "unknown skill"):
             registry.validate_shared_skill_references(

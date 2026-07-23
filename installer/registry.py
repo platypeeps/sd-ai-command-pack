@@ -835,6 +835,15 @@ RETIRED_COMMAND_SURFACES: tuple[RetiredCommandSurface, ...] = (
     ),
 )
 
+
+def retired_surface_targets(surface_id: str) -> tuple[str, ...]:
+    """Return one retired footprint or fail with actionable registry context."""
+
+    for surface in RETIRED_COMMAND_SURFACES:
+        if surface.id == surface_id:
+            return surface.installed_targets
+    raise RuntimeError(f"unknown retired command surface id: {surface_id}")
+
 COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
     CommandSurfaceAllowance(
         identifier="sd-review-local-all",
