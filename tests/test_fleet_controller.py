@@ -411,6 +411,15 @@ class FleetControllerTests(InstallTestCase):
             result="retryable-failure",
             reason_code="temporary-network",
         )
+        self.assertEqual(
+            controller._observations(state)["canary-a"]["state"], "pending"
+        )
+        self.assertEqual(
+            controller._eligible_lanes(
+                state, {"canStart": [], "mergeCandidate": None}
+            ),
+            [],
+        )
         second = controller.issue_next(state)[0]
 
         self.assertNotEqual(first["actionId"], second["actionId"])

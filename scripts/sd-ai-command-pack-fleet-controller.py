@@ -794,6 +794,14 @@ def _new_action(
     }
 
 
+def _current_attempt_receipts(lane: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    return [
+        receipt
+        for receipt in lane["receipts"]
+        if receipt["attempt"] == lane["attempt"]
+    ]
+
+
 def _observations(state: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     selected = {lane["name"]: lane for lane in state["lanes"]}
     observations: dict[str, dict[str, Any]] = {}
@@ -817,7 +825,7 @@ def _observations(state: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
             observed = "blocked"
         elif (
             lane["stage"] == "checkout-validation"
-            and not lane["receipts"]
+            and not _current_attempt_receipts(lane)
             and lane["status"] == "waiting"
         ):
             observed = "pending"
@@ -854,8 +862,8 @@ def _eligible_lanes(state: Mapping[str, Any], plan: Mapping[str, Any]) -> list[d
     for lane in state["lanes"]:
         if lane["status"] != "waiting" or lane["result"] is not None:
             continue
-        if lane["stage"] == "checkout-validation" and not lane["receipts"]:
-            if lane["name"] in starts:
+        if lane["stage"] == "checkout-validation":
+            if not _current_attempt_receipts(lane) and lane["name"] in starts:
                 eligible.append(lane)
             continue
         if lane["stage"] == "merge":
