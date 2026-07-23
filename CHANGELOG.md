@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.35.0 - 2026-07-23
+
+- Expand `sd-status` with deterministic F-prefixed follow-ups, complete
+  T-prefixed unarchived task inventory, and R-prefixed top-level roadmap work,
+  preserving explicit empty sections and structured report-local selectors.
+
 ## 0.34.1 - 2026-07-23
 
 - Add a registry-driven command-surface drift lint with exact-line JSON

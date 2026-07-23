@@ -28,6 +28,7 @@ COMMIT_RE = re.compile(r"[0-9a-f]{40,64}")
 GITHUB_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 PR_SEPARATOR = "\x1f"
 PRIORITY_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+TASK_STATUS_ORDER = {"in_progress": 0, "planning": 1, "completed": 2}
 WORK_LOOP_TERMINAL_STATUSES = frozenset({"none", "invalid", "unavailable"})
 WORK_LOOP_RUN_STATUSES = frozenset({"active", "paused", "stopped", "completed"})
 WORK_LOOP_REQUIRED_STRING_FIELDS = (
@@ -42,6 +43,9 @@ REVIEW_TOTAL_COUNT_QUERY = (
     "query($owner:String!,$name:String!,$number:Int!){"
     "repository(owner:$owner,name:$name){"
     "pullRequest(number:$number){reviews{totalCount}}}}"
+)
+FLEET_READY_STEP = (
+    "Fleet checkouts are locally ready; no immediate fleet action is required."
 )
 
 
@@ -364,14 +368,24 @@ def task_record(path: Path) -> dict[str, Any] | None:
     title = payload.get("title") or payload.get("name") or path.parent.name
     status = payload.get("status")
     priority = payload.get("priority")
+    parent_value = payload.get("parent")
     if not isinstance(status, str):
         return None
+    if parent_value is None:
+        parent = None
+    elif not isinstance(parent_value, str) or not parent_value.strip():
+        return None
+    else:
+        parent = safe_text(parent_value)
+        if not parent:
+            return None
     return {
         "id": safe_text(payload.get("id") or path.parent.name),
         "title": safe_text(title),
         "status": safe_text(status),
         "priority": safe_text(priority or "unprioritized"),
         "path": path.parent.relative_to(path.parents[2]).as_posix(),
+        "parent": parent,
     }
 
 
@@ -381,6 +395,33 @@ def task_sort_key(task: Mapping[str, Any]) -> tuple[int, str, str]:
         str(task.get("title", "")).casefold(),
         str(task.get("id", "")).casefold(),
     )
+
+
+def task_inventory_sort_key(
+    task: Mapping[str, Any],
+    *,
+    active_identity: tuple[str, str] | None,
+) -> tuple[int, int, int, str, str, str]:
+    identity = (str(task.get("id", "")), str(task.get("path", "")))
+    return (
+        0 if identity == active_identity else 1,
+        TASK_STATUS_ORDER.get(str(task.get("status")), 9),
+        PRIORITY_ORDER.get(str(task.get("priority")), 9),
+        str(task.get("title", "")).casefold(),
+        identity[0].casefold(),
+        identity[1].casefold(),
+    )
+
+
+def select_items(
+    items: Sequence[Mapping[str, Any]],
+    *,
+    prefix: str,
+) -> list[dict[str, Any]]:
+    return [
+        {"selectionId": f"{prefix}-{index}", **dict(item)}
+        for index, item in enumerate(items, start=1)
+    ]
 
 
 def collect_trellis(repo: Path) -> dict[str, Any]:
@@ -427,11 +468,43 @@ def collect_trellis(repo: Path) -> dict[str, Any]:
         (task for task in tasks if task["status"] == "completed"),
         key=task_sort_key,
     )
+    scanned_active = None
+    if isinstance(active, dict):
+        active_identity = (str(active.get("id", "")), str(active.get("path", "")))
+        scanned_active = next(
+            (
+                task
+                for task in tasks
+                if (str(task.get("id", "")), str(task.get("path", "")))
+                == active_identity
+            ),
+            None,
+        )
+    inventory_active_identity = (
+        (str(scanned_active.get("id", "")), str(scanned_active.get("path", "")))
+        if isinstance(scanned_active, dict)
+        else None
+    )
+    inventory = sorted(
+        tasks,
+        key=lambda task: task_inventory_sort_key(
+            task,
+            active_identity=inventory_active_identity,
+        ),
+    )
+    roadmap = [
+        task
+        for task in inventory
+        if task.get("parent") is None
+        and task.get("status") in {"in_progress", "planning"}
+    ]
     return {
         "activeTask": active,
         "inProgress": in_progress,
         "planned": planned,
         "completedOutsideArchive": completed_outside_archive,
+        "tasks": select_items(inventory, prefix="T"),
+        "roadmap": select_items(roadmap, prefix="R"),
     }
 
 
@@ -1071,6 +1144,146 @@ def strict_anomalies(
     return anomalies
 
 
+def collect_follow_ups(report: Mapping[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(kind: str, summary: str, source: str) -> None:
+        normalized_summary = safe_text(summary, limit=500)
+        key = (kind, normalized_summary)
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(
+            {
+                "kind": kind,
+                "summary": normalized_summary,
+                "source": source,
+            }
+        )
+
+    anomalies = report.get("anomalies")
+    if isinstance(anomalies, list):
+        for anomaly in anomalies:
+            add("issue", f"Resolve status anomaly: {anomaly}", "anomalies")
+
+    git_value = report.get("git")
+    git: Mapping[str, Any] = git_value if isinstance(git_value, dict) else {}
+    tree_value = git.get("workingTree")
+    tree: Mapping[str, Any] = tree_value if isinstance(tree_value, dict) else {}
+    if tree.get("state") == "dirty":
+        add(
+            "action",
+            "Review and commit or intentionally discard the current working-tree changes.",
+            "git.workingTree",
+        )
+    sync = git.get("syncState")
+    if sync == "behind":
+        add(
+            "action",
+            "Fast-forward the current branch from its upstream before new work.",
+            "git.syncState",
+        )
+    elif sync == "ahead":
+        add(
+            "action",
+            "Push the local commits or confirm they are intentionally local-only.",
+            "git.syncState",
+        )
+    elif sync == "diverged":
+        add(
+            "action",
+            "Reconcile the diverged local and upstream histories before publishing.",
+            "git.syncState",
+        )
+    elif sync == "no-upstream":
+        add(
+            "action",
+            "Configure or verify the branch upstream before publishing new work.",
+            "git.syncState",
+        )
+
+    github = report.get("github")
+    if isinstance(github, dict):
+        pr = github.get("currentPr")
+        if isinstance(pr, dict) and pr.get("state") == "OPEN":
+            add(
+                "action",
+                f"Continue PR #{pr.get('number')} through sd-watch-pr or sd-housekeeping.",
+                "github.currentPr",
+            )
+
+    work_loop = report.get("workLoop")
+    if isinstance(work_loop, dict):
+        loop_status = work_loop.get("status")
+        run_id = work_loop.get("runId")
+        if loop_status == "active":
+            add(
+                "follow-up",
+                f"Resume active SD work loop {run_id} at iteration "
+                f"{work_loop.get('iteration')} phase {work_loop.get('phase')}.",
+                "workLoop.status",
+            )
+        elif loop_status == "paused":
+            add(
+                "follow-up",
+                f"Resume paused SD work loop {run_id} from its recorded checkpoint.",
+                "workLoop.status",
+            )
+        terminal_reconciliation = work_loop.get("terminalReconciliation")
+        terminal_verified = (
+            isinstance(terminal_reconciliation, dict)
+            and terminal_reconciliation.get("status") == "verified"
+        )
+        health = work_loop.get("contextHealth")
+        if (
+            isinstance(health, dict)
+            and health.get("level") == "red"
+            and not terminal_verified
+        ):
+            add(
+                "issue",
+                "Reconcile the red SD work-loop checkpoint with live Trellis, Git, and PR state.",
+                "workLoop.contextHealth",
+            )
+
+    trellis = report.get("trellis")
+    if isinstance(trellis, dict) and trellis.get("completedOutsideArchive"):
+        add(
+            "follow-up",
+            "Archive completed active-root Trellis tasks with "
+            "python3 ./.trellis/scripts/task.py archive <task-dir>.",
+            "trellis.completedOutsideArchive",
+        )
+
+    versions = report.get("versions")
+    if isinstance(versions, dict) and versions.get("packState") == "different":
+        add(
+            "recommendation",
+            "Refresh the installed SD command pack to the source fleet version.",
+            "versions.packState",
+        )
+
+    if isinstance(github, dict) and github.get("openIssuesStatus") == "available":
+        issues = github.get("openIssues")
+        if isinstance(issues, list):
+            valid_issues = [issue for issue in issues if isinstance(issue, dict)]
+            for issue in sorted(
+                valid_issues,
+                key=lambda item: (
+                    item.get("number") if isinstance(item.get("number"), int) else 0,
+                    str(item.get("title", "")).casefold(),
+                ),
+            ):
+                add(
+                    "issue",
+                    f"Review GitHub issue #{issue.get('number')}: {issue.get('title')}",
+                    "github.openIssues",
+                )
+
+    return select_items(candidates, prefix="F")
+
+
 def next_steps(report: Mapping[str, Any]) -> list[str]:
     steps: list[str] = []
     if report.get("anomalies"):
@@ -1214,6 +1427,7 @@ def collect_local(
         else None,
         "anomalies": [safe_text(item, limit=500) for item in prior_anomalies]
         + anomalies,
+        "followUps": [],
         "nextSteps": [],
     }
     if work_loop.get("status") == "invalid":
@@ -1247,6 +1461,7 @@ def collect_local(
                 dry_run=dry_run,
             )
         )
+    report["followUps"] = collect_follow_ups(report)
     report["nextSteps"] = next_steps(report)
     return report
 
@@ -1272,6 +1487,37 @@ def format_items(items: object) -> str:
     shown = [f"#{item.get('number')}: {item.get('title')}" for item in items[:HUMAN_ITEM_LIMIT]]
     suffix = f"; +{len(items) - HUMAN_ITEM_LIMIT} more" if len(items) > HUMAN_ITEM_LIMIT else ""
     return "; ".join(shown) + suffix
+
+
+def format_selectable_task(task: Mapping[str, Any]) -> str:
+    parent = task.get("parent")
+    parent_suffix = f"; parent {parent}" if isinstance(parent, str) else ""
+    return (
+        f"{task.get('selectionId')} [{task.get('status')}, {task.get('priority')}]: "
+        f"{task.get('title')} ({task.get('id')}; {task.get('path')}{parent_suffix})"
+    )
+
+
+def render_selectable_inventory(
+    heading: str,
+    items: object,
+    *,
+    task_items: bool,
+) -> None:
+    print(f"\n==> {heading}")
+    if not isinstance(items, list) or not items:
+        print("none")
+        return
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if task_items:
+            print(format_selectable_task(item))
+        else:
+            print(
+                f"{item.get('selectionId')} [{item.get('kind')}]: "
+                f"{item.get('summary')}"
+            )
 
 
 def render_local(report: Mapping[str, Any], *, dry_run: bool) -> None:
@@ -1420,7 +1666,7 @@ def render_local(report: Mapping[str, Any], *, dry_run: bool) -> None:
     print(f"- current Trellis task: {format_task(trellis.get('activeTask'))}")
     print(f"- in-progress Trellis tasks: {len(trellis.get('inProgress', []))}")
     planned = trellis.get("planned", [])
-    print(f"- planned Trellis tasks ({len(planned)}): {format_task(planned[0]) if planned else 'none'}")
+    print(f"- planned Trellis tasks: {len(planned)}")
     completed_outside_archive = trellis.get("completedOutsideArchive", [])
     print(
         "- completed Trellis tasks outside archive "
@@ -1434,6 +1680,22 @@ def render_local(report: Mapping[str, Any], *, dry_run: bool) -> None:
             print(f"- {anomaly}")
     else:
         print("none")
+
+    render_selectable_inventory(
+        "Follow-ups",
+        report.get("followUps"),
+        task_items=False,
+    )
+    render_selectable_inventory(
+        "Tasks",
+        trellis.get("tasks"),
+        task_items=True,
+    )
+    render_selectable_inventory(
+        "Roadmap",
+        trellis.get("roadmap"),
+        task_items=True,
+    )
 
     print("\n==> Next Steps")
     for index, step in enumerate(report["nextSteps"], start=1):
@@ -1521,8 +1783,19 @@ def fleet_next_steps(reports: Sequence[Mapping[str, Any]], target: str) -> list[
     if stale:
         steps.append("Refresh stale SD pack installations: " + ", ".join(stale) + ".")
     if not steps:
-        steps.append("Fleet checkouts are locally ready; no immediate fleet action is required.")
+        steps.append(FLEET_READY_STEP)
     return steps[:HUMAN_ITEM_LIMIT]
+
+
+def fleet_follow_ups(steps: Sequence[str]) -> list[dict[str, Any]]:
+    actionable = [step for step in steps if step != FLEET_READY_STEP]
+    return select_items(
+        [
+            {"kind": "action", "summary": step, "source": "fleet"}
+            for step in actionable
+        ],
+        prefix="F",
+    )
 
 
 def collect_fleet(
@@ -1585,6 +1858,7 @@ def collect_fleet(
                 "report": report,
             }
         )
+    steps = fleet_next_steps(reports, target)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "mode": "fleet",
@@ -1598,7 +1872,8 @@ def collect_fleet(
             ),
         },
         "repositories": reports,
-        "nextSteps": fleet_next_steps(reports, target),
+        "followUps": fleet_follow_ups(steps),
+        "nextSteps": steps,
     }
 
 
@@ -1654,6 +1929,11 @@ def render_fleet(report: Mapping[str, Any]) -> None:
             f"PRs {pr_count}; "
             f"tasks {len(trellis.get('inProgress', []))}/{len(trellis.get('planned', []))}"
         )
+    render_selectable_inventory(
+        "Follow-ups",
+        report.get("followUps"),
+        task_items=False,
+    )
     print("\n==> Next Steps")
     for index, step in enumerate(report["nextSteps"], start=1):
         print(f"{index}. {step}")

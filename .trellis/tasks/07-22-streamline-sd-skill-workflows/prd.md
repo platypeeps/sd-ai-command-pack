@@ -100,6 +100,9 @@ merge eligibility without mutating the PR.
 - `07-22-add-portable-structured-questions` owns F14.
 - `07-22-optimize-audit-charter-routing` owns F15.
 - `07-22-structure-skill-runtime-contracts` owns F16.
+- `07-23-expand-sd-status-selectable-inventory` owns the separately requested
+  selectable F/T/R status inventory and canonical task-tree roadmap view; it
+  adds no new F01-F17 remediation scope.
 - Every implementation child owns its task-local F17 scenario coverage.
 - `07-22-normalize-sd-workflow-program-task-topology` is the completed
   bookkeeping child that converted the program design and implementation plan

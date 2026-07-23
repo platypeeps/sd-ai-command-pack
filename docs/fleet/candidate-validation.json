@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-23T12:22:00Z",
-  "packVersion": "0.34.1",
-  "payloadDigest": "sha256:093615566707058c8691aad45b64fccc2cc2e4ef6c390c249393840523458226",
+  "validatedAt": "2026-07-23T15:08:38Z",
+  "packVersion": "0.35.0",
+  "payloadDigest": "sha256:86b3f5c1dc23a2d41a78a026c1d37736cfd255d30c164969ed31f3647bbe0d5c",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "85f3495cd12276b35dc365fe64cfd371f2f536bd",
+      "baseCommit": "160a29ebd6b8eadabe49d3d7da61b9de1f6b27cb",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "9c5f7e66d3716843c950e563e7b5ca110b5b26cb",
+      "baseCommit": "f3c89b3c92fba8835f247fc28d63f73c3ffd8e0f",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -121,7 +121,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "101951c49e25035b0f89469f32dd56e35e3c6a9e",
+      "baseCommit": "32fc23d4a59aee4e84d25d44861e7e5e7b8d6483",
       "status": "passed",
       "prepares": [
         [

@@ -59,15 +59,27 @@ reinterpret them as shell text.
    Git stash count, cached upstream divergence, default/local/remote branches,
    installed pack and Trellis versions, relevant PR, open PRs/issues, current
    and queued Trellis work, completed tasks stranded outside the Trellis
-   archive, the user-local autonomous work-loop state, anomalies, and numbered
-   next steps. Loop state includes run ID, mode,
+   archive, the user-local autonomous work-loop state, anomalies, selectable
+   follow-ups, every unarchived task, top-level roadmap work, and numbered next
+   steps. Loop state includes run ID, mode,
    selector/focus, iteration, phase, task, PR, counters, heartbeat, context
    health, checkpoint, lock status, and stop reason when present.
-5. For fleet mode, preserve registry rollout order and show one bounded row per
+5. For local mode, preserve the collector's complete selectable inventory:
+   - `F-*` rows are evidence-backed issues, recommendations, actions, or
+     follow-up suggestions that are not a parallel Trellis backlog.
+   - `T-*` rows enumerate every valid unarchived Trellis task.
+   - `R-*` rows enumerate open top-level Trellis tasks, which are the canonical
+     roadmap now that separate roadmap files are retired.
+   Keep all three sections present and relay the exact word `none` when a
+   category is empty. IDs are deterministic for the reported snapshot but are
+   not durable task identities.
+6. For fleet mode, preserve registry rollout order and show one bounded row per
    consumer with checkout availability, branch/tree/upstream state, stash count, installed
    versus target pack version, PR counts, and task counts. Put missing, dirty,
-   divergent, behind, or stale consumers into evidence-backed next steps.
-6. Return the collector's exit status unchanged. A dirty or stale ordinary
+   divergent, behind, or stale consumers into F-prefixed follow-ups and
+   evidence-backed next steps. Complete per-consumer task and roadmap details
+   remain in nested JSON or a local status request for that checkout.
+7. Return the collector's exit status unchanged. A dirty or stale ordinary
    status report is advisory and exits zero; invalid repositories, malformed
    fleet configuration, or an unavailable configured pack source exit nonzero.
 
@@ -87,14 +99,37 @@ reinterpret them as shell text.
   collector's validated, bounded, control-character-free output fields.
 - Report unavailable optional sources explicitly. Do not silently convert
   failed GitHub or version discovery into an empty healthy result.
-- Keep human output bounded. Use `--json` when the caller needs the complete
-  structured inventory.
+- Keep externally controlled row content bounded. Local T and R sections are
+  intentionally complete; use `--json` when the caller needs the complete
+  structured inventory without human formatting. Fleet human output remains
+  bounded.
 - Treat a completed task directly under `.trellis/tasks/` as an anomaly and
   recommend `task.py archive`; status remains read-only and never moves it.
 
 ## Final Response
 
-Relay the collector's summary, anomalies, and numbered next steps. Mention
-whether refs were cached or refreshed and whether GitHub inventory was queried.
-Do not claim the repository or fleet is clean when the report marks any member
-dirty, stale, missing, behind, or diverged.
+Relay the collector's summary and anomalies, then preserve these headings and
+selection IDs exactly:
+
+```text
+Follow-ups
+F-1 [<kind>]: <summary>
+
+Tasks
+T-1 [<status>, <priority>]: <title> (<durable task id>; <path>)
+
+Roadmap
+R-1 [<status>, <priority>]: <title> (<durable task id>; <path>)
+```
+
+Write `none` under every empty heading instead of omitting it. Then relay the
+collector's compatibility `Next Steps` summary. Mention whether refs were
+cached or refreshed and whether GitHub inventory was queried. Do not claim the
+repository or fleet is clean when the report marks any member dirty, stale,
+missing, behind, or diverged.
+
+If the user later supplies an F/T/R identifier, treat it as a report-local
+selector for this snapshot and resolve it back to the durable row contents. A
+selection is a new request; it does not retroactively authorize `sd-status` to
+mutate the repository or bypass the selected workflow's task, approval, and
+safety gates.

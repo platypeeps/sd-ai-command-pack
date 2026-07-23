@@ -695,6 +695,10 @@ class SdlcCommandsTests(InstallTestCase):
             "run ID, mode, selector/focus, iteration, phase",
             "Do not acquire or refresh its lock",
             "absent state is `none`",
+            "`F-*` rows",
+            "`T-*` rows enumerate every valid unarchived Trellis task",
+            "`R-*` rows enumerate open top-level Trellis tasks",
+            "report-local selector",
         ):
             self.assertIn(pin, status)
 
