@@ -1846,3 +1846,44 @@ Moved the consumer-discovered test-directory classification fix into the source 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 199: Centralize PR eligibility and exact-head gates
+
+**Date**: 2026-07-23
+**Task**: Centralize PR eligibility and exact-head gates
+**Branch**: `codex/centralize-pr-eligibility-gates`
+
+### Summary
+
+Added a shared read-only eligibility evaluator, retained housekeeping as the sole merge owner, and routed dependency PRs through the same exact-head gate for pack 0.33.0.
+
+### Main Changes
+
+- Added a versioned exact-head evaluator covering checks, paginated review threads, finish-work evidence, stable blocked or indeterminate reasons, and final head rereads.
+- Rewired housekeeping and dependency updates so housekeeping remains the only live merge mutation owner.
+- Published pack 0.33.0 with synchronized templates, generated mirrors, executable specs, and all-consumer candidate evidence.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `addda74` | feat: centralize PR eligibility gates |
+| `e73369a` | chore: correct task context references |
+| `5511a0b` | fix: correct eligibility CLI contract |
+
+### Testing
+
+- [OK] make check and deterministic PR full-check passed.
+- [OK] New evaluator reached 89% coverage against an 85% floor.
+- [OK] All eight fleet candidate consumers passed for 0.33.0.
+- [OK] PR #232 CI passed; two Copilot rounds ended with zero unresolved threads after one corrected spec flag.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
