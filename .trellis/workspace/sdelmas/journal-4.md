@@ -1570,3 +1570,45 @@ Published the 0.30.6 corrective release candidate so housekeeping resolves finis
 ### Next Steps
 
 - None - task complete
+
+
+## Session 192: Plan streamlined SD skill workflows
+
+**Date**: 2026-07-22
+**Task**: Plan streamlined SD skill workflows
+**Branch**: `codex/streamline-sd-skill-workflows`
+
+### Summary
+
+Created, reviewed, and aligned the Trellis planning program for streamlining the SD command and review workflows.
+
+### Main Changes
+
+- Captured the workflow audit findings in an umbrella planning task and decomposed them into scoped child tasks.
+- Defined dependency waves and contracts for routed review, eligibility, trust, orchestration, structured questions, audits, runtime outputs, and command-surface drift.
+- Addressed all review feedback and curated the phase manifests to Trellis spec and research context.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `225d0017e0ed4198deaea84d0eebdd67c340691f` | docs: plan streamlined SD skill workflows |
+| `f028ac78c94d232054a7091602c3af3571b10d2a` | docs: address routed review planning feedback |
+| `67493187fa57aac8922a6e3d4bec5e611d84bc31` | docs: make planning dependencies explicit |
+| `547d8fe55fdb588985aca86261863bf73a80fda9` | docs: normalize planning section heading |
+| `6cbecc62e9d931967922861a8b79e0384c1056e9` | docs: curate routed review task context |
+
+### Testing
+
+- [OK] GitHub CI: every executed check on PR #225 succeeded; classifier-only jobs were skipped as expected
+- [OK] GitHub review threads: 0 unresolved across 6 threads
+- [OK] PR head matches the local and origin source branch
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
