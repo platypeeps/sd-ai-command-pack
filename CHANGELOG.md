@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.34.1 - 2026-07-23
+
+- Add a registry-driven command-surface drift lint with exact-line JSON
+  findings, reasoned historical allowances, canonical retirement footprints,
+  and maintainer-gate coverage for stale names and missing targets.
+
 ## 0.34.0 - 2026-07-23
 
 - Generate a capability-driven, fail-closed checkout-trust preflight for every

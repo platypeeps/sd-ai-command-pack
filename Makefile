@@ -17,8 +17,10 @@ hooks:
 generate:
 	@if [ -x "$(VENV_PYTHON)" ]; then \
 		"$(VENV_PYTHON)" .github/scripts/generate-command-surfaces.py; \
+		"$(VENV_PYTHON)" .github/scripts/check-command-surface-drift.py; \
 	else \
 		"$(PYTHON)" .github/scripts/generate-command-surfaces.py; \
+		"$(PYTHON)" .github/scripts/check-command-surface-drift.py; \
 	fi
 
 # Self-sync after payload or doc/spec/task edits: refresh the dogfood
@@ -40,8 +42,8 @@ test:
 # scripts/*.py; templates/scripts/ twins are byte-identical mirrors kept
 # out of the run so duplicate script names cannot collide.
 lint:
-	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests
-	"$(VENV_PYTHON)" -m mypy installer install.py scripts
+	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py
+	"$(VENV_PYTHON)" -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py
 	@if command -v node >/dev/null 2>&1; then \
 		node --check scripts/sd-ai-command-pack-review-preflight.mjs; \
 		node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs; \

@@ -841,6 +841,14 @@ class InstallTestCase(unittest.TestCase):
         root = self.make_git_repo_without_trellis()
         for dirname in ("templates", "scripts", "docs"):
             shutil.copytree(PACK_ROOT / dirname, root / dirname)
+        lint_dir = root / ".github/scripts"
+        lint_dir.mkdir(parents=True)
+        (lint_dir / "check-command-surface-drift.py").write_text(
+            "#!/usr/bin/env python3\n"
+            "# Synthetic pack fixtures exercise linter orchestration only.\n"
+            "raise SystemExit(0)\n",
+            encoding="utf-8",
+        )
         shutil.copyfile(PACK_ROOT / "manifest.json", root / "manifest.json")
         shutil.copyfile(PACK_ROOT / "CHANGELOG.md", root / "CHANGELOG.md")
         (root / "install.py").write_text("# source repo marker\n", encoding="utf-8")

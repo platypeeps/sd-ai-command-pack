@@ -345,6 +345,23 @@ class PackDriftTests(InstallTestCase):
         self.assertIn("template twin pairs compared:", result.stdout)
         self.assertNotIn("skipping SD-specific source checks", result.stdout)
 
+    def test_pack_source_drift_gate_propagates_command_surface_failure(self) -> None:
+        root = self.make_pack_source_fixture()
+        lint = root / ".github/scripts/check-command-surface-drift.py"
+        lint.write_text(
+            "#!/usr/bin/env python3\n"
+            "print('fixture command surface drift')\n"
+            "raise SystemExit(1)\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_pack_source_drift_gates(root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("SD command surface drift lint", result.stdout)
+        self.assertIn("fixture command surface drift", result.stdout)
+        self.assertNotIn("template twin pairs compared:", result.stdout)
+
     def test_pack_source_drift_gate_skips_se_pack_identity(self) -> None:
         root = self.make_installer_pack_fixture(
             json.dumps(

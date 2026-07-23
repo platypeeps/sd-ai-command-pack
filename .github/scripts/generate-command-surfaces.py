@@ -64,12 +64,16 @@ if str(PACK_ROOT) not in sys.path:
     sys.path.insert(0, str(PACK_ROOT))
 
 from installer.registry import (  # noqa: E402
+    BESPOKE_ADAPTER_PLATFORMS,
     COMMAND_FAMILIES,
     COMMAND_NAMES,
     COMMAND_REGISTRY,
+    GENERATED_COMMAND_TARGET_FAMILIES,
+    LATER_NEUTRAL_COMMAND_PLATFORMS,
     NEUTRAL_COMMAND_SOURCE_PLATFORMS,
     PLATFORM_REGISTRY,
     SHARED_SKILL_REFERENCES,
+    SKILL_FANOUT_PLATFORMS,
     SOURCE_ONLY_COMMAND_NAMES,
     CommandInfo,
 )
@@ -174,35 +178,6 @@ SKILL_RESOLUTION_ANCHOR = re.compile(
 GITHUB_PROMPT_HEADER_COMMENT = (
     "# description is shown by GitHub prompt pickers; mode: agent means the "
     "prompt can use tools and run an interactive workflow."
-)
-
-# Adapter platforms whose per-command sources are bespoke generated files
-# rather than the neutral body.
-BESPOKE_ADAPTER_PLATFORMS = ("claude", "gemini", "github")
-
-# Neutral-source platforms added after the original claude/cursor/gemini/
-# github/opencode block; the manifest lists them after that block, in
-# alphabetical order.
-LATER_NEUTRAL_COMMAND_PLATFORMS = tuple(
-    platform
-    for platform in NEUTRAL_COMMAND_SOURCE_PLATFORMS
-    if platform not in ("cursor", "opencode")
-)
-
-# Platforms that receive a per-command copy of the shared skill. Not derivable
-# from PLATFORM_REGISTRY: these are the platforms whose agents resolve skills
-# from their own directory instead of the shared `.agents/` tree.
-SKILL_FANOUT_PLATFORMS = (
-    "antigravity",
-    "codebuddy",
-    "devin",
-    "droid",
-    "kilo",
-    "kiro",
-    "pi",
-    "qoder",
-    "reasonix",
-    "trae",
 )
 
 HELP_CATALOG_PATH = (
@@ -493,6 +468,8 @@ def generate_adapters() -> dict[str, str]:
         description, authored_body = neutral_description_and_body(name)
         body = guarded_command_body(command, authored_body)
         for platform in BESPOKE_ADAPTER_PLATFORMS:
+            if platform not in command.target_families:
+                continue
             if (platform, short) in OVERRIDE_BODIES:
                 path = Path(bespoke_adapter_path(platform, name, short))
                 try:
@@ -516,6 +493,11 @@ def generate_adapters() -> dict[str, str]:
 def generate_neutral_adapters() -> dict[str, str]:
     outputs: dict[str, str] = {}
     for command in COMMAND_REGISTRY:
+        if not any(
+            platform in command.target_families
+            for platform in NEUTRAL_COMMAND_SOURCE_PLATFORMS
+        ):
+            continue
         description, authored_body = neutral_description_and_body(command.name)
         body = guarded_command_body(command, authored_body)
         outputs[f"templates/.commands/{command.name}.md"] = neutral_adapter(
@@ -551,21 +533,25 @@ def _platform_skill_entry(platform: str, name: str) -> dict[str, str]:
     }
 
 
-def _skill_reference_entries(name: str) -> list[dict[str, str]]:
+def _skill_reference_entries(
+    name: str,
+    target_families: tuple[str, ...] = GENERATED_COMMAND_TARGET_FAMILIES,
+) -> list[dict[str, str]]:
     entries: list[dict[str, str]] = []
     for reference in SHARED_SKILL_REFERENCES.get(name, ()):
         source = f"templates/.agents/skills/{name}/{reference}"
         if source not in GENERATED_REFERENCE_PATHS and not (PACK_ROOT / source).is_file():
             raise GenerationError(f"missing shared skill reference: {source}")
-        entries.append(
-            {
-                "platform": "shared",
-                "kind": "skill",
-                "source": source,
-                "target": f".agents/skills/{name}/{reference}",
-                "install": "always",
-            }
-        )
+        if "shared" in target_families:
+            entries.append(
+                {
+                    "platform": "shared",
+                    "kind": "skill",
+                    "source": source,
+                    "target": f".agents/skills/{name}/{reference}",
+                    "install": "always",
+                }
+            )
         entries.extend(
             {
                 "platform": platform,
@@ -578,51 +564,72 @@ def _skill_reference_entries(name: str) -> list[dict[str, str]]:
                 "anchor": PLATFORM_REGISTRY[platform].directory,
             }
             for platform in SKILL_FANOUT_PLATFORMS
+            if platform in target_families
         )
     return entries
 
 
-def derived_manifest_entries(name: str, short: str) -> list[dict[str, str]]:
-    entries = [
-        {
-            "platform": "shared",
-            "kind": "skill",
-            "source": f"templates/.agents/skills/{name}/SKILL.md",
-            "target": f".agents/skills/{name}/SKILL.md",
-            "install": "always",
-        },
-        {
-            "platform": "claude",
-            "kind": "command",
-            "source": bespoke_adapter_path("claude", name, short),
-            "target": f".claude/commands/sd/{short}.md",
-            "anchor": PLATFORM_REGISTRY["claude"].directory,
-        },
-        _neutral_adapter_entry("cursor", name, short),
-        {
-            "platform": "gemini",
-            "kind": "command",
-            "source": bespoke_adapter_path("gemini", name, short),
-            "target": f".gemini/commands/sd/{short}.toml",
-            "anchor": PLATFORM_REGISTRY["gemini"].directory,
-        },
-        {
-            "platform": "github",
-            "kind": "prompt",
-            "source": bespoke_adapter_path("github", name, short),
-            "target": f".github/prompts/{name}.prompt.md",
-            "anchor": PLATFORM_REGISTRY["github"].directory,
-        },
-        _neutral_adapter_entry("opencode", name, short),
-    ]
+def derived_manifest_entries(
+    name: str,
+    short: str,
+    target_families: tuple[str, ...] = GENERATED_COMMAND_TARGET_FAMILIES,
+) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    if "shared" in target_families:
+        entries.append(
+            {
+                "platform": "shared",
+                "kind": "skill",
+                "source": f"templates/.agents/skills/{name}/SKILL.md",
+                "target": f".agents/skills/{name}/SKILL.md",
+                "install": "always",
+            }
+        )
+    if "claude" in target_families:
+        entries.append(
+            {
+                "platform": "claude",
+                "kind": "command",
+                "source": bespoke_adapter_path("claude", name, short),
+                "target": f".claude/commands/sd/{short}.md",
+                "anchor": PLATFORM_REGISTRY["claude"].directory,
+            }
+        )
+    if "cursor" in target_families:
+        entries.append(_neutral_adapter_entry("cursor", name, short))
+    if "gemini" in target_families:
+        entries.append(
+            {
+                "platform": "gemini",
+                "kind": "command",
+                "source": bespoke_adapter_path("gemini", name, short),
+                "target": f".gemini/commands/sd/{short}.toml",
+                "anchor": PLATFORM_REGISTRY["gemini"].directory,
+            }
+        )
+    if "github" in target_families:
+        entries.append(
+            {
+                "platform": "github",
+                "kind": "prompt",
+                "source": bespoke_adapter_path("github", name, short),
+                "target": f".github/prompts/{name}.prompt.md",
+                "anchor": PLATFORM_REGISTRY["github"].directory,
+            }
+        )
+    if "opencode" in target_families:
+        entries.append(_neutral_adapter_entry("opencode", name, short))
     entries.extend(
         _neutral_adapter_entry(platform, name, short)
         for platform in LATER_NEUTRAL_COMMAND_PLATFORMS
+        if platform in target_families
     )
     entries.extend(
-        _platform_skill_entry(platform, name) for platform in SKILL_FANOUT_PLATFORMS
+        _platform_skill_entry(platform, name)
+        for platform in SKILL_FANOUT_PLATFORMS
+        if platform in target_families
     )
-    entries.extend(_skill_reference_entries(name))
+    entries.extend(_skill_reference_entries(name, target_families))
     return entries
 
 
@@ -648,7 +655,16 @@ def _candidate_command_pairs(entry: dict[str, object]) -> set[tuple[str, str]]:
 
 def _is_command_shaped(entry: dict[str, object]) -> bool:
     for name, short in _candidate_command_pairs(entry):
-        if entry in derived_manifest_entries(name, short):
+        command = next(
+            (candidate for candidate in COMMAND_REGISTRY if candidate.name == name),
+            None,
+        )
+        target_families = (
+            command.target_families
+            if command is not None
+            else GENERATED_COMMAND_TARGET_FAMILIES
+        )
+        if entry in derived_manifest_entries(name, short, target_families):
             return True
     return False
 
@@ -659,9 +675,11 @@ def generate_manifest_text() -> str:
     static = [entry for entry in raw_files if not _is_command_shaped(entry)]
     derived = [
         entry
-        for name, short in COMMAND_NAMES
-        if name not in SOURCE_ONLY_COMMAND_NAMES
-        for entry in derived_manifest_entries(name, short)
+        for command in COMMAND_REGISTRY
+        if command.name not in SOURCE_ONLY_COMMAND_NAMES
+        for entry in derived_manifest_entries(
+            command.name, command.short, command.target_families
+        )
     ]
     files = static + derived
     seen: dict[str, str] = {}

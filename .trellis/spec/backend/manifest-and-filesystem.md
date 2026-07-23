@@ -877,8 +877,10 @@ Reference files:
 
 Since pack 0.4.0 the installer performs no broad or heuristic legacy cleanup:
 the `legacy-conflict` and `obsolete-conflict` install statuses no longer exist,
-and install-time retirement is limited to the explicit `RETIRED_TARGETS`
-footprints in `installer/removal.py`. Those targets are removed only when
+and install-time retirement is limited to the canonical
+`RETIRED_COMMAND_SURFACES` footprints in `installer/registry.py`.
+`installer/removal.py` exposes compatibility tuple views derived from those
+rows; it must not maintain a second target list. Those targets are removed only when
 provenance vouches for their current bytes (or the user passes `--force`);
 drifted or unvouched files are preserved. Other cleanup responsibility lives in
 the install audit, which emits advisory warnings (never failures) when known

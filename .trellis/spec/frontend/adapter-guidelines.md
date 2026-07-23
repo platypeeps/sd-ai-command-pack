@@ -20,7 +20,6 @@ Reference files:
 - `templates/.commands/sd-status.md`
 - `templates/.agents/skills/sd-review-pr/SKILL.md`
 - `templates/.agents/skills/sd-review-local/SKILL.md`
-- `templates/.agents/skills/sd-review-local-all/SKILL.md`
 - `templates/.agents/skills/sd-full-check/SKILL.md`
 - `templates/.agents/skills/sd-housekeeping/SKILL.md`
 - `templates/.agents/skills/sd-work-backlog/SKILL.md`
@@ -31,7 +30,6 @@ Reference files:
 - `templates/scripts/sd-ai-command-pack-review-full-check.sh`
 - `templates/scripts/sd-ai-command-pack-review-local.sh`
 - `templates/.commands/sd-review-local.md`
-- `templates/.commands/sd-review-local-all.md`
 - `templates/.commands/sd-work-backlog.md`
 - `templates/.commands/sd-work-designs.md`
 - `templates/.commands/sd-review-pr.md`
@@ -41,7 +39,6 @@ Reference files:
 - `templates/.claude/commands/sd/work-designs.md`
 - `templates/.claude/commands/sd/review-pr.md`
 - `templates/.claude/commands/sd/review-local.md`
-- `templates/.claude/commands/sd/review-local-all.md`
 - `templates/.gemini/commands/sd/review-pr.toml`
 - `templates/.gemini/commands/sd/work-backlog.toml`
 - `templates/.gemini/commands/sd/work-designs.toml`
@@ -556,14 +553,22 @@ noise.
 - Command row: `CommandInfo(name: str, short: str, family: str,
   executes_checkout_code: bool = True, mutates_local: bool = False,
   mutates_remote: bool = False, trusted_static_only: bool = False,
-  safe_mode: str | None = None)`.
+  safe_mode: str | None = None, target_families: tuple[str, ...] = ...,
+  configuration_keys: tuple[str, ...] = ())`.
 - Family row: `CommandFamily(id: str, label: str, summary: str)`.
+- Retirement row: `RetiredCommandSurface(id, identifiers, installed_targets,
+  removed_version, owner_task, ...)`, with targets derived by
+  `command_installed_targets()` rather than copied into the remover.
+- Historical allowance row:
+  `CommandSurfaceAllowance(identifier, path_pattern, reason)`.
 - Compatibility view: `COMMAND_NAMES: tuple[tuple[str, str], ...]`, derived
   from `COMMAND_REGISTRY` rather than maintained separately.
 - Reference declaration:
   `SHARED_SKILL_REFERENCES[skill_name] = ("references/<file>.md", ...)`.
 - Generator entry point:
   `.github/scripts/generate-command-surfaces.py [--check]`.
+- Drift-lint entry point:
+  `.github/scripts/check-command-surface-drift.py [--json]`.
 - Help modes: `list`, `explain`, `compare`, `recommend`, `examples`, and
   `tour`, with optional `family`, `skill`, `skills`, `goal`, and `detail` keys.
 
@@ -572,6 +577,10 @@ noise.
 - Every pack-owned command appears exactly once in `COMMAND_REGISTRY` and
   belongs to exactly one declared family. `SOURCE_ONLY_COMMAND_NAMES` remains
   the single source for source-checkout-only availability.
+- Generated target families, consumer target footprints, retired identifiers,
+  retired paths, and bounded historical allowances derive from the same
+  registry module. Installer compatibility aliases must be derived views, not
+  second authoritative lists.
 - Capability metadata is conservative: new commands execute checkout code by
   default. A `trusted_static_only` command cannot execute checkout code, mutate
   local or remote state, or declare a safe mode; non-executing commands must be
@@ -633,6 +642,13 @@ noise.
   import fails.
 - Missing or duplicate skill-resolution anchor, or an authored checkout-trust
   marker -> generation fails before writing any adapter.
+- Missing registered sources/targets, unknown public paths, live retired
+  identifiers/configuration keys, stale or unsafe allowances, and retired
+  manifest entries -> command-surface lint fails with exact file/line JSON
+  findings.
+- Archived Trellis task/workspace history, backups, caches, vendor, and build
+  output -> excluded by scanner policy; live specs, docs, adapters, manifests,
+  help, configuration, code, and bounded migration fixtures remain in scope.
 - Runtime skill missing from the catalog -> help labels it `unknown/external`.
 - Catalog command absent from runtime discovery -> help labels it bundled but
   unavailable instead of claiming it can run.
@@ -649,7 +665,8 @@ noise.
 ### 6. Tests Required
 
 - Assert registry uniqueness, family completeness, short-name consistency, and
-  source-only policy, conservative capability defaults, and exemption safety.
+  source-only policy, conservative capability defaults, target-family data,
+  and exemption safety.
 - Assert deterministic family/catalog order, canonical frontmatter
   descriptions, version binding, Markdown escaping, and no-write failure.
 - Assert reference path validation and manifest fanout to every skill root.
@@ -660,6 +677,9 @@ noise.
   and that only declared trusted-static commands receive the exemption.
 - Assert help's availability labels, bounded recommendation behavior,
   read-only boundary, failure guidance, and registry-valid authored examples.
+- Assert retired rename/removal, missing adapter, stale spec/help/configuration,
+  unknown target, machine-readable finding, and reasoned historical allowance
+  fixtures. The live repository must lint clean after generated parity.
 
 ### 7. Wrong vs Correct
 
@@ -775,8 +795,7 @@ The `sd-review-pr` shared skill should continue to define:
   `gh auth status`, and PR resolution from the current branch
 - a deterministic local full-check gate that disables Prism and Gito for the
   command-owned PR cycle; those local review tools should run only through an
-  explicit `sd-full-check`, `sd-review-local`, or `sd-review-local-all`
-  invocation
+  explicit `sd-full-check` or `sd-review-local` invocation
 - a local `HEAD` versus PR `headRefOid` check before marking a PR ready or
   requesting review, so the remote reviewer sees the pushed code the user
   intends
@@ -1016,17 +1035,17 @@ not shell instructions. Secure temporary creation plus option-safe cleanup are
 part of this contract; `gh pr create --fill` remains valid when no custom body
 is needed.
 
-The `sd-review-local` and `sd-review-local-all` shared skills should continue
-to define the interactive local review/fix loop while delegating provider
-execution to `scripts/sd-ai-command-pack-review-local.sh`. Keep their behavior
-parallel except for review scope:
+The `sd-review-local` shared skill should continue to define the interactive
+local review/fix loop while delegating provider execution to
+`scripts/sd-ai-command-pack-review-local.sh`. Its argument selects review
+scope:
 
 - `sd-review-local` reviews local changes first; when no local changes exist,
   it reviews the current branch diff against the configured base ref.
-- `sd-review-local-all` reviews the full checked-out repository and should not
+- `sd-review-local all` reviews the full checked-out repository and should not
   infer scope from dirty-state or branch diffs.
-- Both commands should default to the configured local providers, currently
-  Prism and Gito, and remain open to repo-local custom providers named through
+- Both scopes should default to the configured local providers, currently Prism
+  and Gito, and remain open to repo-local custom providers named through
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS`.
 - Custom provider commands are shell snippets supplied by the target repo or
   user configuration; run them with `bash -c` from the repo root so profile

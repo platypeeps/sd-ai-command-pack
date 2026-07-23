@@ -50,17 +50,30 @@ complete generated/public surface.
 
 ## Acceptance Criteria
 
-- [ ] The existing `sd-review-local-all` live-spec references fail before
+- [x] The existing `sd-review-local-all` live-spec references fail before
   cleanup and pass after the spec is corrected or intentionally migrated.
-- [ ] Retired review/check/watch/design identifiers cannot appear in live help,
+- [x] Retired review/check/watch/design identifiers cannot appear in live help,
   adapters, manifests, config docs, or specs after their owning cutovers.
-- [ ] A new public command missing capability/target registry data fails lint.
-- [ ] Historical archive and bounded migration fixtures remain readable through
+- [x] A new public command missing capability/target registry data fails lint.
+- [x] Historical archive and bounded migration fixtures remain readable through
   explicit reasoned allowlist entries.
-- [ ] JSON findings identify exact files/lines and distinguish stale content
+- [x] JSON findings identify exact files/lines and distinguish stale content
   from a missing registry/target declaration.
-- [ ] Focused lint fixtures, generated parity, `make sync`, and `make check`
+- [x] Focused lint fixtures, generated parity, `make sync`, and `make check`
   pass.
+
+## Validation Evidence
+
+- `python .github/scripts/check-command-surface-drift.py --json`: clean across
+  671 live text files with 18 bounded historical occurrences and zero findings.
+- Final command-surface, registry, generator, and generated-parity focus suite:
+  60 tests passed; the broader pack-drift/full-check focus suite also passed
+  126 tests during integration.
+- Release candidate `0.34.1`: all eight configured fleet consumers passed
+  install, audit, preparation, and repository checks.
+- `make check`: passed, including 100% installer branch coverage, generation
+  parity, Ruff, mypy, install audit, KB freshness, the release ledger, and the
+  integrated command-surface drift gate.
 
 ## Out Of Scope
 

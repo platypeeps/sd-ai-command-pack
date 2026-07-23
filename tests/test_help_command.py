@@ -133,6 +133,21 @@ class HelpCommandTests(InstallTestCase):
         self.assertTrue(default.executes_checkout_code)
         self.assertFalse(default.trusted_static_only)
         self.assertEqual(
+            default.target_families, registry.GENERATED_COMMAND_TARGET_FAMILIES
+        )
+        self.assertEqual(
+            len(registry.command_installed_targets("sd-one", "one")), 25
+        )
+        self.assertEqual(
+            registry.command_installed_targets(
+                "sd-one", "one", ("shared", "github")
+            ),
+            (
+                ".agents/skills/sd-one/SKILL.md",
+                ".github/prompts/sd-one.prompt.md",
+            ),
+        )
+        self.assertEqual(
             [command.name for command in registry.COMMAND_REGISTRY if command.trusted_static_only],
             ["sd-help"],
         )
@@ -169,12 +184,234 @@ class HelpCommandTests(InstallTestCase):
                 registry.CommandInfo("sd-one", "one", "one", safe_mode="../unsafe"),
                 "unsafe safe_mode",
             ),
+            (
+                registry.CommandInfo("sd-one", "one", "one", target_families=()),
+                "no generated target families",
+            ),
+            (
+                registry.CommandInfo(
+                    "sd-one", "one", "one", target_families=("missing",)
+                ),
+                "unknown target families",
+            ),
+            (
+                registry.CommandInfo(
+                    "sd-one",
+                    "one",
+                    "one",
+                    target_families=("shared", "shared"),
+                ),
+                "duplicate target families",
+            ),
+            (
+                registry.CommandInfo(
+                    "sd-one", "one", "one", configuration_keys=("",)
+                ),
+                "invalid configuration keys",
+            ),
+            (
+                registry.CommandInfo(
+                    "sd-one",
+                    "one",
+                    "one",
+                    configuration_keys=("SD_ONE", "SD_ONE"),
+                ),
+                "duplicate configuration keys",
+            ),
         )
         for command, message in invalid:
             with self.subTest(message=message), self.assertRaisesRegex(
                 RuntimeError, message
             ):
                 registry.validate_command_registry((command,), families)
+
+    def test_retired_command_surface_schema_is_validated(self) -> None:
+        command = registry.CommandInfo(
+            "sd-one", "one", "orientation-knowledge"
+        )
+        retirement = registry.RetiredCommandSurface(
+            id="old-one",
+            identifiers=("sd-old",),
+            installed_targets=(".agents/skills/sd-old/SKILL.md",),
+            removed_version="1.0.0",
+            owner_task="fixture",
+        )
+        allowance = registry.CommandSurfaceAllowance(
+            identifier="sd-old",
+            path_pattern="CHANGELOG.md",
+            reason="migration history",
+        )
+
+        registry.validate_command_surface_registry(
+            (command,), (retirement,), (allowance,)
+        )
+        with self.assertRaisesRegex(RuntimeError, "identifiers are still live"):
+            registry.validate_command_surface_registry(
+                (command,),
+                (
+                    registry.RetiredCommandSurface(
+                        id="bad",
+                        identifiers=("sd-one",),
+                        installed_targets=(),
+                        removed_version="1.0.0",
+                        owner_task="fixture",
+                    ),
+                ),
+                (),
+            )
+        with self.assertRaisesRegex(RuntimeError, "unsafe command surface allowance"):
+            registry.validate_command_surface_registry(
+                (command,),
+                (retirement,),
+                (
+                    registry.CommandSurfaceAllowance(
+                        identifier="sd-old",
+                        path_pattern="**/*",
+                        reason="too broad",
+                    ),
+                ),
+            )
+
+    def test_retired_command_surface_schema_rejects_invalid_shapes(self) -> None:
+        command = registry.CommandInfo(
+            "sd-one",
+            "one",
+            "orientation-knowledge",
+            configuration_keys=("SD_ONE",),
+        )
+
+        def retirement(
+            *,
+            id: str = "old-one",
+            identifiers: tuple[str, ...] = ("sd-old",),
+            installed_targets: tuple[str, ...] = (),
+            removed_version: str = "1.0.0",
+            owner_task: str = "fixture",
+            source_paths_must_be_absent: bool = True,
+            configuration_keys: tuple[str, ...] = (),
+        ) -> registry.RetiredCommandSurface:
+            return registry.RetiredCommandSurface(
+                id=id,
+                identifiers=identifiers,
+                installed_targets=installed_targets,
+                removed_version=removed_version,
+                owner_task=owner_task,
+                source_paths_must_be_absent=source_paths_must_be_absent,
+                configuration_keys=configuration_keys,
+            )
+
+        invalid_retirements = (
+            ((retirement(), retirement()), "duplicate retirement id"),
+            ((retirement(id=""),), "fields must be non-empty"),
+            (
+                (
+                    retirement(
+                        source_paths_must_be_absent="yes",  # type: ignore[arg-type]
+                    ),
+                ),
+                "source-path policy must be boolean",
+            ),
+            (
+                (
+                    retirement(
+                        identifiers=(),
+                        installed_targets=(),
+                        configuration_keys=(),
+                    ),
+                ),
+                "describes no surface",
+            ),
+            (
+                (retirement(identifiers=("sd-old", "sd-old")),),
+                "invalid identifiers",
+            ),
+            (
+                (retirement(installed_targets=("../outside",)),),
+                "unsafe installed target",
+            ),
+            (
+                (retirement(identifiers=(), configuration_keys=("SD_ONE",)),),
+                "configuration keys are still live",
+            ),
+            (
+                (
+                    retirement(id="old-one"),
+                    retirement(id="old-two"),
+                ),
+                "retired identifiers have multiple owners",
+            ),
+            (
+                (
+                    retirement(
+                        id="old-one",
+                        identifiers=(),
+                        configuration_keys=("SD_OLD",),
+                    ),
+                    retirement(
+                        id="old-two",
+                        identifiers=(),
+                        configuration_keys=("SD_OLD",),
+                    ),
+                ),
+                "retired configuration keys have multiple owners",
+            ),
+        )
+        for retirements, message in invalid_retirements:
+            with self.subTest(message=message), self.assertRaisesRegex(
+                RuntimeError, message
+            ):
+                registry.validate_command_surface_registry(
+                    (command,), retirements, ()
+                )
+
+        valid_retirement = retirement()
+        invalid_allowances = (
+            (
+                (
+                    registry.CommandSurfaceAllowance(
+                        "sd-unknown", "README.md", "history"
+                    ),
+                ),
+                "not retired",
+            ),
+            (
+                (
+                    registry.CommandSurfaceAllowance(
+                        "sd-old", "README.md", "history"
+                    ),
+                    registry.CommandSurfaceAllowance(
+                        "sd-old", "README.md", "history"
+                    ),
+                ),
+                "duplicate command surface allowance",
+            ),
+            (
+                (
+                    registry.CommandSurfaceAllowance(
+                        "sd-old", "README.md", ""
+                    ),
+                ),
+                "allowance has no reason",
+            ),
+        )
+        for allowances, message in invalid_allowances:
+            with self.subTest(message=message), self.assertRaisesRegex(
+                RuntimeError, message
+            ):
+                registry.validate_command_surface_registry(
+                    (command,), (valid_retirement,), allowances
+                )
+
+    def test_command_target_footprint_rejects_platform_without_pattern(self) -> None:
+        invalid_cursor = registry.PlatformInfo(
+            directory=".cursor",
+            command_kind="command",
+            command_target_pattern=None,
+        )
+        with mock.patch.dict(
+            registry.PLATFORM_REGISTRY, {"cursor": invalid_cursor}
+        ), self.assertRaisesRegex(RuntimeError, "no command target pattern"):
+            registry.command_installed_targets("sd-one", "one")
 
     def test_shared_skill_reference_validation_rejects_unknown_and_unsafe(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "unknown skill"):
@@ -216,6 +453,31 @@ class HelpCommandTests(InstallTestCase):
                 self.assertIn(generator.skill_description(command.name), catalog)
         self.assertIn("| `sd-fleet-refresh` | source-checkout-only |", catalog)
         self.assertIn("| `sd-help` | included in installed pack |", catalog)
+
+    def test_manifest_derivation_honors_declared_target_families(self) -> None:
+        generator = load_surface_generator()
+
+        self.assertEqual(
+            generator.derived_manifest_entries(
+                "sd-one", "one", ("shared", "github")
+            ),
+            [
+                {
+                    "platform": "shared",
+                    "kind": "skill",
+                    "source": "templates/.agents/skills/sd-one/SKILL.md",
+                    "target": ".agents/skills/sd-one/SKILL.md",
+                    "install": "always",
+                },
+                {
+                    "platform": "github",
+                    "kind": "prompt",
+                    "source": "templates/.github/prompts/sd-one.prompt.md",
+                    "target": ".github/prompts/sd-one.prompt.md",
+                    "anchor": ".github",
+                },
+            ],
+        )
 
     def test_catalog_generation_is_read_only_and_escapes_markdown(self) -> None:
         generator = load_surface_generator()
