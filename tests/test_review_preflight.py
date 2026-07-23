@@ -71,6 +71,7 @@ import {
   extractDocumentationPathReferences,
   findContradictoryJournalValidationFallbacks,
   findHistoricalTrellisJournalSessionEdits,
+  findMissingTrellisChildReferences,
   findTrellisTaskContextIssues,
   findTrellisTaskContextSeedRows,
   isBoundaryRiskReviewPath,
@@ -88,6 +89,7 @@ import {
   thrownValueMessage,
   unsupportedNodeVersionMessage,
   validateTrellisTaskMetadata,
+  validateTrellisPlanningBaseInheritance,
   validateTrellisJournalSessions,
 } from './scripts/sd-ai-command-pack-review-preflight.mjs';
 
@@ -289,6 +291,70 @@ assert.deepEqual(validateTrellisTaskMetadata({
   'base_branch must be a non-empty string',
   'branch must be null or a non-empty string',
 ]);
+assert.deepEqual(validateTrellisPlanningBaseInheritance({
+  status: 'planning',
+  branch: null,
+  base_branch: 'codex/current-feature',
+  parent: '07-17-parent',
+}, {
+  status: 'planning',
+  branch: null,
+  base_branch: 'main',
+}), [
+  'base_branch "codex/current-feature" must equal parent base_branch or active branch ("main")',
+]);
+assert.deepEqual(validateTrellisPlanningBaseInheritance({
+  status: 'planning',
+  branch: null,
+  base_branch: 'main',
+  parent: '07-17-parent',
+}, {
+  status: 'in_progress',
+  branch: 'codex/parent',
+  base_branch: 'main',
+}), []);
+assert.deepEqual(validateTrellisPlanningBaseInheritance({
+  status: 'planning',
+  branch: null,
+  base_branch: ' main ',
+  parent: '07-17-parent',
+}, {
+  status: 'in_progress',
+  branch: 'codex/parent',
+  base_branch: 'main',
+}), []);
+assert.deepEqual(validateTrellisPlanningBaseInheritance({
+  status: 'planning',
+  branch: null,
+  base_branch: 'codex/parent',
+  parent: '07-17-parent',
+}, {
+  status: 'in_progress',
+  branch: 'codex/parent',
+  base_branch: 'main',
+}), []);
+assert.deepEqual(validateTrellisPlanningBaseInheritance({
+  status: 'planning',
+  branch: 'codex/child',
+  base_branch: 'codex/current-feature',
+  parent: '07-17-parent',
+}, {
+  status: 'planning',
+  branch: null,
+  base_branch: 'main',
+}), []);
+assert.deepEqual(findMissingTrellisChildReferences(
+  'Dependencies: [`07-17-child-extra`](./extra/prd.md) and `07-17-linked`.',
+  ['07-17-child', '07-17-linked'],
+), ['07-17-child']);
+assert.deepEqual(findMissingTrellisChildReferences(
+  '| Child |\\n| --- |\\n| `07-17-child` |',
+  ['07-17-child'],
+), []);
+assert.deepEqual(findMissingTrellisChildReferences(
+  '# Parent without declared children',
+  ['07-17-z-child', '07-17-a-child', '07-17-z-child'],
+), ['07-17-a-child', '07-17-z-child']);
 assert.deepEqual(findTrellisTaskContextSeedRows('check.jsonl', [
   '{"file":".trellis/spec/backend/index.md","reason":"real"}',
   '{"_example":"remove me","file":"src/example.py"}',
@@ -1264,6 +1330,10 @@ assert.deepEqual(
             + "\n",
             encoding="utf-8",
         )
+        (parent / "prd.md").write_text(
+            f"# Parent\n\nDependency: `{child_name}`.\n",
+            encoding="utf-8",
+        )
         (child / "task.json").write_text(
             json.dumps(
                 self.trellis_task_record(
@@ -1296,6 +1366,428 @@ assert.deepEqual(
             "checked 3 changed Trellis task metadata record(s)",
             result.stdout,
         )
+
+    def test_review_preflight_rejects_unrelated_deferred_planning_base(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        parent_name = "07-22-parent"
+        child_name = "07-22-child"
+        parent = root / ".trellis/tasks" / parent_name
+        child = root / ".trellis/tasks" / child_name
+        parent.mkdir(parents=True)
+        child.mkdir(parents=True)
+        (parent / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record("parent", children=[child_name])
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (parent / "prd.md").write_text(
+            f"# Parent\n\n- `{child_name}`\n",
+            encoding="utf-8",
+        )
+        (child / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record(
+                    "child",
+                    base_branch="codex/current-feature",
+                    parent=parent_name,
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            f'{child_name}/task.json field base_branch "codex/current-feature" '
+            'must equal parent base_branch or active branch ("main")',
+            result.stdout,
+        )
+
+    def test_review_preflight_accepts_parent_grounded_deferred_planning_bases(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        parent_name = "07-22-parent"
+        base_child_name = "07-22-base-child"
+        stacked_child_name = "07-22-stacked-child"
+        parent = root / ".trellis/tasks" / parent_name
+        parent.mkdir(parents=True)
+        (parent / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record(
+                    "parent",
+                    status="in_progress",
+                    branch="codex/parent",
+                    children=[base_child_name, stacked_child_name],
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (parent / "prd.md").write_text(
+            "# Parent\n\n"
+            f"Dependencies: `{base_child_name}` and [{stacked_child_name}]"
+            f"(../{stacked_child_name}/prd.md).\n",
+            encoding="utf-8",
+        )
+        for child_name, base_branch in (
+            (base_child_name, "main"),
+            (stacked_child_name, "codex/parent"),
+        ):
+            child = root / ".trellis/tasks" / child_name
+            child.mkdir(parents=True)
+            (child / "task.json").write_text(
+                json.dumps(
+                    self.trellis_task_record(
+                        child_name.removeprefix("07-22-"),
+                        base_branch=base_branch,
+                        parent=parent_name,
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (child / "prd.md").write_text(
+                f"# {child_name}\n",
+                encoding="utf-8",
+            )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "checked 2 deferred planning child base(s) and 1 active parent PRD child map(s)",
+            result.stdout,
+        )
+
+    def test_review_preflight_rejects_changed_parent_prd_child_drift(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        parent_name = "07-22-parent"
+        child_name = "07-22-child"
+        parent = root / ".trellis/tasks" / parent_name
+        child = root / ".trellis/tasks" / child_name
+        parent.mkdir(parents=True)
+        child.mkdir(parents=True)
+        (parent / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record("parent", children=[child_name])
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (parent / "prd.md").write_text(
+            f"# Parent\n\nDependency: `{child_name}-extension`.\n",
+            encoding="utf-8",
+        )
+        (child / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record("child", parent=parent_name)
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            f"{parent_name}/prd.md does not reference declared child {child_name}",
+            result.stdout,
+        )
+
+    def test_review_preflight_checks_prd_only_child_map_changes(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        parent_name = "07-22-parent"
+        child_name = "07-22-child"
+        parent = root / ".trellis/tasks" / parent_name
+        child = root / ".trellis/tasks" / child_name
+        parent.mkdir(parents=True)
+        child.mkdir(parents=True)
+        (parent / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record("parent", children=[child_name])
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (parent / "prd.md").write_text(
+            f"# Parent\n\n- `{child_name}`\n",
+            encoding="utf-8",
+        )
+        (child / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record("child", parent=parent_name)
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (child / "prd.md").write_text(
+            "# Child\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline topology")
+
+        (parent / "prd.md").write_text(
+            "# Parent\n\nThe child reference was removed.\n",
+            encoding="utf-8",
+        )
+        missing = self.run_review_preflight(node, root)
+        self.assertEqual(missing.returncode, 1, missing.stdout)
+        self.assertIn(
+            f"{parent_name}/prd.md does not reference declared child {child_name}",
+            missing.stdout,
+        )
+
+        (parent / "prd.md").write_text(
+            f"# Parent\n\nDependency: [{child_name}](../{child_name}/prd.md).\n",
+            encoding="utf-8",
+        )
+        restored = self.run_review_preflight(node, root)
+        self.assertEqual(restored.returncode, 0, restored.stdout)
+        self.assertIn(
+            "checked 0 deferred planning child base(s) and 1 active parent PRD child map(s)",
+            restored.stdout,
+        )
+
+    def test_review_preflight_fails_closed_for_unsafe_parent_prds(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        parent_kinds = ("missing", "symlinked", "directory", "oversized")
+        for kind in parent_kinds:
+            parent_name = f"07-22-{kind}-parent"
+            child_name = f"07-22-{kind}-child"
+            parent = root / ".trellis/tasks" / parent_name
+            child = root / ".trellis/tasks" / child_name
+            parent.mkdir(parents=True)
+            child.mkdir(parents=True)
+            (parent / "task.json").write_text(
+                json.dumps(
+                    self.trellis_task_record(
+                        f"{kind}-parent", children=[child_name]
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (child / "task.json").write_text(
+                json.dumps(
+                    self.trellis_task_record(
+                        f"{kind}-child", parent=parent_name
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            if kind == "directory":
+                (parent / "prd.md").mkdir()
+            elif kind == "oversized":
+                (parent / "prd.md").write_text(
+                    "x" * (1024 * 1024 + 1),
+                    encoding="utf-8",
+                )
+
+        outside = root / "outside-prd.txt"
+        outside.write_text("# Outside\n", encoding="utf-8")
+        try:
+            (
+                root
+                / ".trellis/tasks/07-22-symlinked-parent/prd.md"
+            ).symlink_to(outside)
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"symlinks are not available: {exc}")
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "07-22-missing-parent/prd.md is missing",
+            result.stdout,
+        )
+        self.assertIn(
+            "07-22-symlinked-parent/prd.md is a symlink; task PRD must be a regular file",
+            result.stdout,
+        )
+        self.assertIn(
+            "07-22-directory-parent/prd.md is not a regular file; task PRD must be a regular file",
+            result.stdout,
+        )
+        self.assertIn(
+            "07-22-oversized-parent/prd.md exceeds the bounded task PRD read limit",
+            result.stdout,
+        )
+
+    def test_review_preflight_grandfathers_unchanged_parent_prd_drift(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        parent_name = "07-18-legacy-parent"
+        child_name = "07-18-legacy-child"
+        parent = root / ".trellis/tasks" / parent_name
+        child = root / ".trellis/tasks" / child_name
+        parent.mkdir(parents=True)
+        child.mkdir(parents=True)
+        (parent / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record(
+                    "legacy-parent", children=[child_name]
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (parent / "prd.md").write_text(
+            "# Legacy parent\n\nThe historical map is incomplete.\n",
+            encoding="utf-8",
+        )
+        (child / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record(
+                    "legacy-child", parent=parent_name
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline legacy topology")
+        (root / ".trellis/config.yaml").write_text(
+            "# unrelated change\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "no changed Trellis task topology requires semantic validation",
+            result.stdout,
+        )
+        self.assertNotIn("legacy-child", result.stdout)
+
+    def test_review_preflight_ignores_changed_archived_parent_prd_drift(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        parent_name = "07-18-archived-parent"
+        child_name = "07-18-archived-child"
+        archive = root / ".trellis/tasks/archive/2026-07"
+        parent = archive / parent_name
+        child = archive / child_name
+        parent.mkdir(parents=True)
+        child.mkdir(parents=True)
+        (parent / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record(
+                    "archived-parent",
+                    status="completed",
+                    completed_at="2026-07-18T12:00:00Z",
+                    children=[child_name],
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (parent / "prd.md").write_text(
+            f"# Archived parent\n\n- `{child_name}`\n",
+            encoding="utf-8",
+        )
+        (child / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record(
+                    "archived-child",
+                    status="completed",
+                    completed_at="2026-07-18T12:00:00Z",
+                    parent=parent_name,
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline archived topology")
+
+        (parent / "prd.md").write_text(
+            "# Archived parent\n\nHistorical child prose was removed.\n",
+            encoding="utf-8",
+        )
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "no changed Trellis task topology requires semantic validation",
+            result.stdout,
+        )
+        self.assertNotIn("archived-child", result.stdout)
 
     def test_review_preflight_grandfathers_unchanged_task_metadata(self) -> None:
         node = shutil.which("node")
@@ -1394,6 +1886,10 @@ assert.deepEqual(
                 )
             )
             + "\n",
+            encoding="utf-8",
+        )
+        (parent / "prd.md").write_text(
+            "# Parent\n\n- `07-21-missing`\n",
             encoding="utf-8",
         )
         (child / "task.json").write_text(
@@ -1909,15 +2405,41 @@ assert.deepEqual(
 
         root = self.make_repo()
         self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
         task = root / ".trellis/tasks/07-19-stranded"
+        child_name = "07-19-child"
+        child = root / ".trellis/tasks" / child_name
         task.mkdir(parents=True)
+        child.mkdir(parents=True)
         (task / "task.json").write_text(
             json.dumps(
                 self.trellis_task_record(
-                    "stranded", status="completed", completed_at="2026-07-19"
+                    "stranded",
+                    status="completed",
+                    completed_at="2026-07-19",
+                    children=[child_name],
                 )
             )
             + "\n",
+            encoding="utf-8",
+        )
+        (task / "prd.md").write_text(
+            f"# Stranded\n\n- `{child_name}`\n",
+            encoding="utf-8",
+        )
+        (child / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record("child", parent="07-19-stranded")
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline completed parent")
+
+        (task / "prd.md").write_text(
+            "# Stranded\n\nThe stale child prose changed.\n",
             encoding="utf-8",
         )
 
@@ -1930,6 +2452,10 @@ assert.deepEqual(
         )
         self.assertIn(
             "task.py archive 07-19-stranded",
+            result.stdout,
+        )
+        self.assertNotIn(
+            "07-19-stranded/prd.md does not reference declared child",
             result.stdout,
         )
 

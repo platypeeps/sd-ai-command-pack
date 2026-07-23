@@ -124,6 +124,20 @@ that exercise the generic JavaScript review preflight.
   Missing/deleted old paths are ignored during moves, while malformed JSON,
   oversized or unreadable files, unsafe symlinks, invalid layouts, and
   unverifiable linked records fail closed with path- and field-specific output.
+- Diff-scoped Trellis task topology semantics inspect added or modified active
+  `task.json` files and active task directories whose `task.json` or `prd.md`
+  changed. A deferred planning child (`status: planning`, `branch: null`, and a
+  valid parent) must use either its parent's durable `base_branch` or that
+  parent's non-empty branch while the parent remains active. This preserves
+  explicit stacks without treating an unrelated current feature branch as an
+  integration target. An in-scope active task with declared children must have
+  a bounded regular sibling `prd.md` that references every child as an exact
+  task-ID token; tables, dependencies, links, and prose are equivalent, and
+  longer IDs do not satisfy shorter children. Deleted changed PRDs fail when
+  child metadata remains, while archived PRDs, standalone or branch-assigned
+  planning tasks, extra prose references, and unchanged history remain outside
+  the semantic gate. Missing, unreadable, oversized, non-regular, or symlinked
+  in-scope PRDs fail closed with path-specific output.
 - A repository-wide bounded scan inspects regular `task.json` files in direct
   `.trellis/tasks/` children. A record with `status: completed` fails with the
   Trellis archive command; the `archive/` subtree, non-completed records,
@@ -156,6 +170,13 @@ that exercise the generic JavaScript review preflight.
 - Changed task metadata is malformed, oversized, unreadable, symlinked, or
   depends on an unsafe/missing/ambiguous linked record -> fail closed rather
   than following the path or accepting unverifiable state.
+- Changed deferred planning child uses a base found in neither its parent's
+  durable base nor active branch -> fail with the child `task.json`, observed
+  base, and allowed parent-derived targets; an intentional parent-branch stack
+  -> pass.
+- Changed active parent metadata or PRD omits a declared exact child ID, or the
+  required PRD is missing or unsafe -> fail with the parent PRD and missing
+  child IDs; unchanged or archived PRD drift -> remain grandfathered.
 - Completed direct active-root task -> fail with the exact `task.json` path and
   `task.py archive` remediation; archived, planning, in-progress, and symlinked
   records -> pass.
@@ -188,6 +209,12 @@ that exercise the generic JavaScript review preflight.
 - Base: a clean repo with no changed paths reports a no-current-diff pass.
 - Base: an untouched baseline session with the legacy no-validation
   contradiction remains grandfathered.
+- Good: a deferred child targets its active parent's feature branch and the
+  parent names that child in a dependency link.
+- Base: an unchanged legacy parent PRD omits a child, so an unrelated branch
+  does not become a historical migration.
+- Bad: a newly planned child inherits the author's unrelated feature branch,
+  or a changed parent PRD mentions only a longer child-ID prefix match.
 - Bad: a broad replacement updates a repeated fallback line in an older journal
   session while adding the intended current session.
 - Bad: a new completed session says the full gate passed while Testing retains
@@ -212,6 +239,11 @@ that exercise the generic JavaScript review preflight.
 - Valid active, archived, parent/child, and stacked-base task metadata;
   unchanged-history grandfathering; identity, lifecycle, branch, and layout
   rejection; reciprocal-link failures; malformed JSON; and symlink rejection.
+- Parent-relative deferred planning bases, including durable-base and active-
+  branch acceptance; unrelated-base rejection; standalone and assigned-branch
+  exclusion; changed-parent and PRD-only child-map drift; exact token
+  boundaries; flexible Markdown placement; unsafe PRDs; archived scope; and
+  unchanged-history grandfathering.
 - Stable first-review risk categorization, good/base/failure rendering,
   overlap deduplication, output/path caps, configured literal signals,
   production-source exclusions, workflow YAML, authored-source exclusions,
@@ -239,6 +271,12 @@ Correct: edit content inside the explicit current `## Session <n>:` block
 
 Wrong: reject every historical no-validation fallback when adding a new guard
 Correct: reject new/amended contradictions and grandfather unchanged baseline sessions
+
+Wrong: force every deferred planning child onto main or inherit the author's current feature branch
+Correct: accept only the recorded parent's durable base or active branch for changed deferred children
+
+Wrong: treat a longer task-ID prefix in free-form PRD prose as a declared child reference
+Correct: require each changed active parent's declared child as an exact delimited PRD token
 
 Wrong: declare a helper-used `const` below the module-level main invocation
 Correct: declare non-hoisted bindings above that invocation

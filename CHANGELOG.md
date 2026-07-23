@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.31.0 - 2026-07-22
+
+- Reject changed deferred Trellis tasks whose bases are not grounded in their
+  parent's durable or active branch, and require changed active parent PRDs to
+  reference every declared child without disrupting intentional stacks or
+  unchanged history.
+
 ## 0.30.8 - 2026-07-22
 
 - Run deterministic review preflight in `sd-create-pr` before staging or
