@@ -1730,3 +1730,44 @@ Addressed two Copilot task-topology findings, reached a clean third review round
 ### Next Steps
 
 - None - task complete
+
+
+## Session 196: Validate Trellis task topology semantics
+
+**Date**: 2026-07-23
+**Task**: Validate Trellis task topology semantics
+**Branch**: `codex/validate-planning-task-topology-semantics`
+
+### Summary
+
+Added diff-scoped semantic guards for deferred planning bases and parent PRD child maps, published the 0.31.0 payload, and converged PR 228 through exact-head review.
+
+### Main Changes
+
+- Added parent-relative deferred planning-base validation and exact child-ID representation checks for changed active parent PRDs.
+- Published command-pack 0.31.0 with synchronized template mirrors, durable quality specs, and refreshed exact-payload fleet evidence.
+- Restricted parent PRD semantics to active lifecycle statuses after review and added completed-parent plus normalized-base regression coverage.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4cac1fd` | feat: validate Trellis task topology semantics |
+| `f7a9279` | test: cover normalized planning bases |
+| `67e9a71` | fix: limit topology semantics to active tasks |
+
+### Testing
+
+- [OK] 56 focused review-preflight tests passed.
+- [OK] Deterministic sd-review-pr full check passed with Prism and Gito disabled.
+- [OK] Exact 0.31.0 fleet candidate validation passed in all 8 configured consumers.
+- [OK] PR #228 CI passed and Copilot exact-head review completed with all threads resolved.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
