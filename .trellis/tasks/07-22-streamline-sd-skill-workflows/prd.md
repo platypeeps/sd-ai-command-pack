@@ -8,8 +8,9 @@ duplicated gates, unnecessary provider spend, stale documentation, and unsafe
 write or checkout-execution boundaries without weakening the delivery lifecycle.
 
 This parent owns the source finding ledger, task boundaries, cross-child
-dependencies, and final integration review. It has no direct implementation
-scope; each deliverable is implemented and verified through its owning child.
+completion contract, and final program-closure decision. It has no direct
+implementation scope; each deliverable, including final integration execution
+and evidence, is implemented and verified through its owning child.
 
 ## Confirmed Evidence
 
@@ -46,7 +47,7 @@ scope; each deliverable is implemented and verified through its owning child.
 | F14 | P2 | Canonical skills have no portable structured-question contract or generated `AskUserQuestion` guidance. | `07-22-add-portable-structured-questions` |
 | F15 | P2 | Formal audits always load/run the broad charter set, even when some dimensions are inapplicable. | `07-22-optimize-audit-charter-routing` |
 | F16 | P3 | Housekeeping and update-spec repeat deterministic output and rare extension mechanics in large prompts. | `07-22-structure-skill-runtime-contracts` |
-| F17 | P1/P2 | Existing tests emphasize parity and pinned prose more than lifecycle scenarios and typed state transitions. | Every owning child; integration coverage is checked by this parent. |
+| F17 | P1/P2 | Existing tests emphasize parity and pinned prose more than lifecycle scenarios and typed state transitions. | Every owning implementation child plus `07-22-validate-sd-workflow-program-integration`. |
 
 F02 deliberately has two owners with non-overlapping responsibilities:
 `integrate-routed-review-backends` produces exact-head review evidence and
@@ -76,8 +77,9 @@ merge eligibility without mutating the PR.
   generated parity or prose-string assertions.
 - R8: No child may weaken exact-head validation, unresolved-thread polling,
   merge authority, no-touch ownership, checkout trust, or data/cost disclosure.
-- R9: The parent closes only after all children are archived or have a recorded
-  disposition accepted during final integration review.
+- R9: The parent closes only after all durable children, including
+  `07-22-validate-sd-workflow-program-integration`, are archived or have a
+  recorded disposition and the integration closure record is accepted.
 
 ## Child Task Map
 
@@ -95,13 +97,27 @@ merge eligibility without mutating the PR.
 - `07-22-add-portable-structured-questions` owns F14.
 - `07-22-optimize-audit-charter-routing` owns F15.
 - `07-22-structure-skill-runtime-contracts` owns F16.
-- Every child owns its F17 scenario coverage; this parent owns the final
-  cross-child lifecycle matrix.
+- Every implementation child owns its task-local F17 scenario coverage.
+- `07-22-validate-sd-workflow-program-integration` owns shared invariants,
+  S01-S11, the final cross-child lifecycle matrix, the F01-F17 evidence map,
+  and the closure record consumed by this parent.
 - External dependency `platypeeps/sd-github-review` task
   `07-22-publish-routed-review-receipt-contract` owns noninteractive routing,
   trusted GitHub-only successor comparison, and a distinct durable receipt for
   every head. It may route a verified bookkeeping-only successor to `none`
   within policy; no command-pack child may create a competing exemption.
+
+## Coordination And Closure
+
+- Start only the child that owns the next independently verifiable deliverable;
+  never start this parent unless it gains separately approved direct scope.
+- Treat written child dependencies as the execution order. Parent/child tree
+  position alone never satisfies a prerequisite.
+- Preserve template authority and generated parity in every implementation
+  child instead of deferring regeneration to final integration.
+- After the integration child publishes its closure record, record each child
+  PR or commit and any accepted follow-up, archive completed children, and
+  close this parent only when R9 and all acceptance criteria hold.
 
 ## Acceptance Criteria
 
@@ -122,9 +138,10 @@ merge eligibility without mutating the PR.
   caught by automated drift validation.
 - [ ] Focused tests, `make sync`, `make check`, install audit, and applicable
   fleet validation pass after the final child lands.
-- [ ] A final integration review proves that the streamlined workflow has one
-  merge authority, one exact-head review lifecycle, no silent paid-provider
-  escalation, and no hidden mutation in deterministic checks.
+- [ ] `07-22-validate-sd-workflow-program-integration` proves that the
+  streamlined workflow has one merge authority, one exact-head review
+  lifecycle, no silent paid-provider escalation, and no hidden mutation in
+  deterministic checks, then publishes the evidence required for closure.
 
 ## Out Of Scope
 
