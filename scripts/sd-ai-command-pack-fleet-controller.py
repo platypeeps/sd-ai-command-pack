@@ -1205,10 +1205,11 @@ def _refresh_campaign_status(
     state["status"] = "blocked" if plan["stopStarting"] else "active"
 
 
-def _git_evidence(path: Path) -> dict[str, Any]:
+def _git_evidence(path: Path, expected_checkout_digest: str) -> dict[str, Any]:
     result: dict[str, Any] = {
         "branch": None,
-        "checkoutDigestMatches": False,
+        "checkoutDigestMatches": path.is_dir()
+        and _digest_path(path) == expected_checkout_digest,
         "clean": None,
         "exists": path.is_dir(),
         "head": None,
@@ -1216,7 +1217,6 @@ def _git_evidence(path: Path) -> dict[str, Any]:
     if not result["exists"]:
         return result
     try:
-        result["checkoutDigestMatches"] = _digest_path(path) == _digest_path(path.resolve())
         head = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "HEAD"],
             check=True,
@@ -1289,10 +1289,7 @@ def resume_report(state: Mapping[str, Any]) -> dict[str, Any]:
         if action is None:
             continue
         checkout = Path(lane["checkoutPath"])
-        evidence = _git_evidence(checkout)
-        evidence["checkoutDigestMatches"] = bool(evidence["exists"]) and (
-            _digest_path(checkout) == lane["checkoutDigest"]
-        )
+        evidence = _git_evidence(checkout, lane["checkoutDigest"])
         reconciliation.append(
             {
                 "action": action,

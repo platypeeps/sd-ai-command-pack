@@ -729,6 +729,19 @@ class FleetControllerTests(InstallTestCase):
 
         self.assertEqual(digest, expected)
 
+    def test_git_evidence_compares_the_bound_checkout_digest(self) -> None:
+        controller = self.load_controller()
+        root = self.make_git_repo_without_trellis()
+
+        self.assertTrue(
+            controller._git_evidence(root, controller._digest_path(root))[
+                "checkoutDigestMatches"
+            ]
+        )
+        self.assertFalse(
+            controller._git_evidence(root, "0" * 64)["checkoutDigestMatches"]
+        )
+
     def test_store_is_private_atomic_and_rejects_cross_repo_state(self) -> None:
         controller = self.load_controller()
         root, _fleet, _manifest, state = self.state(controller)
