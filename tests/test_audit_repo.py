@@ -49,7 +49,7 @@ FINDING_SCHEMA = (
 )
 
 PIPELINE_CHAIN = (
-    "fingerprint → dimension reviews → adversarial verification → "
+    "applicability preflight → dimension reviews → adversarial verification → "
     "synthesis → Trellis reconciliation → report + ledger"
 )
 
@@ -83,7 +83,7 @@ class AuditRepoTests(InstallTestCase):
             # Arguments.
             "dimensions=<a,b,c>",
             "Unknown names are an error",
-            "depth=quick|standard|deep",
+            "depth=standard|exhaustive",
             "2-of-3 refuter votes",
             "follow-up",
             # Ledger rules.
@@ -93,7 +93,11 @@ class AuditRepoTests(InstallTestCase):
             "Humans may edit `notes:` lines freely",
             # Dispatch and safety.
             "Active task: <task path from task.py current>",
-            "one read-only sub-agent per applicable charter",
+            "one read-only sub-agent per router row in state `run`",
+            "scripts/sd-ai-command-pack-audit-route.py",
+            "sd-ai-command-pack-toolchain.sh run-python",
+            "run|not-applicable|not-selected|failed",
+            "not equivalent to exhaustive",
             "Never auto-create Trellis tasks",
             "explicit user consent",
             "Findings without `file:line` evidence are downgraded or dropped",
@@ -150,9 +154,10 @@ class AuditRepoTests(InstallTestCase):
                 for text in [
                     "Resolve the `sd-audit-repo` skill by name",
                     ".agents/skills/sd-audit-repo/charters/",
-                    "fingerprint, per-dimension reviewer dispatch, adversarial "
+                    "deterministic applicability preflight, per-dimension "
+                    "reviewer dispatch, adversarial "
                     "verification, synthesis, Trellis reconciliation",
-                    "`dimensions=...`, `depth=quick|standard|deep`, and "
+                    "`dimensions=...`, `depth=standard|exhaustive`, and "
                     "`follow-up`",
                     ".trellis/audit/ledger.md",
                     "explicit user consent",
@@ -169,7 +174,9 @@ class AuditRepoTests(InstallTestCase):
             "Verdict, Findings,\nTrellis reconciliation, Prioritized actions, "
             "Ledger delta, and\nCoverage & limits",
             "unknown names are an error, not a silent skip",
-            "`depth=quick|standard|deep`",
+            "`depth=standard` (the default)",
+            "`depth=exhaustive`",
+            "`run|not-applicable|not-selected|failed`",
             "`.trellis/audit/ledger.md`",
             "monotonic `A-NNN` finding IDs",
             "wait for explicit user consent",

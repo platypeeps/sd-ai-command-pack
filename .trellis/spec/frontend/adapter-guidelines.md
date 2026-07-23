@@ -122,6 +122,82 @@ then fall back to an unfiltered operation.
 
 Correct: normalize and validate the primary subject before any side effect,
 fail closed on ambiguity, and retain explicit controls for behavior and safety.
+
+## Scenario: Evidence-routed repository audits
+
+### 1. Scope / Trigger
+
+- Trigger: changing `sd-audit-repo` depth, dimension selection, charter
+  applicability, coverage reporting, or post-audit follow-up interaction.
+- Keep the shared skill, generated adapters, shipped router, docs, and focused
+  calibration tests synchronized.
+
+### 2. Signatures
+
+- Public controls: `depth=standard|exhaustive`, additive
+  `dimensions=<charter,...>`, equivalent bare charter names, and `follow-up`.
+- Applicability preflight:
+  `bash scripts/sd-ai-command-pack-toolchain.sh run-python --
+  scripts/sd-ai-command-pack-audit-route.py --repo . --mode
+  standard|exhaustive [--dimension CHARTER]... --json`.
+
+### 3. Contracts
+
+- Standard mode always runs correctness, security, testing, tooling, and
+  release-hygiene. Explicit dimensions add charters and cannot remove that
+  core.
+- The router owns deterministic applicability from bounded repository paths
+  and manifest content. Prompt prose consumes its versioned report and never
+  reclassifies charters from conversation memory.
+- Unknown, conflicting, unavailable, or malformed classification falls back
+  to exhaustive coverage with a visible reason.
+- Every canonical charter remains present in Coverage & limits as
+  `run|not-applicable|not-selected|failed` with evidence and a reason code.
+- Standard is not equivalent to exhaustive. Recommend exhaustive for release,
+  security, or other policy-required assurance.
+- Do not ask before or during deterministic routing. The only structured
+  audit interaction is the independent multi-select for proposed follow-up
+  tasks after findings are complete.
+
+### 4. Validation & Error Matrix
+
+- Unknown depth, dimension, or option-shaped input -> usage error before
+  reviewer dispatch.
+- Missing/nonzero/malformed/unsupported router report -> exhaustive fallback,
+  visible classifier warning, and no omitted charter.
+- Charter read or reviewer failure -> mark that charter `failed`, retain all
+  other charter rows, and stop with the underlying diagnostic.
+- `follow-up` plus dimensions -> usage error because it is a distinct mode.
+
+### 5. Good / Base / Bad Cases
+
+- Good: a UI fixture selects accessibility-i18n and retains the mandatory
+  core; the report shows both selected and omitted charters.
+- Base: a small CLI repository runs the mandatory core plus its matched
+  optional charters and recommends exhaustive when assurance policy requires.
+- Bad: treat absence of `package.json` as proof that every optional risk is
+  irrelevant, or ask the user which fingerprints to trust.
+
+### 6. Tests Required
+
+- Assert mandatory-core and additive-dimension behavior, exhaustive selection,
+  unknown/conflicting fallback, complete coverage rows, and human/JSON output.
+- Calibrate UI, datastore, API, infrastructure, dependency, and release
+  fixtures so each seeded material finding's charter runs in standard mode;
+  compare every fixture with exhaustive selection.
+- Preserve generated adapter parity, template/root byte identity, install
+  provenance, shipped-script coverage, and `make check`.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: dimensions=testing replaces the core and suppresses security
+Correct: dimensions=testing is additive; the standard core remains intact
+
+Wrong: an uncertain manifest parse silently skips dependencies
+Correct: classifier uncertainty is visible and falls back to exhaustive
+```
+
 - Thin adapters pass the user's invocation arguments unchanged to the canonical
   skill; they do not duplicate parsing policy.
 

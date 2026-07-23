@@ -38,6 +38,87 @@ nothing, CI staying green over skipped tests).
 - Bad: `return 0` out of a gate because a tool or input was missing, with no
   output.
 
+## Audit Charter Applicability Router Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing
+`scripts/sd-ai-command-pack-audit-route.py`, its template twin, the
+`sd-audit-repo` shared skill, or calibration tests that decide which charters
+standard mode runs.
+
+### 2. Signatures
+
+- CLI: `sd-ai-command-pack-audit-route.py --repo PATH
+  [--mode standard|exhaustive] [--dimension CHARTER]... [--json]`.
+- Reusable entry point:
+  `build_report(repo, mode, dimensions) -> schema-version-1 mapping`.
+- Report rows carry charter ID/version, mandatory/optional classification,
+  `run|not-applicable|not-selected|failed`, reason code, and bounded evidence.
+
+### 3. Contracts
+
+- The helper is read-only, stdlib-only, and installed beside
+  `sd_ai_command_pack_lib.py`. Inventory includes tracked and non-ignored
+  untracked files through bounded Git execution.
+- Standard mode has a fixed correctness, security, testing, tooling, and
+  release-hygiene core. Optional routing derives only from deterministic file,
+  language, manifest, dependency, infrastructure, datastore, API, UI,
+  deployment, documentation, and component evidence.
+- Explicit dimensions are additive. Exhaustive mode runs every canonical
+  charter. Output order follows the canonical charter and fingerprint tables,
+  independent of filesystem order.
+- Manifest reads are bounded, strict UTF-8, regular-file-only, and
+  repository-contained. Structured JSON manifests are parsed rather than
+  token-matched when their shape controls routing.
+- Git, inventory, path, manifest, decode, or classifier failure returns a
+  successful `fallback-exhaustive` report whose warning names the failure and
+  whose every charter row is `run`. Invalid caller arguments remain exit `2`.
+- Human output derives from the JSON fields and prints fingerprints, every
+  charter row, counts including zero, and warnings including explicit `none`.
+
+### 4. Validation & Error Matrix
+
+- Missing/non-directory repository or unknown dimension -> controlled exit
+  `2`, no traceback.
+- Missing Git, non-repository input, unsafe/inventory overflow, symlinked or
+  non-regular manifest, oversized/invalid-UTF-8 manifest, or malformed
+  `package.json` -> exhaustive fallback with visible reason.
+- Standard with absent optional signal -> explicit `not-applicable` for
+  stack-bounded charters or `not-selected` for broad charters; never omission.
+- Exhaustive or fallback -> all charters `run`; `failed` remains a runtime
+  orchestration state applied after dispatch, so preflight starts its count at
+  zero.
+
+### 5. Good / Base / Bad Cases
+
+- Good: a React path selects accessibility-i18n; database signals select
+  architecture/performance/dependencies; every unselected charter stays in
+  the report.
+- Base: a small repository runs fewer charters than exhaustive while retaining
+  the mandatory core and assurance warning.
+- Bad: scan the whole content tree, follow a manifest symlink, infer from model
+  memory, or turn a classifier exception into reduced coverage.
+
+### 6. Tests Required
+
+- Mandatory, additive, exhaustive, absent, and fallback routing.
+- Representative UI, database, API, infrastructure, dependency, and release
+  calibration fixtures comparing standard and exhaustive modes.
+- CLI JSON/human/error output, deterministic order, bounded manifest safety,
+  root/template parity, manifest install/provenance, and a per-file coverage
+  floor.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: malformed package.json means dependencies and UI are not applicable
+Correct: malformed routing evidence triggers visible exhaustive fallback
+
+Wrong: dimensions=performance runs only performance
+Correct: standard runs its mandatory core and adds performance
+```
+
 ## Pull Request Eligibility Evaluator Contract
 
 ### 1. Scope / Trigger

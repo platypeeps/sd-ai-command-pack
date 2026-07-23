@@ -157,6 +157,7 @@ LEGACY_PACK_PATHS = {
             f"use scripts/sd-ai-command-pack-{name}"
         )
         for name in (
+            "audit-route.py",
             "full-check.sh",
             "housekeeping.sh",
             "install-audit.py",
@@ -189,6 +190,7 @@ LEGACY_PACK_REFERENCES = {
     **{
         f"sd-command-pack-{name}": f"sd-ai-command-pack-{name}"
         for name in (
+            "audit-route.py",
             "full-check.sh",
             "housekeeping.sh",
             "install-audit.py",
