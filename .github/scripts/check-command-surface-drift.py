@@ -20,6 +20,7 @@ from installer.registry import (  # noqa: E402
     COMMAND_REGISTRY,
     COMMAND_SURFACE_ALLOWANCES,
     NEUTRAL_COMMAND_SOURCE_PLATFORMS,
+    PLATFORM_REGISTRY,
     RETIRED_COMMAND_SURFACES,
     SKILL_FANOUT_PLATFORMS,
     SOURCE_ONLY_COMMAND_NAMES,
@@ -51,11 +52,26 @@ IGNORED_PARTS = frozenset(
     }
 )
 IGNORED_PREFIXES = (".trellis/.backup-",)
+SKILL_PUBLIC_ROOTS = tuple(
+    dict.fromkeys(
+        (
+            ".agents",
+            *(
+                PLATFORM_REGISTRY[platform].directory
+                for platform in SKILL_FANOUT_PLATFORMS
+            ),
+        )
+    )
+)
+SKILL_PUBLIC_ROOT_PATTERN = "|".join(
+    re.escape(root) for root in SKILL_PUBLIC_ROOTS
+)
 PUBLIC_PATH_PATTERNS: tuple[tuple[re.Pattern[str], bool], ...] = (
     (re.compile(r"^\.github/command-sources/(sd-[a-z0-9-]+)\.md$"), False),
     (
         re.compile(
-            r"^(?:templates/)?\.agents/skills/(sd-[a-z0-9-]+)/SKILL\.md$"
+            rf"^(?:templates/)?(?:{SKILL_PUBLIC_ROOT_PATTERN})/skills/"
+            r"(sd-[a-z0-9-]+)/(?:SKILL\.md|references/)"
         ),
         False,
     ),
@@ -271,7 +287,13 @@ def _manifest_findings(
 
     known = {command.name for command in commands}
     shorts = {command.short: command.name for command in commands}
+    retired_names = {
+        identifier
+        for retirement in retirements
+        for identifier in retirement.identifiers
+    }
     targets_by_command: dict[str, set[str]] = {name: set() for name in known}
+    reported_targets: set[str] = set()
     findings: list[Finding] = []
     for item in files:
         source = item.get("source")
@@ -282,9 +304,14 @@ def _manifest_findings(
         if command_name is None:
             continue
         if command_name not in known:
+            category = (
+                "retired_identifier_live"
+                if command_name in retired_names
+                else "unregistered_public_target"
+            )
             findings.append(
                 Finding(
-                    category="unregistered_public_target",
+                    category=category,
                     identifier=command_name,
                     path="manifest.json",
                     line=_line_for_literal(text, source),
@@ -292,6 +319,7 @@ def _manifest_findings(
                     suggestion="register the command or remove the public target",
                 )
             )
+            reported_targets.add(target)
             continue
         targets_by_command[command_name].add(target)
 
@@ -309,6 +337,7 @@ def _manifest_findings(
                         suggestion="remove its consumer manifest entry",
                     )
                 )
+                reported_targets.add(target)
             continue
         expected = set(
             command_installed_targets(
@@ -331,7 +360,10 @@ def _manifest_findings(
         str(item.get("target")) for item in files if isinstance(item.get("target"), str)
     }
     for retirement in retirements:
-        for target in sorted(set(retirement.installed_targets) & manifest_targets):
+        for target in sorted(
+            (set(retirement.installed_targets) & manifest_targets)
+            - reported_targets
+        ):
             findings.append(
                 Finding(
                     category="retired_identifier_live",
@@ -364,6 +396,14 @@ def lint_repository(
         for retirement in retirements
         for identifier in (*retirement.identifiers, *retirement.configuration_keys)
     }
+    retired_command_names = {
+        identifier
+        for retirement in retirements
+        for identifier in retirement.identifiers
+    }
+    retired_targets = {
+        target for retirement in retirements for target in retirement.installed_targets
+    }
     findings = _validate_allowances(allowances, retired_identifiers)
     matched_allowances: set[tuple[str, str]] = set()
     suppressed = 0
@@ -373,7 +413,7 @@ def lint_repository(
         relative = path.relative_to(root).as_posix()
         text = _read_text(path)
         lines = text.splitlines()
-        for retirement in retirements:
+        for retirement in () if relative == "manifest.json" else retirements:
             for identifier in retirement.identifiers:
                 pattern = _token_pattern(identifier)
                 for line_number, line in enumerate(lines, start=1):
@@ -433,12 +473,9 @@ def lint_repository(
 
         command_name = _path_command(relative, shorts)
         if command_name and command_name not in known:
-            retired_targets = {
-                target for retirement in retirements for target in retirement.installed_targets
-            }
             category = (
                 "retired_identifier_live"
-                if relative in retired_targets
+                if command_name in retired_command_names or relative in retired_targets
                 else "unregistered_public_target"
             )
             findings.append(

@@ -165,6 +165,24 @@ class CommandSurfaceDriftTests(unittest.TestCase):
             self.assertIn("live_identifier_missing_target", categories)
             self.assertIn("unregistered_public_target", categories)
 
+    def test_unregistered_skill_reference_is_a_public_surface(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            command = self.make_repo(root)
+            reference = root / ".agents/skills/sd-extra/references/guide.md"
+            reference.parent.mkdir(parents=True)
+            reference.write_text("# Extra guide\n", encoding="utf-8")
+
+            report = self.lint(root, command)
+
+            finding = next(
+                item
+                for item in report.findings
+                if item.path == reference.relative_to(root).as_posix()
+            )
+            self.assertEqual(finding.category, "unregistered_public_target")
+            self.assertEqual(finding.identifier, "sd-extra")
+
     def test_stale_help_and_retired_manifest_target_fail(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -207,6 +225,16 @@ class CommandSurfaceDriftTests(unittest.TestCase):
                     and finding.path == "manifest.json"
                     for finding in report.findings
                 )
+            )
+            manifest_findings = [
+                finding
+                for finding in report.findings
+                if finding.path == "manifest.json"
+                and finding.identifier in {"old-command", "sd-old"}
+            ]
+            self.assertEqual(len(manifest_findings), 1)
+            self.assertEqual(
+                manifest_findings[0].category, "retired_identifier_live"
             )
 
     def test_missing_target_family_and_stale_config_are_reported(self) -> None:
