@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-23T03:00:01Z",
+  "validatedAt": "2026-07-23T03:10:41Z",
   "packVersion": "0.30.8",
-  "payloadDigest": "sha256:6032731080dadbca5ed98761576ba5029cf43cabebf15f5ce4627f1a46acc894",
+  "payloadDigest": "sha256:fa2accdc0e189c37505f3f73d4b5e888ad7081c5731f4fc6cf10462d9b31d85c",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "6067e8355678f8e8a98063f0432fc9e341b61713",
+      "baseCommit": "c469c13cdc8527316a393145630b4e6bb56c83bd",
       "status": "passed",
       "prepares": [],
       "checks": [

@@ -1116,8 +1116,9 @@ export function isTrellisTaskContextReference(value) {
   }
 
   return (
+    pathWithoutTrailingSlash === '.trellis/spec' ||
     pathWithoutTrailingSlash.startsWith('.trellis/spec/') ||
-    /^\.trellis\/tasks\/(?:archive\/\d{4}-\d{2}\/)?[^/]+\/research\/.+/.test(pathWithoutTrailingSlash)
+    /^\.trellis\/tasks\/(?:archive\/\d{4}-\d{2}\/)?[^/]+\/research(?:\/.+)?$/.test(pathWithoutTrailingSlash)
   );
 }
 

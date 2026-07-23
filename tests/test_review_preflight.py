@@ -295,10 +295,15 @@ assert.deepEqual(findTrellisTaskContextSeedRows('check.jsonl', [
   '{"nested":{"_example":"not a seed row"}}',
   'malformed',
 ].join('\\n')), [{ file: 'check.jsonl', line: 2 }]);
+assert.equal(isTrellisTaskContextReference('.trellis/spec'), true);
+assert.equal(isTrellisTaskContextReference('.trellis/spec/'), true);
 assert.equal(isTrellisTaskContextReference('.trellis/spec/backend/index.md'), true);
 assert.equal(isTrellisTaskContextReference('.trellis/spec/backend/'), true);
 assert.equal(isTrellisTaskContextReference('./.trellis/spec/frontend/index.md'), true);
+assert.equal(isTrellisTaskContextReference('.trellis/tasks/07-22-demo/research'), true);
+assert.equal(isTrellisTaskContextReference('.trellis/tasks/07-22-demo/research/'), true);
 assert.equal(isTrellisTaskContextReference('.trellis/tasks/07-22-demo/research/notes.md'), true);
+assert.equal(isTrellisTaskContextReference('.trellis/tasks/archive/2026-07/07-22-demo/research/'), true);
 assert.equal(isTrellisTaskContextReference('.trellis/tasks/archive/2026-07/07-22-demo/research/notes.md'), true);
 assert.equal(isTrellisTaskContextReference('src/index.ts'), false);
 assert.equal(isTrellisTaskContextReference('../.trellis/spec/backend/index.md'), false);
