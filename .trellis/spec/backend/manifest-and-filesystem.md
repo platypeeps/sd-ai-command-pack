@@ -45,6 +45,10 @@ run the same pack-source drift gate against the PR base:
 - payload changes require a `manifest.json` version bump;
 - a version bump requires the top `CHANGELOG.md` heading to match
   `## <version> - YYYY-MM-DD`;
+- run `make generate` before `make sync` when the version changes because
+  generated command surfaces embed the pack version and sync installs existing
+  templates without regenerating them; refresh the exact-payload candidate
+  ledger only after both steps;
 - non-payload changes must pass without a release bump.
 
 Wire any future release-gate changes through the shared

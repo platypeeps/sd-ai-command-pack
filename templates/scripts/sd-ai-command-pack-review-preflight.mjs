@@ -21,8 +21,10 @@ const MIN_NODE_VERSION = { major: 16, minor: 9, label: '16.9.0' };
 const GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 const MAX_TRELLIS_TASK_LINKS = 100;
 const MAX_TRELLIS_TASK_REFERENCE_LENGTH = 255;
+const MAX_TRELLIS_PRIORITY_RATIONALE_LENGTH = 1000;
 const TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review', 'completed']);
 const ACTIVE_TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review']);
+const TRELLIS_TASK_PRIORITIES = new Set(['P0', 'P1', 'P2', 'P3']);
 const REVIEW_CODE_PATH_PATTERN = /\.(?:cjs|js|mjs|py|sh|ts|tsx)$/;
 const REVIEW_WORKFLOW_PATH_PATTERN = /^\.github\/workflows\/[^/]+\.ya?ml$/;
 const NON_PRODUCTION_CODE_DIRECTORY_SEGMENTS = new Set([
@@ -945,6 +947,60 @@ export function validateTrellisTaskMetadata(record, taskDir, archived) {
         issues.push('children must contain only safe MM-DD-name task directory references');
       }
     }
+  }
+
+  issues.push(...validateTrellisTaskPriorityProvenance(record));
+
+  return issues;
+}
+
+function validateTrellisTaskPriorityProvenance(record) {
+  if (
+    !isPlainObject(record) ||
+    !isPlainObject(record.meta) ||
+    !Object.prototype.hasOwnProperty.call(record.meta, 'priorityProvenance')
+  ) {
+    return [];
+  }
+
+  const provenance = record.meta.priorityProvenance;
+  if (!isPlainObject(provenance)) {
+    return ['meta.priorityProvenance must be an object'];
+  }
+
+  const issues = [];
+  const priorityValid = TRELLIS_TASK_PRIORITIES.has(record.priority);
+  const sourcePriorityValid = TRELLIS_TASK_PRIORITIES.has(provenance.sourcePriority);
+  if (!priorityValid) {
+    issues.push(
+      'priority must be one of P0, P1, P2, P3 when meta.priorityProvenance is declared',
+    );
+  }
+  if (!sourcePriorityValid) {
+    issues.push('meta.priorityProvenance.sourcePriority must be one of P0, P1, P2, P3');
+  }
+  if (
+    priorityValid &&
+    sourcePriorityValid &&
+    record.priority === provenance.sourcePriority
+  ) {
+    issues.push(
+      'meta.priorityProvenance.sourcePriority must differ from priority; ' +
+        'remove provenance when priority is unchanged',
+    );
+  }
+
+  if (
+    typeof provenance.rationale !== 'string' ||
+    provenance.rationale.trim().length === 0
+  ) {
+    issues.push('meta.priorityProvenance.rationale must be a non-empty string');
+  } else if (
+    provenance.rationale.trim().length > MAX_TRELLIS_PRIORITY_RATIONALE_LENGTH
+  ) {
+    issues.push(
+      `meta.priorityProvenance.rationale must be at most ${MAX_TRELLIS_PRIORITY_RATIONALE_LENGTH} characters`,
+    );
   }
 
   return issues;

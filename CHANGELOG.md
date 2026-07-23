@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.32.0 - 2026-07-23
+
+- Validate optional Trellis task priority provenance with deterministic,
+  redacted diagnostics, and retain executable coverage that archived task
+  evidence may reference later-deleted paths while live PRDs may not.
+
 ## 0.31.0 - 2026-07-22
 
 - Reject changed deferred Trellis tasks whose bases are not grounded in their
