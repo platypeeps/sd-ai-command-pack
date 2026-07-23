@@ -156,3 +156,44 @@ Added a registry-driven lint that keeps live command identifiers, generated adap
 ### Next Steps
 
 - None - task complete
+
+
+## Session 206: Expand sd-status selectable inventory
+
+**Date**: 2026-07-23
+**Task**: Expand sd-status selectable inventory
+**Branch**: `codex/expand-sd-status-selectable-inventory`
+
+### Summary
+
+Added selectable F/T/R status inventories, completed three Copilot review rounds, and hardened selector and task normalization boundaries.
+
+### Main Changes
+
+- Added deterministic F-prefixed follow-ups, T-prefixed Trellis tasks, and R-prefixed roadmap sections to sd-status human and JSON output.
+- Hardened report-local selector ownership, follow-up kind compatibility, and normalized Trellis task validation based on review feedback.
+- Synchronized command surfaces, documentation, release 0.35.0 metadata, and eight-consumer fleet candidate evidence.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `af5f7e3` | feat: add selectable sd-status inventory |
+| `4b1664f` | fix: address review feedback round 1 |
+| `0c3c57d` | fix: address review feedback round 2 |
+| `247edda` | chore(task): archive expand-sd-status-selectable-inventory |
+
+### Testing
+
+- [OK] make check and deterministic review full-check passed with Prism and Gito disabled.
+- [OK] Focused sd-status tests passed (61 tests) and status collector coverage remained above its 80 percent floor.
+- [OK] All eight fleet candidate consumers and all required PR #235 CI checks passed; Copilot round 3 produced no comments.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
