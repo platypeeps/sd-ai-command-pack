@@ -1139,6 +1139,7 @@ export function findTrellisTaskContextIssues(file, text) {
 
     if (isPlainObject(record) && Object.prototype.hasOwnProperty.call(record, '_example')) {
       issues.push({ file, line: index + 1, kind: 'seed' });
+      continue;
     }
     if (
       isPlainObject(record) &&

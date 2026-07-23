@@ -291,7 +291,7 @@ assert.deepEqual(validateTrellisTaskMetadata({
 ]);
 assert.deepEqual(findTrellisTaskContextSeedRows('check.jsonl', [
   '{"file":".trellis/spec/backend/index.md","reason":"real"}',
-  '{"_example":"remove me"}',
+  '{"_example":"remove me","file":"src/example.py"}',
   '{"nested":{"_example":"not a seed row"}}',
   'malformed',
 ].join('\\n')), [{ file: 'check.jsonl', line: 2 }]);
@@ -313,7 +313,7 @@ assert.equal(isTrellisTaskContextReference('https://example.com/spec.md'), false
 assert.deepEqual(findTrellisTaskContextIssues('implement.jsonl', [
   '{"file":".trellis/spec/backend/index.md","reason":"real"}',
   '{"file":"tests/test_app.py","reason":"wrong boundary"}',
-  '{"_example":"remove me"}',
+  '{"_example":"remove me","file":"src/example.py"}',
 ].join('\\n')), [
   { file: 'implement.jsonl', line: 2, kind: 'reference' },
   { file: 'implement.jsonl', line: 3, kind: 'seed' },
