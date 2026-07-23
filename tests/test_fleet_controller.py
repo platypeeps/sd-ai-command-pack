@@ -271,6 +271,34 @@ class FleetControllerTests(InstallTestCase):
         self.assertEqual(lane["prNumber"], 17)
         self.assertEqual(controller.issue_next(state), [])
 
+    def test_lane_receipt_replay_uses_original_action_identity(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("wave-a",)
+        )
+        self.pass_preflight(controller, state)
+        action = controller.issue_next(state)[0]
+        receipt, changed = controller.record_result(
+            state,
+            action_id=action["actionId"],
+            release="0.37.0",
+            consumer="wave-a",
+            result="passed",
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(state["lanes"][0]["stage"], "install-update")
+        replay, replay_changed = controller.record_result(
+            state,
+            action_id=action["actionId"],
+            release="0.37.0",
+            consumer="wave-a",
+            result="passed",
+        )
+
+        self.assertEqual(replay, receipt)
+        self.assertFalse(replay_changed)
+
     def test_no_merge_finishes_at_pr_open(self) -> None:
         controller = self.load_controller()
         _root, _fleet, _manifest, state = self.state(

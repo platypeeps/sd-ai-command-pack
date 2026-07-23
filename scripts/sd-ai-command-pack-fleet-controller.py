@@ -942,13 +942,22 @@ def record_result(
         except StopIteration:
             raise FleetControllerError("receipt consumer is outside the campaign") from None
     issued = target["issuedAction"]
-    candidate_action = issued or {
-        "actionId": action_id,
-        "attempt": target["attempt"],
-        "consumer": consumer,
-        "release": release,
-        "stage": "preflight" if consumer is None else target["stage"],
-    }
+    existing = _existing_receipt(state, action_id)
+    if existing is not None:
+        if existing["consumer"] != consumer:
+            raise FleetControllerError("action already has a conflicting receipt")
+        candidate_action = {
+            key: existing[key]
+            for key in ("actionId", "attempt", "consumer", "release", "stage")
+        }
+    else:
+        candidate_action = issued or {
+            "actionId": action_id,
+            "attempt": target["attempt"],
+            "consumer": consumer,
+            "release": release,
+            "stage": "preflight" if consumer is None else target["stage"],
+        }
     receipt = _build_receipt(
         candidate_action,
         result=result,
@@ -958,7 +967,6 @@ def record_result(
         head=head,
         pr_number=pr_number,
     )
-    existing = _existing_receipt(state, action_id)
     if existing is not None:
         if _receipt_core(existing) != _receipt_core(receipt):
             raise FleetControllerError("action already has a conflicting receipt")
