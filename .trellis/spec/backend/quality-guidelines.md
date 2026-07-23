@@ -104,9 +104,11 @@ that exercise the generic JavaScript review preflight.
   plus incomplete marker pairs in the normal local-path check.
 - Diff-scoped Trellis task checks inspect every changed `implement.jsonl` and
   `check.jsonl` file regardless of whether its task is planning, in progress,
-  completed, or archived. A changed `task.json` does not pull unchanged sibling
-  context into scope. Parsed records with an own `_example` key fail; empty and
-  grounded context pass. Present changed context artifacts outside the active or
+  completed, or archived. A changed non-planning `task.json` also checks both
+  sibling context files. Parsed records with an own `_example` key fail; rows
+  with a `file` key may reference only `.trellis/spec/**` or
+  `.trellis/tasks/**/research/**`; empty and grounded context pass. Present
+  changed context artifacts outside the active or
   month-bucketed archive layout fail even when the directory entry is a broken symlink;
   archive task directory names remain unrestricted for legacy Trellis compatibility,
   deleted old paths during moves are ignored, and untouched historical and

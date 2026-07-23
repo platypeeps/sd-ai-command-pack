@@ -45,6 +45,9 @@ review loop.
   after `sd-update-spec`, classify all changed and untracked paths, and stage
   only files that clearly belong to the PR. Ask before touching ambiguous
   files; in non-interactive sessions, stop by default.
+- Run the pack's deterministic review preflight against the complete intended
+  branch and working-tree diff before staging a new commit or pushing an
+  already-committed branch. Never publish when that gate is missing or fails.
 - Do not create a duplicate PR. If the current branch already has an open PR,
   reuse it and continue into `sd-review-pr`.
 - Never pass generated or user-provided Markdown through `gh pr create --body`
@@ -186,10 +189,29 @@ to include:
 Ask before staging unrelated, generated, local-only, ignored, secret-like, or
 ambiguous files. In non-interactive sessions, stop instead of guessing.
 
-Before committing, run whitespace validation on the intended diff:
+Before staging a new commit or pushing an already-committed branch, run
+whitespace validation and the deterministic pack review preflight on the
+complete intended diff. The preflight catches invalid Trellis task metadata,
+generated `_example` task-context rows, and task-context references outside
+spec/research files before publication:
 
 ```bash
 git diff --check
+if [ ! -f scripts/sd-ai-command-pack-review-preflight.mjs ]; then
+  printf '%s\n' "error: scripts/sd-ai-command-pack-review-preflight.mjs is missing; reinstall sd-ai-command-pack before publishing." >&2
+  exit 1
+fi
+node scripts/sd-ai-command-pack-review-preflight.mjs
+```
+
+If the preflight exits nonzero, stop before staging, committing, or pushing and
+report its complete output. Do not treat a later `sd-review-pr` run as a
+substitute for this pre-publication gate.
+
+When a new commit is needed, stage only the classified intended paths and
+validate the staged diff:
+
+```bash
 git add <intended paths>
 git diff --cached --check
 ```
@@ -356,6 +378,7 @@ the PR merged.
 Report:
 
 - Update-spec skill path and summary of spec or repository knowledge updates.
+- Pre-publication review preflight result.
 - Staged/committed paths and commit SHA, or why no commit was needed.
 - Push target and result.
 - PR number, URL, base branch, and whether the PR was created or reused.

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-22T22:42:57Z",
-  "packVersion": "0.30.7",
-  "payloadDigest": "sha256:cae3a6f49985166bdc1f71180220e51e09a02dfc21861a1a916ee9ef275bb06b",
+  "validatedAt": "2026-07-23T03:00:01Z",
+  "packVersion": "0.30.8",
+  "payloadDigest": "sha256:6032731080dadbca5ed98761576ba5029cf43cabebf15f5ce4627f1a46acc894",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
@@ -64,7 +64,7 @@
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
-      "baseCommit": "c5e43753edf157ad77a1b6f39a803ff7df1642cb",
+      "baseCommit": "05eb6fb299791b8bb7b969f03c9ccde6b08fc597",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "05236694129b325a8a3f303c45abbb4a2f23b72e",
+      "baseCommit": "6067e8355678f8e8a98063f0432fc9e341b61713",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -149,7 +149,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "3434de40f299958f08b1055e88288a6ef2cf2574",
+      "baseCommit": "dc71a8a18598c2e1c780c87d3a753e31c64a2fb9",
       "status": "passed",
       "prepares": [
         [
