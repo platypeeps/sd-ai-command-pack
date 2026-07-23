@@ -111,3 +111,48 @@ Released sd-ai-command-pack 0.34.0 with capability-driven, fail-closed checkout 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 205: Command surface drift lint
+
+**Date**: 2026-07-23
+**Task**: Command surface drift lint
+**Branch**: `codex/add-command-surface-drift-lint`
+
+### Summary
+
+Added a registry-driven lint that keeps live command identifiers, generated adapters, manifests, retired targets, and bounded historical allowances consistent across the pack.
+
+### Main Changes
+
+- Added exact-line human and JSON command-surface drift diagnostics backed by the canonical registry.
+- Derived generated target families and retired install footprints from shared validated registry data.
+- Integrated the lint into local and CI gates, generated parity, release validation, and full fleet candidate checks.
+- Addressed five remote review rounds covering adapter roots, manifest diagnostics, CI parity, strict input validation, and duplicate retired-target findings.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3d5c03de85dfd7ef6e83a9f72daac0cc0a7b8670` | feat: add command surface drift lint |
+| `886f8454026f30ded96ca71d4fd16d1ee305d73c` | fix: address command surface review feedback |
+| `a35782f803198a6342a948ff00281d648dcebaca` | fix: report exact manifest target lines |
+| `75fc0948d29719f3c47b0ef8af94501a5b743fa0` | fix: close command surface review gaps |
+| `e01bf8fc18faba39c86582cde4ecb355e9371dcc` | fix: validate command registry input types |
+| `87c575200425ba3e066882471a94d1881016ffda` | fix: deduplicate retired target findings |
+
+### Testing
+
+- [OK] make check
+- [OK] 95 focused command-surface, registry, parity, pack-drift, and retirement tests
+- [OK] all eight configured fleet consumers passed candidate validation for 0.34.1
+- [OK] command surface lint scanned 671 files with 18 bounded allowances and zero findings
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
