@@ -436,6 +436,45 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
     ),
 }
 
+# Command target families are shared by the generator, installer retirement,
+# and command-surface lint. Keep their order byte-stable: it is the historical
+# manifest order for one generated command footprint.
+BESPOKE_ADAPTER_PLATFORMS = ("claude", "gemini", "github")
+NEUTRAL_COMMAND_SOURCE_PLATFORMS = tuple(
+    sorted(
+        platform
+        for platform, info in PLATFORM_REGISTRY.items()
+        if info.command_kind and info.command_target_pattern
+    )
+)
+LATER_NEUTRAL_COMMAND_PLATFORMS = tuple(
+    platform
+    for platform in NEUTRAL_COMMAND_SOURCE_PLATFORMS
+    if platform not in ("cursor", "opencode")
+)
+SKILL_FANOUT_PLATFORMS = (
+    "antigravity",
+    "codebuddy",
+    "devin",
+    "droid",
+    "kilo",
+    "kiro",
+    "pi",
+    "qoder",
+    "reasonix",
+    "trae",
+)
+GENERATED_COMMAND_TARGET_FAMILIES = tuple(
+    dict.fromkeys(
+        (
+            "shared",
+            *BESPOKE_ADAPTER_PLATFORMS,
+            *NEUTRAL_COMMAND_SOURCE_PLATFORMS,
+            *SKILL_FANOUT_PLATFORMS,
+        )
+    )
+)
+
 @dataclass(frozen=True)
 class CommandFamily:
     id: str
@@ -453,6 +492,8 @@ class CommandInfo:
     mutates_remote: bool = False
     trusted_static_only: bool = False
     safe_mode: str | None = None
+    target_families: tuple[str, ...] = GENERATED_COMMAND_TARGET_FAMILIES
+    configuration_keys: tuple[str, ...] = ()
 
 
 COMMAND_FAMILIES: tuple[CommandFamily, ...] = (
@@ -677,6 +718,31 @@ def validate_command_registry(
             or not command.safe_mode.replace("-", "").replace("_", "").isalnum()
         ):
             errors.append(f"command {command.name} uses unsafe safe_mode")
+        if not isinstance(command.target_families, tuple) or any(
+            not isinstance(target, str) or not target.strip()
+            for target in command.target_families
+        ):
+            errors.append(f"command {command.name} has invalid target families")
+        elif not command.target_families:
+            errors.append(f"command {command.name} has no generated target families")
+        elif len(command.target_families) != len(set(command.target_families)):
+            errors.append(f"command {command.name} has duplicate target families")
+        else:
+            unknown_targets = sorted(
+                set(command.target_families) - set(GENERATED_COMMAND_TARGET_FAMILIES)
+            )
+            if unknown_targets:
+                errors.append(
+                    f"command {command.name} has unknown target families: "
+                    + ", ".join(unknown_targets)
+                )
+        if not isinstance(command.configuration_keys, tuple) or any(
+            not isinstance(key, str) or not key.strip()
+            for key in command.configuration_keys
+        ):
+            errors.append(f"command {command.name} has invalid configuration keys")
+        elif len(command.configuration_keys) != len(set(command.configuration_keys)):
+            errors.append(f"command {command.name} has duplicate configuration keys")
 
     if errors:
         raise RuntimeError("invalid COMMAND_REGISTRY: " + "; ".join(errors))
@@ -693,6 +759,282 @@ COMMAND_NAMES: tuple[tuple[str, str], ...] = tuple(
 # checkout, but are not included in consumer manifests. Their workflows depend
 # on source-only operator files such as the fleet registry and install entrypoint.
 SOURCE_ONLY_COMMAND_NAMES = frozenset({"sd-fleet-refresh"})
+
+
+def command_installed_targets(
+    name: str,
+    short: str,
+    target_families: tuple[str, ...] = GENERATED_COMMAND_TARGET_FAMILIES,
+) -> tuple[str, ...]:
+    """Return the canonical consumer target footprint for one command."""
+
+    def platform_target(platform: str) -> str:
+        pattern = PLATFORM_REGISTRY[platform].command_target_pattern
+        if pattern is None:
+            raise RuntimeError(f"platform has no command target pattern: {platform}")
+        return pattern.format(filename=f"{name}.md", name=short)
+
+    targets: list[str] = []
+    if "shared" in target_families:
+        targets.append(f".agents/skills/{name}/SKILL.md")
+    if "claude" in target_families:
+        targets.append(f".claude/commands/sd/{short}.md")
+    if "cursor" in target_families:
+        targets.append(platform_target("cursor"))
+    if "gemini" in target_families:
+        targets.append(f".gemini/commands/sd/{short}.toml")
+    if "github" in target_families:
+        targets.append(f".github/prompts/{name}.prompt.md")
+    if "opencode" in target_families:
+        targets.append(platform_target("opencode"))
+    targets.extend(
+        platform_target(platform)
+        for platform in LATER_NEUTRAL_COMMAND_PLATFORMS
+        if platform in target_families
+    )
+    targets.extend(
+        f"{PLATFORM_REGISTRY[platform].directory}/skills/{name}/SKILL.md"
+        for platform in SKILL_FANOUT_PLATFORMS
+        if platform in target_families
+    )
+    return tuple(targets)
+
+
+@dataclass(frozen=True)
+class RetiredCommandSurface:
+    id: str
+    identifiers: tuple[str, ...]
+    installed_targets: tuple[str, ...]
+    removed_version: str
+    owner_task: str
+    source_paths_must_be_absent: bool = True
+    configuration_keys: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CommandSurfaceAllowance:
+    identifier: str
+    path_pattern: str
+    reason: str
+
+
+RETIRED_COMMAND_SURFACES: tuple[RetiredCommandSurface, ...] = (
+    RetiredCommandSurface(
+        id="review-local-all-command",
+        identifiers=("sd-review-local-all",),
+        installed_targets=command_installed_targets(
+            "sd-review-local-all", "review-local-all"
+        ),
+        removed_version="0.13.0",
+        owner_task="07-15-skill-review-local-all",
+    ),
+    RetiredCommandSurface(
+        id="fleet-refresh-consumer-targets",
+        identifiers=(),
+        installed_targets=command_installed_targets(
+            "sd-fleet-refresh", "fleet-refresh"
+        ),
+        removed_version="0.15.1",
+        owner_task="07-16-source-only-fleet-refresh-command",
+        source_paths_must_be_absent=False,
+    ),
+)
+
+
+def retired_surface_targets(surface_id: str) -> tuple[str, ...]:
+    """Return one retired footprint or fail with actionable registry context."""
+
+    for surface in RETIRED_COMMAND_SURFACES:
+        if surface.id == surface_id:
+            return surface.installed_targets
+    raise RuntimeError(f"unknown retired command surface id: {surface_id}")
+
+COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
+    CommandSurfaceAllowance(
+        identifier="sd-review-local-all",
+        path_pattern="README.md",
+        reason="bounded migration note for the 0.13.0 command fold",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-review-local-all",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-review-local-all",
+        path_pattern="CHANGELOG.md",
+        reason="bounded historical release record",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-review-local-all",
+        path_pattern="tests/test_install_core.py",
+        reason="migration behavior regression fixture",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-review-local-all",
+        path_pattern="tests/test_retired_targets.py",
+        reason="retired-target cleanup regression fixture",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-review-local-all",
+        path_pattern="tests/test_command_surface_drift.py",
+        reason="command-surface lint fixture",
+    ),
+)
+
+
+def validate_command_surface_registry(
+    commands: tuple[CommandInfo, ...],
+    retirements: tuple[RetiredCommandSurface, ...],
+    allowances: tuple[CommandSurfaceAllowance, ...],
+) -> None:
+    """Validate retired command metadata and its bounded history allowances."""
+
+    errors: list[str] = []
+    live_identifiers = {command.name for command in commands}
+    live_configuration_keys = {
+        key for command in commands for key in command.configuration_keys
+    }
+    retirement_ids = [
+        retirement.id for retirement in retirements if isinstance(retirement.id, str)
+    ]
+    if len(retirement_ids) != len(set(retirement_ids)):
+        errors.append("duplicate retirement id")
+
+    retired_identifiers: set[str] = set()
+    retired_configuration_keys: set[str] = set()
+    for retirement in retirements:
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (
+                retirement.id,
+                retirement.removed_version,
+                retirement.owner_task,
+            )
+        ):
+            errors.append(f"retirement fields must be non-empty: {retirement!r}")
+        if not isinstance(retirement.source_paths_must_be_absent, bool):
+            errors.append(
+                f"retirement {retirement.id} source-path policy must be boolean"
+            )
+        if not (
+            retirement.identifiers
+            or retirement.installed_targets
+            or retirement.configuration_keys
+        ):
+            errors.append(f"retirement {retirement.id} describes no surface")
+        validated_values: dict[str, tuple[str, ...]] = {}
+        for label, values in (
+            ("identifiers", retirement.identifiers),
+            ("installed targets", retirement.installed_targets),
+            ("configuration keys", retirement.configuration_keys),
+        ):
+            if not isinstance(values, tuple) or any(
+                not isinstance(value, str) or not value.strip() for value in values
+            ):
+                errors.append(f"retirement {retirement.id} has invalid {label}")
+                validated_values[label] = ()
+                continue
+            normalized = tuple(value for value in values if isinstance(value, str))
+            if len(normalized) != len(set(normalized)):
+                errors.append(f"retirement {retirement.id} has invalid {label}")
+            validated_values[label] = normalized
+        identifiers = validated_values["identifiers"]
+        installed_targets = validated_values["installed targets"]
+        configuration_keys = validated_values["configuration keys"]
+        for target in installed_targets:
+            path = Path(target)
+            if path.is_absolute() or ".." in path.parts:
+                errors.append(
+                    f"retirement {retirement.id} has unsafe installed target: {target}"
+                )
+        overlap = live_identifiers.intersection(identifiers)
+        if overlap:
+            errors.append(
+                f"retirement {retirement.id} identifiers are still live: "
+                + ", ".join(sorted(overlap))
+            )
+        config_overlap = live_configuration_keys.intersection(
+            configuration_keys
+        )
+        if config_overlap:
+            errors.append(
+                f"retirement {retirement.id} configuration keys are still live: "
+                + ", ".join(sorted(config_overlap))
+            )
+        repeated_identifiers = retired_identifiers.intersection(
+            identifiers
+        )
+        repeated_keys = retired_configuration_keys.intersection(
+            configuration_keys
+        )
+        if repeated_identifiers:
+            errors.append(
+                "retired identifiers have multiple owners: "
+                + ", ".join(sorted(repeated_identifiers))
+            )
+        if repeated_keys:
+            errors.append(
+                "retired configuration keys have multiple owners: "
+                + ", ".join(sorted(repeated_keys))
+            )
+        retired_identifiers.update(identifiers)
+        retired_configuration_keys.update(configuration_keys)
+
+    known_allowance_identifiers = retired_identifiers | retired_configuration_keys
+    seen_allowances: set[tuple[str, str]] = set()
+    for allowance in allowances:
+        identifier = (
+            allowance.identifier
+            if isinstance(allowance.identifier, str) and allowance.identifier.strip()
+            else None
+        )
+        path_pattern = (
+            allowance.path_pattern
+            if isinstance(allowance.path_pattern, str)
+            and allowance.path_pattern.strip()
+            else None
+        )
+        if identifier is None:
+            errors.append("command surface allowance has an invalid identifier")
+        elif identifier not in known_allowance_identifiers:
+            errors.append(
+                f"allowance names an identifier that is not retired: {identifier}"
+            )
+        if identifier is not None and path_pattern is not None:
+            key = (identifier, path_pattern)
+            if key in seen_allowances:
+                errors.append(
+                    f"duplicate command surface allowance: {identifier} {path_pattern}"
+                )
+        if path_pattern is None:
+            errors.append("command surface allowance has an invalid path")
+        else:
+            path = Path(path_pattern)
+        if path_pattern is not None and (
+            path.is_absolute()
+            or ".." in path.parts
+            or path_pattern in {"*", "**", "**/*"}
+        ):
+            errors.append(
+                f"unsafe command surface allowance path: {path_pattern}"
+            )
+        if not isinstance(allowance.reason, str) or not allowance.reason.strip():
+            errors.append(
+                f"command surface allowance has no reason: {allowance.path_pattern}"
+            )
+        if identifier is not None and path_pattern is not None:
+            seen_allowances.add((identifier, path_pattern))
+
+    if errors:
+        raise RuntimeError("invalid command surface registry: " + "; ".join(errors))
+
+
+validate_command_surface_registry(
+    COMMAND_REGISTRY,
+    RETIRED_COMMAND_SURFACES,
+    COMMAND_SURFACE_ALLOWANCES,
+)
 
 # Extra files that must travel with an installed shared skill. Relative paths
 # are rooted inside templates/.agents/skills/<skill>/ and are fanned out by the
@@ -844,13 +1186,6 @@ TRELLIS_INIT_PLATFORM_FLAGS = {
     for platform, info in PLATFORM_REGISTRY.items()
     if info.init_flag
 }
-NEUTRAL_COMMAND_SOURCE_PLATFORMS = tuple(
-    sorted(
-        platform
-        for platform, info in PLATFORM_REGISTRY.items()
-        if info.command_kind and info.command_target_pattern
-    )
-)
 PLATFORM_LOCAL_GITIGNORE_PATTERNS = tuple(
     pattern
     for group in _LOCAL_GITIGNORE_GROUP_ORDER
@@ -939,9 +1274,12 @@ COPILOT_GUIDANCE_END = "<!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:END -->"
 __all__ = [
     "ACTIVE_TRELLIS_PLATFORM_MARKERS",
     "ALWAYS_INSTALL",
+    "BESPOKE_ADAPTER_PLATFORMS",
     "COMMAND_FAMILIES",
+    "COMMAND_SURFACE_ALLOWANCES",
     "COMMAND_REGISTRY",
     "COMMAND_NAMES",
+    "CommandSurfaceAllowance",
     "CommandFamily",
     "CommandInfo",
     "COPILOT_GUIDANCE_END",
@@ -959,6 +1297,8 @@ __all__ = [
     "LOCAL_ONLY_TRACKED_CHECK_PATHS",
     "LOCAL_ONLY_TRELLIS_EXCLUDES",
     "MANAGED_BLOCK_KIND",
+    "GENERATED_COMMAND_TARGET_FAMILIES",
+    "LATER_NEUTRAL_COMMAND_PLATFORMS",
     "NEUTRAL_COMMAND_SOURCE_PLATFORMS",
     "PACK_LOCAL_GITIGNORE_GROUP",
     "PACK_LOCAL_GITIGNORE_GROUP_NAME",
@@ -968,9 +1308,12 @@ __all__ = [
     "PLATFORMS",
     "PROVENANCE_FILE",
     "PlatformInfo",
+    "RETIRED_COMMAND_SURFACES",
+    "RetiredCommandSurface",
     "REVIEW_ARTIFACT_GITIGNORE_PATTERNS",
     "ROOT",
     "SHARED_SKILL_REFERENCES",
+    "SKILL_FANOUT_PLATFORMS",
     "SOURCE_ONLY_COMMAND_NAMES",
     "TRELLIS_BLANKET_GITIGNORE_ENTRIES",
     "TRELLIS_GITIGNORE_END",
@@ -984,6 +1327,8 @@ __all__ = [
     "_validate_registry_group_order",
     "_validate_registry_group_orders",
     "validate_command_registry",
+    "validate_command_surface_registry",
+    "command_installed_targets",
     "validate_shared_skill_references",
     "validate_source_only_command_names",
 ]

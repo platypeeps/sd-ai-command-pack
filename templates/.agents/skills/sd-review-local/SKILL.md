@@ -34,9 +34,8 @@ stop and report them before running any review tool.
 - `all` — review the entire checked-out repository instead of the current
   diff. Run every runner invocation in this loop with the full-codebase
   flag, `bash scripts/sd-ai-command-pack-review-local.sh --full-codebase`,
-  keeping any validated tool names as trailing arguments. The former
-  `sd-review-local-all` command is folded into this skill as the `all`
-  argument.
+  keeping any validated tool names as trailing arguments. Full-codebase
+  review is an argument of this skill, not a separate command surface.
 - Tool names such as `prism` or `gito` — run only that tool set. Validate
   every name per Tool Selection below; a token that is neither `all` nor a
   validated tool name is an error.

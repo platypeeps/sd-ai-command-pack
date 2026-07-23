@@ -40,6 +40,7 @@ from installer.registry import (
     TRELLIS_GITIGNORE_END,
     TRELLIS_GITIGNORE_START,
     TRELLIS_GITIGNORE_TARGET,
+    retired_surface_targets,
 )
 from installer.status import WRITTEN_REMOVE_STATUSES, RemoveStatus
 
@@ -58,68 +59,14 @@ MANAGED_BLOCK_REMOVAL_TARGETS = frozenset(
     }
 )
 
-# sd-review-local-all was retired in 0.13.0: its full-codebase loop moved
-# into `sd-review-local all`. These are the installed target paths the last
-# manifest that shipped the command listed for it; a normal install/refresh
-# deletes vouched leftovers (retire_stale_targets) so consumer repos do not
-# fail the install audit on orphaned pack-like files.
-RETIRED_REVIEW_LOCAL_ALL_TARGETS: tuple[str, ...] = (
-    ".agents/skills/sd-review-local-all/SKILL.md",
-    ".claude/commands/sd/review-local-all.md",
-    ".cursor/commands/sd-review-local-all.md",
-    ".gemini/commands/sd/review-local-all.toml",
-    ".github/prompts/sd-review-local-all.prompt.md",
-    ".opencode/commands/sd-review-local-all.md",
-    ".agent/workflows/sd-review-local-all.md",
-    ".codebuddy/commands/sd/review-local-all.md",
-    ".devin/workflows/sd-review-local-all.md",
-    ".factory/commands/sd/review-local-all.md",
-    ".kilocode/workflows/sd-review-local-all.md",
-    ".pi/prompts/sd-review-local-all.md",
-    ".qoder/commands/sd-review-local-all.md",
-    ".trae/commands/sd-review-local-all.md",
-    ".zcode/commands/sd/review-local-all.md",
-    ".agent/skills/sd-review-local-all/SKILL.md",
-    ".codebuddy/skills/sd-review-local-all/SKILL.md",
-    ".devin/skills/sd-review-local-all/SKILL.md",
-    ".factory/skills/sd-review-local-all/SKILL.md",
-    ".kilocode/skills/sd-review-local-all/SKILL.md",
-    ".kiro/skills/sd-review-local-all/SKILL.md",
-    ".pi/skills/sd-review-local-all/SKILL.md",
-    ".qoder/skills/sd-review-local-all/SKILL.md",
-    ".reasonix/skills/sd-review-local-all/SKILL.md",
-    ".trae/skills/sd-review-local-all/SKILL.md",
+# Compatibility aliases derive from the canonical registry so install-time
+# retirement and source drift lint cannot disagree about old footprints. The
+# helper keeps a renamed or missing registry row actionable at import time.
+RETIRED_REVIEW_LOCAL_ALL_TARGETS = retired_surface_targets(
+    "review-local-all-command"
 )
-
-# sd-fleet-refresh is an operator workflow for the pack source checkout. It
-# was consumer-shipped through 0.15.0, so refreshes retire its vouched footprint
-# while the source checkout keeps its generated dogfood copies.
-SOURCE_ONLY_COMMAND_TARGETS: tuple[str, ...] = (
-    ".agents/skills/sd-fleet-refresh/SKILL.md",
-    ".claude/commands/sd/fleet-refresh.md",
-    ".cursor/commands/sd-fleet-refresh.md",
-    ".gemini/commands/sd/fleet-refresh.toml",
-    ".github/prompts/sd-fleet-refresh.prompt.md",
-    ".opencode/commands/sd-fleet-refresh.md",
-    ".agent/workflows/sd-fleet-refresh.md",
-    ".codebuddy/commands/sd/fleet-refresh.md",
-    ".devin/workflows/sd-fleet-refresh.md",
-    ".factory/commands/sd/fleet-refresh.md",
-    ".kilocode/workflows/sd-fleet-refresh.md",
-    ".pi/prompts/sd-fleet-refresh.md",
-    ".qoder/commands/sd-fleet-refresh.md",
-    ".trae/commands/sd-fleet-refresh.md",
-    ".zcode/commands/sd/fleet-refresh.md",
-    ".agent/skills/sd-fleet-refresh/SKILL.md",
-    ".codebuddy/skills/sd-fleet-refresh/SKILL.md",
-    ".devin/skills/sd-fleet-refresh/SKILL.md",
-    ".factory/skills/sd-fleet-refresh/SKILL.md",
-    ".kilocode/skills/sd-fleet-refresh/SKILL.md",
-    ".kiro/skills/sd-fleet-refresh/SKILL.md",
-    ".pi/skills/sd-fleet-refresh/SKILL.md",
-    ".qoder/skills/sd-fleet-refresh/SKILL.md",
-    ".reasonix/skills/sd-fleet-refresh/SKILL.md",
-    ".trae/skills/sd-fleet-refresh/SKILL.md",
+SOURCE_ONLY_COMMAND_TARGETS = retired_surface_targets(
+    "fleet-refresh-consumer-targets"
 )
 
 RETIRED_TARGETS = (

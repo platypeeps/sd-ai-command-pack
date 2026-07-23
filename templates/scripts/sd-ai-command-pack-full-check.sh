@@ -570,9 +570,10 @@ run_sd_ai_command_pack_kb_freshness_check() {
 
 run_pack_source_drift_gates() {
   # Deterministic pre-PR gates that only apply inside the sd-ai-command-pack
-  # source repository itself: every tracked manifest target must match its
-  # templates/ twin, and every pack env var read by shipped scripts must be
-  # documented in the installed usage guide.
+  # source repository itself: command surfaces must match the canonical
+  # registry, every tracked manifest target must match its templates/ twin,
+  # and every pack env var read by shipped scripts must be documented in the
+  # installed usage guide.
   local mode="${SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT:-auto}"
 
   if is_disabled "$mode"; then
@@ -597,7 +598,15 @@ run_pack_source_drift_gates() {
     return 0
   fi
 
-  section "Pack source drift gates: template twins, release ledger, and env-var docs"
+  section "Pack source drift gates: command surfaces, template twins, release ledger, and env-var docs"
+  local command_surface_lint=".github/scripts/check-command-surface-drift.py"
+  if [ ! -f "$command_surface_lint" ]; then
+    printf 'Command surface drift lint is required but %s is missing.\n' "$command_surface_lint" >&2
+    return 1
+  fi
+  if ! run "SD command surface drift lint" python3 "$command_surface_lint"; then
+    return 1
+  fi
   local release_base_ref
   release_base_ref="$(full_check_base_ref)"
   SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF="${SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF:-$release_base_ref}" python3 - <<'PACK_SOURCE_DRIFT_GATES'

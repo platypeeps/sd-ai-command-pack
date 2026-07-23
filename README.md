@@ -622,6 +622,11 @@ For the complete maintainer workflow, run `make setup` once and then
 breakdown and release rules. The explicit commands below mirror the main test
 lane for environments without `make`.
 
+Command additions and retirements are guarded by
+`.github/scripts/check-command-surface-drift.py`; it validates registry-backed
+targets and rejects stale live command/configuration references while allowing
+only explicitly reasoned historical locations.
+
 Run the pack tests with the explicit dev dependencies from
 `requirements-dev.txt`, including `coverage.py` via the `coverage` package.
 On macOS, use Homebrew Python for the local virtualenv instead of Apple/Xcode
