@@ -252,6 +252,8 @@ def atomic_write_text(
 ) -> None:
     if destination.is_symlink():
         raise OSError("target is a symlink")
+    if revalidate is not None:
+        revalidate()
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(

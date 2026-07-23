@@ -801,6 +801,39 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertEqual(target.read_text(encoding="utf-8"), original)
         self.assertEqual(list(target.parent.glob(".*.tmp")), [])
 
+    def test_review_learnings_revalidates_before_creating_temporary_file(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_pre_temp_revalidation",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-pre-temp-")
+        self.addCleanup(tempdir.cleanup)
+        target = Path(tempdir.name) / "review-learnings.md"
+        events: list[str] = []
+        original_named_temporary_file = module.tempfile.NamedTemporaryFile
+
+        def revalidate() -> None:
+            events.append("revalidate")
+
+        def checked_named_temporary_file(*args: object, **kwargs: object) -> object:
+            self.assertEqual(events, ["revalidate"])
+            events.append("temporary")
+            return original_named_temporary_file(*args, **kwargs)
+
+        with mock.patch.object(
+            module.tempfile,
+            "NamedTemporaryFile",
+            side_effect=checked_named_temporary_file,
+        ):
+            module.atomic_write_text(
+                target,
+                "candidate\n",
+                revalidate=revalidate,
+            )
+
+        self.assertEqual(events[0:2], ["revalidate", "temporary"])
+        self.assertEqual(target.read_text(encoding="utf-8"), "candidate\n")
+
     def test_review_learnings_default_scan_is_read_only_and_reports_target(self) -> None:
         tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-scan-")
         self.addCleanup(tempdir.cleanup)
