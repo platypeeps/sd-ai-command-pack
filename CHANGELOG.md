@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.37.1 - 2026-07-23
+
+- Make `sd-review-learnings` observably read-only by default, constrain local
+  updates to canonical repository-contained UTF-8 files, and require an exact
+  structured confirmation for exceptional external writes.
+- Add atomic target revalidation and structured mode, containment, digest,
+  finding, change, and write-status reporting without staging or publishing
+  learning updates.
+
 ## 0.37.0 - 2026-07-23
 
 - Add a private, atomic fleet campaign controller with deterministic

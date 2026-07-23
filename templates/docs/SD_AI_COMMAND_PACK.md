@@ -229,7 +229,12 @@ it. Use a separate request to execute the recommendation.
    normal loop once findings are fixed, rebutted with evidence, or confirmed
    already addressed.
 13. Use the review-learnings command when review comments repeat across PRs and
-   you want to capture repo-specific preventive guidance. The review-pr loop
+   you want to capture repo-specific preventive guidance. It scans read-only by
+   default. Repository-local persistence requires explicit `--update` and an
+   atomically replaceable canonical target; an external target requires
+   `--update-external`, exact-path structured confirmation, and the matching
+   `--confirmed-external-target`. The command never stages, commits, pushes, or
+   publishes the learning file. The review-pr loop
    automatically attempts one read-only, PR-scoped learning pass after the
    overall cycle is clean; it never runs the learning pass after each round.
 14. Run the update-spec command when the work taught you a durable

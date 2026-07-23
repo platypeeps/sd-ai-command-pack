@@ -159,12 +159,12 @@ authorized by the owning workflow.
 - Owners: `sd-review-learnings`
 - Category: `external-path`
 - Header: `Write target`
-- Question: Where should the review-learning update be written?
+- Question: Should the review-learning update use the exact resolved external path shown?
 - Multi-select: `no`
 - Noninteractive: `stop`
 - Options:
-  - `Repository local` (recommended): Keep the update inside the current repository.
-  - `Exact path`: Use only an explicit external path supplied by the user.
+  - `Repository local` (recommended): Keep the managed-block update inside the current repository.
+  - `Write exact path`: Authorize only the displayed resolved external Markdown path for this invocation.
 
 ### `update-spec.ownership-scope`
 

@@ -6,18 +6,40 @@ description: Use when the user wants to detect repeated PR review feedback patte
 # SD Review Learnings
 
 Use this command to make repo-specific review learnings easy to detect and keep
-current. It is intentionally local-first: scan the current diff for recurring
+current. It is read-only by default: scan the current diff for recurring
 mechanical review-cycle patterns, optionally inspect recent GitHub Copilot
-review comments, then update a repo-owned markdown file with a managed learning
-block.
+review comments, then update a bounded managed block only through an explicit
+update mode.
+
+## Arguments
+
+- No update flag: `scan` mode. Analyze and report without creating directories
+  or files.
+- `--update`: update one canonical repository-contained target.
+- `--update-external`: exceptional external update. It also requires
+  `--confirmed-external-target ABSOLUTE_PATH` matching the exact resolved
+  target shown in the structured confirmation.
+- `--target PATH`: select the learning file; the default is
+  `docs/review-learnings.md`.
+- `--dry-run`: render a repository-local candidate without writing. Do not
+  combine it with an update mode or `--json`.
+- `--json`: emit one structured report instead of mixed human output.
+- `--base`, `--diff-from`, `--include-working-tree`, `--github-days`,
+  `--github-limit`, `--github-pr`, `--github-repo`, `--env-prefix`, and
+  `--allow` retain their documented scan controls.
 
 ## Structured decisions
 
 Read [`../sd-help/references/structured-questions.md`](../sd-help/references/structured-questions.md)
 before asking. This skill owns only `review-learnings.external-target`; use it
-only when an external write target is required and no exact user-supplied path
-already resolves it. The default scan and repository-local update never need
-confirmation.
+for every external write, even when the user supplied the path. Resolve the
+repository root and requested target canonically using trusted host filesystem
+inspection before asking. The question must name the exact resolved absolute
+path and say that one external Markdown file will have only its managed
+`sd-review-learnings` block replaced or appended. Recommend keeping the target
+repository-local. If structured questions are unavailable, ask the same concise
+plain question; in noninteractive execution stop without writing. The default
+scan and repository-local update never need confirmation.
 
 ## Workflow
 
@@ -25,15 +47,22 @@ Run these commands from the repository root. The script path shown below is the
 stable command-pack install path; if a repo wraps it with its own command, use
 the repo wrapper.
 
-1. Run a local scan first:
+1. Resolve and state the canonical repository root, the requested target, and
+   whether the target is repository-local. Run a local scan first:
 
    ```bash
    bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
      scripts/sd-ai-command-pack-review-learnings.py --include-working-tree
    ```
 
-2. When the user asks to record or refresh learnings, update the repo learning
-   file:
+2. When the user asks to record or refresh learnings, preview the exact
+   repository-local managed-block change first, then state the canonical target
+   and planned mutation before updating:
+
+   ```bash
+   bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+     scripts/sd-ai-command-pack-review-learnings.py --include-working-tree --dry-run
+   ```
 
    ```bash
    bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
@@ -65,13 +94,30 @@ the repo wrapper.
    examples; the report names every truncated evidence dimension.
 
 4. If the repository already has a preferred review-learning file, use
-   `--target PATH`. Otherwise the default is `docs/review-learnings.md`.
+   `--target PATH`. Otherwise the default is `docs/review-learnings.md`. A
+   local update must resolve inside the canonical repository root, including
+   through every parent symlink.
 
-5. If the branch diff should be compared against a specific ref, pass
+5. For an exceptional external target, require an exact path from the user,
+   resolve it canonically without creating it, ask
+   `review-learnings.external-target` with that resolved path and impact, then
+   pass the recorded answer only to the same invocation:
+
+   ```bash
+   bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+     scripts/sd-ai-command-pack-review-learnings.py --include-working-tree \
+     --target /exact/resolved/path.md --update-external \
+     --confirmed-external-target /exact/resolved/path.md
+   ```
+
+   Never infer confirmation from a general request to update learnings, an
+   earlier invocation, or an unavailable question capability.
+
+6. If the branch diff should be compared against a specific ref, pass
    `--base REF` explicitly. Otherwise the script uses the discovered remote
    default ref, then the current upstream, then the first available remote ref.
 
-6. Treat the managed block as a starting point. Convert durable lessons into the
+7. Treat the managed block as a starting point. Convert durable lessons into the
    repo's real source of truth: Copilot instructions, PR checklist, preflight
    checks, Trellis specs, or tests. Keep repo-specific policy in the repo; keep
    reusable command behavior in the command pack.
@@ -94,3 +140,44 @@ the repo wrapper.
   target file and preserves surrounding human-written content.
 - The default repository learning file is `docs/review-learnings.md`; use
   `--target PATH` when a repo owns that knowledge somewhere else.
+
+## Safety and mutation boundaries
+
+- Scan mode performs no file or directory creation, task creation, staging,
+  commit, push, review request, or remote mutation.
+- Validate canonical containment, every existing path component, regular-file
+  type, strict UTF-8, current-user ownership, and unchanged target identity and
+  digest before replacement. Reject traversal, external absolute paths,
+  symlink escapes, broken or final symlinks, directories, unreadable content,
+  and ownership mismatches.
+- Local `--update` may create only the validated target's parent directories
+  and may replace only the resolved repository-local target.
+- External mutation requires `--update-external`, the exact-path structured
+  confirmation, and the matching `--confirmed-external-target` value.
+- Writes use a sibling temporary file, flush and fsync it, revalidate the path
+  immediately before atomic replacement, and clean temporary files after a
+  failure. Never degrade to a cross-filesystem copy.
+- Never stage, commit, push, publish, or edit any other learning/spec file as
+  part of this command. Those are separate lifecycle actions.
+
+## Failure behavior
+
+- Stop before writing on invalid arguments, unresolved roots, containment or
+  path-type failures, invalid UTF-8, ownership mismatch, missing external
+  confirmation, target identity/content drift, temp-file failure, or atomic
+  replacement failure.
+- Preserve the prior complete target on failure. Report the failing phase,
+  exact resolved target when available, stable reason, and `write: failed`
+  with `occurred=no`; do not retry against a different path.
+- A finding-only scan may retain its existing nonzero finding exit. That is not
+  permission to update automatically.
+
+## Final report
+
+Report the normalized mode, canonical repository root, requested and resolved
+target, containment class, finding/comment counts, proposed and applied change
+counts, before/after digests, write status (`skipped`, `preview`, `unchanged`,
+`applied`, or `failed`), and whether a write occurred. For an external update,
+also report the structured answer and exact path it authorized. Distinguish
+proposed work from applied work and name any unavailable scan or external
+service evidence.

@@ -777,13 +777,369 @@ class ReviewLearningsTests(InstallTestCase):
         original = "# Review Learnings\n\nHuman notes stay.\n"
         target.write_text(original, encoding="utf-8")
         block = module.render_managed_block([], [])
+        plan = module.resolve_target_plan(
+            Path(tempdir.name),
+            target,
+            mode="update",
+            confirmed_external_target=None,
+        )
+        updated = module.render_target_update(
+            plan.existing_text,
+            block,
+            target=plan.resolved,
+        )
 
         with mock.patch.object(module.os, "replace", side_effect=OSError("blocked")):
             with self.assertRaisesRegex(OSError, "blocked"):
-                module.update_target(target, block, dry_run=False)
+                module.apply_target_update(
+                    plan,
+                    updated,
+                    mode="update",
+                    confirmed_external_target=None,
+                )
 
         self.assertEqual(target.read_text(encoding="utf-8"), original)
         self.assertEqual(list(target.parent.glob(".*.tmp")), [])
+
+    def test_review_learnings_revalidates_before_creating_temporary_file(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_pre_temp_revalidation",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-pre-temp-")
+        self.addCleanup(tempdir.cleanup)
+        target = Path(tempdir.name) / "review-learnings.md"
+        events: list[str] = []
+        original_named_temporary_file = module.tempfile.NamedTemporaryFile
+
+        def revalidate() -> None:
+            events.append("revalidate")
+
+        def checked_named_temporary_file(*args: object, **kwargs: object) -> object:
+            self.assertEqual(events, ["revalidate"])
+            events.append("temporary")
+            return original_named_temporary_file(*args, **kwargs)
+
+        with mock.patch.object(
+            module.tempfile,
+            "NamedTemporaryFile",
+            side_effect=checked_named_temporary_file,
+        ):
+            module.atomic_write_text(
+                target,
+                "candidate\n",
+                revalidate=revalidate,
+            )
+
+        self.assertEqual(events[0:2], ["revalidate", "temporary"])
+        self.assertEqual(target.read_text(encoding="utf-8"), "candidate\n")
+
+    def test_review_learnings_default_scan_is_read_only_and_reports_target(self) -> None:
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-scan-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        seed = root / "seed.txt"
+        seed.write_text("seed\n", encoding="utf-8")
+        for git_args in (
+            ("init",),
+            ("config", "user.email", "test@example.com"),
+            ("config", "user.name", "Test User"),
+            ("add", "seed.txt"),
+            ("commit", "-m", "seed"),
+        ):
+            subprocess.run(
+                ["git", *git_args],
+                cwd=root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+        before = {
+            path.relative_to(root).as_posix(): path.read_bytes()
+            for path in root.rglob("*")
+            if path.is_file() and ".git" not in path.relative_to(root).parts
+        }
+        before_git = subprocess.run(
+            ["git", "status", "--porcelain=v2", "--branch"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            check=True,
+        ).stdout
+        before_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            check=True,
+        ).stdout
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py"),
+                "--repo-root",
+                str(root),
+                "--include-working-tree",
+                "--json",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["mode"], "scan")
+        self.assertEqual(report["repositoryRoot"], str(root.resolve()))
+        self.assertEqual(report["target"]["containment"], "repository-local")
+        self.assertEqual(report["changes"], {"applied": 0, "proposed": 1})
+        self.assertEqual(
+            report["write"],
+            {
+                "occurred": False,
+                "reason": "scan mode is read-only",
+                "status": "skipped",
+            },
+        )
+        after = {
+            path.relative_to(root).as_posix(): path.read_bytes()
+            for path in root.rglob("*")
+            if path.is_file() and ".git" not in path.relative_to(root).parts
+        }
+        self.assertEqual(after, before)
+        self.assertEqual(
+            subprocess.run(
+                ["git", "status", "--porcelain=v2", "--branch"],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                check=True,
+            ).stdout,
+            before_git,
+        )
+        self.assertEqual(
+            subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                check=True,
+            ).stdout,
+            before_head,
+        )
+        self.assertFalse((root / "docs").exists())
+
+    def test_review_learnings_external_update_requires_exact_confirmation(self) -> None:
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-external-")
+        self.addCleanup(tempdir.cleanup)
+        base = Path(tempdir.name)
+        root = base / "repo"
+        root.mkdir()
+        diff = root / "empty.diff"
+        diff.write_text("", encoding="utf-8")
+        external = base / "outside" / "review-learnings.md"
+        command = [
+            sys.executable,
+            str(install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py"),
+            "--repo-root",
+            str(root),
+            "--diff-from",
+            str(diff),
+            "--target",
+            str(external),
+            "--update-external",
+        ]
+
+        missing = subprocess.run(
+            command,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(missing.returncode, 2, missing.stdout)
+        self.assertIn("--confirmed-external-target", missing.stdout)
+        self.assertFalse(external.exists())
+
+        mismatch = subprocess.run(
+            [*command, "--confirmed-external-target", str(base / "wrong.md")],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(mismatch.returncode, 2, mismatch.stdout)
+        self.assertIn("must exactly match", mismatch.stdout)
+        self.assertFalse(external.exists())
+
+        confirmed = subprocess.run(
+            [
+                *command,
+                "--confirmed-external-target",
+                str(external.resolve()),
+                "--json",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertEqual(confirmed.returncode, 0, confirmed.stderr)
+        self.assertTrue(external.is_file())
+        self.assertIn("<!-- sd-review-learnings:start -->", external.read_text())
+        report = json.loads(confirmed.stdout)
+        self.assertEqual(report["target"]["containment"], "external")
+        self.assertEqual(
+            report["externalAuthorization"],
+            {
+                "confirmed": True,
+                "decision": "review-learnings.external-target",
+                "resolvedTarget": str(external.resolve()),
+            },
+        )
+        self.assertEqual(report["write"]["status"], "applied")
+
+    def test_review_learnings_rejects_unsafe_local_targets(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_target_safety",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-targets-")
+        self.addCleanup(tempdir.cleanup)
+        base = Path(tempdir.name)
+        root = base / "repo"
+        root.mkdir()
+        outside = base / "outside"
+        outside.mkdir()
+        (root / "escape").symlink_to(outside, target_is_directory=True)
+        (root / "final-link.md").symlink_to(root / "missing.md")
+        (root / "existing.md").write_text("existing\n", encoding="utf-8")
+        (root / "existing-link.md").symlink_to(root / "existing.md")
+        (root / "directory-target").mkdir()
+        invalid_utf8 = root / "invalid.md"
+        invalid_utf8.write_bytes(b"\xff\xfe")
+
+        cases = (
+            (Path("../outside.md"), "outside the repository"),
+            (outside / "absolute.md", "outside the repository"),
+            (Path("escape/review.md"), "outside the repository"),
+            (Path("final-link.md"), "broken symlink"),
+            (Path("existing-link.md"), "not a symlink"),
+            (Path("directory-target"), "regular file"),
+            (Path("invalid.md"), "valid UTF-8"),
+        )
+        for target, message in cases:
+            with self.subTest(target=target), self.assertRaisesRegex(ValueError, message):
+                module.resolve_target_plan(
+                    root,
+                    target,
+                    mode="update",
+                    confirmed_external_target=None,
+                )
+
+        with mock.patch.object(module.Path, "read_bytes", side_effect=PermissionError("blocked")):
+            with self.assertRaisesRegex(PermissionError, "blocked"):
+                module.resolve_target_plan(
+                    root,
+                    Path("existing.md"),
+                    mode="update",
+                    confirmed_external_target=None,
+                )
+
+        if hasattr(module.os, "geteuid"):
+            owner = (root / "existing.md").stat().st_uid
+            with mock.patch.object(module.os, "geteuid", return_value=owner + 1):
+                with self.assertRaisesRegex(ValueError, "not owned"):
+                    module.resolve_target_plan(
+                        root,
+                        Path("existing.md"),
+                        mode="update",
+                        confirmed_external_target=None,
+                    )
+
+    def test_review_learnings_revalidates_identity_before_replace(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_identity_recheck",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-race-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        target = root / "review-learnings.md"
+        target.write_text("before\n", encoding="utf-8")
+        plan = module.resolve_target_plan(
+            root,
+            target,
+            mode="update",
+            confirmed_external_target=None,
+        )
+        target.write_text("changed by another process\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(OSError, "content changed"):
+            module.apply_target_update(
+                plan,
+                "candidate\n",
+                mode="update",
+                confirmed_external_target=None,
+            )
+
+        self.assertEqual(target.read_text(), "changed by another process\n")
+        self.assertEqual(list(root.glob(".*.tmp")), [])
+
+    def test_review_learnings_rejects_parent_symlink_race_before_write(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_parent_race",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-parent-race-")
+        self.addCleanup(tempdir.cleanup)
+        base = Path(tempdir.name)
+        root = base / "repo"
+        docs = root / "docs"
+        docs.mkdir(parents=True)
+        outside = base / "outside"
+        outside.mkdir()
+        target = docs / "review-learnings.md"
+        plan = module.resolve_target_plan(
+            root,
+            target,
+            mode="update",
+            confirmed_external_target=None,
+        )
+        docs.rename(root / "docs-before-race")
+        docs.symlink_to(outside, target_is_directory=True)
+
+        with self.assertRaisesRegex(ValueError, "outside the repository"):
+            module.apply_target_update(
+                plan,
+                "candidate\n",
+                mode="update",
+                confirmed_external_target=None,
+            )
+
+        self.assertFalse((outside / "review-learnings.md").exists())
+        self.assertEqual(list(outside.glob(".*.tmp")), [])
+
+    def test_review_learnings_skill_declares_bounded_write_contract(self) -> None:
+        skill = (
+            install.ROOT / "templates/.agents/skills/sd-review-learnings/SKILL.md"
+        ).read_text(encoding="utf-8")
+
+        for heading in (
+            "## Arguments",
+            "## Structured decisions",
+            "## Safety and mutation boundaries",
+            "## Failure behavior",
+            "## Final report",
+        ):
+            self.assertIn(heading, skill)
+        self.assertIn("--update-external", skill)
+        self.assertIn("--confirmed-external-target", skill)
+        self.assertIn("for every external write", skill)
+        self.assertIn("noninteractive execution stop without writing", skill)
+        self.assertIn("Never stage, commit, push, publish", skill)
 
     def test_review_learnings_script_rejects_malformed_payload_helpers(self) -> None:
         module = self.load_module_from_path(
@@ -908,7 +1264,11 @@ class ReviewLearningsTests(InstallTestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "invalid order"):
-            module.update_target(target, "<!-- sd-review-learnings:start -->\nnew\n<!-- sd-review-learnings:end -->\n", dry_run=False)
+            module.render_target_update(
+                target.read_text(encoding="utf-8"),
+                "<!-- sd-review-learnings:start -->\nnew\n<!-- sd-review-learnings:end -->\n",
+                target=target,
+            )
 
     def test_review_learnings_main_reports_invalid_managed_marker_order(
         self,
@@ -966,12 +1326,24 @@ class ReviewLearningsTests(InstallTestCase):
             encoding="utf-8",
         )
 
-        module.update_target(
+        plan = module.resolve_target_plan(
+            Path(tempdir.name),
             target,
+            mode="update",
+            confirmed_external_target=None,
+        )
+        updated = module.render_target_update(
+            plan.existing_text,
             "<!-- sd-review-learnings:start -->\n"
             "new\n"
             "<!-- sd-review-learnings:end -->\n",
-            dry_run=False,
+            target=plan.resolved,
+        )
+        module.apply_target_update(
+            plan,
+            updated,
+            mode="update",
+            confirmed_external_target=None,
         )
 
         content = target.read_text(encoding="utf-8")

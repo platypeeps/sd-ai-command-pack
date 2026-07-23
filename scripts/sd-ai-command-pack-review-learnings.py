@@ -12,9 +12,11 @@ import argparse
 import dataclasses
 import datetime as dt
 import functools
+import hashlib
 import json
 import os
 import re
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -56,6 +58,9 @@ MAX_CLUSTER_PRS = 8
 MAX_CLUSTER_PATH_FAMILIES = 6
 MAX_CLUSTER_EXAMPLES = 3
 MIN_PREVENTIVE_ACTION_COUNT = 2
+REPORT_SCHEMA_VERSION = 1
+CONTAINMENT_REPOSITORY = "repository-local"
+CONTAINMENT_EXTERNAL = "external"
 
 SIGNAL_CATEGORY_LABELS = {
     SIGNAL_TASK_METADATA: "Task metadata",
@@ -234,14 +239,21 @@ def default_text_file_mode(destination: Path) -> int:
         os.umask(current_umask)
 
 
+def content_digest(content: bytes) -> str:
+    return f"sha256:{hashlib.sha256(content).hexdigest()}"
+
+
 def atomic_write_text(
     destination: Path,
     content: str,
     *,
     errors: str = "strict",
+    revalidate: Any | None = None,
 ) -> None:
     if destination.is_symlink():
         raise OSError("target is a symlink")
+    if revalidate is not None:
+        revalidate()
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -254,15 +266,186 @@ def atomic_write_text(
             temporary.write(content.encode("utf-8", errors=errors))
             temporary.flush()
             os.fsync(temporary.fileno())
+        if temporary_path.stat().st_dev != destination.parent.stat().st_dev:
+            raise OSError("atomic update would cross filesystems")
+        if revalidate is not None:
+            revalidate()
         os.chmod(temporary_path, default_text_file_mode(destination))
+        if revalidate is not None:
+            revalidate()
         os.replace(temporary_path, destination)
         temporary_path = None
+        try:
+            directory_fd = os.open(destination.parent, os.O_RDONLY)
+        except OSError:
+            directory_fd = None
+        if directory_fd is not None:
+            try:
+                os.fsync(directory_fd)
+            except OSError:
+                pass
+            finally:
+                os.close(directory_fd)
     finally:
         if temporary_path is not None:
             try:
                 temporary_path.unlink()
             except FileNotFoundError:
                 pass
+
+
+@dataclasses.dataclass(frozen=True)
+class TargetPlan:
+    repository_root: Path
+    requested: Path
+    resolved: Path
+    containment: str
+    exists: bool
+    existing_text: str
+    before_digest: str | None
+    identity: tuple[int, int] | None
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
+def _validate_existing_path_components(path: Path) -> None:
+    parts = path.parts
+    if not parts:
+        raise ValueError("target path is empty")
+    current = Path(parts[0])
+    for index, part in enumerate(parts[1:], start=1):
+        current /= part
+        try:
+            node = current.lstat()
+        except FileNotFoundError:
+            return
+        is_final = index == len(parts) - 1
+        if stat.S_ISLNK(node.st_mode):
+            try:
+                resolved = current.resolve(strict=True)
+            except (FileNotFoundError, RuntimeError) as exc:
+                raise ValueError(f"target path contains a broken symlink: {current}") from exc
+            if is_final:
+                raise ValueError(f"target must be a regular file, not a symlink: {current}")
+            if not resolved.is_dir():
+                raise ValueError(f"target parent is not a directory: {current}")
+        elif not is_final and not stat.S_ISDIR(node.st_mode):
+            raise ValueError(f"target parent is not a directory: {current}")
+
+
+def _validate_owner(path: Path, *, label: str) -> None:
+    get_euid = getattr(os, "geteuid", None)
+    if get_euid is None:
+        return
+    node = path.stat()
+    if node.st_uid != get_euid():
+        raise ValueError(f"{label} is not owned by the current user: {path}")
+
+
+def _nearest_existing_parent(path: Path) -> Path:
+    parent = path.parent
+    while True:
+        try:
+            node = parent.lstat()
+        except FileNotFoundError:
+            if parent == parent.parent:
+                raise ValueError(
+                    f"no existing parent directory for target: {path}"
+                ) from None
+            parent = parent.parent
+            continue
+        if stat.S_ISLNK(node.st_mode):
+            raise ValueError(f"resolved target parent must not be a symlink: {parent}")
+        if not stat.S_ISDIR(node.st_mode):
+            raise ValueError(f"target parent is not a directory: {parent}")
+        return parent
+
+
+def resolve_target_plan(
+    repository_root: Path,
+    target: Path,
+    *,
+    mode: str,
+    confirmed_external_target: str | None,
+) -> TargetPlan:
+    try:
+        root = repository_root.resolve(strict=True)
+    except (FileNotFoundError, RuntimeError) as exc:
+        raise ValueError(f"repository root does not resolve: {repository_root}") from exc
+    if not root.is_dir():
+        raise ValueError(f"repository root is not a directory: {root}")
+
+    requested = target if target.is_absolute() else root / target
+    _validate_existing_path_components(requested)
+    try:
+        resolved = requested.resolve(strict=False)
+    except RuntimeError as exc:
+        raise ValueError(f"target path cannot be resolved: {requested}") from exc
+
+    containment = (
+        CONTAINMENT_REPOSITORY
+        if _path_is_within(resolved, root)
+        else CONTAINMENT_EXTERNAL
+    )
+    if containment == CONTAINMENT_EXTERNAL and mode != "update-external":
+        raise ValueError(
+            "target resolves outside the repository; use --update-external with "
+            "an exact confirmed external target"
+        )
+    if mode == "update-external" and containment != CONTAINMENT_EXTERNAL:
+        raise ValueError("--update-external requires a target outside the repository")
+    if mode == "update-external":
+        if confirmed_external_target is None:
+            raise ValueError(
+                "--update-external requires --confirmed-external-target with the "
+                "exact resolved absolute path"
+            )
+        confirmation = Path(confirmed_external_target)
+        if not confirmation.is_absolute() or str(confirmation) != str(resolved):
+            raise ValueError(
+                "--confirmed-external-target must exactly match the resolved "
+                f"absolute target: {resolved}"
+            )
+    elif confirmed_external_target is not None:
+        raise ValueError(
+            "--confirmed-external-target is valid only with --update-external"
+        )
+
+    nearest_parent = _nearest_existing_parent(resolved)
+    _validate_owner(nearest_parent, label="target parent")
+
+    try:
+        node = resolved.lstat()
+    except FileNotFoundError:
+        node = None
+    if node is not None:
+        if not stat.S_ISREG(node.st_mode):
+            raise ValueError(f"target must be a regular file: {resolved}")
+        _validate_owner(resolved, label="target")
+        raw = resolved.read_bytes()
+        try:
+            existing_text = raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"target is not valid UTF-8: {resolved}") from exc
+        before_digest = content_digest(raw)
+        identity = (node.st_dev, node.st_ino)
+    else:
+        existing_text = ""
+        before_digest = None
+        identity = None
+
+    return TargetPlan(
+        repository_root=root,
+        requested=requested,
+        resolved=resolved,
+        containment=containment,
+        exists=node is not None,
+        existing_text=existing_text,
+        before_digest=before_digest,
+        identity=identity,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1352,10 +1535,7 @@ def render_managed_block(findings: list[Finding], comments: list[PullRequestComm
     return "\n".join(lines)
 
 
-def update_target(target: Path, block: str, *, dry_run: bool) -> str:
-    existing = ""
-    if target.is_file():
-        existing = target.read_text(encoding="utf-8", errors="replace")
+def render_target_update(existing: str, block: str, *, target: Path) -> str:
     start = existing.find(MANAGED_START)
     first_end = existing.find(MANAGED_END)
     if start >= 0 or first_end >= 0:
@@ -1379,12 +1559,208 @@ def update_target(target: Path, block: str, *, dry_run: bool) -> str:
         updated = existing.rstrip() + "\n\n" + block
     else:
         updated = "# Review Learnings\n\n" + block
-
-    if dry_run:
-        return updated
-    target.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(target, updated, errors="strict")
     return updated
+
+
+def apply_target_update(
+    plan: TargetPlan,
+    updated: str,
+    *,
+    mode: str,
+    confirmed_external_target: str | None,
+) -> bool:
+    updated_bytes = updated.encode("utf-8", errors="strict")
+    if plan.before_digest == content_digest(updated_bytes):
+        return False
+
+    def revalidate() -> None:
+        current = resolve_target_plan(
+            plan.repository_root,
+            plan.requested,
+            mode=mode,
+            confirmed_external_target=confirmed_external_target,
+        )
+        if current.resolved != plan.resolved:
+            raise OSError("target resolution changed before atomic replacement")
+        if current.containment != plan.containment:
+            raise OSError("target containment changed before atomic replacement")
+        if current.identity != plan.identity:
+            raise OSError("target identity changed before atomic replacement")
+        if current.before_digest != plan.before_digest:
+            raise OSError("target content changed before atomic replacement")
+
+    revalidate()
+    plan.resolved.parent.mkdir(parents=True, exist_ok=True)
+    revalidate()
+    atomic_write_text(
+        plan.resolved,
+        updated,
+        errors="strict",
+        revalidate=revalidate,
+    )
+    return True
+
+
+def _report_payload(
+    *,
+    mode: str,
+    plan: TargetPlan,
+    findings: list[Finding],
+    comments: list[PullRequestComment],
+    review_window: CopilotReviewWindow,
+    proposed_changes: int,
+    applied_changes: int,
+    write_status: str,
+    wrote: bool,
+    before_digest: str | None,
+    after_digest: str | None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "schemaVersion": REPORT_SCHEMA_VERSION,
+        "mode": mode,
+        "repositoryRoot": str(plan.repository_root),
+        "target": {
+            "requested": str(plan.requested),
+            "resolved": str(plan.resolved),
+            "containment": plan.containment,
+            "exists": plan.exists,
+        },
+        "externalAuthorization": {
+            "decision": (
+                "review-learnings.external-target"
+                if mode == "update-external"
+                else None
+            ),
+            "confirmed": mode == "update-external",
+            "resolvedTarget": (
+                str(plan.resolved) if mode == "update-external" else None
+            ),
+        },
+        "findings": {
+            "count": len(findings),
+            "items": [
+                {
+                    "category": finding.category,
+                    "path": finding.path,
+                    "line": finding.lineno,
+                    "detail": finding.detail,
+                    "recommendation": finding.recommendation,
+                }
+                for finding in findings
+            ],
+        },
+        "github": {
+            "comments": len(comments),
+            "prsInspected": review_window.prs_inspected,
+            "cutoff": review_window.cutoff,
+            "truncated": review_window.truncated,
+        },
+        "changes": {
+            "proposed": proposed_changes,
+            "applied": applied_changes,
+        },
+        "write": {
+            "status": write_status,
+            "occurred": wrote,
+            "reason": reason,
+        },
+        "digests": {
+            "before": before_digest,
+            "after": after_digest,
+        },
+    }
+
+
+def _print_human_report(report: dict[str, Any]) -> None:
+    target = report["target"]
+    changes = report["changes"]
+    write = report["write"]
+    print(f"[sd-review-learnings:report] mode: {report['mode']}")
+    print(f"[sd-review-learnings:report] repository root: {report['repositoryRoot']}")
+    print(f"[sd-review-learnings:report] resolved target: {target['resolved']}")
+    print(f"[sd-review-learnings:report] containment: {target['containment']}")
+    print(f"[sd-review-learnings:report] findings: {report['findings']['count']}")
+    print(
+        "[sd-review-learnings:report] changes: "
+        f"{changes['proposed']} proposed, {changes['applied']} applied"
+    )
+    write_line = (
+        "[sd-review-learnings:report] write: "
+        f"{write['status']} (occurred={'yes' if write['occurred'] else 'no'})"
+    )
+    if write["reason"]:
+        write_line += f"; {write['reason']}"
+    print(write_line)
+
+
+def _print_report(report: dict[str, Any], *, json_output: bool) -> None:
+    if json_output:
+        print(json.dumps(report, sort_keys=True))
+    else:
+        _print_human_report(report)
+
+
+def _print_early_failure(
+    *,
+    args: argparse.Namespace,
+    mode: str,
+    phase: str,
+    reason: str,
+) -> None:
+    if not args.json:
+        print(f"[sd-review-learnings:{phase}] {reason}", file=sys.stderr)
+        return
+    try:
+        root = args.repo_root.resolve(strict=False)
+        requested = args.target if args.target.is_absolute() else root / args.target
+        resolved_path = requested.resolve(strict=False)
+        resolved: str | None = str(resolved_path)
+        containment = (
+            CONTAINMENT_REPOSITORY
+            if _path_is_within(resolved_path, root)
+            else CONTAINMENT_EXTERNAL
+        )
+    except (OSError, RuntimeError, ValueError):
+        root = args.repo_root
+        requested = args.target
+        resolved = None
+        containment = "invalid"
+    report = {
+        "schemaVersion": REPORT_SCHEMA_VERSION,
+        "mode": mode,
+        "repositoryRoot": str(root),
+        "target": {
+            "requested": str(requested),
+            "resolved": resolved,
+            "containment": containment,
+            "exists": None,
+        },
+        "externalAuthorization": {
+            "decision": (
+                "review-learnings.external-target"
+                if mode == "update-external"
+                else None
+            ),
+            "confirmed": False,
+            "resolvedTarget": None,
+        },
+        "findings": {"count": 0, "items": []},
+        "github": {
+            "comments": 0,
+            "prsInspected": 0,
+            "cutoff": None,
+            "truncated": False,
+        },
+        "changes": {"proposed": 0, "applied": 0},
+        "write": {
+            "status": "skipped" if mode == "scan" else "failed",
+            "occurred": False,
+            "reason": reason,
+        },
+        "digests": {"before": None, "after": None},
+    }
+    print(json.dumps(report, sort_keys=True))
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1403,9 +1779,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Include staged, unstaged, and untracked changes.",
     )
     parser.add_argument("--repo-root", type=Path, default=Path("."), help="Repository root to scan.")
-    parser.add_argument("--target", type=Path, default=DEFAULT_TARGET, help="Markdown file to update.")
-    parser.add_argument("--update", action="store_true", help="Write/update the managed learnings block.")
+    parser.add_argument("--target", type=Path, default=DEFAULT_TARGET, help="Markdown file to inspect or update.")
+    update_group = parser.add_mutually_exclusive_group()
+    update_group.add_argument(
+        "--update",
+        action="store_true",
+        help="Write/update a repository-contained managed learnings block.",
+    )
+    update_group.add_argument(
+        "--update-external",
+        action="store_true",
+        help="Exceptionally update an explicitly confirmed external target.",
+    )
+    parser.add_argument(
+        "--confirmed-external-target",
+        metavar="ABSOLUTE_PATH",
+        help=(
+            "Exact resolved external path recorded after structured confirmation; "
+            "valid only with --update-external."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print the updated markdown instead of writing it.")
+    parser.add_argument("--json", action="store_true", help="Print one structured final report.")
     parser.add_argument(
         "--github-days",
         type=int,
@@ -1447,26 +1842,81 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    mode = "update-external" if args.update_external else "update" if args.update else "scan"
+    if args.dry_run and (args.update or args.update_external):
+        _print_early_failure(
+            args=args,
+            mode=mode,
+            phase="setup",
+            reason="--dry-run cannot be combined with an update mode",
+        )
+        return 2
+    if args.dry_run and args.json:
+        _print_early_failure(
+            args=args,
+            mode=mode,
+            phase="setup",
+            reason="--dry-run Markdown preview cannot be combined with --json",
+        )
+        return 2
     if args.allow is not None and not args.allow.strip():
-        print("[sd-review-learnings:setup] --allow requires a non-empty reason", file=sys.stderr)
+        _print_early_failure(
+            args=args,
+            mode=mode,
+            phase="setup",
+            reason="--allow requires a non-empty reason",
+        )
         return 2
     if args.github_days < 0:
-        print("[sd-review-learnings:setup] --github-days must be non-negative", file=sys.stderr)
+        _print_early_failure(
+            args=args,
+            mode=mode,
+            phase="setup",
+            reason="--github-days must be non-negative",
+        )
         return 2
     if args.github_limit < 0:
-        print("[sd-review-learnings:setup] --github-limit must be non-negative", file=sys.stderr)
+        _print_early_failure(
+            args=args,
+            mode=mode,
+            phase="setup",
+            reason="--github-limit must be non-negative",
+        )
         return 2
     if args.github_days and args.github_pr:
-        print(
-            "[sd-review-learnings:setup] --github-days and --github-pr are mutually exclusive",
-            file=sys.stderr,
+        _print_early_failure(
+            args=args,
+            mode=mode,
+            phase="setup",
+            reason="--github-days and --github-pr are mutually exclusive",
         )
         return 2
     if any(number < 1 for number in args.github_pr):
-        print("[sd-review-learnings:setup] --github-pr must be positive", file=sys.stderr)
+        _print_early_failure(
+            args=args,
+            mode=mode,
+            phase="setup",
+            reason="--github-pr must be positive",
+        )
         return 2
 
-    repo_root = args.repo_root.resolve()
+    try:
+        plan = resolve_target_plan(
+            args.repo_root,
+            args.target,
+            mode=mode,
+            confirmed_external_target=args.confirmed_external_target,
+        )
+    except (OSError, ValueError) as exc:
+        _print_early_failure(
+            args=args,
+            mode=mode,
+            phase="target",
+            reason=str(exc),
+        )
+        return 2
+
+    repo_root = plan.repository_root
     env_prefixes = tuple(args.env_prefix) if args.env_prefix else DEFAULT_ENV_PREFIXES
     try:
         if args.diff_from is not None:
@@ -1492,7 +1942,25 @@ def main(argv: list[str] | None = None) -> int:
         RuntimeError,
         json.JSONDecodeError,
     ) as exc:
-        print(f"[sd-review-learnings:findings] {exc}", file=sys.stderr)
+        report = _report_payload(
+            mode=mode,
+            plan=plan,
+            findings=[],
+            comments=[],
+            review_window=CopilotReviewWindow((), 0, None, False),
+            proposed_changes=0,
+            applied_changes=0,
+            write_status="skipped" if mode == "scan" else "failed",
+            wrote=False,
+            before_digest=plan.before_digest,
+            after_digest=plan.before_digest,
+            reason=f"findings scan failed: {exc}",
+        )
+        if args.json:
+            _print_report(report, json_output=True)
+        else:
+            print(f"[sd-review-learnings:findings] {exc}", file=sys.stderr)
+            _print_report(report, json_output=False)
         return 2
 
     try:
@@ -1518,13 +1986,32 @@ def main(argv: list[str] | None = None) -> int:
         TypeError,
         json.JSONDecodeError,
     ) as exc:
-        print(f"[sd-review-learnings:github] {exc}", file=sys.stderr)
+        report = _report_payload(
+            mode=mode,
+            plan=plan,
+            findings=findings,
+            comments=[],
+            review_window=CopilotReviewWindow((), 0, None, False),
+            proposed_changes=0,
+            applied_changes=0,
+            write_status="skipped" if mode == "scan" else "failed",
+            wrote=False,
+            before_digest=plan.before_digest,
+            after_digest=plan.before_digest,
+            reason=f"GitHub scan failed: {exc}",
+        )
+        if args.json:
+            _print_report(report, json_output=True)
+        else:
+            print(f"[sd-review-learnings:github] {exc}", file=sys.stderr)
+            _print_report(report, json_output=False)
         return 2
 
-    for finding in findings:
-        print(finding.render())
     comments = list(review_window.comments)
-    if args.github_days or args.github_pr:
+    if not args.json:
+        for finding in findings:
+            print(finding.render())
+    if (args.github_days or args.github_pr) and not args.json:
         window_label = (
             f" updated since {review_window.cutoff}"
             if review_window.cutoff
@@ -1542,31 +2029,111 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
 
-    if args.update or args.dry_run:
-        block = render_managed_block(findings, comments)
-        target = args.target if args.target.is_absolute() else repo_root / args.target
-        try:
-            updated = update_target(target, block, dry_run=args.dry_run)
-        except (OSError, ValueError) as exc:
+    block = render_managed_block(findings, comments)
+    try:
+        updated = render_target_update(plan.existing_text, block, target=plan.resolved)
+    except ValueError as exc:
+        report = _report_payload(
+            mode=mode,
+            plan=plan,
+            findings=findings,
+            comments=comments,
+            review_window=review_window,
+            proposed_changes=0,
+            applied_changes=0,
+            write_status="skipped" if mode == "scan" else "failed",
+            wrote=False,
+            before_digest=plan.before_digest,
+            after_digest=plan.before_digest,
+            reason=str(exc),
+        )
+        if not args.json:
             print(f"[sd-review-learnings:update] {exc}", file=sys.stderr)
+        _print_report(report, json_output=args.json)
+        return 2
+
+    updated_digest = content_digest(updated.encode("utf-8", errors="strict"))
+    proposed_changes = int(updated_digest != plan.before_digest)
+
+    if args.update or args.update_external:
+        try:
+            wrote = apply_target_update(
+                plan,
+                updated,
+                mode=mode,
+                confirmed_external_target=args.confirmed_external_target,
+            )
+        except (OSError, ValueError) as exc:
+            report = _report_payload(
+                mode=mode,
+                plan=plan,
+                findings=findings,
+                comments=comments,
+                review_window=review_window,
+                proposed_changes=proposed_changes,
+                applied_changes=0,
+                write_status="failed",
+                wrote=False,
+                before_digest=plan.before_digest,
+                after_digest=plan.before_digest,
+                reason=str(exc),
+            )
+            if not args.json:
+                print(f"[sd-review-learnings:update] {exc}", file=sys.stderr)
+            _print_report(report, json_output=args.json)
             return 2
-        if args.dry_run:
-            print(updated, end="" if updated.endswith("\n") else "\n")
-        else:
-            try:
-                shown_target = target.relative_to(repo_root)
-            except ValueError:
-                shown_target = target
-            print(f"[sd-review-learnings:OK] updated {shown_target}")
+        report = _report_payload(
+            mode=mode,
+            plan=plan,
+            findings=findings,
+            comments=comments,
+            review_window=review_window,
+            proposed_changes=proposed_changes,
+            applied_changes=int(wrote),
+            write_status="applied" if wrote else "unchanged",
+            wrote=wrote,
+            before_digest=plan.before_digest,
+            after_digest=updated_digest,
+        )
+        if not args.json:
+            shown_target: Path = plan.resolved
+            if plan.containment == CONTAINMENT_REPOSITORY:
+                shown_target = plan.resolved.relative_to(repo_root)
+            print(
+                f"[sd-review-learnings:OK] "
+                f"{'updated' if wrote else 'unchanged'} {shown_target}"
+            )
+        _print_report(report, json_output=args.json)
+        return 0
+
+    report = _report_payload(
+        mode=mode,
+        plan=plan,
+        findings=findings,
+        comments=comments,
+        review_window=review_window,
+        proposed_changes=proposed_changes,
+        applied_changes=0,
+        write_status="preview" if args.dry_run else "skipped",
+        wrote=False,
+        before_digest=plan.before_digest,
+        after_digest=updated_digest,
+        reason="dry-run preview" if args.dry_run else "scan mode is read-only",
+    )
+    _print_report(report, json_output=args.json)
+    if args.dry_run:
+        print(updated, end="" if updated.endswith("\n") else "\n")
         return 0
 
     if findings:
         if args.allow is not None:
-            print(f"[sd-review-learnings:OK] bypassed via --allow: {args.allow}")
+            if not args.json:
+                print(f"[sd-review-learnings:OK] bypassed via --allow: {args.allow}")
             return 0
         return 1
 
-    print("[sd-review-learnings:OK] no local review-cycle findings detected")
+    if not args.json:
+        print("[sd-review-learnings:OK] no local review-cycle findings detected")
     return 0
 
 
