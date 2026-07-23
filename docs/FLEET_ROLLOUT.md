@@ -122,6 +122,39 @@ from receipts or provenance. Run preparation commands in declaration order
 after the audit and before the consumer full-check; deterministic generated
 artifacts must be part of the committed refresh.
 
+## Campaign Controller
+
+Every rollout is planned and advanced through the source-only
+`scripts/sd-ai-command-pack-fleet-controller.py`. The controller validates the
+immutable pack release, fleet manifest, selected checkout identities, and an
+existing campaign before writing private atomic state outside the repositories.
+It owns canary/wave order, concurrency, attempts, action identities, receipts,
+blockers, exact PR heads, and the next eligible action; it never runs consumer
+commands or GitHub mutations itself.
+
+Create one safe campaign ID and plan once:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-controller.py plan \
+  --repo <absolute-source-root> --campaign <campaign-id> \
+  --release <version> [--consumer <name> ...] [--no-merge] --json
+```
+
+Call `next`, execute each returned action exactly once through its documented
+owner, and record the normalized result against that action ID. Identical
+receipt replay is a no-op; a conflicting receipt, wrong release/consumer,
+skipped stage, stale PR head, changed fleet manifest, or invalid concurrent
+start fails closed. `status` and `validate` are read-only. After interruption,
+`resume` exposes reconciliation evidence for issued actions rather than
+reissuing install, PR, review, or merge side effects.
+
+The controller composes the existing wave planner internally. It issues only
+manifest-policy `canStart` lanes, never exceeds `maxConcurrency`, and issues at
+most one manifest-ordered merge action. A pack blocker stops new starts and
+holds unsettled merges after a verified `packBlocker` receipt. `no-merge` turns successful merge eligibility
+into terminal PR-open evidence without issuing a merge.
+
 ## Refresh Shape
 
 For each `refresh-needed` repo:
@@ -143,38 +176,15 @@ For each `refresh-needed` repo:
    only when finding disposition permits the rollout to continue.
 8. Confirm post-merge provenance reads the target version and the audit passes.
 
-Process consumers through the manifest policy. Run the canary cohort strictly
-sequentially and do not start later work until every canary is merged, audited,
-and free of pack-owned blockers. After that gate, independent consumer lanes
-may overlap only within the active cohort's configured bound. Each lane owns
-one checkout, branch, and PR; never interleave writes to the same checkout.
-Review and CI may settle concurrently, but housekeeping merges remain one at a
-time in manifest order. Do not move AMC first merely because it appears in an
-operator's local list.
-
-Use the read-only source scheduler before every start or merge decision. Build
-a temporary schema-version-1 snapshot with every manifest consumer exactly
-once and an observed state of `pending`, `in-flight`, `ready`, `at-target`,
-`merged`, `pr-open`, `skipped`, `failed`, or `blocked`:
-
-```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-wave-plan.py \
-  --fleet docs/fleet/consumers.json --state <temporary-wave-state.json> --json
-```
-
-Pass `--no-merge` to the planner when the fleet command is running in that
-mode. Only then does `pr-open` satisfy the canary gate; the planner also holds
-all merges and returns no `mergeCandidate`. Normal rollouts continue to require
-every canary to be `at-target` or `merged` before later cohorts start.
-
-Start only `canStart`, never exceed `maxConcurrency`, and send only
-`mergeCandidate` through housekeeping. A later ready PR waits for earlier
-unsettled consumers. Set `packBlocker` only from a verified finding-severity
-classification; any pack blocker stops new starts and holds unsettled merges.
-Delete the temporary snapshot after parsing the plan. On interruption, rebuild
-it from live preflight, branch, PR, review, CI, and merge evidence; terminal
-consumers are not restarted.
+Process only actions issued by the controller. Run the canary cohort strictly
+sequentially and do not start later work until every selected canary has the
+required terminal evidence. After that gate, independent consumer lanes may
+overlap only within the active cohort's configured bound. Each lane owns one
+checkout, branch, and PR; never interleave writes to the same checkout. Review
+and CI may settle concurrently, but controller-issued housekeeping merges
+remain one at a time in manifest order. Do not move AMC first merely because it
+appears in an operator's local list, and never rebuild scheduler state from
+conversation history.
 
 ## Timing Evidence
 

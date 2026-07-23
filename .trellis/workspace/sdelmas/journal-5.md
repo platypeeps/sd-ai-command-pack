@@ -237,3 +237,64 @@ Added a validated host-neutral interaction registry, generated Claude AskUserQue
 ### Next Steps
 
 - None - task complete
+
+
+## Session 208: Deterministic fleet refresh orchestration
+
+**Date**: 2026-07-23
+**Task**: Deterministic fleet refresh orchestration
+**Branch**: `codex/determinize-fleet-refresh-orchestration`
+
+### Summary
+
+Implemented and hardened the resumable fleet campaign controller, validated all fleet candidates, and closed PR #237 review feedback through an exact-head clean review.
+
+### Main Changes
+
+- Added a deterministic, durable fleet campaign controller for planning, exact action identities, receipts, retries, reconciliation, concurrency gates, and safe resume behavior.
+- Hardened persisted-state validation, exact-head enforcement, path identity, private atomic storage, lock safety, and controlled filesystem diagnostics.
+- Updated the shipped fleet-refresh skill, recovery guidance, manifest/provenance surfaces, changelog, candidate ledger, and source-only drift coverage for release 0.37.0.
+- Review learnings found no current unresolved feedback; future preventive work should emphasize boundary/failure matrices and generated-surface parity.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1c3652e94cb5f2b0b9f7c370b19ffbcdabb4e1b9` | feat: add resumable fleet campaign controller |
+| `416325be7683fc83b73e81c12a8ebfbbca9cc7c6` | fix: cover source-only fleet skill references |
+| `a22280dcdcc0768eb787c85b320c09ab93624b0d` | fix: address remote review feedback round 2 |
+| `85d349ee801cda96f366cd2892c34cf350a408b4` | fix: correct missing checkout reconciliation evidence |
+| `57d0105f350a1e0ec5eba6a2c316db950634ca47` | fix: harden portable receipts and atomic writes |
+| `faa07acff2e9c5c50012fabf9b3eb575f391e58f` | fix: preserve reconciliation action identity |
+| `e9741c56149753f8252786561746d01f82a767a4` | fix: preserve receipt replay idempotency |
+| `42bd88725922d03cd4608cdec66243f181bcf52d` | fix: harden planner and exact-head receipts |
+| `a8740158c8093ec73a0089de16e5cd7fcdec3b3e` | fix: normalize reconciliation action identity |
+| `9cf184114396746a3fcce713d4891dcab1366e29` | fix: bind fleet checkout identities |
+| `e0bc2147b1daeb1156e833ee0dab74b2ad6cd959` | fix: validate persisted receipt semantics |
+| `763464ba8ccd908b1e678cd5e855b8927f0baba2` | fix: require absolute fleet checkouts |
+| `ce1ad3d60276763d89cd4ef4cd3ee5f4d3d84d0c` | fix: validate fleet lifecycle state |
+| `23b3dddcaf8c5957dc6af29e51fd3fd6b3795020` | fix: enforce exact heads for all outcomes |
+| `ba644232db056b487b024a0b91b589bce7eca0db` | fix: secure fleet lock directories |
+| `4fd7da11089ed4de1e43c39e6772f49bc4f1652e` | fix: control fleet lock creation failures |
+| `03c61bf3e18085fab1433b099506e32501893c98` | fix: bound fleet filesystem errors |
+| `bad9102f1b5403e88fe23d8a00701a7acc078a4c` | fix: constrain fleet recovery identities |
+| `9ea193cb1169a13de349b5ae7f2879914dc5fea6` | fix: scope fleet planning to current attempts |
+| `f31371580fe0316e228e6183a5de7a4ffa9cd47e` | fix: reject non-issued fleet actions first |
+| `873e35a653c1563a7c691b69286cc1d7dd5f59be` | fix: bind fleet reconciliation evidence |
+| `6be8d8dbf0179cf5dd11dbc76559fe6d10231cae` | fix: harden fleet lock creation flags |
+
+### Testing
+
+- [OK] 22 focused fleet controller tests passed with Ruff and mypy.
+- [OK] All 8 fleet consumer candidate validations passed.
+- [OK] The full review gate passed on exact implementation head 6be8d8d.
+- [OK] PR #237 CI passed and GraphQL reported zero unresolved review threads after remote review round 22.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

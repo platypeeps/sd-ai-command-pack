@@ -235,15 +235,17 @@ class PackDriftTests(InstallTestCase):
         }
         _, files = install.load_manifest()
         manifest_sources = {file.source.resolve() for file in files}
-        source_only_template_sources = {
-            (
-                install.ROOT
-                / f"templates/.agents/skills/{name}/SKILL.md"
-            ).resolve()
-            for name in install.SOURCE_ONLY_COMMAND_NAMES
-        }
+        source_only_template_sources = set()
         for name in install.SOURCE_ONLY_COMMAND_NAMES:
             short = name.removeprefix("sd-")
+            skill_root = (
+                install.ROOT / f"templates/.agents/skills/{name}"
+            ).resolve()
+            source_only_template_sources.update(
+                path
+                for path in tracked_template_sources
+                if path.is_relative_to(skill_root)
+            )
             source_only_template_sources.update(
                 {
                     (install.ROOT / f"templates/.commands/{name}.md").resolve(),

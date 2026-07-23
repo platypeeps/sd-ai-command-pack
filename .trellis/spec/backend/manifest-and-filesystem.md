@@ -1192,6 +1192,87 @@ Reference files:
 - `templates/.agents/skills/sd-fleet-refresh/SKILL.md`
 - `tests/test_fleet_wave_plan.py`
 
+## Scenario: Resumable Fleet Campaign Controller
+
+### 1. Scope / Trigger
+
+Use this contract for every `sd-fleet-refresh` rollout. Prompt text selects
+action owners and explains exceptions; executable state alone decides campaign
+identity, order, concurrency, attempts, receipts, blockers, and next actions.
+
+### 2. Signatures
+
+- `scripts/sd-ai-command-pack-fleet-controller.py` is source-only and supports
+  `plan`, `next`, `record`, `status`, `resume`, and `validate` with JSON output.
+- Schema version 1 binds campaign, immutable pack release, source repository,
+  fleet-manifest digest, selected checkout identities, no-merge mode, preflight,
+  ordered lanes, attempts, exact heads/PRs, blockers, actions, and receipts.
+- `next` atomically issues action IDs derived from campaign, release, consumer,
+  stage, and attempt. `record` accepts only the matching current action.
+
+### 3. Contracts
+
+- State is owner-private, lock-protected, size-bounded, schema-validated, and
+  atomically replaced outside source and consumer repositories.
+- `plan` is idempotent only for the same immutable identity and selection.
+  Release, manifest, checkout, consumer, or mode drift fails closed.
+- An issued action is never reissued. After interruption, `resume` reports
+  read-only checkout/head/branch/clean evidence so the caller records the
+  original action or an ambiguous result without duplicating a side effect.
+- Results distinguish retryable infrastructure failure, product failure,
+  review finding, ownership skip, permanent incompatibility, operator decision,
+  ambiguity, at-target state, and success through stable reason codes.
+- The controller composes the canonical wave planner. Canary failures gate
+  later waves, active lanes cannot exceed cohort concurrency, and only the
+  single manifest-order merge candidate may advance. `no-merge` terminates at
+  PR-open evidence.
+- A PR publication receipt establishes a full head SHA and PR number. Review,
+  eligibility, merge, and post-merge receipts must name that exact head.
+- Ownership skip is terminal for its attempt. Only explicit `resume
+  --retry-consumer` after the owner clears creates a new checkout-validation
+  attempt; it never mutates or discards the prior owner's work.
+
+### 4. Validation & Error Matrix
+
+- Wrong schema/field/type, unsafe identity, release mismatch, manifest drift,
+  unknown/out-of-scope consumer, checkout mismatch, action mismatch, skipped
+  stage, conflicting replay, stale PR head, or concurrent-policy violation ->
+  exit `2` without state replacement or consumer mutation.
+- Identical `plan` or receipt replay -> successful no-op.
+- Retryable failure -> one new attempt; exhaustion parks with a stable reason.
+- Ambiguous result or issued action on resume -> reconciliation; never repeat
+  install, PR publication, review dispatch, or merge blindly.
+- Verified pack blocker -> stop starts and hold unsettled merges.
+
+### 5. Good / Base / Bad Cases
+
+- Good: interruption after PR creation preserves the issued action; resume
+  proves the PR/head, records the original receipt, and advances to review.
+- Base: preflight passes, sequential canaries settle, two wave lanes issue,
+  ready PRs merge in manifest order, and the receipt report completes.
+- Bad: a restarted prompt calls install again because it does not remember the
+  prior side effect, or records a review receipt for a successor head.
+
+### 6. Tests Required
+
+- Transition/idempotency matrices cover wrong release/consumer, skipped stages,
+  duplicate/conflicting receipts, retries, terminal results, and stale heads.
+- Scheduler composition covers canary failure, bounded wave starts, pack
+  blocker propagation, no-merge completion, and serialized merge order.
+- Persistence/recovery covers private atomic files, manifest drift, locks,
+  issued action reconciliation, explicit ownership retry, and concise reports.
+- Skill/docs/parity tests prove the controller remains source-only, public
+  adapters expose no campaign/state controls, rare recovery is conditionally
+  loaded, and prompt text no longer owns the lane/timing state machines.
+
+Reference files:
+
+- `scripts/sd-ai-command-pack-fleet-controller.py`
+- `templates/.agents/skills/sd-fleet-refresh/SKILL.md`
+- `templates/.agents/skills/sd-fleet-refresh/references/controller-recovery.md`
+- `docs/FLEET_ROLLOUT.md`
+- `tests/test_fleet_controller.py`
+
 ## Read-Only Status And Housekeeping Delegation
 
 `templates/scripts/sd-ai-command-pack-status.py` is the canonical collector for

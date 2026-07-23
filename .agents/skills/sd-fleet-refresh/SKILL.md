@@ -1,246 +1,203 @@
 ---
 name: sd-fleet-refresh
-description: Use when a pack release must roll across the consumer fleet — run the fleet preflight, then refresh each stale consumer sequentially (branch, install, full-check, PR, watch, gated merge) per docs/FLEET_ROLLOUT.md.
+description: Use when a pack release must roll across the consumer fleet through the deterministic campaign controller, source preflight, bounded waves, and serialized housekeeping merges.
 ---
 
 # SD Fleet Refresh
 
-Run this project-local skill for `sd-fleet-refresh` and `/sd:fleet-refresh`
-style work, from the sd-ai-command-pack source checkout. It rolls the current
-pack release across the known consumer repositories, one consumer at a time.
+Run this source-checkout-only skill after a pack release is merged and tagged.
+It refreshes the configured consumers without touching dirty or externally
+owned checkouts. `docs/FLEET_ROLLOUT.md` owns the delivery procedure; the
+versioned fleet controller owns campaign state, ordering, concurrency, retries,
+receipts, and the next eligible action.
+It preserves sequential canaries and bounded post-canary waves while keeping
+merges serialized.
 
-`docs/FLEET_ROLLOUT.md` is the procedure authority. This skill orchestrates
-exactly that documented procedure — preflight, then per-consumer branch,
-install, audit, full-check, PR, watch, and gated merge — and improvises no
-steps beyond it. It never touches a dirty consumer tree, and consumer merges
-go only through the green + comment-clean housekeeping gate.
+The skill interprets controller output, invokes the action owner, explains
+material exceptions, and renders the final report. Never reconstruct or
+override campaign state from conversation history.
 
 ## When to use
 
-Run this command after a pack release has merged and tagged, when fleet
-consumers are behind the target version in `manifest.json`.
-
-- Run it from the pack source checkout. The fleet manifest
-  (`docs/fleet/consumers.json`), the preflight script, and `install.py` all
-  live here, and the rollout doc installs from this checkout.
-- Use it to refresh the vendored pack files in consumer repositories. It is
-  not a general consumer maintenance, upgrade, or code-change command.
-- The pack repository's own release flow stays with `sd-finish-work` and
-  `sd-housekeeping`; run this command after that release exists.
-- Rerunning after an interruption is safe: preflight marks already
-  refreshed consumers `at-target`, so a rerun resumes with the remaining
-  stale consumers instead of opening duplicate refresh PRs.
-- The release must already have a valid full-fleet candidate ledger. Candidate
-  validation is a pre-release source workflow, not part of this post-tag
-  command; follow `docs/FLEET_ROLLOUT.md` when preparing the release.
+- Run from the `sd-ai-command-pack` source checkout after its immutable
+  `v<version>` release and full-fleet candidate ledger exist.
+- Use only for installer-managed refreshes of consumers already listed in
+  `docs/fleet/consumers.json` and already cloned at their configured path.
+- Rerun an existing campaign through `resume`; never invent a second campaign
+  to hide an issued or ambiguous side effect.
+- Use `sd-finish-work` and `sd-housekeeping` for this source repository's own
+  release. This skill owns only the post-release consumer rollout.
 
 ## Arguments
 
-Arguments arrive as free text with the invocation. Parse the recognized
-`key=value` argument and bare flags before treating remaining bare values as
-the positional primary subject. Unknown option-shaped arguments are an error,
-not a silent skip: stop and report them before running preflight. This skill
-reads no environment variables; every tuning knob is an argument.
+Arguments arrive as free text. Parse recognized `key=value` arguments and bare
+flags before treating remaining bare values as the positional primary subject.
+Reject unknown option-shaped input before planning or mutation.
 
-- `consumer=<a,b>` — comma-separated fleet consumer names. Limit the run to
-  those consumers. Pass each name to preflight via `--consumer`; preflight
-  rejects names that are not in the fleet manifest. Without `consumer=`,
-  the run covers every consumer in the fleet manifest.
-- `no-merge` — bare flag. Stop every consumer at PR-open: open and watch the
-  consumer PR, but do not merge it.
-- `remote-review` — bare flag. Force the normal configured remote-review loop
-  for every refreshed consumer even when the source classifier proves the PR
-  qualifies for integration-only review.
-- `dry-run` — bare flag. Run preflight and emit the report only; perform no
-  consumer mutations.
-- `remote=<name>` — Git remote whose immutable `v<version>` tag must match the
-  local release tag. Defaults to `origin`. Use an explicit mirror remote when
-  `origin` is not the release authority.
-- Remaining bare values are consumer names. `sd-fleet-refresh loadsmith
-  rwbp-website` is equivalent to `consumer=loadsmith,rwbp-website`. Split bare
-  names on whitespace or commas, preserve their order, and de-duplicate exact
-  repeats.
+- `consumer=<a,b>` selects named consumers. Remaining bare names are the same
+  positional form: `sd-fleet-refresh loadsmith rwbp-website` is equivalent to
+  `consumer=loadsmith,rwbp-website`. Preserve order, de-duplicate exact repeats,
+  and reject mixed positional plus explicit consumer input.
+- `no-merge` records PR-open completion and never issues a merge action.
+- `remote-review` forces the configured remote review path instead of the
+  eligible integration-only profile.
+- `dry-run` performs verified release/fleet preflight and reports without
+  issuing a consumer action.
+- `remote=<name>` selects the immutable release-authority remote; default
+  `origin`.
 
-Reject bare consumers combined with `consumer=` before preflight. Validate
-every normalized consumer against the fleet manifest before mutation; an
-unknown name is an error and must never broaden the run to the whole fleet.
-Before preflight, report the normalized consumer set (`all` when unfiltered),
-merge behavior, review behavior (`auto` or `remote-review`), dry-run state, and
-release remote.
+Validate the normalized consumers against the fleet manifest. An unknown name
+is an error and must never broaden to the full fleet. Report the normalized
+consumer set, merge mode, review mode, dry-run state, and release remote before
+starting.
 
-## Timing evidence
+Campaign IDs, state locations, action IDs, attempts, and checkout overrides are
+trusted internal context, not public arguments. Do not expose them through a
+platform adapter.
 
-Timing is mandatory internal observability, not a public fleet option. Do not
-add timing arguments or environment variables to an adapter. Create one safe,
-unique run ID from the target version and UTC start time, record it in the
-active fleet task or session context, and reuse that exact ID after an
-interruption. Read selected consumer names and priorities from the fleet
-manifest, then initialize the local record before preflight:
+## Campaign controller
+
+Choose one safe campaign ID from the target version and UTC start time, record
+it in the active task/session, and reuse it after interruption. Create or
+idempotently reopen the campaign before preflight:
 
 ```bash
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-timing.py --repo <absolute-source-root> \
-  init --run-id <run-id> --target-version <version> \
-  --consumer <name>:<priority> [...]
+  scripts/sd-ai-command-pack-fleet-controller.py plan \
+  --repo <absolute-source-root> --campaign <campaign-id> \
+  --release <version> [--consumer <name> ...] [--no-merge] --json
 ```
 
-The helper stores private, atomic state outside the repository and prints a
-repository digest rather than an absolute path. Bracket an authoritative
-operation with `stage-start` and `stage-end`, using `--fleet` only for
-`preflight` and `--consumer <name>` for the remaining stages. A failed,
-skipped, or interrupted stage requires a short bounded `--reason` without a
-path, credential, review body, or command output. Record each final consumer
-with `consumer-end`, then use `report --complete` only after every selected
-consumer has an outcome. Repeated identical commands are safe no-ops, and a
-new attempt begins only with another `stage-start` after the prior attempt
-closed.
+The controller validates the release, manifest, selected checkout identities,
+canary/wave policy, and existing campaign identity. It stores private atomic
+state outside every repository. It never runs repository commands or GitHub
+mutations itself.
 
-The fixed consumer stage mapping is `checkout-validation`, `install`, `audit`,
-`local-gate`, `commit-push`, `pr-creation`, `reviewer-wait`, `ci-wait`,
-`housekeeping`, and `post-merge-audit`. Start both `reviewer-wait` and
-`ci-wait` immediately after PR creation. End the reviewer interval when
-`sd-review-pr` returns and the CI interval when `sd-watch-pr` settles, so their
-natural overlap is measured instead of double-counted.
+Drive work only from issued actions:
 
-If a timing command fails, report the telemetry anomaly and pause further
-fleet mutation until the last valid record can be resumed or its input can be
-corrected. Never change, erase, or reinterpret an install, audit, review, CI,
-finding, or housekeeping result to make telemetry succeed.
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-controller.py next \
+  --repo <absolute-source-root> --campaign <campaign-id> --json
+```
+
+Every action binds the campaign, immutable release, consumer, stage, attempt,
+timeout, and whether it may cause a side effect. Execute it once through the
+owner named below, then record one normalized receipt:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-controller.py record \
+  --repo <absolute-source-root> --campaign <campaign-id> \
+  --release <version> --action-id <full-action-id> \
+  [--consumer <name>] --result <result> [receipt evidence] --json
+```
+
+Results are `passed`, `at-target`, `retryable-failure`, `product-failure`,
+`review-finding`, `ownership-skip`, `permanent-incompatibility`,
+`operator-decision`, or `ambiguous`. Every non-success result requires a safe,
+bounded `--reason-code`; verified blockers may also supply `--blocker` and
+`--pack-blocker`. PR publication records `--head <full-sha>` and
+`--pr-number <number>`. Review, merge eligibility, merge, and post-merge
+verification record that same exact `--head`; stale heads fail closed.
+
+Repeating an identical receipt is a no-op. A conflicting receipt, wrong
+release or consumer, skipped stage, duplicate action, changed fleet manifest,
+or invalid concurrent start is rejected. Never edit controller state manually.
+
+## Action ownership
+
+The controller returns the stage; this map selects its existing action owner
+but defines no ordering or transition policy:
+
+- `preflight`: run `sd-ai-command-pack-fleet-preflight.py` with the normalized
+  consumers and release remote. Its immutable release, payload, ancestry,
+  ledger, and inventory result is the release-identity guard and remains
+  authoritative.
+- `checkout-validation`: confirm the configured checkout exists and is clean,
+  has no live no-touch/loop owner, capture the exact base commit, and create one
+  isolated refresh branch. Dirty or externally owned means `ownership-skip`;
+  never stash, reset, clean, or install.
+- `install-update` and `install-audit`: run only the commands printed by
+  preflight. The installer, provenance, and audit remain authoritative.
+- `candidate-prepare`, `focused-candidate`, and `local-checks`: run the
+  manifest-ordered preparation/check commands and the consumer's documented
+  full local gate.
+- `pr-publication`: commit only installer-managed output, classify the exact
+  base/head with `sd-ai-command-pack-fleet-review-classify.py`, push, and create
+  or reuse one PR. Record the published head and PR number.
+- `review`: invoke `sd-review-pr` once with trusted `caller: sd-fleet-refresh`,
+  `return-after: review-result`, and `defer-finish-work: true`. Supply either
+  the exact-head `integration-only` context or the normal `remote` profile.
+  Existing comments and unresolved threads are always inspected. Classifier
+  ambiguity falls back to the normal remote-review convergence loop;
+  `remote-review` selects that same normal path explicitly.
+
+  ```text
+  caller: sd-fleet-refresh
+  review-profile: integration-only
+  source-root: <absolute pack source checkout>
+  consumer: <fleet manifest name>
+  base-commit: <full base SHA>
+  release-remote: <source release remote>
+  classified-head: <full consumer refresh SHA>
+  return-after: review-result
+  defer-finish-work: true
+  ```
+- `merge-eligibility`: run the finding severity gate, settle required checks
+  through `sd-watch-pr` with its internal `no-merge` handoff, and prove the
+  recorded head remains green, comment-clean, and mergeable.
+- `merge`: only the controller's single eligible action may invoke the
+  consumer's `sd-housekeeping` gate. The controller alone invokes housekeeping;
+  it never merges in completion order.
+- `post-merge-verification`: verify the installed target version, install audit,
+  clean default branch, deleted refresh branch, and pruned refs.
+
+Call `next` again only after every issued action has a receipt. It may issue
+sequential canaries or a bounded `canStart` wave up to `maxConcurrency`, and it
+issues at most one manifest-ordered merge candidate. Each lane owns one
+existing checkout, branch, and PR. Terminal consumers are never restarted.
+
+## Timing evidence
+
+Initialize `scripts/sd-ai-command-pack-fleet-timing.py` before executing the
+controller's preflight action, then bracket the corresponding delivery work.
+Start both `reviewer-wait` and `ci-wait` immediately after the PR exists; end
+`reviewer-wait` when review returns and end `ci-wait` when checks settle. Use
+`report --run-id <run-id> --complete` only after every selected consumer has a
+terminal controller result.
+
+Timing remains mandatory internal observability. It is private, resumable, and
+never changes a delivery gate's authoritative result. Do not put paths,
+credentials, command output, review text, or secrets in timing reasons. A
+timing failure pauses new mutation until the last valid record is reconciled.
 
 ## Workflow
 
-1. Initialize the timing run, start its fleet-scoped `preflight` stage, then
-   run preflight. The matching local `v<manifest-version>` tag must already
-   exist; if the release was tagged remotely after the last fetch, fetch tags
-   before this step. From the pack checkout, run:
-
-   ```bash
-   bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-     scripts/sd-ai-command-pack-fleet-preflight.py
-   ```
-
-   Append `--remote <name>` when `remote=` is present. Preflight fails before
-   consumer inventory or mutation unless the local tag matches the remote tag,
-   the tag is an ancestor of the checkout, the tagged version and installable
-   payload match the current source payload, and both tagged and current
-   candidate ledgers validate. Do not bypass or substitute a manifest-version
-   check for this release-identity guard.
-
-   Append `--consumer <name>` for each entry in the `consumer=` filter. The
-   script reads the target version from `manifest.json`, reports consumers
-   already at that version as `at-target` — skip them, which prevents
-   duplicate empty refresh PRs — and prints the exact install and audit
-   commands for every stale consumer. A consumer without a local clone
-   cannot be refreshed from this checkout: record it as skipped with that
-   reason. End the preflight timing stage as `passed`, or as `failed` with the
-   bounded preflight reason before stopping.
-2. With `dry-run`: emit the final report from the preflight results and
-   stop here. Zero consumer mutations. Record `at-target` for consumers already
-   current and `skipped` with reason `dry-run did not mutate consumer` for each
-   remaining selected consumer, then complete the timing report.
-3. Refresh stale consumers strictly sequentially in the preflight's explicit
-   priority order, one consumer at a time. Coordinator, loadsmith, and HOA are
-   the fast canaries; AMC runs last. Do not reorder from incidental local path
-   or manifest editing order.
-   Start the next consumer only after the previous one resolves as
-   refreshed+merged, PR-open under `no-merge`, or skipped:
-   1. Start `checkout-validation`, verify the consumer checkout has a clean
-      working tree, and create a refresh branch from its current default
-      branch. If it is dirty, end the stage and consumer as skipped with the
-      reason. Never stash, reset, clean, or install over it.
-   2. Record the exact full base commit before installation;
-      integration-only classification is bound to that commit, not a moving
-      branch name.
-   3. Bracket `install` and `audit` separately. Install the pack release per
-      `docs/FLEET_ROLLOUT.md`: run the
-      preflight-printed `python3 install.py <repo> --force --platform ...`
-      command from the pack checkout, then the printed install-audit
-      command with its `--expected-platform` set.
-   4. Run every `candidatePrepare` command reported by preflight, in manifest
-      order and from the consumer checkout. These deterministic generators are
-      part of the real refresh shape, not candidate-validation-only setup.
-      Then bracket `local-gate` and run the consumer's full-check gate — its
-      `make full-check` or the
-      consumer-documented equivalent. If preparation or the gate fails, do not
-      open a PR:
-      record the consumer as skipped with the failure summary, leave the
-      local branch for inspection, and continue to the next consumer.
-   5. Bracket `commit-push`. Commit the refreshed files. Before pushing, run
-      the source-side
-      classifier against the exact base and current head:
-
-      ```bash
-      bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-        scripts/sd-ai-command-pack-fleet-review-classify.py \
-        --consumer <name> --repo <consumer-path> \
-        --base-commit <full-base-sha> --remote <release-remote> --json
-      ```
-
-      Run this command from the pack source checkout. Exit `0` selects the
-      `integration-only` profile unless `remote-review` was supplied. Any
-      nonzero result, malformed output, head mismatch, or explicit override
-      selects the normal configured remote-review profile; never reinterpret a
-      classifier failure as permission to skip review.
-   6. Push within `commit-push`, then bracket `pr-creation` while opening the
-      consumer PR. Immediately after the PR exists, start both `reviewer-wait`
-      and `ci-wait`. Resolve `sd-review-pr` and run it as the sole review owner,
-      then end `reviewer-wait`. For an eligible auto-classified branch,
-      supply this exact trusted internal context:
-
-      ```text
-      caller: sd-fleet-refresh
-      review-profile: integration-only
-      source-root: <absolute pack source checkout>
-      consumer: <fleet manifest name>
-      base-commit: <full base SHA>
-      release-remote: <source release remote>
-      classified-head: <full consumer refresh SHA>
-      return-after: review-result
-      defer-finish-work: true
-      ```
-
-      This is internal orchestration context, not a user-facing argument. The
-      review owner reruns the classifier and suppresses only a new configured
-      remote implementation-review request. It still runs the deterministic
-      consumer gate, dispositions first-review advisories, inspects all
-      existing comments and unresolved threads, checks CI, addresses valid
-      findings, and performs the one PR-scoped learning pass. If
-      classification no longer matches the exact PR head, it falls back to the
-      normal remote-review convergence loop. For non-qualifying branches or
-      `remote-review`, invoke the normal `sd-review-pr` profile with trusted
-      `caller: sd-fleet-refresh`, `review-profile: remote`,
-      `return-after: review-result`, and `defer-finish-work: true` context, but
-      no integration-only classifier fields.
-   7. Before watch or merge, apply the finding severity gate below to every
-      verified finding surfaced by install, audit, consumer checks, review, or
-      existing feedback. If there are no verified findings, record zero
-      finding observations and continue. Exit `0` permits the run to continue
-      only after observation replies, allowed thread resolution, and follow-up
-      capture are complete. Exit `1` or `2` pauses before this PR or another
-      consumer can be merged or mutated.
-   8. Run `sd-watch-pr` with its internal `no-merge` handoff so required
-      checks and review state settle without duplicating housekeeping. End
-      `ci-wait` with the exact settled outcome.
-   9. Bracket `housekeeping`, then merge via the consumer's housekeeping gate:
-      green, comment-clean,
-      mergeable, heads identical. With `no-merge`, leave the PR open and
-      record the consumer as PR-open instead of invoking housekeeping.
-   10. Bracket `post-merge-audit`. Confirm post-merge provenance reads the
-      target version and the
-      install audit passes, per the rollout doc. Finish the consumer's
-      housekeeping cleanup — default branch checked out, refresh branch
-      deleted, refs pruned — then record `refreshed-merged` and move to the
-      next consumer. `no-merge` records `pr-open`; unavailable, dirty, blocked,
-      or failed consumers use their matching timing outcome and bounded reason.
-4. Aggregate the per-consumer outcomes into the fleet status table and the
-   fleet version summary for the final report. Render a partial timing report
-   after an interruption. When every selected consumer has an outcome, run
-   `report --run-id <run-id> --complete` and include its summary.
+1. Normalize and validate arguments. Resolve the release version, controller
+   campaign ID, timing run ID, selected consumers, and existing checkout paths.
+2. Run controller `plan`, initialize timing, call `next`, and execute the issued
+   `preflight` action. Record its exact result. With `dry-run`, finalize the
+   read-only report here and issue no consumer action.
+3. Repeatedly call controller `next`. Execute only returned actions, within the
+   returned timeout and one-checkout ownership boundary, and record every
+   result before requesting more work.
+4. Before recording a verified finding, run the finding severity gate below.
+   Use `review-finding --pack-blocker` for a pack-owned blocker; use the
+   controller's normalized non-blocking result for deferred or consumer-local
+   work after replies, allowed resolution, and follow-up capture are complete.
+5. After interruption or when no action is returned but work is not complete,
+   run controller `resume` and do not replay an issued side effect. Load
+   `references/controller-recovery.md` only when reconciliation, a blocked
+   campaign, invalid state, an ownership retry, or a corrective release is
+   actually present.
+6. Run controller `validate` and `status`, complete timing, and render the final
+   report from receipts. Do not reconstruct a lane history from chat.
 
 ## Finding severity gate
 
-For every batch of verified findings, construct a temporary schema-version-1
-JSON file and run this source-only, read-only command from the pack checkout:
+For each non-empty batch of verified findings, create a temporary
+schema-version-1 findings file and run:
 
 ```bash
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
@@ -248,156 +205,56 @@ bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
   --input <temporary-findings.json> --json
 ```
 
-The input has a non-empty `findings` array. Every row contains a unique safe
-`id`, `contractFamily`, `summary`, `evidence`, and `reviewer`, with optional
-repository-relative `path` and positive `line`. Contract family is exactly one
-of `correctness`, `security`, `install-audit`, `compatibility`, `hardening`,
-`style`, `test-implementation`, `documentation`, `diagnostics`, or
-`consumer-unrelated`. Use `impact: blocker` plus concrete `impactEvidence` to
-escalate a normally deferred family. An operator may explicitly set
-`overrideDisposition` only together with `overrideRationale`; never infer an
-override from prose, a public flag, or an environment variable.
+Each row has a unique safe `id`, `contractFamily`, `summary`, `evidence`, and
+`reviewer`, with optional repository-relative `path` and positive `line`.
+`impact: blocker` requires concrete `impactEvidence`; an explicit
+`overrideDisposition` requires `overrideRationale`. Never infer an override
+from prose, a public flag, or an environment variable.
 
-Interpret the result by owner rows, not raw observation count:
+- `continue-with-follow-ups`: reply with evidence to every observation,
+  resolve allowed threads, and create or reuse one source or consumer Trellis
+  follow-up per deferred owner before recording the stage result.
+- `pause-corrective-release`: record `review-finding --pack-blocker`, stop
+  before watch or merge, then load the recovery reference.
+- `invalid-pause`, exit `2`, malformed output, or an unavailable command: fail
+  closed and load the recovery reference. Never reinterpret invalid input as
+  deferred work.
 
-- Exit `0`, `continue-with-follow-ups`: correctness is not being dismissed.
-  Reply with evidence to every observation and resolve its thread only when
-  repository policy permits. Create or reuse one source or consumer Trellis
-  follow-up per deferred owner when work remains, record its task identifier,
-  then continue the rollout.
-- Exit `1`, `pause-corrective-release`: stop before watch, merge, or the next
-  consumer mutation. Feed all blocker owners into one corrective campaign;
-  do not create one release or task per observation.
-- Exit `2`, `invalid-pause`, malformed output, or unavailable command: fail
-  closed and pause for input correction. Never reinterpret an invalid result
-  as deferred work.
-
-Exact duplicates have the same normalized reviewer, path, line, and summary.
-The first observation owns their timing disposition, release trigger, and
-follow-up task. Every duplicate still receives its own evidence-backed reply
-and allowed thread resolution. Conflicting duplicate policy is invalid input.
-Delete the temporary file after capturing the deterministic result, and retain
-the owner, duplicate, escalation, and override evidence in the fleet report.
-
-## Corrective campaign
-
-When the finding severity gate returns `pause-corrective-release` for a
-verified pack-owned blocker:
-
-1. Immediately pause consumer mutation before selecting or preparing another
-   release. Keep the original fleet task available to resume later.
-2. Reuse or create one source-owned Trellis corrective task. Record every
-   verified finding in a single ledger with this shape:
-
-   `ID | Contract family | Evidence | Severity | Disposition | Fix | Regression`
-
-   Use classifier owner rows for this ledger. Exact duplicates reuse the
-   owning row instead of creating another task or release trigger.
-3. Run a bounded contract-surface sweep around the failure before choosing the
-   corrective version. Cover equivalent producers and consumers, mutation
-   paths, persisted and dynamically loaded data, normalization and nullability,
-   CLI exposure, human and JSON output, failure behavior, and generated or
-   template mirrors where applicable. Record excluded adjacent surfaces.
-4. Iterate with focused source tests and optional partial candidate diagnostics
-   using `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-fleet-candidate-check.py --consumer <name>`.
-   Partial runs are diagnostic and must never replace the canonical candidate
-   ledger.
-5. After the finding ledger and regressions converge, freeze the payload,
-   select one corrective version, update release surfaces once, and run one
-   canonical full-fleet candidate validation with the no-filter command. Only
-   that canonical run may update `docs/fleet/candidate-validation.json`.
-6. Merge and tag through the source lifecycle, then resume the original fleet
-   task from a fresh preflight rather than creating a duplicate rollout task.
-
-An urgent independent security defect may ship before the broader campaign
-only when waiting would increase risk. Record that reason and keep the remaining
-campaign open.
+Exact duplicates share the first owner's timing disposition and follow-up.
+Every duplicate still receives its own evidence-backed reply and allowed
+thread resolution.
 
 ## Safety rules
 
-- `docs/FLEET_ROLLOUT.md` is the procedure authority. Follow its refresh
-  shape exactly; do not invent steps it does not document.
-- This skill never touches a dirty consumer tree. Dirty means skip and
-  report — never stash, reset, clean, or install over local changes.
-- Refresh one consumer at a time. Never run parallel consumer refreshes and
-  never interleave consumer branches.
-- Consumer merges go only through the green + comment-clean housekeeping
-  gate. Never merge a red, commented, or behind consumer PR, and never
-  force a merge that GitHub refuses.
-- Never force-push in any consumer repository.
-- Never create or clone consumer checkouts from this command. Refresh only
-  consumers that already have a local clone at the fleet-manifest path.
-- Skipped consumers are always reported with their reasons. A silent skip
-  is a defect.
-- Change only the files the pack installer writes, plus its receipts and
-  provenance. Never edit consumer product code.
-- Run the finding severity gate for verified findings before watch, merge, or
-  another consumer mutation. Invalid classification pauses. Default blocker
-  families are correctness, security, install/audit, and compatibility;
-  normally deferred findings still require replies, allowed thread resolution,
-  and one recorded follow-up per owner when work remains.
-- Consumer review focuses on selected-platform wiring, provenance, secrets,
-  docs accuracy, and repo-owned migrations. Pack-owned implementation is
-  reviewed in the source PR, not line-by-line in every refresh PR.
-- Integration-only review is allowed only after the source classifier returns
-  eligible for the exact consumer head and `sd-review-pr` rechecks it. The
-  profile skips only a new remote-review request; it never skips existing
-  feedback, deterministic gates, CI, watch, or housekeeping.
-- `remote-review` always forces the normal review path. Classifier ambiguity,
-  unavailable proof, or any consumer-owned path also falls back to that path.
-- Never begin consumer inventory or mutation after a failed release-identity
-  guard. Fetch missing tags or correct the release evidence, then rerun
-  preflight.
-- `dry-run` runs preflight only and performs zero consumer mutations.
-- Timing state is internal, local, and mandatory. Never print its filesystem
-  path or store secrets, absolute paths, command output, or review text in a
-  reason. A telemetry anomaly pauses new mutation but never changes a delivery
-  gate's authoritative result.
+- Execute only a current controller action for the configured consumer path.
+  Never broaden scope through discovery, a typo, or missing state.
+- Never touch a dirty, missing, or externally owned consumer checkout; never
+  stash, reset, clean, force-push, clone, or create a new checkout here.
+- Change only installer-managed files, receipts, provenance, and repo-owned
+  deterministic preparation output. Never edit consumer product code.
+- Preflight release identity, candidate evidence, install/audit, local checks,
+  review, complete thread polling, CI, exact-head eligibility, housekeeping,
+  and post-merge audit keep their existing authority.
+- A verified pack blocker stops new starts and holds unsettled merges. A
+  controller or telemetry error pauses mutation; prompt prose never overrides
+  an invalid transition.
+- Use the portable structured-question contract only for a genuinely ambiguous
+  operator policy choice. Normal retries, polling, receipts, and optional
+  absence do not prompt.
 
 ## Final report
 
-The final report is mandatory-shaped: every item below appears in every run,
-and an empty item states its emptiness explicitly (write `none`). Keep it
-scannable — bullets and short lines, one point per line, no paragraph blobs.
+Always include each section; state empty values explicitly as `none`.
 
-- Per-consumer status table: one row per fleet consumer in the run —
-  consumer · before-version · review-profile · result. Review profile is
-  `integration-only`, `remote`, or `n/a`. Result is exactly one of
-  `at-target`, `refreshed+merged`, `PR-open`, or `skipped+<reason>`. The
-  before-version is the installed pack version preflight reported at run
-  start, or `unknown` when preflight could not read it.
-- Fleet version summary: the target version, how many consumers are at
-  target after the run, and which consumers remain stale.
-- Finding disposition summary: blocker owners, deferred owners, duplicate
-  observation count, explicit overrides with rationale, and follow-up task
-  identifiers — or `none` for each empty category.
-- Timing summary: run ID and state, aggregate critical path, active wall time,
-  summed stage elapsed, slowest consumer, slowest stage, reviewer/CI overlap,
-  retry count, and telemetry anomalies — or `none` for every empty category.
-- Follow-ups: open consumer PRs to watch, skipped consumers to revisit, and
-  any anomalies — or `none`.
-
-Example shape for a mixed run:
-
-```
-- Target: 0.12.0
-- Fleet:
-  - repo-a · 0.12.0 · n/a · at-target
-  - repo-b · 0.10.5 · integration-only · refreshed+merged
-  - repo-c · 0.11.0 · remote · PR-open (no-merge)
-  - repo-d · 0.11.0 · n/a · skipped+dirty working tree
-  - repo-e · unknown · n/a · skipped+no local clone
-- Fleet versions: 2 of 5 at target; repo-c pending merge; repo-d and
-  repo-e stale
-- Findings: blockers none; deferred F-12 -> task 07-20-doc-follow-up;
-  duplicates 1 (F-13 -> F-12); overrides none
-- Timing: run fleet-0.12.0-20260720T153000Z completed; critical path 31m;
-  active wall 29m; stage elapsed 38m; slowest consumer repo-c 16m;
-  slowest stage ci-wait 18m; reviewer/CI overlap 7m; retries 0;
-  anomalies none
-- Follow-ups:
-  1. Merge repo-c PR #12 via its housekeeping gate once review settles.
-  2. Clean repo-d's working tree, then rerun with consumer=repo-d.
-  3. Clone repo-e at its fleet-manifest path, then rerun with
-     consumer=repo-e.
-```
+- Campaign: ID, immutable release, controller schema/status, selected mode,
+  preflight receipt, and validation result.
+- Fleet: one row per selected consumer with before-version, review profile,
+  controller stage/result, exact head/PR when present, and blocker/reason.
+- Scheduling: canary/wave outcomes, concurrency actually used, serialized merge
+  order, retries, reconciliation actions, and remaining next action.
+- Findings: blocker/deferred owners, duplicates, overrides with rationale, and
+  follow-up task identifiers.
+- Timing: run state, critical path, active wall, summed stage time, slowest
+  consumer/stage, reviewer/CI overlap, retries, and anomalies.
+- Follow-ups: open PRs, skipped consumers, ownership retries, corrective work,
+  and controller/timing anomalies.

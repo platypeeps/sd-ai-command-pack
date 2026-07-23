@@ -1056,6 +1056,7 @@ class GeneratedParityTests(InstallTestCase):
         self.assertIn("--fail-under=76", coverage_gate)
         for expected in (
             "scripts/sd-ai-command-pack-fleet-candidate-check.py 90",
+            "scripts/sd-ai-command-pack-fleet-controller.py 76",
             "scripts/sd-ai-command-pack-fleet-finding-classify.py 85",
             "scripts/sd-ai-command-pack-fleet-review-classify.py 80",
             "scripts/sd-ai-command-pack-fleet-timing.py 88",
@@ -1492,6 +1493,7 @@ class GeneratedParityTests(InstallTestCase):
         _, files = install.load_manifest()
         manifest_targets = {file.target.as_posix() for file in files}
         source_only_helpers = {
+            "scripts/sd-ai-command-pack-fleet-controller.py",
             "scripts/sd-ai-command-pack-fleet-timing.py",
             "scripts/sd-ai-command-pack-fleet-wave-plan.py",
         }
