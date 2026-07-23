@@ -690,7 +690,10 @@ class FleetControllerTests(InstallTestCase):
         state_home = root.parent / f"{root.name}-campaign-state"
         store = controller.CampaignStore(root, "campaign-1", state_home)
 
+        store.directory.mkdir(parents=True, mode=0o755)
+        os.chmod(store.directory, 0o755)
         with store.locked():
+            self.assertEqual(store.directory.stat().st_mode & 0o777, 0o700)
             store.write(state)
         loaded = store.load()
 

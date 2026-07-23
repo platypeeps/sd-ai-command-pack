@@ -226,6 +226,14 @@ class CampaignStore:
         self.state_path = self.directory / f"{self.campaign}.json"
         self.lock_path = self.directory / f"{self.campaign}.lock"
 
+    def _prepare_directory(self) -> None:
+        if self.directory.is_symlink():
+            raise FleetControllerError("campaign state directory must not be a symlink")
+        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if self.directory.is_symlink() or not self.directory.is_dir():
+            raise FleetControllerError("campaign state directory is unusable")
+        os.chmod(self.directory, 0o700)
+
     def load(self) -> dict[str, Any]:
         state = _load_json(self.state_path, "campaign state")
         validate_state(state)
@@ -240,10 +248,7 @@ class CampaignStore:
         payload = _json_bytes(state)
         if self.directory.is_symlink() or self.state_path.is_symlink():
             raise FleetControllerError("campaign state path must not be a symlink")
-        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if self.directory.is_symlink() or not self.directory.is_dir():
-            raise FleetControllerError("campaign state directory is unusable")
-        os.chmod(self.directory, 0o700)
+        self._prepare_directory()
         descriptor, temporary = tempfile.mkstemp(
             prefix=f".{self.campaign}.", suffix=".tmp", dir=self.directory
         )
@@ -272,9 +277,7 @@ class CampaignStore:
     def locked(self) -> Iterator[None]:
         if self.directory.is_symlink() or self.lock_path.is_symlink():
             raise FleetControllerError("campaign lock path must not be a symlink")
-        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if self.directory.is_symlink() or not self.directory.is_dir():
-            raise FleetControllerError("campaign state directory is unusable")
+        self._prepare_directory()
         try:
             descriptor = os.open(
                 self.lock_path,
