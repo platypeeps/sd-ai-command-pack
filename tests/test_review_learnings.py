@@ -423,6 +423,30 @@ class ReviewLearningsTests(InstallTestCase):
                     learnings.SIGNAL_GENERATED_SURFACES,
                 )
 
+    def test_signal_category_recognizes_singular_and_plural_test_directories(self) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_test_directories",
+        )
+
+        for index, directory in enumerate(("test", "tests"), start=1):
+            path = f"{directory}/metadata.test.js"
+            with self.subTest(path=path):
+                comment = learnings.PullRequestComment(
+                    pr_number=index,
+                    pr_title="historical",
+                    pr_url=f"https://github.com/owner/repo/pull/{index}",
+                    path=path,
+                    body="Clarify this edge case.",
+                    is_resolved=True,
+                    is_outdated=False,
+                )
+                self.assertEqual(learnings._path_family(path), "tests")
+                self.assertEqual(
+                    learnings._signal_category(comment),
+                    learnings.SIGNAL_REVIEWER_TEST_HARNESS,
+                )
+
     def test_cluster_output_reports_all_evidence_bounds(self) -> None:
         learnings = self.load_module_from_path(
             PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",

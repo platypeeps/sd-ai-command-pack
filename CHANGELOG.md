@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.32.1 - 2026-07-23
+
+- Preserve review-learning path-family and test-harness signal classification
+  for repositories using either `test/` or `tests/`.
+
 ## 0.32.0 - 2026-07-23
 
 - Validate optional Trellis task priority provenance with deterministic,
