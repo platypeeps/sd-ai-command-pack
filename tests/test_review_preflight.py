@@ -1755,7 +1755,7 @@ assert.deepEqual(
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
-            "no changed Trellis task context files require scaffold checks",
+            "no changed Trellis task context manifests require validation",
             result.stdout,
         )
         self.assertNotIn("legacy-planning/implement.jsonl:1", result.stdout)

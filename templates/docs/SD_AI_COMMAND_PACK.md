@@ -592,7 +592,8 @@ The authored-source threshold excludes installed pack/Trellis mirrors, Trellis
 task and workspace records, and known generated reports. A separate warning calls
 out changes spanning more than one Trellis task directory. The task-context
 check inspects `implement.jsonl` and `check.jsonl`; a changed non-planning
-`task.json` also checks both sibling files. Changed planning scaffolds fail,
+`task.json` also checks both sibling files. Changed planning manifests that
+still contain generated scaffolds fail; grounded planning manifests pass,
 while untouched legacy archives and symlinked context files are skipped.
 Grounded rows may reference only `.trellis/spec/**` or
 `.trellis/tasks/**/research/**`. Journal history is append-only: newly

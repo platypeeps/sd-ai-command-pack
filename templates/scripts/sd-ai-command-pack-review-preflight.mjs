@@ -164,7 +164,7 @@ export function runReviewPreflight(options = {}) {
   runCheck('documentation path references', checkDocumentationPathReferences);
   runCheck('changed Trellis task metadata integrity', checkChangedTrellisTaskMetadata);
   runCheck('completed Trellis task location', checkCompletedTrellisTaskLocation);
-  runCheck('Trellis task context manifests', checkTrellisTaskContextSeeds);
+  runCheck('Trellis task context manifests', checkTrellisTaskContextManifests);
   runCheck('Trellis journal records', checkTrellisJournalRecords);
   runCheck('first-review risk sweep', checkReviewRiskSweep);
   runCheck('diff size warning', checkDiffSize);
@@ -930,11 +930,11 @@ function isTrellisTaskDirectoryName(value) {
   );
 }
 
-function checkTrellisTaskContextSeeds() {
+function checkTrellisTaskContextManifests() {
   const failureStart = failures.length;
   const diff = currentChangedPaths();
   if (diff === null) {
-    warn('could not inspect current diff for Trellis task context seeds.');
+    warn('could not inspect current diff for Trellis task context manifests.');
     return;
   }
 
@@ -1004,14 +1004,14 @@ function checkTrellisTaskContextSeeds() {
       }
       fail(
         `${issue.file}:${issue.line} contains a task context reference outside the allowed spec/research roots; ` +
-          'use .trellis/spec/** or .trellis/tasks/**/research/** only, never code, tests, or files being modified.',
+          'use .trellis/spec/** or .trellis/tasks/**/research/** only, never code or test paths.',
       );
     }
   }
 
   if (inspectedFiles === 0) {
     if (failures.length === failureStart) {
-      pass('no changed Trellis task context files require scaffold checks.');
+      pass('no changed Trellis task context manifests require validation.');
     }
     return;
   }
