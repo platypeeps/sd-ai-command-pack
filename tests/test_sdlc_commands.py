@@ -157,6 +157,17 @@ class SdlcCommandsTests(InstallTestCase):
                 skill = self._skill_text(name)
                 self.assertNotIn("SD_AI_COMMAND_PACK_", skill)
 
+    def test_update_deps_delegates_eligibility_and_merge_to_housekeeping(self) -> None:
+        skill = self._skill_text("sd-update-deps")
+
+        self.assertIn(
+            "bash scripts/sd-ai-command-pack-housekeeping.sh --dependency-pr <number>",
+            skill,
+        )
+        self.assertIn("schema-versioned PR eligibility", skill)
+        self.assertNotIn("```bash\ngh pr merge", skill)
+        self.assertIn("must not invoke\n  `gh pr merge`", skill)
+
     def test_skills_state_unknown_argument_rule_and_scannable_report(self) -> None:
         for name in COMMANDS:
             with self.subTest(skill=name):

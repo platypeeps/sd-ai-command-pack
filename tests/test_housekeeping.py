@@ -221,14 +221,18 @@ class HousekeepingTests(InstallTestCase):
             "PR review rounds:",
             "--no-auto-merge",
             "--finish-work-head <oid>",
+            "--dependency-pr <number>",
+            "sd-ai-command-pack-pr-eligibility.py",
         ]:
             self.assertIn(text, skill)
         for text in [
             "--no-auto-merge",
             "--finish-work-head",
+            "--dependency-pr",
             "--merge-strategy",
-            "view_open_pr_readiness_for_branch()",
-            "unresolved_review_thread_count()",
+            "evaluate_pr_eligibility()",
+            "evaluate_dependency_pr_eligibility()",
+            "sd-ai-command-pack-pr-eligibility.py",
             "PR #$pr_number is open, green, comment-clean",
             "merge_ready_open_pr()",
             "failed to merge PR #$pr_number; resolve branch protection",
@@ -563,13 +567,53 @@ class HousekeepingTests(InstallTestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("SD finish-work completion was not attested", result.stdout)
         self.assertIn(
-            '--finish-work-head "$(git rev-parse --verify '
-            'refs/heads/feature/cleanup)"',
+            '--finish-work-head "$(git rev-parse HEAD)"',
             result.stdout,
         )
-        self.assertNotIn("git rev-parse HEAD", result.stdout)
         self.assertNotIn(f'--finish-work-head "{head_oid}"', result.stdout)
         self.assertFalse(marker.exists())
+
+    def test_housekeeping_dependency_pr_mode_merges_from_clean_default_branch(
+        self,
+    ) -> None:
+        repo, _, stub_bin, pr_head_oid = self.make_housekeeping_repo()
+        self.run_git(repo, "switch", "main")
+        self.run_git(repo, "branch", "-D", "feature/cleanup")
+        marker = repo.parent / "merged-pr"
+        self.write_auto_merge_gh_stub(stub_bin, marker, pr_head_oid=pr_head_oid)
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--dependency-pr",
+                "6",
+            ],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "dependency PR #6 is green, comment-clean, mergeable, and exact-head current",
+            result.stdout,
+        )
+        self.assertIn("merged PR #6 with merge strategy", result.stdout)
+        self.assertIn(
+            "skipped post-finish Obsidian KB refresh for dependency PR mode",
+            result.stdout,
+        )
+        self.assertEqual(self.git_output(repo, "branch", "--show-current"), "main")
+        self.assertTrue(marker.exists())
+        self.assertFalse((repo / ".obsidian-kb").exists())
 
     def test_housekeeping_rejects_stale_finish_work_head_before_auto_merge(
         self,
@@ -701,7 +745,7 @@ class HousekeepingTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
-            "PR #6 has undeterminable check counts; skipped auto-merge",
+            "could not inspect an open PR for feature/cleanup; skipped auto-merge",
             result.stdout,
         )
         self.assertFalse(marker.exists())
@@ -782,19 +826,12 @@ class HousekeepingTests(InstallTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("self-test: all scenarios passed", result.stdout)
         for scenario in (
-            "finish-work head required",
-            "stale finish-work head refuses",
-            "green executed checks merge",
-            "single executed success suffices",
-            "blocking checks refuse",
-            "zero successful checks refuse",
-            "undeterminable counts refuse",
-            "non-clean merge state refuses",
-            "draft PR refuses",
-            "unresolved review threads refuse",
-            "empty middle field remains aligned",
+            "eligible receipt merges",
+            "blocked receipt refuses",
+            "indeterminate receipt refuses",
+            "incomplete eligible receipt refuses",
+            "unknown receipt status refuses",
             "unknown default branch refuses",
-            "unauthenticated gh is reported",
         ):
             self.assertIn(f"self-test: {scenario}: ok", result.stdout)
 
@@ -808,11 +845,11 @@ class HousekeepingTests(InstallTestCase):
         script = (
             install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"
         ).read_text(encoding="utf-8")
-        needle = '[ "$blocking_check_count" -ne 0 ]'
+        needle = 'case "$eligibility_status" in'
         self.assertIn(needle, script)
         sabotaged = Path(tempdir.name) / "sabotaged.sh"
         sabotaged.write_text(
-            script.replace(needle, '[ "$blocking_check_count" -lt 0 ]'),
+            script.replace(needle, 'case "eligible" in'),
             encoding="utf-8",
         )
 
@@ -827,7 +864,7 @@ class HousekeepingTests(InstallTestCase):
         )
 
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("self-test: blocking checks refuse: FAIL", result.stdout)
+        self.assertIn("self-test: blocked receipt refuses: FAIL", result.stdout)
 
     def test_housekeeping_self_test_reports_named_failures_on_stub_errors(
         self,
@@ -841,11 +878,14 @@ class HousekeepingTests(InstallTestCase):
         script = (
             install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"
         ).read_text(encoding="utf-8")
-        needle = '("rev-parse --verify refs/heads/feature^{commit}")'
+        needle = (
+            '[ "$1" != 153 ] || '
+            '[ "$2" != 1111111111111111111111111111111111111111 ]'
+        )
         self.assertIn(needle, script)
         sabotaged = Path(tempdir.name) / "sabotaged.sh"
         sabotaged.write_text(
-            script.replace(needle, '("never-matches")'), encoding="utf-8"
+            script.replace(needle, '[ "$1" = "$1" ]'), encoding="utf-8"
         )
 
         result = subprocess.run(
@@ -859,7 +899,7 @@ class HousekeepingTests(InstallTestCase):
         )
 
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("self-test: green executed checks merge: FAIL", result.stdout)
+        self.assertIn("self-test: eligible receipt merges: FAIL", result.stdout)
         self.assertIn("scenario(s) FAILED", result.stdout)
 
     def test_housekeeping_no_auto_merge_leaves_open_pr_untouched(
@@ -910,9 +950,9 @@ class HousekeepingTests(InstallTestCase):
             graphql_body=(
                 "  args=\" $* \"\n"
                 "  if [[ \"$args\" == *\"cursor=PAGE2\"* ]]; then\n"
-                "    printf '1\\037false\\037\\n'\n"
+                "    printf '%s\\n' '{\"data\":{\"repository\":{\"pullRequest\":{\"reviewThreads\":{\"nodes\":[{\"isResolved\":false}],\"pageInfo\":{\"hasNextPage\":false,\"endCursor\":null}}}}}}'\n"
                 "  else\n"
-                "    printf '0\\037true\\037PAGE2\\n'\n"
+                "    printf '%s\\n' '{\"data\":{\"repository\":{\"pullRequest\":{\"reviewThreads\":{\"nodes\":[],\"pageInfo\":{\"hasNextPage\":true,\"endCursor\":\"PAGE2\"}}}}}}'\n"
                 "  fi\n"
             ),
         )
@@ -978,7 +1018,7 @@ class HousekeepingTests(InstallTestCase):
             result.stdout,
         )
         self.assertIn(
-            "could not derive GitHub repo from origin; skipped auto-merge",
+            "PR #6 for feature/cleanup is OPEN, not MERGED",
             result.stdout,
         )
         self.assertNotIn("merged PR #6 with merge strategy", result.stdout)

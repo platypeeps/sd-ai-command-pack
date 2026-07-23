@@ -67,24 +67,28 @@ variables; every tuning knob is an argument.
    - Everything else is parked.
 4. With `dry-run`: emit the final report from the classification and stop
    here. No merges, no mutations of any kind.
-5. Merge the auto-merge class strictly sequentially, one PR at a time:
-   1. Re-verify immediately before each merge: checks green, review
-      threads comment-clean, and the PR head current — matching the bot
-      branch head and not behind the default branch. Read head, mergeable,
-      and merge-state fields with `gh pr view` and check state with
-      `gh pr checks`. Dependency bots rebase when the base moves, so
-      re-check every remaining auto-class PR after each prior merge;
-      classification state from earlier in the run is never merge
-      evidence.
-   2. Merge only under the housekeeping gate criteria: green,
-      comment-clean, mergeable, heads identical. If GitHub refuses the
-      merge, park the PR with that refusal as the reason.
-   3. After each merge, confirm the default branch stays green before
-      starting the next merge. A red default branch stops the merge loop:
-      report the remaining auto-class PRs as parked pending a green
-      default branch.
-   4. Move any PR that fails re-verification to the parked list with the
-      failing criterion as its reason, then continue with the next PR.
+5. Process the auto-merge class strictly sequentially, one PR at a time:
+   1. Start from the clean synchronized default branch and delegate the one
+      merge attempt to the installed housekeeping owner:
+
+      ```bash
+      bash scripts/sd-ai-command-pack-housekeeping.sh --dependency-pr <number>
+      ```
+
+      Housekeeping invokes the shared schema-versioned PR eligibility
+      evaluator in `dependency-pr` mode, re-reads the exact PR head after
+      checks and complete review-thread pagination, and performs the only
+      `gh pr merge --match-head-commit` mutation. Do not reconstruct checks,
+      thread, head, or mergeability logic in this skill.
+   2. Treat an `eligible` receipt plus housekeeping's confirmed merge and
+      clean default-branch report as success. If the evaluator returns
+      `blocked` or `indeterminate`, or GitHub refuses the merge, park that PR
+      with the stable diagnostic from housekeeping.
+   3. Re-enumerate the remaining open dependency PRs after every successful
+      merge. Dependency bots may rebase when the default branch moves, so an
+      earlier receipt is never evidence for a later attempt.
+   4. A red or unclean default branch stops the merge loop. Report all
+      remaining auto-class PRs as parked pending a clean green default branch.
 6. Park everything outside the merged set with one line per PR: the PR
    reference plus a concrete recommendation. Examples:
    - `major — review the changelog and migration notes manually`
@@ -95,12 +99,13 @@ variables; every tuning knob is an argument.
 ## Safety rules
 
 - Sequential merges only. Never merge dependency PRs in parallel, and never
-  skip the re-verify and default-branch-green steps between merges.
+  bypass the shared evaluator or housekeeping's default-branch verification.
 - Never merge red, commented, or behind PRs.
 - Never auto-merge a major version update, with or without flags —
   majors are always manual.
-- The housekeeping gate criteria are the merge authority. Never bypass or
-  weaken them, and never force a merge that GitHub refuses.
+- Housekeeping is the only merge mutation owner. This skill must not invoke
+  `gh pr merge`, restate readiness logic, weaken an evaluator result, or force
+  a merge that GitHub refuses.
 - Never dismiss reviews or resolve other people's review threads to make a
   PR look comment-clean.
 - Never edit dependency manifests, lockfiles, or bot branches. This skill

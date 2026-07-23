@@ -38,6 +38,7 @@ scripts/sd-ai-command-pack-fleet-timing.py 88
 scripts/sd-ai-command-pack-fleet-wave-plan.py 85
 scripts/sd-ai-command-pack-install-audit.py 89
 scripts/sd-ai-command-pack-pr-body-scope.py 78
+scripts/sd-ai-command-pack-pr-eligibility.py 85
 scripts/sd-ai-command-pack-record-session.py 79
 scripts/sd-ai-command-pack-review-learnings.py 73
 scripts/sd-ai-command-pack-status.py 80

@@ -1,0 +1,3 @@
+{"file": "templates/scripts/sd-ai-command-pack-pr-eligibility.py", "reason": "Canonical side-effect-free exact-head eligibility evaluator and versioned result contract"}
+{"file": "templates/scripts/sd-ai-command-pack-housekeeping.sh", "reason": "Sole merge mutation owner consuming evaluator receipts with final boundary rechecks"}
+{"file": "templates/.agents/skills/sd-update-deps/SKILL.md", "reason": "Dependency workflow delegates classified PRs through housekeeping shared eligibility path"}

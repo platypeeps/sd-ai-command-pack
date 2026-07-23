@@ -1,0 +1,3 @@
+{"file": "tests/test_pr_eligibility.py", "reason": "Eligible blocked indeterminate pagination stale-head schema and failure fixtures; 89 percent coverage"}
+{"file": "tests/test_housekeeping.py", "reason": "Exact-head evaluator delegation protected-main behavior and merge ownership regressions"}
+{"file": "docs/fleet/candidate-validation.json", "reason": "Canonical 0.33.0 all-consumer candidate validation passed on current payload"}

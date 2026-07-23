@@ -687,11 +687,16 @@ class InstallTestCase(unittest.TestCase):
         self,
         stub_bin: Path,
         marker: Path,
-        graphql_body: str = "  printf '0\\037false\\037\\n'\n",
+        graphql_body: str = (
+            "  printf '%s\\n' "
+            "'{\"data\":{\"repository\":{\"pullRequest\":{\"reviewThreads\":"
+            "{\"nodes\":[],\"pageInfo\":{\"hasNextPage\":false,\"endCursor\":null}}}}}}'\n"
+        ),
         blocking_check_count: str = "0",
         successful_check_count: str = "2",
         rollup_json: str | None = None,
         auto_delete_remote_branch: bool = False,
+        pr_head_oid: str | None = None,
     ) -> None:
         # Simulate GitHub's auto-delete-head-branch: the remote drops the
         # feature branch at merge time (after housekeeping's initial prune),
@@ -702,35 +707,48 @@ class InstallTestCase(unittest.TestCase):
             else ""
         )
         if rollup_json is None:
-            readiness_branch = (
-                "    printf '6\\037%s\\037false\\037https://example.test/pr/6\\037feature/cleanup\\037%s\\037main\\037CLEAN\\037%s\\037%s\\n' "
-                f"\"$state\" \"$head\" {blocking_check_count!r} {successful_check_count!r}\n"
-            )
-        else:
-            # Evaluate the script's real --jq program with real jq against a
-            # fixture PR payload so the check-classification logic itself is
-            # exercised instead of canned TSV counts.
-            readiness_branch = (
-                "    prog=''\n"
-                "    prev=''\n"
-                "    for a in \"$@\"; do\n"
-                "      if [ \"$prev\" = '--jq' ]; then prog=\"$a\"; fi\n"
-                "      prev=\"$a\"\n"
-                "    done\n"
-                "    jq -r \"$prog\" <<FIXTURE\n"
-                "{\"number\": 6, \"state\": \"$state\", \"isDraft\": false,"
-                " \"url\": \"https://example.test/pr/6\","
-                " \"headRefName\": \"feature/cleanup\", \"headRefOid\": \"$head\","
-                " \"baseRefName\": \"main\", \"mergeStateStatus\": \"CLEAN\","
-                f" \"statusCheckRollup\": {rollup_json}}}\n"
-                "FIXTURE\n"
-            )
+            if blocking_check_count.isdigit() and successful_check_count.isdigit():
+                rollup = [
+                    {
+                        "__typename": "CheckRun",
+                        "name": f"success-{index + 1}",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                    }
+                    for index in range(int(successful_check_count))
+                ]
+                rollup.extend(
+                    {
+                        "__typename": "CheckRun",
+                        "name": f"blocking-{index + 1}",
+                        "status": "COMPLETED",
+                        "conclusion": "FAILURE",
+                    }
+                    for index in range(int(blocking_check_count))
+                )
+                rollup_json = json.dumps(rollup)
+            else:
+                rollup_json = json.dumps({"invalid": "check-counts"})
+        readiness_branch = (
+            "    cat <<FIXTURE\n"
+            "{\"number\": 6, \"state\": \"$state\", \"isDraft\": false,"
+            " \"url\": \"https://example.test/pr/6\","
+            " \"headRefName\": \"feature/cleanup\", \"headRefOid\": \"$head\","
+            " \"baseRefName\": \"main\", \"mergeStateStatus\": \"CLEAN\","
+            f" \"statusCheckRollup\": {rollup_json}}}\n"
+            "FIXTURE\n"
+        )
+        head_function = (
+            f"head_oid() {{ printf '%s\\n' {pr_head_oid!r}; }}\n"
+            if pr_head_oid is not None
+            else "head_oid() { git rev-parse \"refs/heads/$branch\"; }\n"
+        )
         (stub_bin / "gh").write_text(
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
             "branch='feature/cleanup'\n"
             f"marker={str(marker)!r}\n"
-            "head_oid() { git rev-parse \"refs/heads/$branch\"; }\n"
+            + head_function +
             "pr_state() { if [ -f \"$marker\" ]; then printf 'MERGED'; else printf 'OPEN'; fi; }\n"
             "if [ \"${1:-}\" = repo ] && [ \"${2:-}\" = view ]; then\n"
             "  printf 'main\\n'\n"
@@ -742,6 +760,8 @@ class InstallTestCase(unittest.TestCase):
             "  args=\" $* \"\n"
             "  if [[ \"$args\" == *isDraft* ]]; then\n"
             + readiness_branch +
+            "  elif [[ \"$args\" == *'--json headRefOid'* ]]; then\n"
+            "    printf '{\"headRefOid\":\"%s\"}\\n' \"$head\"\n"
             "  else\n"
             "    merged_at=''\n"
             "    if [ \"$state\" = MERGED ]; then merged_at='2026-06-27T18:00:00Z'; fi\n"

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.33.0 - 2026-07-23
+
+- Centralize exact-head pull-request eligibility in a versioned read-only
+  evaluator, keep housekeeping as the sole merge mutation owner, and route
+  classified dependency updates through that shared gate.
+
 ## 0.32.1 - 2026-07-23
 
 - Preserve review-learning path-family and test-harness signal classification
