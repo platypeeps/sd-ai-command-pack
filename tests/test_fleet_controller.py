@@ -156,6 +156,27 @@ class FleetControllerTests(InstallTestCase):
             controller.validate_state(state)
         state["lanes"][0]["checkoutPath"] = checkout_path
         state["lanes"][0]["checkoutDigest"] = checkout_digest
+        updated_at = state["updatedAt"]
+        state["updatedAt"] = ""
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "updatedAt must be a UTC timestamp"
+        ):
+            controller.validate_state(state)
+        state["updatedAt"] = updated_at
+        state["lanes"][0]["status"] = "terminal"
+        with self.assertRaisesRegex(
+            controller.FleetControllerError,
+            "terminal status and result must be consistent",
+        ):
+            controller.validate_state(state)
+        state["lanes"][0]["status"] = "waiting"
+        state["lanes"][0]["result"] = "at-target"
+        with self.assertRaisesRegex(
+            controller.FleetControllerError,
+            "terminal status and result must be consistent",
+        ):
+            controller.validate_state(state)
+        state["lanes"][0]["result"] = None
 
         manifest.write_text(json.dumps({"version": "0.38.0"}), encoding="utf-8")
         with self.assertRaisesRegex(controller.FleetControllerError, "does not match"):

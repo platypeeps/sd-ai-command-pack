@@ -33,6 +33,7 @@ MAX_STATE_BYTES = 1024 * 1024
 LOCK_STALE_SECONDS = 300
 SAFE_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
+UTC_TIMESTAMP_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 
 LANE_STAGES = (
     "checkout-validation",
@@ -120,6 +121,16 @@ def safe_token(value: object, label: str) -> str:
 def full_sha(value: object, label: str) -> str:
     if not isinstance(value, str) or not FULL_SHA_RE.fullmatch(value):
         raise FleetControllerError(f"{label} must be a lowercase full Git SHA")
+    return value
+
+
+def utc_timestamp(value: object, label: str) -> str:
+    if not isinstance(value, str) or not UTC_TIMESTAMP_RE.fullmatch(value):
+        raise FleetControllerError(f"{label} must be a UTC timestamp")
+    try:
+        time.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        raise FleetControllerError(f"{label} must be a UTC timestamp") from None
     return value
 
 
@@ -345,8 +356,7 @@ def validate_action(value: object, label: str) -> None:
     if stage != "preflight" and stage not in STAGE_INDEX:
         raise FleetControllerError(f"{label} stage is invalid")
     _integer(value["timeoutSeconds"], f"{label} timeoutSeconds", 1)
-    if not isinstance(value["issuedAt"], str):
-        raise FleetControllerError(f"{label} issuedAt must be a string")
+    utc_timestamp(value["issuedAt"], f"{label} issuedAt")
 
 
 def _validate_receipt_semantics(
@@ -416,8 +426,7 @@ def validate_receipt(value: object, label: str) -> None:
     stage = safe_token(value["stage"], f"{label} stage")
     if stage != "preflight" and stage not in STAGE_INDEX:
         raise FleetControllerError(f"{label} stage is invalid")
-    if not isinstance(value["recordedAt"], str):
-        raise FleetControllerError(f"{label} recordedAt must be a string")
+    utc_timestamp(value["recordedAt"], f"{label} recordedAt")
     _validate_receipt_semantics(
         result=value["result"],
         reason_code=value["reasonCode"],
@@ -476,6 +485,10 @@ def validate_lane(value: object, label: str) -> None:
         raise FleetControllerError(f"{label} status is invalid")
     if value["result"] is not None and value["result"] not in TERMINAL_RESULTS:
         raise FleetControllerError(f"{label} result is invalid")
+    if (value["status"] == "terminal") != (value["result"] is not None):
+        raise FleetControllerError(
+            f"{label} terminal status and result must be consistent"
+        )
     if value["blocker"] is not None:
         safe_token(value["blocker"], f"{label} blocker")
     if not isinstance(value["packBlocker"], bool):
@@ -521,6 +534,8 @@ def validate_state(state: Mapping[str, Any]) -> None:
         )
     safe_token(state["campaignId"], "campaignId")
     safe_token(state["release"], "release")
+    utc_timestamp(state["createdAt"], "createdAt")
+    utc_timestamp(state["updatedAt"], "updatedAt")
     if not isinstance(state["repositoryDigest"], str) or len(state["repositoryDigest"]) != 64:
         raise FleetControllerError("repositoryDigest is invalid")
     if not isinstance(state["fleetManifest"], str) or not state["fleetManifest"]:
