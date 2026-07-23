@@ -401,6 +401,70 @@ class FleetControllerTests(InstallTestCase):
                 result="passed",
             )
 
+    def test_persisted_receipts_revalidate_build_invariants(self) -> None:
+        controller = self.load_controller()
+
+        def action(stage):
+            return {
+                "actionId": "c" * 64,
+                "attempt": 1,
+                "consumer": "canary-a",
+                "release": "0.37.0",
+                "stage": stage,
+            }
+
+        missing_reason = controller._build_receipt(
+            action("checkout-validation"),
+            result="retryable-failure",
+            reason_code="temporary-network",
+            blocker=None,
+            pack_blocker=False,
+            head=None,
+            pr_number=None,
+        )
+        missing_reason["reasonCode"] = None
+        contradictory_success = controller._build_receipt(
+            action("checkout-validation"),
+            result="passed",
+            reason_code=None,
+            blocker=None,
+            pack_blocker=False,
+            head=None,
+            pr_number=None,
+        )
+        contradictory_success["packBlocker"] = True
+        missing_review_head = controller._build_receipt(
+            action("review"),
+            result="review-finding",
+            reason_code="review-finding",
+            blocker=None,
+            pack_blocker=False,
+            head=HEAD,
+            pr_number=17,
+        )
+        missing_review_head["head"] = None
+        incomplete_publication = controller._build_receipt(
+            action("pr-publication"),
+            result="passed",
+            reason_code=None,
+            blocker=None,
+            pack_blocker=False,
+            head=HEAD,
+            pr_number=17,
+        )
+        incomplete_publication["prNumber"] = None
+
+        for receipt, message in (
+            (missing_reason, "requires a reason code"),
+            (contradictory_success, "forbids blocker evidence"),
+            (missing_review_head, "requires head"),
+            (incomplete_publication, "requires head and PR number"),
+        ):
+            with self.subTest(message=message), self.assertRaisesRegex(
+                controller.FleetControllerError, message
+            ):
+                controller.validate_receipt(receipt, "persisted receipt")
+
     def test_resume_reports_issued_action_without_replaying_it(self) -> None:
         controller = self.load_controller()
         _root, _fleet, _manifest, state = self.state(

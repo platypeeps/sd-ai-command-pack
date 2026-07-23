@@ -349,6 +349,33 @@ def validate_action(value: object, label: str) -> None:
         raise FleetControllerError(f"{label} issuedAt must be a string")
 
 
+def _validate_receipt_semantics(
+    *,
+    result: str,
+    reason_code: str | None,
+    blocker: str | None,
+    pack_blocker: bool,
+    head: str | None,
+    pr_number: int | None,
+    stage: str,
+) -> None:
+    if (result in REASON_REQUIRED) != (reason_code is not None):
+        requirement = "requires" if result in REASON_REQUIRED else "forbids"
+        raise FleetControllerError(f"result {result} {requirement} a reason code")
+    if result in {"passed", "at-target"} and (blocker is not None or pack_blocker):
+        raise FleetControllerError(f"result {result} forbids blocker evidence")
+    if stage in PR_HEAD_STAGES and head is None:
+        raise FleetControllerError(f"{stage} receipt requires head")
+    if result == "passed" and stage == "pr-publication" and (
+        head is None or pr_number is None
+    ):
+        raise FleetControllerError("PR publication requires head and PR number")
+    if result == "at-target" and stage != "checkout-validation":
+        raise FleetControllerError(
+            "at-target is valid only during checkout validation"
+        )
+
+
 def validate_receipt(value: object, label: str) -> None:
     if not isinstance(value, dict):
         raise FleetControllerError(f"{label} must be an object")
@@ -391,6 +418,15 @@ def validate_receipt(value: object, label: str) -> None:
         raise FleetControllerError(f"{label} stage is invalid")
     if not isinstance(value["recordedAt"], str):
         raise FleetControllerError(f"{label} recordedAt must be a string")
+    _validate_receipt_semantics(
+        result=value["result"],
+        reason_code=value["reasonCode"],
+        blocker=value["blocker"],
+        pack_blocker=value["packBlocker"],
+        head=value["head"],
+        pr_number=value["prNumber"],
+        stage=stage,
+    )
 
 
 def validate_lane(value: object, label: str) -> None:
@@ -846,21 +882,23 @@ def _build_receipt(
 ) -> dict[str, Any]:
     if result not in RESULTS:
         raise FleetControllerError("result is invalid")
-    if (result in REASON_REQUIRED) != (reason_code is not None):
-        requirement = "requires" if result in REASON_REQUIRED else "forbids"
-        raise FleetControllerError(f"result {result} {requirement} a reason code")
     if reason_code is not None:
         reason_code = safe_token(reason_code, "reason code")
-    if result in {"passed", "at-target"} and (blocker is not None or pack_blocker):
-        raise FleetControllerError(f"result {result} forbids blocker evidence")
     if blocker is not None:
         blocker = safe_token(blocker, "blocker")
-    if action["stage"] in PR_HEAD_STAGES and head is None:
-        raise FleetControllerError(f"{action['stage']} receipt requires head")
     if head is not None:
         head = full_sha(head, "head")
     if pr_number is not None:
         _integer(pr_number, "PR number", 1)
+    _validate_receipt_semantics(
+        result=result,
+        reason_code=reason_code,
+        blocker=blocker,
+        pack_blocker=pack_blocker,
+        head=head,
+        pr_number=pr_number,
+        stage=action["stage"],
+    )
     return {
         "actionId": action["actionId"],
         "attempt": action["attempt"],
