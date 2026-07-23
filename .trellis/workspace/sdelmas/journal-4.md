@@ -1926,3 +1926,42 @@ Added a shared read-only eligibility evaluator, retained housekeeping as the sol
 ### Next Steps
 
 - None - task complete
+
+
+## Session 201: Recover PR 232 against current main
+
+**Date**: 2026-07-23
+**Task**: Recover PR 232 against current main
+**Branch**: `codex/centralize-pr-eligibility-gates`
+
+### Summary
+
+Merged current main into PR 232 without rewriting history, preserved both releases and append-only journal evidence, regenerated exact-payload release evidence, and reconverged the exact head through review.
+
+### Main Changes
+
+- Integrated origin/main at 8293d0e with a normal merge commit while preserving the 0.33.0 eligibility evaluator and upstream 0.32.2 malformed-context behavior.
+- Kept upstream Session 199 unchanged, appended the centralization record as Session 200, and synchronized the journal index without losing historical evidence.
+- Regenerated canonical command-pack surfaces, Obsidian KB output, and the 0.33.0 fleet candidate ledger from the combined payload.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e0e5770` | merge: recover PR 232 against current main |
+
+### Testing
+
+- [OK] Focused review-preflight suite passed: 59 tests.
+- [OK] Canonical candidate validation passed all eight configured disposable consumer clones.
+- [OK] make check and the exact pushed-head deterministic review full-check passed.
+- [OK] PR #232 CI passed on e0e5770; Copilot exact-head review produced no new comments and GraphQL polling found zero unresolved threads.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
