@@ -2452,8 +2452,6 @@ class WorkLoopTests(InstallTestCase):
                     "start",
                     "--repo",
                     str(root),
-                    "--mode",
-                    "backlog",
                     "--selector",
                     "needs-design",
                     "--until",
@@ -2486,6 +2484,34 @@ class WorkLoopTests(InstallTestCase):
             )
         self.assertEqual(exit.exception.code, 2)
         self.assertIn("invalid choice", stderr.getvalue())
+
+    def test_cli_resumes_historical_design_mode_when_mode_is_omitted(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, state_path, lock_path = self.make_state(module, root, state_root)
+        module.release_lock(lock_path, state["runId"])
+        state["mode"] = "designs"
+        state["status"] = "paused"
+        module.atomic_write_json(state_path, state)
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "start",
+                    "--repo",
+                    str(root),
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(result, 0, stdout.getvalue())
+        resumed = json.loads(stdout.getvalue())
+        self.assertEqual(resumed["mode"], "designs")
+        self.assertEqual(resumed["status"], "active")
 
     def test_cli_pause_preserves_legacy_checkpoint_target(self) -> None:
         module = self.load_module()

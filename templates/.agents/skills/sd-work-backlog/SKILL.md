@@ -97,7 +97,7 @@ boundary. New runs always use the single `backlog` controller mode.
 
 ```bash
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-work-loop.py start --repo . --mode backlog \
+  scripts/sd-ai-command-pack-work-loop.py start --repo . \
   --selector <all|needs-design> --until <design|merge> --json
 ```
 

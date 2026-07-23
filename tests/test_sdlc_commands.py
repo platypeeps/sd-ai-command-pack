@@ -656,6 +656,7 @@ class SdlcCommandsTests(InstallTestCase):
             "Load only the exact reported reference",
         ):
             self.assertIn(pin, backlog_text)
+        self.assertNotIn("start --repo . --mode backlog", backlog_text)
         self.assertIn("SD_SHIP_MERGE_RESULT", ship_text)
         self.assertIn("trusted `sd-work-backlog` context", ship_text)
         self.assertIn("does not change stage order", ship_text)
