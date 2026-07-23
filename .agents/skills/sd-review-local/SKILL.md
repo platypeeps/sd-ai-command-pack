@@ -25,6 +25,14 @@ This is a local-review-only loop. It does not request remote reviewers, does not
 require a pull request, and must not stage, commit, or push unless the user
 separately asks for that.
 
+## Structured decisions
+
+Read [`../sd-help/references/structured-questions.md`](../sd-help/references/structured-questions.md)
+before asking. This skill owns `review-local.findings` and
+`review.scope-expansion`. Use finding multi-select only after verifying and
+deduplicating candidates. Do not ask for evidence gathering, the requested
+review run, or validation of a selected low-risk fix.
+
 ## Arguments
 
 Arguments arrive as free text with the invocation: bare flags and local

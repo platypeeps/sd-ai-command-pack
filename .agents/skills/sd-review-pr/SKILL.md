@@ -12,6 +12,14 @@ existing comments and CI, and requesting the configured remote reviewer after a
 clean local pass and after every pushed review-fix commit made during the loop.
 GitHub Copilot is the default remote reviewer unless a repo overrides it.
 
+## Structured decisions
+
+Read [`../sd-help/references/structured-questions.md`](../sd-help/references/structured-questions.md)
+before asking. This skill owns `review.higher-risk-fixes`,
+`review.scope-expansion`, and `review.round-extension`. Do not ask for ordinary
+low-risk fixes, bounded polls or retries, review-thread replies or resolution,
+or other actions already authorized by this invocation.
+
 ## Invocation Mode
 
 Standalone `sd-review-pr` is the default and runs finish-work after a clean

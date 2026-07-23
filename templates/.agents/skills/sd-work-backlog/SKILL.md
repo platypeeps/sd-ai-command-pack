@@ -16,6 +16,13 @@ and GitHub are authoritative across compaction, interruption, and resume.
 Reports from nested skills return to this controller and are never the overall
 loop's final response unless this skill records a valid stop condition.
 
+## Structured decisions
+
+Read [`../sd-help/references/structured-questions.md`](../sd-help/references/structured-questions.md)
+before asking. This skill owns `work-backlog.blocked-disposition` and
+`work-backlog.run-extension`. Do not ask at each iteration or for any routine
+lifecycle action already covered by the run-level authority contract.
+
 ## Arguments
 
 Parse the invocation before acquiring a lock or mutating repository state.

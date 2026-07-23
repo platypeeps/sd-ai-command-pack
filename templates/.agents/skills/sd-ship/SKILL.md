@@ -15,6 +15,14 @@ sd-ship only sequences and reports. Each stage runs under its own skill's
 preconditions, gates, and safety rules, and the chain's stop-points sit
 between stages, never inside them.
 
+## Structured decisions
+
+Read [`../sd-help/references/structured-questions.md`](../sd-help/references/structured-questions.md)
+before asking. During its review stage this composite carries
+`review.higher-risk-fixes`, `review.scope-expansion`, and
+`review.round-extension` unchanged from `sd-review-pr`. It adds no confirmation
+between routine stages already authorized by the invocation.
+
 ## When to use
 
 Run this command when work on a feature branch should travel the whole

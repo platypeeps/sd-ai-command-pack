@@ -11,6 +11,14 @@ mechanical review-cycle patterns, optionally inspect recent GitHub Copilot
 review comments, then update a repo-owned markdown file with a managed learning
 block.
 
+## Structured decisions
+
+Read [`../sd-help/references/structured-questions.md`](../sd-help/references/structured-questions.md)
+before asking. This skill owns only `review-learnings.external-target`; use it
+only when an external write target is required and no exact user-supplied path
+already resolves it. The default scan and repository-local update never need
+confirmation.
+
 ## Workflow
 
 Run these commands from the repository root. The script path shown below is the

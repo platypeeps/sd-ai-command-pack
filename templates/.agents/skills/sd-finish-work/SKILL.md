@@ -8,6 +8,13 @@ description: Use when the user wants the Software Delivery finish-work command t
 Wrap up the current Trellis session so task records, validation notes, and
 handoff state are ready for the user to disengage.
 
+## Structured decisions
+
+Read [`../sd-help/references/structured-questions.md`](../sd-help/references/structured-questions.md)
+before asking. This wrapper owns only `finish-work.file-ownership`; use it when
+the delegated flow cannot determine whether a dirty file belongs to the active
+task. Ordinary task archival, journal work, and validation need no confirmation.
+
 1. Resolve the `trellis-finish-work` skill by name using the agent's trusted
    skill discovery mechanism for installed skills.
 2. If that skill is missing, unreadable, empty, resolves to more than one

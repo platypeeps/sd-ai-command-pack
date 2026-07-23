@@ -13,6 +13,13 @@ changes, creates or reuses the branch pull request, then hands off to
 Copilot-style polling when configured, fixes, CI handling, and the bounded
 review loop.
 
+## Structured decisions
+
+Read [`../sd-help/references/structured-questions.md`](../sd-help/references/structured-questions.md)
+before asking. This skill owns only `create-pr.file-scope`; use it for genuinely
+ambiguous file inclusion, not for the normal publish or PR-reuse path. Never
+offer a question as a way to cross the force-push or destructive boundary.
+
 ## Safety Rules
 
 - Require `gh` and an authenticated GitHub session before creating or resolving

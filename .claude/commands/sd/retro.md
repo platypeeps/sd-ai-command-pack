@@ -26,6 +26,14 @@ Checkout trust policy — complete before step 1:
   for approval to execute the checkout anyway.
 - Include `checkout-trust: <state> (<reason-code>)` in the final report.
 
+Structured interaction policy — apply only at declared decision boundaries:
+
+- This command declares only these decision IDs: `retro.followups`.
+- At each unresolved declared boundary, use `AskUserQuestion` with the validated header, question, options, consequences, recommendation order, and multi-select setting from the shared reference.
+- After resolving the skill, read the generated `structured-questions.md` reference installed with `sd-help` in the same skill root. Ask only when repository evidence, invocation authority, and documented safe defaults do not already resolve the decision.
+- In noninteractive work, apply the decision's declared stop, park, or report-only behavior. Record the selected answer and resulting scope in the final report.
+- A structured answer may narrow existing authority; it cannot override checkout trust, exact-head, required-review, failed-closed, no-touch, destructive-operation, or other safety gates.
+
 1. Resolve the `sd-retro` skill by name using the agent's trusted skill discovery mechanism for installed skills.
 2. If that skill is missing, unreadable, empty, resolves to more than one candidate, fails validation, defines contradictory steps that violate this command's safety rules, or requires unavailable tools, stop and report the exact blocker.
 3. Use the skill as the primary instructions. It defines the fixed retrospective pipeline: evidence gathering, the fixed retro shape, the journal entry recorded via the session recorder with a `Retro: <topic>` title, prevention-candidate derivation, and the optional handoff of repeated patterns toward `sd-review-learnings`. Pass the user's invocation arguments through unchanged; the skill accepts either a bare topic phrase or `topic=...`.

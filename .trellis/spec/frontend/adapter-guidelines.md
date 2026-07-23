@@ -554,8 +554,18 @@ noise.
   executes_checkout_code: bool = True, mutates_local: bool = False,
   mutates_remote: bool = False, trusted_static_only: bool = False,
   safe_mode: str | None = None, target_families: tuple[str, ...] = ...,
-  configuration_keys: tuple[str, ...] = ())`.
+  configuration_keys: tuple[str, ...] = (),
+  interaction_decisions: tuple[str, ...] = ())`.
 - Family row: `CommandFamily(id: str, label: str, summary: str)`.
+- Platform capability: `PlatformInfo(...,
+  structured_question_tool: str | None = None)`; capability names are exact
+  host tool identifiers or `None`, never inferred from model identity.
+- Interaction rows:
+  `InteractionOption(label: str, consequence: str,
+  recommended: bool = False)` and
+  `InteractionDecision(id: str, category: str, header: str, question: str,
+  options: tuple[InteractionOption, ...] = (), option_source: str | None =
+  None, multi_select: bool = False, noninteractive: str = "stop")`.
 - Retirement row: `RetiredCommandSurface(id, identifiers, installed_targets,
   removed_version, owner_task, ...)`, with targets derived by
   `command_installed_targets()` rather than copied into the remover.
@@ -585,6 +595,17 @@ noise.
   default. A `trusted_static_only` command cannot execute checkout code, mutate
   local or remote state, or declare a safe mode; non-executing commands must be
   explicitly trusted-static.
+- Structured interaction metadata is also conservative. Every declared
+  decision ID resolves to one validated descriptor and at least one owning
+  command. Static descriptors have two or three mutually exclusive options,
+  put the only recommendation first, and state each consequence. Dynamic
+  descriptors are multi-select and explicitly describe independent runtime
+  candidates. Headers are at most 12 characters and true batches contain no
+  more than three independent questions.
+- The canonical interaction categories are ambiguous scope, higher-risk
+  mutation, external path, blocked-run disposition, finding/task batch, and
+  bounded budget extension. Each descriptor declares `stop`, `park`, or
+  `report-only` behavior for noninteractive execution.
 - The generator reads hand-authored neutral bodies only from
   `.github/command-sources/`, inserts exactly one capability-driven
   checkout-trust policy before skill resolution, and writes guarded neutral
@@ -592,6 +613,19 @@ noise.
   from the same guarded body. Any declared hand-authored platform override must
   pass the same marker and ordering validation; platform-specific sources
   cannot opt out.
+- For commands with `interaction_decisions`, the generator inserts one
+  structured-interaction policy after checkout trust and before skill
+  resolution. Claude adapters name `AskUserQuestion`; hosts without a declared
+  capability receive the same concise plain-question fallback and must not
+  name or guess a tool. The generated host-neutral descriptor reference lives
+  at `sd-help/references/structured-questions.md` so existing skill-root
+  classifiers and manifest fanout install it portably.
+- Structured answers select or narrow behavior inside existing invocation
+  authority. They cannot override checkout trust, exact-head, required-review,
+  failed-closed, no-touch, destructive-operation, or merge gates. Do not add
+  prompts for deterministic checks, ordinary in-scope fixes, bounded polling,
+  review-thread replies or resolution, normal backlog iterations, or an
+  already-authorized housekeeping merge.
 - Checkout trust is classified using trusted host-provided, read-only Git and
   GitHub metadata. Fork heads are untrusted; detached, unreadable, unavailable,
   or contradictory identity is indeterminate. Both states stop before any
@@ -646,8 +680,15 @@ noise.
 - Duplicate/case-folding manifest target -> generation fails.
 - Contradictory command capabilities or an unsafe safe-mode id -> registry
   import fails.
+- Invalid or duplicate interaction IDs, unknown categories, malformed headers
+  or questions, missing consequences, invalid recommendation order, invalid
+  option counts, non-independent dynamic selections, unknown command links,
+  unreferenced descriptors, or invalid platform tool identifiers -> registry
+  import fails.
 - Missing or duplicate skill-resolution anchor, or an authored checkout-trust
   marker -> generation fails before writing any adapter.
+- An authored structured-interaction marker, an unknown interaction platform,
+  or an unknown decision link -> generation fails before writing any adapter.
 - Missing registered sources/targets, unknown public paths, live retired
   identifiers/configuration keys, stale or unsafe allowances, and retired
   manifest entries -> command-surface lint fails with exact file/line JSON
@@ -663,21 +704,36 @@ noise.
 
 - Good: one registry row plus canonical skill/adapter sources regenerates every
   adapter, manifest row, and the version-bound help catalog.
+- Good: one validated decision descriptor and its owning command links
+  regenerate Claude-native guidance, portable fallbacks, the shared reference,
+  manifests, and installed mirrors from one contract.
 - Base: a catalog command missing from the current platform remains visible
   with an honest availability label and a limited explanation.
+- Base: an interactive host without a declared structured capability asks one
+  concise plain-text question with the registered choices; a noninteractive
+  host applies the descriptor's stop, park, or report-only outcome.
 - Bad: a new command is added to a hand-written help list, a reference is copied
-  to only `.agents`, or help executes a recommended mutating workflow.
+  to only `.agents`, a neutral adapter names `AskUserQuestion`, or a question
+  is used to approve a failed safety gate.
 
 ### 6. Tests Required
 
 - Assert registry uniqueness, family completeness, short-name consistency, and
   source-only policy, conservative capability defaults, target-family data,
   and exemption safety.
+- Assert the complete interaction schema: identifier/category links, header
+  and batching limits, static option counts, recommendation order, consequence
+  text, independent multi-select sources, noninteractive disposition, and
+  valid platform tool identifiers.
 - Assert deterministic family/catalog order, canonical frontmatter
   descriptions, version binding, Markdown escaping, and no-write failure.
 - Assert reference path validation and manifest fanout to every skill root.
 - Assert adapter generation/parity, install/update/remove behavior, root
   dogfood parity, and manifest case-fold uniqueness.
+- Assert Claude capability-present guidance, capability-absent plain fallback,
+  noninteractive behavior, no unsupported tool-name leakage, no redundant
+  prompts for invocation-authorized actions, shared-reference fanout, and
+  template/root parity.
 - Enumerate every live command and supported generated adapter, proving that
   execution-capable commands have the canonical policy before skill resolution
   and that only declared trusted-static commands receive the exemption.
@@ -707,6 +763,19 @@ COMMAND_REGISTRY = (
         "example",
         "verification-improvement",
         mutates_local=True,
+        interaction_decisions=("example.scope",),
+    ),
+)
+INTERACTION_DECISIONS = (
+    InteractionDecision(
+        "example.scope",
+        "ambiguous-scope",
+        "Scope",
+        "Which bounded scope should be used?",
+        (
+            InteractionOption("Keep scope", "Preserve the current boundary.", True),
+            InteractionOption("Expand", "Use only the confirmed wider boundary."),
+        ),
     ),
 )
 COMMAND_NAMES = tuple((item.name, item.short) for item in COMMAND_REGISTRY)
