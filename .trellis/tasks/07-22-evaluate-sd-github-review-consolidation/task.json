@@ -1,0 +1,28 @@
+{
+  "id": "evaluate-sd-github-review-consolidation",
+  "name": "evaluate-sd-github-review-consolidation",
+  "title": "Evaluate sd-github-review repository consolidation",
+  "description": "Keep sd-ai-command-pack and sd-github-review separate behind a staged review protocol while replacing the pack's overlapping review and full-check commands with one clean deterministic check surface and one unified review lifecycle.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-22",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-22-integrate-routed-review-backends"
+  ],
+  "parent": "07-22-streamline-sd-skill-workflows",
+  "relatedFiles": [],
+  "notes": "Decision: keep repositories separate behind a versioned staged-review protocol and make a non-backward-compatible command-pack cutover. Public names, scope-based fix defaults, optional-local failure continuation, worktree-versus-PR publishing boundaries, and graceful optional router absence are approved. Missing optional setup degrades without prompting; explicit/required remote review stops early, while broken or ambiguous router state fails closed. Every new head requires a distinct router decision/receipt; router auto policy alone may classify a verified bookkeeping-only successor as none. The router is noninteractive and never executes PR checkout code. Local child 07-22-integrate-routed-review-backends owns the clean surface and consumes the router contract published first by platypeeps/sd-github-review task 07-22-publish-routed-review-receipt-contract.",
+  "meta": {}
+}
