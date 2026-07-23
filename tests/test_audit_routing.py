@@ -38,6 +38,15 @@ class AuditRoutingTests(InstallTestCase):
     def charter_rows(report):
         return {row["id"]: row for row in report["charters"]}
 
+    def test_bounded_evidence_is_deduplicated_sorted_and_capped(self) -> None:
+        router = self.load_router()
+        values = [f"path-{index:03d}" for index in reversed(range(40))]
+
+        bounded = router._bounded([*values, *values])
+
+        self.assertEqual(len(bounded), router.MAX_EVIDENCE)
+        self.assertEqual(bounded, tuple(sorted(set(values))[: router.MAX_EVIDENCE]))
+
     def test_standard_keeps_core_and_dimensions_are_additive(self) -> None:
         router = self.load_router()
         root = self.make_fixture({"main.py": "print('hello')\n"})

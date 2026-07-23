@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import heapq
 import json
 import os
 import stat
@@ -306,7 +307,7 @@ class Fingerprint:
 
 
 def _bounded(items: Iterable[str]) -> tuple[str, ...]:
-    return tuple(sorted(set(items))[:MAX_EVIDENCE])
+    return tuple(heapq.nsmallest(MAX_EVIDENCE, set(items)))
 
 
 def _path_name(path: str) -> str:
