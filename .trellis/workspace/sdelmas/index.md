@@ -7,8 +7,8 @@
 ## Current Status
 
 <!-- @@@auto:current-status -->
-- **Active File**: `journal-4.md`
-- **Total Sessions**: 201
+- **Active File**: `journal-5.md`
+- **Total Sessions**: 202
 - **Last Active**: 2026-07-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1967 | Active |
+| `journal-5.md` | ~43 | Active |
+| `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 202 | 2026-07-23 | Remove redundant PR 232 recovery stash | - | `main` |
 | 201 | 2026-07-23 | Recover PR 232 against current main | `e0e5770` | `codex/centralize-pr-eligibility-gates` |
 | 200 | 2026-07-23 | Centralize PR eligibility and exact-head gates | `addda74`, `e73369a`, `5511a0b` | `codex/centralize-pr-eligibility-gates` |
 | 199 | 2026-07-23 | Reject malformed task context JSONL | `f93a607`, `ddd9af5` | `codex/reject-malformed-task-context-jsonl` |
