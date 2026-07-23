@@ -1655,3 +1655,78 @@ Created, reviewed, and aligned the Trellis planning program for streamlining the
 ### Next Steps
 
 - None - task complete
+
+
+## Session 194: Normalize SD workflow program task topology
+
+**Date**: 2026-07-22
+**Task**: Normalize SD workflow program task topology
+**Branch**: `codex/normalize-sd-workflow-program-task-topology`
+
+### Summary
+
+Converted redundant program planning into explicit Trellis ownership, added the S01-S11 integration-validation task, retired obsolete parent files and references, and passed the full repository quality gate.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d9a377c` | (see git log) |
+
+### Testing
+
+- `make check`
+- `node scripts/sd-ai-command-pack-review-preflight.mjs`
+- `python3 ./.trellis/scripts/task.py validate 07-22-normalize-sd-workflow-program-task-topology`
+- `python3 ./.trellis/scripts/task.py validate 07-22-validate-sd-workflow-program-integration`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 195: Review PR #227 task topology
+
+**Date**: 2026-07-22
+**Task**: Review PR #227 task topology
+**Branch**: `codex/normalize-sd-workflow-program-task-topology`
+
+### Summary
+
+Addressed two Copilot task-topology findings, reached a clean third review round, and verified the deterministic gate plus GitHub CI.
+
+### Main Changes
+
+- Set the integration task PR base to main.
+- Mapped the completed topology-normalization child in the authoritative parent PRD.
+- Replied to and resolved both Copilot review threads.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3ebf44a` | fix: target integration task at main |
+| `b712d6e` | docs: map completed topology migration child |
+
+### Testing
+
+- [OK] bash scripts/sd-ai-command-pack-review-full-check.sh passed after each review fix.
+- [OK] GitHub CI passed lint, security, release payload, Ubuntu 3.10 and 3.13, and macOS 3.13.
+- [OK] Copilot round 3 reviewed b712d6e with no new comments; all review threads are resolved.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

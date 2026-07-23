@@ -28,7 +28,9 @@
     "07-22-add-portable-structured-questions",
     "07-22-optimize-audit-charter-routing",
     "07-22-structure-skill-runtime-contracts",
-    "07-22-add-command-surface-drift-lint"
+    "07-22-add-command-surface-drift-lint",
+    "07-22-normalize-sd-workflow-program-task-topology",
+    "07-22-validate-sd-workflow-program-integration"
   ],
   "parent": null,
   "relatedFiles": [],

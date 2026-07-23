@@ -18,12 +18,12 @@ four-command warning allowlist with a canonical, generated, fail-closed policy.
 
 ## Dependencies
 
-- This is an independent Wave 1 foundation with no implementation prerequisite.
+- This is an independent foundation with no implementation prerequisite.
 - It owns canonical checkout-trust metadata and generated adapter preflight;
   downstream command-surface work, including routed review, consumes that
   policy rather than defining command-specific exceptions.
-- If another Wave 1 task lands generator or manifest changes first, reconcile
-  against that contract without restoring earlier generated output.
+- If another foundation task lands generator or manifest changes first,
+  reconcile against that contract without restoring earlier generated output.
 
 ## Requirements
 

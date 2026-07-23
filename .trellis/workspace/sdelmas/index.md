@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 193
+- **Total Sessions**: 195
 - **Last Active**: 2026-07-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1657 | Active |
+| `journal-4.md` | ~1730 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +32,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 195 | 2026-07-22 | Review PR #227 task topology | `3ebf44a`, `b712d6e` | `codex/normalize-sd-workflow-program-task-topology` |
+| 194 | 2026-07-22 | Normalize SD workflow program task topology | `d9a377c` | `codex/normalize-sd-workflow-program-task-topology` |
 | 193 | 2026-07-22 | Plan streamlined SD skill workflows | `225d0017e0ed4198deaea84d0eebdd67c340691f`, `f028ac78c94d232054a7091602c3af3571b10d2a`, `67493187fa57aac8922a6e3d4bec5e611d84bc31`, `547d8fe55fdb588985aca86261863bf73a80fda9`, `6cbecc62e9d931967922861a8b79e0384c1056e9` | `codex/streamline-sd-skill-workflows` |
 | 192 | 2026-07-22 | Validate task context before PR publication | `ee245d2`, `7a5acb3`, `1bdaf7b`, `e9272cb`, `37f3b73` | `codex/validate-task-context-before-pr` |
 | 191 | 2026-07-22 | Fix stale finish-work head hint | `43a3f9ced3e3a17766fe4459a2d5ab277020e723` | `codex/fix-housekeeping-finish-work-head-hint` |
