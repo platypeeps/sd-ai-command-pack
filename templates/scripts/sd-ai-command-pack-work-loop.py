@@ -2044,9 +2044,19 @@ def status_snapshot(
         lock, lock_error = _read_status_lock(lock_path)
         terminal_lock, terminal_lock_error = _read_status_lock(terminal_lock_path)
         if not state_path.is_file():
+            repository_digest = identity["digest"]
             reason = (
                 "owner_invalid"
-                if lock_error or terminal_lock_error
+                if lock_error
+                or terminal_lock_error
+                or (
+                    lock is not None
+                    and lock.get("repositoryDigest") != repository_digest
+                )
+                or (
+                    terminal_lock is not None
+                    and terminal_lock.get("repositoryDigest") != repository_digest
+                )
                 else "ledger_missing"
                 if lock is not None or terminal_lock is not None
                 else "normal"

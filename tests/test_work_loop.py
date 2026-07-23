@@ -2311,6 +2311,20 @@ class WorkLoopTests(InstallTestCase):
         missing = module.status_snapshot(missing_root, state_root=missing_state_root)
         self.assertEqual(missing["recovery"]["reasonCode"], "ledger_missing")
 
+        mismatched_root = self.make_repo()
+        mismatched_state_root = mismatched_root.parent / "state"
+        _state, mismatched_path, mismatched_lock_path = self.make_state(
+            module, mismatched_root, mismatched_state_root
+        )
+        mismatched_path.unlink()
+        mismatched_lock = module.read_json(mismatched_lock_path)
+        mismatched_lock["repositoryDigest"] = "0" * 64
+        module.atomic_write_json(mismatched_lock_path, mismatched_lock)
+        mismatched = module.status_snapshot(
+            mismatched_root, state_root=mismatched_state_root
+        )
+        self.assertEqual(mismatched["recovery"]["reasonCode"], "owner_invalid")
+
         stale_root = self.make_repo()
         stale_state_root = stale_root.parent / "state"
         _state, _state_path, stale_lock_path = self.make_state(
