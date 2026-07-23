@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 208
+- **Total Sessions**: 209
 - **Last Active**: 2026-07-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~297 | Active |
+| `journal-5.md` | ~337 | Active |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 209 | 2026-07-23 | Harden review-learnings write boundaries | `47e60ae`, `610d9b3` | `codex/harden-review-learnings-boundaries` |
 | 208 | 2026-07-23 | Deterministic fleet refresh orchestration | `1c3652e94cb5f2b0b9f7c370b19ffbcdabb4e1b9`, `416325be7683fc83b73e81c12a8ebfbbca9cc7c6`, `a22280dcdcc0768eb787c85b320c09ab93624b0d`, `85d349ee801cda96f366cd2892c34cf350a408b4`, `57d0105f350a1e0ec5eba6a2c316db950634ca47`, `faa07acff2e9c5c50012fabf9b3eb575f391e58f`, `e9741c56149753f8252786561746d01f82a767a4`, `42bd88725922d03cd4608cdec66243f181bcf52d`, `a8740158c8093ec73a0089de16e5cd7fcdec3b3e`, `9cf184114396746a3fcce713d4891dcab1366e29`, `e0bc2147b1daeb1156e833ee0dab74b2ad6cd959`, `763464ba8ccd908b1e678cd5e855b8927f0baba2`, `ce1ad3d60276763d89cd4ef4cd3ee5f4d3d84d0c`, `23b3dddcaf8c5957dc6af29e51fd3fd6b3795020`, `ba644232db056b487b024a0b91b589bce7eca0db`, `4fd7da11089ed4de1e43c39e6772f49bc4f1652e`, `03c61bf3e18085fab1433b099506e32501893c98`, `bad9102f1b5403e88fe23d8a00701a7acc078a4c`, `9ea193cb1169a13de349b5ae7f2879914dc5fea6`, `f31371580fe0316e228e6183a5de7a4ffa9cd47e`, `873e35a653c1563a7c691b69286cc1d7dd5f59be`, `6be8d8dbf0179cf5dd11dbc76559fe6d10231cae` | `codex/determinize-fleet-refresh-orchestration` |
 | 207 | 2026-07-23 | Portable structured question contracts | `deb5569bfeac98f85a9c1bf75b6d5728e3646aca`, `9f3618f07724a0c520b3e587918202a04dd8e388` | `codex/add-portable-structured-questions` |
 | 206 | 2026-07-23 | Expand sd-status selectable inventory | `af5f7e3`, `4b1664f`, `0c3c57d`, `247edda` | `codex/expand-sd-status-selectable-inventory` |

@@ -298,3 +298,42 @@ Implemented and hardened the resumable fleet campaign controller, validated all 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 209: Harden review-learnings write boundaries
+
+**Date**: 2026-07-23
+**Task**: Harden review-learnings write boundaries
+**Branch**: `codex/harden-review-learnings-boundaries`
+
+### Summary
+
+Made review-learnings read-only by default, added explicit atomic local and exact-path external update modes, shipped structured reporting, and closed a remote-review TOCTOU finding.
+
+### Main Changes
+
+- Added canonical target planning, exact external authorization, strict UTF-8 and ownership checks, identity and digest revalidation, and atomic sibling replacement.
+- Synchronized skill, prompt, command, documentation, manifest, and generated adapter surfaces for release 0.37.1.
+- Addressed Copilot's pre-temp-file TOCTOU finding with an additional revalidation and focused regression test.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `47e60ae` | feat: harden review-learnings write boundaries |
+| `610d9b3` | fix: revalidate before review-learnings temp creation |
+
+### Testing
+
+- [OK] 41 focused review-learnings tests, Ruff, mypy, template parity, and diff hygiene passed.
+- [OK] All eight candidate fleet repositories passed final payload validation.
+- [OK] make check and the sd-review-pr local full gate passed; PR #238 CI and Copilot round 2 were clean.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
