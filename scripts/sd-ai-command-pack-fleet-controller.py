@@ -238,7 +238,11 @@ class CampaignStore:
         try:
             return os.open(
                 self.lock_path,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
                 0o600,
             )
         except FileExistsError:

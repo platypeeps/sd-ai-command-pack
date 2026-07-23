@@ -758,6 +758,13 @@ class FleetControllerTests(InstallTestCase):
         self.assertEqual(loaded, state)
         self.assertEqual(store.directory.stat().st_mode & 0o777, 0o700)
         self.assertEqual(store.state_path.stat().st_mode & 0o777, 0o600)
+        with mock.patch.object(controller.os, "open", return_value=17) as opened:
+            self.assertEqual(store._create_lock(), 17)
+        flags = opened.call_args.args[1]
+        if hasattr(controller.os, "O_NOFOLLOW"):
+            self.assertTrue(flags & controller.os.O_NOFOLLOW)
+        if hasattr(controller.os, "O_CLOEXEC"):
+            self.assertTrue(flags & controller.os.O_CLOEXEC)
         with mock.patch.object(controller.os, "fchmod", None):
             store.write(state)
         self.assertEqual(store.load(), state)
