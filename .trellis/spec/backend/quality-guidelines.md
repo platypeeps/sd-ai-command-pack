@@ -192,9 +192,11 @@ that exercise the generic JavaScript review preflight.
 - Diff-scoped Trellis task checks inspect every changed `implement.jsonl` and
   `check.jsonl` file regardless of whether its task is planning, in progress,
   completed, or archived. A changed non-planning `task.json` also checks both
-  sibling context files. Parsed records with an own `_example` key fail; rows
-  with a `file` key may reference only `.trellis/spec/**` or
-  `.trellis/tasks/**/research/**`; empty and grounded context pass. Present
+  sibling context files. Every non-empty line must parse as one JSON value;
+  malformed rows fail with bounded file-and-line diagnostics. Parsed records
+  with an own `_example` key fail; rows with a `file` key may reference only
+  `.trellis/spec/**` or `.trellis/tasks/**/research/**`; empty and grounded
+  context pass. Present
   changed context artifacts outside the active or
   month-bucketed archive layout fail even when the directory entry is a broken symlink;
   archive task directory names remain unrestricted for legacy Trellis compatibility,
@@ -257,6 +259,8 @@ that exercise the generic JavaScript review preflight.
   line, and corrective action; unchanged baseline sessions remain accepted.
 - Changed planning/in-progress/completed/archived context owns `_example` ->
   fail with the exact file and line plus grounded-context-or-empty guidance.
+- Changed context contains a malformed non-empty JSONL row -> fail with the
+  exact file and line without echoing the malformed content.
 - Changed task metadata violates identity, lifecycle, branch, layout, or
   reciprocal-link invariants -> fail with the exact `task.json` path and field;
   unchanged historical metadata -> remain grandfathered.
@@ -340,9 +344,9 @@ that exercise the generic JavaScript review preflight.
   contradictions, both exact fallback forms, incomplete/planning-only records,
   failure/skip wording, concrete Testing evidence, line-specific diagnostics,
   and unchanged baseline grandfathering.
-- Planning scaffold rejection, multi-file aggregation, empty and grounded
-  context acceptance, newly archived seed rejection, untouched historical
-  grandfathering, and symlink skipping.
+- Planning scaffold and malformed-JSONL rejection, multi-file aggregation,
+  empty and grounded context acceptance, newly archived seed rejection,
+  untouched historical grandfathering, and symlink skipping.
 - Valid active, archived, parent/child, and stacked-base task metadata;
   unchanged-history grandfathering; identity, lifecycle, branch, and layout
   rejection; reciprocal-link failures; malformed JSON; and symlink rejection.

@@ -1,0 +1,30 @@
+{
+  "id": "reject-malformed-task-context-jsonl",
+  "name": "reject-malformed-task-context-jsonl",
+  "title": "Reject malformed task context JSONL",
+  "description": "Fail closed when changed Trellis task context manifests contain malformed non-empty JSONL rows, with deterministic diagnostics and regression coverage.",
+  "status": "completed",
+  "dev_type": "bugfix",
+  "scope": "review-preflight",
+  "package": null,
+  "priority": "P1",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-23",
+  "completedAt": "2026-07-23",
+  "branch": "codex/reject-malformed-task-context-jsonl",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "f93a607",
+  "pr_url": "https://github.com/platypeeps/sd-ai-command-pack/pull/231",
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
+    "scripts/sd-ai-command-pack-review-preflight.mjs",
+    "tests/test_review_preflight.py"
+  ],
+  "notes": "Consumer PR #8 exposed a fail-open JSONL parse path in the 0.32.1 preflight payload.",
+  "meta": {}
+}
