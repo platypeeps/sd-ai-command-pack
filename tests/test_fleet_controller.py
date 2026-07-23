@@ -894,6 +894,29 @@ class FleetControllerTests(InstallTestCase):
         )
         self.assertEqual(status, 2)
         self.assertIn("release", error)
+        with mock.patch.object(
+            controller.CampaignStore,
+            "_prepare_directory",
+            side_effect=PermissionError(13, "Permission denied", "/private/state"),
+        ):
+            status, output, error = self.run_cli(
+                controller,
+                "plan",
+                *common,
+                "--release",
+                "0.37.0",
+                "--fleet",
+                str(fleet),
+                "--manifest",
+                str(manifest),
+                "--consumer",
+                "canary-a",
+            )
+        self.assertEqual((status, output), (2, None))
+        self.assertEqual(
+            error, "error: filesystem operation failed: Permission denied\n"
+        )
+        self.assertNotIn("/private/state", error)
 
 
 if __name__ == "__main__":

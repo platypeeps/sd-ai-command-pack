@@ -1462,8 +1462,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    store = CampaignStore(args.repo, args.campaign, args.state_home)
     try:
+        store = CampaignStore(args.repo, args.campaign, args.state_home)
         if args.command == "plan":
             fleet_path = args.fleet or args.repo / "docs/fleet/consumers.json"
             manifest_path = args.manifest or args.repo / "manifest.json"
@@ -1594,6 +1594,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 0
     except (FleetControllerError, fleet_lib.FleetConfigError) as error:
         print(f"error: {error}", file=sys.stderr)
+        return 2
+    except OSError as error:
+        detail = error.strerror or type(error).__name__
+        print(f"error: filesystem operation failed: {detail}", file=sys.stderr)
         return 2
     raise AssertionError("unreachable command")
 
