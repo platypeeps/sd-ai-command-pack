@@ -301,12 +301,14 @@ paths by the local preflight.
 
 ### sd-audit-repo
 
-Runs the formal multi-dimension repository audit: one read-only reviewer per
-charter dimension, adversarial verification of findings, Trellis backlog
-reconciliation, and a canonical report backed by the committed findings ledger
-at `.trellis/audit/ledger.md`. Bare exact charter names such as `security
-testing` select dimensions; `dimensions=`, `depth=`, and `follow-up` remain
-available explicitly. Details live in the installed guide's
+Runs the formal multi-dimension repository audit through a deterministic
+applicability preflight, one read-only reviewer per selected charter,
+adversarial verification, Trellis backlog reconciliation, and a canonical
+report backed by the committed findings ledger at `.trellis/audit/ledger.md`.
+`depth=standard` keeps a non-removable core and evidence-routes optional
+charters; `depth=exhaustive` runs all charters. Bare charter names and
+`dimensions=` add coverage, while `follow-up` rechecks ledger findings. Details
+live in the installed guide's
 [Commands](docs/SD_AI_COMMAND_PACK.md#commands) section.
 
 ### sd-watch-pr

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "sd-ai-command-pack",
-  "version": "0.37.1",
+  "version": "0.38.0",
   "license": "MIT",
   "description": "Install project-local SD AI command workflows, Prism/Gito defaults, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
@@ -144,6 +144,13 @@
       "kind": "script",
       "source": "templates/scripts/sd_ai_command_pack_lib.py",
       "target": "scripts/sd_ai_command_pack_lib.py",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "script",
+      "source": "templates/scripts/sd-ai-command-pack-audit-route.py",
+      "target": "scripts/sd-ai-command-pack-audit-route.py",
       "install": "always"
     },
     {

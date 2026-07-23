@@ -78,6 +78,8 @@ Quick links:
 - `scripts/sd-ai-command-pack-toolchain.sh`: non-mutating toolchain doctor and
   deterministic Python resolver used by SD workflows before dependency-sensitive
   checks.
+- `scripts/sd-ai-command-pack-audit-route.py`: deterministic repository
+  fingerprinting and charter selection for standard and exhaustive audits.
 - `scripts/sd-ai-command-pack-housekeeping.sh`: canonical post-merge housekeeping script.
 - `scripts/sd-ai-command-pack-status.py`: read-only local/fleet status collector
   and schema-versioned JSON reporter used by housekeeping final verification.
@@ -981,23 +983,31 @@ instead of inventing work, and if the whole backlog is empty it says the
 backlog is clear rather than omitting the section.
 
 The `sd-audit-repo` command runs the formal multi-dimension repository audit.
-It is charter-driven: one read-only reviewer per dimension, with the charters
-installed at `.agents/skills/sd-audit-repo/charters/` (12 always-on
-dimensions plus consumer-impact, observability, and accessibility-i18n when
-the fingerprint stage selects them). The pipeline is fixed and ordered:
-fingerprint → dimension reviews → adversarial verification → synthesis → Trellis reconciliation → report + ledger.
+It is charter-driven: one read-only reviewer per selected dimension, with the
+charters installed at `.agents/skills/sd-audit-repo/charters/`. The shipped
+`scripts/sd-ai-command-pack-audit-route.py` helper deterministically records
+repository fingerprints and every charter's applicability before dispatch.
+The pipeline is fixed and ordered:
+applicability preflight → dimension reviews → adversarial verification → synthesis → Trellis reconciliation → report + ledger.
 
 Arguments: bare exact charter names such as `security testing`, or the explicit
-`dimensions=<a,b,c>` form, restrict the run to the named charters; unknown names are an error, not a silent skip. `depth=quick|standard|deep`
-controls verification (quick skips it, standard refutes P0/P1 findings, deep
-refutes P0–P2 with 2-of-3 votes on P0); `follow-up` re-verifies open ledger
-items against the current tree instead of sweeping the whole repository.
+`dimensions=<a,b,c>` form, add charters; unknown names are an error, not a silent skip.
+`depth=standard` (the default) always runs correctness, security,
+testing, tooling, and release-hygiene, then selects optional charters from
+visible file, manifest, dependency, language, infrastructure, datastore, API,
+UI, and deployment evidence. `depth=exhaustive` runs every charter and is the
+reference for release, security, or policy-required assurance. Classification
+failure falls back to exhaustive rather than silently shrinking coverage.
+`follow-up` re-verifies open ledger items against the current tree instead of
+sweeping the whole repository.
 
 Every audit report contains six mandatory sections — Verdict, Findings,
 Trellis reconciliation, Prioritized actions, Ledger delta, and
 Coverage & limits — and empty sections state their emptiness explicitly
-instead of disappearing. Findings carry fixed scores: severity P0–P3, effort
-S/M/L, confidence Verified or Plausible.
+instead of disappearing. Coverage enumerates every charter as
+`run|not-applicable|not-selected|failed`, with its reason and evidence, and a
+standard report never claims exhaustive assurance. Findings carry fixed
+scores: severity P0–P3, effort S/M/L, confidence Verified or Plausible.
 
 Audit findings persist in the committed ledger at `.trellis/audit/ledger.md`.
 The orchestrator assigns monotonic `A-NNN` finding IDs that are never reused,

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.38.0 - 2026-07-23
+
+- Add a deterministic, versioned audit-charter applicability router with a
+  non-removable standard core, additive dimensions, transparent evidence, and
+  fail-safe exhaustive fallback.
+- Replace legacy quick/deep audit depths with `standard|exhaustive`, enumerate
+  every charter's coverage state, and calibrate standard routing against UI,
+  database, API, infrastructure, dependency, and release fixtures.
+
 ## 0.37.1 - 2026-07-23
 
 - Make `sd-review-learnings` observably read-only by default, constrain local
