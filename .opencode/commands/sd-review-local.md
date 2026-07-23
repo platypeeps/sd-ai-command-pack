@@ -30,6 +30,14 @@ Checkout trust policy — complete before step 1:
   for approval to execute the checkout anyway.
 - Include `checkout-trust: <state> (<reason-code>)` in the final report.
 
+Structured interaction policy — apply only at declared decision boundaries:
+
+- This command declares only these decision IDs: `review-local.findings`, `review.scope-expansion`.
+- Use a host-native structured-question capability only when it is actually available. Otherwise ask one concise plain-text question with the same choices and consequences. Do not invent a tool name.
+- After resolving the skill, read the generated `structured-questions.md` reference installed with `sd-help` in the same skill root. Ask only when repository evidence, invocation authority, and documented safe defaults do not already resolve the decision.
+- In noninteractive work, apply the decision's declared stop, park, or report-only behavior. Record the selected answer and resulting scope in the final report.
+- A structured answer may narrow existing authority; it cannot override checkout trust, exact-head, required-review, failed-closed, no-touch, destructive-operation, or other safety gates.
+
 1. Resolve the `sd-review-local` skill by name using the agent's trusted skill discovery mechanism for installed skills.
 2. Verify that `scripts/sd-ai-command-pack-review-local.sh` exists relative to the repository root. If the skill or script is missing, unreadable, empty, resolves to more than one candidate, fails validation, defines contradictory steps that violate this command's safety rules, requires unavailable tools, or cannot execute, stop and report the exact blocker.
 3. Use the skill as the primary instructions; it is the source of truth for scope selection, default tools, standard exclusions, and the fix loop.

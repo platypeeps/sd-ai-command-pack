@@ -195,6 +195,19 @@ def apply_platform_body_deviations(platform: str, command: str, body: str) -> st
     if platform == "claude" and command in CLAUDE_COMMAND_ALIAS_REWRITES:
         platform_text, neutral_text = CLAUDE_COMMAND_ALIAS_REWRITES[command]
         body = body.replace(platform_text, neutral_text)
+    command_info = next(
+        (
+            candidate
+            for candidate in _surface_generator.COMMAND_REGISTRY
+            if candidate.short == command
+        ),
+        None,
+    )
+    if platform == "claude" and command_info and command_info.interaction_decisions:
+        body = body.replace(
+            _surface_generator.interaction_policy(command_info, "claude"),
+            _surface_generator.interaction_policy(command_info, "shared"),
+        )
     return body
 
 

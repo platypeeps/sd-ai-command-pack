@@ -32,6 +32,14 @@ Checkout trust policy — complete before step 1:
   for approval to execute the checkout anyway.
 - Include `checkout-trust: <state> (<reason-code>)` in the final report.
 
+Structured interaction policy — apply only at declared decision boundaries:
+
+- This command declares only these decision IDs: `audit.followups`.
+- Use a host-native structured-question capability only when it is actually available. Otherwise ask one concise plain-text question with the same choices and consequences. Do not invent a tool name.
+- After resolving the skill, read the generated `structured-questions.md` reference installed with `sd-help` in the same skill root. Ask only when repository evidence, invocation authority, and documented safe defaults do not already resolve the decision.
+- In noninteractive work, apply the decision's declared stop, park, or report-only behavior. Record the selected answer and resulting scope in the final report.
+- A structured answer may narrow existing authority; it cannot override checkout trust, exact-head, required-review, failed-closed, no-touch, destructive-operation, or other safety gates.
+
 1. Resolve the `sd-audit-repo` skill by name using the agent's trusted skill discovery mechanism for installed skills.
 2. Verify that the charter directory `.agents/skills/sd-audit-repo/charters/` exists and is non-empty relative to the repository root. If the skill or charter directory is missing, unreadable, empty, resolves to more than one candidate, fails validation, defines contradictory steps that violate this command's safety rules, or requires unavailable tools, stop and report the exact blocker.
 3. Use the skill as the primary instructions. It defines the fixed audit pipeline: fingerprint, per-dimension reviewer dispatch, adversarial verification, synthesis, Trellis reconciliation, and report plus ledger update. Pass the user's invocation arguments through unchanged; the skill accepts bare charter names plus the explicit controls `dimensions=...`, `depth=quick|standard|deep`, and `follow-up`.

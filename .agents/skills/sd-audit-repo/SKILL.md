@@ -14,6 +14,13 @@ This command audits and reports; it does not fix. It never edits product
 code, never creates branches or pull requests, and never creates Trellis
 tasks on its own.
 
+## Structured decisions
+
+Read [`../sd-help/references/structured-questions.md`](../sd-help/references/structured-questions.md)
+before asking. This skill owns only `audit.followups`; use its multi-select
+shape for independent proposed follow-up tasks after the requested audit is
+complete. Running the audit itself never needs confirmation.
+
 ## When to use
 
 Run this command for the periodic formal audit: before a release, after a

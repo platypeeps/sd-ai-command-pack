@@ -11,6 +11,13 @@ the base Trellis skill does not own directly: repospec/Repomix refreshes,
 architecture overview touch-ups when warranted, and `.obsidian-kb` copies for
 portable Obsidian knowledge-base workflows.
 
+## Structured decisions
+
+Read [`../sd-help/references/structured-questions.md`](../sd-help/references/structured-questions.md)
+before asking. This skill owns only `update-spec.ownership-scope`; use it when
+architecture or ownership evidence leaves a material scope ambiguity. Do not
+ask for a normal bounded spec refresh already requested by the user.
+
 1. Resolve the `trellis-update-spec` skill by name using the agent's trusted
    skill discovery mechanism for installed skills.
 2. If the Trellis update-spec skill is missing, unreadable, empty, resolves to

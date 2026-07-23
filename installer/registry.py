@@ -22,6 +22,7 @@ class PlatformInfo:
     trellis_local_only: tuple[str, ...] = ()
     command_kind: str | None = None
     command_target_pattern: str | None = None
+    structured_question_tool: str | None = None
 
 
 PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
@@ -75,6 +76,7 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".claude/hooks/",
             ".claude/skills/trellis-*/",
         ),
+        structured_question_tool="AskUserQuestion",
     ),
     "codebuddy": PlatformInfo(
         directory=".codebuddy",
@@ -119,6 +121,7 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".codex/hooks.json",
             ".codex/hooks/",
         ),
+        structured_question_tool="request_user_input",
     ),
     "cursor": PlatformInfo(
         directory=".cursor",
@@ -483,6 +486,242 @@ class CommandFamily:
 
 
 @dataclass(frozen=True)
+class InteractionOption:
+    label: str
+    consequence: str
+    recommended: bool = False
+
+
+@dataclass(frozen=True)
+class InteractionDecision:
+    id: str
+    category: str
+    header: str
+    question: str
+    options: tuple[InteractionOption, ...] = ()
+    option_source: str | None = None
+    multi_select: bool = False
+    noninteractive: str = "stop"
+
+
+INTERACTION_CATEGORIES = frozenset(
+    {
+        "ambiguous-scope",
+        "higher-risk-mutation",
+        "external-path",
+        "blocked-run-disposition",
+        "finding-task-batch",
+        "bounded-budget-extension",
+    }
+)
+INTERACTION_NONINTERACTIVE_BEHAVIORS = frozenset(
+    {"stop", "park", "report-only"}
+)
+INTERACTION_HEADER_MAX_LENGTH = 12
+INTERACTION_MIN_OPTIONS = 2
+INTERACTION_MAX_OPTIONS = 3
+INTERACTION_MAX_QUESTIONS_PER_BATCH = 3
+
+
+def _option(
+    label: str,
+    consequence: str,
+    *,
+    recommended: bool = False,
+) -> InteractionOption:
+    return InteractionOption(label, consequence, recommended)
+
+
+INTERACTION_DECISIONS: tuple[InteractionDecision, ...] = (
+    InteractionDecision(
+        "help.route",
+        "ambiguous-scope",
+        "Help route",
+        "Which help outcome should I optimize for?",
+        (
+            _option(
+                "Recommend",
+                "Choose the smallest-fit command from the available evidence.",
+                recommended=True,
+            ),
+            _option("Compare", "Contrast the strongest matching commands."),
+            _option("Explain", "Explain one command without running it."),
+        ),
+        noninteractive="report-only",
+    ),
+    InteractionDecision(
+        "create-pr.file-scope",
+        "ambiguous-scope",
+        "File scope",
+        "How should the ambiguous file be handled?",
+        (
+            _option(
+                "Leave out",
+                "Keep the file untouched and outside the pull request.",
+                recommended=True,
+            ),
+            _option(
+                "Include",
+                "Include it only after confirming that it belongs to this change.",
+            ),
+        ),
+    ),
+    InteractionDecision(
+        "work-backlog.blocked-disposition",
+        "blocked-run-disposition",
+        "Blocked run",
+        "How should this blocked backlog item be handled?",
+        (
+            _option(
+                "Park item",
+                "Record the blocker and continue from a clean boundary.",
+                recommended=True,
+            ),
+            _option("Stop run", "Preserve the checkpoint and stop the whole loop."),
+        ),
+        noninteractive="park",
+    ),
+    InteractionDecision(
+        "work-backlog.run-extension",
+        "bounded-budget-extension",
+        "Extend run",
+        "Should the bounded work-loop limit be extended once?",
+        (
+            _option(
+                "Stop at limit",
+                "Keep the current bound and return a resumable checkpoint.",
+                recommended=True,
+            ),
+            _option(
+                "Extend once",
+                "Add one explicitly bounded continuation window.",
+            ),
+        ),
+    ),
+    InteractionDecision(
+        "audit.followups",
+        "finding-task-batch",
+        "Audit tasks",
+        "Which independent audit follow-ups should become tasks?",
+        option_source="independent, evidence-backed audit follow-up candidates",
+        multi_select=True,
+        noninteractive="report-only",
+    ),
+    InteractionDecision(
+        "retro.followups",
+        "finding-task-batch",
+        "Retro tasks",
+        "Which independent prevention proposals should become tasks?",
+        option_source="independent retrospective prevention proposals",
+        multi_select=True,
+        noninteractive="report-only",
+    ),
+    InteractionDecision(
+        "review-local.findings",
+        "finding-task-batch",
+        "Review fixes",
+        "Which verified local-review findings should I fix now?",
+        option_source="independent verified local-review findings",
+        multi_select=True,
+        noninteractive="report-only",
+    ),
+    InteractionDecision(
+        "review.higher-risk-fixes",
+        "higher-risk-mutation",
+        "Risky fixes",
+        "Which higher-risk review findings should I address?",
+        option_source="independent verified findings that require higher-risk changes",
+        multi_select=True,
+    ),
+    InteractionDecision(
+        "review.scope-expansion",
+        "higher-risk-mutation",
+        "Review scope",
+        "Should this review fix expand beyond the current scope?",
+        (
+            _option(
+                "Keep scope",
+                "Leave the broader behavior or architecture unchanged.",
+                recommended=True,
+            ),
+            _option(
+                "Expand scope",
+                "Broaden the fix only within the explicitly confirmed boundary.",
+            ),
+        ),
+    ),
+    InteractionDecision(
+        "review.round-extension",
+        "bounded-budget-extension",
+        "More rounds",
+        "Should review continue beyond the current round budget?",
+        (
+            _option(
+                "Stop and report",
+                "Return the remaining findings without another review request.",
+                recommended=True,
+            ),
+            _option(
+                "Extend once",
+                "Run one additional bounded review round.",
+            ),
+        ),
+    ),
+    InteractionDecision(
+        "review-learnings.external-target",
+        "external-path",
+        "Write target",
+        "Where should the review-learning update be written?",
+        (
+            _option(
+                "Repository local",
+                "Keep the update inside the current repository.",
+                recommended=True,
+            ),
+            _option(
+                "Exact path",
+                "Use only an explicit external path supplied by the user.",
+            ),
+        ),
+    ),
+    InteractionDecision(
+        "update-spec.ownership-scope",
+        "ambiguous-scope",
+        "Spec scope",
+        "How broadly should the ambiguous specification ownership be resolved?",
+        (
+            _option(
+                "Keep bounded",
+                "Update only the clearly owned specification scope.",
+                recommended=True,
+            ),
+            _option(
+                "Expand scope",
+                "Include the additional ownership boundary after confirmation.",
+            ),
+        ),
+    ),
+    InteractionDecision(
+        "finish-work.file-ownership",
+        "ambiguous-scope",
+        "File owner",
+        "Does the ambiguous file belong to the task being finished?",
+        (
+            _option(
+                "Leave untouched",
+                "Preserve it as unrelated work outside finalization.",
+                recommended=True,
+            ),
+            _option(
+                "Task owned",
+                "Include it only after confirming the task owns the file.",
+            ),
+        ),
+    ),
+)
+
+
+@dataclass(frozen=True)
 class CommandInfo:
     name: str
     short: str
@@ -494,6 +733,7 @@ class CommandInfo:
     safe_mode: str | None = None
     target_families: tuple[str, ...] = GENERATED_COMMAND_TARGET_FAMILIES
     configuration_keys: tuple[str, ...] = ()
+    interaction_decisions: tuple[str, ...] = ()
 
 
 COMMAND_FAMILIES: tuple[CommandFamily, ...] = (
@@ -537,12 +777,17 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
         "orientation-knowledge",
         executes_checkout_code=False,
         trusted_static_only=True,
+        interaction_decisions=("help.route",),
     ),
     CommandInfo("sd-status", "status", "orientation-knowledge"),
     CommandInfo("sd-continue", "continue", "orientation-knowledge", mutates_local=True),
     CommandInfo("sd-start", "start", "orientation-knowledge", mutates_local=True),
     CommandInfo(
-        "sd-finish-work", "finish-work", "orientation-knowledge", mutates_local=True
+        "sd-finish-work",
+        "finish-work",
+        "orientation-knowledge",
+        mutates_local=True,
+        interaction_decisions=("finish-work.file-ownership",),
     ),
     CommandInfo(
         "sd-create-pr",
@@ -550,6 +795,7 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
         "pull-requests-shipping",
         mutates_local=True,
         mutates_remote=True,
+        interaction_decisions=("create-pr.file-scope",),
     ),
     CommandInfo(
         "sd-work-backlog",
@@ -557,6 +803,10 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
         "planning-backlog",
         mutates_local=True,
         mutates_remote=True,
+        interaction_decisions=(
+            "work-backlog.blocked-disposition",
+            "work-backlog.run-extension",
+        ),
     ),
     CommandInfo(
         "sd-work-designs", "work-designs", "planning-backlog", mutates_local=True
@@ -566,6 +816,7 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
         "audit-repo",
         "verification-improvement",
         mutates_local=True,
+        interaction_decisions=("audit.followups",),
     ),
     CommandInfo(
         "sd-watch-pr",
@@ -598,13 +849,24 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
     CommandInfo(
         "sd-test-gaps", "test-gaps", "verification-improvement", mutates_local=True
     ),
-    CommandInfo("sd-retro", "retro", "orientation-knowledge", mutates_local=True),
+    CommandInfo(
+        "sd-retro",
+        "retro",
+        "orientation-knowledge",
+        mutates_local=True,
+        interaction_decisions=("retro.followups",),
+    ),
     CommandInfo(
         "sd-ship",
         "ship",
         "pull-requests-shipping",
         mutates_local=True,
         mutates_remote=True,
+        interaction_decisions=(
+            "review.higher-risk-fixes",
+            "review.scope-expansion",
+            "review.round-extension",
+        ),
     ),
     CommandInfo(
         "sd-review-pr",
@@ -612,18 +874,28 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
         "pull-requests-shipping",
         mutates_local=True,
         mutates_remote=True,
+        interaction_decisions=(
+            "review.higher-risk-fixes",
+            "review.scope-expansion",
+            "review.round-extension",
+        ),
     ),
     CommandInfo(
         "sd-review-local",
         "review-local",
         "verification-improvement",
         mutates_local=True,
+        interaction_decisions=(
+            "review-local.findings",
+            "review.scope-expansion",
+        ),
     ),
     CommandInfo(
         "sd-review-learnings",
         "review-learnings",
         "verification-improvement",
         mutates_local=True,
+        interaction_decisions=("review-learnings.external-target",),
     ),
     CommandInfo(
         "sd-full-check", "full-check", "verification-improvement", mutates_local=True
@@ -636,27 +908,33 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
         mutates_remote=True,
     ),
     CommandInfo(
-        "sd-update-spec", "update-spec", "orientation-knowledge", mutates_local=True
+        "sd-update-spec",
+        "update-spec",
+        "orientation-knowledge",
+        mutates_local=True,
+        interaction_decisions=("update-spec.ownership-scope",),
     ),
 )
+
+
+def _duplicates(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    repeated: set[str] = set()
+    for value in values:
+        if value in seen:
+            repeated.add(value)
+        else:
+            seen.add(value)
+    return sorted(repeated)
 
 
 def validate_command_registry(
     commands: tuple[CommandInfo, ...],
     families: tuple[CommandFamily, ...],
 ) -> None:
-    def duplicates(values: list[str]) -> list[str]:
-        seen: set[str] = set()
-        repeated: set[str] = set()
-        for value in values:
-            if value in seen:
-                repeated.add(value)
-            else:
-                seen.add(value)
-        return sorted(repeated)
 
     family_ids = [family.id for family in families]
-    duplicate_family_ids = duplicates(family_ids)
+    duplicate_family_ids = _duplicates(family_ids)
     errors: list[str] = []
     if duplicate_family_ids:
         errors.append("duplicate family id(s): " + ", ".join(duplicate_family_ids))
@@ -666,8 +944,8 @@ def validate_command_registry(
 
     names = [command.name for command in commands]
     shorts = [command.short for command in commands]
-    duplicate_names = duplicates(names)
-    duplicate_shorts = duplicates(shorts)
+    duplicate_names = _duplicates(names)
+    duplicate_shorts = _duplicates(shorts)
     if duplicate_names:
         errors.append("duplicate command name(s): " + ", ".join(duplicate_names))
     if duplicate_shorts:
@@ -743,12 +1021,139 @@ def validate_command_registry(
             errors.append(f"command {command.name} has invalid configuration keys")
         elif len(command.configuration_keys) != len(set(command.configuration_keys)):
             errors.append(f"command {command.name} has duplicate configuration keys")
+        if not isinstance(command.interaction_decisions, tuple) or any(
+            not isinstance(decision_id, str) or not decision_id.strip()
+            for decision_id in command.interaction_decisions
+        ):
+            errors.append(f"command {command.name} has invalid interaction decisions")
+        elif len(command.interaction_decisions) != len(
+            set(command.interaction_decisions)
+        ):
+            errors.append(f"command {command.name} has duplicate interaction decisions")
 
     if errors:
         raise RuntimeError("invalid COMMAND_REGISTRY: " + "; ".join(errors))
 
 
 validate_command_registry(COMMAND_REGISTRY, COMMAND_FAMILIES)
+
+
+def validate_interaction_registry(
+    platforms: dict[str, PlatformInfo],
+    decisions: tuple[InteractionDecision, ...],
+    commands: tuple[CommandInfo, ...],
+) -> None:
+    errors: list[str] = []
+    decision_ids = [decision.id for decision in decisions]
+    duplicate_ids = _duplicates(decision_ids)
+    if duplicate_ids:
+        errors.append("duplicate interaction decision id(s): " + ", ".join(duplicate_ids))
+
+    for platform, info in platforms.items():
+        tool = info.structured_question_tool
+        if tool is not None and (
+            not isinstance(tool, str) or not tool or not tool.isidentifier()
+        ):
+            errors.append(f"platform {platform} has invalid structured-question tool")
+
+    known_ids = set(decision_ids)
+    referenced_ids: set[str] = set()
+    for decision in decisions:
+        if (
+            not decision.id
+            or any(part == "" for part in decision.id.split("."))
+            or not all(
+                part.replace("-", "").isalnum() for part in decision.id.split(".")
+            )
+        ):
+            errors.append(f"invalid interaction decision id: {decision.id!r}")
+        if decision.category not in INTERACTION_CATEGORIES:
+            errors.append(
+                f"interaction decision {decision.id} has unknown category: "
+                f"{decision.category}"
+            )
+        if (
+            not decision.header
+            or len(decision.header) > INTERACTION_HEADER_MAX_LENGTH
+        ):
+            errors.append(
+                f"interaction decision {decision.id} header must be 1-12 characters"
+            )
+        if not decision.question or not decision.question.endswith("?"):
+            errors.append(
+                f"interaction decision {decision.id} question must end with '?'"
+            )
+        if not isinstance(decision.multi_select, bool):
+            errors.append(
+                f"interaction decision {decision.id} multi_select must be boolean"
+            )
+        if decision.noninteractive not in INTERACTION_NONINTERACTIVE_BEHAVIORS:
+            errors.append(
+                f"interaction decision {decision.id} has invalid noninteractive behavior"
+            )
+        has_static_options = bool(decision.options)
+        has_dynamic_options = decision.option_source is not None
+        if has_static_options == has_dynamic_options:
+            errors.append(
+                f"interaction decision {decision.id} must declare exactly one option source"
+            )
+        if has_static_options:
+            if not (
+                INTERACTION_MIN_OPTIONS
+                <= len(decision.options)
+                <= INTERACTION_MAX_OPTIONS
+            ):
+                errors.append(
+                    f"interaction decision {decision.id} must have 2-3 options"
+                )
+            labels = [option.label for option in decision.options]
+            if len(labels) != len(set(labels)):
+                errors.append(
+                    f"interaction decision {decision.id} has duplicate option labels"
+                )
+            recommended = [
+                index for index, option in enumerate(decision.options) if option.recommended
+            ]
+            if recommended != [0]:
+                errors.append(
+                    f"interaction decision {decision.id} must put one recommendation first"
+                )
+            for option in decision.options:
+                if not option.label.strip() or not option.consequence.strip():
+                    errors.append(
+                        f"interaction decision {decision.id} has an incomplete option"
+                    )
+        elif (
+            not decision.multi_select
+            or not isinstance(decision.option_source, str)
+            or not decision.option_source.strip()
+            or "independent" not in decision.option_source
+        ):
+            errors.append(
+                f"interaction decision {decision.id} dynamic options require multi-select"
+            )
+
+    for command in commands:
+        referenced_ids.update(command.interaction_decisions)
+        unknown = sorted(set(command.interaction_decisions) - known_ids)
+        if unknown:
+            errors.append(
+                f"command {command.name} has unknown interaction decisions: "
+                + ", ".join(unknown)
+            )
+    unreferenced = sorted(known_ids - referenced_ids)
+    if unreferenced:
+        errors.append("unreferenced interaction decision(s): " + ", ".join(unreferenced))
+
+    if errors:
+        raise RuntimeError("invalid interaction registry: " + "; ".join(errors))
+
+
+validate_interaction_registry(
+    PLATFORM_REGISTRY,
+    INTERACTION_DECISIONS,
+    COMMAND_REGISTRY,
+)
 
 # Compatibility view retained for existing installer/generator consumers.
 COMMAND_NAMES: tuple[tuple[str, str], ...] = tuple(
@@ -1043,11 +1448,13 @@ SHARED_SKILL_REFERENCES: dict[str, tuple[str, ...]] = {
     "sd-help": (
         "references/command-catalog.md",
         "references/examples.md",
+        "references/structured-questions.md",
     ),
     "sd-work-backlog": ("references/autonomous-loop.md",),
 }
 
-
+# The generated structured-question reference is hosted by sd-help so it fans
+# out through the existing shared-reference mechanism without adding a skill.
 def validate_shared_skill_references(
     command_names: tuple[tuple[str, str], ...],
     references: dict[str, tuple[str, ...]],
@@ -1298,6 +1705,15 @@ __all__ = [
     "LOCAL_ONLY_TRELLIS_EXCLUDES",
     "MANAGED_BLOCK_KIND",
     "GENERATED_COMMAND_TARGET_FAMILIES",
+    "INTERACTION_CATEGORIES",
+    "INTERACTION_DECISIONS",
+    "INTERACTION_HEADER_MAX_LENGTH",
+    "INTERACTION_MAX_OPTIONS",
+    "INTERACTION_MAX_QUESTIONS_PER_BATCH",
+    "INTERACTION_MIN_OPTIONS",
+    "INTERACTION_NONINTERACTIVE_BEHAVIORS",
+    "InteractionDecision",
+    "InteractionOption",
     "LATER_NEUTRAL_COMMAND_PLATFORMS",
     "NEUTRAL_COMMAND_SOURCE_PLATFORMS",
     "PACK_LOCAL_GITIGNORE_GROUP",
@@ -1327,6 +1743,7 @@ __all__ = [
     "_validate_registry_group_order",
     "_validate_registry_group_orders",
     "validate_command_registry",
+    "validate_interaction_registry",
     "validate_command_surface_registry",
     "command_installed_targets",
     "validate_shared_skill_references",

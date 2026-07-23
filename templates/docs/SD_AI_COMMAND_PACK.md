@@ -26,6 +26,9 @@ Quick links:
   families, descriptions, release version, and bundled availability policy.
 - `.agents/skills/sd-help/references/examples.md`: authored examples for common
   delivery goals and command overlaps.
+- `.agents/skills/sd-help/references/structured-questions.md`: generated host-neutral
+  decision registry, question shape, noninteractive behavior, and authority
+  boundaries shared by workflows that need user judgment.
 - `.agents/skills/sd-status/SKILL.md`: read-only local repository and
   configured fleet status reporting.
 - `.agents/skills/sd-start/SKILL.md`: Codex-visible Trellis start wrapper.
@@ -341,6 +344,13 @@ trusted-base inspection guidance; user approval cannot bypass the stop.
 `sd-help` is the sole initial `trusted_static_only` exemption and remains
 non-executing and read-only. Command reports include the selected
 `checkout-trust` state and reason.
+
+At declared unresolved decision boundaries, adapters also apply the generated
+portable structured-question contract. Claude uses `AskUserQuestion`; other
+hosts use a native structured capability only when available and otherwise ask
+one concise plain question or apply the decision's stop, park, or report-only
+behavior. The contract does not add confirmations for routine actions already
+authorized by the invocation, and no answer can override a safety gate.
 
 Claude Code and Gemini CLI:
 

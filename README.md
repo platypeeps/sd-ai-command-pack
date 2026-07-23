@@ -90,6 +90,14 @@ The preflight never offers user approval as a substitute for source trust.
 `sd-help` is the only initial trusted-static exemption and remains
 non-executing and read-only.
 
+At genuine unresolved decision boundaries, the same generator applies a
+portable structured-question contract. Claude adapters use
+`AskUserQuestion`; other adapters use a native structured capability only when
+available and otherwise ask one concise plain question or follow the declared
+noninteractive stop, park, or report-only behavior. The contract keeps
+recommendations and consequences consistent without asking again for routine
+actions already authorized by the command.
+
 ### sd-help
 
 Provides read-only discovery for the installed SD command surface. It can list

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.36.0 - 2026-07-23
+
+- Add a validated portable structured-question registry, generate
+  `AskUserQuestion` guidance only for capable Claude adapters, and preserve
+  concise interactive fallbacks plus explicit noninteractive behavior for
+  help, review, backlog, audit, retro, spec, PR, and finish-work decisions.
+
 ## 0.35.0 - 2026-07-23
 
 - Expand `sd-status` with deterministic F-prefixed follow-ups, complete

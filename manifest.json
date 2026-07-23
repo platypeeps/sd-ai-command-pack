@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "sd-ai-command-pack",
-  "version": "0.35.0",
+  "version": "0.36.0",
   "license": "MIT",
   "description": "Install project-local SD AI command workflows, Prism/Gito defaults, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
@@ -613,6 +613,83 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-help/references/examples.md",
       "target": ".trae/skills/sd-help/references/examples.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/structured-questions.md",
+      "target": ".agents/skills/sd-help/references/structured-questions.md",
+      "install": "always"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/structured-questions.md",
+      "target": ".agent/skills/sd-help/references/structured-questions.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/structured-questions.md",
+      "target": ".codebuddy/skills/sd-help/references/structured-questions.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/structured-questions.md",
+      "target": ".devin/skills/sd-help/references/structured-questions.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/structured-questions.md",
+      "target": ".factory/skills/sd-help/references/structured-questions.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/structured-questions.md",
+      "target": ".kilocode/skills/sd-help/references/structured-questions.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/structured-questions.md",
+      "target": ".kiro/skills/sd-help/references/structured-questions.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/structured-questions.md",
+      "target": ".pi/skills/sd-help/references/structured-questions.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/structured-questions.md",
+      "target": ".qoder/skills/sd-help/references/structured-questions.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/structured-questions.md",
+      "target": ".reasonix/skills/sd-help/references/structured-questions.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/structured-questions.md",
+      "target": ".trae/skills/sd-help/references/structured-questions.md",
       "anchor": ".trae"
     },
     {

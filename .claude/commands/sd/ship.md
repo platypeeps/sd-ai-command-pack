@@ -26,6 +26,14 @@ Checkout trust policy — complete before step 1:
   for approval to execute the checkout anyway.
 - Include `checkout-trust: <state> (<reason-code>)` in the final report.
 
+Structured interaction policy — apply only at declared decision boundaries:
+
+- This command declares only these decision IDs: `review.higher-risk-fixes`, `review.scope-expansion`, `review.round-extension`.
+- At each unresolved declared boundary, use `AskUserQuestion` with the validated header, question, options, consequences, recommendation order, and multi-select setting from the shared reference.
+- After resolving the skill, read the generated `structured-questions.md` reference installed with `sd-help` in the same skill root. Ask only when repository evidence, invocation authority, and documented safe defaults do not already resolve the decision.
+- In noninteractive work, apply the decision's declared stop, park, or report-only behavior. Record the selected answer and resulting scope in the final report.
+- A structured answer may narrow existing authority; it cannot override checkout trust, exact-head, required-review, failed-closed, no-touch, destructive-operation, or other safety gates.
+
 1. Resolve the `sd-ship` skill by name using the agent's trusted skill discovery mechanism for installed skills.
 2. If that skill is missing, unreadable, empty, resolves to more than one candidate, fails validation, defines contradictory steps that violate this command's safety rules, or requires unavailable tools, stop and report the exact blocker.
 3. Use the skill as the primary instructions. It defines the fixed four-stage chain: the sd-create-pr flow, the sd-review-pr loop, the sd-watch-pr flow, and the sd-housekeeping merge gate, with each stage's own preconditions, gates, and reports staying authoritative, stop-points between stages, and a failed or blocked stage stopping the chain with that stage's report. Pass the `until=pr|review|merge` stop-point and pass-through stage arguments such as `timeout-minutes=N` through to the skill.
