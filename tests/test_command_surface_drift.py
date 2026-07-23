@@ -305,6 +305,34 @@ class CommandSurfaceDriftTests(unittest.TestCase):
                 manifest_findings[0].category, "retired_identifier_live"
             )
 
+    def test_retired_installed_target_reports_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            command = self.make_repo(root)
+            retired_path = ".agents/skills/sd-old/SKILL.md"
+            target = root / retired_path
+            target.parent.mkdir(parents=True)
+            target.write_text("# Obsolete skill\n", encoding="utf-8")
+            retirement = registry.RetiredCommandSurface(
+                id="old-command",
+                identifiers=("sd-old",),
+                installed_targets=(retired_path,),
+                removed_version="1.0.0",
+                owner_task="fixture",
+            )
+
+            report = self.lint(root, command, retirements=(retirement,))
+
+            findings = [
+                finding for finding in report.findings if finding.path == retired_path
+            ]
+            self.assertEqual(len(findings), 1)
+            self.assertEqual(findings[0].identifier, "old-command")
+            self.assertEqual(
+                findings[0].message,
+                "retired installed target exists in the source checkout",
+            )
+
     def test_missing_target_family_and_stale_config_are_reported(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

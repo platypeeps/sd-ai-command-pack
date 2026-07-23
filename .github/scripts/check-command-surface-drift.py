@@ -431,6 +431,12 @@ def lint_repository(
     retired_targets = {
         target for retirement in retirements for target in retirement.installed_targets
     }
+    forbidden_retired_targets = {
+        target
+        for retirement in retirements
+        if retirement.source_paths_must_be_absent
+        for target in retirement.installed_targets
+    }
     findings = _validate_allowances(allowances, retired_identifiers)
     matched_allowances: set[tuple[str, str]] = set()
     suppressed = 0
@@ -499,7 +505,11 @@ def lint_repository(
                     )
 
         command_name = _path_command(relative, shorts)
-        if command_name and command_name not in known:
+        if (
+            command_name
+            and command_name not in known
+            and relative not in forbidden_retired_targets
+        ):
             category = (
                 "retired_identifier_live"
                 if command_name in retired_command_names or relative in retired_targets
