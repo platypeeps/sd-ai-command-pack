@@ -236,11 +236,272 @@ class StatusTests(InstallTestCase):
         self.assertEqual(report["github"]["status"], "disabled")
         self.assertEqual(report["github"]["openPrsStatus"], "unavailable")
         self.assertEqual(report["trellis"]["activeTask"]["id"], "status-fixture")
+        self.assertEqual(report["followUps"], [])
+        self.assertEqual(
+            [task["selectionId"] for task in report["trellis"]["tasks"]],
+            ["T-1"],
+        )
+        self.assertEqual(report["trellis"]["tasks"][0]["id"], "status-fixture")
+        self.assertEqual(
+            [task["selectionId"] for task in report["trellis"]["roadmap"]],
+            ["R-1"],
+        )
+        self.assertEqual(report["trellis"]["roadmap"][0]["id"], "status-fixture")
         self.assertEqual(self.working_files_snapshot(root), before_files)
         self.assertEqual(
             self.git_output(root, "for-each-ref", "--format=%(refname) %(objectname)"),
             before_refs,
         )
+
+    def test_local_human_output_always_lists_selectable_sections(self) -> None:
+        root = self.make_status_repo()
+
+        result = self.run_status(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("==> Follow-ups\nnone", result.stdout)
+        self.assertIn(
+            "==> Tasks\nT-1 [in_progress, P1]: Status fixture task",
+            result.stdout,
+        )
+        self.assertIn(
+            "==> Roadmap\nR-1 [in_progress, P1]: Status fixture task",
+            result.stdout,
+        )
+        self.assertLess(
+            result.stdout.index("==> Follow-ups"),
+            result.stdout.index("==> Tasks"),
+        )
+        self.assertLess(
+            result.stdout.index("==> Tasks"),
+            result.stdout.index("==> Roadmap"),
+        )
+
+    def test_trellis_inventory_ids_are_complete_and_deterministic(self) -> None:
+        root = self.make_status_repo()
+
+        def write_task(
+            directory: str,
+            *,
+            title: str,
+            status_value: str,
+            priority: str,
+            parent: str | None = None,
+        ) -> None:
+            task_dir = root / ".trellis/tasks" / directory
+            task_dir.mkdir()
+            (task_dir / "task.json").write_text(
+                json.dumps(
+                    {
+                        "id": directory,
+                        "title": title,
+                        "status": status_value,
+                        "priority": priority,
+                        "parent": parent,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+        write_task(
+            "child-planning",
+            title="Child planning",
+            status_value="planning",
+            priority="P0",
+            parent=" status-fixture\x00 ",
+        )
+        write_task(
+            "root-planning",
+            title="Root planning",
+            status_value="planning",
+            priority="P2",
+        )
+        write_task(
+            "completed-root",
+            title="Completed root",
+            status_value="completed",
+            priority="P0",
+        )
+        write_task(
+            "blank-parent",
+            title="Blank parent",
+            status_value="planning",
+            priority="P0",
+            parent="   ",
+        )
+        malformed_parent = root / ".trellis/tasks/malformed-parent"
+        malformed_parent.mkdir()
+        (malformed_parent / "task.json").write_text(
+            json.dumps(
+                {
+                    "id": "malformed-parent",
+                    "title": "Malformed parent",
+                    "status": "planning",
+                    "priority": "P0",
+                    "parent": ["status-fixture"],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        first = json.loads(self.run_status(root, "--json").stdout)["trellis"]
+        second = json.loads(self.run_status(root, "--json").stdout)["trellis"]
+
+        self.assertEqual(first["tasks"], second["tasks"])
+        self.assertEqual(
+            [(task["selectionId"], task["id"]) for task in first["tasks"]],
+            [
+                ("T-1", "status-fixture"),
+                ("T-2", "child-planning"),
+                ("T-3", "root-planning"),
+                ("T-4", "completed-root"),
+            ],
+        )
+        self.assertEqual(first["tasks"][1]["parent"], "status-fixture")
+        self.assertNotIn(
+            "blank-parent",
+            [task["id"] for task in first["tasks"]],
+        )
+        self.assertNotIn(
+            "malformed-parent",
+            [task["id"] for task in first["tasks"]],
+        )
+        self.assertEqual(
+            [(task["selectionId"], task["id"]) for task in first["roadmap"]],
+            [("R-1", "status-fixture"), ("R-2", "root-planning")],
+        )
+
+    def test_empty_trellis_inventory_sections_print_none(self) -> None:
+        root = self.make_status_repo()
+        shutil.rmtree(root / ".trellis/tasks/status-fixture")
+
+        machine = json.loads(self.run_status(root, "--json").stdout)
+        human = self.run_status(root)
+
+        self.assertEqual(machine["trellis"]["tasks"], [])
+        self.assertEqual(machine["trellis"]["roadmap"], [])
+        self.assertIn("==> Tasks\nnone", human.stdout)
+        self.assertIn("==> Roadmap\nnone", human.stdout)
+
+    def test_trellis_inventory_rejects_empty_normalized_identity_and_status(
+        self,
+    ) -> None:
+        root = self.make_status_repo()
+
+        def write_task(directory: str, payload: dict[str, object]) -> None:
+            task_dir = root / ".trellis/tasks" / directory
+            task_dir.mkdir()
+            (task_dir / "task.json").write_text(
+                json.dumps(payload) + "\n",
+                encoding="utf-8",
+            )
+
+        write_task(
+            "empty-id",
+            {"id": "\x00", "title": "Empty ID", "status": "planning"},
+        )
+        write_task(
+            "empty-status",
+            {"id": "empty-status", "title": "Empty status", "status": "\x00"},
+        )
+        write_task(
+            "fallback-fields",
+            {
+                "id": "fallback-fields",
+                "title": "\x00",
+                "status": "planning",
+                "priority": "\x00",
+            },
+        )
+
+        tasks = json.loads(self.run_status(root, "--json").stdout)["trellis"]["tasks"]
+        tasks_by_id = {task["id"]: task for task in tasks}
+
+        self.assertNotIn("empty-id", tasks_by_id)
+        self.assertNotIn("empty-status", tasks_by_id)
+        self.assertEqual(tasks_by_id["fallback-fields"]["title"], "fallback-fields")
+        self.assertEqual(
+            tasks_by_id["fallback-fields"]["priority"],
+            "unprioritized",
+        )
+
+    def test_follow_up_ids_classify_and_sort_supported_evidence(self) -> None:
+        status = self.load_status_module()
+        report = {
+            "anomalies": ["status collector warning"],
+            "git": {
+                "workingTree": {"state": "dirty"},
+                "syncState": "ahead",
+            },
+            "github": {
+                "currentPr": {"number": 42, "state": "OPEN"},
+                "openIssuesStatus": "available",
+                "openIssues": [
+                    {"number": 9, "title": "Later issue"},
+                    {"number": 2, "title": "Earlier issue"},
+                ],
+            },
+            "workLoop": {"status": "none"},
+            "trellis": {"completedOutsideArchive": []},
+            "versions": {"packState": "different"},
+        }
+
+        follow_ups = status.collect_follow_ups(report)
+
+        self.assertEqual(
+            [item["selectionId"] for item in follow_ups],
+            [f"F-{index}" for index in range(1, 8)],
+        )
+        self.assertEqual(
+            [item["kind"] for item in follow_ups],
+            [
+                "issue",
+                "action",
+                "action",
+                "action",
+                "recommendation",
+                "issue",
+                "issue",
+            ],
+        )
+        self.assertIn("#2: Earlier issue", follow_ups[5]["summary"])
+        self.assertIn("#9: Later issue", follow_ups[6]["summary"])
+
+    def test_select_items_owns_generated_selection_ids(self) -> None:
+        status = self.load_status_module()
+        selected = status.select_items(
+            [{"selectionId": "untrusted", "id": "task-id"}],
+            prefix="T",
+        )
+
+        self.assertEqual(selected[0]["selectionId"], "T-1")
+        self.assertEqual(selected[0]["id"], "task-id")
+
+    def test_resume_and_archive_follow_ups_are_actions(self) -> None:
+        status = self.load_status_module()
+        for loop_status in ("active", "paused"):
+            with self.subTest(loop_status=loop_status):
+                follow_ups = status.collect_follow_ups(
+                    {
+                        "workLoop": {
+                            "status": loop_status,
+                            "runId": "run-1",
+                            "iteration": 2,
+                            "phase": "implement",
+                        },
+                        "trellis": {"completedOutsideArchive": [{"id": "done"}]},
+                    }
+                )
+
+                self.assertEqual(
+                    [(item["source"], item["kind"]) for item in follow_ups],
+                    [
+                        ("workLoop.status", "action"),
+                        ("trellis.completedOutsideArchive", "action"),
+                    ],
+                )
 
     def test_local_status_reports_active_work_loop_in_json_and_human_output(
         self,
@@ -382,6 +643,18 @@ class StatusTests(InstallTestCase):
         completed = report["trellis"]["completedOutsideArchive"]
         self.assertEqual([task["id"] for task in completed], ["completed-record-id"])
         self.assertEqual([task["path"] for task in completed], ["tasks/completed-fixture"])
+        selectable_tasks = report["trellis"]["tasks"]
+        self.assertIn("completed-record-id", [task["id"] for task in selectable_tasks])
+        self.assertNotIn(
+            "completed-record-id",
+            [task["id"] for task in report["trellis"]["roadmap"]],
+        )
+        self.assertTrue(
+            any(
+                item["source"] == "trellis.completedOutsideArchive"
+                for item in report["followUps"]
+            )
+        )
         self.assertTrue(
             any(
                 "1 completed Trellis task(s) remain outside" in anomaly
@@ -1175,6 +1448,10 @@ class StatusTests(InstallTestCase):
         self.assertEqual(report["repositories"][1]["status"], "missing")
         self.assertIn("missing", report["nextSteps"][0])
         self.assertTrue(any("fast-stale" in step for step in report["nextSteps"]))
+        self.assertEqual(
+            [item["selectionId"] for item in report["followUps"]],
+            ["F-1", "F-2"],
+        )
 
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
@@ -1185,6 +1462,8 @@ class StatusTests(InstallTestCase):
         self.assertIn("slow-current: clean; main; cached:synchronized; pack", rendered)
         self.assertIn("stashes 1", rendered)
         self.assertIn("PRs unavailable", rendered)
+        self.assertIn("==> Follow-ups", rendered)
+        self.assertIn("F-1 [action]", rendered)
 
     def test_fleet_loader_requires_pack_identity(self) -> None:
         status = self.load_status_module()

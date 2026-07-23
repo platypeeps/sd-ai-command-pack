@@ -474,7 +474,11 @@ branch, staged/unstaged/untracked counts, Git stash count, upstream ahead/behind
 and local/remote branches, installed SD pack and Trellis versions, relevant PR,
 open PRs/issues, current/in-progress/planned Trellis work, completed tasks
 stranded outside the Trellis archive, user-local autonomous loop state,
-anomalies, and numbered next steps. Loop state includes run ID,
+anomalies, complete selectable F-prefixed follow-ups and T-prefixed unarchived
+tasks, R-prefixed top-level roadmap work, and numbered next steps. Empty
+selectable sections remain visible as `none`. The ordinals are deterministic
+for an unchanged snapshot but remain report-local; durable Trellis task IDs are
+included in every task and roadmap row. Loop state includes run ID,
 mode/selector/focus, iteration, phase, task, branch/head/base-branch evidence,
 PR identity, last shipped SHA, counters, heartbeat, context health, checkpoint,
 lock, and stop reason. Reading it never refreshes the ledger or lock. The status
@@ -495,7 +499,9 @@ resolves the canonical fleet manifest from `--fleet-manifest`,
 `SD_AI_COMMAND_PACK_FLEET_MANIFEST`, the machine-local fleet profile, or the
 canonical source checkout, in that order. It preserves rollout priority,
 reports missing checkouts, compares installed versions to the source manifest
-version, and returns one bounded row per fleet member. A dirty, stale, missing,
+version, and returns one bounded row per fleet member plus F-prefixed fleet
+follow-ups. Complete per-consumer task and roadmap records remain available in
+nested JSON or through local status for that checkout. A dirty, stale, missing,
 behind, or diverged repository is advisory in ordinary status; the command
 remains read-only and exits zero after producing the report. Invalid
 repositories and malformed, missing, or stale fleet configuration exit
@@ -903,6 +909,15 @@ Ref freshness: refreshed
 
 ==> Anomalies
 none
+
+==> Follow-ups
+none
+
+==> Tasks
+T-1 [planning, P1]: <title> (<durable-task-id>; <task-path>)
+
+==> Roadmap
+R-1 [planning, P1]: <title> (<durable-task-id>; <task-path>)
 
 ==> Next Steps
 1. <highest-value evidence-backed next action>

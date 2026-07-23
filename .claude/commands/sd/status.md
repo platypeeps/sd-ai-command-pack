@@ -39,6 +39,8 @@ Checkout trust policy — complete before step 1:
 5. Keep the workflow read-only. Do not fetch, pull, switch, stage, commit,
    push, merge, delete branches, update tasks, refresh generated files, or run
    a recommended follow-up command.
-6. Relay the bounded report, explicit freshness and availability labels,
-   anomalies, and numbered next steps. A follow-up requires a separate user
+6. Relay the report's explicit freshness and availability labels, anomalies,
+   complete local `F-*` follow-ups, `T-*` tasks, and `R-*` roadmap sections,
+   plus numbered next steps. Preserve each empty section with `none`. Fleet
+   output remains bounded. A selection or follow-up requires a separate user
    request.
