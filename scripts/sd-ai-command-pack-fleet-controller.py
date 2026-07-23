@@ -51,6 +51,7 @@ STAGE_INDEX = {stage: index for index, stage in enumerate(LANE_STAGES)}
 PR_HEAD_STAGES = frozenset(
     {"review", "merge-eligibility", "merge", "post-merge-verification"}
 )
+ACTION_IDENTITY_FIELDS = ("actionId", "attempt", "consumer", "release", "stage")
 SIDE_EFFECT_STAGES = frozenset(
     {"install-update", "pr-publication", "review", "merge"}
 )
@@ -85,6 +86,10 @@ TERMINAL_RESULTS = frozenset(
 
 class FleetControllerError(ValueError):
     """Raised when campaign state or a transition is unsafe."""
+
+
+def _action_identity(action: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: action[key] for key in ACTION_IDENTITY_FIELDS}
 
 
 def _wave_planner() -> Any:
@@ -951,10 +956,7 @@ def record_result(
     if existing is not None:
         if existing["consumer"] != consumer:
             raise FleetControllerError("action already has a conflicting receipt")
-        candidate_action = {
-            key: existing[key]
-            for key in ("actionId", "attempt", "consumer", "release", "stage")
-        }
+        candidate_action = _action_identity(existing)
     else:
         candidate_action = issued or {
             "actionId": action_id,
@@ -1171,7 +1173,7 @@ def _git_evidence(path: Path) -> dict[str, Any]:
 def _reconciliation_action(target: Mapping[str, Any]) -> Mapping[str, Any] | None:
     action = target["issuedAction"]
     if action is not None:
-        return action
+        return _action_identity(action)
     if target["status"] != "reconcile":
         return None
     ambiguous = next(
@@ -1184,10 +1186,7 @@ def _reconciliation_action(target: Mapping[str, Any]) -> Mapping[str, Any] | Non
     )
     if ambiguous is None:
         return None
-    return {
-        key: ambiguous[key]
-        for key in ("actionId", "attempt", "consumer", "release", "stage")
-    }
+    return _action_identity(ambiguous)
 
 
 def resume_report(state: Mapping[str, Any]) -> dict[str, Any]:

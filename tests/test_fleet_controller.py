@@ -407,6 +407,10 @@ class FleetControllerTests(InstallTestCase):
             report["reconciliation"][0]["action"]["actionId"], action["actionId"]
         )
         self.assertEqual(
+            set(report["reconciliation"][0]["action"]),
+            {"actionId", "attempt", "consumer", "release", "stage"},
+        )
+        self.assertEqual(
             report["reconciliation"][0]["reasonCode"],
             "issued-action-needs-reconciliation",
         )
@@ -436,6 +440,10 @@ class FleetControllerTests(InstallTestCase):
         report = controller.resume_report(state)
         self.assertEqual(
             report["reconciliation"][0]["action"]["actionId"], action["actionId"]
+        )
+        self.assertEqual(
+            set(report["reconciliation"][0]["action"]),
+            {"actionId", "attempt", "consumer", "release", "stage"},
         )
         self.assertIsNone(controller.status_report(state)["plan"])
         receipt, changed = controller.resolve_reconciliation(
