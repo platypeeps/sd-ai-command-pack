@@ -149,7 +149,7 @@ The approved clean interface is `sd-check` for deterministic verification and
 skills, compatibility scripts, or readers for retired configuration families.
 Normal installer refresh retires old pack-owned targets safely.
 
-## Cross-Repository Task Map
+## Dependencies
 
 - This repository:
   `07-22-integrate-routed-review-backends` owns receipt consumption,

@@ -35,7 +35,7 @@ fixes, exact-head reruns, thread resolution, CI, and the final report.
   unchanged vouched files can be removed during refresh, while locally modified
   copies are preserved and reported.
 
-## Dependency And Ownership
+## Dependencies
 
 - Depends on `platypeeps/sd-github-review` task
   `07-22-publish-routed-review-receipt-contract` publishing reviewed v1

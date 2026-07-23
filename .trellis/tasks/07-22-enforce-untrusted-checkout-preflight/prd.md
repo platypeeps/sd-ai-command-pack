@@ -16,6 +16,15 @@ four-command warning allowlist with a canonical, generated, fail-closed policy.
 - A warning attached to selected prompt prose is not an enforceable capability
   boundary and drifts as new commands are added.
 
+## Dependencies
+
+- This is an independent Wave 1 foundation with no implementation prerequisite.
+- It owns canonical checkout-trust metadata and generated adapter preflight;
+  downstream command-surface work, including routed review, consumes that
+  policy rather than defining command-specific exceptions.
+- If another Wave 1 task lands generator or manifest changes first, reconcile
+  against that contract without restoring earlier generated output.
+
 ## Requirements
 
 - R1: Classify every public command in canonical metadata by whether it may

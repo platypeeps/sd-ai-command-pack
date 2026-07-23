@@ -17,7 +17,7 @@ the gate result but cannot reproduce or weaken it.
 - Review and ship can create finish-work bookkeeping commits after earlier
   review evidence, so final readiness needs an explicit current-head contract.
 
-## Dependencies And Ownership
+## Dependencies
 
 - This task owns the shared read-only eligibility evaluator and its result
   schema.

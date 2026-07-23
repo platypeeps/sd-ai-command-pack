@@ -22,7 +22,7 @@ where no structured capability exists.
   <https://code.claude.com/docs/en/agent-sdk/typescript> and
   <https://code.claude.com/docs/en/agent-sdk/user-input>.
 
-## Dependencies And Consumers
+## Dependencies
 
 - This task owns the canonical interaction taxonomy, capability registry, and
   adapter-generation rules.
