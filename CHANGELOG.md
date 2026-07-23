@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.33.0 - 2026-07-23
+
+- Centralize exact-head pull-request eligibility in a versioned read-only
+  evaluator, keep housekeeping as the sole merge mutation owner, and route
+  classified dependency updates through that shared gate.
+
 ## 0.32.2 - 2026-07-23
 
 - Fail closed when changed Trellis task-context manifests contain malformed

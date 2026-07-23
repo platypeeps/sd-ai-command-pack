@@ -13,7 +13,10 @@ This command is intentionally narrow: use it only for the current repository's
 active development stream or its just-merged PR cleanup. It is not a general
 repo maintenance, dependency upgrade, issue triage, or branch-pruning command.
 If the user asks for broader cleanup, stop and clarify the intended scope before
-running the housekeeping script.
+running the housekeeping script. `sd-update-deps` is the one internal caller
+allowed to delegate a previously classified dependency PR through
+`--dependency-pr <number>` so housekeeping remains the sole merge mutation
+owner; users should invoke `sd-update-deps`, not that internal mode directly.
 
 Run from the feature branch when the command may merge a ready open PR. If the
 PR is already merged and cleanup starts from the default branch, the script only
@@ -64,8 +67,9 @@ This command performs this end-of-stream flow:
 4. The script fetches and prunes `origin` so local remote-tracking refs reflect
    GitHub.
 5. The script detects the remote default branch, usually `main`.
-6. If the current branch is a feature branch with an open PR, the script merges
-   only when all of these are true:
+6. If the current branch is a feature branch with an open PR, the script calls
+   `scripts/sd-ai-command-pack-pr-eligibility.py`, which emits a versioned,
+   read-only exact-head receipt and merges only when all of these are true:
    - the working tree is clean
    - the local branch head, remote branch head, and PR head are identical
    - the PR is open, not draft, targets the default branch, and has a `CLEAN`
@@ -75,8 +79,12 @@ This command performs this end-of-stream flow:
      failed, cancelled, or timed out). Checks skipped by change classifiers do
      not block the merge.
    - GitHub review threads have no unresolved comments
-7. The script merges the PR with `gh pr merge --match-head-commit`. If GitHub
-   refuses the merge, report an anomaly instead of forcing the merge.
+7. Housekeeping validates the eligible receipt identity again at its mutation
+   boundary and merges with `gh pr merge --match-head-commit`. If GitHub
+   refuses the merge, report an anomaly instead of forcing the merge. The
+   internal dependency-PR mode uses the same evaluator with Trellis
+   finish-work explicitly not applicable and retains this same sole merge
+   owner.
 8. If the current branch is a feature branch, use `gh pr view` to confirm the
    branch's PR is `MERGED` and the local branch head matches the merged PR head
    before deleting anything.
@@ -213,6 +221,10 @@ empty, write that the backlog is clear rather than dropping the section.
   current commit and its resulting commits were pushed before allowing a ready
   open PR to reach the merge gate. Never pass this option speculatively, after
   a blocked finish-work run, or with a head captured before finish-work.
+- `--dependency-pr <number>`: internal `sd-update-deps` handoff for one
+  classified dependency PR. It is valid only from a clean default branch,
+  invokes the shared evaluator with finish-work explicitly not applicable,
+  and keeps the merge mutation inside housekeeping.
 - `--merge-strategy <merge|squash|rebase>`: choose the strategy for an
   auto-merged PR. Defaults to `merge`.
 - `--keep-remote-branch`: delete the merged local branch but leave the remote

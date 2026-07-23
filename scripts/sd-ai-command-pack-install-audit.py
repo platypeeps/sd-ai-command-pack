@@ -159,6 +159,7 @@ LEGACY_PACK_PATHS = {
             "housekeeping.sh",
             "install-audit.py",
             "pr-body-scope.py",
+            "pr-eligibility.py",
             "record-session.py",
             "review-learnings.py",
             "review-local.sh",

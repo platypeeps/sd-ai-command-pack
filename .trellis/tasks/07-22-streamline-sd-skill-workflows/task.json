@@ -30,7 +30,8 @@
     "07-22-structure-skill-runtime-contracts",
     "07-22-add-command-surface-drift-lint",
     "07-22-normalize-sd-workflow-program-task-topology",
-    "07-22-validate-sd-workflow-program-integration"
+    "07-22-validate-sd-workflow-program-integration",
+    "07-23-recover-pr-232-main-conflict"
   ],
   "parent": null,
   "relatedFiles": [],

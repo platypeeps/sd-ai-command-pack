@@ -89,6 +89,9 @@ merge eligibility without mutating the PR.
     review-production side, F05, F06, F09, and F10.
 - `07-22-centralize-pr-eligibility-gates` owns F02's merge-consumption side and
   F03.
+- `07-23-recover-pr-232-main-conflict` owns the bounded integration and
+  revalidation work required after the completed centralization child conflicted
+  with concurrently merged pack release `0.32.2`; it adds no new F01-F17 scope.
 - `07-22-enforce-untrusted-checkout-preflight` owns F04.
 - `07-22-determinize-fleet-refresh-orchestration` owns F07.
 - `07-22-streamline-backlog-design-workflows` owns F08 and F11.

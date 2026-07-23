@@ -38,6 +38,91 @@ nothing, CI staying green over skipped tests).
 - Bad: `return 0` out of a gate because a tool or input was missing, with no
   output.
 
+## Pull Request Eligibility Evaluator Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing
+`scripts/sd-ai-command-pack-pr-eligibility.py`, its template twin,
+housekeeping merge behavior, or a workflow that decides whether a pull request
+may enter housekeeping's merge mutation path.
+
+### 2. Signatures
+
+- JSON mode: `python3 scripts/sd-ai-command-pack-pr-eligibility.py --input PATH`
+- Adapter mode: the same command with `--format shell`, producing a bounded
+  shell receipt for housekeeping without transferring policy ownership to the
+  shell caller.
+- Input schema major 1 supports `local-branch` and `dependency-pr` evaluation.
+- Output schema major 1 reports `eligible`, `blocked`, or `indeterminate` with
+  stable reason codes and observed evidence.
+
+### 3. Contracts
+
+- The evaluator is read-only. It must not merge or approve a PR, push, resolve
+  threads, modify labels or branches, update Trellis state, or write repository
+  files.
+- Every result binds repository identity, PR number, base branch, and the full
+  PR head OID. Re-read the PR head after collecting evidence; a changed head is
+  a retryable `indeterminate` result and cannot inherit prior evidence.
+- Collect checks for the evaluated head. Blocking or pending checks are
+  `blocked`; skipped and neutral checks are non-blocking, but at least one
+  successful check is required.
+- Paginate GraphQL `reviewThreads` through exhaustion. Any unresolved thread is
+  blocking; malformed, incomplete, unauthorized, rate-limited, or otherwise
+  unreadable evidence is `indeterminate`, never clean.
+- `local-branch` requires a clean working tree, equal local, remote, and PR head
+  OIDs, and finish-work evidence attested for that exact head.
+- `dependency-pr` evaluates a classified PR from a clean default branch and
+  does not fabricate Trellis finish-work evidence. Its PR head is still read
+  twice and must remain exact.
+- Routed-review receipt validation belongs to the routed-review integration
+  contract. Until that schema is final, do not guess it or mint a local
+  bookkeeping exemption in this evaluator.
+- `sd-housekeeping` is the only live merge mutation owner. Other workflows,
+  including `sd-update-deps`, delegate an eligible candidate to housekeeping
+  instead of restating checks, thread, head, or merge policy.
+- Housekeeping validates the evaluator's exact eligible receipt, rechecks the
+  mutation-boundary head, and passes `--match-head-commit` to `gh pr merge`.
+
+### 4. Validation & Error Matrix
+
+- Unknown schema major, mode, policy value, or malformed JSON -> fail closed
+  with an invalid-request result and no external mutation.
+- Failed, pending, or absent-success checks -> `blocked` with stable reasons.
+- One or more unresolved review threads -> `blocked`, including on later
+  GraphQL pages.
+- Provider, authentication, rate-limit, malformed-payload, or pagination
+  failure -> `indeterminate` and retryable where appropriate.
+- Missing or stale finish-work evidence in `local-branch` -> `blocked`.
+- PR head changes between the first and final observation -> retryable
+  `indeterminate`, even if all earlier evidence was green.
+
+### 5. Good / Base / Bad Cases
+
+- Good: exact local, remote, PR, and finish-work heads match; the tree is clean;
+  a successful check exists; all thread pages are readable and resolved; the
+  final head is unchanged.
+- Base: a classified dependency PR is evaluated from clean default branch and
+  delegated through housekeeping without a Trellis finish-work requirement.
+- Bad: green CI is treated as sufficient without direct review-thread
+  evidence, or an earlier head's finish-work/review verdict is reused.
+- Bad: `sd-update-deps` or another skill invokes `gh pr merge` directly or
+  reconstructs eligibility prose independently.
+
+### 6. Tests Required
+
+- Eligible exact-head evaluation with mutation-spy assertions.
+- Failed, pending, skipped, neutral, and no-success check combinations.
+- Missing and stale finish-work evidence, dirty local state, and local/remote/PR
+  head mismatches.
+- Multi-page resolved and unresolved review threads.
+- Provider/auth/rate-limit failures and malformed JSON/check/thread payloads.
+- Unknown schema major, unknown fields, strict mode/policy validation, and head
+  changes during evaluation.
+- End-to-end housekeeping delegation for local and dependency modes, proving
+  housekeeping remains the only `gh pr merge` owner.
+
 ## Review Preflight Runtime Contract
 
 ### 1. Scope / Trigger

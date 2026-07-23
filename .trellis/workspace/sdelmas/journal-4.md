@@ -1885,3 +1885,83 @@ Released the fail-closed task-context parser fix for command-pack 0.32.2 after f
 ### Next Steps
 
 - Merge upstream PR #231 and verify the v0.32.2 release tag before refreshing consumer PR #8.
+
+
+## Session 200: Centralize PR eligibility and exact-head gates
+
+**Date**: 2026-07-23
+**Task**: Centralize PR eligibility and exact-head gates
+**Branch**: `codex/centralize-pr-eligibility-gates`
+
+### Summary
+
+Added a shared read-only eligibility evaluator, retained housekeeping as the sole merge owner, and routed dependency PRs through the same exact-head gate for pack 0.33.0.
+
+### Main Changes
+
+- Added a versioned exact-head evaluator covering checks, paginated review threads, finish-work evidence, stable blocked or indeterminate reasons, and final head rereads.
+- Rewired housekeeping and dependency updates so housekeeping remains the only live merge mutation owner.
+- Published pack 0.33.0 with synchronized templates, generated mirrors, executable specs, and all-consumer candidate evidence.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `addda74` | feat: centralize PR eligibility gates |
+| `e73369a` | chore: correct task context references |
+| `5511a0b` | fix: correct eligibility CLI contract |
+
+### Testing
+
+- [OK] make check and deterministic PR full-check passed.
+- [OK] New evaluator reached 89% coverage against an 85% floor.
+- [OK] All eight fleet candidate consumers passed for 0.33.0.
+- [OK] PR #232 CI passed; two Copilot rounds ended with zero unresolved threads after one corrected spec flag.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 201: Recover PR 232 against current main
+
+**Date**: 2026-07-23
+**Task**: Recover PR 232 against current main
+**Branch**: `codex/centralize-pr-eligibility-gates`
+
+### Summary
+
+Merged current main into PR 232 without rewriting history, preserved both releases and append-only journal evidence, regenerated exact-payload release evidence, and reconverged the exact head through review.
+
+### Main Changes
+
+- Integrated origin/main at 8293d0e with a normal merge commit while preserving the 0.33.0 eligibility evaluator and upstream 0.32.2 malformed-context behavior.
+- Kept upstream Session 199 unchanged, appended the centralization record as Session 200, and synchronized the journal index without losing historical evidence.
+- Regenerated canonical command-pack surfaces, Obsidian KB output, and the 0.33.0 fleet candidate ledger from the combined payload.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e0e5770` | merge: recover PR 232 against current main |
+
+### Testing
+
+- [OK] Focused review-preflight suite passed: 59 tests.
+- [OK] Canonical candidate validation passed all eight configured disposable consumer clones.
+- [OK] make check and the exact pushed-head deterministic review full-check passed.
+- [OK] PR #232 CI passed on e0e5770; Copilot exact-head review produced no new comments and GraphQL polling found zero unresolved threads.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

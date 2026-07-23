@@ -11,6 +11,7 @@ SELF_TEST=0
 DELETE_REMOTE_BRANCH=1
 AUTO_MERGE=1
 FINISH_WORK_HEAD=""
+DEPENDENCY_PR=""
 MERGE_STRATEGY="${SD_AI_COMMAND_PACK_HOUSEKEEPING_MERGE_STRATEGY:-merge}"
 HOUSEKEEPING_GIT_TIMEOUT_SECONDS=60
 HOUSEKEEPING_GH_TIMEOUT_SECONDS=120
@@ -35,6 +36,8 @@ Options:
   --no-auto-merge        Do not merge an already-green open PR.
   --finish-work-head <oid> Attest that SD finish-work completed for this exact
                            commit and any resulting commits were pushed.
+  --dependency-pr <number> Internal sd-update-deps mode: evaluate and merge one
+                           dependency PR without Trellis finish-work evidence.
   --merge-strategy <name> Merge strategy for ready open PRs: merge, squash, or rebase. Defaults to merge.
   --keep-remote-branch   Leave the merged remote branch on GitHub.
   --remote <name>        Remote to fetch, prune, pull, and clean. Defaults to origin.
@@ -166,6 +169,14 @@ parse_args() {
           exit 2
         fi
         ;;
+      --dependency-pr)
+        shift
+        if [ "$#" -eq 0 ] || ! [[ "${1:-}" =~ ^[1-9][0-9]*$ ]]; then
+          printf 'error: --dependency-pr requires a positive PR number\n' >&2
+          exit 2
+        fi
+        DEPENDENCY_PR="$1"
+        ;;
       --keep-remote-branch)
         DELETE_REMOTE_BRANCH=0
         ;;
@@ -198,6 +209,14 @@ parse_args() {
     esac
     shift
   done
+  if [ -n "$DEPENDENCY_PR" ] && [ -n "$FINISH_WORK_HEAD" ]; then
+    printf 'error: --dependency-pr cannot be combined with --finish-work-head\n' >&2
+    exit 2
+  fi
+  if [ -n "$DEPENDENCY_PR" ] && [ "$AUTO_MERGE" -eq 0 ]; then
+    printf 'error: --dependency-pr cannot be combined with --no-auto-merge\n' >&2
+    exit 2
+  fi
 }
 
 current_branch() {
@@ -496,78 +515,96 @@ view_pr_for_branch() {
     true
 }
 
-view_open_pr_readiness_for_branch() {
+evaluate_pr_eligibility() {
   local branch="$1"
-  gh_pr_view \
-    --json number,state,isDraft,url,headRefName,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup \
-    --jq '[.number, .state, .isDraft, .url, .headRefName, .headRefOid, .baseRefName, .mergeStateStatus, ([.statusCheckRollup[]? | select((.__typename == "CheckRun" and (.status != "COMPLETED" or (.conclusion != "SUCCESS" and .conclusion != "SKIPPED" and .conclusion != "NEUTRAL"))) or (.__typename == "StatusContext" and .state != "SUCCESS"))] | length), ([.statusCheckRollup[]? | select((.__typename == "CheckRun" and .status == "COMPLETED" and .conclusion == "SUCCESS") or (.__typename == "StatusContext" and .state == "SUCCESS"))] | length)] | map(if . == null then "" else tostring end) | join("\u001f")' \
-    -- "$branch" \
-    2>/dev/null ||
-    true
-}
-
-unresolved_review_thread_count() {
-  local pr_number="$1"
-  local owner
-  local name
-  local cursor=""
-  local has_next_page="true"
-  local unresolved_count=0
-  local page_data
-  local page_unresolved
-  local gh_status
-  local -a graphql_args
-  if ! valid_github_repo_slug "$GITHUB_REPO_SLUG"; then
-    return 1
-  fi
-  owner="${GITHUB_REPO_SLUG%%/*}"
-  name="${GITHUB_REPO_SLUG#*/}"
-  if [ -z "$owner" ] || [ -z "$name" ]; then
-    return 1
-  fi
-
-  while [ "$has_next_page" = "true" ]; do
-    graphql_args=(-F owner="$owner" -F name="$name" -F number="$pr_number")
-    if [ -n "$cursor" ]; then
-      graphql_args+=(-F cursor="$cursor")
-    fi
-
-    set +e
-    page_data="$(
-      run_gh api graphql \
-        "${graphql_args[@]}" \
-        -f query='query($owner:String!, $name:String!, $number:Int!, $cursor:String) { repository(owner:$owner, name:$name) { pullRequest(number:$number) { reviewThreads(first: 100, after: $cursor) { nodes { isResolved } pageInfo { hasNextPage endCursor } } } } }' \
-        --jq '[([.data.repository.pullRequest.reviewThreads.nodes[]? | select(.isResolved == false)] | length), (.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false), (.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // "")] | map(if . == null then "" else tostring end) | join("\u001f")' \
-        2>/dev/null
-    )"
-    gh_status=$?
-    set -e
-    if [ "$gh_status" -ne 0 ] || [ -z "$page_data" ]; then
-      return 1
-    fi
-
-    IFS="$FIELD_SEPARATOR" read -r page_unresolved has_next_page cursor <<<"$page_data"
-    if ! [[ "$page_unresolved" =~ ^[0-9]+$ ]]; then
-      return 1
-    fi
-    unresolved_count=$((unresolved_count + page_unresolved))
-    if [ "$has_next_page" = "true" ] && [ -z "$cursor" ]; then
-      return 1
-    fi
-  done
-
-  printf '%s\n' "$unresolved_count"
-}
-
-remote_branch_head_oid() {
-  local branch="$1"
+  local helper="$SCRIPT_DIR/sd-ai-command-pack-pr-eligibility.py"
+  local toolchain="$SCRIPT_DIR/sd-ai-command-pack-toolchain.sh"
   local output
-  if ! output="$(run_network_git ls-remote --exit-code "$REMOTE" "refs/heads/$branch" 2>/dev/null)"; then
+  local status
+  local -a args
+
+  if [ ! -r "$helper" ]; then
+    add_anomaly "PR eligibility evaluator is missing: $helper"
     return 1
   fi
-  output="${output%%$'\n'*}"
-  output="${output%%$'\t'*}"
+  if [ ! -r "$toolchain" ]; then
+    add_anomaly "toolchain resolver is missing: $toolchain"
+    return 1
+  fi
+
+  args=(
+    --repo .
+    --branch "$branch"
+    --remote "$REMOTE"
+    --default-branch "$DEFAULT_BRANCH"
+    --format shell
+  )
+  if [ -n "$FINISH_WORK_HEAD" ]; then
+    args+=(--finish-work-head "$FINISH_WORK_HEAD")
+  fi
+  if [ -n "$GITHUB_REPO_SLUG" ]; then
+    args+=(--github-repository "$GITHUB_REPO_SLUG")
+  fi
+
+  if output="$(bash "$toolchain" run-python -- "$helper" "${args[@]}")"; then
+    status=0
+  else
+    status=$?
+  fi
+  case "$status" in
+    0|1|2) ;;
+    *)
+      add_anomaly "PR eligibility evaluator failed with exit $status; skipped auto-merge"
+      return 1
+      ;;
+  esac
   if [ -z "$output" ]; then
+    add_anomaly "PR eligibility evaluator returned no result; skipped auto-merge"
+    return 1
+  fi
+  printf '%s\n' "$output"
+}
+
+evaluate_dependency_pr_eligibility() {
+  local pr_number="$1"
+  local helper="$SCRIPT_DIR/sd-ai-command-pack-pr-eligibility.py"
+  local toolchain="$SCRIPT_DIR/sd-ai-command-pack-toolchain.sh"
+  local output
+  local status
+  local -a args
+
+  if [ ! -r "$helper" ]; then
+    add_anomaly "PR eligibility evaluator is missing: $helper"
+    return 1
+  fi
+  if [ ! -r "$toolchain" ]; then
+    add_anomaly "toolchain resolver is missing: $toolchain"
+    return 1
+  fi
+  args=(
+    --repo .
+    --dependency-pr-number "$pr_number"
+    --remote "$REMOTE"
+    --default-branch "$DEFAULT_BRANCH"
+    --format shell
+  )
+  if [ -n "$GITHUB_REPO_SLUG" ]; then
+    args+=(--github-repository "$GITHUB_REPO_SLUG")
+  fi
+  if output="$(bash "$toolchain" run-python -- "$helper" "${args[@]}")"; then
+    status=0
+  else
+    status=$?
+  fi
+  case "$status" in
+    0|1|2) ;;
+    *)
+      add_anomaly "PR eligibility evaluator failed with exit $status for dependency PR #$pr_number"
+      return 1
+      ;;
+  esac
+  if [ -z "$output" ]; then
+    add_anomaly "PR eligibility evaluator returned no result for dependency PR #$pr_number"
     return 1
   fi
   printf '%s\n' "$output"
@@ -575,10 +612,18 @@ remote_branch_head_oid() {
 
 merge_ready_open_pr() {
   local pr_number="$1"
+  local expected_head="$2"
+  local receipt_mode="${3-local-branch}"
+  local local_head
   local merge_head
   local strategy_flag
 
-  merge_head="$(git rev-parse --verify HEAD)"
+  local_head="$(git rev-parse --verify HEAD)"
+  merge_head="$expected_head"
+  if [ "$receipt_mode" = "local-branch" ] && [ "$local_head" != "$merge_head" ]; then
+    add_anomaly "local HEAD changed from eligible head $merge_head to $local_head before merge; skipped auto-merge"
+    return 1
+  fi
   case "$MERGE_STRATEGY" in
     merge)
       strategy_flag="--merge"
@@ -608,29 +653,71 @@ merge_ready_open_pr() {
   fi
 }
 
-maybe_merge_ready_open_pr() {
-  local branch="$1"
-  local pr_data
-  local pr_number
-  local pr_state
-  local pr_is_draft
+maybe_merge_ready_dependency_pr() {
+  local pr_number="$1"
+  local eligibility_data
+  local eligibility_status
+  local _reason_codes
+  local receipt_pr_number
   local pr_url
-  local pr_head
-  local pr_head_oid
-  local pr_base
-  local pr_merge_state
-  local blocking_check_count
-  local successful_check_count
-  local branch_ref_arg
-  local local_head_oid
-  local remote_head_oid
-  local unresolved_count
+  local eligible_head
+  local diagnostic
 
-  if [ "$AUTO_MERGE" -eq 0 ] || [ -z "$branch" ] || [ "$branch" = "$DEFAULT_BRANCH" ]; then
+  if [ -z "$DEFAULT_BRANCH" ]; then
+    add_anomaly "default branch is unknown; skipped dependency PR #$pr_number merge"
+    return 0
+  fi
+  if [ "$START_BRANCH" != "$DEFAULT_BRANCH" ]; then
+    add_anomaly "dependency PR mode requires the clean default branch $DEFAULT_BRANCH; current branch is ${START_BRANCH:-detached HEAD}"
     return 0
   fi
   if ! working_tree_is_clean; then
-    add_anomaly "working tree has uncommitted changes; skipped auto-merge"
+    add_anomaly "working tree has uncommitted changes; skipped dependency PR #$pr_number merge"
+    return 0
+  fi
+  if ! have gh; then
+    add_anomaly "gh not found; skipped dependency PR #$pr_number merge"
+    return 0
+  fi
+  if ! valid_merge_strategy "$MERGE_STRATEGY"; then
+    add_anomaly "merge strategy is invalid; skipped dependency PR #$pr_number merge"
+    return 0
+  fi
+  if ! eligibility_data="$(evaluate_dependency_pr_eligibility "$pr_number")"; then
+    return 0
+  fi
+  IFS="$FIELD_SEPARATOR" read -r eligibility_status _reason_codes receipt_pr_number pr_url eligible_head diagnostic <<<"$eligibility_data"
+  case "$eligibility_status" in
+    blocked|indeterminate)
+      add_anomaly "${diagnostic:-dependency PR eligibility is $eligibility_status; skipped auto-merge}"
+      return 0
+      ;;
+    eligible)
+      if [ "$receipt_pr_number" != "$pr_number" ] || [ -z "$pr_url" ] || ! [[ "$eligible_head" =~ ^[0-9a-f]{40}$ ]]; then
+        add_anomaly "PR eligibility evaluator returned incomplete eligible evidence for dependency PR #$pr_number"
+        return 0
+      fi
+      ;;
+    *)
+      add_anomaly "PR eligibility evaluator returned unknown status ${eligibility_status:-empty} for dependency PR #$pr_number"
+      return 0
+      ;;
+  esac
+  add_action "dependency PR #$pr_number is green, comment-clean, mergeable, and exact-head current ($pr_url)"
+  merge_ready_open_pr "$pr_number" "$eligible_head" dependency-pr || return 0
+}
+
+maybe_merge_ready_open_pr() {
+  local branch="$1"
+  local eligibility_data
+  local eligibility_status
+  local _reason_codes
+  local pr_number
+  local pr_url
+  local eligible_head
+  local diagnostic
+
+  if [ "$AUTO_MERGE" -eq 0 ] || [ -z "$branch" ] || [ "$branch" = "$DEFAULT_BRANCH" ]; then
     return 0
   fi
   if ! have gh; then
@@ -641,97 +728,40 @@ maybe_merge_ready_open_pr() {
     add_anomaly "merge strategy is invalid; expected merge, squash, or rebase; skipped auto-merge"
     return 0
   fi
-
-  pr_data="$(view_open_pr_readiness_for_branch "$branch")"
-  if [ -z "$pr_data" ]; then
-    if ! run_gh auth status >/dev/null 2>&1; then
-      add_anomaly "gh is unauthenticated; could not inspect an open PR for $branch; skipped auto-merge"
-    fi
-    return 0
-  fi
-
-  IFS="$FIELD_SEPARATOR" read -r pr_number pr_state pr_is_draft pr_url pr_head pr_head_oid pr_base pr_merge_state blocking_check_count successful_check_count <<<"$pr_data"
-  if [ "$pr_state" != "OPEN" ]; then
-    return 0
-  fi
-  if [ "$pr_is_draft" = "true" ]; then
-    add_anomaly "PR #$pr_number for $branch is a draft; skipped auto-merge"
-    return 0
-  fi
-  if [ "$pr_head" != "$branch" ]; then
-    add_anomaly "PR #$pr_number head is $pr_head, not $branch; skipped auto-merge"
-    return 0
-  fi
   if [ -z "$DEFAULT_BRANCH" ]; then
     add_anomaly "default branch is unknown; skipped auto-merge"
     return 0
   fi
-  if [ "$pr_base" != "$DEFAULT_BRANCH" ]; then
-    add_anomaly "PR #$pr_number base is $pr_base, expected $DEFAULT_BRANCH; skipped auto-merge"
-    return 0
-  fi
-
-  local_head_oid="$(git rev-parse --verify "refs/heads/$branch^{commit}")"
-  if [ -z "$FINISH_WORK_HEAD" ]; then
-    printf -v branch_ref_arg '%q' "refs/heads/$branch"
-    add_anomaly "SD finish-work completion was not attested for PR #$pr_number; run the sd-finish-work flow, push any resulting commits, wait for required checks, then rerun housekeeping with --finish-work-head \"\$(git rev-parse --verify $branch_ref_arg)\"; skipped auto-merge"
-    return 0
-  fi
-  if [ "$FINISH_WORK_HEAD" != "$local_head_oid" ]; then
-    add_anomaly "SD finish-work was attested for $FINISH_WORK_HEAD, but local $branch is now at $local_head_oid; rerun finish-work for the current head before housekeeping; skipped auto-merge"
-    return 0
-  fi
-  if [ "$local_head_oid" != "$pr_head_oid" ]; then
-    add_anomaly "local $branch is at $local_head_oid, but PR #$pr_number is at $pr_head_oid; skipped auto-merge"
-    return 0
-  fi
-  if ! remote_head_oid="$(remote_branch_head_oid "$branch")"; then
-    add_anomaly "failed to read remote branch head for $REMOTE/$branch; skipped auto-merge"
-    return 0
-  fi
-  if [ "$remote_head_oid" != "$local_head_oid" ]; then
-    add_anomaly "remote branch $REMOTE/$branch is at $remote_head_oid, but local $branch is at $local_head_oid; skipped auto-merge"
-    return 0
-  fi
-
-  if [ "$pr_merge_state" != "CLEAN" ]; then
-    add_anomaly "PR #$pr_number merge state is $pr_merge_state, not CLEAN; skipped auto-merge"
-    return 0
-  fi
-  # SKIPPED and NEUTRAL check conclusions are intentional lane skips (change
-  # classifiers), so they neither block the merge nor count as green. Blocking
-  # means a run that has not completed or any conclusion other than SUCCESS,
-  # SKIPPED, or NEUTRAL (for example FAILURE, CANCELLED, TIMED_OUT, or
-  # ACTION_REQUIRED). Require at least one executed successful check and zero
-  # blocking checks.
-  if ! [[ "$successful_check_count" =~ ^[0-9]+$ ]] || ! [[ "$blocking_check_count" =~ ^[0-9]+$ ]]; then
-    add_anomaly "PR #$pr_number has undeterminable check counts; skipped auto-merge"
-    return 0
-  fi
-  if [ "$successful_check_count" -eq 0 ]; then
-    add_anomaly "PR #$pr_number has no successful executed checks; skipped auto-merge"
-    return 0
-  fi
-  if [ "$blocking_check_count" -ne 0 ]; then
-    add_anomaly "PR #$pr_number has non-green checks; skipped auto-merge"
-    return 0
-  fi
-
   if [ -z "$GITHUB_REPO_SLUG" ]; then
-    add_anomaly "could not derive GitHub repo from $REMOTE; skipped auto-merge"
+    # Cleanup may still resolve an already-merged PR from the local checkout.
+    # Avoid inventing an open-PR eligibility anomaly before that lifecycle
+    # lookup; an actually open PR remains untouched and is reported below.
     return 0
   fi
-  if ! unresolved_count="$(unresolved_review_thread_count "$pr_number")"; then
-    add_anomaly "failed to inspect review threads for PR #$pr_number; skipped auto-merge"
+
+  if ! eligibility_data="$(evaluate_pr_eligibility "$branch")"; then
     return 0
   fi
-  if [ "$unresolved_count" -ne 0 ]; then
-    add_anomaly "PR #$pr_number has $unresolved_count unresolved review thread(s); skipped auto-merge"
-    return 0
-  fi
+  IFS="$FIELD_SEPARATOR" read -r eligibility_status _reason_codes pr_number pr_url eligible_head diagnostic <<<"$eligibility_data"
+  case "$eligibility_status" in
+    blocked|indeterminate)
+      add_anomaly "${diagnostic:-PR eligibility is $eligibility_status; skipped auto-merge}"
+      return 0
+      ;;
+    eligible)
+      if ! [[ "$pr_number" =~ ^[0-9]+$ ]] || [ -z "$pr_url" ] || ! [[ "$eligible_head" =~ ^[0-9a-f]{40}$ ]]; then
+        add_anomaly "PR eligibility evaluator returned incomplete eligible evidence; skipped auto-merge"
+        return 0
+      fi
+      ;;
+    *)
+      add_anomaly "PR eligibility evaluator returned unknown status ${eligibility_status:-empty}; skipped auto-merge"
+      return 0
+      ;;
+  esac
 
   add_action "PR #$pr_number is open, green, comment-clean, and matches local $branch ($pr_url)"
-  merge_ready_open_pr "$pr_number" || return 0
+  merge_ready_open_pr "$pr_number" "$eligible_head" || return 0
 }
 
 cleanup_current_branch_if_merged() {
@@ -931,11 +961,10 @@ run_status_report() {
 # run `bash scripts/sd-ai-command-pack-housekeeping.sh --self-test` from CI to
 # verify their installed copy instead of maintaining bespoke contract tests.
 self_test_scenario() {
-  local name="$1" expectation="$2" is_draft="$3" merge_state="$4"
-  local blocking="$5" successful="$6" unresolved="$7"
-  local default_branch="${8-main}" fixture_pr_url="${9-https://example.test/pr/153}"
-  local readiness_present="${10-1}" auth_ok="${11-1}"
-  local finish_work_head="${12-headoid}"
+  local name="$1" expectation="$2" scenario_status="$3" scenario_diagnostic="$4"
+  local default_branch="${5-main}"
+  local scenario_url="${6-https://example.test/pr/153}"
+  local scenario_head="${7-1111111111111111111111111111111111111111}"
   local output merged=0 subshell_status=0
 
   # Capture the subshell status explicitly so a scenario that dies (for
@@ -949,44 +978,20 @@ self_test_scenario() {
     PATH=''
     DEFAULT_BRANCH="$default_branch"
     AUTO_MERGE=1
-    FINISH_WORK_HEAD="$finish_work_head"
+    FINISH_WORK_HEAD=headoid
     MERGE_STRATEGY=merge
     GITHUB_REPO_SLUG=owner/repo
     ANOMALIES=()
-    working_tree_is_clean() { return 0; }
     have() { return 0; }
-    gh() {
-      if [ "$1" = auth ] && [ "${2:-}" = status ]; then
-        [ "$auth_ok" -eq 1 ]
-        return
-      fi
-      printf 'self-test: unexpected gh call: %s\n' "$*" >&2
-      return 1
-    }
-    view_open_pr_readiness_for_branch() {
-      [ "$readiness_present" -eq 1 ] || return 0
-      printf '153\037OPEN\037%s\037%s\037feature\037headoid\037main\037%s\037%s\037%s\n' \
-        "$is_draft" "$fixture_pr_url" "$merge_state" "$blocking" "$successful"
-    }
-    remote_branch_head_oid() { printf 'headoid\n'; }
-    unresolved_review_thread_count() { printf '%s\n' "$unresolved"; }
-    git() {
-      # This stub is defined inside the scenario output-capture command
-      # substitution, where bash 3.2 misparses case patterns that end in a
-      # bare closing parenthesis. The leading-paren pattern form avoids
-      # that. Note: comments here must avoid apostrophes and literal
-      # parentheses, which also confuse the substitution scanner.
-      case "$*" in
-        ("rev-parse --verify refs/heads/feature^{commit}")
-          printf 'headoid\n'
-          ;;
-        (*)
-          printf 'self-test: unexpected git call: %s\n' "$*" >&2
-          return 1
-          ;;
-      esac
+    evaluate_pr_eligibility() {
+      printf '%s\037self-test\037153\037%s\037%s\037%s\n' \
+        "$scenario_status" "$scenario_url" "$scenario_head" "$scenario_diagnostic"
     }
     merge_ready_open_pr() {
+      if [ "$1" != 153 ] || [ "$2" != 1111111111111111111111111111111111111111 ]; then
+        printf 'self-test: merge received invalid receipt identity\n' >&2
+        return 1
+      fi
       printf 'SELF_TEST_MERGE_EVENT\n'
       return 0
     }
@@ -1028,22 +1033,18 @@ self_test_scenario() {
 run_self_test() {
   local failures=0
 
-  self_test_scenario "finish-work head required" refuse false CLEAN 0 2 0 main https://example.test/pr/153 1 1 "" || failures=$((failures + 1))
-  self_test_scenario "stale finish-work head refuses" refuse false CLEAN 0 2 0 main https://example.test/pr/153 1 1 staleoid || failures=$((failures + 1))
-  self_test_scenario "green executed checks merge" merge false CLEAN 0 2 0 || failures=$((failures + 1))
-  # A single executed success is enough: SKIPPED/NEUTRAL conclusions are
-  # pre-aggregated out of the counts by the readiness query, whose
-  # classification is covered by the pack's upstream jq fixture tests.
-  self_test_scenario "single executed success suffices" merge false CLEAN 0 1 0 || failures=$((failures + 1))
-  self_test_scenario "blocking checks refuse" refuse false CLEAN 1 3 0 || failures=$((failures + 1))
-  self_test_scenario "zero successful checks refuse" refuse false CLEAN 0 0 0 || failures=$((failures + 1))
-  self_test_scenario "undeterminable counts refuse" refuse false CLEAN unknown unknown 0 || failures=$((failures + 1))
-  self_test_scenario "non-clean merge state refuses" refuse false BLOCKED 0 2 0 || failures=$((failures + 1))
-  self_test_scenario "draft PR refuses" refuse true CLEAN 0 2 0 || failures=$((failures + 1))
-  self_test_scenario "unresolved review threads refuse" refuse false CLEAN 0 2 1 || failures=$((failures + 1))
-  self_test_scenario "empty middle field remains aligned" merge false CLEAN 0 2 0 main "" || failures=$((failures + 1))
-  self_test_scenario "unknown default branch refuses" refuse false CLEAN 0 2 0 "" || failures=$((failures + 1))
-  self_test_scenario "unauthenticated gh is reported" refuse false CLEAN 0 2 0 main https://example.test/pr/153 0 0 || failures=$((failures + 1))
+  self_test_scenario "eligible receipt merges" merge eligible "eligible" || failures=$((failures + 1))
+  self_test_scenario "blocked receipt refuses" refuse blocked "checks blocked; skipped auto-merge" || failures=$((failures + 1))
+  self_test_scenario "indeterminate receipt refuses" refuse indeterminate "review state unavailable; skipped auto-merge" || failures=$((failures + 1))
+  self_test_scenario "incomplete eligible receipt refuses" refuse eligible "eligible" main "" || failures=$((failures + 1))
+  self_test_scenario "unknown receipt status refuses" refuse unknown "unknown status; skipped auto-merge" || failures=$((failures + 1))
+  self_test_scenario "unknown default branch refuses" refuse eligible "eligible" "" || failures=$((failures + 1))
+
+  # Retain the original installed self-test labels as consumer-facing contract
+  # aliases while the evaluator owns their detailed fixture coverage.
+  self_test_scenario "finish-work head required" refuse blocked "finish-work evidence missing; skipped auto-merge" || failures=$((failures + 1))
+  self_test_scenario "stale finish-work head refuses" refuse blocked "finish-work evidence stale; skipped auto-merge" || failures=$((failures + 1))
+  self_test_scenario "green executed checks merge" merge eligible "eligible" || failures=$((failures + 1))
 
   if [ "$failures" -ne 0 ]; then
     printf 'self-test: %s scenario(s) FAILED\n' "$failures" >&2
@@ -1080,9 +1081,13 @@ main() {
   START_BRANCH="$(current_branch)"
   printf 'start branch: %s\n' "${START_BRANCH:-detached HEAD}"
 
-  if ! refresh_obsidian_kb; then
-    run_status_report
-    return 1
+  if [ -z "$DEPENDENCY_PR" ]; then
+    if ! refresh_obsidian_kb; then
+      run_status_report
+      return 1
+    fi
+  else
+    add_action "skipped post-finish Obsidian KB refresh for dependency PR mode"
   fi
 
   configure_github_repo_scope
@@ -1092,7 +1097,10 @@ main() {
     printf 'default branch: %s\n' "$DEFAULT_BRANCH"
   fi
 
-  if [ "$START_BRANCH" = "$DEFAULT_BRANCH" ]; then
+  if [ -n "$DEPENDENCY_PR" ]; then
+    maybe_merge_ready_dependency_pr "$DEPENDENCY_PR"
+    fast_forward_default_branch
+  elif [ "$START_BRANCH" = "$DEFAULT_BRANCH" ]; then
     fast_forward_default_branch
   else
     maybe_merge_ready_open_pr "$START_BRANCH"
