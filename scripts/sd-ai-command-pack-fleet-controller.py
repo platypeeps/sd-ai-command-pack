@@ -1155,20 +1155,46 @@ def _git_evidence(path: Path) -> dict[str, Any]:
     return result
 
 
+def _reconciliation_action(target: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    action = target["issuedAction"]
+    if action is not None:
+        return action
+    if target["status"] != "reconcile":
+        return None
+    ambiguous = next(
+        (
+            receipt
+            for receipt in reversed(target["receipts"])
+            if receipt["result"] == "ambiguous"
+        ),
+        None,
+    )
+    if ambiguous is None:
+        return None
+    return {
+        key: ambiguous[key]
+        for key in ("actionId", "attempt", "consumer", "release", "stage")
+    }
+
+
 def resume_report(state: Mapping[str, Any]) -> dict[str, Any]:
     reconciliation: list[dict[str, Any]] = []
-    preflight_action = state["preflight"]["issuedAction"]
+    preflight_action = _reconciliation_action(state["preflight"])
     if preflight_action is not None:
         reconciliation.append(
             {
                 "action": preflight_action,
                 "evidence": None,
-                "reasonCode": "issued-campaign-action",
+                "reasonCode": (
+                    "ambiguous-recorded-result"
+                    if state["preflight"]["status"] == "reconcile"
+                    else "issued-campaign-action"
+                ),
             }
         )
     for lane in state["lanes"]:
-        action = lane["issuedAction"]
-        if action is None and lane["status"] != "reconcile":
+        action = _reconciliation_action(lane)
+        if action is None:
             continue
         checkout = Path(lane["checkoutPath"])
         evidence = _git_evidence(checkout)
@@ -1225,7 +1251,11 @@ def status_report(state: Mapping[str, Any]) -> dict[str, Any]:
         for lane in state["lanes"]
     ]
     plan = None
-    if state["preflight"]["status"] == "passed" and state["status"] != "complete":
+    if (
+        state["preflight"]["status"] == "passed"
+        and state["status"] != "complete"
+        and not any(lane["status"] == "reconcile" for lane in state["lanes"])
+    ):
         plan = _planner(state)
     return {
         "campaignId": state["campaignId"],

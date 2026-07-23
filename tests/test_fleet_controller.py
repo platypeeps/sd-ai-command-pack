@@ -396,6 +396,11 @@ class FleetControllerTests(InstallTestCase):
 
         self.assertEqual(state["status"], "blocked")
         self.assertEqual(controller.issue_next(state), [])
+        report = controller.resume_report(state)
+        self.assertEqual(
+            report["reconciliation"][0]["action"]["actionId"], action["actionId"]
+        )
+        self.assertIsNone(controller.status_report(state)["plan"])
         receipt, changed = controller.resolve_reconciliation(
             state,
             action_id=action["actionId"],
@@ -417,6 +422,29 @@ class FleetControllerTests(InstallTestCase):
         )
         self.assertEqual(replay, receipt)
         self.assertFalse(replay_changed)
+
+    def test_preflight_ambiguity_preserves_original_action_identity(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(controller)
+        action = controller.issue_next(state)[0]
+        controller.record_result(
+            state,
+            action_id=action["actionId"],
+            release="0.37.0",
+            consumer=None,
+            result="ambiguous",
+            reason_code="preflight-result-unknown",
+        )
+
+        report = controller.resume_report(state)
+
+        self.assertEqual(
+            report["reconciliation"][0]["action"]["actionId"], action["actionId"]
+        )
+        self.assertEqual(
+            report["reconciliation"][0]["reasonCode"],
+            "ambiguous-recorded-result",
+        )
 
     def test_explicit_resume_retries_cleared_ownership_skip(self) -> None:
         controller = self.load_controller()
