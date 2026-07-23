@@ -427,6 +427,40 @@ class StatusTests(InstallTestCase):
         self.assertIn("#2: Earlier issue", follow_ups[5]["summary"])
         self.assertIn("#9: Later issue", follow_ups[6]["summary"])
 
+    def test_select_items_owns_generated_selection_ids(self) -> None:
+        status = self.load_status_module()
+        selected = status.select_items(
+            [{"selectionId": "untrusted", "id": "task-id"}],
+            prefix="T",
+        )
+
+        self.assertEqual(selected[0]["selectionId"], "T-1")
+        self.assertEqual(selected[0]["id"], "task-id")
+
+    def test_resume_and_archive_follow_ups_are_actions(self) -> None:
+        status = self.load_status_module()
+        for loop_status in ("active", "paused"):
+            with self.subTest(loop_status=loop_status):
+                follow_ups = status.collect_follow_ups(
+                    {
+                        "workLoop": {
+                            "status": loop_status,
+                            "runId": "run-1",
+                            "iteration": 2,
+                            "phase": "implement",
+                        },
+                        "trellis": {"completedOutsideArchive": [{"id": "done"}]},
+                    }
+                )
+
+                self.assertEqual(
+                    [(item["source"], item["kind"]) for item in follow_ups],
+                    [
+                        ("workLoop.status", "action"),
+                        ("trellis.completedOutsideArchive", "action"),
+                    ],
+                )
+
     def test_local_status_reports_active_work_loop_in_json_and_human_output(
         self,
     ) -> None:

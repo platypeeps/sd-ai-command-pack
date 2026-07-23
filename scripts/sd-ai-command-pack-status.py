@@ -419,7 +419,7 @@ def select_items(
     prefix: str,
 ) -> list[dict[str, Any]]:
     return [
-        {"selectionId": f"{prefix}-{index}", **dict(item)}
+        {**dict(item), "selectionId": f"{prefix}-{index}"}
         for index, item in enumerate(items, start=1)
     ]
 
@@ -1219,14 +1219,14 @@ def collect_follow_ups(report: Mapping[str, Any]) -> list[dict[str, Any]]:
         run_id = work_loop.get("runId")
         if loop_status == "active":
             add(
-                "follow-up",
+                "action",
                 f"Resume active SD work loop {run_id} at iteration "
                 f"{work_loop.get('iteration')} phase {work_loop.get('phase')}.",
                 "workLoop.status",
             )
         elif loop_status == "paused":
             add(
-                "follow-up",
+                "action",
                 f"Resume paused SD work loop {run_id} from its recorded checkpoint.",
                 "workLoop.status",
             )
@@ -1250,7 +1250,7 @@ def collect_follow_ups(report: Mapping[str, Any]) -> list[dict[str, Any]]:
     trellis = report.get("trellis")
     if isinstance(trellis, dict) and trellis.get("completedOutsideArchive"):
         add(
-            "follow-up",
+            "action",
             "Archive completed active-root Trellis tasks with "
             "python3 ./.trellis/scripts/task.py archive <task-dir>.",
             "trellis.completedOutsideArchive",
