@@ -98,6 +98,10 @@ merge eligibility without mutating the PR.
 - `07-22-optimize-audit-charter-routing` owns F15.
 - `07-22-structure-skill-runtime-contracts` owns F16.
 - Every implementation child owns its task-local F17 scenario coverage.
+- `07-22-normalize-sd-workflow-program-task-topology` is the completed
+  bookkeeping child that converted the program design and implementation plan
+  into this task-native topology. It owns no ongoing remediation or integration
+  work.
 - `07-22-validate-sd-workflow-program-integration` owns shared invariants,
   S01-S11, the final cross-child lifecycle matrix, the F01-F17 evidence map,
   and the closure record consumed by this parent.
