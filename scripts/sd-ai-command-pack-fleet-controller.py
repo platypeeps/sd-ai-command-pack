@@ -234,6 +234,18 @@ class CampaignStore:
             raise FleetControllerError("campaign state directory is unusable")
         os.chmod(self.directory, 0o700)
 
+    def _create_lock(self) -> int:
+        try:
+            return os.open(
+                self.lock_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+        except FileExistsError:
+            raise
+        except OSError:
+            raise FleetControllerError("campaign lock cannot be created") from None
+
     def load(self) -> dict[str, Any]:
         state = _load_json(self.state_path, "campaign state")
         validate_state(state)
@@ -279,11 +291,7 @@ class CampaignStore:
             raise FleetControllerError("campaign lock path must not be a symlink")
         self._prepare_directory()
         try:
-            descriptor = os.open(
-                self.lock_path,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                0o600,
-            )
+            descriptor = self._create_lock()
         except FileExistsError:
             try:
                 age = time.time() - self.lock_path.stat().st_mtime
@@ -297,11 +305,10 @@ class CampaignStore:
                 raise FleetControllerError(
                     "stale campaign lock cannot be recovered"
                 ) from None
-            descriptor = os.open(
-                self.lock_path,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                0o600,
-            )
+            try:
+                descriptor = self._create_lock()
+            except FileExistsError:
+                raise FleetControllerError("campaign state is busy") from None
         try:
             os.write(descriptor, f"{os.getpid()}\n".encode())
             os.close(descriptor)

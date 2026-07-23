@@ -703,6 +703,24 @@ class FleetControllerTests(InstallTestCase):
         with mock.patch.object(controller.os, "fchmod", None):
             store.write(state)
         self.assertEqual(store.load(), state)
+        with mock.patch.object(
+            controller.os,
+            "open",
+            side_effect=PermissionError("lock denied"),
+        ), self.assertRaisesRegex(
+            controller.FleetControllerError, "lock cannot be created"
+        ):
+            with store.locked():
+                self.fail("lock creation should fail")
+        store.lock_path.write_text("stale\n", encoding="utf-8")
+        os.utime(store.lock_path, (0, 0))
+        with mock.patch.object(
+            controller.os,
+            "open",
+            side_effect=(FileExistsError(), FileExistsError()),
+        ), self.assertRaisesRegex(controller.FleetControllerError, "busy"):
+            with store.locked():
+                self.fail("stale lock race should fail")
         other = self.make_git_repo_without_trellis()
         wrong = controller.CampaignStore(other, "campaign-1", state_home)
         wrong.directory.mkdir(parents=True)
