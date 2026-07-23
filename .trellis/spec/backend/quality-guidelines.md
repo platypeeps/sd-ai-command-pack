@@ -49,7 +49,7 @@ may enter housekeeping's merge mutation path.
 
 ### 2. Signatures
 
-- JSON mode: `python3 scripts/sd-ai-command-pack-pr-eligibility.py --request-json PATH`
+- JSON mode: `python3 scripts/sd-ai-command-pack-pr-eligibility.py --input PATH`
 - Adapter mode: the same command with `--format shell`, producing a bounded
   shell receipt for housekeeping without transferring policy ownership to the
   shell caller.
