@@ -80,6 +80,16 @@ Claude and Gemini expose wrappers as namespaced commands such as
 platforms expose native `sd-*` skills. See [Supported Adapters](#supported-adapters)
 for the platform matrix and command shapes.
 
+Generated command, prompt, and workflow adapters enforce a capability-driven
+checkout-trust preflight before they resolve repository skills or execute
+checkout-owned scripts, hooks, package tasks, provider adapters, or
+command-bearing configuration. Same-repository PRs and unambiguous local
+branches continue normally; fork PRs stop as untrusted, while detached,
+unreadable, unavailable, or contradictory identity stops as indeterminate.
+The preflight never offers user approval as a substitute for source trust.
+`sd-help` is the only initial trusted-static exemption and remains
+non-executing and read-only.
+
 ### sd-help
 
 Provides read-only discovery for the installed SD command surface. It can list

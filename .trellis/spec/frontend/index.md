@@ -56,9 +56,10 @@ Use these specs when changing files under `templates/`, especially:
 - `templates/.github/prompts/sd-review-pr.prompt.md`
 - `templates/.github/prompts/sd-update-spec.prompt.md`
 
-OpenCode command targets install from the neutral `templates/.commands/`
-sources; do not add duplicate OpenCode command source files under
-`templates/.opencode/commands/`.
+OpenCode command targets install from the generated guarded
+`templates/.commands/` sources. Hand-authored neutral bodies live under
+`.github/command-sources/`; do not add duplicate OpenCode command source files
+under `templates/.opencode/commands/`.
 
 This repo has no React app, browser UI, hooks, CSS, or client-side state. The
 user-facing layer is prompt and command text that other AI platforms execute.

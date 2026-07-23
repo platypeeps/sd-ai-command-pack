@@ -330,6 +330,18 @@ delegates to, or mutates state on behalf of the selected command.
 
 Use the platform-native command when available.
 
+Generated command, prompt, and workflow adapters run a capability-driven
+checkout-trust preflight before resolving repository skills or executing
+checkout-owned scripts, hooks, package tasks, provider adapters, or
+command-bearing configuration. Same-repository PRs and unambiguous local
+branches continue normally. Fork PRs stop as `untrusted`; detached, unreadable,
+unavailable, or contradictory repository identity stops as `indeterminate`.
+Both blocked states report a stable reason code and safe maintainer-run or
+trusted-base inspection guidance; user approval cannot bypass the stop.
+`sd-help` is the sole initial `trusted_static_only` exemption and remains
+non-executing and read-only. Command reports include the selected
+`checkout-trust` state and reason.
+
 Claude Code and Gemini CLI:
 
 ```bash

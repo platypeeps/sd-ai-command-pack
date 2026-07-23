@@ -13,9 +13,11 @@ that users invoke from Claude, Cursor, Gemini, GitHub Copilot, and OpenCode.
 ## Directory Layout
 
 ```text
+.github/
+└── command-sources/sd-<command>.md                 # Authored neutral command bodies
 templates/
 ├── .agents/skills/<command>/SKILL.md               # Shared workflows
-├── .commands/sd-<command>.md                       # Shared generic Markdown command bodies
+├── .commands/sd-<command>.md                       # Generated guarded neutral adapters
 ├── .claude/commands/sd/<command>.md                # Claude command adapters
 ├── .gemini/commands/sd/<command>.toml              # Gemini command adapters
 └── .github/prompts/sd-<command>.prompt.md          # GitHub Copilot prompts
@@ -24,8 +26,9 @@ templates/
 ## Module Organization
 
 - Put reusable workflow instructions in the shared skill.
-- Put generic Markdown command bodies in `templates/.commands/` when multiple
-  platforms can install byte-identical content from one source.
+- Put hand-authored neutral command bodies in `.github/command-sources/`.
+  `make generate` inserts registry-owned safety policy and writes the guarded
+  install sources to `templates/.commands/` for byte-identical fanout.
 - Put only platform-specific command wrappers in platform adapter files.
 - Keep generated or local Trellis runtime files outside the pack payload unless
   they are intentionally added to `templates/` and `manifest.json`.
@@ -50,7 +53,8 @@ templates/
 
 - `templates/.gemini/commands/sd/review-pr.toml` contains a short prompt
   that tells Gemini to load the matching shared skill.
-- `templates/.commands/sd-review-pr.md` is the shared generic Markdown source
-  installed to Cursor, OpenCode, and other generic Markdown command targets.
+- `.github/command-sources/sd-review-pr.md` is the authored neutral body;
+  generated `templates/.commands/sd-review-pr.md` is installed to Cursor,
+  OpenCode, and other generic Markdown command targets.
 - `templates/.github/prompts/sd-review-pr.prompt.md` mirrors the same entry-point
   instructions for GitHub Copilot.

@@ -55,17 +55,17 @@ four-command warning allowlist with a canonical, generated, fail-closed policy.
 
 ## Acceptance Criteria
 
-- [ ] Generated adapter tests enumerate every live command and fail if an
+- [x] Generated adapter tests enumerate every live command and fail if an
   execution-capable command lacks the preflight.
-- [ ] Fork-PR fixtures prove no changed checkout script, package command, hook,
+- [x] Fork-PR fixtures prove no changed checkout script, package command, hook,
   provider adapter, or skill payload executes before trust is established.
-- [ ] Same-repository and trusted-local fixtures retain normal operation.
-- [ ] Detached, unreadable, and contradictory origin states fail closed with
+- [x] Same-repository and trusted-local fixtures retain normal operation.
+- [x] Detached, unreadable, and contradictory origin states fail closed with
   actionable diagnostics.
-- [ ] New command metadata defaults to execution-capable/preflight-required
+- [x] New command metadata defaults to execution-capable/preflight-required
   until deliberately classified.
-- [ ] No platform-specific prompt can silently opt out of the canonical policy.
-- [ ] Templates, generated adapters, manifest parity, focused security tests,
+- [x] No platform-specific prompt can silently opt out of the canonical policy.
+- [x] Templates, generated adapters, manifest parity, focused security tests,
   and `make check` pass.
 
 ## Out Of Scope

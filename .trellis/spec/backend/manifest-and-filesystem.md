@@ -1272,6 +1272,10 @@ Keep these checks in the pack-source drift tests:
 - `git ls-files templates` must equal manifest sources plus the templates for
   registry-declared source-only commands. No other orphaned template files are
   allowed, and every manifest source must remain tracked.
+- Authored neutral command bodies live outside the install payload under
+  `.github/command-sources/`; generator `--check` proves that every guarded
+  `templates/.commands/` payload matches those sources plus registry capability
+  policy.
 - Manifest targets must be unique under `casefold()` to avoid collisions on
   case-insensitive filesystems.
 - Source-checkout install state such as `.sd-ai-command-pack/provenance.json`

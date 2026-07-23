@@ -448,6 +448,11 @@ class CommandInfo:
     name: str
     short: str
     family: str
+    executes_checkout_code: bool = True
+    mutates_local: bool = False
+    mutates_remote: bool = False
+    trusted_static_only: bool = False
+    safe_mode: str | None = None
 
 
 COMMAND_FAMILIES: tuple[CommandFamily, ...] = (
@@ -478,37 +483,120 @@ COMMAND_FAMILIES: tuple[CommandFamily, ...] = (
     ),
 )
 
-# Command source of truth: one row per sd-* command that ships a neutral body
-# at templates/.commands/<name>.md. The generator derives the compatibility
+# Command source of truth: one row per sd-* command. Hand-authored bodies live
+# at .github/command-sources/<name>.md; the generator writes guarded neutral
+# payloads to templates/.commands/<name>.md, then derives the compatibility
 # pair list, help catalog, bespoke adapters, and per-command manifest entries.
+# New rows conservatively execute checkout code until explicitly proven static.
 # Row order remains the canonical regenerated-manifest order.
 COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
-    CommandInfo("sd-help", "help", "orientation-knowledge"),
+    CommandInfo(
+        "sd-help",
+        "help",
+        "orientation-knowledge",
+        executes_checkout_code=False,
+        trusted_static_only=True,
+    ),
     CommandInfo("sd-status", "status", "orientation-knowledge"),
-    CommandInfo("sd-continue", "continue", "orientation-knowledge"),
-    CommandInfo("sd-start", "start", "orientation-knowledge"),
-    CommandInfo("sd-finish-work", "finish-work", "orientation-knowledge"),
-    CommandInfo("sd-create-pr", "create-pr", "pull-requests-shipping"),
-    CommandInfo("sd-work-backlog", "work-backlog", "planning-backlog"),
-    CommandInfo("sd-work-designs", "work-designs", "planning-backlog"),
-    CommandInfo("sd-audit-repo", "audit-repo", "verification-improvement"),
-    CommandInfo("sd-watch-pr", "watch-pr", "pull-requests-shipping"),
-    CommandInfo("sd-fix-ci", "fix-ci", "verification-improvement"),
-    CommandInfo("sd-update-deps", "update-deps", "maintenance-fleet"),
-    CommandInfo("sd-fleet-refresh", "fleet-refresh", "maintenance-fleet"),
-    CommandInfo("sd-test-gaps", "test-gaps", "verification-improvement"),
-    CommandInfo("sd-retro", "retro", "orientation-knowledge"),
-    CommandInfo("sd-ship", "ship", "pull-requests-shipping"),
-    CommandInfo("sd-review-pr", "review-pr", "pull-requests-shipping"),
-    CommandInfo("sd-review-local", "review-local", "verification-improvement"),
+    CommandInfo("sd-continue", "continue", "orientation-knowledge", mutates_local=True),
+    CommandInfo("sd-start", "start", "orientation-knowledge", mutates_local=True),
+    CommandInfo(
+        "sd-finish-work", "finish-work", "orientation-knowledge", mutates_local=True
+    ),
+    CommandInfo(
+        "sd-create-pr",
+        "create-pr",
+        "pull-requests-shipping",
+        mutates_local=True,
+        mutates_remote=True,
+    ),
+    CommandInfo(
+        "sd-work-backlog",
+        "work-backlog",
+        "planning-backlog",
+        mutates_local=True,
+        mutates_remote=True,
+    ),
+    CommandInfo(
+        "sd-work-designs", "work-designs", "planning-backlog", mutates_local=True
+    ),
+    CommandInfo(
+        "sd-audit-repo",
+        "audit-repo",
+        "verification-improvement",
+        mutates_local=True,
+    ),
+    CommandInfo(
+        "sd-watch-pr",
+        "watch-pr",
+        "pull-requests-shipping",
+        mutates_local=True,
+        mutates_remote=True,
+    ),
+    CommandInfo(
+        "sd-fix-ci",
+        "fix-ci",
+        "verification-improvement",
+        mutates_local=True,
+        mutates_remote=True,
+    ),
+    CommandInfo(
+        "sd-update-deps",
+        "update-deps",
+        "maintenance-fleet",
+        mutates_local=True,
+        mutates_remote=True,
+    ),
+    CommandInfo(
+        "sd-fleet-refresh",
+        "fleet-refresh",
+        "maintenance-fleet",
+        mutates_local=True,
+        mutates_remote=True,
+    ),
+    CommandInfo(
+        "sd-test-gaps", "test-gaps", "verification-improvement", mutates_local=True
+    ),
+    CommandInfo("sd-retro", "retro", "orientation-knowledge", mutates_local=True),
+    CommandInfo(
+        "sd-ship",
+        "ship",
+        "pull-requests-shipping",
+        mutates_local=True,
+        mutates_remote=True,
+    ),
+    CommandInfo(
+        "sd-review-pr",
+        "review-pr",
+        "pull-requests-shipping",
+        mutates_local=True,
+        mutates_remote=True,
+    ),
+    CommandInfo(
+        "sd-review-local",
+        "review-local",
+        "verification-improvement",
+        mutates_local=True,
+    ),
     CommandInfo(
         "sd-review-learnings",
         "review-learnings",
         "verification-improvement",
+        mutates_local=True,
     ),
-    CommandInfo("sd-full-check", "full-check", "verification-improvement"),
-    CommandInfo("sd-housekeeping", "housekeeping", "pull-requests-shipping"),
-    CommandInfo("sd-update-spec", "update-spec", "orientation-knowledge"),
+    CommandInfo(
+        "sd-full-check", "full-check", "verification-improvement", mutates_local=True
+    ),
+    CommandInfo(
+        "sd-housekeeping",
+        "housekeeping",
+        "pull-requests-shipping",
+        mutates_local=True,
+        mutates_remote=True,
+    ),
+    CommandInfo(
+        "sd-update-spec", "update-spec", "orientation-knowledge", mutates_local=True
+    ),
 )
 
 
@@ -559,6 +647,36 @@ def validate_command_registry(
             errors.append(
                 f"command {command.name} uses unknown family: {command.family}"
             )
+        capability_values = (
+            command.executes_checkout_code,
+            command.mutates_local,
+            command.mutates_remote,
+            command.trusted_static_only,
+        )
+        if not all(isinstance(value, bool) for value in capability_values):
+            errors.append(f"command {command.name} capability flags must be boolean")
+            continue
+        if command.trusted_static_only and (
+            command.executes_checkout_code
+            or command.mutates_local
+            or command.mutates_remote
+            or command.safe_mode is not None
+        ):
+            errors.append(
+                f"command {command.name} trusted_static_only conflicts with "
+                "checkout execution or mutation"
+            )
+        if not command.executes_checkout_code and not command.trusted_static_only:
+            errors.append(
+                f"command {command.name} must execute checkout code or be "
+                "trusted_static_only"
+            )
+        if command.safe_mode is not None and (
+            not isinstance(command.safe_mode, str)
+            or not command.safe_mode
+            or not command.safe_mode.replace("-", "").replace("_", "").isalnum()
+        ):
+            errors.append(f"command {command.name} uses unsafe safe_mode")
 
     if errors:
         raise RuntimeError("invalid COMMAND_REGISTRY: " + "; ".join(errors))
