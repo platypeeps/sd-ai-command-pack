@@ -205,6 +205,24 @@ class HelpCommandTests(InstallTestCase):
             ),
             (
                 registry.CommandInfo(
+                    "sd-one",
+                    "one",
+                    "one",
+                    target_families=("shared", 1),  # type: ignore[arg-type]
+                ),
+                "invalid target families",
+            ),
+            (
+                registry.CommandInfo(
+                    "sd-one",
+                    "one",
+                    "one",
+                    target_families=["shared"],  # type: ignore[arg-type]
+                ),
+                "invalid target families",
+            ),
+            (
+                registry.CommandInfo(
                     "sd-one", "one", "one", configuration_keys=("",)
                 ),
                 "invalid configuration keys",
@@ -326,6 +344,30 @@ class HelpCommandTests(InstallTestCase):
                 "invalid identifiers",
             ),
             (
+                (
+                    retirement(
+                        identifiers=("sd-old", 1),  # type: ignore[arg-type]
+                    ),
+                ),
+                "invalid identifiers",
+            ),
+            (
+                (
+                    retirement(
+                        installed_targets=(1,),  # type: ignore[arg-type]
+                    ),
+                ),
+                "invalid installed targets",
+            ),
+            (
+                (
+                    retirement(
+                        configuration_keys=(1,),  # type: ignore[arg-type]
+                    ),
+                ),
+                "invalid configuration keys",
+            ),
+            (
                 (retirement(installed_targets=("../outside",)),),
                 "unsafe installed target",
             ),
@@ -392,6 +434,14 @@ class HelpCommandTests(InstallTestCase):
                     ),
                 ),
                 "allowance has no reason",
+            ),
+            (
+                (
+                    registry.CommandSurfaceAllowance(
+                        1, 2, 3  # type: ignore[arg-type]
+                    ),
+                ),
+                "invalid identifier",
             ),
         )
         for allowances, message in invalid_allowances:

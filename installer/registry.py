@@ -718,7 +718,12 @@ def validate_command_registry(
             or not command.safe_mode.replace("-", "").replace("_", "").isalnum()
         ):
             errors.append(f"command {command.name} uses unsafe safe_mode")
-        if not command.target_families:
+        if not isinstance(command.target_families, tuple) or any(
+            not isinstance(target, str) or not target.strip()
+            for target in command.target_families
+        ):
+            errors.append(f"command {command.name} has invalid target families")
+        elif not command.target_families:
             errors.append(f"command {command.name} has no generated target families")
         elif len(command.target_families) != len(set(command.target_families)):
             errors.append(f"command {command.name} has duplicate target families")
@@ -731,7 +736,7 @@ def validate_command_registry(
                     f"command {command.name} has unknown target families: "
                     + ", ".join(unknown_targets)
                 )
-        if any(
+        if not isinstance(command.configuration_keys, tuple) or any(
             not isinstance(key, str) or not key.strip()
             for key in command.configuration_keys
         ):
@@ -890,17 +895,22 @@ def validate_command_surface_registry(
     live_configuration_keys = {
         key for command in commands for key in command.configuration_keys
     }
-    retirement_ids = [retirement.id for retirement in retirements]
+    retirement_ids = [
+        retirement.id for retirement in retirements if isinstance(retirement.id, str)
+    ]
     if len(retirement_ids) != len(set(retirement_ids)):
         errors.append("duplicate retirement id")
 
     retired_identifiers: set[str] = set()
     retired_configuration_keys: set[str] = set()
     for retirement in retirements:
-        if not (
-            retirement.id.strip()
-            and retirement.removed_version.strip()
-            and retirement.owner_task.strip()
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (
+                retirement.id,
+                retirement.removed_version,
+                retirement.owner_task,
+            )
         ):
             errors.append(f"retirement fields must be non-empty: {retirement!r}")
         if not isinstance(retirement.source_paths_must_be_absent, bool):
@@ -913,27 +923,39 @@ def validate_command_surface_registry(
             or retirement.configuration_keys
         ):
             errors.append(f"retirement {retirement.id} describes no surface")
+        validated_values: dict[str, tuple[str, ...]] = {}
         for label, values in (
             ("identifiers", retirement.identifiers),
             ("installed targets", retirement.installed_targets),
             ("configuration keys", retirement.configuration_keys),
         ):
-            if len(values) != len(set(values)) or any(not value.strip() for value in values):
+            if not isinstance(values, tuple) or any(
+                not isinstance(value, str) or not value.strip() for value in values
+            ):
                 errors.append(f"retirement {retirement.id} has invalid {label}")
-        for target in retirement.installed_targets:
+                validated_values[label] = ()
+                continue
+            normalized = tuple(value for value in values if isinstance(value, str))
+            if len(normalized) != len(set(normalized)):
+                errors.append(f"retirement {retirement.id} has invalid {label}")
+            validated_values[label] = normalized
+        identifiers = validated_values["identifiers"]
+        installed_targets = validated_values["installed targets"]
+        configuration_keys = validated_values["configuration keys"]
+        for target in installed_targets:
             path = Path(target)
             if path.is_absolute() or ".." in path.parts:
                 errors.append(
                     f"retirement {retirement.id} has unsafe installed target: {target}"
                 )
-        overlap = live_identifiers.intersection(retirement.identifiers)
+        overlap = live_identifiers.intersection(identifiers)
         if overlap:
             errors.append(
                 f"retirement {retirement.id} identifiers are still live: "
                 + ", ".join(sorted(overlap))
             )
         config_overlap = live_configuration_keys.intersection(
-            retirement.configuration_keys
+            configuration_keys
         )
         if config_overlap:
             errors.append(
@@ -941,10 +963,10 @@ def validate_command_surface_registry(
                 + ", ".join(sorted(config_overlap))
             )
         repeated_identifiers = retired_identifiers.intersection(
-            retirement.identifiers
+            identifiers
         )
         repeated_keys = retired_configuration_keys.intersection(
-            retirement.configuration_keys
+            configuration_keys
         )
         if repeated_identifiers:
             errors.append(
@@ -956,36 +978,53 @@ def validate_command_surface_registry(
                 "retired configuration keys have multiple owners: "
                 + ", ".join(sorted(repeated_keys))
             )
-        retired_identifiers.update(retirement.identifiers)
-        retired_configuration_keys.update(retirement.configuration_keys)
+        retired_identifiers.update(identifiers)
+        retired_configuration_keys.update(configuration_keys)
 
     known_allowance_identifiers = retired_identifiers | retired_configuration_keys
     seen_allowances: set[tuple[str, str]] = set()
     for allowance in allowances:
-        key = (allowance.identifier, allowance.path_pattern)
-        path = Path(allowance.path_pattern)
-        if allowance.identifier not in known_allowance_identifiers:
+        identifier = (
+            allowance.identifier
+            if isinstance(allowance.identifier, str) and allowance.identifier.strip()
+            else None
+        )
+        path_pattern = (
+            allowance.path_pattern
+            if isinstance(allowance.path_pattern, str)
+            and allowance.path_pattern.strip()
+            else None
+        )
+        if identifier is None:
+            errors.append("command surface allowance has an invalid identifier")
+        elif identifier not in known_allowance_identifiers:
             errors.append(
-                f"allowance names an identifier that is not retired: {allowance.identifier}"
+                f"allowance names an identifier that is not retired: {identifier}"
             )
-        if key in seen_allowances:
-            errors.append(
-                f"duplicate command surface allowance: {allowance.identifier} "
-                f"{allowance.path_pattern}"
-            )
-        if (
+        if identifier is not None and path_pattern is not None:
+            key = (identifier, path_pattern)
+            if key in seen_allowances:
+                errors.append(
+                    f"duplicate command surface allowance: {identifier} {path_pattern}"
+                )
+        if path_pattern is None:
+            errors.append("command surface allowance has an invalid path")
+        else:
+            path = Path(path_pattern)
+        if path_pattern is not None and (
             path.is_absolute()
             or ".." in path.parts
-            or allowance.path_pattern in {"*", "**", "**/*"}
+            or path_pattern in {"*", "**", "**/*"}
         ):
             errors.append(
-                f"unsafe command surface allowance path: {allowance.path_pattern}"
+                f"unsafe command surface allowance path: {path_pattern}"
             )
-        if not allowance.reason.strip():
+        if not isinstance(allowance.reason, str) or not allowance.reason.strip():
             errors.append(
                 f"command surface allowance has no reason: {allowance.path_pattern}"
             )
-        seen_allowances.add(key)
+        if identifier is not None and path_pattern is not None:
+            seen_allowances.add((identifier, path_pattern))
 
     if errors:
         raise RuntimeError("invalid command surface registry: " + "; ".join(errors))
