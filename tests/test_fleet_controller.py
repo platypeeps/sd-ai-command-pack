@@ -12,6 +12,7 @@ contextlib = _support.contextlib
 io = _support.io
 os = _support.os
 Path = _support.Path
+mock = _support.mock
 unittest = _support.unittest
 PACK_ROOT = _support.PACK_ROOT
 InstallTestCase = _support.InstallTestCase
@@ -428,6 +429,21 @@ class FleetControllerTests(InstallTestCase):
         with self.assertRaisesRegex(controller.FleetControllerError, "changed"):
             controller.issue_next(state)
 
+    def test_manifest_digest_uses_the_validated_read(self) -> None:
+        controller = self.load_controller()
+        root = self.make_git_repo_without_trellis()
+        fleet, _manifest = self.write_inputs(root)
+        expected = controller.hashlib.sha256(fleet.read_bytes()).hexdigest()
+
+        with mock.patch.object(
+            Path,
+            "read_bytes",
+            side_effect=AssertionError("manifest must not be read twice"),
+        ):
+            _payload, _consumers, _policy, digest = controller._manifest(fleet)
+
+        self.assertEqual(digest, expected)
+
     def test_store_is_private_atomic_and_rejects_cross_repo_state(self) -> None:
         controller = self.load_controller()
         root, _fleet, _manifest, state = self.state(controller)
@@ -562,6 +578,23 @@ class FleetControllerTests(InstallTestCase):
             "passed",
         )
         self.assertTrue(recorded["changed"])
+
+        status, replayed, error = self.run_cli(
+            controller,
+            "plan",
+            *common,
+            "--release",
+            "0.37.0",
+            "--fleet",
+            str(fleet),
+            "--manifest",
+            str(manifest),
+            "--consumer",
+            "canary-a",
+        )
+        self.assertEqual((status, error), (0, ""))
+        self.assertFalse(replayed["changed"])
+        self.assertEqual(replayed["preflight"]["receiptCount"], 1)
 
         _status, issued, _error = self.run_cli(controller, "next", *common)
         checkout = issued["actions"][0]

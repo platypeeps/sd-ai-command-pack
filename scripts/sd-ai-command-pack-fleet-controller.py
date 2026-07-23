@@ -126,7 +126,7 @@ def _digest_path(path: Path) -> str:
     return _digest_text(str(path.expanduser().resolve()))
 
 
-def _load_json(path: Path, label: str) -> dict[str, Any]:
+def _load_json_with_digest(path: Path, label: str) -> tuple[dict[str, Any], str]:
     try:
         inspected = path.lstat()
     except FileNotFoundError:
@@ -167,6 +167,11 @@ def _load_json(path: Path, label: str) -> dict[str, Any]:
         raise FleetControllerError(f"{label} is not valid UTF-8 JSON") from None
     if not isinstance(payload, dict):
         raise FleetControllerError(f"{label} must be a JSON object")
+    return payload, hashlib.sha256(content).hexdigest()
+
+
+def _load_json(path: Path, label: str) -> dict[str, Any]:
+    payload, _digest = _load_json_with_digest(path, label)
     return payload
 
 
@@ -548,12 +553,11 @@ def validate_state(state: Mapping[str, Any]) -> None:
 
 
 def _manifest(path: Path) -> tuple[dict[str, Any], list[Any], Any, str]:
-    payload = _load_json(path, "fleet manifest")
+    payload, digest = _load_json_with_digest(path, "fleet manifest")
     try:
         consumers, policy = fleet_lib.parse_fleet_manifest(payload)
     except fleet_lib.FleetConfigError as error:
         raise FleetControllerError(str(error)) from None
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
     return payload, consumers, policy, digest
 
 
@@ -1353,6 +1357,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         raise FleetControllerError(
                             "campaign already exists with different identity or policy"
                         )
+                    state = existing
                     changed = False
                 else:
                     store.write(state)
