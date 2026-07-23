@@ -355,6 +355,10 @@ class FleetControllerTests(InstallTestCase):
             report["reconciliation"][0]["reasonCode"],
             "issued-action-needs-reconciliation",
         )
+        self.assertFalse(report["reconciliation"][0]["evidence"]["exists"])
+        self.assertFalse(
+            report["reconciliation"][0]["evidence"]["checkoutDigestMatches"]
+        )
 
     def test_ambiguous_action_blocks_until_explicit_reconciliation(self) -> None:
         controller = self.load_controller()

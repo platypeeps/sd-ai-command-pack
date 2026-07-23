@@ -1166,7 +1166,9 @@ def resume_report(state: Mapping[str, Any]) -> dict[str, Any]:
             continue
         checkout = Path(lane["checkoutPath"])
         evidence = _git_evidence(checkout)
-        evidence["checkoutDigestMatches"] = _digest_path(checkout) == lane["checkoutDigest"]
+        evidence["checkoutDigestMatches"] = bool(evidence["exists"]) and (
+            _digest_path(checkout) == lane["checkoutDigest"]
+        )
         reconciliation.append(
             {
                 "action": action,
