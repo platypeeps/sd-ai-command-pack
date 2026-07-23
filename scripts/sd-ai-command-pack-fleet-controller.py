@@ -1045,13 +1045,11 @@ def record_result(
             raise FleetControllerError("action already has a conflicting receipt")
         candidate_action = _action_identity(existing)
     else:
-        candidate_action = issued or {
-            "actionId": action_id,
-            "attempt": target["attempt"],
-            "consumer": consumer,
-            "release": release,
-            "stage": "preflight" if consumer is None else target["stage"],
-        }
+        if issued is None or issued["actionId"] != action_id:
+            raise FleetControllerError(
+                "action ID is not currently issued for this target"
+            )
+        candidate_action = issued
     receipt = _build_receipt(
         candidate_action,
         result=result,
@@ -1065,8 +1063,6 @@ def record_result(
         if _receipt_core(existing) != _receipt_core(receipt):
             raise FleetControllerError("action already has a conflicting receipt")
         return existing, False
-    if issued is None or issued["actionId"] != action_id:
-        raise FleetControllerError("action ID is not currently issued for this target")
     if consumer is None:
         target["receipts"].append(receipt)
         target["issuedAction"] = None

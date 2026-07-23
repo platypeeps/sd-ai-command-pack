@@ -473,6 +473,14 @@ class FleetControllerTests(InstallTestCase):
                 consumer=None,
                 result="passed",
             )
+        with self.assertRaisesRegex(controller.FleetControllerError, "not currently issued"):
+            controller.record_result(
+                state,
+                action_id="f" * 64,
+                release="0.37.0",
+                consumer=None,
+                result="review-finding",
+            )
 
     def test_persisted_receipts_revalidate_build_invariants(self) -> None:
         controller = self.load_controller()
