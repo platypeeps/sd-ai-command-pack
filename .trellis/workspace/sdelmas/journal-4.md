@@ -1808,3 +1808,41 @@ Added deterministic priority-provenance validation and preserved archived task p
 ### Next Steps
 
 - None - task complete
+
+
+## Session 198: Support singular test directories in review learnings
+
+**Date**: 2026-07-23
+**Task**: Support singular test directories in review learnings
+**Branch**: `codex/support-test-directory-review-learnings`
+
+### Summary
+
+Moved the consumer-discovered test-directory classification fix into the source command pack and prepared release 0.32.1.
+
+### Main Changes
+
+- Classified both top-level test/ and tests/ paths as the same review-learning test family and signal fallback.
+- Added focused regression coverage, synchronized generated surfaces, and refreshed the 0.32.1 fleet candidate ledger.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `190c038` | fix: support singular test directories in review learnings |
+
+### Testing
+
+- [OK] Focused review-learnings suite: 34 tests passed.
+- [OK] All eight fleet candidate consumers passed.
+- [OK] make check passed, including full tests, lint, security, coverage, parity, install audit, and release gates.
+- [OK] GitHub CI and Copilot review on PR #230 passed with zero review threads.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

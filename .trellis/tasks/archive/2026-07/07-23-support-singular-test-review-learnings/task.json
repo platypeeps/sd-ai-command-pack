@@ -1,0 +1,30 @@
+{
+  "id": "support-singular-test-review-learnings",
+  "name": "support-singular-test-review-learnings",
+  "title": "Support singular test directories in review learnings",
+  "description": "Preserve review-learning classification for repositories that use either test/ or tests/, with source-template and regression-test coverage.",
+  "status": "completed",
+  "dev_type": "bugfix",
+  "scope": "review-learnings",
+  "package": null,
+  "priority": "P1",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-23",
+  "completedAt": "2026-07-23",
+  "branch": "codex/support-test-directory-review-learnings",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "templates/scripts/sd-ai-command-pack-review-learnings.py",
+    "scripts/sd-ai-command-pack-review-learnings.py",
+    "tests/test_review_learnings.py"
+  ],
+  "notes": "Consumer PR #8 exposed that the source pack did not retain the prior consumer correction for top-level test/ paths.",
+  "meta": {}
+}

@@ -871,7 +871,7 @@ def _path_family(path: str) -> str:
         return "trellis-spec"
     if lowered.startswith("templates/"):
         return "templates"
-    if lowered.startswith("tests/"):
+    if lowered.startswith(("test/", "tests/")):
         return "tests"
     if lowered.startswith("docs/") or lowered in {"readme.md", "changelog.md"}:
         return "documentation"
@@ -896,7 +896,7 @@ def _signal_category(comment: PullRequestComment) -> str:
         return SIGNAL_TASK_METADATA
     if path.startswith(GENERATED_SIGNAL_PATH_PREFIXES) or path in GENERATED_SIGNAL_PATHS:
         return SIGNAL_GENERATED_SURFACES
-    if path.startswith("tests/"):
+    if path.startswith(("test/", "tests/")):
         return SIGNAL_REVIEWER_TEST_HARNESS
     if path.startswith("docs/") or path in {"readme.md", "changelog.md"}:
         return SIGNAL_CONTRACT_DOCUMENTATION
