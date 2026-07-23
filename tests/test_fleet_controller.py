@@ -300,10 +300,33 @@ class FleetControllerTests(InstallTestCase):
                 action_id=action["actionId"],
                 release="0.37.0",
                 consumer="wave-a",
+                result="review-finding",
+                reason_code="review-finding",
+                head=OTHER_HEAD,
+            )
+        with self.assertRaisesRegex(controller.FleetControllerError, "current PR head"):
+            controller.record_result(
+                state,
+                action_id=action["actionId"],
+                release="0.37.0",
+                consumer="wave-a",
                 result="passed",
                 head=OTHER_HEAD,
             )
         self.assertEqual(state["lanes"][0]["status"], "issued")
+        persisted = json.loads(json.dumps(state))
+        controller.record_result(
+            persisted,
+            action_id=action["actionId"],
+            release="0.37.0",
+            consumer="wave-a",
+            result="review-finding",
+            reason_code="review-finding",
+            head=HEAD,
+        )
+        persisted["lanes"][0]["receipts"][-1]["head"] = OTHER_HEAD
+        with self.assertRaisesRegex(controller.FleetControllerError, "current PR head"):
+            controller.validate_state(persisted)
 
         controller.record_result(
             state,

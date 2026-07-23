@@ -506,6 +506,12 @@ def validate_lane(value: object, label: str) -> None:
         raise FleetControllerError(f"{label} receipts must be an array")
     for index, receipt in enumerate(value["receipts"]):
         validate_receipt(receipt, f"{label} receipts[{index}]")
+        if receipt["stage"] in PR_HEAD_STAGES and (
+            value["head"] is None or receipt["head"] != value["head"]
+        ):
+            raise FleetControllerError(
+                f"{label} receipts[{index}] head does not match the current PR head"
+            )
 
 
 def validate_state(state: Mapping[str, Any]) -> None:
@@ -936,7 +942,9 @@ def _advance_lane(lane: dict[str, Any], receipt: Mapping[str, Any], no_merge: bo
     result = receipt["result"]
     stage = lane["stage"]
     prior_head = lane["head"]
-    if result == "passed" and stage in PR_HEAD_STAGES and receipt["head"] != prior_head:
+    if stage in PR_HEAD_STAGES and (
+        prior_head is None or receipt["head"] != prior_head
+    ):
         raise FleetControllerError("receipt head does not match the current PR head")
     if result == "passed" and stage == "pr-publication" and (
         receipt["head"] is None or receipt["prNumber"] is None
