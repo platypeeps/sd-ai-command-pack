@@ -303,6 +303,7 @@ assert.equal(isTrellisTaskContextReference('./.trellis/spec/frontend/index.md'),
 assert.equal(isTrellisTaskContextReference('.trellis/tasks/07-22-demo/research'), true);
 assert.equal(isTrellisTaskContextReference('.trellis/tasks/07-22-demo/research/'), true);
 assert.equal(isTrellisTaskContextReference('.trellis/tasks/07-22-demo/research/notes.md'), true);
+assert.equal(isTrellisTaskContextReference('./.trellis/tasks/07-22-demo/research/notes.md'), true);
 assert.equal(isTrellisTaskContextReference('.trellis/tasks/archive/2026-07/07-22-demo/research/'), true);
 assert.equal(isTrellisTaskContextReference('.trellis/tasks/archive/2026-07/07-22-demo/research/notes.md'), true);
 assert.equal(isTrellisTaskContextReference('src/index.ts'), false);

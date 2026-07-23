@@ -594,6 +594,7 @@ class SdlcCommandsTests(InstallTestCase):
         normalized = " ".join(step_3.split())
 
         preflight = "node scripts/sd-ai-command-pack-review-preflight.mjs"
+        self.assertIn('git diff --check "$BASE_REF"...HEAD', step_3)
         self.assertIn(preflight, step_3)
         self.assertLess(step_3.index(preflight), step_3.index("git add <intended paths>"))
         self.assertIn("stop before staging, committing, or pushing", normalized)

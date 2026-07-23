@@ -196,6 +196,7 @@ generated `_example` task-context rows, and task-context references outside
 spec/research files before publication:
 
 ```bash
+git diff --check "$BASE_REF"...HEAD
 git diff --check
 if [ ! -f scripts/sd-ai-command-pack-review-preflight.mjs ]; then
   printf '%s\n' "error: scripts/sd-ai-command-pack-review-preflight.mjs is missing; reinstall sd-ai-command-pack before publishing." >&2
