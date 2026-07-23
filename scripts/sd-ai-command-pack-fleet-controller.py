@@ -556,6 +556,8 @@ def validate_state(state: Mapping[str, Any]) -> None:
         raise FleetControllerError("repositoryDigest is invalid")
     if not isinstance(state["fleetManifest"], str) or not state["fleetManifest"]:
         raise FleetControllerError("fleetManifest must be a string")
+    if not Path(state["fleetManifest"]).is_absolute():
+        raise FleetControllerError("fleetManifest must be an absolute path")
     if not isinstance(state["fleetManifestDigest"], str) or len(state["fleetManifestDigest"]) != 64:
         raise FleetControllerError("fleetManifestDigest is invalid")
     if not isinstance(state["noMerge"], bool):
@@ -1087,12 +1089,9 @@ def retry_consumer(state: dict[str, Any], consumer: str) -> None:
         lane = next(item for item in state["lanes"] if item["name"] == consumer)
     except StopIteration:
         raise FleetControllerError("consumer is outside the campaign") from None
-    if lane["status"] != "terminal" or lane["result"] not in {
-        "ownership-skip",
-        "operator-decision",
-    }:
+    if lane["status"] != "terminal" or lane["result"] != "ownership-skip":
         raise FleetControllerError(
-            "consumer retry requires a terminal ownership-skip or operator-decision"
+            "consumer retry requires a terminal ownership-skip"
         )
     lane["attempt"] += 1
     lane["blocker"] = None

@@ -137,6 +137,15 @@ class FleetControllerTests(InstallTestCase):
         self.assertEqual(state["repositoryDigest"], controller._digest_path(root))
         controller.validate_state(state)
 
+        fleet_manifest = state["fleetManifest"]
+        state["fleetManifest"] = "relative-fleet.json"
+        with self.assertRaisesRegex(
+            controller.FleetControllerError,
+            "fleetManifest must be an absolute path",
+        ):
+            controller.validate_state(state)
+        state["fleetManifest"] = fleet_manifest
+
         checkout_path = state["lanes"][0]["checkoutPath"]
         state["lanes"][0]["checkoutPath"] = str(root / "redirected-checkout")
         with self.assertRaisesRegex(
@@ -640,6 +649,25 @@ class FleetControllerTests(InstallTestCase):
 
         self.assertEqual(resumed["attempt"], 2)
         self.assertNotEqual(resumed["actionId"], action["actionId"])
+
+        _root, _fleet, _manifest, parked = self.state(
+            controller, selected=("canary-a",)
+        )
+        self.pass_preflight(controller, parked)
+        decision = controller.issue_next(parked)[0]
+        controller.record_result(
+            parked,
+            action_id=decision["actionId"],
+            release="0.37.0",
+            consumer="canary-a",
+            result="operator-decision",
+            reason_code="operator-approval-required",
+        )
+        with self.assertRaisesRegex(
+            controller.FleetControllerError,
+            "requires a terminal ownership-skip",
+        ):
+            controller.retry_consumer(parked, "canary-a")
 
     def test_manifest_drift_and_invalid_concurrency_fail_closed(self) -> None:
         controller = self.load_controller()
