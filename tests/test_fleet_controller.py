@@ -328,6 +328,24 @@ class FleetControllerTests(InstallTestCase):
                 consumer=None,
                 result="passed",
             )
+        with self.assertRaisesRegex(controller.FleetControllerError, "forbids blocker"):
+            controller.record_result(
+                state,
+                action_id=action["actionId"],
+                release="0.37.0",
+                consumer=None,
+                result="passed",
+                blocker="contradiction",
+            )
+        with self.assertRaisesRegex(controller.FleetControllerError, "forbids blocker"):
+            controller.record_result(
+                state,
+                action_id=action["actionId"],
+                release="0.37.0",
+                consumer=None,
+                result="passed",
+                pack_blocker=True,
+            )
         with self.assertRaisesRegex(controller.FleetControllerError, "not currently issued"):
             controller.record_result(
                 state,
@@ -461,6 +479,9 @@ class FleetControllerTests(InstallTestCase):
         self.assertEqual(loaded, state)
         self.assertEqual(store.directory.stat().st_mode & 0o777, 0o700)
         self.assertEqual(store.state_path.stat().st_mode & 0o777, 0o600)
+        with mock.patch.object(controller.os, "fchmod", None):
+            store.write(state)
+        self.assertEqual(store.load(), state)
         other = self.make_git_repo_without_trellis()
         wrong = controller.CampaignStore(other, "campaign-1", state_home)
         wrong.directory.mkdir(parents=True)

@@ -232,7 +232,11 @@ class CampaignStore:
             prefix=f".{self.campaign}.", suffix=".tmp", dir=self.directory
         )
         try:
-            os.fchmod(descriptor, 0o600)
+            fchmod = getattr(os, "fchmod", None)
+            if fchmod is not None:
+                fchmod(descriptor, 0o600)
+            else:
+                os.chmod(temporary, 0o600)
             with os.fdopen(descriptor, "wb") as stream:
                 descriptor = -1
                 stream.write(payload)
@@ -835,6 +839,8 @@ def _build_receipt(
         raise FleetControllerError(f"result {result} {requirement} a reason code")
     if reason_code is not None:
         reason_code = safe_token(reason_code, "reason code")
+    if result in {"passed", "at-target"} and (blocker is not None or pack_blocker):
+        raise FleetControllerError(f"result {result} forbids blocker evidence")
     if blocker is not None:
         blocker = safe_token(blocker, "blocker")
     if head is not None:
