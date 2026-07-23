@@ -1,4 +1,3 @@
-{"file": "tests/test_review_local.py", "reason": "Extend local provider behavior tests with structured outcomes reuse and invalidation."}
-{"file": "tests/test_full_check.py", "reason": "Prove sd-check classifies AI lanes without duplicate provider execution."}
-{"file": "tests/test_review_scope.py", "reason": "Verify shipped sd-review scope variants, provider contracts, and privacy boundaries."}
-{"file": "tests/test_generated_parity.py", "reason": "Keep source templates and generated installed review surfaces synchronized."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify the generated skill and adapter surface, retired identifiers, and cross-platform behavioral parity."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify coordinator, configuration, receipt, and failure-path behavior with focused and full regression coverage."}
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Check that source templates remain authoritative and every generated adapter preserves the unified review contract."}

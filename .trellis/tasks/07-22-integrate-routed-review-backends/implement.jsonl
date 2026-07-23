@@ -1,5 +1,3 @@
-{"file": "templates/.agents/skills/sd-review-local/SKILL.md", "reason": "Preserve standalone local review scope and consent semantics while sharing execution."}
-{"file": "templates/scripts/sd-ai-command-pack-review-local.sh", "reason": "Extract the current Prism Gito and custom provider behavior into the shared coordinator."}
-{"file": "templates/scripts/sd-ai-command-pack-full-check.sh", "reason": "Remove duplicate provider invocation while preserving a separately classified local AI stage."}
-{"file": "templates/scripts/sd-ai-command-pack-review-full-check.sh", "reason": "Move deterministic sd-check orchestration into its canonical runner, isolated from AI provider execution."}
-{"file": "templates/.agents/skills/sd-review-pr/SKILL.md", "reason": "Integrate local receipts and routed remote receipts into one remediation lifecycle."}
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Apply source-template, generated-adapter, capability, and cross-platform parity rules while replacing the review command surface."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Apply manifest, configuration, provenance, and filesystem-safety contracts to the routed-review coordinator and receipts."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Consolidate deterministic checks and review providers around shared primitives without creating duplicate orchestration paths."}
