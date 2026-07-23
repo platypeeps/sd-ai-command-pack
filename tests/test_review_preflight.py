@@ -316,6 +316,16 @@ assert.deepEqual(validateTrellisPlanningBaseInheritance({
 assert.deepEqual(validateTrellisPlanningBaseInheritance({
   status: 'planning',
   branch: null,
+  base_branch: ' main ',
+  parent: '07-17-parent',
+}, {
+  status: 'in_progress',
+  branch: 'codex/parent',
+  base_branch: 'main',
+}), []);
+assert.deepEqual(validateTrellisPlanningBaseInheritance({
+  status: 'planning',
+  branch: null,
   base_branch: 'codex/parent',
   parent: '07-17-parent',
 }, {
