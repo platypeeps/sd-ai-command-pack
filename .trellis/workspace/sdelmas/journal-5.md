@@ -72,3 +72,42 @@ Verified the detached legacy checkout was clean and unused, confirmed its commit
 ### Next Steps
 
 - None - task complete
+
+
+## Session 204: Enforce untrusted checkout preflight
+
+**Date**: 2026-07-23
+**Task**: Enforce untrusted checkout preflight
+**Branch**: `codex/enforce-untrusted-checkout-preflight`
+
+### Summary
+
+Released sd-ai-command-pack 0.34.0 with capability-driven, fail-closed checkout trust preflight across generated command adapters.
+
+### Main Changes
+
+- Added conservative command capability metadata and made sd-help the sole trusted-static exemption.
+- Moved authored neutral command bodies into .github/command-sources and generated guarded neutral, Claude, Gemini, GitHub, and OpenCode surfaces from the canonical policy.
+- Documented checkout trust states and added drift, capability, path-boundary, and generated-parity coverage.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3d40d0e` | chore: release sd-ai-command-pack 0.34.0 |
+
+### Testing
+
+- [OK] make check
+- [OK] focused checkout-trust and parity suite: 201 tests passed
+- [OK] disposable fleet candidate validation: 8 of 8 consumers passed
+- [OK] PR 233 CI and Copilot review completed with zero review threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
