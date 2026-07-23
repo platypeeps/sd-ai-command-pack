@@ -66,8 +66,11 @@ same object.
 ## Classification and ordering
 
 The task scanner continues to accept only regular, non-symlinked direct child
-task records under `.trellis/tasks/`. It records a bounded string parent only
-when `task.json.parent` is a nonblank string.
+task records under `.trellis/tasks/`. Missing or null `task.json.parent` marks
+a root task; a present parent that is non-string, blank, or empty after
+normalization rejects the entire task record. IDs and statuses that normalize
+to empty also reject the record. Empty normalized titles fall back to the task
+ID, and empty normalized priorities fall back to `unprioritized`.
 
 `tasks` ordering is:
 

@@ -365,12 +365,20 @@ def task_record(path: Path) -> dict[str, Any] | None:
     payload = read_json_object(path)
     if payload is None:
         return None
-    title = payload.get("title") or payload.get("name") or path.parent.name
     status = payload.get("status")
-    priority = payload.get("priority")
     parent_value = payload.get("parent")
     if not isinstance(status, str):
         return None
+    task_id = safe_text(payload.get("id") or path.parent.name)
+    normalized_status = safe_text(status)
+    if not task_id or not normalized_status:
+        return None
+    title = safe_text(payload.get("title") or payload.get("name") or task_id)
+    if not title:
+        title = task_id
+    priority = safe_text(payload.get("priority") or "unprioritized")
+    if not priority:
+        priority = "unprioritized"
     if parent_value is None:
         parent = None
     elif not isinstance(parent_value, str) or not parent_value.strip():
@@ -380,10 +388,10 @@ def task_record(path: Path) -> dict[str, Any] | None:
         if not parent:
             return None
     return {
-        "id": safe_text(payload.get("id") or path.parent.name),
-        "title": safe_text(title),
-        "status": safe_text(status),
-        "priority": safe_text(priority or "unprioritized"),
+        "id": task_id,
+        "title": title,
+        "status": normalized_status,
+        "priority": priority,
         "path": path.parent.relative_to(path.parents[2]).as_posix(),
         "parent": parent,
     }

@@ -385,6 +385,48 @@ class StatusTests(InstallTestCase):
         self.assertIn("==> Tasks\nnone", human.stdout)
         self.assertIn("==> Roadmap\nnone", human.stdout)
 
+    def test_trellis_inventory_rejects_empty_normalized_identity_and_status(
+        self,
+    ) -> None:
+        root = self.make_status_repo()
+
+        def write_task(directory: str, payload: dict[str, object]) -> None:
+            task_dir = root / ".trellis/tasks" / directory
+            task_dir.mkdir()
+            (task_dir / "task.json").write_text(
+                json.dumps(payload) + "\n",
+                encoding="utf-8",
+            )
+
+        write_task(
+            "empty-id",
+            {"id": "\x00", "title": "Empty ID", "status": "planning"},
+        )
+        write_task(
+            "empty-status",
+            {"id": "empty-status", "title": "Empty status", "status": "\x00"},
+        )
+        write_task(
+            "fallback-fields",
+            {
+                "id": "fallback-fields",
+                "title": "\x00",
+                "status": "planning",
+                "priority": "\x00",
+            },
+        )
+
+        tasks = json.loads(self.run_status(root, "--json").stdout)["trellis"]["tasks"]
+        tasks_by_id = {task["id"]: task for task in tasks}
+
+        self.assertNotIn("empty-id", tasks_by_id)
+        self.assertNotIn("empty-status", tasks_by_id)
+        self.assertEqual(tasks_by_id["fallback-fields"]["title"], "fallback-fields")
+        self.assertEqual(
+            tasks_by_id["fallback-fields"]["priority"],
+            "unprioritized",
+        )
+
     def test_follow_up_ids_classify_and_sort_supported_evidence(self) -> None:
         status = self.load_status_module()
         report = {
