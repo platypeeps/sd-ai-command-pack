@@ -101,6 +101,8 @@ class InstallAuditTests(InstallTestCase):
                 "scripts/sd-ai-command-pack-fleet-review-classify.py",
                 "scripts/sd-ai-command-pack-fleet-timing.py",
                 "scripts/sd-ai-command-pack-fleet-wave-plan.py",
+                "scripts/sd-ai-command-pack-fleet-controller.py",
+                ".agents/skills/sd-fleet-refresh/references/controller-recovery.md",
                 "scripts/sd_ai_command_pack_fleet_lib.py",
             },
             set(install.SOURCE_ONLY_COMMAND_TARGETS),

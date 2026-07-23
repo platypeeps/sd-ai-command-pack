@@ -331,9 +331,12 @@ Source-checkout-only operator command; it is not installed into consumer
 repositories because it depends on this repository's installer, fleet
 registry, and rollout procedure. It rolls the pack release across consumer
 repos per `docs/FLEET_ROLLOUT.md`:
-fleet preflight, sequential canaries, then manifest-configured bounded
-post-canary lanes — clean-tree check, install, consumer full-check, PR, and
-watch — with gated merges serialized in manifest order, ending with a
+the source-only campaign controller validates the immutable release and
+checkout identities, issues fleet preflight, sequential canaries, then
+manifest-configured bounded post-canary actions, and records exact-scope
+receipts. It never repeats an issued install, PR, review, or merge side effect
+after interruption; `resume` returns reconciliation evidence instead. Gated
+merges stay serialized in manifest order, ending with a receipt-derived
 per-consumer status table. Preflight first proves that the local and remote release tag,
 tagged payload, ancestry, and candidate ledgers agree; any mismatch stops
 before consumer inventory or mutation. Before review, a source-side classifier
@@ -343,12 +346,13 @@ review without a new Copilot request; ambiguity or consumer-owned changes use
 the normal remote-review loop. A source-only timing sidecar records the
 critical path, per-stage retries, bounded-wave overlap, and reviewer/CI overlap
 in private local state without weakening a delivery gate or adding public
-adapter arguments. Bare consumer names select a subset, for example
+adapter arguments. The existing timing and wave helpers remain controller-owned
+implementation details rather than prompt-owned state machines. Bare consumer names select a subset, for example
 `/sd:fleet-refresh loadsmith rwbp-website`; `consumer=`, `dry-run`, and
 `no-merge` remain available explicitly, `remote-review` forces remote review,
-and `remote=<name>` selects a release remote other than `origin`. The scheduler
-receives the explicit `no-merge` mode so PR-open canaries may unlock later
-consumer work without ever producing a merge candidate.
+and `remote=<name>` selects a release remote other than `origin`. In
+`no-merge` mode, successful merge eligibility becomes a terminal PR-open
+receipt and the controller never issues a merge action.
 
 ### sd-test-gaps
 

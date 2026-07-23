@@ -219,7 +219,11 @@ class SdlcCommandsTests(InstallTestCase):
 
     def test_fleet_refresh_batches_corrective_release_findings(self) -> None:
         fleet = self._skill_text("sd-fleet-refresh")
-        fleet_text = " ".join(fleet.split())
+        recovery = (
+            install.ROOT
+            / "templates/.agents/skills/sd-fleet-refresh/references/controller-recovery.md"
+        ).read_text(encoding="utf-8")
+        recovery_text = " ".join(recovery.split())
 
         skill_pins = (
             "## Corrective campaign",
@@ -227,7 +231,7 @@ class SdlcCommandsTests(InstallTestCase):
             "ID | Contract family | Evidence | Severity | Disposition | Fix | Regression",
             "bounded contract-surface sweep",
             "partial candidate diagnostics",
-            "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-fleet-candidate-check.py --consumer <name>",
+            "scripts/sd-ai-command-pack-fleet-candidate-check.py",
             "must never replace the canonical candidate ledger",
             "select one corrective version",
             "one canonical full-fleet candidate validation",
@@ -235,42 +239,38 @@ class SdlcCommandsTests(InstallTestCase):
             "resume the original fleet task",
         )
         for pin in skill_pins:
-            self.assertIn(pin.casefold(), fleet_text.casefold())
+            self.assertIn(pin.casefold(), recovery_text.casefold())
+        self.assertIn("references/controller-recovery.md", fleet)
+        self.assertIn("only when", fleet.casefold())
 
     def test_fleet_refresh_records_internal_timing_without_public_controls(self) -> None:
         fleet = self._skill_text("sd-fleet-refresh")
         fleet_text = " ".join(fleet.split())
+        recovery_text = " ".join(
+            (
+                install.ROOT
+                / "templates/.agents/skills/sd-fleet-refresh/references/controller-recovery.md"
+            )
+            .read_text(encoding="utf-8")
+            .split()
+        )
         guide_normalized = " ".join(
             (install.ROOT / "docs/FLEET_ROLLOUT.md")
             .read_text(encoding="utf-8")
             .split()
         )
         arguments = fleet.split("## Arguments", 1)[1].split("## Timing evidence", 1)[0]
-        workflow = fleet.split("## Workflow", 1)[1].split(
-            "## Finding severity gate", 1
-        )[0]
-        normalized = " ".join(workflow.split())
-        normalized_folded = normalized.casefold()
-
         for pin in (
             "scripts/sd-ai-command-pack-fleet-timing.py",
-            "init --run-id <run-id>",
             "start both `reviewer-wait` and `ci-wait`",
             "report --run-id <run-id> --complete",
             "never changes a delivery gate's authoritative result",
         ):
             self.assertIn(pin.casefold(), fleet_text.casefold())
+        timing = fleet.split("## Timing evidence", 1)[1].split("## Workflow", 1)[0]
         self.assertLess(
-            normalized_folded.index("initialize the timing run"),
-            normalized_folded.index("run preflight"),
-        )
-        self.assertLess(
-            normalized_folded.index("immediately after the pr exists"),
-            normalized_folded.index("end `reviewer-wait`"),
-        )
-        self.assertLess(
-            normalized_folded.index("end `reviewer-wait`"),
-            normalized_folded.index("end `ci-wait`"),
+            timing.casefold().index("before executing"),
+            timing.casefold().index("preflight action"),
         )
         for public_control in ("timing=", "run-id=", "state-home="):
             self.assertNotIn(public_control, arguments)
@@ -286,14 +286,16 @@ class SdlcCommandsTests(InstallTestCase):
                 self.assertNotIn("fleet-timing", content)
                 self.assertNotIn("state-home", content)
 
-        ordered_skill_pins = (
+        ordered_recovery_pins = (
             "pause consumer mutation",
             "bounded contract-surface sweep",
             "select one corrective version",
             "one canonical full-fleet candidate validation",
             "resume the original fleet task",
         )
-        positions = [fleet_text.casefold().index(pin) for pin in ordered_skill_pins]
+        positions = [
+            recovery_text.casefold().index(pin) for pin in ordered_recovery_pins
+        ]
         self.assertEqual(positions, sorted(positions))
 
         for pin in (
@@ -329,9 +331,9 @@ class SdlcCommandsTests(InstallTestCase):
             self.assertIn(pin.casefold(), fleet_text.casefold())
 
         ordered_pins = (
-            "apply the finding severity gate",
-            "Run `sd-watch-pr`",
-            "Merge via the consumer's housekeeping gate",
+            "run the finding severity gate",
+            "settle required checks",
+            "consumer's `sd-housekeeping` gate",
         )
         positions = [fleet_text.casefold().index(pin.casefold()) for pin in ordered_pins]
         self.assertEqual(positions, sorted(positions))
@@ -365,18 +367,19 @@ class SdlcCommandsTests(InstallTestCase):
         )
 
         for pin in (
-            "## Wave planning",
-            "sd-ai-command-pack-fleet-wave-plan.py",
-            "canaries run sequentially",
+            "## Campaign controller",
+            "sd-ai-command-pack-fleet-controller.py",
+            "sequential canaries",
             "canStart",
             "maxConcurrency",
-            "mergeCandidate",
-            "packBlocker",
+            "single eligible action",
+            "--pack-blocker",
             "one existing checkout, branch, and PR",
             "controller alone invokes housekeeping",
             "terminal consumers are never restarted",
         ):
             self.assertIn(pin.casefold(), fleet_text.casefold())
+        self.assertNotIn("temporary schema-version-1 snapshot", fleet_text)
 
         for pin in (
             "schema-version-4 manifest",
@@ -386,7 +389,9 @@ class SdlcCommandsTests(InstallTestCase):
         ):
             self.assertIn(pin.casefold(), guide.casefold())
 
-        arguments = fleet.split("## Arguments", 1)[1].split("## Timing evidence", 1)[0]
+        arguments = fleet.split("## Arguments", 1)[1].split(
+            "## Campaign controller", 1
+        )[0]
         for public_adapter in (
             install.ROOT / "templates/.commands/sd-fleet-refresh.md",
             install.ROOT / "templates/.claude/commands/sd/fleet-refresh.md",
@@ -476,7 +481,7 @@ class SdlcCommandsTests(InstallTestCase):
             "existing comments and unresolved threads",
             "sd-watch-pr` with its internal `no-merge",
         ):
-            self.assertIn(pin, fleet_text)
+            self.assertIn(pin.casefold(), fleet_text.casefold())
 
         for pin in (
             "review-profile: integration-only|remote",
