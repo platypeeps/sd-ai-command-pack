@@ -40,11 +40,12 @@ Quick links:
   tooling/generated-only auto-filled bodies gain the required scope section
   before either standalone or `sd-ship` review handoff.
 - `.agents/skills/sd-work-backlog/SKILL.md`: sequential Trellis backlog work
-  loop and canonical resumable controller for planning through clean merge.
+  loop and canonical resumable controller for planning through clean merge,
+  including typed `all` and `needs-design` selectors.
 - `.agents/skills/sd-work-backlog/references/autonomous-loop.md`: shared
   planning-quality and artifact-exit contract used by both work selectors.
-- `.agents/skills/sd-work-designs/SKILL.md`: thin `needs-design` selector for
-  the canonical full-cycle controller, with `until=design` planning-only mode.
+- `.agents/skills/sd-work-backlog/references/*-recovery.md`: conditionally
+  loaded ledger, ownership, stopped/red, and terminal recovery contracts.
 - `.agents/skills/sd-review-pr/SKILL.md`: deterministic local gate plus remote
   PR review workflow.
 - `.agents/skills/sd-review-local/SKILL.md`: local review provider fix loop.
@@ -142,7 +143,7 @@ repospec artifacts through existing maintenance infrastructure when available,
 and then performs the architecture-overview check.
 Codex exposes the pack entry points as skills named `sd-help`, `sd-status`,
 `sd-start`, `sd-continue`,
-`sd-finish-work`, `sd-create-pr`, `sd-work-backlog`, `sd-work-designs`,
+`sd-finish-work`, `sd-create-pr`, `sd-work-backlog`,
 `sd-full-check`, `sd-housekeeping`, `sd-review-pr`, `sd-review-local`,
 `sd-review-learnings`, `sd-audit-repo`, `sd-ship`,
 `sd-watch-pr`, `sd-fix-ci`, `sd-update-deps`,
@@ -200,12 +201,10 @@ it. Use a separate request to execute the recommendation.
    tasks sequentially. It selects one implementation-ready task, completes it
    through create-pr, review-pr, housekeeping, and an extra housekeeping
    verification, then addresses or records follow-ups and learnings before
-   selecting the next task.
-9. Use the work-designs command when existing Trellis tasks have real PRDs but
-   still need `design.md` or `implement.md`. It adds implementation proposals
-   and execution guidance to those task artifacts, parks tasks that need user
-   input, and reports links to every planning document it created or updated.
-10. Use the review-pr command for an existing PR loop. It should run the deterministic
+   selecting the next task. Add `selector=needs-design` when existing tasks
+   still need `design.md` or `implement.md`, and `until=design` to stop after
+   validating those planning artifacts.
+9. Use the review-pr command for an existing PR loop. It should run the deterministic
    local full-check path with Prism/Gito disabled before requesting remote
    review, then disposition any first-review boundary-risk, authored-source
    size, or multi-task scope advisory before round one. Run `sd-full-check` or
@@ -221,16 +220,16 @@ it. Use a separate request to execute the recommendation.
    itself. After a clean non-deferred review, review-pr resolves
    `sd-finish-work`; that wrapper owns Trellis finish-work and records concrete
    journal change/test evidence through the pack session recorder.
-11. Request the configured remote reviewer, defaulting to GitHub Copilot, after
+10. Request the configured remote reviewer, defaulting to GitHub Copilot, after
    a clean local pass and again after every pushed review-fix commit made
    during the loop, unless the user explicitly asked for local-only review or
    the trusted fleet workflow proves the exact consumer head qualifies for
    integration-only review. That profile suppresses only a new request and
    still inspects all existing feedback, local gates, and CI.
-12. Let the review-pr command reply to and resolve review threads as part of the
+11. Let the review-pr command reply to and resolve review threads as part of the
    normal loop once findings are fixed, rebutted with evidence, or confirmed
    already addressed.
-13. Use the review-learnings command when review comments repeat across PRs and
+12. Use the review-learnings command when review comments repeat across PRs and
    you want to capture repo-specific preventive guidance. It scans read-only by
    default. Repository-local persistence requires explicit `--update` and an
    atomically replaceable canonical target; an external target requires
@@ -239,19 +238,19 @@ it. Use a separate request to execute the recommendation.
    publishes the learning file. The review-pr loop
    automatically attempts one read-only, PR-scoped learning pass after the
    overall cycle is clean; it never runs the learning pass after each round.
-14. Run the update-spec command when the work taught you a durable
+13. Run the update-spec command when the work taught you a durable
    implementation contract or convention. It runs the existing update-spec skill
    and also checks whether an existing architectural overview needs to be
    updated.
-15. Run the finish-work command when the coding session is complete and you need
+14. Run the finish-work command when the coding session is complete and you need
    the Trellis finish-work skill's quality gate, archive, journal, and commit
    reminder behavior. Lifecycle commands must chain through `sd-finish-work`
    rather than invoking Trellis directly so the pack's concrete session
    recorder remains in the path.
-16. After the PR merges, run the housekeeping command to get back to the default
+15. After the PR merges, run the housekeeping command to get back to the default
    branch, prune/delete the merged development stream, and see the condensed
    clean-state/anomaly report.
-17. If the review-pr command sees the PR is already merged or becomes merged
+16. If the review-pr command sees the PR is already merged or becomes merged
    while the command is running, it stops the review loop and runs post-merge
    housekeeping before the final report. This does not wake inactive sessions;
    it only runs when the active agent observes the merge.
@@ -322,11 +321,10 @@ identity, PR, Git, branch, or regression conflicts stay red without a partial
 update. Legacy schema-v1 ledgers use a phase-valued target as the owner, or
 require explicit `--resume-phase` when the target is human-only.
 
-The work-designs command is a thin `needs-design` selector for that same
-controller. Its default now carries selected tasks from planning through a
-green merge. `sd-work-designs until=design` preserves planning-only behavior
-and ends with numbered links to every planning artifact it created or updated.
-Focus composes with the selector rather than replacing it.
+`sd-work-backlog selector=needs-design` carries matching tasks from planning
+through a green merge. Adding `until=design` stops after planning and ends with
+numbered links to every planning artifact it created or updated. Focus composes
+with the selector rather than replacing it.
 
 The help command is a read-only orientation surface. Use bare help for a
 compact lifecycle tour, `all` for the complete catalog, an exact command for
@@ -369,7 +367,6 @@ Claude Code and Gemini CLI:
 /sd:finish-work
 /sd:create-pr
 /sd:work-backlog
-/sd:work-designs
 /sd:full-check
 /sd:housekeeping
 /sd:review-pr
@@ -396,7 +393,6 @@ Qoder commands, Trae commands, Pi prompts, workflow adapters, and Codex skills:
 /sd-finish-work
 /sd-create-pr
 /sd-work-backlog
-/sd-work-designs
 /sd-full-check
 /sd-housekeeping
 /sd-review-pr
@@ -1243,8 +1239,8 @@ profile. `sd-status` reads but never writes it.
 
 ### Autonomous Work-Loop State
 
-`sd-work-backlog` and `sd-work-designs` store resumable coordination state
-outside the repository. Resolution order is:
+`sd-work-backlog` stores resumable coordination state outside the repository.
+Resolution order is:
 
 1. absolute `SD_AI_COMMAND_PACK_STATE_HOME`;
 2. absolute `$XDG_STATE_HOME/sd-ai-command-pack`;

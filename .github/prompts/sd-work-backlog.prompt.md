@@ -8,7 +8,7 @@ mode: agent
 
 In this pack, SD means Software Delivery. A skill is a project-installed Markdown instruction bundle resolved by the agent's trusted installed-skill resolver.
 
-Run the Software Delivery (SD) work-backlog workflow. Pass all invocation arguments unchanged to the resolved skill, including bare focus text, repeatable `focus=` or `focus-only=`, and `until=design|merge`.
+Run the Software Delivery (SD) work-backlog workflow. Pass all invocation arguments unchanged to the resolved skill, including bare focus text, repeatable `focus=` or `focus-only=`, `selector=all|needs-design`, and `until=design|merge`.
 
 Checkout trust policy — complete before step 1:
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.39.0 - 2026-07-23
+
+- Consolidate design-first backlog work into typed `sd-work-backlog`
+  `selector=needs-design` and `until=design|merge` arguments, retiring the
+  separate `sd-work-designs` command without an alias.
+- Route stopped, red, missing-ledger, stale-owner, and terminal-reconciliation
+  states through deterministic helper reason codes and conditional recovery
+  references so healthy runs avoid rare recovery prose.
+
 ## 0.38.0 - 2026-07-23
 
 - Add a deterministic, versioned audit-charter applicability router with a

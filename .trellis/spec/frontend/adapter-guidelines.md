@@ -23,7 +23,6 @@ Reference files:
 - `templates/.agents/skills/sd-full-check/SKILL.md`
 - `templates/.agents/skills/sd-housekeeping/SKILL.md`
 - `templates/.agents/skills/sd-work-backlog/SKILL.md`
-- `templates/.agents/skills/sd-work-designs/SKILL.md`
 - `templates/.agents/skills/sd-continue/SKILL.md`
 - `templates/.agents/skills/sd-finish-work/SKILL.md`
 - `templates/.agents/skills/sd-update-spec/SKILL.md`
@@ -31,20 +30,16 @@ Reference files:
 - `templates/scripts/sd-ai-command-pack-review-local.sh`
 - `templates/.commands/sd-review-local.md`
 - `templates/.commands/sd-work-backlog.md`
-- `templates/.commands/sd-work-designs.md`
 - `templates/.commands/sd-review-pr.md`
 - `templates/.claude/commands/sd/continue.md`
 - `templates/.claude/commands/sd/finish-work.md`
 - `templates/.claude/commands/sd/work-backlog.md`
-- `templates/.claude/commands/sd/work-designs.md`
 - `templates/.claude/commands/sd/review-pr.md`
 - `templates/.claude/commands/sd/review-local.md`
 - `templates/.gemini/commands/sd/review-pr.toml`
 - `templates/.gemini/commands/sd/work-backlog.toml`
-- `templates/.gemini/commands/sd/work-designs.toml`
 - `templates/.github/prompts/sd-review-pr.prompt.md`
 - `templates/.github/prompts/sd-work-backlog.prompt.md`
-- `templates/.github/prompts/sd-work-designs.prompt.md`
 
 Hand-authored neutral bodies live under `.github/command-sources/`. The
 generator inserts the canonical checkout-trust policy and writes the guarded
@@ -212,15 +207,13 @@ timeouts, retries, dry-run behavior, and output formats explicit.
 
 - Trigger: a command repeats multi-phase work across tasks or must survive
   context compaction, interruption, external PR changes, or process restart.
-- Use one canonical controller with selector-specific entry points; do not let
-  two public skills maintain competing lifecycle loops.
+- Use one canonical controller with typed selectors; do not add preset commands
+  or let two public skills maintain competing lifecycle loops.
 
 ### 2. Signatures
 
 - Canonical controller: `sd-work-backlog [FOCUS] [focus=...] [focus-only=...]
-  [until=design|merge]`.
-- Design selector: `sd-work-designs ...` resolves the controller with trusted
-  `mode: designs`, `selector: needs-design` context.
+  [selector=all|needs-design] [until=design|merge]`.
 - Nested ship context: `caller: sd-work-backlog`, ledger run ID, positive
   iteration, and `return-after: merge-result`.
 - Durable helper: `scripts/sd-ai-command-pack-work-loop.py` owns the user-local
@@ -257,6 +250,11 @@ timeouts, retries, dry-run behavior, and output formats explicit.
   counters, accepts identical evidence as a byte-for-byte no-op, and rejects
   live owners, unsafe stale locks, or contradictory evidence without reviving
   the run.
+- Read-only status emits one stable `recovery.reasonCode` plus at most one
+  `recovery.reference`. Healthy runs load no recovery reference. Missing or
+  invalid ledgers, stale or invalid owners, stopped or red runs, and terminal
+  reconciliation each route to a bounded reference; unknown or mismatched
+  reason/path pairs fail closed.
 - Terminal-lock diagnostics must preserve that safety boundary: active owners
   tell the operator to wait, while stale owners name `reconcile-terminal
   --recover-stale-lock` and require verification that the prior process is
@@ -339,16 +337,18 @@ timeouts, retries, dry-run behavior, and output formats explicit.
   checkpoint clearing. Include paused lifecycle-overlay recovery after merge,
   legacy checkpoint targets, explicit legacy resume phases, and incomplete
   recovery evidence with no partial mutation.
-- Pin canonical-controller, thin-selector, nested-return, status visibility,
-  generated adapter, reference fanout, manifest, and template/root parity.
+- Pin canonical-controller, typed design selection, nested-return, status
+  visibility, conditional recovery routing, generated adapter, retirement,
+  reference fanout, manifest, and template/root parity.
 - Assert active and stale terminal-lock diagnostics independently, including
   the stale recovery flag and byte-for-byte preservation of the unrecovered
   lock.
 
 ### 7. Wrong vs Correct
 
-Wrong: duplicate the task loop in `sd-work-designs`, call `sd-create-pr` and
-housekeeping around `sd-ship`, or use retained chat history as phase evidence.
+Wrong: add a public preset command for design selection, call `sd-create-pr`
+and housekeeping around `sd-ship`, or use retained chat history as phase
+evidence.
 
 Correct: one state-backed controller composes a selector, delegates one full
 ship lifecycle, reconciles the compact result, processes follow-ups, and emits
@@ -1497,11 +1497,10 @@ and descriptions such as `conditional task` rather than preserving a separate
 planning namespace, and update prior notes so they point at the canonical tasks
 instead of continuing to act as a parallel backlog.
 
-The `sd-work-designs` shared skill should compose existing Trellis planning
-artifacts instead of starting implementation. It must inventory existing
-Trellis tasks, rank tasks that have real PRDs but still need `design.md` or
-`implement.md`, create or append grounded implementation proposals and
-execution guidance, preserve existing user-authored artifact content, park
+The `sd-work-backlog selector=needs-design` path composes existing Trellis
+planning artifacts through the canonical controller. With `until=design`, it
+must rank real PRDs that still need `design.md` or `implement.md`, create or
+append grounded implementation guidance, preserve user-authored content, park
 tasks that need user input, and finish with numbered links to every planning
 document it created or updated.
 

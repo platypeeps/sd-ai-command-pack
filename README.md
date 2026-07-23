@@ -233,18 +233,8 @@ folder remain unchanged.
 /sd:work-backlog CI pipeline
 /sd:work-backlog focus="CI pipeline" focus="release automation"
 /sd:work-backlog focus-only="priority:P1"
-```
-
-### sd-work-designs
-
-Uses the same autonomous controller with a `needs-design` selector. It starts
-with tasks whose real PRDs still need `design.md` or `implement.md`, then carries
-them through implementation and green merge by default. Use `until=design` to
-stop after creating and validating planning artifacts.
-
-```text
-/sd:work-designs CI pipeline
-/sd:work-designs until=design focus-only="scope:ci"
+/sd:work-backlog selector=needs-design focus="CI pipeline"
+/sd:work-backlog selector=needs-design until=design focus-only="scope:ci"
 ```
 
 ### sd-full-check

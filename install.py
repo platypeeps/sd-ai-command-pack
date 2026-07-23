@@ -122,6 +122,7 @@ from installer.registry import (
 from installer.removal import (
     RETIRED_REVIEW_LOCAL_ALL_TARGETS,
     RETIRED_TARGETS,
+    RETIRED_WORK_DESIGNS_TARGETS,
     SOURCE_ONLY_COMMAND_TARGETS,
     installed_target_candidates,
     may_remove_pack_file,
@@ -163,6 +164,7 @@ __all__ = [
     "PackFile",
     "RETIRED_TARGETS",
     "RETIRED_REVIEW_LOCAL_ALL_TARGETS",
+    "RETIRED_WORK_DESIGNS_TARGETS",
     "REVIEW_ARTIFACT_GITIGNORE_PATTERNS",
     "ROOT",
     "SOURCE_ONLY_COMMAND_NAMES",
@@ -244,6 +246,7 @@ __all__ = [
     "validate_resolved_target_path",
     "write_local_only_marker",
 ]
+
 
 class ManifestVersionAction(argparse.Action):
     def __init__(self, option_strings, dest, **kwargs):
@@ -684,7 +687,9 @@ def _run_inspection(
         retired_results=retired_results,
         audit=audit_result,
     )
-    print(inspection.render_json(report) if args.json else inspection.render_human(report))
+    print(
+        inspection.render_json(report) if args.json else inspection.render_human(report)
+    )
     return inspection.report_exit_code(report, check=args.check)
 
 
@@ -817,9 +822,7 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=args.dry_run,
     )
     if args.local_only:
-        local_only_results.append(
-            write_local_only_marker(target, dry_run=args.dry_run)
-        )
+        local_only_results.append(write_local_only_marker(target, dry_run=args.dry_run))
 
     _print_install_summary(
         target,

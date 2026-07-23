@@ -87,8 +87,7 @@ COMMANDS = {
         "ship",
         [
             "until=pr|review|merge",
-            "adds no new gate logic; every stage's own gates remain "
-            "authoritative",
+            "adds no new gate logic; every stage's own gates remain authoritative",
             "stage · outcome",
             "timeout-minutes=",
         ],
@@ -172,7 +171,9 @@ class SdlcCommandsTests(InstallTestCase):
         for name in COMMANDS:
             with self.subTest(skill=name):
                 skill = self._skill_text(name)
-                self.assertIn("error", skill.split("## Arguments")[1].split("##")[0].lower())
+                self.assertIn(
+                    "error", skill.split("## Arguments")[1].split("##")[0].lower()
+                )
                 report = skill.split("## Final report")[1]
                 self.assertIn("explicitly", report)
 
@@ -210,9 +211,7 @@ class SdlcCommandsTests(InstallTestCase):
             for adapter in adapters:
                 with self.subTest(adapter=adapter.name):
                     content = adapter.read_text(encoding="utf-8")
-                    self.assertIn(
-                        f"Resolve the `{name}` skill by name", content
-                    )
+                    self.assertIn(f"Resolve the `{name}` skill by name", content)
                     for pin in adapter_pins:
                         self.assertIn(pin, content)
                     self.assertIn("final-report format", content)
@@ -243,7 +242,9 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("references/controller-recovery.md", fleet)
         self.assertIn("only when", fleet.casefold())
 
-    def test_fleet_refresh_records_internal_timing_without_public_controls(self) -> None:
+    def test_fleet_refresh_records_internal_timing_without_public_controls(
+        self,
+    ) -> None:
         fleet = self._skill_text("sd-fleet-refresh")
         fleet_text = " ".join(fleet.split())
         recovery_text = " ".join(
@@ -255,9 +256,7 @@ class SdlcCommandsTests(InstallTestCase):
             .split()
         )
         guide_normalized = " ".join(
-            (install.ROOT / "docs/FLEET_ROLLOUT.md")
-            .read_text(encoding="utf-8")
-            .split()
+            (install.ROOT / "docs/FLEET_ROLLOUT.md").read_text(encoding="utf-8").split()
         )
         arguments = fleet.split("## Arguments", 1)[1].split("## Timing evidence", 1)[0]
         for pin in (
@@ -335,7 +334,9 @@ class SdlcCommandsTests(InstallTestCase):
             "settle required checks",
             "consumer's `sd-housekeeping` gate",
         )
-        positions = [fleet_text.casefold().index(pin.casefold()) for pin in ordered_pins]
+        positions = [
+            fleet_text.casefold().index(pin.casefold()) for pin in ordered_pins
+        ]
         self.assertEqual(positions, sorted(positions))
 
         for pin in (
@@ -361,9 +362,7 @@ class SdlcCommandsTests(InstallTestCase):
         fleet = self._skill_text("sd-fleet-refresh")
         fleet_text = " ".join(fleet.split())
         guide = " ".join(
-            (install.ROOT / "docs/FLEET_ROLLOUT.md")
-            .read_text(encoding="utf-8")
-            .split()
+            (install.ROOT / "docs/FLEET_ROLLOUT.md").read_text(encoding="utf-8").split()
         )
 
         for pin in (
@@ -414,16 +413,12 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("active `sd-fleet-refresh`", review_text)
         self.assertIn("Standalone `sd-review-pr`", review_text)
         self.assertIn("routing in Steps 1.5 and 8", review_text)
-        self.assertIn(
-            "run the SD finish-work flow automatically", review_text
-        )
+        self.assertIn("run the SD finish-work flow automatically", review_text)
         self.assertIn("Finish-work deferred to Stage 4", review_text)
         review_step_8 = review.split("## Step 8")[1].split("## Final Report")[0]
         self.assertIn("Resolve the `sd-finish-work` skill by name", review_step_8)
         self.assertIn("scripts/sd-ai-command-pack-record-session.py", review_step_8)
-        self.assertNotIn(
-            ".agents/skills/trellis-finish-work/SKILL.md", review_step_8
-        )
+        self.assertNotIn(".agents/skills/trellis-finish-work/SKILL.md", review_step_8)
         self.assertNotIn("Resolve the `trellis-finish-work` skill", review_step_8)
         self.assertEqual(
             review_step_8.count(
@@ -438,7 +433,9 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("with `no-merge`", ship_text)
         self.assertIn("leaves the active Trellis task unarchived", ship_text)
         self.assertIn("exactly once", ship_text)
-        self.assertIn("one read-only, PR-scoped post-cycle review-learning pass", ship_text)
+        self.assertIn(
+            "one read-only, PR-scoped post-cycle review-learning pass", ship_text
+        )
         self.assertIn("no other ship stage repeats it", ship_text)
         self.assertIn("Stage 2 is also the only review-learning owner", ship_text)
         self.assertNotIn("sd-ai-command-pack-review-learnings.py", ship)
@@ -524,25 +521,19 @@ class SdlcCommandsTests(InstallTestCase):
         ):
             self.assertIn(pin, invocation_text)
 
-        create_step_6 = create_pr.split("## Step 6", 1)[1].split(
-            "## Final Report", 1
-        )[0]
+        create_step_6 = create_pr.split("## Step 6", 1)[1].split("## Final Report", 1)[
+            0
+        ]
         create_step_6_text = " ".join(create_step_6.split())
-        self.assertIn(
-            "verified internal orchestration context", create_step_6_text
-        )
-        self.assertIn(
-            "Do not resolve or invoke `sd-review-pr`", create_step_6_text
-        )
+        self.assertIn("verified internal orchestration context", create_step_6_text)
+        self.assertIn("Do not resolve or invoke `sd-review-pr`", create_step_6_text)
         self.assertIn("For every standalone invocation", create_step_6_text)
-        self.assertIn(
-            "resolve and follow the `sd-review-pr`", create_step_6_text
-        )
+        self.assertIn("resolve and follow the `sd-review-pr`", create_step_6_text)
 
         safety_text = " ".join(
-            create_pr.split("## Safety Rules", 1)[1].split(
-                "## Invocation Modes", 1
-            )[0].split()
+            create_pr.split("## Safety Rules", 1)[1]
+            .split("## Invocation Modes", 1)[0]
+            .split()
         )
         self.assertIn("In standalone mode, also resolve `sd-review-pr`", safety_text)
         self.assertIn("the composite owns `sd-review-pr` resolution", safety_text)
@@ -558,9 +549,7 @@ class SdlcCommandsTests(InstallTestCase):
         ):
             self.assertIn(pin, ship_stage_1_text)
 
-        ship_safety = ship.split("## Safety rules", 1)[1].split(
-            "## Final report", 1
-        )[0]
+        ship_safety = ship.split("## Safety rules", 1)[1].split("## Final report", 1)[0]
         ship_safety_text = " ".join(ship_safety.split())
         self.assertIn("Stage 1 always returns after publishing", ship_safety_text)
         self.assertIn("does not run for `until=pr`", ship_safety_text)
@@ -576,14 +565,14 @@ class SdlcCommandsTests(InstallTestCase):
         normalized = " ".join(step_5.split())
 
         for pin in (
-            "if ! gh pr create --base \"$BASE_BRANCH\" --fill; then",
+            'if ! gh pr create --base "$BASE_BRANCH" --fill; then',
             "PR_BODY_FILE= CHANGED_FILES_FILE=",
             "if ! PR_BODY_FILE=$(mktemp",
             "if ! CHANGED_FILES_FILE=$(mktemp",
-            "if ! git diff --name-only -z \"$BASE_REF\"...HEAD",
+            'if ! git diff --name-only -z "$BASE_REF"...HEAD',
             "if ! gh pr view --json body --jq .body",
             "--prepare-tooling-body",
-            "if ! gh pr edit --body-file \"$PR_BODY_FILE\"; then",
+            'if ! gh pr edit --body-file "$PR_BODY_FILE"; then',
             "PR creation failed; stop before Step 6.",
             "cannot create secure PR-body temporary file; stop before Step 6.",
             "cannot create secure changed-files temporary file; stop before Step 6.",
@@ -612,9 +601,13 @@ class SdlcCommandsTests(InstallTestCase):
         preflight = "node scripts/sd-ai-command-pack-review-preflight.mjs"
         self.assertIn('git diff --check "$BASE_REF"...HEAD', step_3)
         self.assertIn(preflight, step_3)
-        self.assertLess(step_3.index(preflight), step_3.index("git add <intended paths>"))
+        self.assertLess(
+            step_3.index(preflight), step_3.index("git add <intended paths>")
+        )
         self.assertIn("stop before staging, committing, or pushing", normalized)
-        self.assertIn("Do not treat a later `sd-review-pr` run as a substitute", normalized)
+        self.assertIn(
+            "Do not treat a later `sd-review-pr` run as a substitute", normalized
+        )
         self.assertIn("reinstall sd-ai-command-pack before publishing", normalized)
 
         final_report = create_pr.split("## Final Report", 1)[1]
@@ -644,10 +637,8 @@ class SdlcCommandsTests(InstallTestCase):
 
     def test_work_backlog_is_the_single_resumable_full_cycle_controller(self) -> None:
         backlog = self._skill_text("sd-work-backlog")
-        designs = self._skill_text("sd-work-designs")
         ship = self._skill_text("sd-ship")
         backlog_text = " ".join(backlog.split())
-        designs_text = " ".join(designs.split())
         ship_text = " ".join(ship.split())
 
         for pin in (
@@ -660,18 +651,11 @@ class SdlcCommandsTests(InstallTestCase):
             "return-after: merge-result",
             "A clean nested housekeeping report is a return value",
             "Do not emit the overall final response while the helper remains active",
+            "selector=needs-design",
+            "recovery.reasonCode",
+            "Load only the exact reported reference",
         ):
             self.assertIn(pin, backlog_text)
-
-        for pin in (
-            "thin selector entry point",
-            "selector: needs-design",
-            "until=design",
-            "until=merge",
-            "Pass the user's invocation text unchanged",
-        ):
-            self.assertIn(pin, designs_text)
-        self.assertNotIn("task.py start", designs)
         self.assertIn("SD_SHIP_MERGE_RESULT", ship_text)
         self.assertIn("trusted `sd-work-backlog` context", ship_text)
         self.assertIn("does not change stage order", ship_text)
@@ -682,16 +666,17 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("sd-ai-command-pack-update-spec-kb.py --if-present", backlog_text)
         self.assertIn("blocks the iteration", backlog_text)
 
-    def test_work_loop_adapters_forward_arguments_and_do_not_duplicate_policy(self) -> None:
-        for name in ("sd-work-backlog", "sd-work-designs"):
-            adapter = install.ROOT / f"templates/.commands/{name}.md"
-            content = " ".join(adapter.read_text(encoding="utf-8").split())
-            with self.subTest(command=name):
-                self.assertIn("Pass all invocation arguments unchanged", content)
-                self.assertIn("focus=", content)
-                self.assertIn("focus-only=", content)
-                self.assertIn("until=design|merge", content)
-                self.assertIn(f"Resolve the `{name}` skill by name", content)
+    def test_work_loop_adapters_forward_arguments_and_do_not_duplicate_policy(
+        self,
+    ) -> None:
+        adapter = install.ROOT / "templates/.commands/sd-work-backlog.md"
+        content = " ".join(adapter.read_text(encoding="utf-8").split())
+        self.assertIn("Pass all invocation arguments unchanged", content)
+        self.assertIn("focus=", content)
+        self.assertIn("focus-only=", content)
+        self.assertIn("selector=all|needs-design", content)
+        self.assertIn("until=design|merge", content)
+        self.assertIn("Resolve the `sd-work-backlog` skill by name", content)
 
     def test_status_skill_declares_read_only_work_loop_inventory(self) -> None:
         status = " ".join(self._skill_text("sd-status").split())
@@ -711,16 +696,17 @@ class SdlcCommandsTests(InstallTestCase):
         guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")
         guide_text = " ".join(guide.split())
 
-        self.assertIn(
-            "`until=review` keeps finish-work in `sd-review-pr`", guide_text
-        )
+        self.assertIn("`until=review` keeps finish-work in `sd-review-pr`", guide_text)
         self.assertIn("defers finish-work to Stage 4", guide_text)
         self.assertIn("watches with `no-merge`", guide_text)
         self.assertIn("housekeeping exactly once", guide_text)
         self.assertIn("Stage 2 the only review owner", guide_text)
         self.assertIn("no review for `until=pr`", guide_text)
         self.assertIn("one post-cycle review-learning pass", guide_text)
-        self.assertIn("No later ship, watch, finish-work, or housekeeping stage repeats it", guide_text)
+        self.assertIn(
+            "No later ship, watch, finish-work, or housekeeping stage repeats it",
+            guide_text,
+        )
 
     def test_usage_guide_documents_all_six(self) -> None:
         guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")
@@ -734,8 +720,7 @@ class SdlcCommandsTests(InstallTestCase):
                     self.assertNotIn(f"/sd:{short}", guide)
                     self.assertNotIn(f"/sd-{short}", guide)
                     self.assertIn(
-                        f"The `{name}` command is an operator workflow "
-                        "available only",
+                        f"The `{name}` command is an operator workflow available only",
                         guide,
                     )
                     continue

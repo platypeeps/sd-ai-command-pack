@@ -131,13 +131,17 @@ class InstallCoreTests(InstallTestCase):
         self.assertTrue(merged.startswith("dist/\n\n"))
         self.assert_trellis_gitignore_block(merged)
 
-    def test_trellis_gitignore_blanket_removal_preserves_blank_only_content(self) -> None:
+    def test_trellis_gitignore_blanket_removal_preserves_blank_only_content(
+        self,
+    ) -> None:
         self.assertEqual(
             install.remove_unmanaged_trellis_blanket_entries("\n\n"),
             ("\n\n", False),
         )
         self.assertEqual(
-            install.remove_unmanaged_trellis_blanket_entries("dist/\n\n.trellis/\n\nlogs/\n"),
+            install.remove_unmanaged_trellis_blanket_entries(
+                "dist/\n\n.trellis/\n\nlogs/\n"
+            ),
             ("dist/\n\n\nlogs/\n", True),
         )
 
@@ -206,7 +210,6 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-start/SKILL.md",
                 ".agents/skills/sd-create-pr/SKILL.md",
                 ".agents/skills/sd-work-backlog/SKILL.md",
-                ".agents/skills/sd-work-designs/SKILL.md",
                 ".agents/skills/sd-audit-repo/SKILL.md",
                 ".agents/skills/sd-watch-pr/SKILL.md",
                 ".agents/skills/sd-ship/SKILL.md",
@@ -247,7 +250,6 @@ class InstallCoreTests(InstallTestCase):
                 ".gemini/commands/sd/finish-work.toml",
                 ".gemini/commands/sd/create-pr.toml",
                 ".gemini/commands/sd/work-backlog.toml",
-                ".gemini/commands/sd/work-designs.toml",
                 ".gemini/commands/sd/audit-repo.toml",
                 ".gemini/commands/sd/watch-pr.toml",
                 ".gemini/commands/sd/ship.toml",
@@ -271,7 +273,6 @@ class InstallCoreTests(InstallTestCase):
                 ".claude/commands/sd/finish-work.md",
                 ".claude/commands/sd/create-pr.md",
                 ".claude/commands/sd/work-backlog.md",
-                ".claude/commands/sd/work-designs.md",
                 ".claude/commands/sd/audit-repo.md",
                 ".claude/commands/sd/watch-pr.md",
                 ".claude/commands/sd/ship.md",
@@ -291,7 +292,6 @@ class InstallCoreTests(InstallTestCase):
                 ".cursor/commands/sd-finish-work.md",
                 ".cursor/commands/sd-create-pr.md",
                 ".cursor/commands/sd-work-backlog.md",
-                ".cursor/commands/sd-work-designs.md",
                 ".cursor/commands/sd-audit-repo.md",
                 ".cursor/commands/sd-watch-pr.md",
                 ".cursor/commands/sd-ship.md",
@@ -311,7 +311,6 @@ class InstallCoreTests(InstallTestCase):
                 ".github/prompts/sd-finish-work.prompt.md",
                 ".github/prompts/sd-create-pr.prompt.md",
                 ".github/prompts/sd-work-backlog.prompt.md",
-                ".github/prompts/sd-work-designs.prompt.md",
                 ".github/prompts/sd-audit-repo.prompt.md",
                 ".github/prompts/sd-watch-pr.prompt.md",
                 ".github/prompts/sd-ship.prompt.md",
@@ -332,7 +331,6 @@ class InstallCoreTests(InstallTestCase):
                 ".opencode/commands/sd-finish-work.md",
                 ".opencode/commands/sd-create-pr.md",
                 ".opencode/commands/sd-work-backlog.md",
-                ".opencode/commands/sd-work-designs.md",
                 ".opencode/commands/sd-audit-repo.md",
                 ".opencode/commands/sd-watch-pr.md",
                 ".opencode/commands/sd-ship.md",
@@ -443,7 +441,8 @@ class InstallCoreTests(InstallTestCase):
             encoding="utf-8"
         )
         template = (
-            install.ROOT / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
+            install.ROOT
+            / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
         ).read_text(encoding="utf-8")
 
         self.assertEqual(installed.count(install.COPILOT_GUIDANCE_START), 1)
@@ -460,7 +459,8 @@ class InstallCoreTests(InstallTestCase):
         # these phrases as contiguous substrings; a line-wrap inside one silently
         # breaks both, so pin that they survive as single-line substrings.
         template = (
-            install.ROOT / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
+            install.ROOT
+            / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
         ).read_text(encoding="utf-8")
         for phrase in (
             "current, non-outdated unresolved",
@@ -472,7 +472,8 @@ class InstallCoreTests(InstallTestCase):
 
     def test_copilot_guidance_explains_source_only_consumer_contract(self) -> None:
         template = (
-            install.ROOT / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
+            install.ROOT
+            / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
         ).read_text(encoding="utf-8")
 
         for phrase in (
@@ -488,7 +489,9 @@ class InstallCoreTests(InstallTestCase):
         ):
             self.assertIn(phrase, template)
 
-    def test_tracked_full_check_skill_matches_template_and_documents_audit(self) -> None:
+    def test_tracked_full_check_skill_matches_template_and_documents_audit(
+        self,
+    ) -> None:
         installed = (install.ROOT / ".agents/skills/sd-full-check/SKILL.md").read_text(
             encoding="utf-8"
         )
@@ -549,7 +552,8 @@ class InstallCoreTests(InstallTestCase):
             target=Path(".github/copilot-instructions.md"),
         )
         managed_source = (
-            install.ROOT / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
+            install.ROOT
+            / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
         )
         unsupported_target = install.PackFile(
             platform="github",
@@ -841,9 +845,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertEqual(overwritten.status, "overwritten")
         self.assertIsNotNone(overwritten.backup)
         self.assertEqual(destination.read_text(encoding="utf-8"), "pack template\n")
-        self.assertEqual(
-            overwritten.backup.read_text(encoding="utf-8"), "local edit\n"
-        )
+        self.assertEqual(overwritten.backup.read_text(encoding="utf-8"), "local edit\n")
 
     def test_generated_pack_files_have_no_template_source(self) -> None:
         generated = install.fileops.generated_pack_file(
@@ -1279,9 +1281,7 @@ class InstallCoreTests(InstallTestCase):
         receipt_path = root / str(install.INSTALLED_TARGETS_FILE)
         receipt_path.parent.mkdir(parents=True, exist_ok=True)
         receipt_path.write_text("# comment\n\nreal-entry\n", encoding="utf-8")
-        self.assertEqual(
-            install.read_existing_installed_targets(root), {"real-entry"}
-        )
+        self.assertEqual(install.read_existing_installed_targets(root), {"real-entry"})
 
         absolute_exclude = root / ".git/info/exclude"
         with mock.patch.object(
@@ -1542,7 +1542,9 @@ class InstallCoreTests(InstallTestCase):
         self.assertEqual(destination.read_text(encoding="utf-8"), '{"local": true}\n')
 
     def test_load_manifest_reports_missing_manifest_cleanly(self) -> None:
-        with mock.patch.object(install.manifest, "MANIFEST_PATH", PACK_ROOT / "missing-manifest.json"):
+        with mock.patch.object(
+            install.manifest, "MANIFEST_PATH", PACK_ROOT / "missing-manifest.json"
+        ):
             with self.assertRaisesRegex(SystemExit, "manifest not found"):
                 install.load_manifest()
 
@@ -1570,8 +1572,9 @@ class InstallCoreTests(InstallTestCase):
             with self.subTest(args=args):
                 stdout = io.StringIO()
                 stderr = io.StringIO()
-                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(
-                    stderr
+                with (
+                    contextlib.redirect_stdout(stdout),
+                    contextlib.redirect_stderr(stderr),
                 ):
                     with self.assertRaises(SystemExit) as raised:
                         install.parse_args(args)
@@ -1610,9 +1613,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertEqual(payload["schemaVersion"], 1)
         self.assertEqual(Path(payload["packSource"]), PACK_ROOT)
         self.assertEqual(payload["pathOverrides"], {})
-        self.assertTrue(
-            (root / "scripts/sd_ai_command_pack_fleet_lib.py").is_file()
-        )
+        self.assertTrue((root / "scripts/sd_ai_command_pack_fleet_lib.py").is_file())
 
     def test_configure_fleet_dry_run_does_not_write_profile(self) -> None:
         root = self.make_repo()
@@ -1670,10 +1671,13 @@ class InstallCoreTests(InstallTestCase):
         update = object()
         fleet_module = mock.Mock()
         fleet_module.configure_fleet_profile.return_value = update
-        with mock.patch.object(sys, "path", [scripts_path, *sys.path]), mock.patch.object(
-            install.importlib,
-            "import_module",
-            return_value=fleet_module,
+        with (
+            mock.patch.object(sys, "path", [scripts_path, *sys.path]),
+            mock.patch.object(
+                install.importlib,
+                "import_module",
+                return_value=fleet_module,
+            ),
         ):
             result = install.configure_fleet_profile(PACK_ROOT, dry_run=True)
 
@@ -1684,10 +1688,13 @@ class InstallCoreTests(InstallTestCase):
         )
 
         path_without_scripts = [entry for entry in sys.path if entry != scripts_path]
-        with mock.patch.object(sys, "path", path_without_scripts), mock.patch.object(
-            install.importlib,
-            "import_module",
-            side_effect=ImportError("missing"),
+        with (
+            mock.patch.object(sys, "path", path_without_scripts),
+            mock.patch.object(
+                install.importlib,
+                "import_module",
+                side_effect=ImportError("missing"),
+            ),
         ):
             with self.assertRaisesRegex(ValueError, "fleet helper is missing"):
                 install.configure_fleet_profile(PACK_ROOT, dry_run=True)
@@ -1813,7 +1820,9 @@ class InstallCoreTests(InstallTestCase):
         for content, expected in cases:
             with self.subTest(expected=expected):
                 manifest_path.write_text(content, encoding="utf-8")
-                with mock.patch.object(install.manifest, "MANIFEST_PATH", manifest_path):
+                with mock.patch.object(
+                    install.manifest, "MANIFEST_PATH", manifest_path
+                ):
                     with self.assertRaisesRegex(SystemExit, expected):
                         install.manifest_cli_identity()
 
@@ -2063,9 +2072,7 @@ class InstallCoreTests(InstallTestCase):
             install.ROOT / "scripts/sd-ai-command-pack-review-scope.sh"
         ).read_text(encoding="utf-8")
         scope_patterns = {
-            pattern
-            for rule in scope_script.DEFAULT_RULES
-            for pattern in rule.patterns
+            pattern for rule in scope_script.DEFAULT_RULES for pattern in rule.patterns
         }
         _, files = install.load_manifest()
         platforms_with_files = {
@@ -2256,9 +2263,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("overwritten", result.stdout)
         self.assertNotIn("backup", result.stdout)
-        self.assertFalse(
-            (root / ".agents/skills/sd-review-pr/SKILL.md.bak").exists()
-        )
+        self.assertFalse((root / ".agents/skills/sd-review-pr/SKILL.md.bak").exists())
         self.assertEqual(target.read_text(encoding="utf-8"), "local edit\n")
 
     def test_force_backup_does_not_write_through_existing_backup_symlink(self) -> None:
@@ -2308,7 +2313,6 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-review-pr/SKILL.md",
                 ".agents/skills/sd-create-pr/SKILL.md",
                 ".agents/skills/sd-work-backlog/SKILL.md",
-                ".agents/skills/sd-work-designs/SKILL.md",
                 ".agents/skills/sd-audit-repo/SKILL.md",
                 ".agents/skills/sd-watch-pr/SKILL.md",
                 ".agents/skills/sd-ship/SKILL.md",
@@ -2338,7 +2342,6 @@ class InstallCoreTests(InstallTestCase):
                 ".opencode/commands/sd-review-pr.md",
                 ".opencode/commands/sd-create-pr.md",
                 ".opencode/commands/sd-work-backlog.md",
-                ".opencode/commands/sd-work-designs.md",
                 ".opencode/commands/sd-audit-repo.md",
                 ".opencode/commands/sd-watch-pr.md",
                 ".opencode/commands/sd-ship.md",
@@ -2412,7 +2415,6 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-review-pr/SKILL.md",
                 ".agents/skills/sd-create-pr/SKILL.md",
                 ".agents/skills/sd-work-backlog/SKILL.md",
-                ".agents/skills/sd-work-designs/SKILL.md",
                 ".agents/skills/sd-audit-repo/SKILL.md",
                 ".agents/skills/sd-watch-pr/SKILL.md",
                 ".agents/skills/sd-ship/SKILL.md",
@@ -2423,7 +2425,6 @@ class InstallCoreTests(InstallTestCase):
                 ".cursor/commands/sd-review-pr.md",
                 ".cursor/commands/sd-create-pr.md",
                 ".cursor/commands/sd-work-backlog.md",
-                ".cursor/commands/sd-work-designs.md",
                 ".cursor/commands/sd-audit-repo.md",
                 ".cursor/commands/sd-watch-pr.md",
                 ".cursor/commands/sd-ship.md",
@@ -2438,9 +2439,7 @@ class InstallCoreTests(InstallTestCase):
             "init --yes --skip-existing --codex --cursor",
         )
 
-        exclude = Path(
-            self.git_output(root, "rev-parse", "--git-path", "info/exclude")
-        )
+        exclude = Path(self.git_output(root, "rev-parse", "--git-path", "info/exclude"))
         if not exclude.is_absolute():
             exclude = root / exclude
         exclude_text = exclude.read_text(encoding="utf-8")
@@ -2451,7 +2450,6 @@ class InstallCoreTests(InstallTestCase):
             ".agents/skills/sd-review-pr/SKILL.md",
             ".agents/skills/sd-create-pr/SKILL.md",
             ".agents/skills/sd-work-backlog/SKILL.md",
-            ".agents/skills/sd-work-designs/SKILL.md",
             ".agents/skills/sd-audit-repo/SKILL.md",
             ".agents/skills/sd-watch-pr/SKILL.md",
             ".agents/skills/sd-ship/SKILL.md",
@@ -2465,7 +2463,6 @@ class InstallCoreTests(InstallTestCase):
             ".cursor/commands/sd-review-pr.md",
             ".cursor/commands/sd-create-pr.md",
             ".cursor/commands/sd-work-backlog.md",
-            ".cursor/commands/sd-work-designs.md",
             ".cursor/commands/sd-audit-repo.md",
             ".cursor/commands/sd-watch-pr.md",
             ".cursor/commands/sd-ship.md",
@@ -2552,7 +2549,9 @@ class InstallCoreTests(InstallTestCase):
         pack_script = root / "scripts/sd-ai-command-pack-full-check.sh"
         pack_script.parent.mkdir(parents=True)
         pack_script.write_text("#!/bin/sh\n", encoding="utf-8")
-        self.run_git(root, "add", "AGENTS.md", "scripts/sd-ai-command-pack-full-check.sh")
+        self.run_git(
+            root, "add", "AGENTS.md", "scripts/sd-ai-command-pack-full-check.sh"
+        )
         tools_tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-tools-")
         self.addCleanup(tools_tempdir.cleanup)
         bin_dir = Path(tools_tempdir.name) / "bin"
@@ -2612,8 +2611,7 @@ class InstallCoreTests(InstallTestCase):
         git_path = shutil.which("git")
         self.assertIsNotNone(git_path)
         (bin_dir / "git").write_text(
-            "#!/bin/sh\n"
-            f"exec {git_path!r} \"$@\"\n",
+            f'#!/bin/sh\nexec {git_path!r} "$@"\n',
             encoding="utf-8",
         )
         (bin_dir / "git").chmod(0o755)
@@ -2678,7 +2676,9 @@ class InstallCoreTests(InstallTestCase):
                 )
 
         with mock.patch.object(install.localonly, "git_output", return_value=None):
-            with self.assertRaisesRegex(SystemExit, "requires the target to be a Git repo"):
+            with self.assertRaisesRegex(
+                SystemExit, "requires the target to be a Git repo"
+            ):
                 install.require_git_repo_for_local_only(root)
 
         with mock.patch.object(install.localonly, "git_output", return_value=str(root)):
@@ -2779,7 +2779,9 @@ class InstallCoreTests(InstallTestCase):
         root = self.make_git_repo_without_trellis()
         tracked = [f"path-{index}.txt" for index in range(22)]
 
-        with mock.patch.object(install.localonly, "tracked_paths", return_value=tracked):
+        with mock.patch.object(
+            install.localonly, "tracked_paths", return_value=tracked
+        ):
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 with self.assertRaisesRegex(SystemExit, "Remove these paths"):
@@ -3039,9 +3041,7 @@ class InstallCoreTests(InstallTestCase):
                     install.validate_manifest([self.valid_pack_file(source=source)])
 
     def test_manifest_rejects_source_symlink_resolved_outside_pack_root(self) -> None:
-        pack_tempdir = tempfile.TemporaryDirectory(
-            prefix="sd-ai-command-pack-root-"
-        )
+        pack_tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-root-")
         outside_tempdir = tempfile.TemporaryDirectory(
             prefix="sd-ai-command-pack-outside-"
         )
@@ -3102,16 +3102,12 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("# SD PR Review Loop", review_pr)
         self.assertIn("standing permission to reply", review_pr)
         self.assertIn("sd-ai-command-pack-toolchain.sh doctor", review_pr)
-        self.assertIn(
-            "bash scripts/sd-ai-command-pack-review-full-check.sh", review_pr
-        )
+        self.assertIn("bash scripts/sd-ai-command-pack-review-full-check.sh", review_pr)
         self.assertIn("Project checks:", review_pr)
         self.assertIn("Optional AI review:", review_pr)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0", review_pr)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0", review_pr)
-        self.assertIn(
-            "--json name,workflow,state,bucket,link,completedAt", review_pr
-        )
+        self.assertIn("--json name,workflow,state,bucket,link,completedAt", review_pr)
         self.assertNotIn("workflow,status,conclusion,bucket", review_pr)
 
         create_pr = (
@@ -3158,18 +3154,6 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("record each follow-up", work_backlog)
         self.assertIn("upstream Trellis pull request", work_backlog)
 
-        work_designs = (
-            install.ROOT / "templates/.agents/skills/sd-work-designs/SKILL.md"
-        ).read_text(encoding="utf-8")
-        self.assertIn("name: sd-work-designs", work_designs)
-        self.assertIn("# SD Work Designs", work_designs)
-        self.assertIn("design.md", work_designs)
-        self.assertIn("implement.md", work_designs)
-        self.assertIn("selector: needs-design", work_designs)
-        self.assertIn("until=merge", work_designs)
-        self.assertIn("until=design", work_designs)
-        self.assertIn("numbered list", work_designs)
-
         review_local = (
             install.ROOT / "templates/.agents/skills/sd-review-local/SKILL.md"
         ).read_text(encoding="utf-8")
@@ -3189,7 +3173,9 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("prism review codebase", review_local)
         self.assertIn("empty chunk response", review_local)
         self.assertIn("gito review --all --path <repo-root>", review_local)
-        self.assertIn("replacing `<repo-root>` with the absolute repository root", review_local)
+        self.assertIn(
+            "replacing `<repo-root>` with the absolute repository root", review_local
+        )
         self.assertIn("branch-diff deletions", review_local)
         self.assertIn("continue stacking fixes", review_local)
         self.assertIn("UV_CACHE_DIR", review_local)
@@ -3203,7 +3189,9 @@ class InstallCoreTests(InstallTestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("name: sd-review-learnings", review_learnings)
         self.assertIn("# SD Review Learnings", review_learnings)
-        self.assertIn("scripts/sd-ai-command-pack-review-learnings.py", review_learnings)
+        self.assertIn(
+            "scripts/sd-ai-command-pack-review-learnings.py", review_learnings
+        )
         self.assertIn("sd-ai-command-pack-toolchain.sh run-python", review_learnings)
 
         full_check = (
@@ -3231,9 +3219,9 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("--no-commit", finish_work)
         self.assertIn("git add -- <exact-journal-path>", finish_work)
 
-        retro = (
-            install.ROOT / "templates/.agents/skills/sd-retro/SKILL.md"
-        ).read_text(encoding="utf-8")
+        retro = (install.ROOT / "templates/.agents/skills/sd-retro/SKILL.md").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("sd-ai-command-pack-toolchain.sh run-python", retro)
         self.assertIn("scripts/sd-ai-command-pack-record-session.py", retro)
 
@@ -3255,7 +3243,9 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("helper as the source of truth for `.obsidian-kb/`", update_spec)
         self.assertIn("sd-ai-command-pack-toolchain.sh run-python", update_spec)
         self.assertNotIn("Ensure `.obsidian-kb/`", update_spec)
-        self.assertNotIn("Link every relevant existing repo-knowledge file", update_spec)
+        self.assertNotIn(
+            "Link every relevant existing repo-knowledge file", update_spec
+        )
         self.assertNotIn("perform the remaining bullets manually", update_spec)
 
         self.assertIn("repospec artifact", update_spec)
@@ -3302,7 +3292,10 @@ class InstallCoreTests(InstallTestCase):
         for file in files:
             if file.platform not in generic_platforms:
                 continue
-            if file.source.relative_to(install.ROOT).parts[:2] != ("templates", ".commands"):
+            if file.source.relative_to(install.ROOT).parts[:2] != (
+                "templates",
+                ".commands",
+            ):
                 continue
             command_sources_by_platform[file.platform][file.source.name] = file.source
 
@@ -3316,7 +3309,6 @@ class InstallCoreTests(InstallTestCase):
                 "finish-work",
                 "create-pr",
                 "work-backlog",
-                "work-designs",
                 "audit-repo",
                 "watch-pr",
                 "ship",
@@ -3392,8 +3384,8 @@ class InstallCoreTests(InstallTestCase):
         for script_path in runner_paths:
             content = script_path.read_text(encoding="utf-8")
             self.assertIn("source_sd_ai_command_pack_shell_lib", content)
-            self.assertIn("--exclude \"$excludes\"", content)
-            self.assertIn("--filter \"$filters\"", content)
+            self.assertIn('--exclude "$excludes"', content)
+            self.assertIn('--filter "$filters"', content)
 
     def test_shell_scripts_source_shared_helper_library(self) -> None:
         helper_functions = (
@@ -3467,7 +3459,7 @@ class InstallCoreTests(InstallTestCase):
             install.ROOT / "templates/scripts/sd-ai-command-pack-review-scope.sh"
         ).read_text(encoding="utf-8")
         self.assertIn("normalize_repo_path()", scope_script)
-        self.assertNotIn("[[ \"$path\" =~", scope_script)
+        self.assertNotIn('[[ "$path" =~', scope_script)
 
     def test_install_drops_gitignored_anchor_entries_without_git(self) -> None:
         root = self.make_repo(".claude")
@@ -3486,7 +3478,9 @@ class InstallCoreTests(InstallTestCase):
         result = self.run_install(root, extra_env={"PATH": ""})
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        receipt_text = (root / install.INSTALLED_TARGETS_FILE).read_text(encoding="utf-8")
+        receipt_text = (root / install.INSTALLED_TARGETS_FILE).read_text(
+            encoding="utf-8"
+        )
         self.assertNotIn(".claude/commands/sd/start.md", receipt_text)
         self.assertNotIn("kept-in-receipt", result.stdout)
 
@@ -3508,9 +3502,14 @@ class InstallCoreTests(InstallTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("overwritten", result.stdout)
 
-        template_digest = "sha256:" + hashlib.sha256(
-            (PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-local.sh").read_bytes()
-        ).hexdigest()
+        template_digest = (
+            "sha256:"
+            + hashlib.sha256(
+                (
+                    PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-local.sh"
+                ).read_bytes()
+            ).hexdigest()
+        )
         provenance = json.loads(
             (root / install.PROVENANCE_FILE).read_text(encoding="utf-8")
         )
@@ -3572,7 +3571,9 @@ class InstallCoreTests(InstallTestCase):
         for relative_path, recorded_digest in provenance["files"].items():
             installed = root / relative_path
             self.assertTrue(installed.is_file(), relative_path)
-            actual_digest = "sha256:" + hashlib.sha256(installed.read_bytes()).hexdigest()
+            actual_digest = (
+                "sha256:" + hashlib.sha256(installed.read_bytes()).hexdigest()
+            )
             self.assertEqual(actual_digest, recorded_digest, relative_path)
 
     def test_fresh_gitignore_reports_created_status(self) -> None:

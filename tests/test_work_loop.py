@@ -261,9 +261,7 @@ class WorkLoopTests(InstallTestCase):
 
         identity = module.repository_identity(root)
 
-        self.assertEqual(
-            identity["remote"], "ssh://github.com/platypeeps/example"
-        )
+        self.assertEqual(identity["remote"], "ssh://github.com/platypeeps/example")
         self.assertEqual(identity["label"], "example")
         self.assertEqual(len(identity["digest"]), 64)
         self.assertEqual(
@@ -275,7 +273,9 @@ class WorkLoopTests(InstallTestCase):
             "c:/users/test/example",
         )
 
-    def test_repository_identity_strips_remote_credentials_before_persistence(self) -> None:
+    def test_repository_identity_strips_remote_credentials_before_persistence(
+        self,
+    ) -> None:
         module = self.load_module()
         root = self.make_repo()
         identity = module.repository_identity(
@@ -423,7 +423,9 @@ class WorkLoopTests(InstallTestCase):
                 with self.assertRaisesRegex(module.WorkLoopError, "focus"):
                     module.validate_state(candidate)
 
-    def test_validate_state_rejects_missing_or_wrong_typed_snapshot_fields(self) -> None:
+    def test_validate_state_rejects_missing_or_wrong_typed_snapshot_fields(
+        self,
+    ) -> None:
         module = self.load_module()
         root = self.make_repo()
         state = module.new_state(
@@ -491,7 +493,9 @@ class WorkLoopTests(InstallTestCase):
             with self.assertRaisesRegex(OSError, "blocked"):
                 module.atomic_write_json(target, {"value": "after"})
 
-        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"value": "before"})
+        self.assertEqual(
+            json.loads(target.read_text(encoding="utf-8")), {"value": "before"}
+        )
         self.assertEqual(list(target.parent.glob("*.tmp")), [])
 
     def test_atomic_write_succeeds_when_chmod_is_unsupported(self) -> None:
@@ -513,7 +517,9 @@ class WorkLoopTests(InstallTestCase):
 
         direct_chmod.assert_not_called()
         path_chmod.assert_has_calls([mock.call(0o700), mock.call(0o600)])
-        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"value": "written"})
+        self.assertEqual(
+            json.loads(target.read_text(encoding="utf-8")), {"value": "written"}
+        )
         self.assertEqual(list(target.parent.glob("*.tmp")), [])
 
     def test_validation_and_persistence_use_the_same_size_limit(self) -> None:
@@ -537,7 +543,9 @@ class WorkLoopTests(InstallTestCase):
             with self.assertRaisesRegex(module.WorkLoopError, "oversized"):
                 module.atomic_write_json(root.parent / "state/state.json", state)
 
-    def test_lock_rejects_concurrency_and_requires_explicit_stale_recovery(self) -> None:
+    def test_lock_rejects_concurrency_and_requires_explicit_stale_recovery(
+        self,
+    ) -> None:
         module = self.load_module()
         root = self.make_repo()
         state_root = root.parent / "state"
@@ -679,9 +687,7 @@ class WorkLoopTests(InstallTestCase):
                     _lock_path,
                     original,
                     evidence,
-                ) = self.make_terminal_fixture(
-                    module, squash_delivery=squash_delivery
-                )
+                ) = self.make_terminal_fixture(module, squash_delivery=squash_delivery)
                 reconciled = module.reconcile_terminal_state(
                     root,
                     original["runId"],
@@ -696,11 +702,14 @@ class WorkLoopTests(InstallTestCase):
                 self.assertEqual(reconciled["focus"], original["focus"])
                 self.assertEqual(reconciled["iteration"], original["iteration"])
                 self.assertEqual(reconciled["stopReason"], original["stopReason"])
-                self.assertEqual(reconciled["contextHealth"], {
-                    "level": "green",
-                    "epoch": 3,
-                    "reasons": [],
-                })
+                self.assertEqual(
+                    reconciled["contextHealth"],
+                    {
+                        "level": "green",
+                        "epoch": 3,
+                        "reasons": [],
+                    },
+                )
                 self.assertEqual(reconciled["checkpoint"]["state"], "completed")
                 terminal = reconciled["terminalReconciliation"]
                 self.assertEqual(terminal["status"], "verified")
@@ -788,7 +797,9 @@ class WorkLoopTests(InstallTestCase):
             )
         self.assertEqual(state_path.read_bytes(), before)
 
-    def test_terminal_reconciliation_requires_explicit_safe_stale_recovery(self) -> None:
+    def test_terminal_reconciliation_requires_explicit_safe_stale_recovery(
+        self,
+    ) -> None:
         module = self.load_module()
         root, state_root, state_path, lock_path, state, evidence = (
             self.make_terminal_fixture(module)
@@ -821,7 +832,9 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(reconciled["terminalReconciliation"]["status"], "verified")
         self.assertFalse(lock_path.exists())
 
-    def test_terminal_reconciliation_rejects_unsafe_repository_state_unchanged(self) -> None:
+    def test_terminal_reconciliation_rejects_unsafe_repository_state_unchanged(
+        self,
+    ) -> None:
         module = self.load_module()
 
         root, state_root, state_path, _lock, state, evidence = (
@@ -861,7 +874,9 @@ class WorkLoopTests(InstallTestCase):
             )
         self.assertEqual(state_path.read_bytes(), before)
 
-    def test_terminal_reconciliation_rejects_bad_task_and_pr_evidence_unchanged(self) -> None:
+    def test_terminal_reconciliation_rejects_bad_task_and_pr_evidence_unchanged(
+        self,
+    ) -> None:
         module = self.load_module()
 
         root, state_root, state_path, _lock, state, evidence = (
@@ -894,7 +909,9 @@ class WorkLoopTests(InstallTestCase):
             )
         self.assertEqual(state_path.read_bytes(), before)
 
-    def test_pr_url_validation_rejects_malformed_netlocs_without_traceback(self) -> None:
+    def test_pr_url_validation_rejects_malformed_netlocs_without_traceback(
+        self,
+    ) -> None:
         module = self.load_module()
 
         for url in (
@@ -911,7 +928,9 @@ class WorkLoopTests(InstallTestCase):
                         merge_commit="b" * 40,
                     )
 
-    def test_terminal_reconciliation_rejects_incomplete_or_mismatched_task(self) -> None:
+    def test_terminal_reconciliation_rejects_incomplete_or_mismatched_task(
+        self,
+    ) -> None:
         module = self.load_module()
 
         for task_update, expected in (
@@ -963,7 +982,9 @@ class WorkLoopTests(InstallTestCase):
 
         self.assertEqual(state_path.read_bytes(), before)
 
-    def test_terminal_reconciliation_atomic_failure_preserves_ledger_and_unlocks(self) -> None:
+    def test_terminal_reconciliation_atomic_failure_preserves_ledger_and_unlocks(
+        self,
+    ) -> None:
         module = self.load_module()
         root, state_root, state_path, _lock, state, evidence = (
             self.make_terminal_fixture(module)
@@ -1025,7 +1046,9 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(result, 2)
         self.assertIn("complete group", stderr.getvalue())
 
-    def test_legal_transitions_increment_iteration_and_clear_current_state(self) -> None:
+    def test_legal_transitions_increment_iteration_and_clear_current_state(
+        self,
+    ) -> None:
         module = self.load_module()
         root = self.make_repo()
         state = module.new_state(
@@ -1083,7 +1106,9 @@ class WorkLoopTests(InstallTestCase):
 
         self.assertEqual(state["iteration"], 2)
 
-    def test_transition_rejects_stable_identity_replacement_before_phase_change(self) -> None:
+    def test_transition_rejects_stable_identity_replacement_before_phase_change(
+        self,
+    ) -> None:
         module = self.load_module()
         root = self.make_repo()
         state = module.new_state(
@@ -1095,9 +1120,7 @@ class WorkLoopTests(InstallTestCase):
             run_id="run-1",
         )
         module.transition_state(state, "selected", updates={"task": "task-one"})
-        module.transition_state(
-            state, "planning", updates={"task": "task-one   "}
-        )
+        module.transition_state(state, "planning", updates={"task": "task-one   "})
         self.assertEqual(state["current"]["task"], "task-one")
 
         with self.assertRaisesRegex(module.WorkLoopError, "stable"):
@@ -1192,7 +1215,9 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["iterations"][0]["task"], "task-3")
         self.assertEqual(state["counters"]["completed"], module.MAX_HISTORY + 3)
         self.assertEqual(state["counters"]["mergedPrs"], module.MAX_HISTORY + 3)
-        self.assertEqual(state["counters"]["reviewRounds"], 2 * (module.MAX_HISTORY + 3))
+        self.assertEqual(
+            state["counters"]["reviewRounds"], 2 * (module.MAX_HISTORY + 3)
+        )
 
     def test_evidence_tracks_publish_review_finish_and_squash_merge(self) -> None:
         module = self.load_module()
@@ -1732,7 +1757,9 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["contextHealth"]["level"], "green")
         self.assertEqual(state["checkpoint"]["state"], "none")
 
-    def test_verified_live_advance_is_idempotent_and_unverified_advance_is_red(self) -> None:
+    def test_verified_live_advance_is_idempotent_and_unverified_advance_is_red(
+        self,
+    ) -> None:
         module = self.load_module()
         root = self.make_repo()
         state = module.new_state(
@@ -1744,9 +1771,7 @@ class WorkLoopTests(InstallTestCase):
             run_id="run-1",
         )
 
-        module.reconcile_state(
-            state, {"phase": "planning"}, verified_live_advance=True
-        )
+        module.reconcile_state(state, {"phase": "planning"}, verified_live_advance=True)
         self.assertEqual(state["phase"], "planning")
         self.assertEqual(state["contextHealth"]["level"], "amber")
 
@@ -1781,15 +1806,15 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["checkpoint"]["state"], "blocked")
 
         complete_evidence = {
-            key: value
-            for key, value in state["current"].items()
-            if value is not None
+            key: value for key, value in state["current"].items() if value is not None
         }
         module.reconcile_state(state, complete_evidence, repo=root)
         self.assertEqual(state["contextHealth"]["level"], "green")
         self.assertEqual(state["checkpoint"]["state"], "none")
 
-    def test_verified_reconcile_updates_same_phase_evidence_and_clears_checkpoint(self) -> None:
+    def test_verified_reconcile_updates_same_phase_evidence_and_clears_checkpoint(
+        self,
+    ) -> None:
         module = self.load_module()
         root = self.make_repo()
         state, _main_head = self.make_shipping_state(module, root)
@@ -1833,7 +1858,9 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["contextHealth"]["level"], "red")
         self.assertEqual(state["checkpoint"]["state"], "blocked")
 
-    def test_verified_reconcile_validates_merge_evidence_at_observed_phase(self) -> None:
+    def test_verified_reconcile_validates_merge_evidence_at_observed_phase(
+        self,
+    ) -> None:
         module = self.load_module()
         root = self.make_repo()
         state, _main_head = self.make_shipping_state(module, root)
@@ -1893,7 +1920,9 @@ class WorkLoopTests(InstallTestCase):
                 repo=root,
             )
 
-    def test_paused_checkpoint_recovers_verified_post_merge_advance_atomically(self) -> None:
+    def test_paused_checkpoint_recovers_verified_post_merge_advance_atomically(
+        self,
+    ) -> None:
         module = self.load_module()
         root = self.make_repo()
         state, _main_head = self.make_shipping_state(module, root)
@@ -1954,7 +1983,9 @@ class WorkLoopTests(InstallTestCase):
         module.reconcile_state(state, observations, repo=root)
         self.assertEqual(state["contextHealth"]["level"], "green")
 
-    def test_checkpoint_recovery_rejects_partial_evidence_without_partial_advance(self) -> None:
+    def test_checkpoint_recovery_rejects_partial_evidence_without_partial_advance(
+        self,
+    ) -> None:
         module = self.load_module()
         root = self.make_repo()
         state, _main_head = self.make_shipping_state(module, root)
@@ -2052,7 +2083,9 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["checkpoint"]["state"], "none")
         self.assertEqual(state["contextHealth"]["level"], "green")
 
-    def test_checkpoint_recovery_requires_verified_flag_for_changed_evidence(self) -> None:
+    def test_checkpoint_recovery_requires_verified_flag_for_changed_evidence(
+        self,
+    ) -> None:
         module = self.load_module()
         root = self.make_repo()
         state, _main_head = self.make_shipping_state(module, root)
@@ -2129,7 +2162,9 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["checkpoint"]["state"], "none")
         self.assertEqual(state["contextHealth"]["level"], "amber")
 
-    def test_cli_recovers_legacy_human_checkpoint_with_explicit_resume_phase(self) -> None:
+    def test_cli_recovers_legacy_human_checkpoint_with_explicit_resume_phase(
+        self,
+    ) -> None:
         module = self.load_module()
         root = self.make_repo()
         state_root = root.parent / "state"
@@ -2183,13 +2218,19 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(recovered["checkpoint"]["state"], "none")
         self.assertEqual(recovered["contextHealth"]["level"], "green")
 
-    def test_status_snapshot_is_read_only_and_reports_active_paused_and_invalid(self) -> None:
+    def test_status_snapshot_is_read_only_and_reports_active_paused_and_invalid(
+        self,
+    ) -> None:
         module = self.load_module()
         root = self.make_repo()
         state_root = root.parent / "state"
 
         self.assertEqual(
-            module.status_snapshot(root, state_root=state_root), {"status": "none"}
+            module.status_snapshot(root, state_root=state_root),
+            {
+                "status": "none",
+                "recovery": {"reasonCode": "normal", "reference": None},
+            },
         )
         state, state_path, _lock_path = self.make_state(module, root, state_root)
         head = module.run_git(root, "rev-parse", "HEAD")
@@ -2213,6 +2254,9 @@ class WorkLoopTests(InstallTestCase):
             current,
         )
         self.assertTrue(active["lock"]["present"])
+        self.assertEqual(
+            active["recovery"], {"reasonCode": "normal", "reference": None}
+        )
 
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
@@ -2225,12 +2269,95 @@ class WorkLoopTests(InstallTestCase):
         invalid = module.status_snapshot(root, state_root=state_root)
         self.assertEqual(invalid["status"], "invalid")
         self.assertIn("cannot read", invalid["error"])
+        self.assertEqual(
+            invalid["recovery"],
+            {
+                "reasonCode": "ledger_invalid",
+                "reference": "references/ledger-recovery.md",
+            },
+        )
 
         state["mode"] = None
         module.atomic_write_json(state_path, state)
         malformed = module.status_snapshot(root, state_root=state_root)
         self.assertEqual(malformed["status"], "invalid")
         self.assertIn("mode", malformed["error"])
+
+    def test_status_routes_each_exception_to_one_typed_recovery_reference(self) -> None:
+        module = self.load_module()
+
+        expected = {
+            "ledger_missing": "references/ledger-recovery.md",
+            "owner_stale": "references/ownership-recovery.md",
+            "run_stopped": "references/run-recovery.md",
+            "context_red": "references/run-recovery.md",
+            "terminal_reconciliation": "references/terminal-reconciliation.md",
+        }
+        for reason, reference in expected.items():
+            with self.subTest(reason=reason):
+                self.assertEqual(
+                    module.recovery_directive(reason),
+                    {"reasonCode": reason, "reference": reference},
+                )
+        with self.assertRaisesRegex(module.WorkLoopError, "unknown recovery"):
+            module.recovery_directive("terminal_reconciliation.md")
+
+        missing_root = self.make_repo()
+        missing_state_root = missing_root.parent / "state"
+        state, state_path, _lock_path = self.make_state(
+            module, missing_root, missing_state_root
+        )
+        state_path.unlink()
+        missing = module.status_snapshot(missing_root, state_root=missing_state_root)
+        self.assertEqual(missing["recovery"]["reasonCode"], "ledger_missing")
+
+        stale_root = self.make_repo()
+        stale_state_root = stale_root.parent / "state"
+        _state, _state_path, stale_lock_path = self.make_state(
+            module, stale_root, stale_state_root
+        )
+        stale_lock = module.read_json(stale_lock_path)
+        stale_lock.update(
+            {
+                "pid": 99999999,
+                "hostname": "different-host",
+                "heartbeatAt": "2000-01-01T00:00:00Z",
+            }
+        )
+        module.atomic_write_json(stale_lock_path, stale_lock)
+        stale = module.status_snapshot(stale_root, state_root=stale_state_root)
+        self.assertEqual(stale["recovery"]["reasonCode"], "owner_stale")
+
+        stopped_root = self.make_repo()
+        stopped_state_root = stopped_root.parent / "state"
+        stopped_state, stopped_path, stopped_lock_path = self.make_state(
+            module, stopped_root, stopped_state_root
+        )
+        module.release_lock(stopped_lock_path, stopped_state["runId"])
+        stopped_state["status"] = "stopped"
+        stopped_state["phase"] = "stopped"
+        module.atomic_write_json(stopped_path, stopped_state)
+        stopped = module.status_snapshot(stopped_root, state_root=stopped_state_root)
+        self.assertEqual(stopped["recovery"]["reasonCode"], "run_stopped")
+
+        red_root = self.make_repo()
+        red_state_root = red_root.parent / "state"
+        red_state, red_path, _red_lock_path = self.make_state(
+            module, red_root, red_state_root
+        )
+        red_state["contextHealth"] = {
+            "level": "red",
+            "epoch": 1,
+            "reasons": ["fixture contradiction"],
+        }
+        module.atomic_write_json(red_path, red_state)
+        red = module.status_snapshot(red_root, state_root=red_state_root)
+        self.assertEqual(red["recovery"]["reasonCode"], "context_red")
+
+        terminal_lock_path = red_path.parent / module.TERMINAL_LOCK_NAME
+        module.atomic_write_json(terminal_lock_path, module.lock_payload(red_state))
+        terminal = module.status_snapshot(red_root, state_root=red_state_root)
+        self.assertEqual(terminal["recovery"]["reasonCode"], "terminal_reconciliation")
 
     def test_cli_resumes_paused_run_and_does_not_create_repo_state(self) -> None:
         module = self.load_module()
@@ -2296,6 +2423,55 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(resumed["status"], "active")
         self.assertEqual(resumed["phase"], "inventory")
         self.assertFalse((root / ".sd-ai-command-pack/work-loop.json").exists())
+
+    def test_cli_starts_typed_design_selector_without_legacy_mode(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "start",
+                    "--repo",
+                    str(root),
+                    "--mode",
+                    "backlog",
+                    "--selector",
+                    "needs-design",
+                    "--until",
+                    "design",
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(result, 0, stdout.getvalue())
+        snapshot = json.loads(stdout.getvalue())
+        self.assertEqual(snapshot["mode"], "backlog")
+        self.assertEqual(snapshot["selector"], "needs-design")
+        self.assertEqual(snapshot["until"], "design")
+        self.assertEqual(
+            snapshot["recovery"], {"reasonCode": "normal", "reference": None}
+        )
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as exit:
+            module.main(
+                [
+                    "--state-home",
+                    str(root.parent / "other-state"),
+                    "start",
+                    "--repo",
+                    str(root),
+                    "--mode",
+                    "designs",
+                ]
+            )
+        self.assertEqual(exit.exception.code, 2)
+        self.assertIn("invalid choice", stderr.getvalue())
 
     def test_cli_pause_preserves_legacy_checkpoint_target(self) -> None:
         module = self.load_module()
@@ -2370,9 +2546,7 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(result, 0, stdout.getvalue())
         checkpointed = json.loads(stdout.getvalue())
         self.assertEqual(checkpointed["phase"], "checkpoint")
-        self.assertEqual(
-            checkpointed["checkpoint"]["target"], "updated human target"
-        )
+        self.assertEqual(checkpointed["checkpoint"]["target"], "updated human target")
         self.assertIsNone(checkpointed["checkpoint"]["resumePhase"])
 
     def test_cli_resume_rejects_conflicting_configuration_and_focus(self) -> None:
@@ -2390,7 +2564,6 @@ class WorkLoopTests(InstallTestCase):
         module.atomic_write_json(_state_path, state)
 
         conflicts = (
-            (["--mode", "designs"], "--mode"),
             (["--selector", "needs-design"], "--selector"),
             (["--until", "design"], "--until"),
             (["--focus-only", "release"], "focus subcommand"),

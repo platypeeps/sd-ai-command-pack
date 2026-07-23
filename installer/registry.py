@@ -8,6 +8,8 @@ from pathlib import Path
 # The package lives one level below the pack root that hosts install.py,
 # manifest.json, and templates/.
 ROOT = Path(__file__).resolve().parent.parent
+
+
 # One registry row per platform id; every per-platform table below derives
 # from it. Adding a platform means one registry row (plus manifest records)
 # and, when the row carries gitignore/local-only entries, a slot in the
@@ -377,15 +379,11 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".reasonix/**/tmp/",
             ".reasonix/**/*.log",
         ),
-        trellis_local_only=(
-            ".reasonix/skills/trellis-*/",
-        ),
+        trellis_local_only=(".reasonix/skills/trellis-*/",),
     ),
     "shared": PlatformInfo(
         directory=".agents",
-        trellis_local_only=(
-            ".agents/skills/trellis-*/",
-        ),
+        trellis_local_only=(".agents/skills/trellis-*/",),
     ),
     "trae": PlatformInfo(
         directory=".trae",
@@ -478,6 +476,7 @@ GENERATED_COMMAND_TARGET_FAMILIES = tuple(
     )
 )
 
+
 @dataclass(frozen=True)
 class CommandFamily:
     id: str
@@ -514,9 +513,7 @@ INTERACTION_CATEGORIES = frozenset(
         "bounded-budget-extension",
     }
 )
-INTERACTION_NONINTERACTIVE_BEHAVIORS = frozenset(
-    {"stop", "park", "report-only"}
-)
+INTERACTION_NONINTERACTIVE_BEHAVIORS = frozenset({"stop", "park", "report-only"})
 INTERACTION_HEADER_MAX_LENGTH = 12
 INTERACTION_MIN_OPTIONS = 2
 INTERACTION_MAX_OPTIONS = 3
@@ -809,9 +806,6 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
         ),
     ),
     CommandInfo(
-        "sd-work-designs", "work-designs", "planning-backlog", mutates_local=True
-    ),
-    CommandInfo(
         "sd-audit-repo",
         "audit-repo",
         "verification-improvement",
@@ -1047,7 +1041,9 @@ def validate_interaction_registry(
     decision_ids = [decision.id for decision in decisions]
     duplicate_ids = _duplicates(decision_ids)
     if duplicate_ids:
-        errors.append("duplicate interaction decision id(s): " + ", ".join(duplicate_ids))
+        errors.append(
+            "duplicate interaction decision id(s): " + ", ".join(duplicate_ids)
+        )
 
     for platform, info in platforms.items():
         tool = info.structured_question_tool
@@ -1072,10 +1068,7 @@ def validate_interaction_registry(
                 f"interaction decision {decision.id} has unknown category: "
                 f"{decision.category}"
             )
-        if (
-            not decision.header
-            or len(decision.header) > INTERACTION_HEADER_MAX_LENGTH
-        ):
+        if not decision.header or len(decision.header) > INTERACTION_HEADER_MAX_LENGTH:
             errors.append(
                 f"interaction decision {decision.id} header must be 1-12 characters"
             )
@@ -1112,7 +1105,9 @@ def validate_interaction_registry(
                     f"interaction decision {decision.id} has duplicate option labels"
                 )
             recommended = [
-                index for index, option in enumerate(decision.options) if option.recommended
+                index
+                for index, option in enumerate(decision.options)
+                if option.recommended
             ]
             if recommended != [0]:
                 errors.append(
@@ -1143,7 +1138,9 @@ def validate_interaction_registry(
             )
     unreferenced = sorted(known_ids - referenced_ids)
     if unreferenced:
-        errors.append("unreferenced interaction decision(s): " + ", ".join(unreferenced))
+        errors.append(
+            "unreferenced interaction decision(s): " + ", ".join(unreferenced)
+        )
 
     if errors:
         raise RuntimeError("invalid interaction registry: " + "; ".join(errors))
@@ -1243,6 +1240,13 @@ RETIRED_COMMAND_SURFACES: tuple[RetiredCommandSurface, ...] = (
         owner_task="07-16-source-only-fleet-refresh-command",
         source_paths_must_be_absent=False,
     ),
+    RetiredCommandSurface(
+        id="work-designs-command",
+        identifiers=("sd-work-designs",),
+        installed_targets=command_installed_targets("sd-work-designs", "work-designs"),
+        removed_version="0.39.0",
+        owner_task="07-22-streamline-backlog-design-workflows",
+    ),
 )
 
 
@@ -1253,6 +1257,7 @@ def retired_surface_targets(surface_id: str) -> tuple[str, ...]:
         if surface.id == surface_id:
             return surface.installed_targets
     raise RuntimeError(f"unknown retired command surface id: {surface_id}")
+
 
 COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
     CommandSurfaceAllowance(
@@ -1284,6 +1289,21 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         identifier="sd-review-local-all",
         path_pattern="tests/test_command_surface_drift.py",
         reason="command-surface lint fixture",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-work-designs",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-work-designs",
+        path_pattern="CHANGELOG.md",
+        reason="bounded historical release record",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-work-designs",
+        path_pattern="tests/test_retired_targets.py",
+        reason="retired-target cleanup regression fixture",
     ),
 )
 
@@ -1359,20 +1379,14 @@ def validate_command_surface_registry(
                 f"retirement {retirement.id} identifiers are still live: "
                 + ", ".join(sorted(overlap))
             )
-        config_overlap = live_configuration_keys.intersection(
-            configuration_keys
-        )
+        config_overlap = live_configuration_keys.intersection(configuration_keys)
         if config_overlap:
             errors.append(
                 f"retirement {retirement.id} configuration keys are still live: "
                 + ", ".join(sorted(config_overlap))
             )
-        repeated_identifiers = retired_identifiers.intersection(
-            identifiers
-        )
-        repeated_keys = retired_configuration_keys.intersection(
-            configuration_keys
-        )
+        repeated_identifiers = retired_identifiers.intersection(identifiers)
+        repeated_keys = retired_configuration_keys.intersection(configuration_keys)
         if repeated_identifiers:
             errors.append(
                 "retired identifiers have multiple owners: "
@@ -1421,9 +1435,7 @@ def validate_command_surface_registry(
             or ".." in path.parts
             or path_pattern in {"*", "**", "**/*"}
         ):
-            errors.append(
-                f"unsafe command surface allowance path: {path_pattern}"
-            )
+            errors.append(f"unsafe command surface allowance path: {path_pattern}")
         if not isinstance(allowance.reason, str) or not allowance.reason.strip():
             errors.append(
                 f"command surface allowance has no reason: {allowance.path_pattern}"
@@ -1450,8 +1462,15 @@ SHARED_SKILL_REFERENCES: dict[str, tuple[str, ...]] = {
         "references/examples.md",
         "references/structured-questions.md",
     ),
-    "sd-work-backlog": ("references/autonomous-loop.md",),
+    "sd-work-backlog": (
+        "references/autonomous-loop.md",
+        "references/ledger-recovery.md",
+        "references/ownership-recovery.md",
+        "references/run-recovery.md",
+        "references/terminal-reconciliation.md",
+    ),
 }
+
 
 # The generated structured-question reference is hosted by sd-help so it fans
 # out through the existing shared-reference mechanism without adding a skill.
@@ -1508,8 +1527,45 @@ PACK_LOCAL_GITIGNORE_GROUP = (
 
 # Hand-curated group order preserved from the pre-registry literal so the
 # managed .gitignore block content does not churn in consumer repos.
-_LOCAL_GITIGNORE_GROUP_ORDER = ("antigravity", "claude", "codebuddy", "codex", "cursor", "devin", "droid", "gemini", PACK_LOCAL_GITIGNORE_GROUP_NAME, "kiro", "kilo", "opencode", "pi", "qoder", "reasonix", "trae", "zcode",)
-_LOCAL_ONLY_GROUP_ORDER = ("antigravity", "shared", "claude", "codebuddy", "codex", "cursor", "devin", "droid", "gemini", "github", "kiro", "kilo", "opencode", "pi", "qoder", "reasonix", "trae", "zcode",)
+_LOCAL_GITIGNORE_GROUP_ORDER = (
+    "antigravity",
+    "claude",
+    "codebuddy",
+    "codex",
+    "cursor",
+    "devin",
+    "droid",
+    "gemini",
+    PACK_LOCAL_GITIGNORE_GROUP_NAME,
+    "kiro",
+    "kilo",
+    "opencode",
+    "pi",
+    "qoder",
+    "reasonix",
+    "trae",
+    "zcode",
+)
+_LOCAL_ONLY_GROUP_ORDER = (
+    "antigravity",
+    "shared",
+    "claude",
+    "codebuddy",
+    "codex",
+    "cursor",
+    "devin",
+    "droid",
+    "gemini",
+    "github",
+    "kiro",
+    "kilo",
+    "opencode",
+    "pi",
+    "qoder",
+    "reasonix",
+    "trae",
+    "zcode",
+)
 
 PLATFORMS = tuple(sorted(PLATFORM_REGISTRY))
 ALWAYS_INSTALL = "always"
