@@ -71,9 +71,11 @@ import {
   extractDocumentationPathReferences,
   findContradictoryJournalValidationFallbacks,
   findHistoricalTrellisJournalSessionEdits,
+  findTrellisTaskContextIssues,
   findTrellisTaskContextSeedRows,
   isBoundaryRiskReviewPath,
   isSourceReviewPath,
+  isTrellisTaskContextReference,
   maskGeneratedDocumentationPathProvenance,
   parseNumstat,
   parseJournalSessionsFromText,
@@ -288,11 +290,34 @@ assert.deepEqual(validateTrellisTaskMetadata({
   'branch must be null or a non-empty string',
 ]);
 assert.deepEqual(findTrellisTaskContextSeedRows('check.jsonl', [
-  '{"file":"spec.md","reason":"real"}',
-  '{"_example":"remove me"}',
+  '{"file":".trellis/spec/backend/index.md","reason":"real"}',
+  '{"_example":"remove me","file":"src/example.py"}',
   '{"nested":{"_example":"not a seed row"}}',
   'malformed',
 ].join('\\n')), [{ file: 'check.jsonl', line: 2 }]);
+assert.equal(isTrellisTaskContextReference('.trellis/spec'), true);
+assert.equal(isTrellisTaskContextReference('.trellis/spec/'), true);
+assert.equal(isTrellisTaskContextReference('.trellis/spec/backend/index.md'), true);
+assert.equal(isTrellisTaskContextReference('.trellis/spec/backend/'), true);
+assert.equal(isTrellisTaskContextReference('./.trellis/spec/frontend/index.md'), true);
+assert.equal(isTrellisTaskContextReference('.trellis/tasks/07-22-demo/research'), true);
+assert.equal(isTrellisTaskContextReference('.trellis/tasks/07-22-demo/research/'), true);
+assert.equal(isTrellisTaskContextReference('.trellis/tasks/07-22-demo/research/notes.md'), true);
+assert.equal(isTrellisTaskContextReference('./.trellis/tasks/07-22-demo/research/notes.md'), true);
+assert.equal(isTrellisTaskContextReference('.trellis/tasks/archive/2026-07/07-22-demo/research/'), true);
+assert.equal(isTrellisTaskContextReference('.trellis/tasks/archive/2026-07/07-22-demo/research/notes.md'), true);
+assert.equal(isTrellisTaskContextReference('src/index.ts'), false);
+assert.equal(isTrellisTaskContextReference('../.trellis/spec/backend/index.md'), false);
+assert.equal(isTrellisTaskContextReference('.trellis/spec//backend/index.md'), false);
+assert.equal(isTrellisTaskContextReference('https://example.com/spec.md'), false);
+assert.deepEqual(findTrellisTaskContextIssues('implement.jsonl', [
+  '{"file":".trellis/spec/backend/index.md","reason":"real"}',
+  '{"file":"tests/test_app.py","reason":"wrong boundary"}',
+  '{"_example":"remove me","file":"src/example.py"}',
+].join('\\n')), [
+  { file: 'implement.jsonl', line: 2, kind: 'reference' },
+  { file: 'implement.jsonl', line: 3, kind: 'seed' },
+]);
 assert.deepEqual(parseNumstat('1\\t2\\tsrc/file\\tname.js\\0'), [
   { added: 1, deleted: 2, path: 'src/file\\tname.js' },
 ]);
@@ -1586,7 +1611,7 @@ assert.deepEqual(
             result.stdout,
         )
 
-        context = '{"file":"spec.md","reason":"grounded"}\n'
+        context = '{"file":".trellis/spec/backend/index.md","reason":"grounded"}\n'
         (task / "implement.jsonl").write_text(context, encoding="utf-8")
         (task / "check.jsonl").write_text("", encoding="utf-8")
         result = self.run_review_preflight(node, root)
@@ -1653,6 +1678,56 @@ assert.deepEqual(
             result.stdout,
         )
 
+    def test_review_preflight_rejects_changed_non_spec_context_paths(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        task = root / ".trellis/tasks/07-22-context-boundary"
+        task.mkdir(parents=True)
+        (task / "task.json").write_text(
+            json.dumps(self.trellis_task_record("context-boundary")) + "\n",
+            encoding="utf-8",
+        )
+        (task / "implement.jsonl").write_text(
+            '{"file":"src/app.py","reason":"implementation"}\n',
+            encoding="utf-8",
+        )
+        (task / "check.jsonl").write_text(
+            '{"file":"tests/test_app.py","reason":"tests"}\n',
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            ".trellis/tasks/07-22-context-boundary/implement.jsonl:1 contains a task context reference outside",
+            result.stdout,
+        )
+        self.assertIn(
+            ".trellis/tasks/07-22-context-boundary/check.jsonl:1 contains a task context reference outside",
+            result.stdout,
+        )
+        self.assertIn(".trellis/spec/** or .trellis/tasks/**/research/** only", result.stdout)
+
+        (task / "implement.jsonl").write_text(
+            '{"file":".trellis/spec/backend/index.md","reason":"implementation contract"}\n',
+            encoding="utf-8",
+        )
+        (task / "check.jsonl").write_text(
+            '{"file":".trellis/tasks/07-22-context-boundary/research/cases.md","reason":"research evidence"}\n',
+            encoding="utf-8",
+        )
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_review_preflight_ignores_unchanged_planning_context(self) -> None:
         node = shutil.which("node")
         if node is None:
@@ -1681,7 +1756,7 @@ assert.deepEqual(
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
-            "no changed Trellis task context files require scaffold checks",
+            "no changed Trellis task context manifests require validation",
             result.stdout,
         )
         self.assertNotIn("legacy-planning/implement.jsonl:1", result.stdout)
@@ -1775,7 +1850,8 @@ assert.deepEqual(
             '{"_example":"current"}\n', encoding="utf-8"
         )
         (current / "check.jsonl").write_text(
-            '{"file":"spec.md","reason":"grounded"}\n', encoding="utf-8"
+            '{"file":".trellis/spec/backend/index.md","reason":"grounded"}\n',
+            encoding="utf-8",
         )
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 1, result.stdout)
@@ -1811,7 +1887,8 @@ assert.deepEqual(
             encoding="utf-8",
         )
         (task / "check.jsonl").write_text(
-            '{"file":"spec.md","reason":"grounded"}\n', encoding="utf-8"
+            '{"file":".trellis/spec/backend/index.md","reason":"grounded"}\n',
+            encoding="utf-8",
         )
         try:
             (task / "implement.jsonl").symlink_to(outside)

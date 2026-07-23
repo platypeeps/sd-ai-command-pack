@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.30.8 - 2026-07-22
+
+- Run deterministic review preflight in `sd-create-pr` before staging or
+  pushing, and reject changed Trellis task-context references outside spec and
+  task research roots before publication.
+
 ## 0.30.7 - 2026-07-22
 
 - Keep the full-check Obsidian KB freshness lane strict for broken root

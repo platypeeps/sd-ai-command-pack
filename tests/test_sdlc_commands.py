@@ -588,6 +588,22 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertNotIn("gh pr create --body ", step_5)
         self.assertNotIn("keeping GitHub's auto-filled body unchanged", step_5)
 
+    def test_create_pr_runs_review_preflight_before_publication(self) -> None:
+        create_pr = self._skill_text("sd-create-pr")
+        step_3 = create_pr.split("## Step 3", 1)[1].split("## Step 4", 1)[0]
+        normalized = " ".join(step_3.split())
+
+        preflight = "node scripts/sd-ai-command-pack-review-preflight.mjs"
+        self.assertIn('git diff --check "$BASE_REF"...HEAD', step_3)
+        self.assertIn(preflight, step_3)
+        self.assertLess(step_3.index(preflight), step_3.index("git add <intended paths>"))
+        self.assertIn("stop before staging, committing, or pushing", normalized)
+        self.assertIn("Do not treat a later `sd-review-pr` run as a substitute", normalized)
+        self.assertIn("reinstall sd-ai-command-pack before publishing", normalized)
+
+        final_report = create_pr.split("## Final Report", 1)[1]
+        self.assertIn("Pre-publication review preflight result", final_report)
+
     def test_create_pr_adapters_do_not_expose_internal_ship_context(self) -> None:
         adapters = [
             install.ROOT / "templates/.commands/sd-create-pr.md",

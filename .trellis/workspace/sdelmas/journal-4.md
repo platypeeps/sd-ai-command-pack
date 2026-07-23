@@ -1572,7 +1572,50 @@ Published the 0.30.6 corrective release candidate so housekeeping resolves finis
 - None - task complete
 
 
-## Session 192: Plan streamlined SD skill workflows
+## Session 192: Validate task context before PR publication
+
+**Date**: 2026-07-22
+**Task**: Validate task context before PR publication
+**Branch**: `codex/validate-task-context-before-pr`
+
+### Summary
+
+Added a pre-publication Trellis task-context gate, converged PR #226 through five remote review rounds, and archived the completed task.
+
+### Main Changes
+
+- Run deterministic review preflight before sd-create-pr stages, commits, or pushes.
+- Validate changed Trellis task context against canonical spec and research roots with precise, non-duplicative diagnostics.
+- Check committed branch whitespace against the fetched base and keep templates, installed mirrors, docs, and tests aligned.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ee245d2` | fix: validate task context before PR publication |
+| `7a5acb3` | fix: accept task context root directories |
+| `1bdaf7b` | docs: clarify task context validation |
+| `e9272cb` | fix: check committed whitespace before PR publication |
+| `37f3b73` | fix: avoid duplicate task context findings |
+
+### Testing
+
+- [OK] 71 focused review-preflight and SDLC command tests
+- [OK] make check
+- [OK] eight-consumer fleet candidate validation and ledger check
+- [OK] hosted CI and exact-head Copilot review with zero unresolved threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 193: Plan streamlined SD skill workflows
 
 **Date**: 2026-07-22
 **Task**: Plan streamlined SD skill workflows

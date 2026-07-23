@@ -565,13 +565,14 @@ review. User-provided bodies never enter this preparation mode and remain
 byte-for-byte subject to the existing validator.
 
 The review preflight is intentionally generic and safe to run without project
-dependencies. It checks for duplicate npm override sources of truth, changed
+dependencies. `sd-create-pr` runs it before staging, committing, or pushing so
+known task and context defects cannot be published for later review to find.
+It checks for duplicate npm override sources of truth, changed
 copied Trellis or SD command-pack surfaces without companion repo-owned
 integration context, personal absolute paths in docs/prompts/specs, missing
 repo path references in docs/prompts/specs, completed Trellis journal
-placeholder or journal/index commit drift, generated `_example` seed rows in
-changed task context after a task enters implementation, completes, or is
-archived, edits to historical
+placeholder or journal/index commit drift, generated `_example` seed rows and
+non-spec/non-research file references in changed task context, edits to historical
 journal sessions relative to the review base, and large diffs that are likely
 to skip remote AI review. It also emits a soft first-review warning when changed
 production code matches the stable `structured-input-types`,
@@ -590,10 +591,12 @@ mirrors, and non-workflow YAML remain outside the production-risk scan, while
 The authored-source threshold excludes installed pack/Trellis mirrors, Trellis
 task and workspace records, and known generated reports. A separate warning calls
 out changes spanning more than one Trellis task directory. The task-context
-check inspects `implement.jsonl` and
-`check.jsonl`; a changed qualifying `task.json` also checks both sibling files.
-Planning scaffolds, untouched legacy archives, and
-symlinked context files are skipped. Journal history is append-only: newly
+check inspects `implement.jsonl` and `check.jsonl`; a changed non-planning
+`task.json` also checks both sibling files. Changed planning manifests that
+still contain generated scaffolds fail; grounded planning manifests pass,
+while untouched legacy archives and symlinked context files are skipped.
+Grounded rows may reference only `.trellis/spec/**` or
+`.trellis/tasks/**/research/**`. Journal history is append-only: newly
 added/current sessions remain editable, but an older session must be restored
 and the intended current session edited by its explicit `## Session <n>:`
 heading. A separate repository-wide task-location check fails when a direct

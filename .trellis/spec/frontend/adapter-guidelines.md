@@ -864,6 +864,14 @@ branch before committing or opening a PR, preferring
 `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH_SLUG` or the commit message, with a
 timestamped fallback for empty or colliding names.
 
+After update-spec and intended-path classification, `sd-create-pr` must run
+`scripts/sd-ai-command-pack-review-preflight.mjs` on the complete branch plus
+working-tree diff before its first `git add` or any push. A missing helper or
+nonzero preflight stops publication; the later `sd-review-pr` gate is not a
+substitute for catching known task metadata, generated context scaffolds, or
+non-spec/non-research context references before they reach GitHub. Tests must
+pin the preflight before staging and preserve fail-closed diagnostics.
+
 ### SD Create-PR Composite Delegation Contract
 
 #### 1. Scope / Trigger
