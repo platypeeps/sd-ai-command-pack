@@ -2405,15 +2405,41 @@ assert.deepEqual(
 
         root = self.make_repo()
         self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
         task = root / ".trellis/tasks/07-19-stranded"
+        child_name = "07-19-child"
+        child = root / ".trellis/tasks" / child_name
         task.mkdir(parents=True)
+        child.mkdir(parents=True)
         (task / "task.json").write_text(
             json.dumps(
                 self.trellis_task_record(
-                    "stranded", status="completed", completed_at="2026-07-19"
+                    "stranded",
+                    status="completed",
+                    completed_at="2026-07-19",
+                    children=[child_name],
                 )
             )
             + "\n",
+            encoding="utf-8",
+        )
+        (task / "prd.md").write_text(
+            f"# Stranded\n\n- `{child_name}`\n",
+            encoding="utf-8",
+        )
+        (child / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record("child", parent="07-19-stranded")
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline completed parent")
+
+        (task / "prd.md").write_text(
+            "# Stranded\n\nThe stale child prose changed.\n",
             encoding="utf-8",
         )
 
@@ -2426,6 +2452,10 @@ assert.deepEqual(
         )
         self.assertIn(
             "task.py archive 07-19-stranded",
+            result.stdout,
+        )
+        self.assertNotIn(
+            "07-19-stranded/prd.md does not reference declared child",
             result.stdout,
         )
 

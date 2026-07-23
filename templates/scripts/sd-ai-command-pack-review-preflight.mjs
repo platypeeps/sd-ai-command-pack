@@ -754,6 +754,9 @@ function checkChangedTrellisTaskTopologySemantics() {
       }
       continue;
     }
+    if (!ACTIVE_TRELLIS_TASK_STATUSES.has(record.status)) {
+      continue;
+    }
     if (record.children === undefined || (Array.isArray(record.children) && record.children.length === 0)) {
       continue;
     }
