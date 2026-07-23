@@ -241,6 +241,85 @@ assert.deepEqual(validateTrellisTaskMetadata({
   base_branch: 'main',
 }, '.trellis/tasks/07-17-demo', false), []);
 assert.deepEqual(validateTrellisTaskMetadata({
+  id: 'demo',
+  name: 'demo',
+  status: 'planning',
+  completedAt: null,
+  branch: null,
+  base_branch: 'main',
+  priority: 'P2',
+  meta: {
+    priorityProvenance: {
+      sourcePriority: 'P3',
+      rationale: 'Promoted because this task owns the broader safety policy.',
+      evidence: 'source roadmap',
+    },
+  },
+}, '.trellis/tasks/07-17-demo', false), []);
+assert.deepEqual(validateTrellisTaskMetadata({
+  id: 'demo',
+  name: 'demo',
+  status: 'planning',
+  completedAt: null,
+  branch: null,
+  base_branch: 'main',
+  priority: 'P2',
+  meta: { priorityProvenance: null },
+}, '.trellis/tasks/07-17-demo', false), [
+  'meta.priorityProvenance must be an object',
+]);
+assert.deepEqual(validateTrellisTaskMetadata({
+  id: 'demo',
+  name: 'demo',
+  status: 'planning',
+  completedAt: null,
+  branch: null,
+  base_branch: 'main',
+  priority: 'P4',
+  meta: { priorityProvenance: { sourcePriority: 'P5', rationale: ' ' } },
+}, '.trellis/tasks/07-17-demo', false), [
+  'priority must be one of P0, P1, P2, P3 when meta.priorityProvenance is declared',
+  'meta.priorityProvenance.sourcePriority must be one of P0, P1, P2, P3',
+  'meta.priorityProvenance.rationale must be a non-empty string',
+]);
+assert.deepEqual(validateTrellisTaskMetadata({
+  id: 'demo',
+  name: 'demo',
+  status: 'planning',
+  completedAt: null,
+  branch: null,
+  base_branch: 'main',
+  priority: 'P2',
+  meta: { priorityProvenance: {} },
+}, '.trellis/tasks/07-17-demo', false), [
+  'meta.priorityProvenance.sourcePriority must be one of P0, P1, P2, P3',
+  'meta.priorityProvenance.rationale must be a non-empty string',
+]);
+assert.deepEqual(validateTrellisTaskMetadata({
+  id: 'demo',
+  name: 'demo',
+  status: 'planning',
+  completedAt: null,
+  branch: null,
+  base_branch: 'main',
+  priority: 'P2',
+  meta: { priorityProvenance: { sourcePriority: 'P2', rationale: 'No change.' } },
+}, '.trellis/tasks/07-17-demo', false), [
+  'meta.priorityProvenance.sourcePriority must differ from priority; remove provenance when priority is unchanged',
+]);
+assert.deepEqual(validateTrellisTaskMetadata({
+  id: 'demo',
+  name: 'demo',
+  status: 'planning',
+  completedAt: null,
+  branch: null,
+  base_branch: 'main',
+  priority: 'P1',
+  meta: { priorityProvenance: { sourcePriority: 'P3', rationale: 'x'.repeat(1001) } },
+}, '.trellis/tasks/07-17-demo', false), [
+  'meta.priorityProvenance.rationale must be at most 1000 characters',
+]);
+assert.deepEqual(validateTrellisTaskMetadata({
   id: '00-bootstrap-guidelines',
   name: '00-bootstrap-guidelines',
   status: 'completed',
@@ -1366,6 +1445,85 @@ assert.deepEqual(
             "checked 3 changed Trellis task metadata record(s)",
             result.stdout,
         )
+
+    def test_review_preflight_accepts_declared_task_priority_provenance(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+        task = root / ".trellis/tasks/07-23-promoted"
+        task.mkdir(parents=True)
+        record = self.trellis_task_record("promoted")
+        record["priority"] = "P1"
+        record["meta"] = {
+            "priorityProvenance": {
+                "sourcePriority": "P3",
+                "rationale": "Implements an approved shared dependency.",
+            }
+        }
+        (task / "task.json").write_text(
+            json.dumps(record) + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "checked 1 changed Trellis task metadata record(s)",
+            result.stdout,
+        )
+
+    def test_review_preflight_rejects_invalid_task_priority_provenance(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+        task = root / ".trellis/tasks/07-23-contradictory"
+        task.mkdir(parents=True)
+        record = self.trellis_task_record("contradictory")
+        record["priority"] = "P2"
+        record["meta"] = {
+            "priorityProvenance": {
+                "sourcePriority": "P2",
+                "rationale": "SECRET_RATIONALE " + ("x" * 1000),
+            }
+        }
+        (task / "task.json").write_text(
+            json.dumps(record) + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "task.json field meta.priorityProvenance.sourcePriority must "
+            "differ from priority",
+            result.stdout,
+        )
+        self.assertIn(
+            "task.json field meta.priorityProvenance.rationale must be at most "
+            "1000 characters",
+            result.stdout,
+        )
+        self.assertNotIn("SECRET_RATIONALE", result.stdout)
 
     def test_review_preflight_rejects_unrelated_deferred_planning_base(
         self,
@@ -3011,6 +3169,60 @@ assert.deepEqual(
         self.assertNotIn("full-check.sh:1-2,3-4,5-6", result.stdout)
         self.assertNotIn("install-audit.py:~145", result.stdout)
         self.assertNotIn("review-local.sh:~315-366", result.stdout)
+
+    def test_review_preflight_preserves_archived_deleted_path_references(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        for archived in (True, False):
+            with self.subTest(archived=archived):
+                root = self.make_repo()
+                self.assertEqual(self.run_install(root).returncode, 0)
+                self.run_git(root, "config", "user.email", "test@example.com")
+                self.run_git(root, "config", "user.name", "Test User")
+                retired = root / "docs/retired-roadmap.md"
+                retired.write_text("# Retired roadmap\n", encoding="utf-8")
+                if archived:
+                    task = (
+                        root
+                        / ".trellis/tasks/archive/2026-07/07-20-historical-path"
+                    )
+                    record = self.trellis_task_record(
+                        "historical-path",
+                        status="completed",
+                        completed_at="2026-07-20",
+                    )
+                else:
+                    task = root / ".trellis/tasks/07-23-live-path"
+                    record = self.trellis_task_record("live-path")
+                task.mkdir(parents=True)
+                (task / "task.json").write_text(
+                    json.dumps(record) + "\n",
+                    encoding="utf-8",
+                )
+                (task / "prd.md").write_text(
+                    "Historical source: `docs/retired-roadmap.md`.\n",
+                    encoding="utf-8",
+                )
+                self.run_git(root, "add", "-A")
+                self.run_git(root, "commit", "-m", "baseline with roadmap")
+                retired.unlink()
+
+                result = self.run_review_preflight(node, root)
+
+                if archived:
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    self.assertNotIn("retired-roadmap.md", result.stdout)
+                else:
+                    self.assertEqual(result.returncode, 1, result.stdout)
+                    self.assertIn(
+                        ".trellis/tasks/07-23-live-path/prd.md:1 references "
+                        "missing path docs/retired-roadmap.md",
+                        result.stdout,
+                    )
 
     def test_review_preflight_ignores_only_managed_review_provenance_paths(
         self,

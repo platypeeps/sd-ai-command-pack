@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Provides the deterministic good/base/failure cases and required task-metadata coverage."}
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Provides template parity, manifest, provenance, and candidate-ledger verification requirements."}

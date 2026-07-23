@@ -1771,3 +1771,40 @@ Added diff-scoped semantic guards for deferred planning bases and parent PRD chi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 197: Validate task metadata provenance
+
+**Date**: 2026-07-23
+**Task**: Validate task metadata provenance
+**Branch**: `codex/validate-task-metadata-provenance`
+
+### Summary
+
+Added deterministic priority-provenance validation and preserved archived task path evidence, then published and reviewed the 0.32.0 upstream candidate.
+
+### Main Changes
+
+- Validated optional Trellis priority provenance with distinct P0-P3 priorities, bounded rationale, and redacted diagnostics.
+- Added active-versus-archived deleted-path regression coverage and synchronized release surfaces and fleet evidence for 0.32.0.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fbb6a82` | feat: validate task priority provenance |
+
+### Testing
+
+- [OK] Focused review-preflight unit and executable tests passed.
+- [OK] All eight fleet candidate consumers passed install, audit, preparation, and repository-specific checks.
+- [OK] make check, published-head SD review full-check, GitHub CI, and settled Copilot review passed with zero threads.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

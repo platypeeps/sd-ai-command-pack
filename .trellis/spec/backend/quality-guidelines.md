@@ -51,6 +51,8 @@ that exercise the generic JavaScript review preflight.
 - Command: `node scripts/sd-ai-command-pack-review-preflight.mjs`
 - Reusable API: exported helpers such as `runReviewPreflight()` and parser
   helpers may be imported by Node-based tests.
+- Internal validator: `validateTrellisTaskPriorityProvenance(record)` returns
+  field-relative issue strings and never includes rationale contents.
 
 ### 3. Contracts
 
@@ -124,6 +126,12 @@ that exercise the generic JavaScript review preflight.
   Missing/deleted old paths are ignored during moves, while malformed JSON,
   oversized or unreadable files, unsafe symlinks, invalid layouts, and
   unverifiable linked records fail closed with path- and field-specific output.
+- Optional `meta.priorityProvenance` records an intentional priority remap. When
+  present it must be a plain object with a valid `sourcePriority` (`P0` through
+  `P3`) that differs from the task's current valid `priority`, plus a trimmed,
+  non-empty `rationale` of at most 1000 characters. Extra keys are tolerated,
+  absence preserves existing behavior, and diagnostics must identify fields
+  without echoing rationale text.
 - Diff-scoped Trellis task topology semantics inspect added or modified active
   `task.json` files and active task directories whose `task.json` or `prd.md`
   changed. A deferred planning child (`status: planning`, `branch: null`, and a
@@ -170,6 +178,11 @@ that exercise the generic JavaScript review preflight.
 - Changed task metadata is malformed, oversized, unreadable, symlinked, or
   depends on an unsafe/missing/ambiguous linked record -> fail closed rather
   than following the path or accepting unverifiable state.
+- Absent priority provenance or a complete declaration with distinct valid
+  source/current priorities and a bounded rationale -> pass; a non-object,
+  partial, same-priority, invalid-priority, blank-rationale, or oversized-
+  rationale declaration -> fail with field-specific output that omits the
+  rationale contents.
 - Changed deferred planning child uses a base found in neither its parent's
   durable base nor active branch -> fail with the child `task.json`, observed
   base, and allowed parent-derived targets; an intentional parent-branch stack
@@ -197,6 +210,9 @@ that exercise the generic JavaScript review preflight.
   the total-size warning but exclude them from the authored-source threshold.
 - Two changed task directories -> warn to confirm one reviewable outcome or
   split the work.
+- A live changed PRD references a missing local path -> fail; the same
+  historical reference in an archived task PRD -> remain accepted after that
+  path is deleted.
 
 ### 5. Good/Base/Bad Cases
 
@@ -211,10 +227,16 @@ that exercise the generic JavaScript review preflight.
   contradiction remains grandfathered.
 - Good: a deferred child targets its active parent's feature branch and the
   parent names that child in a dependency link.
+- Good: a task remapped from `P3` to `P2` declares both priorities and a concise
+  rationale in `meta.priorityProvenance`.
 - Base: an unchanged legacy parent PRD omits a child, so an unrelated branch
   does not become a historical migration.
+- Base: an ordinary task omits `meta.priorityProvenance` and retains its current
+  metadata behavior; an archived PRD retains a historical path reference.
 - Bad: a newly planned child inherits the author's unrelated feature branch,
   or a changed parent PRD mentions only a longer child-ID prefix match.
+- Bad: provenance supplies only a rationale, repeats the current priority, or
+  uses an unbounded explanation.
 - Bad: a broad replacement updates a repeated fallback line in an older journal
   session while adding the intended current session.
 - Bad: a new completed session says the full gate passed while Testing retains
@@ -239,6 +261,9 @@ that exercise the generic JavaScript review preflight.
 - Valid active, archived, parent/child, and stacked-base task metadata;
   unchanged-history grandfathering; identity, lifecycle, branch, and layout
   rejection; reciprocal-link failures; malformed JSON; and symlink rejection.
+- Priority-provenance coverage for absence, valid remapping, extra keys,
+  malformed and partial declarations, invalid and identical priorities, blank
+  rationale, the 1000-character boundary, and redacted diagnostics.
 - Parent-relative deferred planning bases, including durable-base and active-
   branch acceptance; unrelated-base rejection; standalone and assigned-branch
   exclusion; changed-parent and PRD-only child-map drift; exact token
@@ -256,6 +281,8 @@ that exercise the generic JavaScript review preflight.
 - Generated review-learning remote paths and path-like comment snippets are
   exempt only inside a complete managed block; surrounding human references
   and incomplete marker pairs remain checked with accurate line numbers.
+- Real-Git documentation-path coverage proving an active changed PRD fails when
+  a referenced path is later deleted while the archived-task equivalent passes.
 
 ### 7. Wrong vs Correct
 
@@ -277,6 +304,12 @@ Correct: accept only the recorded parent's durable base or active branch for cha
 
 Wrong: treat a longer task-ID prefix in free-form PRD prose as a declared child reference
 Correct: require each changed active parent's declared child as an exact delimited PRD token
+
+Wrong: infer priority remapping from free-form prose or accept a declaration that repeats the current priority
+Correct: declare bounded, field-valid `meta.priorityProvenance` only when the source and current priorities differ
+
+Wrong: require archived task PRDs to keep every historical local path alive forever
+Correct: enforce live PRD paths while allowing archived task evidence to retain historical references
 
 Wrong: declare a helper-used `const` below the module-level main invocation
 Correct: declare non-hoisted bindings above that invocation

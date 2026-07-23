@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines the shipped review-preflight task metadata and regression-test contract."}
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Defines template authority, synchronized mirrors, payload hashes, and release validation."}

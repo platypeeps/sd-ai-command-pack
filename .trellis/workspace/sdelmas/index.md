@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 196
+- **Total Sessions**: 197
 - **Last Active**: 2026-07-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1770 | Active |
+| `journal-4.md` | ~1808 | Active |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
 | `journal-1.md` | ~1990 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 197 | 2026-07-23 | Validate task metadata provenance | `fbb6a82` | `codex/validate-task-metadata-provenance` |
 | 196 | 2026-07-23 | Validate Trellis task topology semantics | `4cac1fd`, `f7a9279`, `67e9a71` | `codex/validate-planning-task-topology-semantics` |
 | 195 | 2026-07-22 | Review PR #227 task topology | `3ebf44a`, `b712d6e` | `codex/normalize-sd-workflow-program-task-topology` |
 | 194 | 2026-07-22 | Normalize SD workflow program task topology | `d9a377c` | `codex/normalize-sd-workflow-program-task-topology` |
