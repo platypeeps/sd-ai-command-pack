@@ -41,3 +41,34 @@ Proved the sole rebase safety stash contained no unique work and removed it with
 ### Next Steps
 
 - None - task complete
+
+
+## Session 203: Remove detached legacy archive worktree
+
+**Date**: 2026-07-23
+**Task**: Remove detached legacy archive worktree
+**Branch**: `main`
+
+### Summary
+
+Verified the detached legacy checkout was clean and unused, confirmed its commit remained reachable from main, origin/main, and v0.30.7, removed the exact linked worktree, and validated the primary checkout.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

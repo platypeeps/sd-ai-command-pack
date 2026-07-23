@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 202
+- **Total Sessions**: 203
 - **Last Active**: 2026-07-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~43 | Active |
+| `journal-5.md` | ~74 | Active |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 203 | 2026-07-23 | Remove detached legacy archive worktree | - | `main` |
 | 202 | 2026-07-23 | Remove redundant PR 232 recovery stash | - | `main` |
 | 201 | 2026-07-23 | Recover PR 232 against current main | `e0e5770` | `codex/centralize-pr-eligibility-gates` |
 | 200 | 2026-07-23 | Centralize PR eligibility and exact-head gates | `addda74`, `e73369a`, `5511a0b` | `codex/centralize-pr-eligibility-gates` |
