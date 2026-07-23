@@ -143,6 +143,9 @@ SOURCE_EXTENSIONS = {
 }
 
 UI_EXTENSIONS = frozenset({".html", ".htm", ".jsx", ".tsx", ".vue", ".svelte"})
+DOCUMENTATION_EXTENSIONS = frozenset(
+    {"", ".adoc", ".asciidoc", ".markdown", ".md", ".mdx", ".org", ".rst", ".txt"}
+)
 NON_PRODUCT_ROOTS = frozenset(
     {
         ".agents",
@@ -608,7 +611,10 @@ def collect_fingerprints(repo: Path, paths: Sequence[str]) -> tuple[Fingerprint,
     docs_paths = [
         path
         for path in paths
-        if _path_name(path).startswith(("readme", "contributing", "architecture"))
+        if (
+            _path_name(path).startswith(("readme", "contributing", "architecture"))
+            and _suffix(path) in DOCUMENTATION_EXTENSIONS
+        )
         or _has_part(path, frozenset({"doc", "docs", "documentation"}))
     ]
     consumer_paths = [

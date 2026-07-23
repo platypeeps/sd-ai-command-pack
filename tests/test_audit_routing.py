@@ -72,6 +72,26 @@ class AuditRoutingTests(InstallTestCase):
         self.assertIn("not equivalent to exhaustive", report["warnings"][0])
         self.assertEqual(sum(report["summary"].values()), len(router.CHARTERS))
 
+    def test_documentation_signal_requires_a_document_extension_or_directory(self) -> None:
+        router = self.load_router()
+        code_root = self.make_fixture({"src/architecture.py": "class Router: pass\n"})
+        named_doc_root = self.make_fixture({"README": "fixture\n"})
+        directory_doc_root = self.make_fixture(
+            {"docs/examples/architecture.py": "# documented example\n"}
+        )
+
+        code_rows = self.charter_rows(router.build_report(code_root, "standard", []))
+        named_doc_rows = self.charter_rows(
+            router.build_report(named_doc_root, "standard", [])
+        )
+        directory_doc_rows = self.charter_rows(
+            router.build_report(directory_doc_root, "standard", [])
+        )
+
+        self.assertEqual(code_rows["documentation"]["status"], "not-applicable")
+        self.assertEqual(named_doc_rows["documentation"]["status"], "run")
+        self.assertEqual(directory_doc_rows["documentation"]["status"], "run")
+
     def test_exhaustive_runs_every_charter(self) -> None:
         router = self.load_router()
         root = self.make_fixture({"README.md": "fixture\n"})
