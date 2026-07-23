@@ -461,9 +461,12 @@ def validate_lane(value: object, label: str) -> None:
     _integer(value["attempt"], f"{label} attempt", 1)
     if not isinstance(value["checkoutPath"], str) or not value["checkoutPath"]:
         raise FleetControllerError(f"{label} checkoutPath must be a string")
+    checkout_path = Path(value["checkoutPath"])
+    if not checkout_path.is_absolute():
+        raise FleetControllerError(f"{label} checkoutPath must be absolute")
     if not isinstance(value["checkoutDigest"], str) or len(value["checkoutDigest"]) != 64:
         raise FleetControllerError(f"{label} checkoutDigest is invalid")
-    if value["checkoutDigest"] != _digest_path(Path(value["checkoutPath"])):
+    if value["checkoutDigest"] != _digest_path(checkout_path):
         raise FleetControllerError(
             f"{label} checkoutDigest does not match checkoutPath"
         )
@@ -675,9 +678,8 @@ def new_state(
         if consumer.name not in selected_names:
             continue
         checkout = overrides.get(
-            consumer.name,
-            Path(consumer.path_hint).expanduser().resolve(),
-        )
+            consumer.name, Path(consumer.path_hint)
+        ).expanduser().resolve()
         lanes.append(
             {
                 "attempt": 1,

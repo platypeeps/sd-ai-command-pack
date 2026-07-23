@@ -145,6 +145,17 @@ class FleetControllerTests(InstallTestCase):
         ):
             controller.validate_state(state)
         state["lanes"][0]["checkoutPath"] = checkout_path
+        checkout_digest = state["lanes"][0]["checkoutDigest"]
+        state["lanes"][0]["checkoutPath"] = "relative-checkout"
+        state["lanes"][0]["checkoutDigest"] = controller._digest_path(
+            Path("relative-checkout")
+        )
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "checkoutPath must be absolute"
+        ):
+            controller.validate_state(state)
+        state["lanes"][0]["checkoutPath"] = checkout_path
+        state["lanes"][0]["checkoutDigest"] = checkout_digest
 
         manifest.write_text(json.dumps({"version": "0.38.0"}), encoding="utf-8")
         with self.assertRaisesRegex(controller.FleetControllerError, "does not match"):
