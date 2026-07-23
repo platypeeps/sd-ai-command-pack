@@ -1846,3 +1846,42 @@ Moved the consumer-discovered test-directory classification fix into the source 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 199: Reject malformed task context JSONL
+
+**Date**: 2026-07-23
+**Task**: Reject malformed task context JSONL
+**Branch**: `codex/reject-malformed-task-context-jsonl`
+
+### Summary
+
+Released the fail-closed task-context parser fix for command-pack 0.32.2 after focused, fleet, full-check, CI, and Copilot validation.
+
+### Main Changes
+
+- Malformed non-empty implement.jsonl and check.jsonl rows now fail with bounded file-and-line diagnostics.
+- Canonical templates, generated copies, command catalog metadata, changelog, and fleet candidate ledger were synchronized for 0.32.2.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f93a607` | fix: reject malformed task context JSONL |
+| `ddd9af5` | docs: link malformed context task to PR |
+
+### Testing
+
+- [OK] Focused review-preflight tests passed.
+- [OK] All eight fleet candidates passed.
+- [OK] make check and exact-head review-full-check passed.
+- [OK] GitHub CI succeeded on ddd9af5 and direct review-thread polling found zero unresolved threads.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge upstream PR #231 and verify the v0.32.2 release tag before refreshing consumer PR #8.
