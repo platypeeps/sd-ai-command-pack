@@ -377,3 +377,44 @@ Implemented deterministic repository fingerprinting and cost-aware audit charter
 ### Next Steps
 
 - None - task complete
+
+
+## Session 211: Streamline backlog and design workflows
+
+**Date**: 2026-07-23
+**Task**: Streamline backlog and design workflows
+**Branch**: `codex/streamline-backlog-design-workflows`
+
+### Summary
+
+Consolidated design-first execution into sd-work-backlog, added typed recovery routing and diagnostics, retired sd-work-designs, and completed PR review convergence.
+
+### Main Changes
+
+- Added selector=needs-design and until=design|merge to the canonical backlog controller while retiring the separate sd-work-designs surface.
+- Moved exceptional recovery guidance behind helper-selected typed reason codes and added bounded active/terminal lock evidence for missing-ledger recovery.
+- Updated generated adapters, installer retirement metadata, release evidence, documentation, tests, and the status work-loop code-spec.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `467bd42` | feat(work-backlog): consolidate design workflow |
+| `9b10b31` | fix: reject mismatched orphaned loop locks |
+| `79f54de` | fix: preserve historical work-loop resumes |
+| `ac7f72f` | fix: report lock diagnostics without ledger |
+
+### Testing
+
+- [OK] 73 focused work-loop tests passed.
+- [OK] Eight fleet consumers passed candidate validation for payload 0.39.0.
+- [OK] Deterministic PR full-check and exact-head GitHub CI passed; Copilot reported no new comments and all review threads are resolved.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
