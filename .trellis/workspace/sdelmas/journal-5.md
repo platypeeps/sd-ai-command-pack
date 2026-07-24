@@ -55,12 +55,7 @@ Verified the detached legacy checkout was clean and unused, confirmed its commit
 
 ### Main Changes
 
-- Added a shared Python environment builder and shell/toolchain adapters for
-  private per-user/per-repository XDG, Python, uv, pip, Ruff, and npm caches.
-- Migrated review, GitHub observation, status, fleet, full-check, and
-  housekeeping owners while preserving GitHub authentication configuration.
-- Added regression coverage, documented the cache contract, and published the
-  synchronized 0.45.0 pack payload and fleet candidate ledger.
+- Detailed change bullets were not supplied; see the summary above.
 
 ### Git Commits
 
@@ -68,11 +63,7 @@ Verified the detached legacy checkout was clean and unused, confirmed its commit
 
 ### Testing
 
-- `make check`
-- Candidate install, audit, preparation, and compatibility checks across all
-  eight configured consumer repositories
-- `make generate`, `make sync`, candidate-ledger validation, Obsidian KB
-  freshness validation, and final pack full-check
+- Validation was not recorded for this session.
 
 ### Status
 
@@ -734,7 +725,12 @@ Added one validated external cache environment for pack-owned Python and shell t
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Added a shared Python environment builder and shell/toolchain adapters for
+  private per-user/per-repository XDG, Python, uv, pip, Ruff, and npm caches.
+- Migrated review, GitHub observation, status, fleet, full-check, and
+  housekeeping owners while preserving GitHub authentication configuration.
+- Added regression coverage, documented the cache contract, and published the
+  synchronized 0.45.0 pack payload and fleet candidate ledger.
 
 ### Git Commits
 
@@ -744,7 +740,11 @@ Added one validated external cache environment for pack-owned Python and shell t
 
 ### Testing
 
-- Validation was not recorded for this session.
+- `make check`
+- Candidate install, audit, preparation, and compatibility checks across all
+  eight configured consumer repositories
+- `make generate`, `make sync`, candidate-ledger validation, Obsidian KB
+  freshness validation, and final pack full-check
 
 ### Status
 
