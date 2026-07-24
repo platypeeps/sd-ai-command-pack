@@ -1602,6 +1602,18 @@ update process, then refresh repo-owned repospec artifacts through existing
 maintenance infrastructure when available, perform the pack-specific
 architectural-overview gate, and rebuild the repo-local `.obsidian-kb` folder:
 
+- Keep routine Trellis delegation, extension order, the normal one-line KB
+  helper invocation, shared safety, and final reporting in the canonical skill.
+- Put detailed repository-map, architecture, and exceptional Obsidian-KB
+  procedures in three direct references registered through
+  `SHARED_SKILL_REFERENCES`; every installed skill root must receive them.
+- A routine spec-only pass loads no optional reference. Exact repository
+  evidence or explicit invocation selects only applicable references; multiple
+  independent extensions may apply, but each reference is loaded at most once
+  and no reference links to another reference.
+- A selected missing, unreadable, empty, escaping, or contradictory reference
+  is a visible failure, never permission to skip the extension silently.
+
 - If the repo has checked-in infrastructure for maintaining a repospec artifact
   (docs, scripts, package tasks, make targets, or similar), use that
   infrastructure to refresh the artifact.

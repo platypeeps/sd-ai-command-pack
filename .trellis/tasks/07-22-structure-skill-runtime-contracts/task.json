@@ -3,7 +3,7 @@
   "name": "structure-skill-runtime-contracts",
   "title": "Structure skill runtime contracts",
   "description": "Shorten housekeeping and update-spec prompts by moving deterministic output and rare extension mechanics into typed scripts and conditionally loaded references.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

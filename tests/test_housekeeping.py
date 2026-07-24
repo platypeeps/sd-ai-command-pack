@@ -415,6 +415,38 @@ class HousekeepingTests(InstallTestCase):
             "feature/cleanup",
         )
 
+    def test_housekeeping_json_reserves_stdout_for_typed_result(self) -> None:
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        self.write_housekeeping_gh_stub(stub_bin, head_oid)
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(install.ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--dry-run",
+                "--json",
+            ],
+            cwd=repo,
+            env={**os.environ, "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["schemaVersion"], 1)
+        self.assertEqual(payload["kind"], "housekeeping")
+        self.assertEqual(payload["outcome"], {"reasonCodes": [], "status": "clean"})
+        self.assertEqual(payload["status"]["mode"], "local")
+        self.assertIsNone(payload["eligibility"])
+        action_codes = {item["code"] for item in payload["actions"]}
+        self.assertIn("pull_request_merge_confirmed", action_codes)
+        self.assertIn("local_branch_delete_previewed", action_codes)
+        self.assertIn("==> SD AI command pack housekeeping", result.stderr)
+        self.assertNotIn("==> SD AI command pack housekeeping", result.stdout)
+
     def test_housekeeping_reports_fetch_failure_without_empty_action_crash(
         self,
     ) -> None:
@@ -541,6 +573,43 @@ class HousekeepingTests(InstallTestCase):
             check=False,
         )
         self.assertEqual(remote_branch.returncode, 2, remote_branch.stdout)
+
+    def test_housekeeping_json_embeds_the_exact_eligibility_receipt(self) -> None:
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_merge_gh_stub(stub_bin, marker)
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(install.ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--finish-work-head",
+                head_oid,
+                "--json",
+            ],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["outcome"]["status"], "clean")
+        self.assertEqual(payload["eligibility"]["status"], "eligible")
+        self.assertEqual(payload["eligibility"]["head"]["startOid"], head_oid)
+        self.assertEqual(payload["identity"]["finishWork"]["providedHead"], head_oid)
+        self.assertEqual(payload["identity"]["pullRequest"]["number"], 6)
+        action_codes = {item["code"] for item in payload["actions"]}
+        self.assertIn("pull_request_merged", action_codes)
+        self.assertIn("remote_branch_deleted", action_codes)
+        self.assertTrue(marker.exists())
 
     def test_housekeeping_requires_finish_work_head_before_auto_merge(self) -> None:
         repo, _, stub_bin, head_oid = self.make_housekeeping_repo()

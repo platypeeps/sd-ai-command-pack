@@ -382,7 +382,9 @@ no code changes.
 Runs the existing Trellis `trellis-update-spec` skill, refreshes repo-owned
 repospec or repository-map artifacts when maintained by the target repo, updates
 an existing architecture overview only when warranted, and refreshes the
-repo-local `.obsidian-kb/` copy folder.
+repo-local `.obsidian-kb/` copy folder. Routine spec-only runs load no optional
+guidance; repository-map, architecture, and exceptional KB procedures live in
+three flat references loaded only when their exact evidence applies.
 
 ### sd-housekeeping
 
@@ -391,6 +393,9 @@ the PR is clean and comment-free, then switching to the default branch,
 fast-forwarding, deleting merged refs, and reporting the final clean state.
 The cleanup script delegates final Git/GitHub/Trellis inventory, anomaly
 classification, and next steps to `sd-status` in strict mode.
+Its `--json` mode composes that status report with the existing exact-head PR
+eligibility receipt plus stable cleanup action/anomaly codes in one
+schema-version-1 result; human output remains the default for direct shell use.
 
 ## Configuration Quick Reference
 

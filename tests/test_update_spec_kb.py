@@ -32,47 +32,78 @@ InstallTestCase = _support.InstallTestCase
 class UpdateSpecKbTests(InstallTestCase):
     """Tests for Obsidian/LLM knowledge-base export behavior."""
 
-    def test_update_spec_wrappers_include_repospec_and_architecture_gates(self) -> None:
+    def test_update_spec_skill_and_flat_references_cover_extension_gates(self) -> None:
         shared_skill = (
             install.ROOT / "templates/.agents/skills/sd-update-spec/SKILL.md"
         ).read_text(encoding="utf-8")
+        reference_root = (
+            install.ROOT / "templates/.agents/skills/sd-update-spec/references"
+        )
+        repository_map = (reference_root / "repository-map.md").read_text(
+            encoding="utf-8"
+        )
+        architecture = (reference_root / "architecture.md").read_text(
+            encoding="utf-8"
+        )
+        obsidian_kb = (reference_root / "obsidian-kb.md").read_text(
+            encoding="utf-8"
+        )
+
         for expected in (
             "Resolve the `trellis-update-spec` skill by name",
             "skill discovery mechanism",
             "Use the Trellis update-spec skill as the primary instructions",
-            "repospec artifact",
+            "references/repository-map.md",
+            "references/architecture.md",
+            "references/obsidian-kb.md",
+            "routine spec-only run loads no optional reference",
+            "never follow a reference from another reference",
+            "scripts/sd-ai-command-pack-update-spec-kb.py",
+            "no infrastructure",
+            "not present",
+            "not warranted",
+            "Obsidian KB",
+            "Obsidian vault copy",
+        ):
+            self.assertIn(expected, shared_skill)
+
+        for expected in (
             "Makefile",
             "package.json",
             "instead of hand-editing generated",
             "Repomix",
             "docs/repomix-map.md",
             "no infrastructure",
+        ):
+            self.assertIn(expected, repository_map)
+
+        for expected in (
             "ARCHITECTURE.md",
             "docs/ARCHITECTURE.md",
             ".trellis/spec/**/architecture*.md",
-            "Do not create a new overview unless",
-            "architecture signals",
-            "package/module boundaries",
+            "Do not create an overview unless",
+            "architectural signals",
+            "package/module",
             "not present",
             "not warranted",
+        ):
+            self.assertIn(expected, architecture)
+
+        for expected in (
             ".obsidian-kb",
-            "scripts/sd-ai-command-pack-update-spec-kb.py",
             "exits nonzero",
-            "repo root `.gitignore`",
+            ".gitignore",
             "copies",
-            "visible semantic",
-            "file/folder names that start with `.`",
             ".trellis/workflow.md",
             ".trellis/config.yaml",
             ".trellis/spec/**/*.md",
             ".trellis/tasks/**/*.md",
             ".trellis/workspace/",
-            ".obsidian-kb/Dashboard - <repo>.md",
-            "landing page",
-            "Obsidian KB",
-            "Obsidian vault copy",
+            "Dashboard - <repo>.md",
+            "Do not rebuild the KB manually",
         ):
-            self.assertIn(expected, shared_skill)
+            self.assertIn(expected, obsidian_kb)
+        self.assertRegex(obsidian_kb, r"visible\s+semantic")
 
         adapter_paths = [
             install.ROOT / "templates/.claude/commands/sd/update-spec.md",

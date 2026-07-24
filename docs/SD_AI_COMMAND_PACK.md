@@ -82,6 +82,8 @@ Quick links:
 - `scripts/sd-ai-command-pack-audit-route.py`: deterministic repository
   fingerprinting and charter selection for standard and exhaustive audits.
 - `scripts/sd-ai-command-pack-housekeeping.sh`: canonical post-merge housekeeping script.
+- `scripts/sd-ai-command-pack-housekeeping-result.py`: read-only composer for
+  schema-versioned housekeeping action, eligibility, and final-status evidence.
 - `scripts/sd-ai-command-pack-status.py`: read-only local/fleet status collector
   and schema-versioned JSON reporter used by housekeeping final verification.
 - `scripts/sd-ai-command-pack-work-loop.py`: standard-library user-local loop
@@ -475,7 +477,7 @@ Use the script directly from any shell:
 bash scripts/sd-ai-command-pack-full-check.sh
 bash scripts/sd-ai-command-pack-review-local.sh
 bash scripts/sd-ai-command-pack-review-local.sh --full-codebase
-bash scripts/sd-ai-command-pack-housekeeping.sh # cleanup-only or already merged
+bash scripts/sd-ai-command-pack-housekeeping.sh --json # typed cleanup result
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-status.py
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-status.py fleet --json
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
@@ -793,6 +795,14 @@ command surfaces, data flow, persistence, external integrations, config/env, or
 runtime/deployment topology, the wrapper updates it. Otherwise it leaves the
 overview untouched and reports `not present` or `not warranted`.
 
+The canonical update-spec skill keeps routine Trellis delegation, extension
+ordering, the normal KB command, safety, and final reporting inline. It loads no
+optional reference for a routine spec-only pass. Existing repository-map
+infrastructure, applicable architecture changes, explicit preview, unusual KB
+paths, or helper failures select only the matching direct reference under
+`.agents/skills/sd-update-spec/references/`; independent extensions may load
+more than one, but references never chain.
+
 The update-spec command also runs
 `scripts/sd-ai-command-pack-update-spec-kb.py` to maintain `.obsidian-kb/` in the
 repo root and ensure that folder is listed in `.gitignore` inside a managed
@@ -887,6 +897,14 @@ the default/source branches, remote-branch policy, cleanup anomalies, and a
 final Git verification, pack/Trellis versions, relevant PR/review count,
 repo-wide open PRs/issues, Trellis inventory, anomaly list, and numbered next
 steps. Repo-wide inventory remains context rather than a cleanup blocker.
+
+Pass `--json` to reserve stdout for one schema-version-1 housekeeping result;
+progress and diagnostics move to stderr. The result embeds the existing PR
+eligibility JSON unchanged, stable coded actions/anomalies, and the complete
+delegated `sd-status --json` report. Its final `outcome.status` is
+`clean|blocked|indeterminate|failed`. The read-only
+`sd-ai-command-pack-housekeeping-result.py` helper validates and composes these
+documents but collects no Git/GitHub evidence and owns no mutation.
 
 The installed script also supports
 `bash scripts/sd-ai-command-pack-housekeeping.sh --self-test`, which verifies

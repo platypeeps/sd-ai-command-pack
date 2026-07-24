@@ -3232,15 +3232,16 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("# SD Housekeeping", housekeeping)
         self.assertIn("bash scripts/sd-ai-command-pack-housekeeping.sh", housekeeping)
         self.assertIn("Expected clean state", housekeeping)
-        self.assertIn("general\nrepo maintenance", housekeeping)
-        self.assertIn("branch: <default>", housekeeping)
+        self.assertIn("not general maintenance", housekeeping)
+        self.assertIn("Branch: <default>", housekeeping)
 
         update_spec = (
             install.ROOT / "templates/.agents/skills/sd-update-spec/SKILL.md"
         ).read_text(encoding="utf-8")
-        self.assertRegex(update_spec, r"do\s+not rebuild")
-        self.assertIn("`.obsidian-kb/` manually", update_spec)
-        self.assertIn("helper as the source of truth for `.obsidian-kb/`", update_spec)
+        self.assertIn("references/repository-map.md", update_spec)
+        self.assertIn("references/architecture.md", update_spec)
+        self.assertIn("references/obsidian-kb.md", update_spec)
+        self.assertIn("routine spec-only run loads no optional reference", update_spec)
         self.assertIn("sd-ai-command-pack-toolchain.sh run-python", update_spec)
         self.assertNotIn("Ensure `.obsidian-kb/`", update_spec)
         self.assertNotIn(
@@ -3248,8 +3249,17 @@ class InstallCoreTests(InstallTestCase):
         )
         self.assertNotIn("perform the remaining bullets manually", update_spec)
 
-        self.assertIn("repospec artifact", update_spec)
-        self.assertIn("docs/repomix-map.md", update_spec)
+        update_spec_references = (
+            install.ROOT / "templates/.agents/skills/sd-update-spec/references"
+        )
+        repository_map = (update_spec_references / "repository-map.md").read_text(
+            encoding="utf-8"
+        )
+        obsidian_kb = (update_spec_references / "obsidian-kb.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertRegex(repository_map, r"new\s+artifact")
+        self.assertIn("docs/repomix-map.md", repository_map)
         self.assertIn("Architectural overview", update_spec)
 
         fleet_refresh = (
@@ -3267,7 +3277,7 @@ class InstallCoreTests(InstallTestCase):
             )
         self.assertIn(".obsidian-kb", update_spec)
         self.assertIn("scripts/sd-ai-command-pack-update-spec-kb.py", update_spec)
-        self.assertIn(".obsidian-kb/Dashboard - <repo>.md", update_spec)
+        self.assertIn("Dashboard - <repo>.md", obsidian_kb)
         self.assertIn("Obsidian vault copy", update_spec)
 
     def test_generic_markdown_platforms_share_neutral_command_sources(self) -> None:

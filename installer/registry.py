@@ -1462,6 +1462,11 @@ SHARED_SKILL_REFERENCES: dict[str, tuple[str, ...]] = {
         "references/examples.md",
         "references/structured-questions.md",
     ),
+    "sd-update-spec": (
+        "references/architecture.md",
+        "references/repository-map.md",
+        "references/obsidian-kb.md",
+    ),
     "sd-work-backlog": (
         "references/autonomous-loop.md",
         "references/ledger-recovery.md",

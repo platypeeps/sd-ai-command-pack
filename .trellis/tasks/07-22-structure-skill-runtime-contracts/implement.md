@@ -7,9 +7,17 @@
 
 ## 2. Add Typed Housekeeping Output
 
-- Reuse the shared PR eligibility schema.
-- Add versioned action/lifecycle/cleanup results and stable reason codes.
-- Derive human output from the structured result where possible.
+- Add a read-only stdlib result builder and ship it beside housekeeping.
+- Add `--json` to housekeeping, keeping default human output unchanged and
+  reserving JSON-mode stdout for one final document.
+- Add stable action/anomaly codes at each Bash decision boundary.
+- Extend the PR evaluator with a combined JSON-plus-shell adapter format so
+  housekeeping embeds the shared eligibility result without rerunning remote
+  evidence collection.
+- Embed the delegated `sd-status --json` report rather than adding a parallel
+  final-state collector.
+- Derive `clean|blocked|indeterminate|failed` and result reason codes from the
+  embedded status, eligibility, action, and anomaly evidence.
 
 ## 3. Reduce Housekeeping Prose
 
@@ -19,14 +27,28 @@
 
 ## 4. Split Optional Update-Spec Guidance
 
-- Create direct references for architecture/map/KB extensions.
-- Add deterministic selection and missing-reference failure behavior.
-- Keep normal update-spec behavior unchanged.
+- Create direct `architecture.md`, `repository-map.md`, and `obsidian-kb.md`
+  references under the canonical skill.
+- Register the references once so generation fans them out to every installed
+  skill root and manifest target.
+- Keep Trellis delegation, extension ordering, selection criteria, the normal
+  KB helper invocation, safety boundaries, and final report shape in the core
+  skill.
+- Load zero optional references for a routine spec-only run; load each selected
+  direct reference at most once, with no reference-to-reference chains.
+- Make missing, unreadable, empty, unsafe, or contradictory selected references
+  visible failures rather than silent skips.
 
 ## 5. Validate
 
-- Run output schema/compatibility, housekeeping lifecycle, update-spec routing,
-  generated parity, `make sync`, and `make check` tests.
+- Add builder schema/classification/invalid-input tests, combined eligibility
+  rendering tests, and end-to-end housekeeping human/JSON lifecycle tests.
+- Add update-spec zero/one/multiple-extension routing assertions plus selected
+  reference failure tests.
+- Register any new shipped helper in manifest/provenance, per-file coverage,
+  docs, version/changelog, and full-fleet candidate evidence.
+- Run focused output-schema, housekeeping lifecycle, update-spec routing,
+  generated parity, `make sync`, fleet candidate validation, and `make check`.
 
 ## Stop Points
 
