@@ -441,6 +441,7 @@ class ToolchainPreflightTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 5, result.stderr)
         self.assertIn("cache setup failed", result.stderr)
+        self.assertEqual(len(result.stderr.splitlines()), 1)
         self.assertFalse(marker.exists())
 
     def test_run_executes_argv_with_shared_cache_and_preserved_auth(self) -> None:

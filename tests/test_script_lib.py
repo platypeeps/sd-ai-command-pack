@@ -324,6 +324,55 @@ class ScriptLibTests(InstallTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), ["</cache/xdg>", "</cache/npm>"])
 
+    def test_shared_shell_cache_failure_suppresses_nested_stderr(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-shell-cache-failure-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        scripts = root / "scripts"
+        scripts.mkdir()
+        shell_lib = scripts / "sd-ai-command-pack-shell-lib.sh"
+        shell_lib.write_text(
+            (
+                install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh"
+            ).read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        toolchain = scripts / "sd-ai-command-pack-toolchain.sh"
+        toolchain.write_text(
+            "#!/usr/bin/env bash\n"
+            "printf 'raw nested helper diagnostic /host/path\\n' >&2\n"
+            "exit 5\n",
+            encoding="utf-8",
+        )
+        toolchain.chmod(0o755)
+
+        result = subprocess.run(
+            [
+                self._bash_path,
+                "-c",
+                (
+                    "warn() { printf 'WARN:%s\\n' \"$*\" >&2; }; "
+                    "source \"$1\"; "
+                    "export SD_AI_COMMAND_PACK_REPO_ROOT=\"$2\"; "
+                    "prepare_tool_cache_env"
+                ),
+                "bash",
+                str(shell_lib),
+                str(root),
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("raw nested helper", result.stderr)
+        self.assertEqual(len(result.stderr.splitlines()), 1)
+        self.assertIn("WARN:cache setup failed", result.stderr)
+
     def test_github_workflow_skills_require_argv_safe_cache_wrapper(self) -> None:
         for name in (
             "sd-create-pr",

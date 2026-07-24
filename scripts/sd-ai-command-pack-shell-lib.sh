@@ -183,7 +183,7 @@ prepare_tool_cache_env() {
     warn "cache setup failed: shared toolchain is missing: $toolchain"
     return 1
   fi
-  if ! output="$(SD_AI_COMMAND_PACK_REPO_ROOT="$cache_repo_root" bash "$toolchain" cache-env)"; then
+  if ! output="$(SD_AI_COMMAND_PACK_REPO_ROOT="$cache_repo_root" bash "$toolchain" cache-env 2>/dev/null)"; then
     warn "cache setup failed; set SD_AI_COMMAND_PACK_CACHE_ROOT to a private writable directory outside the repository"
     return 1
   fi

@@ -415,7 +415,7 @@ configure_cache_environment() {
     fail "cache setup failed: shared helper is missing: $helper" 5
   fi
   if ! CACHE_ENV_OUTPUT="$(PYTHONDONTWRITEBYTECODE=1 "$PYTHON_COMMAND" \
-    "$helper" cache-env --repo "$REPO_ROOT")"; then
+    "$helper" cache-env --repo "$REPO_ROOT" 2>/dev/null)"; then
     fail "cache setup failed; set SD_AI_COMMAND_PACK_CACHE_ROOT to a private writable directory outside the repository" 5
   fi
   while IFS='=' read -r key value; do
