@@ -713,38 +713,33 @@ Implemented final PR-head verification in eligibility results, published and rev
 - None - task complete
 
 
-## Session 220: Standardize sandbox-safe tool cache routing
+## Session 220: Harden audit read-only methods
 
 **Date**: 2026-07-24
-**Task**: Standardize sandbox-safe tool cache routing
-**Branch**: `codex/standardize-sandbox-safe-tool-cache-routing`
+**Task**: Harden audit read-only methods
+**Branch**: `codex/harden-audit-read-only-methods`
 
 ### Summary
 
-Added one validated external cache environment for pack-owned Python and shell tool execution, migrated review, status, fleet, CI, and housekeeping owners, documented the authentication boundary and retention policy, expanded regression coverage, and validated release 0.45.0 across the full consumer fleet.
+Made audit evidence collection static-only and added a delimiter-safe committed-tree inventory helper.
 
 ### Main Changes
 
-- Added a shared Python environment builder and shell/toolchain adapters for
-  private per-user/per-repository XDG, Python, uv, pip, Ruff, and npm caches.
-- Migrated review, GitHub observation, status, fleet, full-check, and
-  housekeeping owners while preserving GitHub authentication configuration.
-- Added regression coverage, documented the cache contract, and published the
-  synchronized 0.45.0 pack payload and fleet candidate ledger.
+- Removed execution-shaped audit charter methods and documented the static-only contract.
+- Added and shipped the NUL-safe Git tree inventory helper with hostile-filename and failure-boundary tests.
+- Bumped the pack to 0.45.0, refreshed generated mirrors, and validated the full consumer fleet.
 
 ### Git Commits
 
 | Hash | Message |
 |------|---------|
-| `4020df8cd7e538199b086de730495de39d23b1b8` | (see git log) |
+| `7c78840ccfb73c4d0978cef588ffe8aea105b2c2` | feat: harden audit read-only methods |
 
 ### Testing
 
-- `make check`
-- Candidate install, audit, preparation, and compatibility checks across all
-  eight configured consumer repositories
-- `make generate`, `make sync`, candidate-ledger validation, Obsidian KB
-  freshness validation, and final pack full-check
+- [OK] make check
+- [OK] fleet candidate validation: 8 consumers passed
+- [OK] Copilot reviewed 25 files with no comments; zero unresolved threads
 
 ### Status
 

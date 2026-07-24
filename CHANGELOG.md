@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.45.0 - 2026-07-24
+## 0.46.0 - 2026-07-24
 
 - Route XDG/GitHub CLI, Python, uv, pip, Ruff, and npm caches through one
   validated private per-user/per-repository environment shared by Python and
@@ -8,6 +8,13 @@
 - Replace command-specific UV and disposable-candidate cache fragments with
   the shared builder, controlled failures, deterministic external namespaces,
   and documented cache-root/retention behavior.
+
+## 0.45.0 - 2026-07-24
+
+- Keep formal repository audits read-only by replacing checkout-owned Make and
+  help probes with static inspection.
+- Add a deterministic committed-tree architecture inventory that safely ranks
+  regular blobs while preserving hostile valid filenames.
 
 ## 0.44.0 - 2026-07-24
 

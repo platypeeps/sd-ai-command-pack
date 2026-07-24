@@ -317,6 +317,9 @@ Runs the formal multi-dimension repository audit through a deterministic
 applicability preflight, one read-only reviewer per selected charter,
 adversarial verification, Trellis backlog reconciliation, and a canonical
 report backed by the committed findings ledger at `.trellis/audit/ledger.md`.
+Its charters use static inspection only and never execute checkout-owned code;
+the shipped audit-inventory helper safely ranks committed Git blobs without
+delimiter-unsafe filename pipelines.
 `depth=standard` keeps a non-removable core and evidence-routes optional
 charters; `depth=exhaustive` runs all charters. Bare charter names and
 `dimensions=` add coverage, while `follow-up` rechecks ledger findings. Details

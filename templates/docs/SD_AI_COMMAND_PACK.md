@@ -85,6 +85,9 @@ Quick links:
   checks.
 - `scripts/sd-ai-command-pack-audit-route.py`: deterministic repository
   fingerprinting and charter selection for standard and exhaustive audits.
+- `scripts/sd-ai-command-pack-audit-inventory.py`: read-only committed-tree
+  inventory for architecture audits; ranks regular Git blobs by byte size
+  without executing checkout-owned code or opening worktree paths.
 - `scripts/sd-ai-command-pack-housekeeping.sh`: canonical post-merge housekeeping script.
 - `scripts/sd-ai-command-pack-housekeeping-result.py`: read-only composer for
   schema-versioned housekeeping action, eligibility, and final-status evidence.
@@ -1027,6 +1030,12 @@ It is charter-driven: one read-only reviewer per selected dimension, with the
 charters installed at `.agents/skills/sd-audit-repo/charters/`. The shipped
 `scripts/sd-ai-command-pack-audit-route.py` helper deterministically records
 repository fingerprints and every charter's applicability before dispatch.
+Charter evidence collection is static-only: it must not execute repository
+targets, scripts, hooks, package tasks, Make expansion, or application help
+handlers. Architecture reviews use the shipped
+`scripts/sd-ai-command-pack-audit-inventory.py` helper to inspect committed Git
+tree metadata safely, including repositories with spaces, tabs, newlines, or
+leading dashes in valid filenames.
 The pipeline is fixed and ordered:
 applicability preflight → dimension reviews → adversarial verification → synthesis → Trellis reconciliation → report + ledger.
 

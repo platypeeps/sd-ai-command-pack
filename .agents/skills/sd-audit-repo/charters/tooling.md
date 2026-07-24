@@ -62,8 +62,12 @@ of re-deriving the repository inventory.
   `bash scripts/sd-ai-command-pack-toolchain.sh run -- gh ...`; a missing or
   failed cache wrapper makes this optional probe unavailable and is not
   permission to retry bare or redirect `GH_CONFIG_DIR`.
-- Exercise the repo's own targets and scripts read-only (`make -n <target>`,
-  `--help`) to verify the machinery resolves and starts.
+- Inspect target declarations, package-script definitions, shell entry points,
+  argument parsers, workflow invocations, and documented prerequisites
+  statically. Do not run checkout-owned targets, scripts, hooks, package tasks,
+  Make expansion, or help handlers merely to see whether they resolve or
+  start. Record any runtime smoke test as separate work requiring explicit
+  execution authority outside this read-only audit.
 
 ## Severity guide
 
