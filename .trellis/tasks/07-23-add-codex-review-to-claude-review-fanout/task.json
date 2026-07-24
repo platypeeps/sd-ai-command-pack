@@ -1,0 +1,31 @@
+{
+  "id": "add-codex-review-to-claude-review-fanout",
+  "name": "add-codex-review-to-claude-review-fanout",
+  "title": "Add Codex review to Claude Code local review fan-out",
+  "description": "Run the native Codex CLI reviewer in parallel with sd-review-local's selected providers when the command executes in Claude Code.",
+  "status": "in_progress",
+  "dev_type": "feature",
+  "scope": "Claude adapter and native Codex CLI review fan-out",
+  "package": "frontend",
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-23",
+  "completedAt": null,
+  "branch": "codex/claude-codex-review-fanout",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    ".github/command-sources/sd-review-local.md",
+    ".github/scripts/generate-command-surfaces.py",
+    "templates/.agents/skills/sd-review-local/SKILL.md",
+    ".trellis/spec/frontend/adapter-guidelines.md"
+  ],
+  "notes": "",
+  "meta": {}
+}

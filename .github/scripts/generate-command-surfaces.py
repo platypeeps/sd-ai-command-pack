@@ -12,8 +12,8 @@ regenerates the committed payload adapters in place:
   by every neutral-source platform.
 
 - `templates/.claude/commands/sd/<short>.md`: the neutral body without its
-  YAML frontmatter, with `CLAUDE_COMMAND_ALIAS_REWRITES` applied (Claude
-  installs the Trellis wrapper workflows as `trellis:<command>` commands).
+  YAML frontmatter, with bounded `CLAUDE_COMMAND_ALIAS_REWRITES` and
+  `CLAUDE_COMMAND_BODY_INSERTIONS` applied for Claude-only capabilities.
 - `templates/.gemini/commands/sd/<short>.toml`: TOML with `description`
   from the neutral frontmatter and a `prompt` block holding the body minus
   the SD-preamble line; `GEMINI_SD_HEADING_STRIPPED` commands also drop the
@@ -111,6 +111,41 @@ CLAUDE_COMMAND_ALIAS_REWRITES = {
         "resolving `trellis:finish-work` counts as resolving this skill.",
         "1. Resolve the `trellis-finish-work` skill by name using the agent's "
         "trusted skill discovery mechanism for installed skills.",
+    ),
+}
+
+# command short form -> (unique neutral-body anchor, Claude-only text inserted
+# immediately before that anchor). Keep platform-specific mechanics here rather
+# than hand-editing generated adapters or duplicating them in the neutral body.
+# Parity tests import this mapping and remove the insert before body comparison.
+CLAUDE_COMMAND_BODY_INSERTIONS = {
+    "review-local": (
+        (
+            "4. Run the requested local review tools through "
+            "`scripts/sd-ai-command-pack-review-local.sh`."
+        ),
+        """Claude Code native Codex lane — apply while carrying out step 4:
+
+- Follow the shared skill's `Claude Code Native Codex Lane` section. Codex is
+  additive to the validated runner tool set; it is not a runner tool name.
+- Outside `all` mode, first check `command -v codex`. Only when that succeeds,
+  capability-check `codex review --help`. For local changes, use
+  `codex review --uncommitted`. For a clean-tree branch diff, use
+  `codex review --base <resolved-ref>` using the same base selected by the
+  shared skill.
+- Launch the validated runner command and the Codex command as separate Claude
+  background Bash tasks before waiting for either. Retain both task IDs and use
+  `BashOutput` to collect both terminal results even when one lane fails.
+- Treat a missing executable, failed help probe, or absent required target flag
+  as an unavailable optional lane: do not launch a Codex task, run the selected
+  runner stack normally, and report `Codex: skipped (CLI unavailable or
+  incompatible)` with CLI install and login guidance. The runner result remains
+  authoritative for that run. A started Codex failure makes the combined review
+  incomplete, never clean.
+- In `all` mode, do not run a narrower Codex review. Run the full-codebase
+  runner stack and report that native Codex review has no equivalent scope.
+- Do not inspect, install, patch, or invoke the OpenAI Codex Claude plugin; this
+  lane uses the supported `codex review` CLI directly.""",
     ),
 }
 
@@ -538,14 +573,25 @@ def bespoke_adapter_path(platform: str, name: str, short: str) -> str:
 
 def claude_adapter(name: str, short: str, body: str) -> str:
     rewrite = CLAUDE_COMMAND_ALIAS_REWRITES.get(short)
-    if rewrite is None:
-        return body
-    platform_text, neutral_text = rewrite
-    if neutral_text not in body:
-        raise GenerationError(
-            f"{name}: neutral body lost the Claude alias-rewrite anchor line"
-        )
-    return body.replace(neutral_text, platform_text)
+    if rewrite is not None:
+        platform_text, neutral_text = rewrite
+        if body.count(neutral_text) != 1:
+            raise GenerationError(
+                f"{name}: neutral body lost the unique Claude "
+                "alias-rewrite anchor line"
+            )
+        body = body.replace(neutral_text, platform_text)
+
+    insertion = CLAUDE_COMMAND_BODY_INSERTIONS.get(short)
+    if insertion is not None:
+        anchor, platform_text = insertion
+        if body.count(anchor) != 1:
+            raise GenerationError(
+                f"{name}: neutral body lost the unique Claude "
+                "body-insertion anchor line"
+            )
+        body = body.replace(anchor, f"{platform_text}\n\n{anchor}")
+    return body
 
 
 def gemini_adapter(name: str, short: str, description: str, body: str) -> str:

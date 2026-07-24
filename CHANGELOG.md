@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.42.0 - 2026-07-23
+
+- Add a Claude-only native Codex CLI peer lane to normal `sd-review-local`
+  scopes, running it concurrently with the selected Prism, Gito, or configured
+  runner stack and joining verified findings before fix selection.
+- Preserve runner-only fallback for missing, incompatible, failed, or
+  full-codebase Codex review without requiring or patching the OpenAI Codex
+  Claude plugin.
+
 ## 0.41.0 - 2026-07-23
 
 - Remove the duplicate R-prefixed Trellis roadmap inventory from `sd-status`

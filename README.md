@@ -272,6 +272,13 @@ loop. With the `all` argument it reviews the full checked-out repository (the
 former `sd-review-local-all` command, folded in as of 0.13.0); exclusion and
 retry behavior lives in the installed guide's
 [Local Review](docs/SD_AI_COMMAND_PACK.md#local-review) section.
+On Claude Code, normal current-diff review also runs the native `codex review`
+CLI concurrently with the selected runner stack when the CLI is available and
+supports the matching target. This does not require the OpenAI Codex Claude
+plugin. If the `codex` executable is absent or incompatible, the optional lane
+is reported as skipped and the selected runner stack continues normally; `all`
+mode remains runner-only because native Codex review has no full-codebase
+target.
 
 ### sd-review-learnings
 

@@ -1294,7 +1294,7 @@ part of this contract; `gh pr create --fill` remains valid when no custom body
 is needed.
 
 The `sd-review-local` shared skill should continue to define the interactive
-local review/fix loop while delegating provider execution to
+local review/fix loop while delegating runner-provider execution to
 `scripts/sd-ai-command-pack-review-local.sh`. Its argument selects review
 scope:
 
@@ -1305,6 +1305,29 @@ scope:
 - Both scopes should default to the configured local providers, currently Prism
   and Gito, and remain open to repo-local custom providers named through
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS`.
+- The generated Claude adapter should add native Codex CLI review as an
+  automatic peer lane only for normal current-diff scope. This host lane is not
+  a runner tool name and must not change `--list-tools`, positional tool
+  selection, or non-Claude adapters.
+- Map local staged, unstaged, or untracked scope to
+  `codex review --uncommitted`; map a clean-tree branch diff to
+  `codex review --base <resolved-ref>` using the same base selected by the
+  shared skill.
+- Check `command -v codex` before capability-checking `codex review --help` for
+  the required target flag and before launching paid work. Start the runner and
+  Codex as separate Claude background Bash tasks before waiting, then collect
+  both terminal results even when one lane fails.
+- A missing executable, failed help probe, or incompatible Codex CLI should not
+  start a Codex task and should visibly fall back to the selected runner stack.
+  This optional-lane skip is not a runner failure. A started Codex failure
+  preserves successful runner findings but prevents a clean combined-review
+  claim.
+- Full-codebase `all` mode should skip Codex visibly rather than run it against
+  a narrower target. Native Codex review has no equivalent repository-wide
+  target.
+- The Claude lane must call the supported Codex CLI directly. Do not inspect,
+  install, patch, or invoke the OpenAI Codex Claude plugin or its managed cache;
+  plugin lifecycle remains independent.
 - Custom provider commands are shell snippets supplied by the target repo or
   user configuration; run them with `bash -c` from the repo root so profile
   startup files do not unexpectedly change review behavior.
@@ -1319,6 +1342,12 @@ scope:
 - The runner must register temporary files as they are created and remove them
   through its cleanup trap, including paths created by Prism chunking, Gito
   output capture, and review path/filter generation.
+
+Tests should prove that the Claude insertion is generated from a bounded,
+fail-closed anchor; that neutral, Gemini, GitHub, and later-platform adapters do
+not inherit it; that generated content has no plugin/cache coupling; and that
+the shared skill preserves scope parity, joined-result handling, reruns, and
+visible degradation.
 
 ## Scenario: Full-Check Prism Local-First Scope
 
