@@ -72,7 +72,7 @@ or becomes unreadable after evidence collection.
   housekeeping still checks the mutation-boundary head.
 - [x] Focused eligibility and housekeeping tests, template/root parity,
   `make sync`, and `make check` pass.
-- [ ] PR #244 accurately describes the mixed planning/implementation scope and
+- [x] PR #244 accurately describes the mixed planning/implementation scope and
   is re-reviewed at the final implementation head.
 
 ## Out Of Scope
