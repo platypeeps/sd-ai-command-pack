@@ -1,0 +1,33 @@
+{
+  "id": "reread-pr-head-at-eligibility-completion",
+  "name": "reread-pr-head-at-eligibility-completion",
+  "title": "Re-read PR head at eligibility completion",
+  "description": "Make local-branch eligibility re-read and verify the pull-request head after evidence collection so stale PR evidence cannot return eligible.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "eligibility-final-pr-head",
+  "package": null,
+  "priority": "P1",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-24",
+  "completedAt": "2026-07-24",
+  "branch": "codex/plan-workflow-improvements",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "07-22-streamline-sd-skill-workflows",
+  "relatedFiles": [
+    ".trellis/spec/backend/quality-guidelines.md",
+    "templates/scripts/sd-ai-command-pack-pr-eligibility.py",
+    "scripts/sd-ai-command-pack-pr-eligibility.py",
+    "templates/scripts/sd-ai-command-pack-housekeeping.sh",
+    "tests/test_pr_eligibility.py",
+    "tests/test_housekeeping.py"
+  ],
+  "notes": "Finding F-8 from the 2026-07-24 recent-run review and unresolved PR #232 thread. The user approved the final plan and using this task as the smallest bootstrap implementation on PR #244; update and re-review that PR's formerly planning-only scope before merge, then land this fix before planning-only finalization and final program integration.",
+  "meta": {}
+}

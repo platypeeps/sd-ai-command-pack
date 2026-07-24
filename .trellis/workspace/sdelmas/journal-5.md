@@ -670,3 +670,44 @@ Addressed the Copilot parity-harness finding and completed the exact-head review
 ### Next Steps
 
 - None - task complete
+
+
+## Session 219: Re-read PR head at eligibility completion
+
+**Date**: 2026-07-24
+**Task**: Re-read PR head at eligibility completion
+**Branch**: `codex/plan-workflow-improvements`
+
+### Summary
+
+Implemented final PR-head verification in eligibility results, published and reviewed PR #244, and completed the Trellis lifecycle.
+
+### Main Changes
+
+- Re-read the exact numeric PR head at eligibility completion and emit additive pullRequest.finalHeadOid evidence.
+- Fail closed on changed or unavailable final PR heads while preserving local and dependency-mode behavior.
+- Updated synchronized templates, release 0.44.0 metadata, the quality contract, focused tests, and fleet evidence.
+- Updated PR #244 to mixed scope and completed exact-head Copilot review.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7afc5f9` | fix: re-read PR head at eligibility completion |
+
+### Testing
+
+- [OK] make check
+- [OK] 67 focused eligibility and housekeeping tests
+- [OK] all eight fleet candidates and the current ledger
+- [OK] deterministic PR full-check and GitHub CI
+- [OK] exact-head Copilot review with zero unresolved threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

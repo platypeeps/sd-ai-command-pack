@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = 1
-TOOL_VERSION = "1.0.0"
+TOOL_VERSION = "1.1.0"
 COMMAND_TIMEOUT_SECONDS = 60
 GH_TIMEOUT_SECONDS = 120
 MAX_INPUT_BYTES = 64 * 1024
@@ -334,6 +334,7 @@ def parse_pr(value: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str, A
         "url": require_pr_string(value.get("url"), "url"),
         "headRefName": require_pr_string(value.get("headRefName"), "headRefName"),
         "headOid": head_oid,
+        "finalHeadOid": None,
         "baseRefName": require_pr_string(value.get("baseRefName"), "baseRefName"),
         "mergeStateStatus": require_pr_string(
             value.get("mergeStateStatus"), "mergeStateStatus"
@@ -564,6 +565,7 @@ def evaluate_dependency_request(
     ) -> dict[str, Any]:
         end_head = query_pr_head(repo, slug, requested_number, runner)
         evidence["head"]["endOid"] = end_head
+        pr["finalHeadOid"] = end_head
         if end_head is None:
             status = "indeterminate"
             reason_codes = ["head_unavailable"]
@@ -720,6 +722,9 @@ def evaluate_request(
             "reason": "unified receipt schema is owned by the routed-review integration task",
         },
     }
+    pr_slug: str | None = None
+    pr_number: int | None = None
+    initial_pr_head: str | None = None
 
     def finish(
         status: str,
@@ -728,6 +733,12 @@ def evaluate_request(
         *,
         retryable: bool = False,
     ) -> dict[str, Any]:
+        final_pr_head = None
+        if pr_slug is not None and pr_number is not None:
+            final_pr_head = query_pr_head(repo, pr_slug, pr_number, runner)
+            pull_request = evidence["pullRequest"]
+            if isinstance(pull_request, dict):
+                pull_request["finalHeadOid"] = final_pr_head
         end_head = parse_commit_output(
             runner(
                 ["git", "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}"],
@@ -753,6 +764,24 @@ def evaluate_request(
                 "eligibility evaluation; retry housekeeping for the new head"
             )
             final_retryable = True
+        elif pr_number is not None and initial_pr_head is not None:
+            if final_pr_head is None:
+                final_status = "indeterminate"
+                final_reasons = ["head_unavailable"]
+                final_diagnostic = (
+                    f"PR #{pr_number} head became unavailable; retry eligibility "
+                    "evaluation"
+                )
+                final_retryable = True
+            elif final_pr_head != initial_pr_head:
+                final_status = "indeterminate"
+                final_reasons = ["head_changed"]
+                final_diagnostic = (
+                    f"PR #{pr_number} changed from {initial_pr_head} to "
+                    f"{final_pr_head} during eligibility evaluation; retry for the "
+                    "new head"
+                )
+                final_retryable = True
         return {
             "schemaVersion": SCHEMA_VERSION,
             "toolVersion": TOOL_VERSION,
@@ -797,6 +826,7 @@ def evaluate_request(
             ["github_repository_unavailable"],
             f"could not derive GitHub repo from {request['remote']}; skipped auto-merge",
         )
+    pr_slug = slug
 
     try:
         pr, checks, blocking_checks, successful_checks = query_pr(
@@ -816,6 +846,7 @@ def evaluate_request(
         "successfulCount": successful_checks,
     }
     pr_number = pr["number"]
+    initial_pr_head = pr["headOid"]
 
     if pr["state"] != "OPEN":
         return finish(

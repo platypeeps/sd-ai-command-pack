@@ -1,0 +1,30 @@
+{
+  "id": "harden-audit-read-only-methods",
+  "name": "harden-audit-read-only-methods",
+  "title": "Harden audit read-only methods and path handling",
+  "description": "Resolve review findings 1.4.1.1 and 1.4.1.2 by removing checkout-code execution from read-only audit charters and making tracked-file analysis safe for hostile valid filenames.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-24",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "07-24-correct-sd-skill-contract-drift",
+  "relatedFiles": [
+    "templates/.agents/skills/sd-audit-repo/charters/architecture.md",
+    "templates/.agents/skills/sd-audit-repo/charters/tooling.md",
+    "tests/test_audit_repo.py"
+  ],
+  "notes": "",
+  "meta": {}
+}
