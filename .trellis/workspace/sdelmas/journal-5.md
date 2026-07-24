@@ -593,3 +593,42 @@ Added a Claude-only native Codex CLI review lane alongside Prism/Gito, with expl
 ### Next Steps
 
 - None - task complete
+
+
+## Session 217: Add Claude planning adversarial review
+
+**Date**: 2026-07-23
+**Task**: Add Claude planning adversarial review
+**Branch**: `codex/claude-codex-review-fanout`
+
+### Summary
+
+Added a Claude-scoped planning convergence rule that runs a native read-only Codex peer review alongside the host adversarial review, with graceful fallback and bounded concern remediation.
+
+### Main Changes
+
+- Added the Claude planning rule and lazily loaded adversarial-review contract without changing upstream Trellis or plugin-managed code.
+- Registered and documented the 0.43.0 Claude-only payload, including copied-scope classifiers and a seven-section adapter contract.
+- Added installer and contract coverage, then refreshed the all-consumer candidate ledger after merging Loadsmith compatibility PR #169.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `65c3566` | feat: add Claude planning adversarial review |
+
+### Testing
+
+- [OK] focused Claude planning-review, manifest, install-audit, and review-scope tests
+- [OK] make check (unit suite, coverage floors, Ruff, mypy, zizmor, full pack gate)
+- [OK] fleet candidate validation passed for all 8 consumers and ledger check is current
+- [OK] Loadsmith PR #169 CI and Copilot review passed; zero unresolved threads before merge
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

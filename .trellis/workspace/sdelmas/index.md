@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 216
+- **Total Sessions**: 217
 - **Last Active**: 2026-07-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~595 | Active |
+| `journal-5.md` | ~631 | Active |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 217 | 2026-07-23 | Add Claude planning adversarial review | `65c3566` | `codex/claude-codex-review-fanout` |
 | 216 | 2026-07-23 | Add native Codex review to Claude fan-out | `b227cfc` | `codex/claude-codex-review-fanout` |
 | 215 | 2026-07-23 | Sanitize roadmap status diagnostics | `832570d` | `codex/status-roadmap-followups` |
 | 214 | 2026-07-23 | Route untracked roadmap items into status follow-ups | `d6b3c2c` | `main` |
