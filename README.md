@@ -467,14 +467,16 @@ schema-version-1 result; human output remains the default for direct shell use.
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote review request/fix rounds before asking whether to continue. | `5` |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_SETTLE_POLLS` | Maximum 30-second polls before an accepted request without author-matched activity stops as ambiguous. | `40` |
 
-The shared cache environment builder sets `XDG_CACHE_HOME`,
-`PYTHONPYCACHEPREFIX`, `UV_CACHE_DIR`, `UV_TOOL_DIR`, `PIP_CACHE_DIR`,
-`RUFF_CACHE_DIR`, and `NPM_CONFIG_CACHE` to private external directories unless
-a valid explicit individual override is already present. It never rewrites
-`GH_CONFIG_DIR` or other authentication state, and ordinary housekeeping keeps
-the reusable pack-created caches. Shared workflows route direct external tools
-through `bash scripts/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]`
-so CI-log reads and other GitHub observations receive the same environment.
+The shared cache environment builder always maps `XDG_CACHE_HOME` to a private
+pack namespace. A valid inherited `XDG_CACHE_HOME` may supply that namespace's
+safe parent, but is not preserved verbatim. Valid explicit overrides keep
+precedence for `PYTHONPYCACHEPREFIX`, `UV_CACHE_DIR`, `UV_TOOL_DIR`,
+`PIP_CACHE_DIR`, `RUFF_CACHE_DIR`, and `NPM_CONFIG_CACHE`. The builder never
+rewrites `GH_CONFIG_DIR` or other authentication state, and ordinary
+housekeeping keeps the reusable pack-created caches. Shared workflows route
+direct external tools through
+`bash scripts/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]` so
+CI-log reads and other GitHub observations receive the same environment.
 
 Use `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` for explicit review-scope PR body text.
 

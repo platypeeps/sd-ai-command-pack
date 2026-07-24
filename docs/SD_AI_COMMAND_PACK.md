@@ -1400,15 +1400,18 @@ bash scripts/sd-ai-command-pack-toolchain.sh doctor
 The builder validates the parent, creates private deterministic namespaces,
 and sets `XDG_CACHE_HOME`, `PYTHONPYCACHEPREFIX`, `UV_CACHE_DIR`,
 `UV_TOOL_DIR`, `PIP_CACHE_DIR`, `RUFF_CACHE_DIR`, and `NPM_CONFIG_CACHE`.
-Existing valid individual cache overrides keep precedence. Relative,
-repository-contained, symlinked, non-directory, or non-private overrides fail
-before the external tool runs. `GH_CONFIG_DIR`, tokens, credential helpers,
-and unrelated environment variables are never rewritten. Reusable
-pack-created caches remain after successful commands; ordinary housekeeping
-does not delete them. Shared workflows invoke non-Python tools as separate argv
-through `bash scripts/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]`;
-use that form for ad hoc `gh`, uv, pip, Ruff, or npm calls inside an SD
-workflow instead of bypassing the cache contract.
+`XDG_CACHE_HOME` always points to the private pack namespace; a valid inherited
+value may supply the namespace's safe parent but is not preserved verbatim.
+Existing valid overrides keep precedence for the other per-tool cache
+variables. Relative, repository-contained, symlinked, non-directory, or
+non-private overrides fail before the external tool runs. `GH_CONFIG_DIR`,
+tokens, credential helpers, and unrelated environment variables are never
+rewritten. Reusable pack-created caches remain after successful commands;
+ordinary housekeeping does not delete them. Shared workflows invoke non-Python
+tools as separate argv through
+`bash scripts/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]`; use that
+form for ad hoc `gh`, uv, pip, Ruff, or npm calls inside an SD workflow instead
+of bypassing the cache contract.
 
 - `SD_AI_COMMAND_PACK_PYTHON`: authoritative Python executable for the
   toolchain helper. It must be Python 3.10 or newer and include every module
