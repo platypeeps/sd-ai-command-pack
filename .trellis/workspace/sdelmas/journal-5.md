@@ -748,3 +748,51 @@ Made audit evidence collection static-only and added a delimiter-safe committed-
 ### Next Steps
 
 - None - task complete
+
+
+## Session 221: Standardize sandbox-safe tool cache routing
+
+**Date**: 2026-07-24
+**Task**: Standardize sandbox-safe tool cache routing
+**Branch**: `codex/standardize-sandbox-safe-tool-cache-routing`
+
+### Summary
+
+Standardized private external cache routing across shipped Python and shell entrypoints, hardened cross-platform boundaries and diagnostics through review, and validated release 0.46.0 across the consumer fleet.
+
+### Main Changes
+
+- Added one shared, namespaced, repository-external cache environment for pack-owned Python and shell tooling.
+- Hardened repository-boundary normalization, CRLF parsing, bounded diagnostics, Windows metadata handling, and stable generated-XDG namespace reuse.
+- Synchronized canonical templates, documentation, release metadata, generated mirrors, and the fleet validation ledger for version 0.46.0.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4020df8cd7e538199b086de730495de39d23b1b8` | feat: standardize sandbox-safe tool cache routing |
+| `47a276f3bde62ce49f154e5aacc51c53a672bb64` | fix: harden cache boundary parsing |
+| `4f2076e2e6ef3fd658abc5365e8aa280ade40978` | fix: surface cache setup failures |
+| `2b09a5205bdbb2df97d1d8b3cce12500b3100b29` | fix: normalize cache setup diagnostics |
+| `ab5b916bd9ae2867cf9064c23b98c2fbc48d21bc` | docs: clarify cache override precedence |
+| `e5659445f4c66c27a6b15be70c39428b626c311a` | fix: fail closed on toolchain path errors |
+| `a3a3e7c3686566ed64ab69fa8327f8e0b33cf9b5` | fix: bound shell cache path diagnostics |
+| `5be50b454af0883bd21a16edd55d85fab01fd638` | fix: support Windows cache metadata |
+| `bfb60265825dc75fafc93fcaa9edbc259113db9e` | fix: bound nested cache diagnostics |
+| `35d5d96964e6a153aaa743aef8595d0d6c04302f` | fix: reuse generated cache namespace |
+
+### Testing
+
+- [OK] Focused toolchain and script-library unit suites passed.
+- [OK] Ruff and mypy passed via make lint.
+- [OK] All eight configured consumer-fleet candidate checks passed.
+- [OK] Exact-head deterministic review gate, GitHub CI, clean Copilot review, and zero unresolved threads verified.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
