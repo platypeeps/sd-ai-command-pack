@@ -225,7 +225,7 @@ class StatusTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         report = json.loads(result.stdout)
-        self.assertEqual(report["schemaVersion"], 1)
+        self.assertEqual(report["schemaVersion"], 2)
         self.assertEqual(report["mode"], "local")
         self.assertEqual(report["git"]["branch"], "main")
         self.assertEqual(report["git"]["workingTree"]["state"], "clean")
@@ -242,11 +242,7 @@ class StatusTests(InstallTestCase):
             ["T-1"],
         )
         self.assertEqual(report["trellis"]["tasks"][0]["id"], "status-fixture")
-        self.assertEqual(
-            [task["selectionId"] for task in report["trellis"]["roadmap"]],
-            ["R-1"],
-        )
-        self.assertEqual(report["trellis"]["roadmap"][0]["id"], "status-fixture")
+        self.assertNotIn("roadmap", report["trellis"])
         self.assertEqual(self.working_files_snapshot(root), before_files)
         self.assertEqual(
             self.git_output(root, "for-each-ref", "--format=%(refname) %(objectname)"),
@@ -264,17 +260,10 @@ class StatusTests(InstallTestCase):
             "==> Tasks\nT-1 [in_progress, P1]: Status fixture task",
             result.stdout,
         )
-        self.assertIn(
-            "==> Roadmap\nR-1 [in_progress, P1]: Status fixture task",
-            result.stdout,
-        )
+        self.assertNotIn("==> Roadmap", result.stdout)
         self.assertLess(
             result.stdout.index("==> Follow-ups"),
             result.stdout.index("==> Tasks"),
-        )
-        self.assertLess(
-            result.stdout.index("==> Tasks"),
-            result.stdout.index("==> Roadmap"),
         )
 
     def test_trellis_inventory_ids_are_complete_and_deterministic(self) -> None:
@@ -368,10 +357,7 @@ class StatusTests(InstallTestCase):
             "malformed-parent",
             [task["id"] for task in first["tasks"]],
         )
-        self.assertEqual(
-            [(task["selectionId"], task["id"]) for task in first["roadmap"]],
-            [("R-1", "status-fixture"), ("R-2", "root-planning")],
-        )
+        self.assertNotIn("roadmap", first)
 
     def test_empty_trellis_inventory_sections_print_none(self) -> None:
         root = self.make_status_repo()
@@ -381,9 +367,199 @@ class StatusTests(InstallTestCase):
         human = self.run_status(root)
 
         self.assertEqual(machine["trellis"]["tasks"], [])
-        self.assertEqual(machine["trellis"]["roadmap"], [])
+        self.assertNotIn("roadmap", machine["trellis"])
         self.assertIn("==> Tasks\nnone", human.stdout)
-        self.assertIn("==> Roadmap\nnone", human.stdout)
+        self.assertNotIn("==> Roadmap", human.stdout)
+
+    def test_roadmap_source_items_join_follow_ups_with_source_evidence(self) -> None:
+        root = self.make_status_repo()
+        (root / "ROADMAP.md").write_text(
+            "# Roadmap\n"
+            "- [ ] First roadmap item\n"
+            "  - nested explanation\n"
+            "  - [ ] Nested checkbox item\n"
+            "- Top-level unmarked item\n"
+            "  - Nested unmarked item\n"
+            "1. Ordered roadmap item\n"
+            "- [x] Completed item\n",
+            encoding="utf-8",
+        )
+        docs = root / "docs"
+        docs.mkdir()
+        (docs / "PROGRAM-DESIGN.txt").write_text(
+            "+ Program design item\n",
+            encoding="utf-8",
+        )
+        proposals = root / "proposals"
+        proposals.mkdir()
+        (proposals / "feature.mdx").write_text(
+            "* Proposal item\n",
+            encoding="utf-8",
+        )
+        (docs / "notes.md").write_text(
+            "- Ordinary documentation bullet\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "add roadmap sources")
+        self.run_git(root, "push")
+
+        machine = json.loads(self.run_status(root, "--json").stdout)
+        human = self.run_status(root)
+        roadmap = [item for item in machine["followUps"] if item["kind"] == "roadmap"]
+
+        self.assertEqual(
+            [
+                (item["selectionId"], item["summary"], item["path"], item["line"])
+                for item in roadmap
+            ],
+            [
+                ("F-1", "Program design item", "docs/PROGRAM-DESIGN.txt", 1),
+                ("F-2", "Proposal item", "proposals/feature.mdx", 1),
+                ("F-3", "First roadmap item", "ROADMAP.md", 2),
+                ("F-4", "Nested checkbox item", "ROADMAP.md", 4),
+                ("F-5", "Top-level unmarked item", "ROADMAP.md", 5),
+                ("F-6", "Ordered roadmap item", "ROADMAP.md", 7),
+            ],
+        )
+        self.assertNotIn("Completed item", str(machine["followUps"]))
+        self.assertNotIn("Nested unmarked item", str(machine["followUps"]))
+        self.assertNotIn("Ordinary documentation bullet", str(machine["followUps"]))
+        self.assertIn(
+            "F-1 [roadmap]: Program design item (docs/PROGRAM-DESIGN.txt:1)",
+            human.stdout,
+        )
+        self.assertNotIn("==> Roadmap", human.stdout)
+
+    def test_roadmap_scan_includes_untracked_not_ignored_sources(self) -> None:
+        root = self.make_status_repo()
+        rfcs = root / "rfcs"
+        rfcs.mkdir()
+        (rfcs / "next.md").write_text(
+            "- Untracked RFC item\n",
+            encoding="utf-8",
+        )
+        status = self.load_status_module()
+
+        candidates, diagnostics = status.collect_roadmap_candidates(
+            root,
+            status.collect_trellis(root)["tasks"],
+        )
+
+        self.assertEqual(diagnostics, [])
+        self.assertEqual(
+            [
+                (item["summary"], item["path"], item["line"])
+                for item in candidates
+            ],
+            [("Untracked RFC item", "rfcs/next.md", 1)],
+        )
+
+    def test_roadmap_candidates_deduplicate_against_tasks_and_sources(self) -> None:
+        root = self.make_status_repo()
+        parked = root / ".trellis/tasks/parked-fixture"
+        parked.mkdir()
+        (parked / "task.json").write_text(
+            json.dumps(
+                {
+                    "id": "parked-fixture",
+                    "title": "PARKED: Deferred delivery item",
+                    "status": "planning",
+                    "priority": "P2",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        literal_marker = root / ".trellis/tasks/literal-marker-fixture"
+        literal_marker.mkdir()
+        (literal_marker / "task.json").write_text(
+            json.dumps(
+                {
+                    "id": "literal-marker-fixture",
+                    "title": "FooBar",
+                    "status": "planning",
+                    "priority": "P2",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (root / "BACKLOG.md").write_text(
+            "- **Shared candidate**\n"
+            "- Status fixture task\n"
+            "- Deferred delivery item\n"
+            "- See `status-fixture`\n"
+            "- [Status fixture task](.trellis/tasks/status-fixture)\n"
+            "- Status fixture task plus extra detail\n"
+            "- See tasks/status-fixture-extra\n"
+            "- See status-fixture.\n"
+            "- Foo_Bar\n",
+            encoding="utf-8",
+        )
+        (root / "ROADMAP.md").write_text(
+            "- Shared candidate\n"
+            "- PARKED: Deferred delivery item\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "add tracked roadmap references")
+        self.run_git(root, "push")
+
+        report = json.loads(self.run_status(root, "--json").stdout)
+        roadmap = [item for item in report["followUps"] if item["kind"] == "roadmap"]
+
+        self.assertEqual(
+            [(item["summary"], item["path"], item["line"]) for item in roadmap],
+            [
+                ("Shared candidate", "BACKLOG.md", 1),
+                ("Status fixture task plus extra detail", "BACKLOG.md", 6),
+                ("See tasks/status-fixture-extra", "BACKLOG.md", 7),
+                ("Foo_Bar", "BACKLOG.md", 9),
+            ],
+        )
+
+    def test_roadmap_scan_skips_ignored_symlinked_and_oversized_sources(self) -> None:
+        root = self.make_status_repo()
+        (root / ".gitignore").write_text("ignored/\n", encoding="utf-8")
+        vendor = root / "vendor"
+        vendor.mkdir()
+        (vendor / "ROADMAP.md").write_text(
+            "- Generated vendor roadmap item\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", ".gitignore", "vendor/ROADMAP.md")
+        self.run_git(root, "commit", "-m", "add generated roadmap fixture")
+        self.run_git(root, "push")
+        ignored = root / "ignored"
+        ignored.mkdir()
+        (ignored / "ROADMAP.md").write_text(
+            "- Ignored roadmap item\n",
+            encoding="utf-8",
+        )
+        external = root.parent / "external-roadmap.md"
+        external.write_text("- Symlinked roadmap item\n", encoding="utf-8")
+        try:
+            (root / "ROADMAP-link.md").symlink_to(external)
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"symlinks are not available: {exc}")
+        status = self.load_status_module()
+        (root / "TODO.txt").write_text(
+            "- " + ("x" * status.MAX_ROADMAP_SOURCE_BYTES) + "\n",
+            encoding="utf-8",
+        )
+
+        report = json.loads(self.run_status(root, "--json").stdout)
+
+        self.assertFalse(
+            any(item["kind"] == "roadmap" for item in report["followUps"])
+        )
+        self.assertTrue(
+            any("roadmap source scan incomplete" in item for item in report["anomalies"])
+        )
+        self.assertNotIn("Ignored roadmap item", str(report))
+        self.assertNotIn("Generated vendor roadmap item", str(report))
+        self.assertNotIn("Symlinked roadmap item", str(report))
 
     def test_trellis_inventory_rejects_empty_normalized_identity_and_status(
         self,
@@ -645,10 +821,7 @@ class StatusTests(InstallTestCase):
         self.assertEqual([task["path"] for task in completed], ["tasks/completed-fixture"])
         selectable_tasks = report["trellis"]["tasks"]
         self.assertIn("completed-record-id", [task["id"] for task in selectable_tasks])
-        self.assertNotIn(
-            "completed-record-id",
-            [task["id"] for task in report["trellis"]["roadmap"]],
-        )
+        self.assertNotIn("roadmap", report["trellis"])
         self.assertTrue(
             any(
                 item["source"] == "trellis.completedOutsideArchive"

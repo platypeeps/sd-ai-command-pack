@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.41.0 - 2026-07-23
+
+- Remove the duplicate R-prefixed Trellis roadmap inventory from `sd-status`
+  and advance its machine-readable report schema to version 2.
+- Route unmatched task-like items from bounded roadmap sources into the
+  existing F-prefixed follow-up list with deterministic source evidence and
+  exact Trellis task deduplication.
+
 ## 0.40.0 - 2026-07-23
 
 - Add a schema-versioned housekeeping result that composes the existing

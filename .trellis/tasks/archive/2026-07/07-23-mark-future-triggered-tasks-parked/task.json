@@ -2,7 +2,7 @@
   "id": "mark-future-triggered-tasks-parked",
   "name": "mark-future-triggered-tasks-parked",
   "title": "Mark future-triggered tasks as PARKED",
-  "description": "",
+  "description": "Prefix the seven current future-trigger-gated Trellis task titles and PRD headings with PARKED without changing pack behavior or task identity.",
   "status": "completed",
   "dev_type": null,
   "scope": null,

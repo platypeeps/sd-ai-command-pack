@@ -734,12 +734,14 @@ noise.
   bounded GraphQL `reviews.totalCount` query. It must not use the length of a
   single paginated REST response; unavailable or malformed totals remain
   explicitly unavailable.
-- Local status always renders complete, separately selectable `F-*` follow-up,
-  `T-*` unarchived-task, and `R-*` open-root-roadmap sections. Empty sections
-  render `none`; report-local ordinals are deterministic for an unchanged
-  snapshot but never replace durable Trellis task IDs. Fleet human output stays
-  bounded while nested local JSON retains each repository's complete task and
-  roadmap inventory.
+- Local status always renders complete, separately selectable `F-*` follow-up
+  and `T-*` unarchived-task sections. Empty sections render `none`;
+  report-local ordinals are deterministic for an unchanged snapshot but never
+  replace durable Trellis task IDs. Bounded roadmap-like Markdown/text sources
+  contribute source-backed `F-*` items only when no unarchived task ID/path or
+  exact normalized title represents them. Fleet human output stays bounded
+  while nested local JSON retains each repository's complete follow-up and task
+  inventory.
 - Review preflight applies `untrackedFileReadLimitBytes` to both diff sizing and
   the first-review boundary-risk scan. Oversized untracked code files are never
   read in full and must be named in an explicit advisory warning.
