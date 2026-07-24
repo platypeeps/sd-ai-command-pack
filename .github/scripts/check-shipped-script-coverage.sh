@@ -31,6 +31,7 @@ while read -r script floor; do
   run_coverage_report --include="$script" --fail-under="$floor"
 done <<'EOF'
 scripts/sd-ai-command-pack-audit-route.py 77
+scripts/sd-ai-command-pack-audit-inventory.py 85
 scripts/sd-ai-command-pack-fleet-preflight.py 82
 scripts/sd-ai-command-pack-fleet-candidate-check.py 90
 scripts/sd-ai-command-pack-fleet-controller.py 76

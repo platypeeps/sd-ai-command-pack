@@ -153,6 +153,13 @@ fail closed on ambiguity, and retain explicit controls for behavior and safety.
 - Do not ask before or during deterministic routing. The only structured
   audit interaction is the independent multi-select for proposed follow-up
   tasks after findings are complete.
+- Charter methods remain read-only after routing. They may statically inspect
+  checkout-owned command definitions but never execute targets, scripts,
+  hooks, package tasks, Make expansion, or help handlers merely to probe them.
+- Architecture size evidence comes from the pack-owned
+  `sd-ai-command-pack-audit-inventory.py` helper. It parses NUL-delimited
+  committed-tree metadata, ranks regular blobs by byte size, escapes hostile
+  filenames in structured output, and never opens a worktree path.
 
 ### 4. Validation & Error Matrix
 
@@ -162,6 +169,9 @@ fail closed on ambiguity, and retain explicit controls for behavior and safety.
   visible classifier warning, and no omitted charter.
 - Charter read or reviewer failure -> mark that charter `failed`, retain all
   other charter rows, and stop with the underlying diagnostic.
+- Missing, nonzero, malformed, unsupported, or oversized architecture
+  inventory -> mark architecture `failed`; do not fall back to an
+  execution-shaped checkout probe or a delimiter-unsafe pipeline.
 - `follow-up` plus dimensions -> usage error because it is a distinct mode.
 
 ### 5. Good / Base / Bad Cases
@@ -180,6 +190,9 @@ fail closed on ambiguity, and retain explicit controls for behavior and safety.
 - Calibrate UI, datastore, API, infrastructure, dependency, and release
   fixtures so each seeded material finding's charter runs in standard mode;
   compare every fixture with exhaustive selection.
+- Assert side-effecting Make expansion and help-handler fixtures are never
+  executed, and round-trip spaces, tabs, newlines, leading dashes, symlinks,
+  and an empty committed tree through the architecture inventory contract.
 - Preserve generated adapter parity, template/root byte identity, install
   provenance, shipped-script coverage, and `make check`.
 

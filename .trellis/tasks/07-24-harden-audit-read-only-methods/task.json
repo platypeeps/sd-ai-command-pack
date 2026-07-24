@@ -3,7 +3,7 @@
   "name": "harden-audit-read-only-methods",
   "title": "Harden audit read-only methods and path handling",
   "description": "Resolve review findings 1.4.1.1 and 1.4.1.2 by removing checkout-code execution from read-only audit charters and making tracked-file analysis safe for hostile valid filenames.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
