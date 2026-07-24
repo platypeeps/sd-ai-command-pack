@@ -1,4 +1,4 @@
-# Evaluate pack workaround cleanup after upstream Trellis issues close
+# PARKED: Evaluate pack workaround cleanup after upstream Trellis issues close
 
 ## Goal
 

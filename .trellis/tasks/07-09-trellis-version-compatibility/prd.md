@@ -1,4 +1,4 @@
-# Define Trellis version compatibility contract when incompatibilities appear
+# PARKED: Define Trellis version compatibility contract when incompatibilities appear
 
 ## Goal
 

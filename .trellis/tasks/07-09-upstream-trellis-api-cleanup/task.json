@@ -1,7 +1,7 @@
 {
   "id": "upstream-trellis-api-cleanup",
   "name": "upstream-trellis-api-cleanup",
-  "title": "Revisit recorder and housekeeping wrappers after upstream Trellis APIs land",
+  "title": "PARKED: Revisit recorder and housekeeping wrappers after upstream Trellis APIs land",
   "description": "Conditional task: when upstream Trellis structured session-content or JSON-output APIs land, revisit pack wrappers to remove or shrink local workaround code.",
   "status": "planning",
   "dev_type": null,

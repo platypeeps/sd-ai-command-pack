@@ -1,7 +1,7 @@
 {
   "id": "upstream-issue-closure-cleanup",
   "name": "upstream-issue-closure-cleanup",
-  "title": "Evaluate pack workaround cleanup after upstream Trellis issues close",
+  "title": "PARKED: Evaluate pack workaround cleanup after upstream Trellis issues close",
   "description": "Conditional task: when upstream Trellis issues #394-#397 close, evaluate whether corresponding sd-ai-command-pack workarounds can be simplified or removed.",
   "status": "planning",
   "dev_type": null,

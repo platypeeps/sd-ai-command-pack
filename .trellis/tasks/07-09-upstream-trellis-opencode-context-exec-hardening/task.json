@@ -1,7 +1,7 @@
 {
   "id": "upstream-trellis-opencode-context-exec-hardening",
   "name": "upstream-trellis-opencode-context-exec-hardening",
-  "title": "Harden vendored trellis-context.js shell invocation",
+  "title": "PARKED: Harden vendored trellis-context.js shell invocation",
   "description": "Parked Trellis-owned fix: use the recorded upstream handoff only after explicit user consent or an upstream release.",
   "status": "planning",
   "dev_type": null,

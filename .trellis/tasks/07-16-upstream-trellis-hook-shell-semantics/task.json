@@ -1,7 +1,7 @@
 {
   "id": "upstream-trellis-hook-shell-semantics",
   "name": "upstream-trellis-hook-shell-semantics",
-  "title": "Park upstream Trellis lifecycle hook shell semantics",
+  "title": "PARKED: Upstream Trellis lifecycle hook shell semantics",
   "description": "Parked upstream-owned A-027 follow-up: Trellis lifecycle hooks run trusted repo config commands through shell=True; do not implement in sd-ai-command-pack or open a Trellis PR without explicit user consent.",
   "status": "planning",
   "dev_type": null,

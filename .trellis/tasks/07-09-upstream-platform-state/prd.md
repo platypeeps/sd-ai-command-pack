@@ -1,4 +1,4 @@
-# Revisit platform registry after upstream active-platform state lands
+# PARKED: Revisit platform registry after upstream active-platform state lands
 
 ## Goal
 

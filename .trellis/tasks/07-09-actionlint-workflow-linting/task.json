@@ -1,7 +1,7 @@
 {
   "id": "actionlint-workflow-linting",
   "name": "actionlint-workflow-linting",
-  "title": "Evaluate actionlint workflow linting when workflow syntax defects appear",
+  "title": "PARKED: Evaluate actionlint workflow linting when workflow syntax defects appear",
   "description": "Conditional task: add pinned actionlint coverage only after a concrete GitHub Actions workflow syntax defect motivates the extra dependency and gate.",
   "status": "planning",
   "dev_type": null,

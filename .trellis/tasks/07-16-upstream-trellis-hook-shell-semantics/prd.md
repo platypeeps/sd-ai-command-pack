@@ -1,4 +1,4 @@
-# Park upstream Trellis lifecycle hook shell semantics
+# PARKED: Upstream Trellis lifecycle hook shell semantics
 
 ## Goal
 

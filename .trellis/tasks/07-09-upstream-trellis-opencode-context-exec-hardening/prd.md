@@ -1,4 +1,4 @@
-# Harden vendored trellis-context.js shell invocation
+# PARKED: Harden vendored trellis-context.js shell invocation
 
 ## Goal
 

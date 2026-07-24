@@ -1,4 +1,4 @@
-# Evaluate actionlint workflow linting when workflow syntax defects appear
+# PARKED: Evaluate actionlint workflow linting when workflow syntax defects appear
 
 ## Goal
 
