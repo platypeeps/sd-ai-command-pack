@@ -139,16 +139,20 @@ may enter housekeeping's merge mutation path.
   embed the authoritative result without querying a moving PR twice.
 - Input schema major 1 supports `local-branch` and `dependency-pr` evaluation.
 - Output schema major 1 reports `eligible`, `blocked`, or `indeterminate` with
-  stable reason codes and observed evidence.
+  stable reason codes and observed evidence. `pullRequest.headOid` is the
+  initial PR observation and additive nullable `pullRequest.finalHeadOid` is
+  the completion observation; existing `head` fields retain their mode-specific
+  schema-major-1 meanings.
 
 ### 3. Contracts
 
 - The evaluator is read-only. It must not merge or approve a PR, push, resolve
   threads, modify labels or branches, update Trellis state, or write repository
   files.
-- Every result binds repository identity, PR number, base branch, and the full
-  PR head OID. Re-read the PR head after collecting evidence; a changed head is
-  a retryable `indeterminate` result and cannot inherit prior evidence.
+- Every result after PR discovery binds repository identity, PR number, base
+  branch, and initial plus final full PR head OIDs. Re-read the exact PR by its
+  retained number after collecting evidence; a changed or unavailable final
+  head is a retryable `indeterminate` result and cannot inherit prior evidence.
 - Collect checks for the evaluated head. Blocking or pending checks are
   `blocked`; skipped and neutral checks are non-blocking, but at least one
   successful check is required.
@@ -178,6 +182,9 @@ may enter housekeeping's merge mutation path.
   GraphQL pages.
 - Provider, authentication, rate-limit, malformed-payload, or pagination
   failure -> `indeterminate` and retryable where appropriate.
+- Failed, timed-out, malformed, missing, non-string, or non-OID final PR-head
+  read -> retryable `indeterminate` with `head_unavailable` and a nullable
+  `pullRequest.finalHeadOid`.
 - Missing or stale finish-work evidence in `local-branch` -> `blocked`.
 - PR head changes between the first and final observation -> retryable
   `indeterminate`, even if all earlier evidence was green.
@@ -202,10 +209,21 @@ may enter housekeeping's merge mutation path.
   head mismatches.
 - Multi-page resolved and unresolved review threads.
 - Provider/auth/rate-limit failures and malformed JSON/check/thread payloads.
-- Unknown schema major, unknown fields, strict mode/policy validation, and head
-  changes during evaluation.
+- Unknown schema major, unknown fields, strict mode/policy validation, local
+  and PR head changes during evaluation, and every malformed/unavailable final
+  PR-head response.
 - End-to-end housekeeping delegation for local and dependency modes, proving
   housekeeping remains the only `gh pr merge` owner.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: re-read only the local branch and assume the PR still points to the earlier head
+Correct: retain the PR number, re-read that exact PR at completion, and record its final OID independently
+
+Wrong: overload local-branch head.endOid with the final PR observation
+Correct: preserve existing head semantics and add pullRequest.finalHeadOid within schema major 1
+```
 
 ## Housekeeping Result Contract
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.44.0 - 2026-07-24
+
+- Re-read the exact pull request head by retained PR number at local-branch
+  eligibility completion, failing closed when it changes or becomes unreadable.
+- Bind schema-major-1 eligibility evidence to additive initial and final PR
+  head observations while preserving local-head and housekeeping safeguards.
+
 ## 0.43.0 - 2026-07-23
 
 - Add a Claude project rule that adversarially reviews materially changed

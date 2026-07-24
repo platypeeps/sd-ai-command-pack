@@ -65,13 +65,12 @@ class FixtureRunner:
     def __init__(self, repo: Path) -> None:
         self.repo = repo
         self.local_heads = [HEAD, HEAD]
-        self.pr_head_end = HEAD
+        self.pr_head_result: Any | None = None
         self.remote_head = HEAD
         self.git_status = ""
         self.git_status_returncode = 0
         self.remote_returncode = 0
         self.pr_failure = False
-        self.pr_head_failure = False
         self.thread_failure = False
         self.thread_pages = [thread_page([])]
         self.pr_payload: dict[str, Any] = {
@@ -111,10 +110,10 @@ class FixtureRunner:
             if self.pr_failure:
                 return eligibility.CommandResult(1, "")
             if args[-1] == "headRefOid":
-                if self.pr_head_failure:
-                    return eligibility.CommandResult(1, "")
+                if self.pr_head_result is not None:
+                    return self.pr_head_result
                 return eligibility.CommandResult(
-                    0, json.dumps({"headRefOid": self.pr_head_end})
+                    0, json.dumps({"headRefOid": self.pr_payload["headRefOid"]})
                 )
             return eligibility.CommandResult(0, json.dumps(self.pr_payload))
         if args[:3] == ("gh", "api", "graphql"):
@@ -181,12 +180,29 @@ class PrEligibilityTests(unittest.TestCase):
         self.assertEqual(result["head"]["startOid"], HEAD)
         self.assertEqual(result["head"]["endOid"], HEAD)
         self.assertEqual(result["head"]["remoteOid"], HEAD)
+        self.assertEqual(result["pullRequest"]["headOid"], HEAD)
+        self.assertEqual(result["pullRequest"]["finalHeadOid"], HEAD)
         self.assertTrue(result["finishWork"]["matchesCurrentHead"])
         self.assertEqual(result["checks"]["successfulCount"], 1)
         self.assertEqual(result["reviewThreads"]["unresolvedCount"], 0)
         commands = {call[:3] for call in runner.calls}
         self.assertNotIn(("gh", "pr", "merge"), commands)
         self.assertFalse(any(call[:2] == ("git", "push") for call in runner.calls))
+        self.assertEqual(
+            [call for call in runner.calls if call[-1:] == ("headRefOid",)],
+            [
+                (
+                    "gh",
+                    "pr",
+                    "view",
+                    "42",
+                    "--repo",
+                    "example/repo",
+                    "--json",
+                    "headRefOid",
+                )
+            ],
+        )
 
     def test_combined_adapter_preserves_json_and_shell_receipt(self) -> None:
         result = self.evaluate(self.local_request(), FixtureRunner(self.repo))
@@ -235,6 +251,51 @@ class PrEligibilityTests(unittest.TestCase):
         self.assertEqual(result["status"], "indeterminate")
         self.assertEqual(result["reasonCodes"], ["head_changed"])
         self.assertTrue(result["retryable"])
+        self.assertEqual(result["pullRequest"]["finalHeadOid"], HEAD)
+
+    def test_pr_head_change_overrides_stable_local_head_as_retryable(self) -> None:
+        runner = FixtureRunner(self.repo)
+        runner.pr_head_result = eligibility.CommandResult(
+            0, json.dumps({"headRefOid": OTHER_HEAD})
+        )
+        result = self.evaluate(self.local_request(), runner)
+
+        self.assertEqual(result["status"], "indeterminate")
+        self.assertEqual(result["reasonCodes"], ["head_changed"])
+        self.assertTrue(result["retryable"])
+        self.assertEqual(result["head"]["endOid"], HEAD)
+        self.assertEqual(result["pullRequest"]["headOid"], HEAD)
+        self.assertEqual(result["pullRequest"]["finalHeadOid"], OTHER_HEAD)
+        self.assertIn("PR #42 changed", result["diagnostic"])
+
+    def test_final_pr_head_unavailable_payloads_fail_closed(self) -> None:
+        scenarios = (
+            (eligibility.CommandResult(1, ""), "provider failure"),
+            (eligibility.CommandResult(127, ""), "timeout equivalent"),
+            (eligibility.CommandResult(0, "{"), "malformed JSON"),
+            (eligibility.CommandResult(0, "[]"), "non-object JSON"),
+            (eligibility.CommandResult(0, "{}"), "missing field"),
+            (
+                eligibility.CommandResult(0, json.dumps({"headRefOid": 42})),
+                "invalid type",
+            ),
+            (
+                eligibility.CommandResult(0, json.dumps({"headRefOid": "abc"})),
+                "invalid OID",
+            ),
+        )
+        for pr_head_result, label in scenarios:
+            with self.subTest(label=label):
+                runner = FixtureRunner(self.repo)
+                runner.pr_head_result = pr_head_result
+                result = self.evaluate(self.local_request(), runner)
+
+                self.assertEqual(result["status"], "indeterminate")
+                self.assertEqual(result["reasonCodes"], ["head_unavailable"])
+                self.assertTrue(result["retryable"])
+                self.assertEqual(result["head"]["endOid"], HEAD)
+                self.assertIsNone(result["pullRequest"]["finalHeadOid"])
+                self.assertIn("PR #42 head became unavailable", result["diagnostic"])
 
     def test_unresolved_threads_are_counted_across_pages(self) -> None:
         runner = FixtureRunner(self.repo)
@@ -288,6 +349,8 @@ class PrEligibilityTests(unittest.TestCase):
         result = self.evaluate(self.dependency_request(), runner)
         self.assertEqual(result["status"], "eligible")
         self.assertFalse(result["finishWork"]["required"])
+        self.assertEqual(result["pullRequest"]["headOid"], HEAD)
+        self.assertEqual(result["pullRequest"]["finalHeadOid"], HEAD)
         self.assertFalse(any(call[:2] == ("git", "status") for call in runner.calls))
         self.assertFalse(any(call[:2] == ("git", "ls-remote") for call in runner.calls))
         self.assertTrue(
@@ -296,11 +359,14 @@ class PrEligibilityTests(unittest.TestCase):
 
     def test_dependency_mode_detects_rebased_head(self) -> None:
         runner = FixtureRunner(self.repo)
-        runner.pr_head_end = OTHER_HEAD
+        runner.pr_head_result = eligibility.CommandResult(
+            0, json.dumps({"headRefOid": OTHER_HEAD})
+        )
         result = self.evaluate(self.dependency_request(), runner)
         self.assertEqual(result["status"], "indeterminate")
         self.assertEqual(result["reasonCodes"], ["head_changed"])
         self.assertTrue(result["retryable"])
+        self.assertEqual(result["pullRequest"]["finalHeadOid"], OTHER_HEAD)
 
     def test_request_validation_rejects_unsafe_mode_specific_values(self) -> None:
         invalid_requests = (
@@ -477,7 +543,7 @@ class PrEligibilityTests(unittest.TestCase):
             ["review_threads_unavailable"],
         )
         missing_head = FixtureRunner(self.repo)
-        missing_head.pr_head_failure = True
+        missing_head.pr_head_result = eligibility.CommandResult(1, "")
         self.assertEqual(
             self.evaluate(self.dependency_request(), missing_head)["reasonCodes"],
             ["head_unavailable"],

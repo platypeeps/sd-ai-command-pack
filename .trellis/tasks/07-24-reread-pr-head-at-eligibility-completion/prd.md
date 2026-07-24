@@ -23,6 +23,12 @@ or becomes unreadable after evidence collection.
 - Preserve the completed shared eligibility evaluator and housekeeping as the
   only merge mutation owner. This is a focused correctness fix, not a new
   eligibility implementation.
+- `07-24-support-planning-only-pr-finalization` depends on this final PR-head
+  proof. Land this task first, or reconcile it in the same reviewed cutover,
+  before that task changes the finalization evidence carried by eligibility.
+- The user approved implementing this task on PR #244 as the smallest
+  bootstrap implementation. Update that PR's planning-only description and
+  rerun its review gates before merge; do not leave the published scope stale.
 - Land before the final routed-review/program integration matrix relies on the
   evaluator's exact-head receipt.
 
@@ -41,8 +47,10 @@ or becomes unreadable after evidence collection.
   No result may remain `eligible` after either local or PR final-head evidence
   changes or becomes unavailable.
 - R4: Bind the output evidence to both initial and final PR head observations
-  through the existing versioned result contract, updating schema/spec
-  documentation only as required by its compatibility rules.
+  through the existing versioned result contract. Preserve
+  `pullRequest.headOid` as the initial observation and add the nullable,
+  additive `pullRequest.finalHeadOid` field for the final observation in both
+  modes; retain the current `head` fields for schema-major-1 compatibility.
 - R5: Keep the evaluator read-only and bounded. It must not fetch, push, merge,
   resolve threads, update labels, or retry indefinitely.
 - R6: Update template source first and synchronize the root mirror; preserve
@@ -50,18 +58,22 @@ or becomes unreadable after evidence collection.
 
 ## Acceptance Criteria
 
-- [ ] Local and PR heads stable throughout evaluation can return eligible when
+- [x] Local and PR heads stable throughout evaluation can return eligible when
   every other gate passes.
-- [ ] A PR head that advances while the local branch remains stable returns
+- [x] A PR head that advances while the local branch remains stable returns
   retryable `indeterminate:head_changed` and never eligible.
-- [ ] Final PR lookup failure, timeout, malformed JSON, missing field, invalid
+- [x] The final lookup uses the retained PR number rather than the branch name,
+  and the receipt records both initial and final PR OIDs.
+- [x] Final PR lookup failure, timeout, malformed JSON, missing field, invalid
   type, and invalid OID each fail closed without a traceback or mutation.
-- [ ] Local-head change behavior and dependency-PR double-read behavior retain
+- [x] Local-head change behavior and dependency-PR double-read behavior retain
   their existing contracts.
-- [ ] Mutation-spy tests prove no Git/GitHub write was introduced, and
+- [x] Mutation-spy tests prove no Git/GitHub write was introduced, and
   housekeeping still checks the mutation-boundary head.
-- [ ] Focused eligibility and housekeeping tests, template/root parity,
+- [x] Focused eligibility and housekeeping tests, template/root parity,
   `make sync`, and `make check` pass.
+- [ ] PR #244 accurately describes the mixed planning/implementation scope and
+  is re-reviewed at the final implementation head.
 
 ## Out Of Scope
 
