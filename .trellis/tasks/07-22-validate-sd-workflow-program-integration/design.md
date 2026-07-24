@@ -8,7 +8,7 @@ contracts. It does not become a second implementation owner.
 1. Resolve prerequisite task, PR, commit, version, and disposition evidence.
 2. Install or select the exact final command-pack head and compatible external
    router contract.
-3. Execute S01-S20 through real generated surfaces and focused deterministic
+3. Execute S01-S21 through real generated surfaces and focused deterministic
    fixtures.
 4. Run repository-wide and applicable fleet validation on the same head.
 5. Publish one closure record consumed by the parent program task.
@@ -16,7 +16,7 @@ contracts. It does not become a second implementation owner.
 ## Evidence Contract
 
 The task writes a task-local integration record under `research/` with one row
-per F01-F17, G01-G07, and H01-H08 finding and S01-S20 scenario. Each row records:
+per F01-F17, G01-G07, and H01-H09 finding and S01-S21 scenario. Each row records:
 
 - owner task and terminal status;
 - PR, commit, pack version, and external router contract identity;
@@ -32,8 +32,8 @@ all aggregate commands.
 
 Use deterministic fixtures for unavailable, invalid, paginated, untrusted,
 noninteractive, retry, path-containment, retired-identifier, repeated-family,
-surface-closure, bookkeeping, recovery-artifact, cache, learning-freshness, and
-final-head cases. Use an
+surface-closure, completion/planning bookkeeping, recovery-artifact, cache,
+learning-freshness, and final-head cases. Use an
 integration checkout only where behavior depends on generated installation or
 cross-repository routing. Provider-backed tests must disclose network or paid
 use and reuse exact-scope receipts when eligible.

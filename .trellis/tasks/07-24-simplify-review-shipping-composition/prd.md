@@ -21,6 +21,9 @@ housekeeping remains the sole merge mutation owner.
 - Parent: `07-22-integrate-routed-review-backends`.
 - Depends on `07-24-implement-read-only-sd-check` and
   `07-24-implement-unified-routed-sd-review` publishing their stable contracts.
+- Depends on `07-24-support-planning-only-pr-finalization` publishing one typed
+  completion/planning finalization contract so `sd-ship` does not recreate
+  task-state heuristics or a planning bypass.
 - Housekeeping and the shared exact-head eligibility evaluator remain unchanged
   as the only merge mutation/gate owners.
 
@@ -31,8 +34,9 @@ housekeeping remains the sole merge mutation owner.
   performs no AI review, remote routing, review polling, finish-work, merge, or
   private nested composition.
 - R2: Make `sd-ship` the explicit end-to-end workflow: publish/reuse, review,
-  finish-work, re-enter check/review for any new exact head, then delegate the
-  eligible merge and cleanup to housekeeping.
+  run the deterministically selected completion or planning finalization,
+  re-enter check/review for any new exact head, then delegate the eligible merge
+  and cleanup to housekeeping.
 - R3: Remove public `sd-watch-pr`. Keep any required waiting as a deterministic
   read-only internal coordinator used by `sd-review`/`sd-ship`, with bounded
   polling and no direct or implicit merge transition.
@@ -50,7 +54,8 @@ housekeeping remains the sole merge mutation owner.
 - [ ] `sd-create-pr` fixtures prove publication stops after the PR exists and no
   provider, polling, finish-work, or merge call occurs.
 - [ ] `sd-ship` fixtures prove the complete ordered lifecycle, including
-  successor-head re-entry and a single housekeeping merge owner.
+  completion/planning finalization, successor-head re-entry, preserved planned
+  task state, and a single housekeeping merge owner.
 - [ ] No public catalog, registry, adapter, or help output exposes `sd-watch-pr`.
 - [ ] Internal waiting tests prove bounded polling, complete thread pagination,
   timeout reporting, and zero mutation.

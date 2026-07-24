@@ -2,7 +2,7 @@
 
 ## Goal
 
-Prove that the completed F01-F17, G01-G07, and H01-H08 remediation children operate as one
+Prove that the completed F01-F17, G01-G07, and H01-H09 remediation children operate as one
 coherent, cost-aware, fail-closed delivery workflow with no live legacy surface.
 Run the coupled cross-child lifecycle matrix, map every finding to landed
 implementation and validation evidence, and publish the closure evidence
@@ -10,7 +10,7 @@ consumed by the parent program task.
 
 ## Confirmed Evidence
 
-- The parent `07-22-streamline-sd-skill-workflows` owns the F01-F17, G01-G07, and H01-H08 ledgers,
+- The parent `07-22-streamline-sd-skill-workflows` owns the F01-F17, G01-G07, and H01-H09 ledgers,
   task boundaries, completion contract, and program closure decision.
 - Foundation and workflow changes are intentionally implemented in separate
   children so each remains independently reviewable and reversible.
@@ -53,6 +53,7 @@ explicit parent-approved disposition:
 - `07-24-standardize-sandbox-safe-tool-cache-routing`
 - `07-24-feed-review-learnings-into-review-planning`
 - `07-24-reread-pr-head-at-eligibility-completion`
+- `07-24-support-planning-only-pr-finalization`
 
 It also depends on `platypeeps/sd-github-review` task
 `07-22-publish-routed-review-receipt-contract` publishing the reviewed v1
@@ -130,11 +131,15 @@ PR or commit identity, and accepted disposition.
 - S20: The PR head advances while local branch evidence remains stable during
   eligibility evaluation; the final PR-head read returns retryable
   indeterminate and no stale eligible receipt reaches housekeeping.
+- S21: A reviewed planning-only PR records one journal successor, produces
+  independently verified typed planning-finalization evidence, merges through
+  housekeeping, and preserves every planning task plus its active session
+  pointer; mixed or ambiguous scope blocks without a false archive or bypass.
 
 ## Requirements
 
-- R1: Produce an evidence map from every F01-F17, G01-G07, and H01-H08 finding and every
-  S01-S20 scenario
+- R1: Produce an evidence map from every F01-F17, G01-G07, and H01-H09 finding and every
+  S01-S21 scenario
   to its owning task, landed PR or commit, focused test, and observed result.
 - R2: Exercise the matrix against the final generated command surface and
   installed payload, not isolated source-only helpers.
@@ -159,7 +164,7 @@ PR or commit identity, and accepted disposition.
 
 - [ ] Every prerequisite has terminal evidence or an explicit parent-approved
   disposition; no tree-position inference is used.
-- [ ] F01-F17, G01-G07, and H01-H08 each map to an owner, landed identity, behavioral
+- [ ] F01-F17, G01-G07, and H01-H09 each map to an owner, landed identity, behavioral
   validation, and final result.
 - [ ] S01 proves successor-head review evidence cannot be reused ambiguously.
 - [ ] S02 proves all remote-router unavailable/failure states remain distinct
@@ -198,6 +203,9 @@ PR or commit identity, and accepted disposition.
   limitation-aware, and does not create a per-PR documentation commit.
 - [ ] S20 proves both local and PR final-head changes invalidate eligibility
   before housekeeping's mutation boundary.
+- [ ] S21 proves planning-only finalization preserves planned task/session
+  state, emits independently verified exact-head evidence, and composes with
+  review, CI, eligibility, merge, and cleanup without a second authority.
 - [ ] I1-I7 hold across the combined lifecycle, including generated adapters
   and unavailable paths.
 - [ ] A repository-wide dead-code and identifier scan finds no callable retired

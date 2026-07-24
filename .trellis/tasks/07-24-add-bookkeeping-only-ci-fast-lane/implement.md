@@ -21,8 +21,8 @@
 - Keep Git path/history inspection local and NUL-safe; keep API payload parsing
   separately testable and read-only.
 - Consume the canonical finish-work bookkeeping validator for metadata and
-  journal invariants; keep only history, prior-run, and tree-mode classification
-  in this task.
+  journal invariants, including completion and planning finalization modes;
+  keep only history, prior-run, and tree-mode classification in this task.
 
 ## 3. Integrate the GitHub Actions fast lane
 
@@ -37,7 +37,7 @@
 ## 4. Preserve the one-push finish-work boundary
 
 - Verify standalone review and housekeeping defer their push until archive and
-  journal work is complete.
+  journal work, or planning task and journal work, is complete.
 - Add a focused contract test or minimal wording correction only if a path can
   push intermediate bookkeeping state.
 - Do not combine local archive/journal commits unless an actual extra push is

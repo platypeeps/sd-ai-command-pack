@@ -26,6 +26,7 @@
     "templates/.agents/skills/sd-watch-pr/SKILL.md",
     "templates/.agents/skills/sd-work-backlog/SKILL.md",
     "templates/.agents/skills/sd-housekeeping/SKILL.md",
+    ".trellis/tasks/07-24-support-planning-only-pr-finalization/prd.md",
     "tests/test_sdlc_commands.py"
   ],
   "notes": "",

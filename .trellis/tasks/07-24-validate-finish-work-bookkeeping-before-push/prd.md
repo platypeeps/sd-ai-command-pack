@@ -17,7 +17,8 @@ its single push.
 - The installed Trellis finish-work skill archives tasks and then records the
   journal. The pack wrapper improves journal recording but does not run one
   authoritative post-finalization bookkeeping validation before later callers
-  push.
+  push, nor can it validate a planning finalization that intentionally has no
+  archive move.
 
 ## Dependencies And Boundaries
 
@@ -26,6 +27,9 @@ its single push.
   cheap exact-head CI lane and must not implement a second metadata policy.
 - `07-24-implement-read-only-sd-check` may invoke the validator read-only but
   does not own archive or journal mutation.
+- `07-24-support-planning-only-pr-finalization` depends on this task publishing
+  an explicit planning-finalization validation mode. That task owns mode
+  selection, typed finalization evidence, and merge-flow composition.
 - Implement entirely in the command pack. Do not modify or publish upstream
   Trellis without separate explicit approval.
 
@@ -40,10 +44,12 @@ its single push.
   description, directory/identity agreement, legal lifecycle fields,
   timestamps, base/feature branch semantics, parent/child reciprocity, and
   context files without generated placeholders.
-- R3: After archive and journal recording, validate the complete finalization
-  delta: supported active/archive layout, completion metadata, archive move
-  identity, journal/index agreement, real summary/change/test content, known
-  work commits, placeholders, and whitespace.
+- R3: After journal recording, validate the complete mode-specific
+  finalization delta. `completion` requires supported active/archive layout,
+  completion metadata, and archive move identity. `planning` requires changed
+  tasks to remain valid active planning tasks with no archive, completion, or
+  session-pointer mutation. Both require journal/index agreement, real
+  summary/change/test content, known work commits, placeholders, and whitespace.
 - R4: The pre-archive failure stops before Trellis mutation. A post-finalization
   failure stops before push, reports exact recovery steps, and preserves the
   local commits for inspection; it never amends, resets, drops, or publishes
@@ -65,8 +71,9 @@ its single push.
 
 - [ ] A PRD-backed active task with a blank description fails before archive
   and produces no task or journal commit.
-- [ ] A valid archive-plus-journal bundle passes locally and the identical
-  fixture passes the bookkeeping CI lane.
+- [ ] A valid archive-plus-journal completion bundle and a valid
+  planning-task-plus-journal bundle both pass locally and the identical
+  fixtures pass the bookkeeping CI lane under distinct typed modes.
 - [ ] Invalid lifecycle metadata, topology, archive layout, context
   placeholders, journal/index state, commit references, or whitespace stop
   before push with stable field/path diagnostics.
@@ -80,5 +87,6 @@ its single push.
 ## Out Of Scope
 
 - Changing upstream Trellis task/archive behavior.
+- Selecting completion versus planning finalization or authorizing merge.
 - Migrating untouched historical archives repository-wide.
 - Treating local bookkeeping validation as review or merge authority.

@@ -27,6 +27,7 @@
     "templates/.agents/skills/sd-review-pr/SKILL.md",
     "templates/.agents/skills/sd-housekeeping/SKILL.md",
     ".trellis/tasks/07-24-validate-finish-work-bookkeeping-before-push/prd.md",
+    ".trellis/tasks/07-24-support-planning-only-pr-finalization/prd.md",
     "tests/test_review_preflight.py",
     "tests/test_generated_parity.py"
   ],

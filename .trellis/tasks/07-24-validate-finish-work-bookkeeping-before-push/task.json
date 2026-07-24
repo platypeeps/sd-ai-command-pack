@@ -22,6 +22,7 @@
   "parent": "07-22-streamline-sd-skill-workflows",
   "relatedFiles": [
     ".trellis/tasks/07-24-add-bookkeeping-only-ci-fast-lane/prd.md",
+    ".trellis/tasks/07-24-support-planning-only-pr-finalization/prd.md",
     "templates/.agents/skills/sd-finish-work/SKILL.md",
     "templates/.agents/skills/sd-housekeeping/SKILL.md",
     "scripts/sd-ai-command-pack-review-preflight.mjs",

@@ -39,6 +39,10 @@ closed whenever the cheaper path cannot be proven safe.
 - This task is the CI counterpart to the bookkeeping-successor behavior in
   `07-22-integrate-routed-review-backends`; it must not mint, reuse, or weaken a
   routed-review receipt.
+- `07-24-support-planning-only-pr-finalization` owns the lifecycle semantics
+  and typed evidence for a planning task/journal successor. This task treats a
+  valid result as one canonical bookkeeping-validator mode and does not create
+  a path-only exemption.
 - The final program integration task must exercise the resulting exact-head CI
   behavior together with review and housekeeping gates.
 - Keep the implementation local to `sd-ai-command-pack`. Fleet-wide workflow
@@ -74,8 +78,8 @@ closed whenever the cheaper path cannot be proven safe.
   `git diff --check`, task JSON/schema/status and parent-child topology checks,
   supported active/archive layout checks, journal/index consistency, and
   placeholder detection. Consume the canonical finish-work bookkeeping
-  validator and its stable reason codes instead of creating a second
-  validator.
+  validator, including its distinct completion and planning finalization
+  modes, and its stable reason codes instead of creating a second validator.
 - R7: Skip the unit-test matrix, lint, security, and release-payload jobs only
   after R2-R6 succeed. Known ambiguity, missing or unsuccessful prior evidence,
   an API lookup problem, force-push/non-ancestor history, or a mixed delta must
@@ -109,7 +113,8 @@ closed whenever the cheaper path cannot be proven safe.
   release-payload jobs.
 - [ ] Journal-only, task-metadata-only, task-archive, and combined
   archive-plus-journal successors pass focused positive tests, including more
-  than one bookkeeping commit in a single push.
+  than one bookkeeping commit in a single push and a valid planning
+  finalization that preserves its active planning task.
 - [ ] Changed source/workflow/configuration paths, mixed deltas, executable or
   symlink entries, merge commits, malformed SHAs, missing objects,
   non-ancestor/force-push histories, first/opened PR heads, and prior checks
@@ -139,6 +144,8 @@ closed whenever the cheaper path cannot be proven safe.
   weakening exact-head review, unresolved-thread, finish-work, or merge gates.
 - Replacing the routed-review successor receipt or treating CI success as AI
   review evidence.
+- Defining planning-finalization mode selection, task preservation, or
+  housekeeping evidence.
 - Avoiding the post-merge full run for a real code/release merge.
 - Publishing a generic fleet workflow, modifying consumer repositories, or
   changing upstream Trellis lifecycle behavior.

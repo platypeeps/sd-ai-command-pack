@@ -5,8 +5,9 @@
 Coordinate the complete remediation of the 2026-07-22 canonical skill review
 and the accepted 2026-07-24 verification round.
 Reduce overlapping commands, hidden mutations, prompt-owned state machines,
-duplicated gates, unnecessary provider spend, stale documentation, and unsafe
-write or checkout-execution boundaries without weakening the delivery lifecycle.
+duplicated gates, unnecessary provider spend, stale documentation, unsafe
+write or checkout-execution boundaries, and lifecycle states that cannot be
+truthfully finalized without weakening the delivery lifecycle.
 
 This parent owns the source finding ledgers, task boundaries, cross-child
 completion contract, and final program-closure decision. It has no direct
@@ -86,10 +87,11 @@ merge eligibility without mutating the PR.
 | H06 | F-6 | P2 | Cache-writing tools rely on callers remembering sandbox-specific environment overrides and can fail before the requested operation begins. | `07-24-standardize-sandbox-safe-tool-cache-routing` |
 | H07 | F-7 | P2 | Ordinary review consumes a stale checked-in learning snapshot instead of a bounded current read-only family summary. | `07-24-feed-review-learnings-into-review-planning` |
 | H08 | F-8 | P1 | Local-branch eligibility does not re-read the PR head after collecting checks and thread evidence. | `07-24-reread-pr-head-at-eligibility-completion` |
+| H09 | PR #244 housekeeping | P1 | A reviewed planning-only PR cannot merge through housekeeping without either withholding required finish-work evidence or incorrectly archiving an unfinished planning task. | `07-24-support-planning-only-pr-finalization` |
 
 ## Requirements
 
-- R1: Preserve the F01-F17, G01-G07, and H01-H08 finding ledgers as the authoritative,
+- R1: Preserve the F01-F17, G01-G07, and H01-H09 finding ledgers as the authoritative,
   lossless source map.
   A finding may be split only when each task states its non-overlapping piece.
 - R2: Keep all children independently startable, testable, reviewable, and
@@ -160,14 +162,18 @@ merge eligibility without mutating the PR.
   pack subprocess path while preserving authentication/configuration state.
 - `07-24-reread-pr-head-at-eligibility-completion` owns H08 as a focused fix to
   the shared eligibility evaluator before final integration.
+- `07-24-support-planning-only-pr-finalization` owns H09. It adds a
+  deterministically proven planning finalization that records the session and
+  preserves planned task state, replaces the bare finish-work-head attestation
+  with typed evidence, and leaves housekeeping as the sole merge owner.
 - Every implementation child owns its task-local F17 scenario coverage.
 - `07-22-normalize-sd-workflow-program-task-topology` is the completed
   bookkeeping child that converted the program design and implementation plan
   into this task-native topology. It owns no ongoing remediation or integration
   work.
 - `07-22-validate-sd-workflow-program-integration` owns shared invariants,
-  S01-S20, the final cross-child lifecycle matrix, the
-  F01-F17/G01-G07/H01-H08 evidence map, and the closure record consumed by this
+  S01-S21, the final cross-child lifecycle matrix, the
+  F01-F17/G01-G07/H01-H09 evidence map, and the closure record consumed by this
   parent.
 - External dependency `platypeeps/sd-github-review` task
   `07-22-publish-routed-review-receipt-contract` owns noninteractive routing,
@@ -189,7 +195,7 @@ merge eligibility without mutating the PR.
 
 ## Acceptance Criteria
 
-- [ ] Every F01-F17, G01-G07, and H01-H08 row has an active or archived task and a testable
+- [ ] Every F01-F17, G01-G07, and H01-H09 row has an active or archived task and a testable
   acceptance mapping; no finding is left only in review prose.
 - [ ] Each child contains explicit dependencies, out-of-scope boundaries,
   rollback/stop points where material, and behavioral validation commands.

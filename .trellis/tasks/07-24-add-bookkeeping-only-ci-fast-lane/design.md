@@ -97,9 +97,11 @@ After the history/path proof and prior evidence pass, check out the after head
 and run the canonical validator published by
 `07-24-validate-finish-work-bookkeeping-before-push` for task layout/topology,
 context manifests, descriptions, lifecycle state, journal/index consistency,
-placeholders, and whitespace. Keep history/tree-mode classification in this
-task rather than duplicating it in the bookkeeping validator. The prior-head
-classifier has already proved that these helpers are
+placeholders, and whitespace. Accept its explicit completion or planning
+finalization mode; mode selection remains owned by
+`07-24-support-planning-only-pr-finalization`. Keep history/tree-mode
+classification in this task rather than duplicating it in the bookkeeping
+validator. The prior-head classifier has already proved that these helpers are
 unchanged across a selected bookkeeping delta, so no changed checkout-owned
 executable is run to decide eligibility.
 
@@ -127,11 +129,11 @@ bookkeeping-only pushes.
 
 ## Finish-work Interaction
 
-The existing skills create archive and journal commits locally and push after
-finish-work completes. Preserve that single-push boundary. A later review fix
-may legitimately require a new finalization attempt and another bookkeeping
-successor; the fast lane makes that new exact head cheap without pretending the
-older head is current.
+The finalization skills create a completion archive/journal bundle or a
+planning task/journal bundle locally and push after finalization completes.
+Preserve that single-push boundary. A later review fix may legitimately require
+a new finalization attempt and another bookkeeping successor; the fast lane
+makes that new exact head cheap without pretending the older head is current.
 
 Do not combine archive and journal into one commit merely to optimize Actions:
 multiple local commits in one push create one evaluated PR head. If inspection
