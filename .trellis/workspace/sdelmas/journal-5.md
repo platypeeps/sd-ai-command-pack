@@ -560,3 +560,36 @@ Addressed PR #242 review feedback by sanitizing repository-controlled roadmap di
 ### Next Steps
 
 - None - task complete
+
+
+## Session 216: Add native Codex review to Claude fan-out
+
+**Date**: 2026-07-23
+**Task**: Add native Codex review to Claude fan-out
+**Branch**: `codex/claude-codex-review-fanout`
+
+### Summary
+
+Added a Claude-only native Codex CLI review lane alongside Prism/Gito, with explicit executable and capability probes, non-blocking fallback when Codex is unavailable, visible failure semantics, scope parity, documentation, tests, version bump, and fleet validation.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b227cfc` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
