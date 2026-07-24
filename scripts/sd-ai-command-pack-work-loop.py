@@ -2030,6 +2030,17 @@ def _read_status_lock(path: Path) -> tuple[dict[str, Any] | None, str | None]:
         return None, compact_text(error, limit=500)
 
 
+def _status_lock_snapshot(
+    lock: Mapping[str, Any] | None, error: str | None
+) -> dict[str, Any]:
+    return {
+        "present": lock is not None or error is not None,
+        "stale": lock_is_stale(lock) if lock else False,
+        "runId": lock.get("runId") if lock else None,
+        "error": error,
+    }
+
+
 def status_snapshot(
     repo: Path,
     *,
@@ -2061,7 +2072,14 @@ def status_snapshot(
                 if lock is not None or terminal_lock is not None
                 else "normal"
             )
-            return {"status": "none", "recovery": recovery_directive(reason)}
+            return {
+                "status": "none",
+                "recovery": recovery_directive(reason),
+                "lock": _status_lock_snapshot(lock, lock_error),
+                "terminalLock": _status_lock_snapshot(
+                    terminal_lock, terminal_lock_error
+                ),
+            }
         state = read_json(state_path)
         validate_state(state)
         if state["repository"]["digest"] != identity["digest"]:
@@ -2100,18 +2118,10 @@ def status_snapshot(
                 state.get("terminalReconciliation")
             ),
             "recovery": recovery_directive(recovery_reason),
-            "lock": {
-                "present": lock is not None or lock_error is not None,
-                "stale": lock_is_stale(lock) if lock else False,
-                "runId": lock.get("runId") if lock else None,
-                "error": lock_error,
-            },
-            "terminalLock": {
-                "present": terminal_lock is not None or terminal_lock_error is not None,
-                "stale": lock_is_stale(terminal_lock) if terminal_lock else False,
-                "runId": terminal_lock.get("runId") if terminal_lock else None,
-                "error": terminal_lock_error,
-            },
+            "lock": _status_lock_snapshot(lock, lock_error),
+            "terminalLock": _status_lock_snapshot(
+                terminal_lock, terminal_lock_error
+            ),
         }
     except (KeyError, TypeError, WorkLoopError) as error:
         return {

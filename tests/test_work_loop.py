@@ -2230,6 +2230,18 @@ class WorkLoopTests(InstallTestCase):
             {
                 "status": "none",
                 "recovery": {"reasonCode": "normal", "reference": None},
+                "lock": {
+                    "present": False,
+                    "stale": False,
+                    "runId": None,
+                    "error": None,
+                },
+                "terminalLock": {
+                    "present": False,
+                    "stale": False,
+                    "runId": None,
+                    "error": None,
+                },
             },
         )
         state, state_path, _lock_path = self.make_state(module, root, state_root)
@@ -2310,6 +2322,42 @@ class WorkLoopTests(InstallTestCase):
         state_path.unlink()
         missing = module.status_snapshot(missing_root, state_root=missing_state_root)
         self.assertEqual(missing["recovery"]["reasonCode"], "ledger_missing")
+        self.assertEqual(
+            missing["lock"],
+            {
+                "present": True,
+                "stale": False,
+                "runId": state["runId"],
+                "error": None,
+            },
+        )
+        self.assertFalse(missing["terminalLock"]["present"])
+
+        terminal_root = self.make_repo()
+        terminal_state_root = terminal_root.parent / "state"
+        terminal_state, terminal_state_path, terminal_lock_path = self.make_state(
+            module, terminal_root, terminal_state_root
+        )
+        terminal_state_path.unlink()
+        terminal_lock_path.replace(
+            terminal_lock_path.parent / module.TERMINAL_LOCK_NAME
+        )
+        terminal_missing = module.status_snapshot(
+            terminal_root, state_root=terminal_state_root
+        )
+        self.assertEqual(
+            terminal_missing["recovery"]["reasonCode"], "ledger_missing"
+        )
+        self.assertFalse(terminal_missing["lock"]["present"])
+        self.assertEqual(
+            terminal_missing["terminalLock"],
+            {
+                "present": True,
+                "stale": False,
+                "runId": terminal_state["runId"],
+                "error": None,
+            },
+        )
 
         mismatched_root = self.make_repo()
         mismatched_state_root = mismatched_root.parent / "state"
@@ -2324,6 +2372,24 @@ class WorkLoopTests(InstallTestCase):
             mismatched_root, state_root=mismatched_state_root
         )
         self.assertEqual(mismatched["recovery"]["reasonCode"], "owner_invalid")
+        self.assertTrue(mismatched["lock"]["present"])
+        self.assertIsNone(mismatched["lock"]["error"])
+
+        unreadable_root = self.make_repo()
+        unreadable_state_root = unreadable_root.parent / "state"
+        _state, unreadable_path, unreadable_lock_path = self.make_state(
+            module, unreadable_root, unreadable_state_root
+        )
+        unreadable_path.unlink()
+        unreadable_lock_path.write_text("not-json\n", encoding="utf-8")
+        unreadable = module.status_snapshot(
+            unreadable_root, state_root=unreadable_state_root
+        )
+        self.assertEqual(unreadable["recovery"]["reasonCode"], "owner_invalid")
+        self.assertTrue(unreadable["lock"]["present"])
+        self.assertFalse(unreadable["lock"]["stale"])
+        self.assertIsNone(unreadable["lock"]["runId"])
+        self.assertIn("cannot read", unreadable["lock"]["error"])
 
         stale_root = self.make_repo()
         stale_state_root = stale_root.parent / "state"

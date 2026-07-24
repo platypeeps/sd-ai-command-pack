@@ -511,6 +511,12 @@ schema.
   `task`, `branch`, `head`, `baseBranch`, `prNumber`, `prUrl`, and
   `lastShippedSha`. Its human renderer prints each non-null field so direct
   work-loop status and `sd-status` observe the same ledger evidence.
+- When the ledger is absent, the canonical helper still emits both `lock` and
+  `terminalLock` diagnostics. Each mapping contains `present`, `stale`,
+  `runId`, and `error`; an unreadable lock remains `present` with a bounded
+  error and no inferred run ID. Keep the two lock sources distinct so the
+  typed recovery directive can be executed from one status response without
+  reconstructing user-state paths manually.
 - A run snapshot may include a complete `terminalReconciliation` audit record
   with verified status, timestamp, archived task path/ID, delivery PR evidence,
   optional all-or-none bookkeeping PR evidence, and observed default
@@ -545,6 +551,10 @@ schema.
 - Unsupported status -> `unsupported status` anomaly without the supplied
   value.
 - Missing or malformed run field -> `invalid run snapshot field: <field>`.
+- Missing ledger with no locks -> `none` plus `normal` recovery and both lock
+  diagnostics present with `present: false`; valid, stale, digest-mismatched,
+  or unreadable active/terminal locks -> preserve the corresponding diagnostic
+  source while selecting the typed recovery reason.
 - Present-but-blank optional run string -> `invalid run snapshot field:
   <field>`; explicit `null` remains valid.
 - `terminalReconciliation` on an `active` or `paused` run -> `invalid run
@@ -562,6 +572,9 @@ schema.
 - Good: a complete paused snapshot renders the same run, focus, heartbeat,
   context, checkpoint, and counters as before.
 - Base: `{"status": "none"}` remains a valid no-loop result.
+- Good: a missing ledger with an unreadable active lock reports
+  `owner_invalid`, `lock.present: true`, a bounded `lock.error`, and an absent
+  `terminalLock` instead of collapsing the evidence into the reason code.
 - Base: an optional run field such as `branch` may be absent or `null`.
 - Good: a `completed` run carries a complete reconciliation with nested status
   `verified`.
@@ -580,6 +593,9 @@ schema.
 - Missing string fields, boolean iteration, mixed-type focus, non-dictionary
   containers, and missing nested renderer members.
 - Existing real-ledger JSON and human-output tests plus template twin parity.
+- Missing-ledger helper snapshots with no lock, a valid active lock, a valid
+  terminal lock, a digest mismatch, and malformed lock JSON; assert both lock
+  diagnostic mappings and the selected recovery reason.
 - Canonical helper snapshots and human output include all non-null
   current-state evidence, including base branch and last shipped SHA.
 - Invalid-port and malformed-IPv6 PR URL regressions at both the work-loop
@@ -595,6 +611,9 @@ schema.
 ```text
 Wrong: any helper-returned dictionary flows directly into the renderer
 Correct: validate its status and renderer-required fields at the load boundary
+
+Wrong: return only the recovery reason when the ledger is missing and make the operator rediscover which lock exists
+Correct: return bounded active and terminal lock diagnostics alongside the typed recovery directive
 
 Wrong: include an unsupported helper value in the diagnostic
 Correct: report only that the status is unsupported
