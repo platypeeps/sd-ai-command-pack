@@ -138,10 +138,13 @@ def _ensure_private_directory(path: Path, *, label: str) -> Path:
         raise CacheSetupError(f"cannot create {label} {path}: {error}") from error
     if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
         raise CacheSetupError(f"{label} must be a real directory: {path}")
-    if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
-        raise CacheSetupError(f"{label} is not owned by the current user: {path}")
-    if stat.S_IMODE(metadata.st_mode) & 0o077:
-        raise CacheSetupError(f"{label} permissions must not allow group or other access: {path}")
+    if os.name != "nt":
+        if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
+            raise CacheSetupError(f"{label} is not owned by the current user: {path}")
+        if stat.S_IMODE(metadata.st_mode) & 0o077:
+            raise CacheSetupError(
+                f"{label} permissions must not allow group or other access: {path}"
+            )
     if not os.access(path, os.W_OK | os.X_OK):
         raise CacheSetupError(f"{label} is not writable: {path}")
     return path

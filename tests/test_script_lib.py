@@ -156,6 +156,24 @@ class ScriptLibTests(InstallTestCase):
                 environ={lib.CACHE_ROOT_ENV: str(cache_root)},
             )
 
+    def test_tool_environment_skips_posix_metadata_checks_on_windows(self) -> None:
+        lib = self.load_lib()
+        _repo, cache_root = self.cache_fixture()
+        cache_root.mkdir()
+        cache_root.chmod(0o777)
+        self.addCleanup(cache_root.chmod, 0o700)
+
+        with (
+            mock.patch.object(lib.os, "name", "nt"),
+            mock.patch.object(lib.os, "getuid", return_value=999_999),
+        ):
+            validated = lib._ensure_private_directory(
+                cache_root,
+                label="test cache",
+            )
+
+        self.assertEqual(validated, cache_root)
+
     def test_tool_environment_concurrent_creation_is_stable(self) -> None:
         lib = self.load_lib()
         repo, cache_root = self.cache_fixture()
