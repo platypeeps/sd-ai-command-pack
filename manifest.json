@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "sd-ai-command-pack",
-  "version": "0.39.0",
+  "version": "0.40.0",
   "license": "MIT",
   "description": "Install project-local SD AI command workflows, Prism/Gito defaults, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
@@ -165,6 +165,13 @@
       "kind": "script",
       "source": "templates/scripts/sd-ai-command-pack-housekeeping.sh",
       "target": "scripts/sd-ai-command-pack-housekeeping.sh",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "script",
+      "source": "templates/scripts/sd-ai-command-pack-housekeeping-result.py",
+      "target": "scripts/sd-ai-command-pack-housekeeping-result.py",
       "install": "always"
     },
     {
@@ -4407,6 +4414,237 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-update-spec/SKILL.md",
       "target": ".trae/skills/sd-update-spec/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/architecture.md",
+      "target": ".agents/skills/sd-update-spec/references/architecture.md",
+      "install": "always"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/architecture.md",
+      "target": ".agent/skills/sd-update-spec/references/architecture.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/architecture.md",
+      "target": ".codebuddy/skills/sd-update-spec/references/architecture.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/architecture.md",
+      "target": ".devin/skills/sd-update-spec/references/architecture.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/architecture.md",
+      "target": ".factory/skills/sd-update-spec/references/architecture.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/architecture.md",
+      "target": ".kilocode/skills/sd-update-spec/references/architecture.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/architecture.md",
+      "target": ".kiro/skills/sd-update-spec/references/architecture.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/architecture.md",
+      "target": ".pi/skills/sd-update-spec/references/architecture.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/architecture.md",
+      "target": ".qoder/skills/sd-update-spec/references/architecture.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/architecture.md",
+      "target": ".reasonix/skills/sd-update-spec/references/architecture.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/architecture.md",
+      "target": ".trae/skills/sd-update-spec/references/architecture.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/repository-map.md",
+      "target": ".agents/skills/sd-update-spec/references/repository-map.md",
+      "install": "always"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/repository-map.md",
+      "target": ".agent/skills/sd-update-spec/references/repository-map.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/repository-map.md",
+      "target": ".codebuddy/skills/sd-update-spec/references/repository-map.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/repository-map.md",
+      "target": ".devin/skills/sd-update-spec/references/repository-map.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/repository-map.md",
+      "target": ".factory/skills/sd-update-spec/references/repository-map.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/repository-map.md",
+      "target": ".kilocode/skills/sd-update-spec/references/repository-map.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/repository-map.md",
+      "target": ".kiro/skills/sd-update-spec/references/repository-map.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/repository-map.md",
+      "target": ".pi/skills/sd-update-spec/references/repository-map.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/repository-map.md",
+      "target": ".qoder/skills/sd-update-spec/references/repository-map.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/repository-map.md",
+      "target": ".reasonix/skills/sd-update-spec/references/repository-map.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/repository-map.md",
+      "target": ".trae/skills/sd-update-spec/references/repository-map.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/obsidian-kb.md",
+      "target": ".agents/skills/sd-update-spec/references/obsidian-kb.md",
+      "install": "always"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/obsidian-kb.md",
+      "target": ".agent/skills/sd-update-spec/references/obsidian-kb.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/obsidian-kb.md",
+      "target": ".codebuddy/skills/sd-update-spec/references/obsidian-kb.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/obsidian-kb.md",
+      "target": ".devin/skills/sd-update-spec/references/obsidian-kb.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/obsidian-kb.md",
+      "target": ".factory/skills/sd-update-spec/references/obsidian-kb.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/obsidian-kb.md",
+      "target": ".kilocode/skills/sd-update-spec/references/obsidian-kb.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/obsidian-kb.md",
+      "target": ".kiro/skills/sd-update-spec/references/obsidian-kb.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/obsidian-kb.md",
+      "target": ".pi/skills/sd-update-spec/references/obsidian-kb.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/obsidian-kb.md",
+      "target": ".qoder/skills/sd-update-spec/references/obsidian-kb.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/obsidian-kb.md",
+      "target": ".reasonix/skills/sd-update-spec/references/obsidian-kb.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/obsidian-kb.md",
+      "target": ".trae/skills/sd-update-spec/references/obsidian-kb.md",
       "anchor": ".trae"
     }
   ]

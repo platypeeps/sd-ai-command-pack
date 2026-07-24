@@ -159,6 +159,7 @@ LEGACY_PACK_PATHS = {
         for name in (
             "audit-route.py",
             "full-check.sh",
+            "housekeeping-result.py",
             "housekeeping.sh",
             "install-audit.py",
             "pr-body-scope.py",

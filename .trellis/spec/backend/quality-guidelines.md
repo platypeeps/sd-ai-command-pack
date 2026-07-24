@@ -134,6 +134,9 @@ may enter housekeeping's merge mutation path.
 - Adapter mode: the same command with `--format shell`, producing a bounded
   shell receipt for housekeeping without transferring policy ownership to the
   shell caller.
+- Combined adapter mode: `--format json-shell` emits one compact JSON line and
+  the same shell receipt from one evidence collection so housekeeping can
+  embed the authoritative result without querying a moving PR twice.
 - Input schema major 1 supports `local-branch` and `dependency-pr` evaluation.
 - Output schema major 1 reports `eligible`, `blocked`, or `indeterminate` with
   stable reason codes and observed evidence.
@@ -203,6 +206,78 @@ may enter housekeeping's merge mutation path.
   changes during evaluation.
 - End-to-end housekeeping delegation for local and dependency modes, proving
   housekeeping remains the only `gh pr merge` owner.
+
+## Housekeeping Result Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing
+`scripts/sd-ai-command-pack-housekeeping-result.py`, its template twin,
+housekeeping JSON output, coded housekeeping actions/anomalies, or final status
+delegation.
+
+### 2. Signatures
+
+- `bash scripts/sd-ai-command-pack-housekeeping.sh --json` reserves stdout for
+  one schema-version-1 result and writes progress/diagnostics to stderr.
+- The stdlib result builder receives a delegated status JSON file or explicit
+  status failure, optional eligibility JSON, invocation/identity fields, and
+  repeatable coded action/anomaly pairs.
+
+### 3. Contracts
+
+- The builder validates and composes evidence only. It does not run Git/GitHub,
+  collect status, merge, switch, pull, delete, prune, or mutate Trellis.
+- Embed the existing eligibility and status documents without reimplementing
+  their policies. Eligibility is `null` when no open-PR evaluation applies;
+  status is `null` only with a typed status failure.
+- Identity binds repository, start/default/current branches, PR, full heads,
+  and finish-work evidence. Actions/anomalies contain lowercase stable codes
+  and bounded control-free messages.
+- Outcome is exactly `clean|blocked|indeterminate|failed`. Eligibility
+  indeterminacy and unavailable evidence remain indeterminate; known blocking
+  eligibility, coded anomalies, or status anomalies are blocked; status
+  collection failure is failed.
+- Human mode remains compatible. The canonical skill interprets structured
+  fields and keeps authority, safety, mutation boundaries, and recovery rules
+  explicit instead of pinning raw output choreography.
+
+### 4. Validation & Error Matrix
+
+- Unknown schema major, non-object JSON, unsafe/symlinked/oversized input,
+  invalid code/message, or contradictory status input/error -> controlled exit
+  `2`, no traceback or mutation.
+- Valid status with strict anomalies -> typed `blocked` even when no shell
+  anomaly was recorded.
+- Missing/empty status result with an explicit collector error -> typed
+  `failed` result with `status: null` and stable failure reason.
+- JSON mode builder failure -> nonzero; never print progress on stdout or infer
+  a human clean result.
+
+### 5. Good / Base / Bad Cases
+
+- Good: a merged branch cleanup embeds coded merge/branch/prune actions and a
+  clean delegated status report in one machine-readable result.
+- Base: default-branch verification has no applicable eligibility receipt and
+  still returns a complete clean or blocked result.
+- Bad: rerun PR evidence collection for JSON, parse human status lines, or let
+  the result builder become a second merge/status policy owner.
+
+### 6. Tests Required
+
+- Clean, blocked, indeterminate, failed, null-eligibility, and missing-status
+  classification; invalid schema/code/message/path inputs; CLI error behavior.
+- End-to-end JSON stdout/stderr separation plus unchanged human lifecycle,
+  exact-head, checks, thread, merge, cleanup, and dry-run tests.
+- Root/template parity, manifest/provenance/install coverage, generated skill
+  parity, and a per-file shipped-helper coverage floor.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: run status and eligibility twice so the JSON can disagree with the merge receipt
+Correct: collect each once, embed its versioned document, and keep Bash as mutation owner
+```
 
 ## Review Preflight Runtime Contract
 

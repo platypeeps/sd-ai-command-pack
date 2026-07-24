@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.40.0 - 2026-07-23
+
+- Add a schema-versioned housekeeping result that composes the existing
+  exact-head eligibility receipt and delegated status report with stable
+  cleanup action and anomaly codes.
+- Shorten `sd-housekeeping` around that typed runtime contract and move rare
+  `sd-update-spec` architecture, repository-map, and knowledge-base mechanics
+  into flat, conditionally loaded references.
+
 ## 0.39.0 - 2026-07-23
 
 - Consolidate design-first backlog work into typed `sd-work-backlog`

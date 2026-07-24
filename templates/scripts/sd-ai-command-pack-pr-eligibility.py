@@ -995,6 +995,17 @@ def render_shell(result: Mapping[str, Any]) -> str:
     return FIELD_SEPARATOR.join(safe_text(item, limit=1000) for item in fields)
 
 
+def render_json_shell(result: Mapping[str, Any]) -> str:
+    """Render one compact JSON line plus the bounded shell receipt."""
+
+    return "\n".join(
+        (
+            json.dumps(result, sort_keys=True, separators=(",", ":")),
+            render_shell(result),
+        )
+    )
+
+
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Evaluate exact-head pull-request eligibility without mutation."
@@ -1007,7 +1018,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--default-branch")
     parser.add_argument("--finish-work-head")
     parser.add_argument("--github-repository")
-    parser.add_argument("--format", choices=("json", "shell"), default="json")
+    parser.add_argument(
+        "--format", choices=("json", "shell", "json-shell"), default="json"
+    )
     return parser.parse_args(argv)
 
 
@@ -1076,6 +1089,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     if args.format == "shell":
         print(render_shell(result))
+    elif args.format == "json-shell":
+        print(render_json_shell(result))
     else:
         print(json.dumps(result, indent=2, sort_keys=True))
     return {"eligible": 0, "blocked": 1}.get(str(result.get("status")), 2)

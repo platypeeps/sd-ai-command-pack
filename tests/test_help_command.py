@@ -601,6 +601,28 @@ class HelpCommandTests(InstallTestCase):
         self.assertEqual({entry["target"] for entry in entries}, expected_targets)
         self.assertEqual(len(entries), len(expected_targets))
 
+    def test_manifest_fans_update_spec_references_to_every_skill_root(self) -> None:
+        generator = load_surface_generator()
+        manifest = json.loads(generator.generate_manifest_text())
+        entries = [
+            entry
+            for entry in manifest["files"]
+            if entry["source"].startswith(
+                "templates/.agents/skills/sd-update-spec/references/"
+            )
+        ]
+        expected_targets = set()
+        for reference in registry.SHARED_SKILL_REFERENCES["sd-update-spec"]:
+            expected_targets.add(f".agents/skills/sd-update-spec/{reference}")
+            expected_targets.update(
+                f"{registry.PLATFORM_REGISTRY[platform].directory}/skills/"
+                f"sd-update-spec/{reference}"
+                for platform in generator.SKILL_FANOUT_PLATFORMS
+            )
+
+        self.assertEqual({entry["target"] for entry in entries}, expected_targets)
+        self.assertEqual(len(entries), len(expected_targets))
+
     def test_nested_skill_reference_sources_remain_generator_owned(self) -> None:
         generator = load_surface_generator()
 

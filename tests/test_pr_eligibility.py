@@ -188,6 +188,15 @@ class PrEligibilityTests(unittest.TestCase):
         self.assertNotIn(("gh", "pr", "merge"), commands)
         self.assertFalse(any(call[:2] == ("git", "push") for call in runner.calls))
 
+    def test_combined_adapter_preserves_json_and_shell_receipt(self) -> None:
+        result = self.evaluate(self.local_request(), FixtureRunner(self.repo))
+
+        json_line, shell_line = eligibility.render_json_shell(result).splitlines()
+
+        self.assertEqual(json.loads(json_line), result)
+        self.assertEqual(shell_line, eligibility.render_shell(result))
+        self.assertNotIn("\n", json_line)
+
     def test_skipped_and_neutral_checks_do_not_block(self) -> None:
         runner = FixtureRunner(self.repo)
         runner.pr_payload["statusCheckRollup"] = [

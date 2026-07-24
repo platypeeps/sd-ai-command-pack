@@ -667,6 +667,34 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("sd-ai-command-pack-update-spec-kb.py --if-present", backlog_text)
         self.assertIn("blocks the iteration", backlog_text)
 
+    def test_update_spec_routes_flat_optional_references(self) -> None:
+        skill_path = (
+            install.ROOT / "templates/.agents/skills/sd-update-spec/SKILL.md"
+        )
+        skill = skill_path.read_text(encoding="utf-8")
+        normalized = " ".join(skill.split())
+        references = (
+            "references/repository-map.md",
+            "references/architecture.md",
+            "references/obsidian-kb.md",
+        )
+
+        self.assertIn("A routine spec-only run loads no optional reference", normalized)
+        self.assertIn("load each at most once", normalized)
+        self.assertIn("never follow a reference from another reference", normalized)
+        self.assertIn("missing, unreadable, empty, escaping, or contradictory", normalized)
+        self.assertIn(
+            "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- "
+            "scripts/sd-ai-command-pack-update-spec-kb.py",
+            normalized,
+        )
+        for relative in references:
+            with self.subTest(reference=relative):
+                self.assertEqual(skill.count(relative), 2)
+                content = (skill_path.parent / relative).read_text(encoding="utf-8")
+                self.assertTrue(content.strip())
+                self.assertNotIn("references/", content)
+
     def test_work_loop_adapters_forward_arguments_and_do_not_duplicate_policy(
         self,
     ) -> None:

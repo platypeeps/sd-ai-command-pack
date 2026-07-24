@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 211
+- **Total Sessions**: 212
 - **Last Active**: 2026-07-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~418 | Active |
+| `journal-5.md` | ~456 | Active |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 212 | 2026-07-23 | Structure skill runtime contracts | `360e5b816179499e19b856e326d15edeb71bc819` | `codex/structure-skill-runtime-contracts` |
 | 211 | 2026-07-23 | Streamline backlog and design workflows | `467bd42`, `9b10b31`, `79f54de`, `ac7f72f` | `codex/streamline-backlog-design-workflows` |
 | 210 | 2026-07-23 | Adaptive audit charter routing | `d9496cb5d9398b61d6655f4ed439ec22c2950e5a`, `08beea72af38bb34c99cb0f509350738122aa922`, `645aba5f4d3334ec8d97c50d39b58552582e5132` | `codex/optimize-audit-charter-routing` |
 | 209 | 2026-07-23 | Harden review-learnings write boundaries | `47e60ae`, `610d9b3` | `codex/harden-review-learnings-boundaries` |
