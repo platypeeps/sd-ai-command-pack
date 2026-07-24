@@ -38,6 +38,9 @@ The current Trellis-focused pack installs:
   present
 - a managed `sd-ai-command-pack` guidance block in
   `.github/copilot-instructions.md` for GitHub Copilot installs
+- a Claude-only project rule that adversarially reviews materially changed
+  Trellis planning artifacts before implementation starts, with an optional
+  parallel native Codex CLI lane
 
 The exact installed file set is defined by `manifest.json` and validated in
 target repos by `scripts/sd-ai-command-pack-install-audit.py`.
@@ -272,6 +275,25 @@ loop. With the `all` argument it reviews the full checked-out repository (the
 former `sd-review-local-all` command, folded in as of 0.13.0); exclusion and
 retry behavior lives in the installed guide's
 [Local Review](docs/SD_AI_COMMAND_PACK.md#local-review) section.
+On Claude Code, normal current-diff review also runs the native `codex review`
+CLI concurrently with the selected runner stack when the CLI is available and
+supports the matching target. This does not require the OpenAI Codex Claude
+plugin. If the `codex` executable is absent or incompatible, the optional lane
+is reported as skipped and the selected runner stack continues normally; `all`
+mode remains runner-only because native Codex review has no full-codebase
+target.
+
+### Planning artifact adversarial review
+
+Claude installs receive a project rule that reviews a materially created or
+updated active task `prd.md`, `design.md`, or `implement.md` at the planning
+convergence boundary. Claude performs the host review and, when the native
+`codex` CLI supports `codex exec`, runs one read-only ephemeral Codex peer
+review in parallel. Concerns are verified, assigned explicit dispositions, and
+rerun at most once after remediation; unresolved blockers stop implementation
+approval and task start. Missing or failed Codex is reported as a degraded
+optional lane while Claude's host review continues. The rule does not require
+an OpenAI Codex Claude plugin or an upstream Trellis change.
 
 ### sd-review-learnings
 
@@ -468,7 +490,8 @@ installed footprint. For normal shared installs, it also maintains a managed
 `sd-ai-command-pack trellis-gitignore` block in the repo root `.gitignore` that
 ignores Trellis and AI-tool local/runtime state (caches, logs, sessions, tmp,
 Gito artifacts, `node_modules/`) while keeping shareable `.trellis` and platform
-adapter files — plus tracked Claude SD commands — committed.
+adapter files — plus tracked Claude SD commands and the pack-owned planning
+review rule — committed.
 It installs platform adapters only when the target repo has the corresponding
 platform directory and a Trellis-owned marker for that platform, such as a
 Trellis command, hook, skill, or Copilot hook file. A plain `.github` directory
@@ -604,7 +627,7 @@ the installed guide to avoid duplicate README drift:
 | Shared skills, scripts, Prism/Gito defaults, usage guide | Always |
 | Codex skill completion | `.agents/skills/sd-*` installed as shared skills |
 | Antigravity | `.agent/` exists with Trellis workflow or skill markers; or `--all` / `--platform antigravity` |
-| Claude Code | `.claude/` exists with Trellis command, hook, or skill markers; or `--all` / `--platform claude` |
+| Claude Code | `.claude/` exists with Trellis command, hook, or skill markers; or `--all` / `--platform claude`; includes the planning-artifact adversarial review rule |
 | CodeBuddy | `.codebuddy/` exists with Trellis command, hook, agent, settings, or skill markers; or `--all` / `--platform codebuddy` |
 | Cursor | `.cursor/` exists with Trellis command, hook, or skill markers; or `--all` / `--platform cursor` |
 | Devin | `.devin/` exists with Trellis workflow or skill markers; or `--all` / `--platform devin` |

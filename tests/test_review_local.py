@@ -1246,6 +1246,32 @@ class ReviewLocalTests(InstallTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(result.stdout.splitlines(), ["prism", "gito", "all", "default"])
 
+    def test_review_local_skill_keeps_codex_as_claude_peer_lane(self) -> None:
+        skill = (
+            PACK_ROOT / "templates/.agents/skills/sd-review-local/SKILL.md"
+        ).read_text(encoding="utf-8")
+
+        for expected in (
+            "### Claude Code Native Codex Lane",
+            "command -v codex",
+            "codex review --uncommitted",
+            "codex review --base <resolved-ref>",
+            "separate Claude background Bash tasks",
+            "Do not start a Codex background task",
+            "Codex: skipped (CLI unavailable",
+            "not a runner failure",
+            "combined review incomplete",
+            "no equivalent repository-wide scope",
+            "plugin is optional",
+        ):
+            self.assertIn(expected, skill)
+        for forbidden in (
+            "codex-companion.mjs",
+            "CLAUDE_PLUGIN_ROOT",
+            "claude plugin install",
+        ):
+            self.assertNotIn(forbidden, skill)
+
     def test_review_local_script_help_describes_full_codebase_alias(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")

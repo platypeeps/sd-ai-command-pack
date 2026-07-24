@@ -98,6 +98,55 @@ class SurfaceGenerationTests(InstallTestCase):
 
         self.assertEqual(on_disk, generated | overrides)
 
+    def test_claude_review_local_adds_native_codex_fanout_only(self) -> None:
+        generator = load_surface_generator()
+        generated = generator.generate_adapters()
+        neutral = generator.generate_neutral_adapters()
+        claude_path = "templates/.claude/commands/sd/review-local.md"
+        claude = generated[claude_path]
+
+        for expected in (
+            "Claude Code native Codex lane",
+            "command -v codex",
+            "codex review --uncommitted",
+            "codex review --base <resolved-ref>",
+            "background Bash tasks before waiting",
+            "`BashOutput`",
+            "Codex: skipped (CLI unavailable or",
+            "runner result remains",
+            "native Codex review has no equivalent scope",
+        ):
+            self.assertIn(expected, claude)
+        for forbidden in (
+            "codex-companion.mjs",
+            "CLAUDE_PLUGIN_ROOT",
+            "codex@openai-codex",
+        ):
+            self.assertNotIn(forbidden, claude)
+
+        self.assertNotIn(
+            "Claude Code native Codex lane",
+            neutral["templates/.commands/sd-review-local.md"],
+        )
+        for path in (
+            "templates/.gemini/commands/sd/review-local.toml",
+            "templates/.github/prompts/sd-review-local.prompt.md",
+        ):
+            self.assertNotIn("Claude Code native Codex lane", generated[path])
+            self.assertNotIn("codex review --uncommitted", generated[path])
+
+    def test_claude_body_insertion_requires_unique_anchor(self) -> None:
+        generator = load_surface_generator()
+        with self.assertRaisesRegex(
+            generator.GenerationError,
+            "unique Claude body-insertion anchor",
+        ):
+            generator.claude_adapter(
+                "sd-review-local",
+                "review-local",
+                "# SD Local Review\n\n1. Resolve the skill.\n",
+            )
+
     def test_checkout_trust_policy_covers_every_command_adapter(self) -> None:
         generator = load_surface_generator()
         preflight = generator.CHECKOUT_TRUST_POLICY_MARKER

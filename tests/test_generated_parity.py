@@ -47,6 +47,9 @@ def _load_surface_generator():
 
 _surface_generator = _load_surface_generator()
 CLAUDE_COMMAND_ALIAS_REWRITES = _surface_generator.CLAUDE_COMMAND_ALIAS_REWRITES
+CLAUDE_COMMAND_BODY_INSERTIONS = (
+    _surface_generator.CLAUDE_COMMAND_BODY_INSERTIONS
+)
 BESPOKE_BODY_PARITY_EXEMPTIONS = _surface_generator.OVERRIDE_BODIES
 
 NODE_BUILTIN_MODULES = {
@@ -197,6 +200,14 @@ def apply_platform_body_deviations(platform: str, command: str, body: str) -> st
     if platform == "claude" and command in CLAUDE_COMMAND_ALIAS_REWRITES:
         platform_text, neutral_text = CLAUDE_COMMAND_ALIAS_REWRITES[command]
         body = body.replace(platform_text, neutral_text)
+    if platform == "claude" and command in CLAUDE_COMMAND_BODY_INSERTIONS:
+        _, platform_text = CLAUDE_COMMAND_BODY_INSERTIONS[command]
+        insertion = f"{platform_text}\n\n"
+        if body.count(insertion) != 1:
+            raise AssertionError(
+                f"{command}: Claude body insertion must appear exactly once"
+            )
+        body = body.replace(insertion, "", 1)
     command_info = next(
         (
             candidate
@@ -1780,6 +1791,19 @@ class GeneratedParityTests(InstallTestCase):
                         apply_platform_body_deviations(platform, command, body)
                     )
                     self.assertEqual(adapter_body, neutral_body)
+
+    def test_claude_body_insertion_parity_requires_exactly_one_copy(self) -> None:
+        command = "review-local"
+        _, platform_text = CLAUDE_COMMAND_BODY_INSERTIONS[command]
+        insertion = f"{platform_text}\n\n"
+
+        for body in ("", insertion * 2):
+            with self.subTest(copy_count=body.count(insertion)):
+                with self.assertRaisesRegex(
+                    AssertionError,
+                    "Claude body insertion must appear exactly once",
+                ):
+                    apply_platform_body_deviations("claude", command, body)
 
     def test_review_pr_remote_round_limit_defaults_to_five(self) -> None:
         _, files = install.load_manifest()

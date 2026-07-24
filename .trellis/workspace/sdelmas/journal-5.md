@@ -560,3 +560,113 @@ Addressed PR #242 review feedback by sanitizing repository-controlled roadmap di
 ### Next Steps
 
 - None - task complete
+
+
+## Session 216: Add native Codex review to Claude fan-out
+
+**Date**: 2026-07-23
+**Task**: Add native Codex review to Claude fan-out
+**Branch**: `codex/claude-codex-review-fanout`
+
+### Summary
+
+Added a Claude-only native Codex CLI review lane alongside Prism/Gito, with explicit executable and capability probes, non-blocking fallback when Codex is unavailable, visible failure semantics, scope parity, documentation, tests, version bump, and fleet validation.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b227cfc` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 217: Add Claude planning adversarial review
+
+**Date**: 2026-07-23
+**Task**: Add Claude planning adversarial review
+**Branch**: `codex/claude-codex-review-fanout`
+
+### Summary
+
+Added a Claude-scoped planning convergence rule that runs a native read-only Codex peer review alongside the host adversarial review, with graceful fallback and bounded concern remediation.
+
+### Main Changes
+
+- Added the Claude planning rule and lazily loaded adversarial-review contract without changing upstream Trellis or plugin-managed code.
+- Registered and documented the 0.43.0 Claude-only payload, including copied-scope classifiers and a seven-section adapter contract.
+- Added installer and contract coverage, then refreshed the all-consumer candidate ledger after merging Loadsmith compatibility PR #169.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `65c3566` | feat: add Claude planning adversarial review |
+
+### Testing
+
+- [OK] focused Claude planning-review, manifest, install-audit, and review-scope tests
+- [OK] make check (unit suite, coverage floors, Ruff, mypy, zizmor, full pack gate)
+- [OK] fleet candidate validation passed for all 8 consumers and ledger check is current
+- [OK] Loadsmith PR #169 CI and Copilot review passed; zero unresolved threads before merge
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 218: PR 243 review remediation
+
+**Date**: 2026-07-24
+**Task**: PR 243 review remediation
+**Branch**: `codex/claude-codex-review-fanout`
+
+### Summary
+
+Addressed the Copilot parity-harness finding and completed the exact-head review gate for PR #243.
+
+### Main Changes
+
+- Require the Claude-only generated body insertion to appear exactly once before parity normalization removes it.
+- Add regression coverage for both missing and duplicated Claude insertion blocks.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9978866` | test: enforce unique Claude body insertion |
+
+### Testing
+
+- [OK] Focused generated-parity tests passed.
+- [OK] make check passed.
+- [OK] Deterministic pack review full-check passed before both remote review requests.
+- [OK] PR #243 CI passed and the fresh exact-head Copilot review reported no new comments.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
