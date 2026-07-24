@@ -152,6 +152,13 @@ def compact_text(value: object, *, limit: int = 300) -> str:
 def run_git(repo: Path, *args: str) -> str | None:
     try:
         environment, _, _ = build_tool_environment(repo=repo)
+    except CacheSetupError as error:
+        raise WorkLoopError(
+            "cache setup failed: "
+            f"{error}; set SD_AI_COMMAND_PACK_CACHE_ROOT to a private writable "
+            "directory outside the repository"
+        ) from error
+    try:
         result = subprocess.run(
             ["git", "-C", str(repo), *args],
             env=environment,
@@ -163,7 +170,7 @@ def run_git(repo: Path, *args: str) -> str | None:
             errors="strict",
             timeout=20,
         )
-    except (CacheSetupError, OSError, UnicodeError, subprocess.TimeoutExpired):
+    except (OSError, UnicodeError, subprocess.TimeoutExpired):
         return None
     return result.stdout.strip() if result.returncode == 0 else None
 
