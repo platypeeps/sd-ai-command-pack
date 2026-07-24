@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.45.0 - 2026-07-24
+
+- Route XDG/GitHub CLI, Python, uv, pip, Ruff, and npm caches through one
+  validated private per-user/per-repository environment shared by Python and
+  shell entry points without changing authentication state.
+- Replace command-specific UV and disposable-candidate cache fragments with
+  the shared builder, controlled failures, deterministic external namespaces,
+  and documented cache-root/retention behavior.
+
 ## 0.44.0 - 2026-07-24
 
 - Re-read the exact pull request head by retained PR number at local-branch

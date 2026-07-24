@@ -16,7 +16,11 @@ if SPEC is None or SPEC.loader is None:
     raise RuntimeError(f"cannot load {SCRIPT_PATH}")
 eligibility = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = eligibility
-SPEC.loader.exec_module(eligibility)
+sys.path.insert(0, str(SCRIPT_PATH.parent))
+try:
+    SPEC.loader.exec_module(eligibility)
+finally:
+    sys.path.pop(0)
 
 HEAD = "1" * 40
 OTHER_HEAD = "2" * 40

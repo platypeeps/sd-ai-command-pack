@@ -326,7 +326,94 @@ class ToolchainPreflightTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(marker.read_text(encoding="utf-8"), "run\n")
-        self.assertEqual(len(invocation_log.read_text().splitlines()), 2)
+        self.assertEqual(len(invocation_log.read_text().splitlines()), 3)
+
+    def test_cache_env_reports_fixed_private_external_paths(self) -> None:
+        root = self._repo()
+        cache_tempdir = tempfile.TemporaryDirectory(prefix="sd-toolchain-cache-")
+        self.addCleanup(cache_tempdir.cleanup)
+        cache_root = Path(cache_tempdir.name) / "cache-root"
+
+        result = self._run(
+            root,
+            "cache-env",
+            env={
+                "SD_AI_COMMAND_PACK_PYTHON": sys.executable,
+                "SD_AI_COMMAND_PACK_CACHE_ROOT": str(cache_root),
+                "GH_CONFIG_DIR": "/existing/gh-config",
+            },
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        values = dict(line.split("=", 1) for line in result.stdout.splitlines())
+        self.assertEqual(
+            set(values),
+            {
+                "XDG_CACHE_HOME",
+                "PYTHONPYCACHEPREFIX",
+                "UV_CACHE_DIR",
+                "UV_TOOL_DIR",
+                "PIP_CACHE_DIR",
+                "RUFF_CACHE_DIR",
+                "NPM_CONFIG_CACHE",
+            },
+        )
+        self.assertNotIn("GH_CONFIG_DIR", values)
+        for path in map(Path, values.values()):
+            self.assertTrue(path.is_dir())
+            self.assertFalse(path.is_relative_to(root))
+
+    def test_invalid_cache_root_stops_before_python_workload(self) -> None:
+        root = self._repo()
+        marker = root / "workload-ran"
+
+        result = self._run(
+            root,
+            "run-python",
+            "--",
+            "-c",
+            f"from pathlib import Path; Path({str(marker)!r}).touch()",
+            env={
+                "SD_AI_COMMAND_PACK_PYTHON": sys.executable,
+                "SD_AI_COMMAND_PACK_CACHE_ROOT": str(root / "cache"),
+            },
+        )
+
+        self.assertEqual(result.returncode, 5, result.stderr)
+        self.assertIn("cache setup failed", result.stderr)
+        self.assertFalse(marker.exists())
+
+    def test_run_executes_argv_with_shared_cache_and_preserved_auth(self) -> None:
+        root = self._repo()
+        cache_tempdir = tempfile.TemporaryDirectory(prefix="sd-toolchain-run-")
+        self.addCleanup(cache_tempdir.cleanup)
+        cache_root = Path(cache_tempdir.name) / "cache-root"
+
+        result = self._run(
+            root,
+            "run",
+            "--",
+            sys.executable,
+            "-c",
+            (
+                "import os,sys;"
+                "print(os.environ['XDG_CACHE_HOME']);"
+                "print(os.environ['GH_CONFIG_DIR']);"
+                "print(sys.argv[1])"
+            ),
+            "argument with spaces",
+            env={
+                "SD_AI_COMMAND_PACK_PYTHON": sys.executable,
+                "SD_AI_COMMAND_PACK_CACHE_ROOT": str(cache_root),
+                "GH_CONFIG_DIR": "/existing/gh-config",
+            },
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        xdg_cache, gh_config, argument = result.stdout.splitlines()
+        self.assertTrue(Path(xdg_cache).is_dir())
+        self.assertEqual(gh_config, "/existing/gh-config")
+        self.assertEqual(argument, "argument with spaces")
 
     def test_doctor_reports_candidates_without_executing_them(self) -> None:
         root = self._repo()
@@ -384,6 +471,18 @@ class ToolchainPreflightTests(InstallTestCase):
         self.assertIn("script:preflight-pr.sh", payload["project_check_candidates"])
         self.assertIn(
             "script:check.sh (recursive)", payload["project_check_candidates"]
+        )
+        self.assertEqual(
+            set(payload["cache_paths"]),
+            {
+                "XDG_CACHE_HOME",
+                "PYTHONPYCACHEPREFIX",
+                "UV_CACHE_DIR",
+                "UV_TOOL_DIR",
+                "PIP_CACHE_DIR",
+                "RUFF_CACHE_DIR",
+                "NPM_CONFIG_CACHE",
+            },
         )
 
     def test_installer_distributes_toolchain_helper(self) -> None:

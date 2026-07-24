@@ -7,7 +7,6 @@ import argparse
 import contextlib
 import importlib.util
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -18,6 +17,11 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
+
+sys.dont_write_bytecode = True
+
+# This import must follow the bytecode guard for direct entrypoint invocation.
+from sd_ai_command_pack_lib import CacheSetupError, build_tool_environment  # noqa: E402
 
 SCHEMA_VERSION = 2
 COMMAND_TIMEOUT_SECONDS = 20
@@ -115,10 +119,12 @@ def run_command(
     timeout_seconds: int = COMMAND_TIMEOUT_SECONDS,
 ) -> CommandResult:
     try:
+        environment, _, _ = build_tool_environment(repo=cwd)
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
         result = subprocess.run(
             list(argv),
             cwd=cwd,
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            env=environment,
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -128,6 +134,9 @@ def run_command(
             timeout=timeout_seconds,
         )
         return CommandResult(result.returncode, result.stdout)
+    except CacheSetupError as error:
+        print(f"status cache setup failed: {error}", file=sys.stderr)
+        return CommandResult(127, "")
     except (OSError, UnicodeError, subprocess.TimeoutExpired):
         return CommandResult(127, "")
 

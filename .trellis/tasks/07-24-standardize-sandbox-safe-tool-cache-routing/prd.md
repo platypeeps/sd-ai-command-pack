@@ -60,19 +60,19 @@ tracked repository state.
 
 ## Acceptance Criteria
 
-- [ ] A fixture with an unwritable home cache successfully runs a stubbed
+- [x] A fixture with an unwritable home cache successfully runs a stubbed
   GitHub CLI through the safe XDG cache while retaining its existing auth
   configuration path.
-- [ ] uv, pip, GitHub CLI, and generic XDG fixtures use private external cache
+- [x] uv, pip, GitHub CLI, and generic XDG fixtures use private external cache
   paths and never write inside the repository.
-- [ ] Relative, repository-contained, symlinked, non-directory, permission
+- [x] Relative, repository-contained, symlinked, non-directory, permission
   denied, and concurrent cache-root cases fail or recover as specified without
   raw tracebacks.
-- [ ] All owning commands consume the shared helper; duplicate environment
+- [x] All owning commands consume the shared helper; duplicate environment
   fragments and command-specific hidden defaults are removed.
-- [ ] Tests instrument environment and filesystem writes and prove credentials
+- [x] Tests instrument environment and filesystem writes and prove credentials
   and non-cache variables remain unchanged.
-- [ ] Focused toolchain tests, shell lint, generated parity, `make sync`, and
+- [x] Focused toolchain tests, shell lint, generated parity, `make sync`, and
   `make check` pass.
 
 ## Out Of Scope

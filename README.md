@@ -424,6 +424,7 @@ schema-version-1 result; human output remains the default for direct shell use.
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `SD_AI_COMMAND_PACK_PYTHON` | Authoritative Python executable used by the toolchain preflight. | repo `.venv`, active virtualenv, Homebrew Python 3.13, then supported `python3` |
+| `SD_AI_COMMAND_PACK_CACHE_ROOT` | Absolute external parent for private per-user/per-repository XDG, Python, uv, pip, Ruff, and npm caches; GitHub auth/config remains unchanged. | safe inherited XDG cache root, then validated system temporary root |
 | `SD_AI_COMMAND_PACK_PROJECT_CHECK_COMMAND` | Explicit trusted project-check command; discovered candidates are never auto-selected. | unset |
 | `SD_AI_COMMAND_PACK_TOOLCHAIN_PLATFORM` | Advanced/test override for toolchain platform detection. | `uname -s` |
 | `SD_AI_COMMAND_PACK_TOOLCHAIN_HOMEBREW_PREFIXES` | Advanced/test override for colon-separated Homebrew Python prefixes. | `/opt/homebrew:/usr/local` |
@@ -438,6 +439,7 @@ schema-version-1 result; human output remains the default for direct shell use.
 | `SD_AI_COMMAND_PACK_INSTALL_AUDIT` | Controls structural post-install audit; unset warns and continues, `0` skips, and `required` fails when unavailable. | unset |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_KB` | Obsidian KB freshness lane; `auto` checks an existing KB and refreshes/rechecks stale output only when `.obsidian-kb/` is already ignored, `0` skips, and `required` remains read-only and fails when unavailable or stale. | `auto` |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF` | Base ref used by pack-source full-check to confirm shipped payload changes include a manifest version bump. | full-check base ref |
+
 | `SD_AI_COMMAND_PACK_CREATE_PR_BASE` | Base branch override for `sd-create-pr`; unset detects the GitHub default branch. | unset |
 | `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH` | Feature branch name for `sd-create-pr` when it starts on the repository default branch. | auto-derived `codex/<slug>` |
 | `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH_SLUG` | Slug source used to derive `codex/<slug>` when `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH` is unset. | unset |
@@ -462,6 +464,15 @@ schema-version-1 result; human output remains the default for direct shell use.
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND` | Custom command for requesting a remote review. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote review request/fix rounds before asking whether to continue. | `5` |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_SETTLE_POLLS` | Maximum 30-second polls before an accepted request without author-matched activity stops as ambiguous. | `40` |
+
+The shared cache environment builder sets `XDG_CACHE_HOME`,
+`PYTHONPYCACHEPREFIX`, `UV_CACHE_DIR`, `UV_TOOL_DIR`, `PIP_CACHE_DIR`,
+`RUFF_CACHE_DIR`, and `NPM_CONFIG_CACHE` to private external directories unless
+a valid explicit individual override is already present. It never rewrites
+`GH_CONFIG_DIR` or other authentication state, and ordinary housekeeping keeps
+the reusable pack-created caches. Shared workflows route direct external tools
+through `bash scripts/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]`
+so CI-log reads and other GitHub observations receive the same environment.
 
 Use `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` for explicit review-scope PR body text.
 
@@ -534,12 +545,8 @@ After installing or refreshing a target repo, a quick smoke test is:
 
 ```bash
 cd /path/to/repo
-SANDBOX_TMP="${SANDBOX_TMP:-${TMPDIR:-/tmp}}"
-export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-$SANDBOX_TMP/sd-ai-command-pack-pycache}"
-export UV_CACHE_DIR="${UV_CACHE_DIR:-$SANDBOX_TMP/sd-ai-command-pack-uv-cache}"
-export UV_TOOL_DIR="${UV_TOOL_DIR:-$SANDBOX_TMP/sd-ai-command-pack-uv-tools}"
-export RUFF_CACHE_DIR="${RUFF_CACHE_DIR:-$SANDBOX_TMP/sd-ai-command-pack-ruff-cache}"
-python3 scripts/sd-ai-command-pack-install-audit.py
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-install-audit.py
 # For fleet or scripted refreshes, pass the repo's explicit platforms too:
 python3 scripts/sd-ai-command-pack-install-audit.py \
   --expected-platform claude --expected-platform gemini \

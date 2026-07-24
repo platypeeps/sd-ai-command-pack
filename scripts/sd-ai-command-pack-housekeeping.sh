@@ -1194,6 +1194,7 @@ main() {
     exit 2
   fi
   cd "$repo_root"
+  prepare_tool_cache_env || exit 5
 
   if [ "$JSON_OUTPUT" -eq 1 ]; then
     exec 3>&1

@@ -435,8 +435,6 @@ run_gito_review() {
   fi
 
   load_gito_pack_env
-  prepare_gito_uv_env
-
   local base_ref
   base_ref="$(full_check_gito_base_ref)"
   local out_dir="${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR:-.build/review/gito}"
@@ -1022,6 +1020,7 @@ run_review_preflight() {
 }
 
 main() {
+  prepare_tool_cache_env || exit 5
   section "SD AI command pack full check"
   git status -sb
   warn_unarmed_pack_source_hook

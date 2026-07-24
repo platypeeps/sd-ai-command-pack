@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -14,6 +13,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+sys.dont_write_bytecode = True
+
+# This import must follow the bytecode guard for direct entrypoint invocation.
+from sd_ai_command_pack_lib import CacheSetupError, build_tool_environment  # noqa: E402
 
 SCHEMA_VERSION = 1
 TOOL_VERSION = "1.1.0"
@@ -62,10 +66,12 @@ Runner = Callable[[Sequence[str], Path, int], CommandResult]
 
 def run_command(argv: Sequence[str], cwd: Path, timeout: int) -> CommandResult:
     try:
+        environment, _, _ = build_tool_environment(repo=cwd)
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
         result = subprocess.run(
             list(argv),
             cwd=cwd,
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            env=environment,
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -75,6 +81,9 @@ def run_command(argv: Sequence[str], cwd: Path, timeout: int) -> CommandResult:
             timeout=timeout,
         )
         return CommandResult(result.returncode, result.stdout)
+    except CacheSetupError as error:
+        print(f"eligibility cache setup failed: {error}", file=sys.stderr)
+        return CommandResult(127, "")
     except (OSError, UnicodeError, subprocess.TimeoutExpired):
         return CommandResult(127, "")
 

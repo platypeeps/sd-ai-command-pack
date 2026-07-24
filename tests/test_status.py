@@ -54,6 +54,7 @@ class StatusTests(InstallTestCase):
         for name in (
             "sd-ai-command-pack-status.py",
             "sd-ai-command-pack-work-loop.py",
+            "sd_ai_command_pack_lib.py",
             "sd_ai_command_pack_fleet_lib.py",
         ):
             shutil.copyfile(PACK_ROOT / "templates/scripts" / name, scripts / name)

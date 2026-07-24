@@ -31,6 +31,7 @@ class ReviewFullCheckTests(InstallTestCase):
         for name in (
             "sd-ai-command-pack-review-full-check.sh",
             "sd-ai-command-pack-toolchain.sh",
+            "sd_ai_command_pack_lib.py",
         ):
             shutil.copy2(install.ROOT / f"templates/scripts/{name}", scripts_dir / name)
 

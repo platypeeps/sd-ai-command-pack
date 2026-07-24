@@ -19,6 +19,11 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
+sys.dont_write_bytecode = True
+
+# This import must follow the bytecode guard for direct entrypoint invocation.
+from sd_ai_command_pack_lib import CacheSetupError, build_tool_environment  # noqa: E402
+
 SCHEMA_VERSION = 1
 MAX_LEDGER_BYTES = 64 * 1024
 MAX_HISTORY = 20
@@ -146,8 +151,10 @@ def compact_text(value: object, *, limit: int = 300) -> str:
 
 def run_git(repo: Path, *args: str) -> str | None:
     try:
+        environment, _, _ = build_tool_environment(repo=repo)
         result = subprocess.run(
             ["git", "-C", str(repo), *args],
+            env=environment,
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -156,7 +163,7 @@ def run_git(repo: Path, *args: str) -> str | None:
             errors="strict",
             timeout=20,
         )
-    except (OSError, UnicodeError, subprocess.TimeoutExpired):
+    except (CacheSetupError, OSError, UnicodeError, subprocess.TimeoutExpired):
         return None
     return result.stdout.strip() if result.returncode == 0 else None
 

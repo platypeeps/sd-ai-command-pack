@@ -58,7 +58,10 @@ of re-deriving the repository inventory.
 - Inspect caching configuration and matrix definitions for redundant or
   missing entries; prefer reading config over executing long builds.
 - When `gh` is available, read recent run history (`gh run list`) for
-  rerun patterns and chronically failing jobs.
+  rerun patterns and chronically failing jobs. Execute it through
+  `bash scripts/sd-ai-command-pack-toolchain.sh run -- gh ...`; a missing or
+  failed cache wrapper makes this optional probe unavailable and is not
+  permission to retry bare or redirect `GH_CONFIG_DIR`.
 - Exercise the repo's own targets and scripts read-only (`make -n <target>`,
   `--help`) to verify the machinery resolves and starts.
 
