@@ -75,6 +75,14 @@ class ToolchainPreflightTests(InstallTestCase):
             check=False,
         )
 
+    def test_script_directory_resolution_fails_closed(self) -> None:
+        script = self.script.read_text(encoding="utf-8")
+        guard = 'if ! SCRIPT_DIR="$(cd -- "$SCRIPT_DIR" 2>/dev/null && pwd -P)"; then'
+
+        self.assertIn(guard, script)
+        self.assertIn('fail "cannot resolve toolchain directory" 5', script)
+        self.assertLess(script.index("fail() {"), script.index(guard))
+
     def test_explicit_python_override_and_required_module(self) -> None:
         root = self._repo()
         wrapper = self._python_wrapper(root / "custom-python")

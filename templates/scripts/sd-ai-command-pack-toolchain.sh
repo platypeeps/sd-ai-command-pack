@@ -17,16 +17,18 @@ EOF
   exit 2
 }
 
-case "${BASH_SOURCE[0]}" in
-  */*) SCRIPT_DIR="${BASH_SOURCE[0]%/*}" ;;
-  *) SCRIPT_DIR="." ;;
-esac
-SCRIPT_DIR="$(cd -- "$SCRIPT_DIR" && pwd -P)"
-
 fail() {
   printf 'sd-ai-command-pack toolchain: %s\n' "$1" >&2
   exit "${2:-1}"
 }
+
+case "${BASH_SOURCE[0]}" in
+  */*) SCRIPT_DIR="${BASH_SOURCE[0]%/*}" ;;
+  *) SCRIPT_DIR="." ;;
+esac
+if ! SCRIPT_DIR="$(cd -- "$SCRIPT_DIR" 2>/dev/null && pwd -P)"; then
+  fail "cannot resolve toolchain directory" 5
+fi
 
 repo_root() {
   if [ -n "${SD_AI_COMMAND_PACK_REPO_ROOT:-}" ]; then
