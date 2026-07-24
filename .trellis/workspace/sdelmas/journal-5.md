@@ -456,3 +456,36 @@ Added typed housekeeping results and flat update-spec references, validated acro
 ### Next Steps
 
 - None - task complete
+
+
+## Session 213: Label future-triggered tasks as parked
+
+**Date**: 2026-07-23
+**Task**: Label future-triggered tasks as parked
+**Branch**: `main`
+
+### Summary
+
+Renamed seven explicitly selected future-triggered Trellis tasks with a PARKED prefix in task metadata and PRD headings, left routed review integration unchanged, and validated the metadata-only batch with review preflight and make check.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f44c7ab` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
