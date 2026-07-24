@@ -711,3 +711,41 @@ Implemented final PR-head verification in eligibility results, published and rev
 ### Next Steps
 
 - None - task complete
+
+
+## Session 220: Harden audit read-only methods
+
+**Date**: 2026-07-24
+**Task**: Harden audit read-only methods
+**Branch**: `codex/harden-audit-read-only-methods`
+
+### Summary
+
+Made audit evidence collection static-only and added a delimiter-safe committed-tree inventory helper.
+
+### Main Changes
+
+- Removed execution-shaped audit charter methods and documented the static-only contract.
+- Added and shipped the NUL-safe Git tree inventory helper with hostile-filename and failure-boundary tests.
+- Bumped the pack to 0.45.0, refreshed generated mirrors, and validated the full consumer fleet.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7c78840ccfb73c4d0978cef588ffe8aea105b2c2` | feat: harden audit read-only methods |
+
+### Testing
+
+- [OK] make check
+- [OK] fleet candidate validation: 8 consumers passed
+- [OK] Copilot reviewed 25 files with no comments; zero unresolved threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
