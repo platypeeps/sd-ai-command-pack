@@ -165,7 +165,7 @@ prepare_tool_cache_env() {
     */*) lib_dir="${lib_source%/*}" ;;
     *) lib_dir="." ;;
   esac
-  if ! lib_dir="$(cd -- "$lib_dir" && pwd -P)"; then
+  if ! lib_dir="$(cd -- "$lib_dir" 2>/dev/null && pwd -P)"; then
     warn "cache setup failed: cannot resolve the shared shell-library directory"
     return 1
   fi

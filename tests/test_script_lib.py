@@ -225,6 +225,9 @@ class ScriptLibTests(InstallTestCase):
             install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh"
         ).read_text(encoding="utf-8")
         self.assertIn("prepare_tool_cache_env()", shell_lib)
+        self.assertIn(
+            'lib_dir="$(cd -- "$lib_dir" 2>/dev/null && pwd -P)"', shell_lib
+        )
         self.assertNotIn("prepare_gito_uv_env", shell_lib)
         self.assertNotIn("SD_AI_COMMAND_PACK_REVIEW_LOCAL_UV_", shell_lib)
 
