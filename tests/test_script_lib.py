@@ -86,6 +86,23 @@ class ScriptLibTests(InstallTestCase):
         self.assertEqual(namespace.parent, cache_root.resolve())
         self.assertEqual(environment["GH_CONFIG_DIR"], "/existing/gh-config")
 
+    def test_tool_environment_reuses_generated_xdg_namespace(self) -> None:
+        lib = self.load_lib()
+        repo, cache_root = self.cache_fixture()
+        environment, _, namespace = lib.build_tool_environment(
+            repo=repo,
+            environ={"TMPDIR": str(cache_root)},
+        )
+
+        second_environment, _, second_namespace = lib.build_tool_environment(
+            repo=repo,
+            environ=environment,
+        )
+
+        self.assertEqual(second_namespace, namespace)
+        self.assertEqual(second_environment["XDG_CACHE_HOME"], environment["XDG_CACHE_HOME"])
+        self.assertEqual(namespace.parent, cache_root.resolve())
+
     def test_tool_environment_preserves_valid_individual_cache_override(self) -> None:
         lib = self.load_lib()
         repo, cache_root = self.cache_fixture()

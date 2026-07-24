@@ -169,6 +169,8 @@ def _prepare_namespace(base: Path, *, repo: Path, source: str) -> Path:
 
 def _cache_root_candidates(
     environment: Mapping[str, str],
+    *,
+    repo: Path,
 ) -> tuple[tuple[Path, str, bool], ...]:
     explicit_root = environment.get(CACHE_ROOT_ENV, "")
     if explicit_root:
@@ -186,6 +188,11 @@ def _cache_root_candidates(
         except CacheSetupError:
             pass
         else:
+            namespace_name = _cache_namespace_name(repo)
+            if xdg_path.name == CACHE_DIRECTORY_NAMES["XDG_CACHE_HOME"]:
+                inherited_namespace = xdg_path.parent
+                if inherited_namespace.name == namespace_name:
+                    xdg_path = inherited_namespace.parent
             candidates.append((xdg_path, "inherited XDG cache root", False))
 
     temp_values = [
@@ -230,7 +237,7 @@ def build_tool_environment(
 
     namespace: Path | None = None
     failures: list[str] = []
-    candidates = _cache_root_candidates(environment)
+    candidates = _cache_root_candidates(environment, repo=repository)
     for base, source, required in candidates:
         try:
             namespace = _prepare_namespace(base, repo=repository, source=source)
