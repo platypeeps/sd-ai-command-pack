@@ -418,3 +418,41 @@ Consolidated design-first execution into sd-work-backlog, added typed recovery r
 ### Next Steps
 
 - None - task complete
+
+
+## Session 212: Structure skill runtime contracts
+
+**Date**: 2026-07-23
+**Task**: Structure skill runtime contracts
+**Branch**: `codex/structure-skill-runtime-contracts`
+
+### Summary
+
+Added typed housekeeping results and flat update-spec references, validated across the full consumer fleet.
+
+### Main Changes
+
+- Added schema-versioned housekeeping JSON that composes exact-head eligibility and delegated status evidence.
+- Moved optional update-spec architecture, repository-map, and Obsidian guidance into direct non-chaining references.
+- Released pack version 0.40.0 with generated mirrors, docs, specs, tests, and fresh fleet evidence.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `360e5b816179499e19b856e326d15edeb71bc819` | feat: structure skill runtime contracts |
+
+### Testing
+
+- [OK] make check
+- [OK] all 8 configured fleet candidates passed
+- [OK] PR 241 CI and Copilot review completed with zero unresolved threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
