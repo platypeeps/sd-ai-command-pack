@@ -40,13 +40,13 @@ Output shape:
 
 ```json
 {
-  "schema_version": 1,
+  "schemaVersion": 1,
   "mode": "bookkeeping",
   "reason": "verified_bookkeeping_successor",
-  "before_sha": "<40-char sha>",
-  "after_sha": "<40-char sha>",
-  "evidence_run_id": 123456,
-  "evidence_scope": "pull_request:243"
+  "beforeSha": "<40-char sha>",
+  "afterSha": "<40-char sha>",
+  "evidenceRunId": 123456,
+  "evidenceScope": "pull_request:243"
 }
 ```
 

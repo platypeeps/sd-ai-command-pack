@@ -49,14 +49,14 @@ resumed invocation cannot accidentally duplicate provider or remote calls.
 
 ```json
 {
-  "schema_version": 1,
+  "schemaVersion": 1,
   "scope": "branch_delta",
-  "risk_class": "substantive",
-  "risk_reasons": ["source", "state_contract"],
+  "riskClass": "substantive",
+  "riskReasons": ["source", "state_contract"],
   "providers": ["prism", "gito"],
   "execution": "parallel",
-  "policy_id": "default-pr-first-head",
-  "configuration_digest": "..."
+  "policyId": "default-pr-first-head",
+  "configurationDigest": "..."
 }
 ```
 
