@@ -19,10 +19,10 @@ Make Prism and Gito part of the normal PR lifecycle through a policy-routed, par
 - The parent unified-review task already requires the ordered lifecycle
   `sd-check -> local review -> disposition -> remote routing`, exact-scope
   receipts, and bookkeeping-successor handling.
-- The parent routed-review requirement currently defines `local=auto` as one
-  lowest-cost provider. That rule does not implement the accepted recommendation
-  to front-load complementary Prism and Gito coverage on the first substantive
-  PR head.
+- Before this planning update, the parent routed-review requirement defined
+  `local=auto` as one lowest-cost provider. This planning batch reconciles the
+  parent PRD/design to the accepted provider-plan contract, including concurrent
+  Prism and Gito coverage on the first substantive PR head.
 - The review-convergence evidence records PR #237 requiring 22 remote-review
   rounds and 23 PR CI executions. The repeated findings were family-level
   boundary and state-machine concerns that should be searched for in one local

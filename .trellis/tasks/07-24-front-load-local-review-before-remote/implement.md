@@ -2,8 +2,9 @@
 
 ## Preconditions
 
-- [ ] Reconcile the parent routed-review PRD/design so `local=auto` returns a
-  policy-selected provider set rather than exactly one provider.
+- [x] The parent routed-review PRD/design now defines `local=auto` as a
+  policy-selected provider set rather than exactly one provider; reverify that
+  contract remains aligned before implementation starts.
 - [ ] Confirm `07-24-implement-read-only-sd-check` has published the typed
   deterministic result consumed by the controller.
 - [ ] Confirm the external router capability/receipt contract used by the

@@ -141,9 +141,10 @@ evidence and possible adapter code to extract, not a compatibility boundary.
 Legacy commands, environment variables, and helpers are removed by the
 retirement child after all callers use the new controller.
 
-The parent requirements that currently define `local=auto` as exactly one
-provider must be reconciled to the provider-plan contract before this task can
-start implementation.
+The parent PRD/design are reconciled in the same planning batch to define
+`local=auto` as a provider plan rather than exactly one provider. Before this
+task starts implementation, confirm that those parent requirements still match
+this design instead of reopening the settled product decision.
 
 ## Operational And Rollback Considerations
 
