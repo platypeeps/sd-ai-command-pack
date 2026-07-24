@@ -55,7 +55,12 @@ Verified the detached legacy checkout was clean and unused, confirmed its commit
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Added a shared Python environment builder and shell/toolchain adapters for
+  private per-user/per-repository XDG, Python, uv, pip, Ruff, and npm caches.
+- Migrated review, GitHub observation, status, fleet, full-check, and
+  housekeeping owners while preserving GitHub authentication configuration.
+- Added regression coverage, documented the cache contract, and published the
+  synchronized 0.45.0 pack payload and fleet candidate ledger.
 
 ### Git Commits
 
@@ -63,7 +68,11 @@ Verified the detached legacy checkout was clean and unused, confirmed its commit
 
 ### Testing
 
-- Validation was not recorded for this session.
+- `make check`
+- Candidate install, audit, preparation, and compatibility checks across all
+  eight configured consumer repositories
+- `make generate`, `make sync`, candidate-ledger validation, Obsidian KB
+  freshness validation, and final pack full-check
 
 ### Status
 
@@ -703,6 +712,39 @@ Implemented final PR-head verification in eligibility results, published and rev
 - [OK] all eight fleet candidates and the current ledger
 - [OK] deterministic PR full-check and GitHub CI
 - [OK] exact-head Copilot review with zero unresolved threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 220: Standardize sandbox-safe tool cache routing
+
+**Date**: 2026-07-24
+**Task**: Standardize sandbox-safe tool cache routing
+**Branch**: `codex/standardize-sandbox-safe-tool-cache-routing`
+
+### Summary
+
+Added one validated external cache environment for pack-owned Python and shell tool execution, migrated review, status, fleet, CI, and housekeeping owners, documented the authentication boundary and retention policy, expanded regression coverage, and validated release 0.45.0 across the full consumer fleet.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4020df8cd7e538199b086de730495de39d23b1b8` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
 
 ### Status
 
