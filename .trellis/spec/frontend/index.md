@@ -12,7 +12,6 @@ Use these specs when changing files under `templates/`, especially:
 - `templates/.agents/skills/sd-full-check/SKILL.md`
 - `templates/.agents/skills/sd-housekeeping/SKILL.md`
 - `templates/.agents/skills/sd-work-backlog/SKILL.md`
-- `templates/.agents/skills/sd-work-designs/SKILL.md`
 - `templates/.agents/skills/sd-start/SKILL.md`
 - `templates/.agents/skills/sd-continue/SKILL.md`
 - `templates/.agents/skills/sd-finish-work/SKILL.md`
@@ -25,7 +24,6 @@ Use these specs when changing files under `templates/`, especially:
 - `templates/.claude/commands/sd/full-check.md`
 - `templates/.claude/commands/sd/housekeeping.md`
 - `templates/.claude/commands/sd/work-backlog.md`
-- `templates/.claude/commands/sd/work-designs.md`
 - `templates/.claude/commands/sd/review-pr.md`
 - `templates/.claude/commands/sd/update-spec.md`
 - `templates/.commands/sd-start.md`
@@ -34,7 +32,6 @@ Use these specs when changing files under `templates/`, especially:
 - `templates/.commands/sd-full-check.md`
 - `templates/.commands/sd-housekeeping.md`
 - `templates/.commands/sd-work-backlog.md`
-- `templates/.commands/sd-work-designs.md`
 - `templates/.commands/sd-review-pr.md`
 - `templates/.commands/sd-update-spec.md`
 - `templates/.gemini/commands/sd/start.toml`
@@ -43,7 +40,6 @@ Use these specs when changing files under `templates/`, especially:
 - `templates/.gemini/commands/sd/full-check.toml`
 - `templates/.gemini/commands/sd/housekeeping.toml`
 - `templates/.gemini/commands/sd/work-backlog.toml`
-- `templates/.gemini/commands/sd/work-designs.toml`
 - `templates/.gemini/commands/sd/review-pr.toml`
 - `templates/.gemini/commands/sd/update-spec.toml`
 - `templates/.github/prompts/sd-start.prompt.md`
@@ -52,7 +48,6 @@ Use these specs when changing files under `templates/`, especially:
 - `templates/.github/prompts/sd-full-check.prompt.md`
 - `templates/.github/prompts/sd-housekeeping.prompt.md`
 - `templates/.github/prompts/sd-work-backlog.prompt.md`
-- `templates/.github/prompts/sd-work-designs.prompt.md`
 - `templates/.github/prompts/sd-review-pr.prompt.md`
 - `templates/.github/prompts/sd-update-spec.prompt.md`
 

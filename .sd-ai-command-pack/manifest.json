@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "sd-ai-command-pack",
-  "version": "0.38.0",
+  "version": "0.39.0",
   "license": "MIT",
   "description": "Install project-local SD AI command workflows, Prism/Gito defaults, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
@@ -1829,176 +1829,309 @@
     {
       "platform": "shared",
       "kind": "skill",
-      "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
-      "target": ".agents/skills/sd-work-designs/SKILL.md",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ledger-recovery.md",
+      "target": ".agents/skills/sd-work-backlog/references/ledger-recovery.md",
       "install": "always"
     },
     {
-      "platform": "claude",
-      "kind": "command",
-      "source": "templates/.claude/commands/sd/work-designs.md",
-      "target": ".claude/commands/sd/work-designs.md",
-      "anchor": ".claude"
-    },
-    {
-      "platform": "cursor",
-      "kind": "command",
-      "source": "templates/.commands/sd-work-designs.md",
-      "target": ".cursor/commands/sd-work-designs.md",
-      "anchor": ".cursor"
-    },
-    {
-      "platform": "gemini",
-      "kind": "command",
-      "source": "templates/.gemini/commands/sd/work-designs.toml",
-      "target": ".gemini/commands/sd/work-designs.toml",
-      "anchor": ".gemini"
-    },
-    {
-      "platform": "github",
-      "kind": "prompt",
-      "source": "templates/.github/prompts/sd-work-designs.prompt.md",
-      "target": ".github/prompts/sd-work-designs.prompt.md",
-      "anchor": ".github"
-    },
-    {
-      "platform": "opencode",
-      "kind": "command",
-      "source": "templates/.commands/sd-work-designs.md",
-      "target": ".opencode/commands/sd-work-designs.md",
-      "anchor": ".opencode"
-    },
-    {
-      "platform": "antigravity",
-      "kind": "workflow",
-      "source": "templates/.commands/sd-work-designs.md",
-      "target": ".agent/workflows/sd-work-designs.md",
-      "anchor": ".agent"
-    },
-    {
-      "platform": "codebuddy",
-      "kind": "command",
-      "source": "templates/.commands/sd-work-designs.md",
-      "target": ".codebuddy/commands/sd/work-designs.md",
-      "anchor": ".codebuddy"
-    },
-    {
-      "platform": "devin",
-      "kind": "workflow",
-      "source": "templates/.commands/sd-work-designs.md",
-      "target": ".devin/workflows/sd-work-designs.md",
-      "anchor": ".devin"
-    },
-    {
-      "platform": "droid",
-      "kind": "command",
-      "source": "templates/.commands/sd-work-designs.md",
-      "target": ".factory/commands/sd/work-designs.md",
-      "anchor": ".factory"
-    },
-    {
-      "platform": "kilo",
-      "kind": "workflow",
-      "source": "templates/.commands/sd-work-designs.md",
-      "target": ".kilocode/workflows/sd-work-designs.md",
-      "anchor": ".kilocode"
-    },
-    {
-      "platform": "pi",
-      "kind": "prompt",
-      "source": "templates/.commands/sd-work-designs.md",
-      "target": ".pi/prompts/sd-work-designs.md",
-      "anchor": ".pi"
-    },
-    {
-      "platform": "qoder",
-      "kind": "command",
-      "source": "templates/.commands/sd-work-designs.md",
-      "target": ".qoder/commands/sd-work-designs.md",
-      "anchor": ".qoder"
-    },
-    {
-      "platform": "trae",
-      "kind": "command",
-      "source": "templates/.commands/sd-work-designs.md",
-      "target": ".trae/commands/sd-work-designs.md",
-      "anchor": ".trae"
-    },
-    {
-      "platform": "zcode",
-      "kind": "command",
-      "source": "templates/.commands/sd-work-designs.md",
-      "target": ".zcode/commands/sd/work-designs.md",
-      "anchor": ".zcode"
-    },
-    {
       "platform": "antigravity",
       "kind": "skill",
-      "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
-      "target": ".agent/skills/sd-work-designs/SKILL.md",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ledger-recovery.md",
+      "target": ".agent/skills/sd-work-backlog/references/ledger-recovery.md",
       "anchor": ".agent"
     },
     {
       "platform": "codebuddy",
       "kind": "skill",
-      "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
-      "target": ".codebuddy/skills/sd-work-designs/SKILL.md",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ledger-recovery.md",
+      "target": ".codebuddy/skills/sd-work-backlog/references/ledger-recovery.md",
       "anchor": ".codebuddy"
     },
     {
       "platform": "devin",
       "kind": "skill",
-      "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
-      "target": ".devin/skills/sd-work-designs/SKILL.md",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ledger-recovery.md",
+      "target": ".devin/skills/sd-work-backlog/references/ledger-recovery.md",
       "anchor": ".devin"
     },
     {
       "platform": "droid",
       "kind": "skill",
-      "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
-      "target": ".factory/skills/sd-work-designs/SKILL.md",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ledger-recovery.md",
+      "target": ".factory/skills/sd-work-backlog/references/ledger-recovery.md",
       "anchor": ".factory"
     },
     {
       "platform": "kilo",
       "kind": "skill",
-      "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
-      "target": ".kilocode/skills/sd-work-designs/SKILL.md",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ledger-recovery.md",
+      "target": ".kilocode/skills/sd-work-backlog/references/ledger-recovery.md",
       "anchor": ".kilocode"
     },
     {
       "platform": "kiro",
       "kind": "skill",
-      "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
-      "target": ".kiro/skills/sd-work-designs/SKILL.md",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ledger-recovery.md",
+      "target": ".kiro/skills/sd-work-backlog/references/ledger-recovery.md",
       "anchor": ".kiro"
     },
     {
       "platform": "pi",
       "kind": "skill",
-      "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
-      "target": ".pi/skills/sd-work-designs/SKILL.md",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ledger-recovery.md",
+      "target": ".pi/skills/sd-work-backlog/references/ledger-recovery.md",
       "anchor": ".pi"
     },
     {
       "platform": "qoder",
       "kind": "skill",
-      "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
-      "target": ".qoder/skills/sd-work-designs/SKILL.md",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ledger-recovery.md",
+      "target": ".qoder/skills/sd-work-backlog/references/ledger-recovery.md",
       "anchor": ".qoder"
     },
     {
       "platform": "reasonix",
       "kind": "skill",
-      "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
-      "target": ".reasonix/skills/sd-work-designs/SKILL.md",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ledger-recovery.md",
+      "target": ".reasonix/skills/sd-work-backlog/references/ledger-recovery.md",
       "anchor": ".reasonix"
     },
     {
       "platform": "trae",
       "kind": "skill",
-      "source": "templates/.agents/skills/sd-work-designs/SKILL.md",
-      "target": ".trae/skills/sd-work-designs/SKILL.md",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ledger-recovery.md",
+      "target": ".trae/skills/sd-work-backlog/references/ledger-recovery.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ownership-recovery.md",
+      "target": ".agents/skills/sd-work-backlog/references/ownership-recovery.md",
+      "install": "always"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ownership-recovery.md",
+      "target": ".agent/skills/sd-work-backlog/references/ownership-recovery.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ownership-recovery.md",
+      "target": ".codebuddy/skills/sd-work-backlog/references/ownership-recovery.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ownership-recovery.md",
+      "target": ".devin/skills/sd-work-backlog/references/ownership-recovery.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ownership-recovery.md",
+      "target": ".factory/skills/sd-work-backlog/references/ownership-recovery.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ownership-recovery.md",
+      "target": ".kilocode/skills/sd-work-backlog/references/ownership-recovery.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ownership-recovery.md",
+      "target": ".kiro/skills/sd-work-backlog/references/ownership-recovery.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ownership-recovery.md",
+      "target": ".pi/skills/sd-work-backlog/references/ownership-recovery.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ownership-recovery.md",
+      "target": ".qoder/skills/sd-work-backlog/references/ownership-recovery.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ownership-recovery.md",
+      "target": ".reasonix/skills/sd-work-backlog/references/ownership-recovery.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ownership-recovery.md",
+      "target": ".trae/skills/sd-work-backlog/references/ownership-recovery.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/run-recovery.md",
+      "target": ".agents/skills/sd-work-backlog/references/run-recovery.md",
+      "install": "always"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/run-recovery.md",
+      "target": ".agent/skills/sd-work-backlog/references/run-recovery.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/run-recovery.md",
+      "target": ".codebuddy/skills/sd-work-backlog/references/run-recovery.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/run-recovery.md",
+      "target": ".devin/skills/sd-work-backlog/references/run-recovery.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/run-recovery.md",
+      "target": ".factory/skills/sd-work-backlog/references/run-recovery.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/run-recovery.md",
+      "target": ".kilocode/skills/sd-work-backlog/references/run-recovery.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/run-recovery.md",
+      "target": ".kiro/skills/sd-work-backlog/references/run-recovery.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/run-recovery.md",
+      "target": ".pi/skills/sd-work-backlog/references/run-recovery.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/run-recovery.md",
+      "target": ".qoder/skills/sd-work-backlog/references/run-recovery.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/run-recovery.md",
+      "target": ".reasonix/skills/sd-work-backlog/references/run-recovery.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/run-recovery.md",
+      "target": ".trae/skills/sd-work-backlog/references/run-recovery.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "target": ".agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "install": "always"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "target": ".agent/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "target": ".codebuddy/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "target": ".devin/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "target": ".factory/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "target": ".kilocode/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "target": ".kiro/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "target": ".pi/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "target": ".qoder/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "target": ".reasonix/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "target": ".trae/skills/sd-work-backlog/references/terminal-reconciliation.md",
       "anchor": ".trae"
     },
     {

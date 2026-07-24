@@ -75,7 +75,9 @@ def strip_js_comments(content: str) -> str:
     )
 
 
-def collect_js_from_specifier(lines: list[str], index: int, *, stop_at_brace: bool) -> tuple[str | None, int]:
+def collect_js_from_specifier(
+    lines: list[str], index: int, *, stop_at_brace: bool
+) -> tuple[str | None, int]:
     statement = lines[index]
     from_match = re.search(r'\bfrom\s+["\']([^"\']+)["\']', statement)
     while from_match is None and index + 1 < len(lines):
@@ -234,7 +236,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-review-pr/SKILL.md",
                 ".agents/skills/sd-create-pr/SKILL.md",
                 ".agents/skills/sd-work-backlog/SKILL.md",
-                ".agents/skills/sd-work-designs/SKILL.md",
                 ".agents/skills/sd-audit-repo/SKILL.md",
                 ".agents/skills/sd-watch-pr/SKILL.md",
                 ".agents/skills/sd-ship/SKILL.md",
@@ -286,7 +287,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".gemini/commands/sd/finish-work.toml",
                 ".gemini/commands/sd/create-pr.toml",
                 ".gemini/commands/sd/work-backlog.toml",
-                ".gemini/commands/sd/work-designs.toml",
                 ".gemini/commands/sd/audit-repo.toml",
                 ".gemini/commands/sd/watch-pr.toml",
                 ".gemini/commands/sd/ship.toml",
@@ -305,7 +305,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".github/prompts/sd-finish-work.prompt.md",
                 ".github/prompts/sd-create-pr.prompt.md",
                 ".github/prompts/sd-work-backlog.prompt.md",
-                ".github/prompts/sd-work-designs.prompt.md",
                 ".github/prompts/sd-audit-repo.prompt.md",
                 ".github/prompts/sd-watch-pr.prompt.md",
                 ".github/prompts/sd-ship.prompt.md",
@@ -334,7 +333,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".cursor/commands/sd-finish-work.md",
                 ".cursor/commands/sd-create-pr.md",
                 ".cursor/commands/sd-work-backlog.md",
-                ".cursor/commands/sd-work-designs.md",
                 ".cursor/commands/sd-audit-repo.md",
                 ".cursor/commands/sd-watch-pr.md",
                 ".cursor/commands/sd-ship.md",
@@ -358,7 +356,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".claude/commands/sd/finish-work.md",
                 ".claude/commands/sd/create-pr.md",
                 ".claude/commands/sd/work-backlog.md",
-                ".claude/commands/sd/work-designs.md",
                 ".claude/commands/sd/audit-repo.md",
                 ".claude/commands/sd/watch-pr.md",
                 ".claude/commands/sd/ship.md",
@@ -378,7 +375,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".opencode/commands/sd-finish-work.md",
                 ".opencode/commands/sd-create-pr.md",
                 ".opencode/commands/sd-work-backlog.md",
-                ".opencode/commands/sd-work-designs.md",
                 ".opencode/commands/sd-audit-repo.md",
                 ".opencode/commands/sd-watch-pr.md",
                 ".opencode/commands/sd-ship.md",
@@ -408,7 +404,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".kiro/skills/sd-review-pr/SKILL.md",
                 ".kiro/skills/sd-create-pr/SKILL.md",
                 ".kiro/skills/sd-work-backlog/SKILL.md",
-                ".kiro/skills/sd-work-designs/SKILL.md",
                 ".kiro/skills/sd-audit-repo/SKILL.md",
                 ".kiro/skills/sd-watch-pr/SKILL.md",
                 ".kiro/skills/sd-ship/SKILL.md",
@@ -419,7 +414,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".reasonix/skills/sd-review-pr/SKILL.md",
                 ".reasonix/skills/sd-create-pr/SKILL.md",
                 ".reasonix/skills/sd-work-backlog/SKILL.md",
-                ".reasonix/skills/sd-work-designs/SKILL.md",
                 ".reasonix/skills/sd-audit-repo/SKILL.md",
                 ".reasonix/skills/sd-watch-pr/SKILL.md",
                 ".reasonix/skills/sd-ship/SKILL.md",
@@ -430,7 +424,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".trae/commands/sd-review-pr.md",
                 ".trae/commands/sd-create-pr.md",
                 ".trae/commands/sd-work-backlog.md",
-                ".trae/commands/sd-work-designs.md",
                 ".trae/commands/sd-audit-repo.md",
                 ".trae/commands/sd-watch-pr.md",
                 ".trae/commands/sd-ship.md",
@@ -441,7 +434,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".trae/skills/sd-review-pr/SKILL.md",
                 ".trae/skills/sd-create-pr/SKILL.md",
                 ".trae/skills/sd-work-backlog/SKILL.md",
-                ".trae/skills/sd-work-designs/SKILL.md",
                 ".trae/skills/sd-audit-repo/SKILL.md",
                 ".trae/skills/sd-watch-pr/SKILL.md",
                 ".trae/skills/sd-ship/SKILL.md",
@@ -452,7 +444,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".zcode/commands/sd/review-pr.md",
                 ".zcode/commands/sd/create-pr.md",
                 ".zcode/commands/sd/work-backlog.md",
-                ".zcode/commands/sd/work-designs.md",
                 ".zcode/commands/sd/audit-repo.md",
                 ".zcode/commands/sd/watch-pr.md",
                 ".zcode/commands/sd/ship.md",
@@ -477,7 +468,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-start/SKILL.md",
                 ".agents/skills/sd-create-pr/SKILL.md",
                 ".agents/skills/sd-work-backlog/SKILL.md",
-                ".agents/skills/sd-work-designs/SKILL.md",
                 ".agents/skills/sd-audit-repo/SKILL.md",
                 ".agents/skills/sd-watch-pr/SKILL.md",
                 ".agents/skills/sd-ship/SKILL.md",
@@ -517,7 +507,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".claude/commands/sd/finish-work.md",
                 ".claude/commands/sd/create-pr.md",
                 ".claude/commands/sd/work-backlog.md",
-                ".claude/commands/sd/work-designs.md",
                 ".claude/commands/sd/audit-repo.md",
                 ".claude/commands/sd/watch-pr.md",
                 ".claude/commands/sd/ship.md",
@@ -536,7 +525,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".cursor/commands/sd-finish-work.md",
                 ".cursor/commands/sd-create-pr.md",
                 ".cursor/commands/sd-work-backlog.md",
-                ".cursor/commands/sd-work-designs.md",
                 ".cursor/commands/sd-audit-repo.md",
                 ".cursor/commands/sd-watch-pr.md",
                 ".cursor/commands/sd-ship.md",
@@ -555,7 +543,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".gemini/commands/sd/finish-work.toml",
                 ".gemini/commands/sd/create-pr.toml",
                 ".gemini/commands/sd/work-backlog.toml",
-                ".gemini/commands/sd/work-designs.toml",
                 ".gemini/commands/sd/audit-repo.toml",
                 ".gemini/commands/sd/watch-pr.toml",
                 ".gemini/commands/sd/ship.toml",
@@ -574,7 +561,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".github/prompts/sd-finish-work.prompt.md",
                 ".github/prompts/sd-create-pr.prompt.md",
                 ".github/prompts/sd-work-backlog.prompt.md",
-                ".github/prompts/sd-work-designs.prompt.md",
                 ".github/prompts/sd-audit-repo.prompt.md",
                 ".github/prompts/sd-watch-pr.prompt.md",
                 ".github/prompts/sd-ship.prompt.md",
@@ -603,7 +589,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".opencode/commands/sd-finish-work.md",
                 ".opencode/commands/sd-create-pr.md",
                 ".opencode/commands/sd-work-backlog.md",
-                ".opencode/commands/sd-work-designs.md",
                 ".opencode/commands/sd-audit-repo.md",
                 ".opencode/commands/sd-watch-pr.md",
                 ".opencode/commands/sd-ship.md",
@@ -632,7 +617,6 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-review-pr/SKILL.md",
                 ".agents/skills/sd-create-pr/SKILL.md",
                 ".agents/skills/sd-work-backlog/SKILL.md",
-                ".agents/skills/sd-work-designs/SKILL.md",
                 ".agents/skills/sd-audit-repo/SKILL.md",
                 ".agents/skills/sd-watch-pr/SKILL.md",
                 ".agents/skills/sd-ship/SKILL.md",
@@ -718,22 +702,6 @@ class GeneratedParityTests(InstallTestCase):
                     "one task per iteration",
                     "sd-ship",
                     "nested housekeeping report",
-                ],
-                [],
-            ),
-            (
-                [
-                    root / ".claude/commands/sd/work-designs.md",
-                    root / ".cursor/commands/sd-work-designs.md",
-                    root / ".gemini/commands/sd/work-designs.toml",
-                    root / ".github/prompts/sd-work-designs.prompt.md",
-                    root / ".opencode/commands/sd-work-designs.md",
-                ],
-                [
-                    "Resolve the `sd-work-designs` skill by name",
-                    "design.md",
-                    "implement.md",
-                    "numbered list",
                 ],
                 [],
             ),
@@ -938,14 +906,15 @@ class GeneratedParityTests(InstallTestCase):
         self.assertIn("Quick links:", readme)
         self.assertIn("[Overview](#overview)", readme)
         self.assertIn("[Commands](#commands)", readme)
-        self.assertIn("[Configuration Quick Reference](#configuration-quick-reference)", readme)
+        self.assertIn(
+            "[Configuration Quick Reference](#configuration-quick-reference)", readme
+        )
         self.assertIn("[Install](#install)", readme)
         for command_heading in (
             "### sd-help",
             "### sd-start",
             "### sd-create-pr",
             "### sd-work-backlog",
-            "### sd-work-designs",
             "### sd-audit-repo",
             "### sd-watch-pr",
             "### sd-ship",
@@ -984,12 +953,10 @@ class GeneratedParityTests(InstallTestCase):
             self.assertIn(expected, readme)
 
     def test_coverage_dependency_is_declared_and_used_by_ci(self) -> None:
-        requirements = (PACK_ROOT / "requirements-dev.txt").read_text(
+        requirements = (PACK_ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+        workflow = (PACK_ROOT / ".github/workflows/tests.yml").read_text(
             encoding="utf-8"
         )
-        workflow = (
-            PACK_ROOT / ".github/workflows/tests.yml"
-        ).read_text(encoding="utf-8")
         readme = (PACK_ROOT / "README.md").read_text(encoding="utf-8")
         pyproject = (PACK_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         gitignore = (PACK_ROOT / ".gitignore").read_text(encoding="utf-8")
@@ -1073,9 +1040,9 @@ class GeneratedParityTests(InstallTestCase):
         # The parallel test runner owns the coverage rig contract that used to
         # live inline in the workflow/README: the absolute coverage env plus
         # per-module --parallel-mode sharding.
-        runner = (
-            PACK_ROOT / ".github/scripts/run-tests.sh"
-        ).read_text(encoding="utf-8")
+        runner = (PACK_ROOT / ".github/scripts/run-tests.sh").read_text(
+            encoding="utf-8"
+        )
         for expected in (
             'COVERAGE_PROCESS_START="$REPO_ROOT/.coveragerc"',
             'COVERAGE_FILE="$REPO_ROOT/.coverage"',
@@ -1187,9 +1154,7 @@ class GeneratedParityTests(InstallTestCase):
             r"uses: actions/(?:checkout|setup-python)@v\d+",
         )
         self.assertEqual(
-            workflow.count(
-                "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
-            ),
+            workflow.count("actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"),
             6,
         )
         self.assertEqual(
@@ -1207,9 +1172,7 @@ class GeneratedParityTests(InstallTestCase):
         self.assertEqual(workflow.count("pull-requests: read"), 1)
         self.assertIn("commits/${GITHUB_SHA}/pulls", workflow)
         self.assertIn("set -o pipefail", workflow)
-        merge_probe = (
-            'git rev-parse --verify --quiet "${GITHUB_SHA}^2" >/dev/null'
-        )
+        merge_probe = 'git rev-parse --verify --quiet "${GITHUB_SHA}^2" >/dev/null'
         self.assertIn(merge_probe, workflow)
         self.assertLess(workflow.index(merge_probe), workflow.index("gh api"))
         self.assertIn("invalid pull-request merge evidence", workflow)
@@ -1274,7 +1237,7 @@ class GeneratedParityTests(InstallTestCase):
             "SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0",
             "command -v node >/dev/null 2>&1",
             "warning: node not found; skipping JavaScript syntax checks.",
-            'skipped=[1-9][0-9]*',
+            "skipped=[1-9][0-9]*",
             '"$(VENV_PYTHON)" -m mypy installer',
         ):
             self.assertIn(target, makefile)
@@ -1303,9 +1266,9 @@ class GeneratedParityTests(InstallTestCase):
         for source in opencode_module_sources(PACK_ROOT):
             text = source.read_text(encoding="utf-8")
             for imported in find_js_module_specifiers(text):
-                if not imported.startswith((".", "/", "node:")) and not is_node_builtin_module(
-                    imported
-                ):
+                if not imported.startswith(
+                    (".", "/", "node:")
+                ) and not is_node_builtin_module(imported):
                     external_imports.append(
                         f"{source.relative_to(PACK_ROOT)} imports {imported}"
                     )
@@ -1387,12 +1350,10 @@ class GeneratedParityTests(InstallTestCase):
         result = self.run_install(root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        template = (
-            install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md"
-        ).read_text(encoding="utf-8")
-        installed = (root / "docs/SD_AI_COMMAND_PACK.md").read_text(
+        template = (install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md").read_text(
             encoding="utf-8"
         )
+        installed = (root / "docs/SD_AI_COMMAND_PACK.md").read_text(encoding="utf-8")
         self.assert_trellis_prerequisite_documented(template)
         self.assert_trellis_prerequisite_documented(installed)
         for expected in (
@@ -1426,7 +1387,10 @@ class GeneratedParityTests(InstallTestCase):
         self.assertEqual(installed, template)
 
     def test_installer_modules_use_explicit_public_import_surfaces(self) -> None:
-        installer_paths = [PACK_ROOT / "install.py", *sorted((PACK_ROOT / "installer").glob("*.py"))]
+        installer_paths = [
+            PACK_ROOT / "install.py",
+            *sorted((PACK_ROOT / "installer").glob("*.py")),
+        ]
         for path in installer_paths:
             content = path.read_text(encoding="utf-8")
             with self.subTest(path=path.relative_to(PACK_ROOT).as_posix()):
@@ -1436,7 +1400,9 @@ class GeneratedParityTests(InstallTestCase):
 
         self.assertIs(install.install_file, install.fileops.install_file)
         self.assertIs(install.load_manifest, install.manifest.load_manifest)
-        self.assertIs(install.remove_installed_pack, install.removal.remove_installed_pack)
+        self.assertIs(
+            install.remove_installed_pack, install.removal.remove_installed_pack
+        )
 
     def test_installed_targets_snapshot_lists_scope_scripts_and_guide(self) -> None:
         root = self.make_repo(".github")
@@ -1444,9 +1410,7 @@ class GeneratedParityTests(InstallTestCase):
         result = self.run_install(root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        snapshot = (root / install.INSTALLED_TARGETS_FILE).read_text(
-            encoding="utf-8"
-        )
+        snapshot = (root / install.INSTALLED_TARGETS_FILE).read_text(encoding="utf-8")
         for expected in (
             ".gitignore",
             "scripts/sd-ai-command-pack-review-scope.sh",
@@ -1562,7 +1526,6 @@ class GeneratedParityTests(InstallTestCase):
             ".agent/workflows/sd-review-pr.md",
             ".agent/workflows/sd-create-pr.md",
             ".agent/workflows/sd-work-backlog.md",
-            ".agent/workflows/sd-work-designs.md",
             ".agent/workflows/sd-audit-repo.md",
             ".agent/workflows/sd-watch-pr.md",
             ".agent/workflows/sd-ship.md",
@@ -1573,7 +1536,6 @@ class GeneratedParityTests(InstallTestCase):
             ".agent/skills/sd-review-pr/SKILL.md",
             ".agent/skills/sd-create-pr/SKILL.md",
             ".agent/skills/sd-work-backlog/SKILL.md",
-            ".agent/skills/sd-work-designs/SKILL.md",
             ".agent/skills/sd-audit-repo/SKILL.md",
             ".agent/skills/sd-watch-pr/SKILL.md",
             ".agent/skills/sd-ship/SKILL.md",
@@ -1584,7 +1546,6 @@ class GeneratedParityTests(InstallTestCase):
             ".codebuddy/commands/sd/review-pr.md",
             ".codebuddy/commands/sd/create-pr.md",
             ".codebuddy/commands/sd/work-backlog.md",
-            ".codebuddy/commands/sd/work-designs.md",
             ".codebuddy/commands/sd/audit-repo.md",
             ".codebuddy/commands/sd/watch-pr.md",
             ".codebuddy/commands/sd/ship.md",
@@ -1595,7 +1556,6 @@ class GeneratedParityTests(InstallTestCase):
             ".codebuddy/skills/sd-review-pr/SKILL.md",
             ".codebuddy/skills/sd-create-pr/SKILL.md",
             ".codebuddy/skills/sd-work-backlog/SKILL.md",
-            ".codebuddy/skills/sd-work-designs/SKILL.md",
             ".codebuddy/skills/sd-audit-repo/SKILL.md",
             ".codebuddy/skills/sd-watch-pr/SKILL.md",
             ".codebuddy/skills/sd-ship/SKILL.md",
@@ -1606,7 +1566,6 @@ class GeneratedParityTests(InstallTestCase):
             ".devin/workflows/sd-review-pr.md",
             ".devin/workflows/sd-create-pr.md",
             ".devin/workflows/sd-work-backlog.md",
-            ".devin/workflows/sd-work-designs.md",
             ".devin/workflows/sd-audit-repo.md",
             ".devin/workflows/sd-watch-pr.md",
             ".devin/workflows/sd-ship.md",
@@ -1617,7 +1576,6 @@ class GeneratedParityTests(InstallTestCase):
             ".factory/commands/sd/review-pr.md",
             ".factory/commands/sd/create-pr.md",
             ".factory/commands/sd/work-backlog.md",
-            ".factory/commands/sd/work-designs.md",
             ".factory/commands/sd/audit-repo.md",
             ".factory/commands/sd/watch-pr.md",
             ".factory/commands/sd/ship.md",
@@ -1628,7 +1586,6 @@ class GeneratedParityTests(InstallTestCase):
             ".kilocode/workflows/sd-review-pr.md",
             ".kilocode/workflows/sd-create-pr.md",
             ".kilocode/workflows/sd-work-backlog.md",
-            ".kilocode/workflows/sd-work-designs.md",
             ".kilocode/workflows/sd-audit-repo.md",
             ".kilocode/workflows/sd-watch-pr.md",
             ".kilocode/workflows/sd-ship.md",
@@ -1639,7 +1596,6 @@ class GeneratedParityTests(InstallTestCase):
             ".kiro/skills/sd-review-pr/SKILL.md",
             ".kiro/skills/sd-create-pr/SKILL.md",
             ".kiro/skills/sd-work-backlog/SKILL.md",
-            ".kiro/skills/sd-work-designs/SKILL.md",
             ".kiro/skills/sd-audit-repo/SKILL.md",
             ".kiro/skills/sd-watch-pr/SKILL.md",
             ".kiro/skills/sd-ship/SKILL.md",
@@ -1650,7 +1606,6 @@ class GeneratedParityTests(InstallTestCase):
             ".pi/prompts/sd-review-pr.md",
             ".pi/prompts/sd-create-pr.md",
             ".pi/prompts/sd-work-backlog.md",
-            ".pi/prompts/sd-work-designs.md",
             ".pi/prompts/sd-audit-repo.md",
             ".pi/prompts/sd-watch-pr.md",
             ".pi/prompts/sd-ship.md",
@@ -1661,7 +1616,6 @@ class GeneratedParityTests(InstallTestCase):
             ".qoder/commands/sd-review-pr.md",
             ".qoder/commands/sd-create-pr.md",
             ".qoder/commands/sd-work-backlog.md",
-            ".qoder/commands/sd-work-designs.md",
             ".qoder/commands/sd-audit-repo.md",
             ".qoder/commands/sd-watch-pr.md",
             ".qoder/commands/sd-ship.md",
@@ -1672,7 +1626,6 @@ class GeneratedParityTests(InstallTestCase):
             ".reasonix/skills/sd-review-pr/SKILL.md",
             ".reasonix/skills/sd-create-pr/SKILL.md",
             ".reasonix/skills/sd-work-backlog/SKILL.md",
-            ".reasonix/skills/sd-work-designs/SKILL.md",
             ".reasonix/skills/sd-audit-repo/SKILL.md",
             ".reasonix/skills/sd-watch-pr/SKILL.md",
             ".reasonix/skills/sd-ship/SKILL.md",
@@ -1683,7 +1636,6 @@ class GeneratedParityTests(InstallTestCase):
             ".trae/commands/sd-review-pr.md",
             ".trae/commands/sd-create-pr.md",
             ".trae/commands/sd-work-backlog.md",
-            ".trae/commands/sd-work-designs.md",
             ".trae/commands/sd-audit-repo.md",
             ".trae/commands/sd-watch-pr.md",
             ".trae/commands/sd-ship.md",
@@ -1694,7 +1646,6 @@ class GeneratedParityTests(InstallTestCase):
             ".zcode/commands/sd/review-pr.md",
             ".zcode/commands/sd/create-pr.md",
             ".zcode/commands/sd/work-backlog.md",
-            ".zcode/commands/sd/work-designs.md",
             ".zcode/commands/sd/audit-repo.md",
             ".zcode/commands/sd/watch-pr.md",
             ".zcode/commands/sd/ship.md",
@@ -1728,17 +1679,14 @@ class GeneratedParityTests(InstallTestCase):
                 self.assertIn("Resolve the `trellis-continue` skill by name", content)
                 self.assertIn("Use that skill as the primary instructions", content)
             elif "finish-work" in file.target.name:
-                self.assertIn("Resolve the `trellis-finish-work` skill by name", content)
+                self.assertIn(
+                    "Resolve the `trellis-finish-work` skill by name", content
+                )
                 self.assertIn("Use that skill as the primary instructions", content)
             elif "create-pr" in file.target.name:
                 self.assertIn("Resolve the `sd-create-pr` skill by name", content)
                 self.assertIn("sd-update-spec", content)
                 self.assertIn("sd-review-pr", content)
-            elif "work-designs" in file.target.name:
-                self.assertIn("Resolve the `sd-work-designs` skill by name", content)
-                self.assertIn("design.md", content)
-                self.assertIn("implement.md", content)
-                self.assertIn("numbered list", content)
             elif "audit-repo" in file.target.name:
                 self.assertIn("Resolve the `sd-audit-repo` skill by name", content)
                 self.assertIn(".agents/skills/sd-audit-repo/charters/", content)
@@ -1781,9 +1729,13 @@ class GeneratedParityTests(InstallTestCase):
                 self.assertIn("scripts/sd-ai-command-pack-housekeeping.sh", content)
             elif "update-spec" in file.target.name:
                 self.assertIn("Resolve the `sd-update-spec` skill by name", content)
-                self.assertIn("source of truth for Trellis update-spec delegation", content)
+                self.assertIn(
+                    "source of truth for Trellis update-spec delegation", content
+                )
             elif "review-learnings" in file.target.name:
-                self.assertIn("Resolve the `sd-review-learnings` skill by name", content)
+                self.assertIn(
+                    "Resolve the `sd-review-learnings` skill by name", content
+                )
                 self.assertIn("scripts/sd-ai-command-pack-review-learnings.py", content)
             elif "status" in file.target.name:
                 self.assertIn("Resolve the `sd-status` skill by name", content)
@@ -1834,8 +1786,7 @@ class GeneratedParityTests(InstallTestCase):
         review_command_sources = {
             file.source
             for file in files
-            if file.kind in {"command", "prompt"}
-            and "review-pr" in file.target.name
+            if file.kind in {"command", "prompt"} and "review-pr" in file.target.name
         }
 
         self.assertGreater(len(review_command_sources), 0)
@@ -1867,9 +1818,9 @@ class GeneratedParityTests(InstallTestCase):
             "review request/fix rounds before asking whether to continue. | `5` |",
             readme,
         )
-        guide = (
-            install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md"
-        ).read_text(encoding="utf-8")
+        guide = (install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md").read_text(
+            encoding="utf-8"
+        )
         self.assertIn(
             "The round limit\ndefaults to five configured remote-review requests",
             guide,
@@ -1917,7 +1868,9 @@ class GeneratedParityTests(InstallTestCase):
 
     def test_shared_skill_frontmatter_is_strict_yaml(self) -> None:
         allowed_keys = {"name", "description", "license", "allowed-tools", "metadata"}
-        skill_paths = sorted((install.ROOT / "templates/.agents/skills").glob("*/SKILL.md"))
+        skill_paths = sorted(
+            (install.ROOT / "templates/.agents/skills").glob("*/SKILL.md")
+        )
 
         self.assertGreater(len(skill_paths), 0)
         for skill_path in skill_paths:
@@ -1951,7 +1904,6 @@ class GeneratedParityTests(InstallTestCase):
             "finish-work",
             "create-pr",
             "work-backlog",
-            "work-designs",
             "audit-repo",
             "watch-pr",
             "ship",
@@ -1993,7 +1945,6 @@ class GeneratedParityTests(InstallTestCase):
             "finish-work": "Wrap up the current Trellis coding session.",
             "create-pr": "Create or reuse a PR after SD spec refresh, commit, and push, then run the SD PR review loop.",
             "work-backlog": "Autonomously work the Trellis backlog one task at a time through planning, green merge, follow-ups, and resumable checkpoints.",
-            "work-designs": "Run the autonomous work loop for Trellis tasks that still need design or implementation planning, optionally stopping after design.",
             "audit-repo": "Run a formal multi-dimension repository audit that produces a canonical report and updates the committed findings ledger.",
             "watch-pr": "Watch the current branch's open pull request until it settles, then hand off to the housekeeping merge gate or report the blockers.",
             "fix-ci": "Triage failing CI runs, classify each failure, and drive the run back to green without weakening tests or bypassing guards.",
@@ -2039,7 +1990,9 @@ class GeneratedParityTests(InstallTestCase):
 
         command_files = [file for file in files if file.kind == "command"]
         github_prompt_files = [
-            file for file in files if file.platform == "github" and file.kind == "prompt"
+            file
+            for file in files
+            if file.platform == "github" and file.kind == "prompt"
         ]
         self.assertGreater(len(command_files), 0)
         self.assertGreater(len(github_prompt_files), 0)
@@ -2062,7 +2015,9 @@ class GeneratedParityTests(InstallTestCase):
         self.assertFalse((install.ROOT / "templates/.commands/trellis").exists())
         self.assertFalse((install.ROOT / "templates/.cursor/commands/trellis").exists())
         self.assertFalse((install.ROOT / "templates/.gemini/commands/trellis").exists())
-        self.assertFalse((install.ROOT / "templates/.opencode/commands/trellis").exists())
+        self.assertFalse(
+            (install.ROOT / "templates/.opencode/commands/trellis").exists()
+        )
 
     def test_pack_owned_scripts_use_sd_ai_command_pack_identity(self) -> None:
         raw, files = install.load_manifest()
@@ -2071,10 +2026,7 @@ class GeneratedParityTests(InstallTestCase):
             for file in files
             if file.platform == "shared" and file.kind == "script"
         ]
-        script_targets = {
-            file.target.as_posix()
-            for file in script_files
-        }
+        script_targets = {file.target.as_posix() for file in script_files}
         expected_targets = {
             "scripts/sd-ai-command-pack-full-check.sh",
             "scripts/sd-ai-command-pack-shell-lib.sh",

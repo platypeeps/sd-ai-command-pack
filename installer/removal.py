@@ -62,16 +62,14 @@ MANAGED_BLOCK_REMOVAL_TARGETS = frozenset(
 # Compatibility aliases derive from the canonical registry so install-time
 # retirement and source drift lint cannot disagree about old footprints. The
 # helper keeps a renamed or missing registry row actionable at import time.
-RETIRED_REVIEW_LOCAL_ALL_TARGETS = retired_surface_targets(
-    "review-local-all-command"
-)
-SOURCE_ONLY_COMMAND_TARGETS = retired_surface_targets(
-    "fleet-refresh-consumer-targets"
-)
+RETIRED_REVIEW_LOCAL_ALL_TARGETS = retired_surface_targets("review-local-all-command")
+SOURCE_ONLY_COMMAND_TARGETS = retired_surface_targets("fleet-refresh-consumer-targets")
+RETIRED_WORK_DESIGNS_TARGETS = retired_surface_targets("work-designs-command")
 
 RETIRED_TARGETS = (
     *RETIRED_REVIEW_LOCAL_ALL_TARGETS,
     *SOURCE_ONLY_COMMAND_TARGETS,
+    *RETIRED_WORK_DESIGNS_TARGETS,
 )
 
 # remove_pack_file statuses renamed so the install summary reads as
@@ -395,8 +393,7 @@ def remove_installed_pack(
     changed_paths = [
         result.target
         for result in results
-        if result.status in WRITTEN_REMOVE_STATUSES
-        and not result.target.is_absolute()
+        if result.status in WRITTEN_REMOVE_STATUSES and not result.target.is_absolute()
     ]
     if not dry_run and not skip_diff_check:
         diff_status = run_diff_check(target, changed_paths)
@@ -410,6 +407,7 @@ __all__ = [
     "MANAGED_BLOCK_REMOVAL_TARGETS",
     "RETIRED_REVIEW_LOCAL_ALL_TARGETS",
     "RETIRED_TARGETS",
+    "RETIRED_WORK_DESIGNS_TARGETS",
     "SOURCE_ONLY_COMMAND_TARGETS",
     "installed_target_candidates",
     "is_git_internal_candidate",

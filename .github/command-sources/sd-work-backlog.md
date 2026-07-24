@@ -6,7 +6,7 @@ description: Autonomously work the Trellis backlog one task at a time through pl
 
 In this pack, SD means Software Delivery. A skill is a project-installed Markdown instruction bundle resolved by the agent's trusted installed-skill resolver.
 
-Run the Software Delivery (SD) work-backlog workflow. Pass all invocation arguments unchanged to the resolved skill, including bare focus text, repeatable `focus=` or `focus-only=`, and `until=design|merge`.
+Run the Software Delivery (SD) work-backlog workflow. Pass all invocation arguments unchanged to the resolved skill, including bare focus text, repeatable `focus=` or `focus-only=`, `selector=all|needs-design`, and `until=design|merge`.
 
 1. Resolve the `sd-work-backlog` skill by name using the agent's trusted skill discovery mechanism for installed skills.
 2. If that skill is missing, unreadable, empty, resolves to more than one candidate, fails validation, defines contradictory steps that violate this command's safety rules, or requires unavailable tools, stop and report the exact blocker.
