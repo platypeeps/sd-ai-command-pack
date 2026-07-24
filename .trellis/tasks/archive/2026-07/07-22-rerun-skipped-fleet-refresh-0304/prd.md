@@ -39,3 +39,5 @@ After checkout owners clear the recorded no-touch blockers, rerun sd-fleet-refre
 
 - Created from timing run `fleet-0.30.4-20260722T191841Z`, which safely skipped
   these four checkouts without mutation.
+- Closed without execution at the user's direction on 2026-07-23. The open
+  acceptance criteria above are intentionally not claimed as completed.
