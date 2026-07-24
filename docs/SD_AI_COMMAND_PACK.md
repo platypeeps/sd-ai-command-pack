@@ -490,10 +490,14 @@ and local/remote branches, installed SD pack and Trellis versions, relevant PR,
 open PRs/issues, current/in-progress/planned Trellis work, completed tasks
 stranded outside the Trellis archive, user-local autonomous loop state,
 anomalies, complete selectable F-prefixed follow-ups and T-prefixed unarchived
-tasks, R-prefixed top-level roadmap work, and numbered next steps. Empty
-selectable sections remain visible as `none`. The ordinals are deterministic
-for an unchanged snapshot but remain report-local; durable Trellis task IDs are
-included in every task and roadmap row. Loop state includes run ID,
+tasks, and numbered next steps. Task-like items in bounded roadmap sources are
+reported as source-backed F-prefixed follow-ups only when no unarchived Trellis
+task represents them. Sources are limited to roadmap/backlog/TODO/program-design
+or implementation-plan Markdown/text files and files below `roadmap/`,
+`proposals/`, or `rfcs/`; unchecked boxes count at any indentation while
+ordinary list items count only at the top level. Empty selectable sections remain visible as `none`. The
+ordinals are deterministic for an unchanged snapshot but remain report-local;
+durable Trellis task IDs are included in every task row. Loop state includes run ID,
 mode/selector/focus, iteration, phase, task, branch/head/base-branch evidence,
 PR identity, last shipped SHA, counters, heartbeat, context health, checkpoint,
 lock, and stop reason. Reading it never refreshes the ledger or lock. The status
@@ -504,7 +508,7 @@ become bounded `invalid` anomalies without echoing helper-controlled values. A
 positional path selects another checkout, so
 `sd-status /path/to/repo` is equivalent to
 `sd-status --repo /path/to/repo`.
-`--no-network` suppresses GitHub calls and `--json` emits schema version 1. Ordinary runs do
+`--no-network` suppresses GitHub calls and `--json` emits schema version 2. Ordinary runs do
 not fetch and label ref-derived values `cached`. Relevant-PR review totals use
 GitHub's GraphQL `reviews.totalCount`, so repositories with more than one REST
 page of review events are reported accurately without fetching every review.
@@ -515,8 +519,8 @@ resolves the canonical fleet manifest from `--fleet-manifest`,
 canonical source checkout, in that order. It preserves rollout priority,
 reports missing checkouts, compares installed versions to the source manifest
 version, and returns one bounded row per fleet member plus F-prefixed fleet
-follow-ups. Complete per-consumer task and roadmap records remain available in
-nested JSON or through local status for that checkout. A dirty, stale, missing,
+follow-ups. Complete per-consumer follow-up and task records remain available
+in nested JSON or through local status for that checkout. A dirty, stale, missing,
 behind, or diverged repository is advisory in ordinary status; the command
 remains read-only and exits zero after producing the report. Invalid
 repositories and malformed, missing, or stale fleet configuration exit
@@ -946,9 +950,6 @@ none
 
 ==> Tasks
 T-1 [planning, P1]: <title> (<durable-task-id>; <task-path>)
-
-==> Roadmap
-R-1 [planning, P1]: <title> (<durable-task-id>; <task-path>)
 
 ==> Next Steps
 1. <highest-value evidence-backed next action>

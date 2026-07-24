@@ -34,7 +34,7 @@ class HousekeepingResultTests(unittest.TestCase):
         self.root = Path(self.tempdir.name)
         self.status_path = self.root / "status.json"
         self.status = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "mode": "local",
             "repository": {"path": "/repo", "name": "repo", "github": "o/r"},
             "git": {"branch": "main", "workingTree": {"state": "clean"}},
@@ -151,12 +151,12 @@ class HousekeepingResultTests(unittest.TestCase):
         self.assertEqual(result["outcome"]["reasonCodes"], ["status_anomalies"])
 
     def test_invalid_schema_code_message_and_symlink_fail_closed(self) -> None:
-        self.status["schemaVersion"] = 2
+        self.status["schemaVersion"] = 1
         self.write_json(self.status_path, self.status)
         with self.assertRaises(result_builder.ResultInputError):
             result_builder.build_result(self.args())
 
-        self.status["schemaVersion"] = 1
+        self.status["schemaVersion"] = 2
         self.write_json(self.status_path, self.status)
         with self.assertRaises(result_builder.ResultInputError):
             result_builder.build_result(self.args(action=[["BAD", "message"]]))
@@ -252,12 +252,12 @@ class HousekeepingResultTests(unittest.TestCase):
             self.assertEqual(result_builder.main(argv), 0)
         self.assertEqual(json.loads(stdout.getvalue())["outcome"]["status"], "clean")
 
-        self.status["schemaVersion"] = 2
+        self.status["schemaVersion"] = 1
         self.write_json(self.status_path, self.status)
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
             self.assertEqual(result_builder.main(argv), 2)
-        self.assertIn("schemaVersion must be 1", stderr.getvalue())
+        self.assertIn("schemaVersion must be 2", stderr.getvalue())
         self.assertNotIn("Traceback", stderr.getvalue())
 
     def test_parser_rejects_invalid_numeric_and_head_arguments(self) -> None:

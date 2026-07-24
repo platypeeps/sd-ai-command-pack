@@ -46,7 +46,8 @@ Checkout trust policy — complete before step 1:
    push, merge, delete branches, update tasks, refresh generated files, or run
    a recommended follow-up command.
 6. Relay the report's explicit freshness and availability labels, anomalies,
-   complete local `F-*` follow-ups, `T-*` tasks, and `R-*` roadmap sections,
-   plus numbered next steps. Preserve each empty section with `none`. Fleet
-   output remains bounded. A selection or follow-up requires a separate user
-   request.
+   complete local `F-*` follow-ups and `T-*` tasks, plus numbered next steps.
+   Roadmap-file items that are not represented by a Trellis task appear as
+   source-backed `F-*` follow-ups. Preserve each empty selectable section with
+   `none`. Fleet output remains bounded. A selection or follow-up requires a
+   separate user request.

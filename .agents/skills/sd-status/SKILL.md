@@ -60,24 +60,30 @@ reinterpret them as shell text.
    installed pack and Trellis versions, relevant PR, open PRs/issues, current
    and queued Trellis work, completed tasks stranded outside the Trellis
    archive, the user-local autonomous work-loop state, anomalies, selectable
-   follow-ups, every unarchived task, top-level roadmap work, and numbered next
-   steps. Loop state includes run ID, mode,
+   follow-ups, every unarchived task, and numbered next steps. Follow-ups also
+   include task-like items from bounded roadmap sources when no unarchived
+   Trellis task represents them. Loop state includes run ID, mode,
    selector/focus, iteration, phase, task, PR, counters, heartbeat, context
    health, checkpoint, lock status, and stop reason when present.
 5. For local mode, preserve the collector's complete selectable inventory:
    - `F-*` rows are evidence-backed issues, recommendations, actions, or
-     follow-up suggestions that are not a parallel Trellis backlog.
+     follow-up suggestions. They also include untracked task-like items found
+     in roadmap-like Markdown/text files, with repository-relative path and
+     line evidence, when no task ID/path or exact normalized task title matches.
+     Roadmap-like sources are files named for roadmap, backlog, TODO, program
+     design, or implementation plans, plus Markdown/text files below
+     `roadmap/`, `proposals/`, or `rfcs/`. Unchecked boxes count at any
+     indentation; ordinary list items count only at the top level. Ignore
+     checked boxes and nested unmarked explanation bullets.
    - `T-*` rows enumerate every valid unarchived Trellis task.
-   - `R-*` rows enumerate open top-level Trellis tasks, which are the canonical
-     roadmap now that separate roadmap files are retired.
-   Keep all three sections present and relay the exact word `none` when a
+   Keep both sections present and relay the exact word `none` when a
    category is empty. IDs are deterministic for the reported snapshot but are
    not durable task identities.
 6. For fleet mode, preserve registry rollout order and show one bounded row per
    consumer with checkout availability, branch/tree/upstream state, stash count, installed
    versus target pack version, PR counts, and task counts. Put missing, dirty,
    divergent, behind, or stale consumers into F-prefixed follow-ups and
-   evidence-backed next steps. Complete per-consumer task and roadmap details
+   evidence-backed next steps. Complete per-consumer follow-up and task details
    remain in nested JSON or a local status request for that checkout.
 7. Return the collector's exit status unchanged. A dirty or stale ordinary
    status report is advisory and exits zero; invalid repositories, malformed
@@ -99,7 +105,7 @@ reinterpret them as shell text.
   collector's validated, bounded, control-character-free output fields.
 - Report unavailable optional sources explicitly. Do not silently convert
   failed GitHub or version discovery into an empty healthy result.
-- Keep externally controlled row content bounded. Local T and R sections are
+- Keep externally controlled row content bounded. The local T section is
   intentionally complete; use `--json` when the caller needs the complete
   structured inventory without human formatting. Fleet human output remains
   bounded.
@@ -117,9 +123,6 @@ F-1 [<kind>]: <summary>
 
 Tasks
 T-1 [<status>, <priority>]: <title> (<durable task id>; <path>)
-
-Roadmap
-R-1 [<status>, <priority>]: <title> (<durable task id>; <path>)
 ```
 
 Write `none` under every empty heading instead of omitting it. Then relay the

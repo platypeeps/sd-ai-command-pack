@@ -19,13 +19,55 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 COMMAND_TIMEOUT_SECONDS = 20
 MAX_ITEMS = 100
 HUMAN_ITEM_LIMIT = 5
+MAX_ROADMAP_SOURCE_FILES = 100
+MAX_ROADMAP_SOURCE_BYTES = 256 * 1024
+MAX_ROADMAP_LINE_CHARS = 2_000
+MAX_ROADMAP_ITEMS = 500
 CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
 COMMIT_RE = re.compile(r"[0-9a-f]{40,64}")
 GITHUB_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+ROADMAP_SOURCE_EXTENSIONS = frozenset({".md", ".mdx", ".txt"})
+ROADMAP_SOURCE_STEMS = (
+    "roadmap",
+    "backlog",
+    "todo",
+    "program_design",
+    "implementation_plan",
+)
+ROADMAP_SOURCE_DIRECTORIES = frozenset({"roadmap", "proposals", "rfcs"})
+ROADMAP_EXCLUDED_DIRECTORIES = frozenset(
+    {
+        "git",
+        "trellis",
+        "venv",
+        "build",
+        "coverage",
+        "dist",
+        "node_modules",
+        "target",
+        "vendor",
+    }
+)
+UNCHECKED_TASK_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[[ \t]\][ \t]+(.+?)\s*$")
+CHECKED_TASK_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[[xX]\][ \t]+")
+TOP_LEVEL_LIST_RE = re.compile(
+    r"^(?:[-*+]|[0-9]{1,4}[.)])[ \t]+(?!\[[ xX]\][ \t]+)(.+?)\s*$"
+)
+MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
+MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+MARKDOWN_REFERENCE_LINK_RE = re.compile(r"\[([^\]]+)\]\[[^\]]*\]")
+MARKDOWN_TAG_RE = re.compile(r"<[^>]+>")
+MARKDOWN_OPEN_MARKER_RE = re.compile(
+    r"(?<!\w)(?:\*{1,3}|_{1,3}|~{1,2}|`+)(?=\S)"
+)
+MARKDOWN_CLOSE_MARKER_RE = re.compile(
+    r"(?<=\S)(?:\*{1,3}|_{1,3}|~{1,2}|`+)(?!\w)"
+)
+PARKED_PREFIX_RE = re.compile(r"^PARKED\s*:\s*", re.IGNORECASE)
 PR_SEPARATOR = "\x1f"
 PRIORITY_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 TASK_STATUS_ORDER = {"in_progress": 0, "planning": 1, "completed": 2}
@@ -500,20 +542,248 @@ def collect_trellis(repo: Path) -> dict[str, Any]:
             active_identity=inventory_active_identity,
         ),
     )
-    roadmap = [
-        task
-        for task in inventory
-        if task.get("parent") is None
-        and task.get("status") in {"in_progress", "planning"}
-    ]
     return {
         "activeTask": active,
         "inProgress": in_progress,
         "planned": planned,
         "completedOutsideArchive": completed_outside_archive,
         "tasks": select_items(inventory, prefix="T"),
-        "roadmap": select_items(roadmap, prefix="R"),
     }
+
+
+def normalize_roadmap_source_component(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", value.casefold()).strip("_")
+
+
+def is_roadmap_source(relative: PurePosixPath) -> bool:
+    if relative.suffix.casefold() not in ROADMAP_SOURCE_EXTENSIONS:
+        return False
+    normalized_directories = {
+        normalize_roadmap_source_component(part) for part in relative.parts[:-1]
+    }
+    if normalized_directories & ROADMAP_EXCLUDED_DIRECTORIES:
+        return False
+    normalized_stem = normalize_roadmap_source_component(relative.stem)
+    compact_stem = normalized_stem.replace("_", "")
+    if any(
+        compact_stem.startswith(prefix.replace("_", ""))
+        for prefix in ROADMAP_SOURCE_STEMS
+    ):
+        return True
+    return bool(normalized_directories & ROADMAP_SOURCE_DIRECTORIES)
+
+
+def path_has_symlink(repo: Path, relative: PurePosixPath) -> bool:
+    candidate = repo
+    for part in relative.parts:
+        candidate /= part
+        if candidate.is_symlink():
+            return True
+    return False
+
+
+def visible_markdown_text(value: str, *, limit: int = 500) -> str:
+    text = MARKDOWN_IMAGE_RE.sub(r"\1", value)
+    text = MARKDOWN_LINK_RE.sub(r"\1", text)
+    text = MARKDOWN_REFERENCE_LINK_RE.sub(r"\1", text)
+    text = MARKDOWN_TAG_RE.sub(" ", text)
+    text = re.sub(r"\\([\\`*_{}\[\]()#+.!~-])", r"\1", text)
+    text = MARKDOWN_OPEN_MARKER_RE.sub("", text)
+    text = MARKDOWN_CLOSE_MARKER_RE.sub("", text)
+    return safe_text(" ".join(text.split()), limit=limit)
+
+
+def normalize_roadmap_match_text(value: str) -> str:
+    text = PARKED_PREFIX_RE.sub(
+        "",
+        visible_markdown_text(value, limit=MAX_ROADMAP_LINE_CHARS),
+    )
+    return " ".join(text.casefold().split())
+
+
+def bounded_roadmap_reference(
+    raw_text: str,
+    reference: str,
+    *,
+    path: bool = False,
+) -> bool:
+    boundary = r"a-z0-9_./-" if path else r"a-z0-9_-"
+    return bool(
+        re.search(
+            rf"(?<![{boundary}]){re.escape(reference)}(?![{boundary}])",
+            raw_text,
+        )
+    )
+
+
+def roadmap_task_match_records(
+    repo: Path,
+    tasks: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for task in tasks:
+        record = dict(task)
+        raw_path = task.get("path")
+        if isinstance(raw_path, str):
+            relative = PurePosixPath(raw_path)
+            if (
+                not relative.is_absolute()
+                and relative.parts
+                and all(part not in {"", ".", ".."} for part in relative.parts)
+            ):
+                task_json = repo.joinpath(".trellis", *relative.parts, "task.json")
+                if not path_has_symlink(repo, PurePosixPath(".trellis") / relative):
+                    payload = read_json_object(task_json)
+                    if payload is not None:
+                        title = payload.get("title") or payload.get("name")
+                        if isinstance(title, str):
+                            record["title"] = safe_text(
+                                title,
+                                limit=MAX_ROADMAP_LINE_CHARS,
+                            )
+        records.append(record)
+    return records
+
+
+def roadmap_task_reference(raw_text: str, tasks: Sequence[Mapping[str, Any]]) -> bool:
+    raw_folded = raw_text.casefold()
+    normalized = normalize_roadmap_match_text(raw_text)
+    for task in tasks:
+        title = normalize_roadmap_match_text(str(task.get("title", "")))
+        if title and normalized == title:
+            return True
+        path = str(task.get("path", "")).casefold().strip()
+        if path:
+            for path_reference in (path, f".trellis/{path}"):
+                if bounded_roadmap_reference(
+                    raw_folded,
+                    path_reference,
+                    path=True,
+                ):
+                    return True
+        references = {
+            str(task.get("id", "")).casefold().strip(),
+            PurePosixPath(path).name if path else "",
+        }
+        for reference in references:
+            if reference and bounded_roadmap_reference(raw_folded, reference):
+                return True
+    return False
+
+
+def roadmap_item_text(line: str) -> str | None:
+    if CHECKED_TASK_RE.match(line):
+        return None
+    match = UNCHECKED_TASK_RE.match(line)
+    if match is None:
+        match = TOP_LEVEL_LIST_RE.match(line)
+    if match is None:
+        return None
+    raw_text = match.group(1).strip()
+    if not raw_text or CONTROL_RE.search(raw_text):
+        return None
+    return raw_text
+
+
+def collect_roadmap_candidates(
+    repo: Path,
+    tasks: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    match_tasks = roadmap_task_match_records(repo, tasks)
+    result = run_command(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        cwd=repo,
+    )
+    if result.returncode != 0:
+        return [], ["roadmap source scan incomplete: Git file inventory unavailable"]
+
+    sources: list[tuple[PurePosixPath, Path]] = []
+    for raw_path in result.stdout.split("\0"):
+        if not raw_path:
+            continue
+        relative = PurePosixPath(raw_path)
+        if (
+            relative.is_absolute()
+            or not relative.parts
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or not is_roadmap_source(relative)
+            or path_has_symlink(repo, relative)
+        ):
+            continue
+        path = repo.joinpath(*relative.parts)
+        if path.is_file():
+            sources.append((relative, path))
+
+    sources.sort(key=lambda item: (item[0].as_posix().casefold(), item[0].as_posix()))
+    diagnostics: list[str] = []
+    if len(sources) > MAX_ROADMAP_SOURCE_FILES:
+        diagnostics.append(
+            "roadmap source scan incomplete: "
+            f"limited {len(sources)} matching files to {MAX_ROADMAP_SOURCE_FILES}"
+        )
+        sources = sources[:MAX_ROADMAP_SOURCE_FILES]
+
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    limit_reached = False
+    for relative, path in sources:
+        try:
+            size = path.stat().st_size
+        except OSError:
+            diagnostics.append(
+                "roadmap source scan incomplete: cannot stat " + relative.as_posix()
+            )
+            continue
+        if size > MAX_ROADMAP_SOURCE_BYTES:
+            diagnostics.append(
+                "roadmap source scan incomplete: skipped oversized file "
+                + relative.as_posix()
+            )
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8", errors="strict").splitlines()
+        except (OSError, UnicodeError):
+            diagnostics.append(
+                "roadmap source scan incomplete: cannot read " + relative.as_posix()
+            )
+            continue
+        overlong_line = False
+        for line_number, line in enumerate(lines, start=1):
+            if len(line) > MAX_ROADMAP_LINE_CHARS:
+                overlong_line = True
+                continue
+            raw_text = roadmap_item_text(line)
+            if raw_text is None or roadmap_task_reference(raw_text, match_tasks):
+                continue
+            summary = visible_markdown_text(raw_text)
+            key = normalize_roadmap_match_text(raw_text)
+            if not summary or not key or key in seen:
+                continue
+            seen.add(key)
+            candidates.append(
+                {
+                    "kind": "roadmap",
+                    "summary": summary,
+                    "source": f"roadmap:{relative.as_posix()}:{line_number}",
+                    "path": relative.as_posix(),
+                    "line": line_number,
+                }
+            )
+            if len(candidates) >= MAX_ROADMAP_ITEMS:
+                diagnostics.append(
+                    "roadmap source scan incomplete: "
+                    f"limited emitted items to {MAX_ROADMAP_ITEMS}"
+                )
+                limit_reached = True
+                break
+        if overlong_line:
+            diagnostics.append(
+                "roadmap source scan incomplete: skipped overlong line(s) in "
+                + relative.as_posix()
+            )
+        if limit_reached:
+            break
+    return candidates, diagnostics
 
 
 def collect_work_loop(repo: Path) -> dict[str, Any]:
@@ -1152,23 +1422,37 @@ def strict_anomalies(
     return anomalies
 
 
-def collect_follow_ups(report: Mapping[str, Any]) -> list[dict[str, Any]]:
-    candidates: list[dict[str, str]] = []
+def collect_follow_ups(
+    report: Mapping[str, Any],
+    *,
+    roadmap_candidates: Sequence[Mapping[str, Any]] = (),
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
 
-    def add(kind: str, summary: str, source: str) -> None:
+    def add(
+        kind: str,
+        summary: str,
+        source: str,
+        *,
+        path: str | None = None,
+        line: int | None = None,
+    ) -> None:
         normalized_summary = safe_text(summary, limit=500)
         key = (kind, normalized_summary)
         if key in seen:
             return
         seen.add(key)
-        candidates.append(
-            {
-                "kind": kind,
-                "summary": normalized_summary,
-                "source": source,
-            }
-        )
+        candidate: dict[str, Any] = {
+            "kind": kind,
+            "summary": normalized_summary,
+            "source": source,
+        }
+        if path is not None:
+            candidate["path"] = safe_text(path, limit=500)
+        if line is not None:
+            candidate["line"] = line
+        candidates.append(candidate)
 
     anomalies = report.get("anomalies")
     if isinstance(anomalies, list):
@@ -1289,6 +1573,24 @@ def collect_follow_ups(report: Mapping[str, Any]) -> list[dict[str, Any]]:
                     "github.openIssues",
                 )
 
+    for candidate in roadmap_candidates:
+        path = candidate.get("path")
+        line = candidate.get("line")
+        if (
+            candidate.get("kind") == "roadmap"
+            and isinstance(path, str)
+            and isinstance(line, int)
+            and not isinstance(line, bool)
+            and line > 0
+        ):
+            add(
+                "roadmap",
+                str(candidate.get("summary", "")),
+                str(candidate.get("source", "")),
+                path=path,
+                line=line,
+            )
+
     return select_items(candidates, prefix="F")
 
 
@@ -1408,6 +1710,10 @@ def collect_local(
         relevant_branch = git.get("branch")
     work_loop = collect_work_loop(repo)
     trellis = collect_trellis(repo)
+    roadmap_candidates, roadmap_diagnostics = collect_roadmap_candidates(
+        repo,
+        trellis.get("tasks", []),
+    )
     report: dict[str, Any] = {
         "schemaVersion": SCHEMA_VERSION,
         "mode": "local",
@@ -1434,7 +1740,8 @@ def collect_local(
         if source_branch or dry_run
         else None,
         "anomalies": [safe_text(item, limit=500) for item in prior_anomalies]
-        + anomalies,
+        + anomalies
+        + [safe_text(item, limit=500) for item in roadmap_diagnostics],
         "followUps": [],
         "nextSteps": [],
     }
@@ -1469,7 +1776,10 @@ def collect_local(
                 dry_run=dry_run,
             )
         )
-    report["followUps"] = collect_follow_ups(report)
+    report["followUps"] = collect_follow_ups(
+        report,
+        roadmap_candidates=roadmap_candidates,
+    )
     report["nextSteps"] = next_steps(report)
     return report
 
@@ -1522,9 +1832,16 @@ def render_selectable_inventory(
         if task_items:
             print(format_selectable_task(item))
         else:
+            suffix = ""
+            if (
+                item.get("kind") == "roadmap"
+                and isinstance(item.get("path"), str)
+                and isinstance(item.get("line"), int)
+            ):
+                suffix = f" ({item.get('path')}:{item.get('line')})"
             print(
                 f"{item.get('selectionId')} [{item.get('kind')}]: "
-                f"{item.get('summary')}"
+                f"{item.get('summary')}{suffix}"
             )
 
 
@@ -1699,12 +2016,6 @@ def render_local(report: Mapping[str, Any], *, dry_run: bool) -> None:
         trellis.get("tasks"),
         task_items=True,
     )
-    render_selectable_inventory(
-        "Roadmap",
-        trellis.get("roadmap"),
-        task_items=True,
-    )
-
     print("\n==> Next Steps")
     for index, step in enumerate(report["nextSteps"], start=1):
         print(f"{index}. {step}")

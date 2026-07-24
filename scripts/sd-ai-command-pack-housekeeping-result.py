@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = 1
+STATUS_SCHEMA_VERSION = 2
 TOOL_VERSION = "1.0.0"
 MAX_INPUT_BYTES = 2 * 1024 * 1024
 MAX_MESSAGE_LENGTH = 1000
@@ -52,14 +53,19 @@ def load_json(path: Path, label: str) -> dict[str, Any]:
     return value
 
 
-def require_schema(value: Mapping[str, Any], label: str) -> None:
+def require_schema(
+    value: Mapping[str, Any],
+    label: str,
+    *,
+    expected: int = SCHEMA_VERSION,
+) -> None:
     schema = value.get("schemaVersion")
-    if isinstance(schema, bool) or not isinstance(schema, int) or schema != 1:
-        raise ResultInputError(f"{label} schemaVersion must be 1")
+    if isinstance(schema, bool) or not isinstance(schema, int) or schema != expected:
+        raise ResultInputError(f"{label} schemaVersion must be {expected}")
 
 
 def validate_status(value: dict[str, Any]) -> dict[str, Any]:
-    require_schema(value, "status input")
+    require_schema(value, "status input", expected=STATUS_SCHEMA_VERSION)
     if value.get("mode") != "local":
         raise ResultInputError("status input mode must be local")
     for field in ("repository", "git", "trellis"):

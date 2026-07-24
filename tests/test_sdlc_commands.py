@@ -716,7 +716,8 @@ class SdlcCommandsTests(InstallTestCase):
             "absent state is `none`",
             "`F-*` rows",
             "`T-*` rows enumerate every valid unarchived Trellis task",
-            "`R-*` rows enumerate open top-level Trellis tasks",
+            "roadmap-like Markdown/text files",
+            "path and line evidence",
             "report-local selector",
         ):
             self.assertIn(pin, status)
