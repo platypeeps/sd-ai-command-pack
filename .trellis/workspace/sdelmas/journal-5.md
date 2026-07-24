@@ -632,3 +632,41 @@ Added a Claude-scoped planning convergence rule that runs a native read-only Cod
 ### Next Steps
 
 - None - task complete
+
+
+## Session 218: PR 243 review remediation
+
+**Date**: 2026-07-24
+**Task**: PR 243 review remediation
+**Branch**: `codex/claude-codex-review-fanout`
+
+### Summary
+
+Addressed the Copilot parity-harness finding and completed the exact-head review gate for PR #243.
+
+### Main Changes
+
+- Require the Claude-only generated body insertion to appear exactly once before parity normalization removes it.
+- Add regression coverage for both missing and duplicated Claude insertion blocks.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9978866` | test: enforce unique Claude body insertion |
+
+### Testing
+
+- [OK] Focused generated-parity tests passed.
+- [OK] make check passed.
+- [OK] Deterministic pack review full-check passed before both remote review requests.
+- [OK] PR #243 CI passed and the fresh exact-head Copilot review reported no new comments.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
