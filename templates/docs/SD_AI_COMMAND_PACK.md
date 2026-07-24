@@ -29,6 +29,10 @@ Quick links:
 - `.agents/skills/sd-help/references/structured-questions.md`: generated host-neutral
   decision registry, question shape, noninteractive behavior, and authority
   boundaries shared by workflows that need user judgment.
+- `.claude/rules/sd-planning-adversarial-review.md` and the lazily loaded
+  `.claude/sd-ai-command-pack/planning-adversarial-review.md` contract:
+  Claude-only planning-artifact adversarial review with an optional native
+  Codex CLI peer lane.
 - `.agents/skills/sd-status/SKILL.md`: read-only local repository and
   configured fleet status reporting.
 - `.agents/skills/sd-start/SKILL.md`: Codex-visible Trellis start wrapper.
@@ -1489,6 +1493,26 @@ ephemeral tool state and do not change what the checks validate.
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS`, then `600`; set `0`
   to disable the timeout.
 
+### Planning Artifact Review
+
+- Claude Code installs review a materially created or updated active Trellis
+  task `prd.md`, `design.md`, or `implement.md` once at the planning convergence
+  boundary, before implementation approval or `task.py start`.
+- The rule captures pre-edit existence and hashes, skips unchanged or
+  non-semantic churn visibly, and keeps paid review to one coherent artifact
+  batch rather than one call per write.
+- Claude performs its own adversarial review. When `command -v codex` and
+  `codex exec --help` succeed, it launches one `codex exec` peer review in a
+  separate background task using `--sandbox read-only` and `--ephemeral`, then
+  joins both results.
+- Every material concern receives a `C-*` identifier and an `addressed`,
+  `rebutted`, `parked`, or `unresolved` disposition backed by repository
+  evidence. Changed remediation is reviewed once more; a repeated substantive
+  concern stops for user judgment instead of starting a third automatic round.
+- Missing, incompatible, unauthenticated, or failed Codex is reported as a
+  degraded optional lane while Claude's host review continues. The integration
+  neither requires the OpenAI Codex Claude plugin nor changes upstream Trellis.
+
 ### Local Review
 
 - Claude Code normal-scope invocations add `codex review --uncommitted` or
@@ -1803,7 +1827,8 @@ sd-ai-command-pack-uv-tools/
 # .opencode/, .pi/, .qoder/, .reasonix/, .trae/, .zcode/), with a few extras
 # (.codex/ + .opencode/ sessions/, .opencode/ state/ + node_modules/, .gemini/
 # + .claude/ settings.local.json). .claude/ is handled differently: it ignores
-# .claude/** while negating tracked .claude/commands/sd/*.md. A normal install
+# .claude/** while negating tracked .claude/commands/sd/*.md, the thin
+# planning-review rule, and its pack-owned support contract. A normal install
 # regenerates this managed block; --local-only writes the equivalent patterns
 # to .git/info/exclude instead.
 node_modules/

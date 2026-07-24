@@ -34,6 +34,8 @@ PACK_FILE_PATTERNS = [
     ".agent/workflows/sd-*",
     ".agents/skills/sd-*/*",
     ".claude/commands/sd/*",
+    ".claude/rules/sd-planning-adversarial-review.md",
+    ".claude/sd-ai-command-pack/*",
     ".codebuddy/commands/sd/*",
     ".codebuddy/skills/sd-*/*",
     ".cursor/commands/sd-*",

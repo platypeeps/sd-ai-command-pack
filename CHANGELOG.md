@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.43.0 - 2026-07-23
+
+- Add a Claude project rule that adversarially reviews materially changed
+  Trellis planning artifacts before implementation approval or task start.
+- Run an optional read-only native `codex exec` peer review in parallel with
+  Claude's host review, reconcile all concerns explicitly, and degrade cleanly
+  when the Codex CLI is unavailable or fails.
+
 ## 0.42.0 - 2026-07-23
 
 - Add a Claude-only native Codex CLI peer lane to normal `sd-review-local`

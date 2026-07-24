@@ -1,0 +1,31 @@
+{
+  "id": "add-codex-adversarial-planning-review",
+  "name": "add-codex-adversarial-planning-review",
+  "title": "Add Codex adversarial planning review",
+  "description": "Add a pack-owned Claude project rule that invokes native Codex as an optional adversarial peer reviewer for materially changed Trellis planning artifacts and requires grounded concern disposition before implementation.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "Claude planning-artifact review integration, shared workflow contract, installer surfaces, tests, docs, and release metadata",
+  "package": "frontend",
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-23",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "codex/claude-codex-review-fanout",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "templates/.claude/rules/sd-planning-adversarial-review.md",
+    "templates/.claude/sd-ai-command-pack/planning-adversarial-review.md",
+    "manifest.json",
+    "tests/"
+  ],
+  "notes": "Planning uses a pack-installed Claude project rule so direct trellis-brainstorm is covered without changing upstream Trellis. Native codex exec remains optional and plugin-independent.",
+  "meta": {}
+}

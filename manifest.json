@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "sd-ai-command-pack",
-  "version": "0.42.0",
+  "version": "0.43.0",
   "license": "MIT",
   "description": "Install project-local SD AI command workflows, Prism/Gito defaults, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
@@ -110,6 +110,20 @@
       "source": "templates/.agents/skills/sd-audit-repo/charters/accessibility-i18n.md",
       "target": ".agents/skills/sd-audit-repo/charters/accessibility-i18n.md",
       "install": "always"
+    },
+    {
+      "platform": "claude",
+      "kind": "config",
+      "source": "templates/.claude/rules/sd-planning-adversarial-review.md",
+      "target": ".claude/rules/sd-planning-adversarial-review.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "claude",
+      "kind": "doc",
+      "source": "templates/.claude/sd-ai-command-pack/planning-adversarial-review.md",
+      "target": ".claude/sd-ai-command-pack/planning-adversarial-review.md",
+      "anchor": ".claude"
     },
     {
       "platform": "shared",

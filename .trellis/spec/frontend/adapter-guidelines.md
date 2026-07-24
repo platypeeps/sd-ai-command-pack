@@ -1690,6 +1690,85 @@ architectural-overview gate, and rebuild the repo-local `.obsidian-kb` folder:
   `Architectural overview`, `Obsidian KB`, `Obsidian vault copy`, and
   `Validation` in the final response.
 
+## Scenario: Claude planning-artifact adversarial review
+
+### 1. Scope / Trigger
+
+- Trigger only when the current Claude run creates or materially updates an
+  active Trellis task's `prd.md`, `design.md`, or `implement.md`.
+- Capture file existence and content hashes before the coherent planning edit
+  batch, then evaluate the converged artifact set before implementation
+  approval or `task.py start`.
+- Unchanged, whitespace/format-only, generated-metadata-only, and no-active-task
+  cases skip with a visible reason.
+
+### 2. Signatures
+
+- Claude rule:
+  `.claude/rules/sd-planning-adversarial-review.md`.
+- Canonical Claude-scoped contract:
+  `.claude/sd-ai-command-pack/planning-adversarial-review.md`.
+- Optional peer invocation: `codex exec --cd <repo-root> --sandbox read-only
+  --ephemeral <focused-review-prompt>`.
+
+### 3. Contracts
+
+- The rule is a pack-owned additive instruction; it does not modify or shadow
+  Trellis planning skills and applies to direct brainstorming, backlog, and
+  continue flows that produce the same artifacts.
+- One coherent edit batch produces one initial host review and, when
+  `command -v codex` plus `codex exec --help` succeed, one parallel Codex
+  review. Claude launches Codex as a separate background Bash task and joins it
+  with `BashOutput` while performing its own review.
+- Both lanes are advisory inputs until verified against repository evidence.
+  Deduplicated concerns use stable `C-*` IDs and exactly one of `addressed`,
+  `rebutted`, `parked`, or `unresolved`.
+- Addressed artifact changes receive one remediation review round. A repeated
+  substantive concern or material lane conflict stops for user judgment; no
+  third automatic round is allowed.
+- An unresolved or parked blocking concern prevents implementation approval
+  and `task.py start`.
+
+### 4. Validation & Error Matrix
+
+- Codex executable/help probe succeeds -> run the read-only ephemeral peer lane
+  in parallel and collect its terminal result.
+- Executable missing, incompatible help, authentication failure, or runtime
+  failure -> report skipped/failed Codex, continue the host review, and never
+  report Codex approval.
+- No semantic planning change -> report the skip and issue no Codex call.
+- Blocking concern survives remediation -> stop before task start and request
+  user judgment.
+
+### 5. Good / Base / Bad Cases
+
+- Good: a new design receives overlapping host/Codex review; one verified
+  concern updates `design.md`, the bounded rerun is clean, and implementation
+  becomes unblocked.
+- Base: formatting-only task edits report a review skip and make no paid call.
+- Bad: the Codex CLI fails, the host silently treats that as approval, or a
+  repeated blocker is bypassed by starting implementation.
+
+### 6. Tests Required
+
+- Assert the manifest installs the rule and reference only for Claude and the
+  managed gitignore keeps those two pack-owned paths trackable.
+- Assert the contract names all three artifacts, hash/material-change gating,
+  direct `codex exec`, read-only/ephemeral flags, background collection,
+  concern dispositions, blocker semantics, and the one-rerun limit.
+- Assert non-Claude installs receive neither file and shipped behavior has no
+  plugin-cache, companion-script, or upstream Trellis dependency.
+
+### 7. Wrong vs Correct
+
+Wrong: patch the OpenAI Codex Claude plugin or upstream `trellis-brainstorm`,
+then call Codex after every planning file write.
+
+Correct: install one thin Claude project rule and one lazily loaded,
+Claude-scoped support contract outside `.claude/rules`, review the converged
+artifact batch once, and degrade visibly to the host lane when the native Codex
+CLI is unavailable.
+
 ## Platform Adapter Pattern
 
 Adapters should stay short and parallel:
