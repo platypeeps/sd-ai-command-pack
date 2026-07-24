@@ -1,0 +1,32 @@
+{
+  "id": "register-fleet-operator-policy-decision",
+  "name": "register-fleet-operator-policy-decision",
+  "title": "Register the fleet operator policy decision",
+  "description": "Resolve review finding 1.6.2.1 by registering a bounded fleet operator decision with native structured-question adaptation, safe fallback, and noninteractive parking.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-24",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "07-24-correct-sd-skill-contract-drift",
+  "relatedFiles": [
+    "installer/registry.py",
+    "templates/.agents/skills/sd-fleet-refresh/SKILL.md",
+    "templates/.agents/skills/sd-fleet-refresh/references/controller-recovery.md",
+    "templates/.agents/skills/sd-help/references/structured-questions.md",
+    "tests/test_surface_generation.py"
+  ],
+  "notes": "",
+  "meta": {}
+}

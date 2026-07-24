@@ -10,7 +10,8 @@
 
 ## 2. Build The Evidence Matrix
 
-- Create the task-local F01-F17 and S01-S11 evidence record under `research/`.
+- Create the task-local F01-F17, G01-G07, H01-H08, and S01-S20 evidence record
+  under `research/`.
 - Link each finding and scenario to its owning task, focused fixture, expected
   result, and final observation.
 - Add only integration fixtures or evidence plumbing owned by this task; route
@@ -19,7 +20,10 @@
 ## 3. Execute Lifecycle Scenarios
 
 - Run the exact-head, routing/provider, trust, structured-interaction, review
-  pagination, dependency, fleet, audit, drift, and write-boundary scenarios.
+  pagination, repeated-family convergence, surface closure, finish-work
+  bookkeeping, cheap exact-head CI, recovery-artifact, sandbox-cache,
+  learning-freshness, final-head, dependency, fleet, audit, drift, and
+  write-boundary scenarios.
 - Exercise generated adapters and an installed payload where source-only tests
   cannot prove the contract.
 - Preserve distinct unavailable/failure results and disclose paid or networked

@@ -93,10 +93,19 @@ Provider profiles declare:
 Custom providers use argv arrays or a bounded executable adapter. The clean
 contract does not accept legacy shell-string environment commands.
 
-In `local=auto`, choose one available provider with the lowest configured cost
-tier that satisfies scope, data policy, required capability, and minimum
-quality. Deterministic tie-breaking is configuration order. `all` deliberately
-runs every eligible provider and reports each result.
+In `local=auto`, resolve a deterministic provider plan from scope, data policy,
+required capability, minimum quality, change risk, finding families, and cost.
+The default first substantive PR head selects Prism and Gito and runs their
+isolated attempts concurrently. Cross-cutting/high-risk successors and repeated
+finding families select both again; a low-risk successor may select one
+lowest-cost eligible provider, while an exact verified bookkeeping successor
+may produce the stable skip defined below. Deterministic tie-breaking is
+configuration order. `all` deliberately runs every eligible provider and
+reports each result.
+
+Provider-set selection is complete before dispatch. A missing or failed planned
+provider remains an explicit attempt outcome and never causes an unannounced
+replacement or more-expensive call.
 
 Executable presence alone does not authorize a paid or network call. The
 provider must be enabled by the versioned review configuration or explicit

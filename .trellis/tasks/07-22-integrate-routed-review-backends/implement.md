@@ -42,6 +42,10 @@
 - Add the versioned pack-owned review configuration and strict parser.
   Provider command configuration uses validated argv arrays/adapters, never
   shell strings.
+- Add the risk/cost provider-plan resolver. Run isolated Prism and Gito attempts
+  concurrently for first substantive PR heads, high-risk successors, and
+  repeated finding families; retain deterministic one-provider and stable-skip
+  plans for bounded low-risk cases.
 - Resolve router capability before provider calls or GitHub mutation in PR scope
   unless `remote=none`. Treat a missing stanza as optional absence, but fail on
   declared-invalid or unreadable integration state.
@@ -49,7 +53,8 @@
   timeout, and bounded retry behavior into provider adapters; add the custom
   adapter contract.
 - Compute exact-scope manifests/content digests, normalize provider outcomes,
-  write local receipts atomically, and reuse only exact identity matches.
+  preserve per-provider provenance while deduplicating findings, write local
+  receipts atomically, and reuse only exact identity matches.
 - Preserve worktree, branch, codebase, and PR outcomes through this single
   coordinator.
 - Persist coordinator state and make transport, polling, retry accounting,

@@ -15,10 +15,13 @@ platform adapters, scripts, environment-variable families, help entries, and
 configuration readers rather than wrapping them. Preserve user outcomes and
 installer safety, not legacy invocation shapes.
 
-The unified review workflow selects the lowest-cost eligible local provider,
+The unified review workflow resolves a cost- and risk-aware local provider plan,
 records exact-scope evidence, and asks `sd-github-review` whether an independent
-remote review is still required. One invocation owns findings disposition,
-fixes, exact-head reruns, thread resolution, CI, and the final report.
+remote review is still required. Its default first substantive PR head runs
+Prism and Gito concurrently before remote dispatch, while low-risk successors
+may select one eligible provider and verified bookkeeping successors may skip.
+One invocation owns findings disposition, fixes, exact-head reruns, thread
+resolution, CI, and the final report.
 
 ## Confirmed Evidence
 
@@ -58,6 +61,20 @@ fixes, exact-head reruns, thread resolution, CI, and the final report.
   infrastructure may land first, while this task owns registering and proving
   retirement of the old review/check identifiers.
 
+## Implementation Child Map
+
+- `07-24-implement-read-only-sd-check` owns the deterministic successor and
+  finding `1.4.6.1`; it must land before review integration and retirement.
+- `07-24-implement-unified-routed-sd-review` owns the unified local/remote state
+  machine and finding `1.1.2`; it depends on `sd-check` and router v1.
+- `07-24-simplify-review-shipping-composition` owns publish/review/ship
+  boundaries and finding `1.5.2.1`; it depends on both successor commands.
+- `07-24-remove-retired-review-surfaces` owns exhaustive deletion and installed
+  target retirement; it runs after all callers use the new contracts.
+- This task is the review-cutover coordination parent. It does not complete
+  merely because the successor commands exist; every child and the clean-cutover
+  evidence must be terminal.
+
 ## Requirements
 
 - R1: Expose only `sd-check` and `sd-review` across every supported platform.
@@ -80,9 +97,15 @@ fixes, exact-head reruns, thread resolution, CI, and the final report.
   profiles and defaults. Profiles declare adapter ID, supported scopes,
   network/data-handling class, cost tier, quality tier, timeout, and version.
   Custom commands use validated argument arrays or adapters, not shell strings.
-- R6: In local `auto`, run one lowest-cost configured provider that satisfies
-  scope, data-handling, capability, and minimum-quality policy. `all` is an
-  explicit high-assurance/comparison choice, not the default.
+- R6: In local `auto`, resolve a deterministic provider set from scope,
+  data-handling, capability, minimum-quality, risk, finding-family, and cost
+  policy. Run Prism and Gito concurrently for the first substantive PR head,
+  cross-cutting or high-risk successor heads, and repeated finding families.
+  Low-risk successors may select one lowest-cost eligible provider; verified
+  documentation, metadata, or bookkeeping-only cases may use a stable recorded
+  skip when policy permits. `all` still explicitly requests every eligible
+  provider, and failure never silently substitutes an unselected or more
+  expensive provider.
 - R7: Record local receipt schema v1 with repository, scope kind, base/head,
   canonical content digest including applicable staged/unstaged/untracked
   bytes, provider/configuration identity, timing, normalized outcome, findings
@@ -212,6 +235,17 @@ fixes, exact-head reruns, thread resolution, CI, and the final report.
   if retry content conflicts. A same-head rerequest is a separate explicit next
   attempt that references the prior receipt and is allowed only when backend
   capability and repository policy permit it.
+- R33: Execute the child order explicitly: read-only check, unified review,
+  shipping composition, then retirement. Do not expose a mixed old/new public
+  surface as a completed release between those steps.
+- R34: The final public experience has one vocabulary and authority model:
+  `sd-check` checks, `sd-review` reviews, `sd-create-pr` publishes, `sd-ship`
+  composes delivery, and `sd-housekeeping` merges/cleans. No other public or
+  hidden route performs those same responsibilities.
+- R35: Remove obsolete implementation code as well as names. Unreachable
+  branches, parsers, environment readers, provider dispatchers, polling loops,
+  generated templates, tests, and documentation are deleted rather than
+  disabled, deprecated, or retained for speculative rollback.
 
 ## Acceptance Criteria
 
@@ -232,6 +266,10 @@ fixes, exact-head reruns, thread resolution, CI, and the final report.
 - [ ] Prism, Gito, and custom adapters use one execution/result contract;
   matching receipts are reused and every identity/config/content change forces
   a rerun.
+- [ ] A substantive first-head fixture runs Prism and Gito concurrently,
+  aggregates and deduplicates their findings before remote routing, and proves
+  low-risk successor selection plus bookkeeping-only skips do not reuse stale
+  confidence or create duplicate provider billing.
 - [ ] One PR invocation spans deterministic checks, local review, routed remote
   review, findings remediation, exact-head invalidation, delayed thread reads,
   CI, and a stable final report.
@@ -279,6 +317,14 @@ fixes, exact-head reruns, thread resolution, CI, and the final report.
   decision boundaries and degrade safely when the host lacks the capability.
 - [ ] Source templates, generated mirrors, manifest/provenance, candidate
   ledger, focused tests, `make check`, and fleet candidate validation pass.
+- [ ] All four implementation children are archived with landed and validated
+  evidence in dependency order.
+- [ ] A repository-wide live-surface scan and upgrade-from-prior-release fixture
+  prove that no old command, code path, shell-string/environment reader, alias,
+  wrapper, fallback, hidden mode, or stale receipt remains executable.
+- [ ] One end-to-end user journey proves the same scope, provider, finding,
+  failure, head, and merge semantics across direct `sd-review`, `sd-ship`, and
+  `sd-work-backlog` composition without duplicate provider or polling work.
 
 ## Out Of Scope
 

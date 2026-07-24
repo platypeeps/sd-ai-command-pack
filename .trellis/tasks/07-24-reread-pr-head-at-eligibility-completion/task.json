@@ -1,0 +1,33 @@
+{
+  "id": "reread-pr-head-at-eligibility-completion",
+  "name": "reread-pr-head-at-eligibility-completion",
+  "title": "Re-read PR head at eligibility completion",
+  "description": "Make local-branch eligibility re-read and verify the pull-request head after evidence collection so stale PR evidence cannot return eligible.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-24",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "07-22-streamline-sd-skill-workflows",
+  "relatedFiles": [
+    ".trellis/spec/backend/quality-guidelines.md",
+    "templates/scripts/sd-ai-command-pack-pr-eligibility.py",
+    "scripts/sd-ai-command-pack-pr-eligibility.py",
+    "templates/scripts/sd-ai-command-pack-housekeeping.sh",
+    "tests/test_pr_eligibility.py",
+    "tests/test_housekeeping.py"
+  ],
+  "notes": "Finding F-8 from the 2026-07-24 recent-run review and unresolved PR #232 thread. Planning complete pending user review; this focused fix should land before final program integration.",
+  "meta": {}
+}
