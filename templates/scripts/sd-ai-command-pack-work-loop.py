@@ -22,7 +22,11 @@ from urllib.parse import urlsplit, urlunsplit
 sys.dont_write_bytecode = True
 
 # This import must follow the bytecode guard for direct entrypoint invocation.
-from sd_ai_command_pack_lib import CacheSetupError, build_tool_environment  # noqa: E402
+from sd_ai_command_pack_lib import (  # noqa: E402
+    CACHE_ROOT_ENV,
+    CacheSetupError,
+    build_tool_environment,
+)
 
 SCHEMA_VERSION = 1
 MAX_LEDGER_BYTES = 64 * 1024
@@ -153,11 +157,15 @@ def run_git(repo: Path, *args: str) -> str | None:
     try:
         environment, _, _ = build_tool_environment(repo=repo)
     except CacheSetupError as error:
-        raise WorkLoopError(
-            "cache setup failed: "
-            f"{error}; set SD_AI_COMMAND_PACK_CACHE_ROOT to a private writable "
-            "directory outside the repository"
-        ) from error
+        detail = str(error).strip()
+        detail = detail.removeprefix("cache setup failed for external tools: ")
+        detail = detail.removeprefix("cache setup failed: ")
+        if CACHE_ROOT_ENV not in detail:
+            detail = (
+                f"{detail}; set {CACHE_ROOT_ENV} to a private writable directory "
+                "outside the repository"
+            )
+        raise WorkLoopError(f"cache setup failed: {detail}") from error
     try:
         result = subprocess.run(
             ["git", "-C", str(repo), *args],
