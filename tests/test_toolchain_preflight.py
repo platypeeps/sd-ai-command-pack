@@ -363,6 +363,58 @@ class ToolchainPreflightTests(InstallTestCase):
             self.assertTrue(path.is_dir())
             self.assertFalse(path.is_relative_to(root))
 
+    def test_run_strips_crlf_from_cache_helper_output(self) -> None:
+        root = self._repo()
+        scripts = root / "scripts"
+        scripts.mkdir()
+        toolchain = scripts / "sd-ai-command-pack-toolchain.sh"
+        toolchain.write_text(self.script.read_text(encoding="utf-8"), encoding="utf-8")
+        toolchain.chmod(0o755)
+        helper = scripts / "sd_ai_command_pack_lib.py"
+        helper.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            "sys.stdout.buffer.write(\n"
+            "    b'XDG_CACHE_HOME=/cache/xdg\\r\\n'\n"
+            "    b'PYTHONPYCACHEPREFIX=/cache/python\\r\\n'\n"
+            "    b'UV_CACHE_DIR=/cache/uv\\r\\n'\n"
+            "    b'UV_TOOL_DIR=/cache/uv-tools\\r\\n'\n"
+            "    b'PIP_CACHE_DIR=/cache/pip\\r\\n'\n"
+            "    b'RUFF_CACHE_DIR=/cache/ruff\\r\\n'\n"
+            "    b'NPM_CONFIG_CACHE=/cache/npm\\r\\n'\n"
+            ")\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                self._bash_path,
+                str(toolchain),
+                "run",
+                "--",
+                sys.executable,
+                "-c",
+                (
+                    "import os; "
+                    "print(repr(os.environ['XDG_CACHE_HOME'])); "
+                    "print(repr(os.environ['NPM_CONFIG_CACHE']))"
+                ),
+            ],
+            cwd=root,
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_REPO_ROOT": str(root),
+                "SD_AI_COMMAND_PACK_PYTHON": sys.executable,
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["'/cache/xdg'", "'/cache/npm'"])
+
     def test_invalid_cache_root_stops_before_python_workload(self) -> None:
         root = self._repo()
         marker = root / "workload-ran"

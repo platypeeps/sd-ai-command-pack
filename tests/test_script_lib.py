@@ -124,6 +124,22 @@ class ScriptLibTests(InstallTestCase):
                         environ={lib.CACHE_ROOT_ENV: str(value)},
                     )
 
+    def test_tool_environment_uses_worktree_root_for_subdirectory_input(self) -> None:
+        lib = self.load_lib()
+        repo, _ = self.cache_fixture()
+        (repo / ".git").mkdir()
+        subdirectory = repo / "nested" / "work"
+        subdirectory.mkdir(parents=True)
+        repository_cache = repo / ".cache"
+
+        with self.assertRaisesRegex(lib.CacheSetupError, "outside the repository"):
+            lib.build_tool_environment(
+                repo=subdirectory,
+                environ={lib.CACHE_ROOT_ENV: str(repository_cache)},
+            )
+
+        self.assertFalse(repository_cache.exists())
+
     def test_tool_environment_rejects_non_private_namespace(self) -> None:
         lib = self.load_lib()
         repo, cache_root = self.cache_fixture()
@@ -233,6 +249,59 @@ class ScriptLibTests(InstallTestCase):
                 encoding="utf-8"
             )
             self.assertIn("build_tool_environment", content, name)
+
+    def test_shared_shell_cache_parser_strips_crlf(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-shell-cache-crlf-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        scripts = root / "scripts"
+        scripts.mkdir()
+        shell_lib = scripts / "sd-ai-command-pack-shell-lib.sh"
+        shell_lib.write_text(
+            (
+                install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh"
+            ).read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        toolchain = scripts / "sd-ai-command-pack-toolchain.sh"
+        toolchain.write_text(
+            "#!/usr/bin/env bash\n"
+            "printf 'XDG_CACHE_HOME=/cache/xdg\\r\\n'\n"
+            "printf 'PYTHONPYCACHEPREFIX=/cache/python\\r\\n'\n"
+            "printf 'UV_CACHE_DIR=/cache/uv\\r\\n'\n"
+            "printf 'UV_TOOL_DIR=/cache/uv-tools\\r\\n'\n"
+            "printf 'PIP_CACHE_DIR=/cache/pip\\r\\n'\n"
+            "printf 'RUFF_CACHE_DIR=/cache/ruff\\r\\n'\n"
+            "printf 'NPM_CONFIG_CACHE=/cache/npm\\r\\n'\n",
+            encoding="utf-8",
+        )
+        toolchain.chmod(0o755)
+
+        result = subprocess.run(
+            [
+                self._bash_path,
+                "-c",
+                (
+                    "warn() { printf '%s\\n' \"$*\" >&2; }; "
+                    "source \"$1\"; "
+                    "export SD_AI_COMMAND_PACK_REPO_ROOT=\"$2\"; "
+                    "prepare_tool_cache_env; "
+                    "printf '<%s>\\n' \"$XDG_CACHE_HOME\" \"$NPM_CONFIG_CACHE\""
+                ),
+                "bash",
+                str(shell_lib),
+                str(root),
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["</cache/xdg>", "</cache/npm>"])
 
     def test_github_workflow_skills_require_argv_safe_cache_wrapper(self) -> None:
         for name in (

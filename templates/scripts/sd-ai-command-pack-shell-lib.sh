@@ -188,6 +188,8 @@ prepare_tool_cache_env() {
     return 1
   fi
   while IFS='=' read -r key value; do
+    key="${key%$'\r'}"
+    value="${value%$'\r'}"
     case "$key" in
       XDG_CACHE_HOME|PYTHONPYCACHEPREFIX|UV_CACHE_DIR|UV_TOOL_DIR|PIP_CACHE_DIR|RUFF_CACHE_DIR|NPM_CONFIG_CACHE)
         if [ -z "$value" ]; then

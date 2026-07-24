@@ -417,6 +417,8 @@ configure_cache_environment() {
     fail "cache setup failed; set SD_AI_COMMAND_PACK_CACHE_ROOT to a private writable directory outside the repository" 5
   fi
   while IFS='=' read -r key value; do
+    key="${key%$'\r'}"
+    value="${value%$'\r'}"
     case "$key" in
       XDG_CACHE_HOME|PYTHONPYCACHEPREFIX|UV_CACHE_DIR|UV_TOOL_DIR|PIP_CACHE_DIR|RUFF_CACHE_DIR|NPM_CONFIG_CACHE)
         [ -n "$value" ] || fail "cache setup returned an empty $key" 5

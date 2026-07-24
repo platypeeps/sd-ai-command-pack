@@ -94,6 +94,21 @@ def _is_within(path: Path, parent: Path) -> bool:
     return True
 
 
+def _repository_boundary(repository: Path) -> Path:
+    """Return the nearest conservative worktree boundary for a repository path."""
+
+    for candidate in (repository, *repository.parents):
+        marker = candidate / ".git"
+        try:
+            if marker.exists() or marker.is_symlink():
+                return candidate
+        except OSError as error:
+            raise CacheSetupError(
+                f"cannot inspect repository boundary marker {marker}: {error}"
+            ) from error
+    return repository
+
+
 def _validate_external_path(path: Path, *, repo: Path, label: str) -> Path:
     try:
         resolved = path.resolve(strict=False)
@@ -208,6 +223,7 @@ def build_tool_environment(
         repository = repository.resolve(strict=True)
     except OSError as error:
         raise CacheSetupError(f"cannot resolve repository for cache setup: {error}") from error
+    repository = _repository_boundary(repository)
 
     namespace: Path | None = None
     failures: list[str] = []
