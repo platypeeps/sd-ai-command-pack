@@ -59,8 +59,12 @@ of re-deriving the repository inventory.
   missing entries; prefer reading config over executing long builds.
 - When `gh` is available, read recent run history (`gh run list`) for
   rerun patterns and chronically failing jobs.
-- Exercise the repo's own targets and scripts read-only (`make -n <target>`,
-  `--help`) to verify the machinery resolves and starts.
+- Inspect target declarations, package-script definitions, shell entry points,
+  argument parsers, workflow invocations, and documented prerequisites
+  statically. Do not run checkout-owned targets, scripts, hooks, package tasks,
+  Make expansion, or help handlers merely to see whether they resolve or
+  start. Record any runtime smoke test as separate work requiring explicit
+  execution authority outside this read-only audit.
 
 ## Severity guide
 

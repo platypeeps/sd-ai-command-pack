@@ -13,6 +13,9 @@ InstallTestCase = _support.InstallTestCase
 SKILL_TEMPLATE = install.ROOT / "templates/.agents/skills/sd-audit-repo/SKILL.md"
 CHARTER_DIR = install.ROOT / "templates/.agents/skills/sd-audit-repo/charters"
 GUIDE_TEMPLATE = install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md"
+INVENTORY_TEMPLATE = (
+    install.ROOT / "templates/scripts/sd-ai-command-pack-audit-inventory.py"
+)
 
 ALWAYS_ON_CHARTERS = (
     "architecture",
@@ -141,6 +144,20 @@ class AuditRepoTests(InstallTestCase):
         charter = (CHARTER_DIR / "improvements.md").read_text(encoding="utf-8")
         self.assertIn("cite", charter)
 
+    def test_read_only_charters_do_not_execute_checkout_owned_probes(self) -> None:
+        tooling = (CHARTER_DIR / "tooling.md").read_text(encoding="utf-8")
+        architecture = (CHARTER_DIR / "architecture.md").read_text(encoding="utf-8")
+
+        for forbidden in ("make -n", "`--help`", "xargs wc -l"):
+            self.assertNotIn(forbidden, tooling + architecture)
+        for required in (
+            "Do not run checkout-owned targets",
+            "sd-ai-command-pack-audit-inventory.py",
+            "escaped `blob-bytes` rows",
+        ):
+            self.assertIn(required, tooling + architecture)
+        self.assertTrue(INVENTORY_TEMPLATE.is_file())
+
     def test_command_adapters_share_audit_contract(self) -> None:
         adapters = [
             install.ROOT / "templates/.commands/sd-audit-repo.md",
@@ -157,8 +174,7 @@ class AuditRepoTests(InstallTestCase):
                     "deterministic applicability preflight, per-dimension "
                     "reviewer dispatch, adversarial "
                     "verification, synthesis, Trellis reconciliation",
-                    "`dimensions=...`, `depth=standard|exhaustive`, and "
-                    "`follow-up`",
+                    "`dimensions=...`, `depth=standard|exhaustive`, and `follow-up`",
                     ".trellis/audit/ledger.md",
                     "explicit user consent",
                     "mandatory final-report format",

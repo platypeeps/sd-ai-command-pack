@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 219
+- **Total Sessions**: 220
 - **Last Active**: 2026-07-24
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~709 | Active |
+| `journal-5.md` | ~749 | Active |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 220 | 2026-07-24 | Harden audit read-only methods | `7c78840ccfb73c4d0978cef588ffe8aea105b2c2` | `codex/harden-audit-read-only-methods` |
 | 219 | 2026-07-24 | Re-read PR head at eligibility completion | `7afc5f9` | `codex/plan-workflow-improvements` |
 | 218 | 2026-07-24 | PR 243 review remediation | `9978866` | `codex/claude-codex-review-fanout` |
 | 217 | 2026-07-23 | Add Claude planning adversarial review | `65c3566` | `codex/claude-codex-review-fanout` |
