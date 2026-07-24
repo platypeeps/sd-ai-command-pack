@@ -273,6 +273,44 @@ class WorkLoopTests(InstallTestCase):
             "c:/users/test/example",
         )
 
+    def test_run_git_reports_cache_setup_failure_before_git_probe(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        cache_error = module.CacheSetupError("cache root is unsafe")
+
+        with (
+            mock.patch.object(
+                module, "build_tool_environment", side_effect=cache_error
+            ),
+            mock.patch.object(module.subprocess, "run") as run,
+        ):
+            with self.assertRaisesRegex(
+                module.WorkLoopError,
+                "cache setup failed: cache root is unsafe.*SD_AI_COMMAND_PACK_CACHE_ROOT",
+            ):
+                module.resolve_repository(root)
+
+        run.assert_not_called()
+
+    def test_run_git_does_not_duplicate_cache_setup_remediation(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        cache_error = module.CacheSetupError(
+            "cache setup failed for external tools: no safe root; set "
+            "SD_AI_COMMAND_PACK_CACHE_ROOT to a private writable directory "
+            "outside the repository"
+        )
+
+        with mock.patch.object(
+            module, "build_tool_environment", side_effect=cache_error
+        ):
+            with self.assertRaises(module.WorkLoopError) as raised:
+                module.run_git(root, "status")
+
+        message = str(raised.exception)
+        self.assertEqual(message.count("cache setup failed"), 1)
+        self.assertEqual(message.count("SD_AI_COMMAND_PACK_CACHE_ROOT"), 1)
+
     def test_repository_identity_strips_remote_credentials_before_persistence(
         self,
     ) -> None:

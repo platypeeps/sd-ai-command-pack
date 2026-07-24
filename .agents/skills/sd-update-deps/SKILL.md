@@ -16,6 +16,14 @@ never edits dependency manifests or lockfiles, never pushes to bot branches,
 and never opens PRs of its own. The housekeeping gate criteria are the merge
 authority: this skill adds no second merge path with weaker criteria.
 
+## Sandbox-safe tool execution
+
+Run every `gh`, `uv`, `pip`, `ruff`, or `npm` command shown in this workflow
+through `bash scripts/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]`.
+The argv-safe wrapper changes only documented cache variables and preserves
+auth/config state. If it is missing or reports a cache-setup failure, stop with
+that diagnostic; do not retry the tool bare or redirect `GH_CONFIG_DIR`.
+
 ## When to use
 
 Run this command when dependency-bot PRs have accumulated and the user wants

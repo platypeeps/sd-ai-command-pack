@@ -3404,7 +3404,7 @@ class InstallCoreTests(InstallTestCase):
             "positive_int_or_default",
             "nonnegative_int_or_default",
             "load_gito_pack_env",
-            "prepare_gito_uv_env",
+            "prepare_tool_cache_env",
             "gito_output_indicates_rate_limit",
             "run_gito_command",
             "has_ref",

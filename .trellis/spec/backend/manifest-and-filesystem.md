@@ -641,15 +641,23 @@ Generated text writers follow the same safety model:
    when moving repeated subprocess, git, gh, path, or error-formatting behavior
    out of individual scripts.
 2. Signatures: `scripts/sd_ai_command_pack_lib.py` exposes
-   `CommandError`, `DEFAULT_COMMAND_TIMEOUT`, `DEFAULT_GIT_TIMEOUT`,
+   `CommandError`, `CacheSetupError`, `ToolExecutionPlan`, `CACHE_ROOT_ENV`,
+   `CACHE_ENV_KEYS`, `DEFAULT_COMMAND_TIMEOUT`, `DEFAULT_GIT_TIMEOUT`,
    `DEFAULT_GH_TIMEOUT`, `DEFAULT_TRELLIS_TIMEOUT`, `command_display(args)`,
    `command_detail(process, fallback)`, `run_command(args, *, timeout,
    context, check, cwd, allowed_returncodes, capture_output, stdout, stderr,
-   text, encoding, errors)`, `run_git(args, *, cwd, timeout, check,
+   text, encoding, errors, env)`,
+   `build_tool_environment(*, repo, environ) -> (environment, cache_paths,
+   namespace)`, `build_tool_execution_plan(args, *, cwd, environ) ->
+   ToolExecutionPlan`, `run_git(args, *, cwd, timeout, check,
    allowed_returncodes, errors, context)`, `run_gh(args, *, cwd, timeout,
    check, allowed_returncodes, errors, context)`, `git_stdout(args, *, cwd,
    timeout, errors, context, required)`, and
    `repo_root(*, fallback_to_cwd=False)`.
+   `scripts/sd-ai-command-pack-toolchain.sh cache-env` emits the fixed
+   allowlisted cache key/value set, while `... run -- COMMAND [ARG]...`
+   executes one external argv through that environment and preserves the
+   command's exit status.
 3. Contracts: the helper is copied from `templates/scripts/` into the same
    installed `scripts/` directory as its consumers, so scripts import it by
    module name and must not mutate `sys.path` at runtime. The helper must remain
@@ -657,24 +665,53 @@ Generated text writers follow the same safety model:
    replacement decoding for captured output, and must apply bounded subprocess
    execution by default: 60 seconds for generic/git commands and 120 seconds
    for GitHub or Trellis operations unless a caller supplies a narrower
-   timeout.
+   timeout. Every pack-owned subprocess that may write tool cache state must
+   use the shared execution plan. The plan begins with the inherited
+   environment, preserves credentials and `GH_CONFIG_DIR`, and routes
+   `XDG_CACHE_HOME`, `PYTHONPYCACHEPREFIX`, `UV_CACHE_DIR`, `UV_TOOL_DIR`,
+   `PIP_CACHE_DIR`, `RUFF_CACHE_DIR`, and `NPM_CONFIG_CACHE` to private
+   deterministic per-user/per-repository directories. Root precedence is a
+   valid `SD_AI_COMMAND_PACK_CACHE_ROOT`, then a valid inherited XDG cache
+   root, then a validated system temporary root. Valid explicit individual
+   cache paths retain precedence. Shell entry points obtain the same fixed
+   allowlisted key/value set from `sd-ai-command-pack-toolchain.sh cache-env`;
+   they must parse it without `eval` or constructed shell commands. Reusable
+   pack-created caches remain after success and ordinary housekeeping does not
+   delete them.
 4. Validation and error matrix: empty command -> `CommandError`; missing binary
    -> `CommandError` naming the command and context; timeout ->
    `CommandError` naming the command, context, and timeout seconds; checked
    nonzero exit -> `CommandError` with stderr/stdout detail; unchecked nonzero
    exit -> returned `CompletedProcess`; repository-root lookup outside git ->
-   `CommandError`.
+   `CommandError`; relative, repository-contained, symlinked, non-directory,
+   non-private, wrong-owner, or unwritable explicit cache location ->
+   `CacheSetupError` before the provider command runs; unsafe inherited XDG or
+   temporary candidate -> try the next safe candidate; no safe candidate ->
+   controlled cache-setup diagnostic naming `SD_AI_COMMAND_PACK_CACHE_ROOT` as
+   the corrective option. Cache paths must be absolute and outside the
+   repository, private namespace creation must be concurrency-safe, and raw
+   repository paths must never appear in namespace names.
 5. Good, base, and bad cases: good scripts call `run_git(["status"], context=...)`
    or `run_gh(["pr", "view"], context=...)` and report the helper's
    user-facing error; a base successful command returns the original completed
    process; a bad script reimplements `subprocess.run(..., timeout=...)` with
    different messages or imports installer modules that do not exist in
-   consumer repos.
+   consumer repos. A good sandboxed `gh run view --log-failed` receives a
+   writable private `XDG_CACHE_HOME` while the inherited `GH_CONFIG_DIR` and
+   token remain byte-for-byte unchanged; a base invocation reuses its stable
+   repository namespace; a bad caller redirects GitHub configuration to solve
+   a cache failure, writes caches under the repository, or adds a one-off uv
+   environment fragment.
 6. Tests required: add focused helper tests for success, empty command, missing
    binary, timeout, checked failure, git/gh timeout defaults, stdout stripping,
    and repo-root failure. Any migrated script must keep focused tests for its
    previous CLI behavior plus root/template byte parity, manifest selection,
-   install-audit provenance, and shipped-script coverage floor updates.
+   install-audit provenance, and shipped-script coverage floor updates. Cache
+   changes additionally require fixtures for unwritable home state, all
+   supported cache variables, credential preservation, relative/repository/
+   symlink/non-directory/private-permission rejection, concurrent creation,
+   fixed shell export keys, provider non-invocation after setup failure, and a
+   stubbed GitHub CLI cache write outside the repository.
 7. Wrong vs correct:
 
    ```text
@@ -683,6 +720,12 @@ Generated text writers follow the same safety model:
 
    Wrong: from installer.fileops import run_diff_check
    Correct: from sd_ai_command_pack_lib import run_command
+
+   Wrong: GH_CONFIG_DIR=/tmp/gh gh run view --log-failed
+   Correct: build_tool_execution_plan(["gh", "run", "view", "--log-failed"], cwd=repo)
+
+   Wrong: export UV_CACHE_DIR="$REPO_ROOT/.cache/uv"
+   Correct: prepare_tool_cache_env
    ```
 
 ## Plan-Before-Apply And Concurrency

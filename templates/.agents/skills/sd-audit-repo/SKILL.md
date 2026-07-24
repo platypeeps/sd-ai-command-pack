@@ -14,6 +14,14 @@ This command audits and reports; it does not fix. It never edits product
 code, never creates branches or pull requests, and never creates Trellis
 tasks on its own.
 
+## Sandbox-safe tool execution
+
+Run every `gh`, `uv`, `pip`, `ruff`, or `npm` command shown in this workflow
+through `bash scripts/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]`.
+The argv-safe wrapper changes only documented cache variables and preserves
+auth/config state. If it is missing or reports a cache-setup failure, stop with
+that diagnostic; do not retry the tool bare or redirect `GH_CONFIG_DIR`.
+
 ## Structured decisions
 
 Read [`../sd-help/references/structured-questions.md`](../sd-help/references/structured-questions.md)

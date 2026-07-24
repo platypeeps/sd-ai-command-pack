@@ -775,11 +775,11 @@ class FullCheckTests(InstallTestCase):
             encoding="utf-8",
         )
         gito.chmod(0o755)
-        temp_root = root / "tmp"
+        cache_root = Path(tools_tempdir.name) / "cache-root"
         env = {
             **os.environ,
             "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
-            "TMPDIR": str(temp_root),
+            "SD_AI_COMMAND_PACK_CACHE_ROOT": str(cache_root),
             "SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT": "0",
             "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0",
             "SD_AI_COMMAND_PACK_SCOPE_CHECK": "0",
@@ -804,10 +804,11 @@ class FullCheckTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         log = log_path.read_text(encoding="utf-8")
-        user_root = temp_root / f"sd-ai-command-pack-{os.getuid()}"
-        self.assertIn(f"UV_CACHE_DIR={user_root}/uv-cache", log)
+        digest = hashlib.sha256(os.fsencode(str(root.resolve()))).hexdigest()[:16]
+        user_root = cache_root.resolve() / f"sd-ai-command-pack-{os.getuid()}-{digest}"
+        self.assertIn(f"UV_CACHE_DIR={user_root}/uv", log)
         self.assertIn(f"UV_TOOL_DIR={user_root}/uv-tools", log)
-        self.assertTrue((user_root / "uv-cache").is_dir())
+        self.assertTrue((user_root / "uv").is_dir())
         self.assertTrue((user_root / "uv-tools").is_dir())
         self.assertIn("gito review --vs HEAD --filter app.txt", log)
 

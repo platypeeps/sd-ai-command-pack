@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 220
+- **Total Sessions**: 221
 - **Last Active**: 2026-07-24
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~749 | Active |
+| `journal-5.md` | ~795 | Active |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 221 | 2026-07-24 | Standardize sandbox-safe tool cache routing | `4020df8cd7e538199b086de730495de39d23b1b8`, `47a276f3bde62ce49f154e5aacc51c53a672bb64`, `4f2076e2e6ef3fd658abc5365e8aa280ade40978`, `2b09a5205bdbb2df97d1d8b3cce12500b3100b29`, `ab5b916bd9ae2867cf9064c23b98c2fbc48d21bc`, `e5659445f4c66c27a6b15be70c39428b626c311a`, `a3a3e7c3686566ed64ab69fa8327f8e0b33cf9b5`, `5be50b454af0883bd21a16edd55d85fab01fd638`, `bfb60265825dc75fafc93fcaa9edbc259113db9e`, `35d5d96964e6a153aaa743aef8595d0d6c04302f` | `codex/standardize-sandbox-safe-tool-cache-routing` |
 | 220 | 2026-07-24 | Harden audit read-only methods | `7c78840ccfb73c4d0978cef588ffe8aea105b2c2` | `codex/harden-audit-read-only-methods` |
 | 219 | 2026-07-24 | Re-read PR head at eligibility completion | `7afc5f9` | `codex/plan-workflow-improvements` |
 | 218 | 2026-07-24 | PR 243 review remediation | `9978866` | `codex/claude-codex-review-fanout` |

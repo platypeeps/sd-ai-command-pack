@@ -194,11 +194,11 @@ class FleetCandidateTests(InstallTestCase):
         ):
             env = candidate.command_environment(Path(sys.executable), work_root)
 
-        self.assertEqual(env["NPM_CONFIG_CACHE"], str(work_root / "npm-cache"))
-        self.assertEqual(env["UV_CACHE_DIR"], str(work_root / "uv-cache"))
-        self.assertEqual(
-            env["PYTHONPYCACHEPREFIX"], str(work_root / "python-cache")
-        )
+        namespace = Path(env["UV_CACHE_DIR"]).parent
+        self.assertEqual(Path(env["NPM_CONFIG_CACHE"]), namespace / "npm")
+        self.assertEqual(Path(env["UV_CACHE_DIR"]), namespace / "uv")
+        self.assertEqual(Path(env["PYTHONPYCACHEPREFIX"]), namespace / "python")
+        self.assertEqual(namespace.parent, work_root.resolve())
 
     def test_run_command_normalizes_timeout_and_start_failures(self) -> None:
         candidate = self.load_candidate_module()

@@ -11,6 +11,14 @@ mechanical review-cycle patterns, optionally inspect recent GitHub Copilot
 review comments, then update a bounded managed block only through an explicit
 update mode.
 
+## Sandbox-safe tool execution
+
+Run every `gh`, `uv`, `pip`, `ruff`, or `npm` command shown in this workflow
+through `bash scripts/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]`.
+The argv-safe wrapper changes only documented cache variables and preserves
+auth/config state. If it is missing or reports a cache-setup failure, stop with
+that diagnostic; do not retry the tool bare or redirect `GH_CONFIG_DIR`.
+
 ## Arguments
 
 - No update flag: `scan` mode. Analyze and report without creating directories

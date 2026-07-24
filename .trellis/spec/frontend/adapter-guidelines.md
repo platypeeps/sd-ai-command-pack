@@ -56,6 +56,14 @@ local OpenCode surface remains dependency-free.
 Keep detailed workflow rules in the matching shared skill under
 `templates/.agents/skills/<command>/SKILL.md`.
 
+Skills that invoke cache-writing external tools such as `gh`, `uv`, `pip`,
+`ruff`, or `npm` must route them as argv through
+`bash scripts/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]`. A
+missing wrapper or cache-setup error is a distinct blocker; never retry the
+same command bare, invent a command string, or redirect `GH_CONFIG_DIR` to
+solve a cache failure. Platform adapters remain thin because this rule belongs
+in the shared skill.
+
 ## Positional Primary Subjects
 
 ### 1. Scope / Trigger

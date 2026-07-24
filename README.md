@@ -427,6 +427,7 @@ schema-version-1 result; human output remains the default for direct shell use.
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `SD_AI_COMMAND_PACK_PYTHON` | Authoritative Python executable used by the toolchain preflight. | repo `.venv`, active virtualenv, Homebrew Python 3.13, then supported `python3` |
+| `SD_AI_COMMAND_PACK_CACHE_ROOT` | Absolute external parent for private per-user/per-repository XDG, Python, uv, pip, Ruff, and npm caches; GitHub auth/config remains unchanged. | safe inherited XDG cache root, then validated system temporary root |
 | `SD_AI_COMMAND_PACK_PROJECT_CHECK_COMMAND` | Explicit trusted project-check command; discovered candidates are never auto-selected. | unset |
 | `SD_AI_COMMAND_PACK_TOOLCHAIN_PLATFORM` | Advanced/test override for toolchain platform detection. | `uname -s` |
 | `SD_AI_COMMAND_PACK_TOOLCHAIN_HOMEBREW_PREFIXES` | Advanced/test override for colon-separated Homebrew Python prefixes. | `/opt/homebrew:/usr/local` |
@@ -465,6 +466,17 @@ schema-version-1 result; human output remains the default for direct shell use.
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REQUEST_COMMAND` | Custom command for requesting a remote review. | unset |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT` | Max remote review request/fix rounds before asking whether to continue. | `5` |
 | `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_SETTLE_POLLS` | Maximum 30-second polls before an accepted request without author-matched activity stops as ambiguous. | `40` |
+
+The shared cache environment builder always maps `XDG_CACHE_HOME` to a private
+pack namespace. A valid inherited `XDG_CACHE_HOME` may supply that namespace's
+safe parent, but is not preserved verbatim. Valid explicit overrides keep
+precedence for `PYTHONPYCACHEPREFIX`, `UV_CACHE_DIR`, `UV_TOOL_DIR`,
+`PIP_CACHE_DIR`, `RUFF_CACHE_DIR`, and `NPM_CONFIG_CACHE`. The builder never
+rewrites `GH_CONFIG_DIR` or other authentication state, and ordinary
+housekeeping keeps the reusable pack-created caches. Shared workflows route
+direct external tools through
+`bash scripts/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]` so
+CI-log reads and other GitHub observations receive the same environment.
 
 Use `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` for explicit review-scope PR body text.
 
@@ -537,12 +549,8 @@ After installing or refreshing a target repo, a quick smoke test is:
 
 ```bash
 cd /path/to/repo
-SANDBOX_TMP="${SANDBOX_TMP:-${TMPDIR:-/tmp}}"
-export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-$SANDBOX_TMP/sd-ai-command-pack-pycache}"
-export UV_CACHE_DIR="${UV_CACHE_DIR:-$SANDBOX_TMP/sd-ai-command-pack-uv-cache}"
-export UV_TOOL_DIR="${UV_TOOL_DIR:-$SANDBOX_TMP/sd-ai-command-pack-uv-tools}"
-export RUFF_CACHE_DIR="${RUFF_CACHE_DIR:-$SANDBOX_TMP/sd-ai-command-pack-ruff-cache}"
-python3 scripts/sd-ai-command-pack-install-audit.py
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-install-audit.py
 # For fleet or scripted refreshes, pass the repo's explicit platforms too:
 python3 scripts/sd-ai-command-pack-install-audit.py \
   --expected-platform claude --expected-platform gemini \

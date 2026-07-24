@@ -735,9 +735,11 @@ AI/tooling/cache directories:
 node_modules/
 ```
 
-For `uvx`-based Gito wrappers, the full-check and review-local runners set
-`UV_CACHE_DIR` and `UV_TOOL_DIR` to writable temp directories when they are
-unset. When Gito reports provider rate limiting through an explicit
+Pack-owned shell and Python entry points use one shared environment builder for
+XDG/GitHub CLI, Python, uv, pip, Ruff, and npm cache state. The builder creates
+a private per-user/per-repository namespace outside the repository while
+leaving GitHub configuration and authentication paths unchanged. When Gito
+reports provider rate limiting through an explicit
 HTTP 429 status such as `ClientError: 429` or a 429 slow-down response, the
 runner retries with bounded exponential backoff. Tune attempts and delays with
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`,
@@ -1385,25 +1387,42 @@ test -x "$BREW_PYTHON" || BREW_PYTHON=/usr/local/bin/python3.13
 ```
 
 In sandboxed agent sessions, some otherwise-correct local checks fail because
-their default caches or temporary files land outside the writable sandbox, or
-inside repo cache directories the agent cannot write. Before running `uv run`,
-`uvx`, Ruff, Python compile/coverage, `scripts/preflight-pr.sh`, or
-`sd-ai-command-pack-full-check.sh`, prefer sandbox-local cache directories:
+their default caches land outside the writable sandbox or inside the
+repository. Pack-owned entry points prevent that by routing these cache
+classes through the shared toolchain. To select a specific safe parent, set one
+absolute external root before running the command:
 
 ```bash
-SANDBOX_TMP="${SANDBOX_TMP:-${TMPDIR:-/tmp}}"
-export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-$SANDBOX_TMP/sd-ai-command-pack-pycache}"
-export UV_CACHE_DIR="${UV_CACHE_DIR:-$SANDBOX_TMP/sd-ai-command-pack-uv-cache}"
-export UV_TOOL_DIR="${UV_TOOL_DIR:-$SANDBOX_TMP/sd-ai-command-pack-uv-tools}"
-export RUFF_CACHE_DIR="${RUFF_CACHE_DIR:-$SANDBOX_TMP/sd-ai-command-pack-ruff-cache}"
+export SD_AI_COMMAND_PACK_CACHE_ROOT="${SD_AI_COMMAND_PACK_CACHE_ROOT:-${TMPDIR:-/tmp}}"
+bash scripts/sd-ai-command-pack-toolchain.sh doctor
 ```
 
-These variables are safe for normal developer shells too: they only redirect
-ephemeral tool state and do not change what the checks validate.
+The builder validates the parent, creates private deterministic namespaces,
+and sets `XDG_CACHE_HOME`, `PYTHONPYCACHEPREFIX`, `UV_CACHE_DIR`,
+`UV_TOOL_DIR`, `PIP_CACHE_DIR`, `RUFF_CACHE_DIR`, and `NPM_CONFIG_CACHE`.
+`XDG_CACHE_HOME` always points to the private pack namespace; a valid inherited
+value may supply the namespace's safe parent but is not preserved verbatim.
+Existing valid overrides keep precedence for the other per-tool cache
+variables. Relative, repository-contained, symlinked, non-directory, or
+non-private overrides fail before the external tool runs. `GH_CONFIG_DIR`,
+tokens, credential helpers, and unrelated environment variables are never
+rewritten. Reusable pack-created caches remain after successful commands;
+ordinary housekeeping does not delete them. Shared workflows invoke non-Python
+tools as separate argv through
+`bash scripts/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]`; use that
+form for ad hoc `gh`, uv, pip, Ruff, or npm calls inside an SD workflow instead
+of bypassing the cache contract.
 
 - `SD_AI_COMMAND_PACK_PYTHON`: authoritative Python executable for the
   toolchain helper. It must be Python 3.10 or newer and include every module
   requested with `--require-module`.
+- `SD_AI_COMMAND_PACK_CACHE_ROOT`: absolute writable parent for private
+  per-user/per-repository tool-cache namespaces. It must resolve outside the
+  repository and must not itself be a symlink. Defaults to a safe inherited
+  XDG cache root, then a validated system temporary root.
+- `SD_AI_COMMAND_PACK_CACHE_ENV_READY`: internal shell-library sentinel set
+  after the shared cache environment is validated. Operators should not set it
+  directly.
 - `SD_AI_COMMAND_PACK_PROJECT_CHECK_COMMAND`: explicit trusted project-check
   command selected by the repo/operator. Toolchain discovery only reports
   candidates when this is unset.
@@ -1583,12 +1602,6 @@ ephemeral tool state and do not change what the checks validate.
 - `MAX_CONCURRENT_TASKS`: Gito LLM concurrency cap. The pack runners load the
   installed `.gito/sd-ai-command-pack.env` default of `4` when this variable is
   unset.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_UV_CACHE_DIR`: fallback `UV_CACHE_DIR` for
-  full-check and review-local Gito when `UV_CACHE_DIR` is unset. Defaults to a temp
-  `sd-ai-command-pack-uv-cache` directory.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_UV_TOOL_DIR`: fallback `UV_TOOL_DIR` for
-  full-check and review-local Gito when `UV_TOOL_DIR` is unset. Defaults to a temp
-  `sd-ai-command-pack-uv-tools` directory.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND`: command for a repo-specific
   or third-party local review tool, run with `bash -c`.
 - `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND`: full-codebase command
@@ -1922,12 +1935,8 @@ After installing or refreshing a target repo, a quick smoke test is:
 
 ```bash
 cd /path/to/repo
-SANDBOX_TMP="${SANDBOX_TMP:-${TMPDIR:-/tmp}}"
-export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-$SANDBOX_TMP/sd-ai-command-pack-pycache}"
-export UV_CACHE_DIR="${UV_CACHE_DIR:-$SANDBOX_TMP/sd-ai-command-pack-uv-cache}"
-export UV_TOOL_DIR="${UV_TOOL_DIR:-$SANDBOX_TMP/sd-ai-command-pack-uv-tools}"
-export RUFF_CACHE_DIR="${RUFF_CACHE_DIR:-$SANDBOX_TMP/sd-ai-command-pack-ruff-cache}"
-python3 scripts/sd-ai-command-pack-install-audit.py
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-install-audit.py
 bash -n scripts/sd-ai-command-pack-full-check.sh
 bash -n scripts/sd-ai-command-pack-review-full-check.sh
 bash -n scripts/sd-ai-command-pack-shell-lib.sh
@@ -1962,17 +1971,16 @@ python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run
   `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0` to skip it, or set
   `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=required` when review must be mandatory.
 - Gito fails due to cache, network sandboxing, or provider rate limiting:
-  `sd-full-check` when Gito is explicitly enabled, `sd-review-local`, and
-  `sd-review-local` in `all` mode set writable `UV_CACHE_DIR` and
-  `UV_TOOL_DIR` defaults
-  and retry HTTP 429 / slow-down responses with bounded backoff. If the failure
+  pack-owned entry points route uv and generic cache state through the shared
+  private environment and retry HTTP 429 / slow-down responses with bounded
+  backoff. If the failure
   is network or credential related, run from an environment with the needed
   access. Leave `SD_AI_COMMAND_PACK_FULL_CHECK_GITO` unset unless Gito is
   configured locally.
-- `uvx`, Ruff, Python compile/coverage, preflight, or full-check fail with
-  `Operation not permitted` while creating cache or temporary files: export the
-  sandbox-local `PYTHONPYCACHEPREFIX`, `UV_CACHE_DIR`, `UV_TOOL_DIR`, and
-  `RUFF_CACHE_DIR` block from Configuration, then rerun the same command.
+- A pack-owned command reports `cache setup failed`: set
+  `SD_AI_COMMAND_PACK_CACHE_ROOT` to an absolute private writable directory
+  outside the repository, then rerun the same command. Do not redirect
+  `GH_CONFIG_DIR`; cache routing intentionally preserves existing GitHub auth.
 - Root-level `code-review-report.*` files appear after manual Gito runs: the
   managed gitignore block ignores them, but prefer running through
   `sd-review-local` (any scope) or

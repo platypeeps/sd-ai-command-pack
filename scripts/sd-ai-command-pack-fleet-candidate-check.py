@@ -32,6 +32,12 @@ from sd_ai_command_pack_fleet_lib import (  # noqa: E402
     manifest_version,
     validate_candidate_ledger,
 )
+from sd_ai_command_pack_lib import (  # noqa: E402
+    CACHE_ENV_KEYS,
+    CACHE_ROOT_ENV,
+    CacheSetupError,
+    build_tool_environment,
+)
 
 DEFAULT_FLEET_MANIFEST = ROOT / "docs/fleet/consumers.json"
 DEFAULT_PACK_MANIFEST = ROOT / "manifest.json"
@@ -58,7 +64,14 @@ class CandidateResult:
 
 
 def command_environment(python_executable: Path, work_root: Path) -> dict[str, str]:
-    env = os.environ.copy()
+    inherited = os.environ.copy()
+    for variable in CACHE_ENV_KEYS:
+        inherited.pop(variable, None)
+    inherited[CACHE_ROOT_ENV] = str(work_root.resolve())
+    try:
+        env, _, _ = build_tool_environment(repo=ROOT, environ=inherited)
+    except CacheSetupError as error:
+        raise FleetConfigError(f"candidate cache setup failed: {error}") from None
     env.pop("COVERAGE_FILE", None)
     env.pop("COVERAGE_PROCESS_START", None)
     python_bin = str(python_executable.resolve().parent)
@@ -66,9 +79,6 @@ def command_environment(python_executable: Path, work_root: Path) -> dict[str, s
     env["PATH"] = (
         os.pathsep.join([python_bin, inherited_path]) if inherited_path else python_bin
     )
-    env["PYTHONPYCACHEPREFIX"] = str(work_root / "python-cache")
-    env["NPM_CONFIG_CACHE"] = str(work_root / "npm-cache")
-    env["UV_CACHE_DIR"] = str(work_root / "uv-cache")
     env["SD_AI_COMMAND_PACK_CANDIDATE_CHECK"] = "1"
     return env
 

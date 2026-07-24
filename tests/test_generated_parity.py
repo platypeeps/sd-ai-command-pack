@@ -949,10 +949,13 @@ class GeneratedParityTests(InstallTestCase):
         self.assertNotIn("sd-ai-command-pack trellis-gitignore start", readme)
         self.assertNotIn("SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START", readme)
         self.assertIn("quick smoke test", readme)
-        self.assertIn("SANDBOX_TMP", readme)
+        self.assertIn("SD_AI_COMMAND_PACK_CACHE_ROOT", readme)
+        self.assertIn("XDG_CACHE_HOME", readme)
         self.assertIn("PYTHONPYCACHEPREFIX", readme)
         self.assertIn("UV_CACHE_DIR", readme)
+        self.assertIn("PIP_CACHE_DIR", readme)
         self.assertIn("RUFF_CACHE_DIR", readme)
+        self.assertIn("NPM_CONFIG_CACHE", readme)
         self.assertIn("scripts/sd-ai-command-pack-install-audit.py", readme)
         self.assertIn("scripts/sd-ai-command-pack-update-spec-kb.py --dry-run", readme)
         self.assertIn("Normal shared installs should commit that snapshot", readme)
@@ -1386,10 +1389,14 @@ class GeneratedParityTests(InstallTestCase):
             "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS",
             "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS",
             "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS",
-            "sandbox-local cache directories",
+            "shared environment builder",
+            "SD_AI_COMMAND_PACK_CACHE_ROOT",
+            "XDG_CACHE_HOME",
             "PYTHONPYCACHEPREFIX",
             "UV_TOOL_DIR",
+            "PIP_CACHE_DIR",
             "RUFF_CACHE_DIR",
+            "NPM_CONFIG_CACHE",
             "agent-facing final response",
             "numbered `Next Steps` section",
             "even on a verification-only",

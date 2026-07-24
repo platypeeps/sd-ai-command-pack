@@ -11,8 +11,14 @@ import os
 import re
 import stat
 import subprocess
+import sys
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath, PureWindowsPath
+
+sys.dont_write_bytecode = True
+
+# This import must follow the bytecode guard for direct entrypoint invocation.
+from sd_ai_command_pack_lib import CacheSetupError, build_tool_environment  # noqa: E402
 
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
 PROVENANCE_FILE = Path(".sd-ai-command-pack/provenance.json")
@@ -573,15 +579,17 @@ def gitignored_paths(root: Path, relative_paths: Iterable[str]) -> set[str]:
         return set()
     input_payload = b"".join(os.fsencode(path) + b"\0" for path in candidates)
     try:
+        environment, _, _ = build_tool_environment(repo=root)
         result = subprocess.run(
             ["git", "-C", str(root), "check-ignore", "--stdin", "-z"],
             input=input_payload,
+            env=environment,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             check=False,
             timeout=GIT_TIMEOUT_SECONDS,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (CacheSetupError, OSError, subprocess.TimeoutExpired):
         return set()
     if result.returncode not in {0, 1}:
         return set()
