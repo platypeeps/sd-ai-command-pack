@@ -561,6 +561,39 @@ class StatusTests(InstallTestCase):
         self.assertNotIn("Generated vendor roadmap item", str(report))
         self.assertNotIn("Symlinked roadmap item", str(report))
 
+    def test_roadmap_scan_diagnostics_are_sanitized_and_bounded(self) -> None:
+        root = self.make_status_repo()
+        source = root / "roadmap"
+        for character in "abcdefg":
+            source /= character * 110
+        source.mkdir(parents=True)
+        unsafe_path = source / "TODO-\nunsafe.txt"
+        unsafe_path.write_text(
+            "- " + ("x" * self.load_status_module().MAX_ROADMAP_SOURCE_BYTES) + "\n",
+            encoding="utf-8",
+        )
+
+        report = json.loads(self.run_status(root, "--json").stdout)
+        roadmap_diagnostics = [
+            item
+            for item in report["anomalies"]
+            if item.startswith("roadmap source scan incomplete:")
+        ]
+        issue_followups = [
+            item
+            for item in report["followUps"]
+            if item["source"] == "anomalies"
+        ]
+
+        self.assertEqual(len(roadmap_diagnostics), 1)
+        self.assertLessEqual(len(roadmap_diagnostics[0]), 500)
+        self.assertFalse(any(char in roadmap_diagnostics[0] for char in "\r\n\t"))
+        self.assertEqual(len(issue_followups), 1)
+        self.assertLessEqual(len(issue_followups[0]["summary"]), 500)
+        self.assertFalse(
+            any(char in issue_followups[0]["summary"] for char in "\r\n\t")
+        )
+
     def test_trellis_inventory_rejects_empty_normalized_identity_and_status(
         self,
     ) -> None:

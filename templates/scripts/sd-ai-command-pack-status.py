@@ -1741,7 +1741,7 @@ def collect_local(
         else None,
         "anomalies": [safe_text(item, limit=500) for item in prior_anomalies]
         + anomalies
-        + roadmap_diagnostics,
+        + [safe_text(item, limit=500) for item in roadmap_diagnostics],
         "followUps": [],
         "nextSteps": [],
     }
