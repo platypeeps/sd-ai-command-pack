@@ -16,7 +16,8 @@ contracts. It does not become a second implementation owner.
 ## Evidence Contract
 
 The task writes a task-local integration record under `research/` with one row
-per F01-F17, G01-G07, and H01-H09 finding and S01-S21 scenario. Each row records:
+for every F01-F17, G01-G07, and H01-H09 finding and one row for every S01-S21
+scenario. Each row records:
 
 - owner task and terminal status;
 - PR, commit, pack version, and external router contract identity;

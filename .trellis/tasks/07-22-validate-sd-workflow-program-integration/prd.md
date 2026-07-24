@@ -138,9 +138,9 @@ PR or commit identity, and accepted disposition.
 
 ## Requirements
 
-- R1: Produce an evidence map from every F01-F17, G01-G07, and H01-H09 finding and every
-  S01-S21 scenario
-  to its owning task, landed PR or commit, focused test, and observed result.
+- R1: Produce an evidence map with one row for every F01-F17, G01-G07, and
+  H01-H09 finding and one row for every S01-S21 scenario, linking each to its
+  owning task, landed PR or commit, focused test, and observed result.
 - R2: Exercise the matrix against the final generated command surface and
   installed payload, not isolated source-only helpers.
 - R3: Verify the command pack and `sd-github-review` use the same successor-head,
