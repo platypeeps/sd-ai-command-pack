@@ -522,3 +522,41 @@ Removed sd-status's duplicate Roadmap inventory, added bounded source-backed roa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 215: Sanitize roadmap status diagnostics
+
+**Date**: 2026-07-23
+**Task**: Sanitize roadmap status diagnostics
+**Branch**: `codex/status-roadmap-followups`
+
+### Summary
+
+Addressed PR #242 review feedback by sanitizing repository-controlled roadmap diagnostics and reconverging the release candidate.
+
+### Main Changes
+
+- Bounded and sanitized roadmap scan diagnostics before anomaly and derived follow-up rendering.
+- Added regression coverage for control-character and overlong repository paths and refreshed the exact fleet candidate ledger.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `832570d` | fix(status): sanitize roadmap diagnostics |
+
+### Testing
+
+- [OK] 43 status tests passed
+- [OK] all 8 configured fleet consumers passed candidate validation
+- [OK] make check passed
+- [OK] Copilot round 2 produced no findings, CI passed, and zero unresolved threads remained
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
