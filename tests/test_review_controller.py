@@ -150,7 +150,8 @@ class ReviewControllerTests(InstallTestCase):
         self,
         root: Path,
         *,
-        contract: int = 1,
+        schema_version: object = 1,
+        contract: object = 1,
         check_name: str = "sd-github-review/receipt",
     ) -> Path:
         path = root / "config/routed-review-setup-v1.json"
@@ -158,7 +159,7 @@ class ReviewControllerTests(InstallTestCase):
         path.write_text(
             json.dumps(
                 {
-                    "schemaVersion": 1,
+                    "schemaVersion": schema_version,
                     "integrationId": "sd-github-review",
                     "workflow": {
                         "name": "SD routed review",
@@ -222,6 +223,12 @@ class ReviewControllerTests(InstallTestCase):
             controller.load_review_configuration(root)
         with self.assertRaisesRegex(local_stage.ReviewInputError, "stay inside"):
             local_stage.load_config(root)
+
+        config["schemaVersion"] = True
+        config["remoteIntegration"]["descriptorPath"] = "config/custom-review.json"
+        path.write_text(json.dumps(config), encoding="utf-8")
+        with self.assertRaisesRegex(controller.ReviewError, "schemaVersion"):
+            controller.load_review_configuration(root)
 
     def test_json_path_and_bound_helpers_fail_closed(self) -> None:
         controller = self.load_controller()
@@ -453,6 +460,22 @@ class ReviewControllerTests(InstallTestCase):
             request=first,
         )
         self.assertEqual(decoded, receipt)
+        for field in ("schemaVersion", "pullRequestNumber", "attempt"):
+            invalid = receipt | {field: True}
+            check["output"] = {
+                "text": controller.RECEIPT_MARKER
+                + controller._canonical_text(invalid)
+            }
+            with self.assertRaisesRegex(controller.ReviewError, field):
+                controller._decode_receipt_check(
+                    check,
+                    check_name="sd-github-review/receipt",
+                    request=first,
+                )
+        check["output"] = {
+            "text": controller.RECEIPT_MARKER
+            + controller._canonical_text(receipt)
+        }
         check["external_id"] = "0" * 64
         with self.assertRaisesRegex(controller.ReviewError, "external_id"):
             controller._decode_receipt_check(
@@ -487,6 +510,21 @@ class ReviewControllerTests(InstallTestCase):
             )["state"],
             "incompatible",
         )
+        for field in ("schemaVersion", "contractMajor"):
+            self.write_descriptor(
+                root,
+                schema_version=True if field == "schemaVersion" else 1,
+                contract=True if field == "contractMajor" else 1,
+            )
+            self.assertEqual(
+                controller._capability(
+                    root,
+                    remote=remote,
+                    repository=repository,
+                    intent="auto",
+                )["state"],
+                "incompatible",
+            )
         descriptor = self.write_descriptor(root)
         descriptor.write_text("{\n", encoding="utf-8")
         malformed = controller._capability(

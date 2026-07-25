@@ -134,6 +134,10 @@ def _bounded_integer(
     return value
 
 
+def _is_exact_integer(value: object, expected: int) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value == expected
+
+
 def _parse_remote_dispositions(values: Sequence[str]) -> dict[str, str]:
     dispositions: dict[str, str] = {}
     for value in values:
@@ -220,7 +224,7 @@ def load_review_configuration(repo: Path) -> tuple[dict[str, Any], dict[str, Any
     )
     if not isinstance(value, dict) or set(value) - TOP_LEVEL_CONFIG_KEYS:
         raise ReviewError("review configuration must use only supported fields")
-    if value.get("schemaVersion") != 1:
+    if not _is_exact_integer(value.get("schemaVersion"), 1):
         raise ReviewError("review configuration schemaVersion must be 1")
     policy = value.get("policy")
     if not isinstance(policy, dict):
@@ -598,7 +602,9 @@ def _load_or_create_state(
 ) -> dict[str, Any]:
     if path.exists():
         value = _read_json(path, limit=MAX_STATE_BYTES, label="review state")
-        if not isinstance(value, dict) or value.get("schemaVersion") != 1:
+        if not isinstance(value, dict) or not _is_exact_integer(
+            value.get("schemaVersion"), 1
+        ):
             raise ReviewError("review state schema is invalid")
         if value.get("attemptId") != attempt_id or value.get("identity") != identity:
             raise ReviewError("review state identity conflicts with the current invocation")
@@ -639,7 +645,7 @@ def _run_check(repo: Path) -> dict[str, Any]:
         context="run typed sd-check",
         timeout=3600,
     )
-    if report.get("schemaVersion") != 1:
+    if not _is_exact_integer(report.get("schemaVersion"), 1):
         raise ReviewError("sd-check returned an unsupported schema")
     return report
 
@@ -695,7 +701,7 @@ def _run_local(
         context="run exact-scope local review",
         timeout=3600,
     )
-    if report.get("schemaVersion") != 1:
+    if not _is_exact_integer(report.get("schemaVersion"), 1):
         raise ReviewError("local review returned an unsupported schema")
     return report
 
@@ -723,7 +729,9 @@ def _capability(
     if not isinstance(descriptor, dict):
         return {"state": "invalid", "reason": "setup-descriptor-not-object"}
     try:
-        if descriptor.get("schemaVersion") != 1 or descriptor.get("contractMajor") != 1:
+        if not _is_exact_integer(
+            descriptor.get("schemaVersion"), 1
+        ) or not _is_exact_integer(descriptor.get("contractMajor"), 1):
             return {"state": "incompatible", "reason": "unsupported-contract-major"}
         if descriptor.get("integrationId") != "sd-github-review":
             return {"state": "invalid", "reason": "unexpected-integration-id"}
@@ -1040,14 +1048,19 @@ def _decode_receipt_check(
         raise ReviewError("durable receipt must be an object")
     if text != RECEIPT_MARKER + _canonical_text(receipt):
         raise ReviewError("durable receipt JSON is not canonical")
-    required_equal = {
+    required_integers = {
         "schemaVersion": 1,
+        "pullRequestNumber": request["pullRequestNumber"],
+        "attempt": request["attempt"],
+    }
+    for field, expected in required_integers.items():
+        if not _is_exact_integer(receipt.get(field), expected):
+            raise ReviewError(f"durable receipt {field} does not match the request")
+    required_equal = {
         "logicalDispatchId": request["logicalDispatchId"],
         "requestFingerprint": request["requestFingerprint"],
         "repository": request["repository"],
-        "pullRequestNumber": request["pullRequestNumber"],
         "headSha": request["headSha"],
-        "attempt": request["attempt"],
         "policyVersion": request["policyVersion"],
     }
     for field, expected in required_equal.items():
