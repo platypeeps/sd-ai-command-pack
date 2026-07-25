@@ -1785,11 +1785,21 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     if not isinstance(local, dict):
         raise ReviewError("local review state is invalid")
     local_status = local.get("status")
-    if local_status == "findings" or local_status == "blocked":
+    if local_status == "findings":
         return 1, _report(
             state=state,
             status="findings",
             diagnostic="local review findings require disposition before remote routing",
+        )
+    if local_status == "blocked":
+        local_diagnostic = local.get("diagnostic")
+        if not isinstance(local_diagnostic, str) or not local_diagnostic.strip():
+            raise ReviewError("blocked local review diagnostic is invalid")
+        return 1, _report(
+            state=state,
+            status="blocked",
+            diagnostic=_bounded(local_diagnostic),
+            limitations=("local-policy-blocked",),
         )
     if local_status not in {"clean", "skipped", "unavailable", "failed", "cancelled"}:
         return 3, _report(

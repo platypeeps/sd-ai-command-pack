@@ -1008,6 +1008,7 @@ class ReviewControllerTests(InstallTestCase):
         *,
         scope: str,
         local_status: str = "clean",
+        local_diagnostic: str | None = None,
         capability: dict[str, object] | None = None,
         remote: str = "auto",
         receipt: dict[str, object] | None = None,
@@ -1038,6 +1039,8 @@ class ReviewControllerTests(InstallTestCase):
             },
             status=local_status,
         )
+        if local_diagnostic is not None:
+            local["diagnostic"] = local_diagnostic
         patches = [
             mock.patch.object(
                 controller,
@@ -1188,6 +1191,22 @@ class ReviewControllerTests(InstallTestCase):
             local_status="findings",
         )
         self.assertEqual((code, report["status"]), (1, "findings"))
+        dispatch.assert_not_called()
+
+        root = self.make_repo()
+        blocked_diagnostic = (
+            "an approved review.round-extension decision is required"
+        )
+        (code, report), dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="pr",
+            local_status="blocked",
+            local_diagnostic=blocked_diagnostic,
+        )
+        self.assertEqual((code, report["status"]), (1, "blocked"))
+        self.assertEqual(report["diagnostic"], blocked_diagnostic)
+        self.assertEqual(report["limitations"], ["local-policy-blocked"])
         dispatch.assert_not_called()
 
         root = self.make_repo()
