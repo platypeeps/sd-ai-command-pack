@@ -23,6 +23,8 @@ class BookkeepingValidatorTests(InstallTestCase):
 
     def make_validator_repo(self) -> Path:
         root = self.make_repo()
+        self.run_git(root, "config", "user.email", "bookkeeping@example.com")
+        self.run_git(root, "config", "user.name", "Bookkeeping Test")
         scripts = root / "scripts"
         scripts.mkdir()
         shutil.copy2(
