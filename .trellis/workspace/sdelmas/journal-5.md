@@ -969,3 +969,44 @@ Implemented and validated the internal exact-scope local review stage for determ
 ### Next Steps
 
 - None - task complete
+
+
+## Session 226: Converge repeated review finding families
+
+**Date**: 2026-07-25
+**Task**: Converge repeated review finding families
+**Branch**: `codex/converge-review-finding-families`
+
+### Summary
+
+Implemented and shipped the bounded exact-head family convergence boundary for the local review stage.
+
+### Main Changes
+
+- Added exact-head finding-family recurrence gates, audit telemetry, and structured round-extension handling.
+- Centralized the bounded family vocabulary and preserved canonical provider provenance.
+- Enforced complete sibling batches with focused review fixes, executable specs, synchronized payloads, and fleet release evidence.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `55b026b` | feat: converge repeated review finding families |
+| `cbbe162` | fix: require complete sibling audit batches |
+| `33df03f` | fix: normalize blank finding-family provenance |
+
+### Testing
+
+- [OK] make check
+- [OK] 41 focused tests.test_review_stage tests
+- [OK] typed sd-check: 8 passed with unchanged state guard
+- [OK] all 8 disposable fleet consumer candidate validations
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
