@@ -1026,11 +1026,16 @@ def _gito_payload(attempt_dir: Path) -> dict[str, Any] | None:
             if not isinstance(location, dict):
                 location = {}
             severity = raw.get("severity")
-            severity_name = (
-                {1: "low", 2: "medium", 3: "high"}.get(severity, "unspecified")
-                if isinstance(severity, int) and not isinstance(severity, bool)
-                else str(severity or "unspecified")
-            )
+            if isinstance(severity, int) and not isinstance(severity, bool):
+                severity_name = {1: "low", 2: "medium", 3: "high"}.get(severity)
+                if severity_name is None:
+                    return None
+            elif severity is None:
+                severity_name = "unspecified"
+            elif isinstance(severity, str):
+                severity_name = severity
+            else:
+                return None
             tags = raw.get("tags")
             family = tags[0] if isinstance(tags, list) and tags else "other"
             findings.append(

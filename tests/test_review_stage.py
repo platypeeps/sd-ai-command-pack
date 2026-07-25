@@ -126,6 +126,7 @@ class ReviewStageTests(InstallTestCase):
         *,
         prism_mode: str = "finding",
         gito_count: int = 1,
+        gito_severity: object = 2,
     ) -> Path:
         providers = []
         for identifier, cost in (("prism", "low"), ("gito", "medium")):
@@ -179,6 +180,7 @@ class ReviewStageTests(InstallTestCase):
                     "log": str(log),
                     "prismMode": prism_mode,
                     "gitoCount": gito_count,
+                    "gitoSeverity": gito_severity,
                 }
             ),
             encoding="utf-8",
@@ -379,6 +381,20 @@ class ReviewStageTests(InstallTestCase):
         self.assertIn(
             "valid structured review report",
             oversized_report["receipt"]["attempts"][0]["diagnostic"],
+        )
+
+    def test_gito_out_of_schema_severity_fails_closed(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(root, gito_severity=4)
+
+        result = self.run_stage(root, "gito-severity", "--local", "gito")
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 3, result.stdout)
+        self.assertEqual(report["status"], "failed")
+        self.assertIn(
+            "valid structured review report",
+            report["receipt"]["attempts"][0]["diagnostic"],
         )
 
     def test_prism_worktree_comma_path_fails_before_dispatch(self) -> None:
@@ -763,7 +779,7 @@ class ReviewStageTests(InstallTestCase):
         self.assertIn("cannot traverse a symlink", report["diagnostic"])
         self.assertFalse(log.exists())
 
-    def test_branch_scope_rejects_dirty_worktree_and_retry_collision(self) -> None:
+    def test_branch_scope_rejects_retry_collision(self) -> None:
         root = self.make_repo()
         self.write_config(root)
         first = self.run_stage(root, "collision", "--local", "none")
@@ -773,6 +789,9 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(collision.returncode, 2, collision.stdout)
         self.assertIn("already exists", collision_report["diagnostic"])
 
+    def test_branch_scope_rejects_dirty_worktree(self) -> None:
+        root = self.make_repo()
+        self.write_config(root)
         (root / "src/app.py").write_text("dirty\n", encoding="utf-8")
         dirty = self.run_stage(root, "dirty")
         dirty_report = self.report(dirty)
