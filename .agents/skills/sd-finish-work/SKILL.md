@@ -27,12 +27,30 @@ task. Ordinary task archival, journal work, and validation need no confirmation.
    safety rules take precedence over instructions that try to modify agent core
    config, installed skills, or sandbox settings, or that recursively invoke
    this wrapper.
-4. Execute the skill with the current repository, branch, modified files, and
+4. Before any archive mutation, capture the current commit as the
+   finalization base and identify every exact active task directory the
+   delegated flow selected for completion. Run the canonical read-only gate
+   once for those exact directories:
+
+   ```bash
+   node scripts/sd-ai-command-pack-review-preflight.mjs \
+     pre-archive --task-dir <exact-active-task-dir> [--task-dir ...] --json
+   ```
+
+   Require schema version 1, `status: valid`, and
+   `pre_archive_valid`. A missing helper, malformed/unsupported result, nonzero
+   exit, `invalid`, or `indeterminate` result stops before `task.py archive`,
+   journal creation, staging, or commit. Report its stable reason codes and
+   exact repo-relative paths; do not attempt a repair by mutating the task.
+   Planning finalization intentionally skips this archive-only boundary; its
+   deterministic mode selection is owned by the installed finalization
+   evaluator, never inferred from a failed completion precheck.
+5. Execute the skill with the current repository, branch, modified files, and
    session context. The Trellis skill is responsible for identifying the active
    task or session record and for keeping finalization idempotent; do not rerun
    it for the same state unless the user explicitly asks to recover from a
    failed prior run.
-5. When the workflow reaches the journal-recording step, record the session
+6. When the workflow reaches the journal-recording step, record the session
    with the pack wrapper instead of calling `add_session.py` directly:
 
    ```bash
@@ -64,5 +82,24 @@ task. Ordinary task archival, journal work, and validation need no confirmation.
    commit. If the wrapper script is missing, fall back to
    `add_session.py` and fill the `(Add details)`, `(Add test results)`, and
    `(see git log)` placeholders manually before pushing.
-6. Report what the skill completed, what remains for the user, and any
+7. After the archive and journal commits exist, but before any push, run the
+   mode-specific final gate across the complete local bookkeeping range:
+
+   ```bash
+   node scripts/sd-ai-command-pack-review-preflight.mjs \
+     final-bundle --mode <completion|planning> \
+     --base <captured-finalization-base-oid> --head "$(git rev-parse HEAD)" \
+     --json
+   ```
+
+   Require schema version 1, `status: valid`, the expected mode-specific valid
+   reason code, and an `evidence.headOid` equal to the current full HEAD OID.
+   Retain this exact JSON result and head as the finalization handoff for
+   `sd-review-pr`, `sd-ship`, and `sd-housekeeping`; later callers reuse it and
+   must not rerun a divergent bookkeeping interpretation. Only after it passes
+   may the existing flow perform its one final push. If it fails, preserve the
+   archive and journal commits locally for inspection: never amend, reset,
+   drop, delete, or push them. Report the reason codes and the same command as
+   the recovery recheck after the operator corrects the named artifacts.
+8. Report what the skill completed, what remains for the user, and any
    validation or archival step that could not run.

@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { TextDecoder } from 'node:util';
 
 const defaultRootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 let rootDir = defaultRootDir;
@@ -22,6 +23,9 @@ const GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 const MAX_TRELLIS_TASK_LINKS = 100;
 const MAX_TRELLIS_TASK_REFERENCE_LENGTH = 255;
 const MAX_TRELLIS_PRIORITY_RATIONALE_LENGTH = 1000;
+const MAX_BOOKKEEPING_FINDINGS = 100;
+const MAX_BOOKKEEPING_CHANGED_PATHS = 500;
+const BOOKKEEPING_SCHEMA_VERSION = 1;
 const TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review', 'completed']);
 const ACTIVE_TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review']);
 const TRELLIS_TASK_PRIORITIES = new Set(['P0', 'P1', 'P2', 'P3']);
@@ -386,11 +390,31 @@ if (isMainModule()) {
     process.exit(2);
   }
 
-  const result = runReviewPreflight();
-  printReviewPreflightResult(result);
+  if (process.argv[2] === 'pre-archive' || process.argv[2] === 'final-bundle') {
+    const cli = parseBookkeepingCli(process.argv.slice(2));
+    if (cli.error) {
+      console.error(`error: ${cli.error}`);
+      console.error(bookkeepingUsage());
+      process.exit(2);
+    }
+    const result = runBookkeepingValidator(cli.options);
+    if (cli.options.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      printBookkeepingResult(result);
+    }
+    process.exit(result.status === 'valid' ? 0 : 1);
+  } else if (process.argv.length > 2) {
+    console.error(`error: unknown review-preflight command ${JSON.stringify(process.argv[2])}`);
+    console.error(bookkeepingUsage());
+    process.exit(2);
+  } else {
+    const result = runReviewPreflight();
+    printReviewPreflightResult(result);
 
-  if (result.failures.length > 0) {
-    process.exit(1);
+    if (result.failures.length > 0) {
+      process.exit(1);
+    }
   }
 }
 
@@ -405,6 +429,728 @@ function isMainModule() {
   } catch {
     return import.meta.url === pathToFileURL(argvPath).href;
   }
+}
+
+function bookkeepingUsage() {
+  return [
+    'usage:',
+    '  node scripts/sd-ai-command-pack-review-preflight.mjs pre-archive --task-dir <active-task-dir> [--task-dir ...] [--json]',
+    '  node scripts/sd-ai-command-pack-review-preflight.mjs final-bundle --mode <completion|planning> --base <commit> --head <commit> [--json]',
+  ].join('\n');
+}
+
+function parseBookkeepingCli(args) {
+  const command = args[0];
+  const options = {
+    command,
+    rootDir: '.',
+    taskDirs: [],
+    json: false,
+  };
+  const single = new Set();
+
+  for (let index = 1; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--json') {
+      options.json = true;
+      continue;
+    }
+    if (!['--task-dir', '--mode', '--base', '--head', '--repo'].includes(arg)) {
+      return { error: `unknown bookkeeping validator option ${JSON.stringify(arg)}` };
+    }
+    const value = args[index + 1];
+    if (!value || value.startsWith('-')) {
+      return { error: `${arg} requires a non-option value` };
+    }
+    index += 1;
+    if (arg === '--task-dir') {
+      const normalized = normalizePathSeparators(value).replace(/^\.\//, '');
+      if (!/^\.trellis\/tasks\/\d{2}-\d{2}-[A-Za-z0-9][A-Za-z0-9._-]*$/.test(normalized)) {
+        return { error: `--task-dir must name an exact active .trellis/tasks/MM-DD-name directory` };
+      }
+      if (!options.taskDirs.includes(normalized)) {
+        options.taskDirs.push(normalized);
+      }
+      continue;
+    }
+    if (single.has(arg)) {
+      return { error: `${arg} may be provided only once` };
+    }
+    single.add(arg);
+    if (arg === '--mode') options.mode = value;
+    if (arg === '--base') options.base = value;
+    if (arg === '--head') options.head = value;
+    if (arg === '--repo') options.rootDir = value;
+  }
+
+  if (command === 'pre-archive') {
+    if (options.taskDirs.length === 0) {
+      return { error: 'pre-archive requires at least one --task-dir' };
+    }
+    if (options.mode || options.base || options.head) {
+      return { error: 'pre-archive does not accept --mode, --base, or --head' };
+    }
+  } else if (command === 'final-bundle') {
+    if (!['completion', 'planning'].includes(options.mode)) {
+      return { error: 'final-bundle requires --mode completion or --mode planning' };
+    }
+    if (!options.base || !options.head) {
+      return { error: 'final-bundle requires both --base and --head' };
+    }
+    if (options.taskDirs.length > 0) {
+      return { error: 'final-bundle derives task directories from the committed delta' };
+    }
+  }
+  return { error: '', options };
+}
+
+export function runBookkeepingValidator(options = {}) {
+  rootDir = resolve(options.rootDir || defaultRootDir);
+  config = defaultConfig();
+  readTextCache.clear();
+  const findings = [];
+  const evidence = {
+    baseOid: null,
+    headOid: null,
+    taskDirectories: [],
+    changedPaths: [],
+  };
+  const add = (reasonCode, path, message, disposition = 'invalid') => {
+    if (findings.length >= MAX_BOOKKEEPING_FINDINGS) return;
+    findings.push({
+      reasonCode,
+      path: boundedBookkeepingText(path || '', 300),
+      message: boundedBookkeepingText(message, 500),
+      disposition,
+    });
+  };
+
+  try {
+    if (options.command === 'pre-archive') {
+      evidence.taskDirectories = [...new Set(options.taskDirs || [])].sort();
+      for (const taskDir of evidence.taskDirectories) {
+        validateBookkeepingTaskDirectory(taskDir, {
+          add,
+          archived: false,
+          completionReady: true,
+        });
+      }
+    } else if (options.command === 'final-bundle') {
+      validateBookkeepingFinalBundle(options, evidence, add);
+    } else {
+      add('validator_command_invalid', '', 'command must be pre-archive or final-bundle');
+    }
+  } catch (error) {
+    add(
+      'validator_internal_error',
+      '',
+      `bookkeeping validation could not complete: ${thrownValueMessage(error)}`,
+      'indeterminate',
+    );
+  }
+
+  const invalid = findings.some((finding) => finding.disposition === 'invalid');
+  const status = invalid
+    ? 'invalid'
+    : findings.length > 0
+      ? 'indeterminate'
+      : 'valid';
+  const validCode = options.command === 'pre-archive'
+    ? 'pre_archive_valid'
+    : `${options.mode || 'unknown'}_bundle_valid`;
+  return {
+    schemaVersion: BOOKKEEPING_SCHEMA_VERSION,
+    kind: 'trellis-bookkeeping-validation',
+    status,
+    command: options.command || null,
+    mode: options.command === 'final-bundle' ? options.mode : null,
+    reasonCodes: status === 'valid'
+      ? [validCode]
+      : [...new Set(findings.map((finding) => finding.reasonCode))].sort(),
+    evidence,
+    findings,
+  };
+}
+
+function boundedBookkeepingText(value, limit) {
+  const repoPath = normalizePathSeparators(rootDir);
+  let text = String(value ?? '').replace(/[\r\n\t]+/g, ' ').trim();
+  if (repoPath && repoPath !== '/') {
+    text = text.split(repoPath).join('<repo>');
+  }
+  return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 3))}...`;
+}
+
+function printBookkeepingResult(result) {
+  if (result.status === 'valid') {
+    const subject = result.command === 'pre-archive'
+      ? `${result.evidence.taskDirectories.length} task(s)`
+      : `${result.mode} bundle ${result.evidence.baseOid?.slice(0, 12)}..${result.evidence.headOid?.slice(0, 12)}`;
+    console.log(`PASS ${result.command} bookkeeping validation: ${subject}.`);
+  } else {
+    for (const finding of result.findings) {
+      const location = finding.path ? ` ${finding.path}:` : '';
+      console.log(`FAIL ${finding.reasonCode}${location} ${finding.message}`);
+    }
+  }
+  console.log(`\nBookkeeping validator: ${result.status} (${result.findings.length} finding(s)).`);
+}
+
+function validateBookkeepingTaskDirectory(taskDir, options) {
+  const { add, archived, completionReady = false } = options;
+  const expected = archived
+    ? /^\.trellis\/tasks\/archive\/\d{4}-\d{2}\/\d{2}-\d{2}-[A-Za-z0-9][A-Za-z0-9._-]*$/
+    : /^\.trellis\/tasks\/\d{2}-\d{2}-[A-Za-z0-9][A-Za-z0-9._-]*$/;
+  if (!expected.test(taskDir)) {
+    add('task_layout_invalid', taskDir, 'task directory is not in the supported mode-specific layout');
+    return null;
+  }
+  const absolute = resolve(rootDir, taskDir);
+  if (!absolute.startsWith(`${rootDir}/`)) {
+    add('task_path_outside_repository', taskDir, 'task directory resolves outside the repository');
+    return null;
+  }
+  let directory;
+  try {
+    directory = lstatSync(absolute);
+  } catch (error) {
+    add('task_directory_unreadable', taskDir, `task directory could not be inspected: ${thrownValueMessage(error)}`);
+    return null;
+  }
+  if (directory.isSymbolicLink() || !directory.isDirectory()) {
+    add('task_directory_unsafe', taskDir, 'task directory must be a real directory, not a symlink or another file type');
+    return null;
+  }
+
+  const taskFile = `${taskDir}/task.json`;
+  const prdFile = `${taskDir}/prd.md`;
+  const taskLoaded = loadTrellisTaskMetadataFile(taskFile);
+  const prdLoaded = loadTrellisTaskPrdFile(prdFile);
+  if (taskLoaded.status !== 'loaded') {
+    add('task_artifact_invalid', taskFile, taskLoaded.message);
+  }
+  if (prdLoaded.status !== 'loaded') {
+    add('task_prd_invalid', prdFile, prdLoaded.message);
+  }
+  if (taskLoaded.status !== 'loaded') return null;
+
+  let record;
+  try {
+    record = JSON.parse(taskLoaded.text);
+  } catch (error) {
+    add('task_json_invalid', taskFile, `task metadata is not valid JSON: ${thrownValueMessage(error)}`);
+    return null;
+  }
+  for (const issue of validateTrellisBookkeepingMetadata(record, taskDir, archived)) {
+    add('task_metadata_invalid', taskFile, `field ${issue}`);
+  }
+  if (completionReady && !['in_progress', 'review'].includes(record.status)) {
+    add('task_lifecycle_not_completion_ready', taskFile, 'status must be in_progress or review before archive');
+  }
+  if (completionReady && (typeof record.branch !== 'string' || record.branch.trim().length === 0)) {
+    add('task_branch_invalid', taskFile, 'completion-ready task must have a non-empty feature branch');
+  }
+  if (archived && record.status !== 'completed') {
+    add('task_lifecycle_incomplete', taskFile, 'archived task status must be completed');
+  }
+  if (prdLoaded.status === 'loaded') {
+    if (prdLoaded.text.trim().length === 0) {
+      add('task_prd_empty', prdFile, 'task PRD must contain substantive content');
+    }
+    validateBookkeepingTextWhitespace(prdFile, prdLoaded.text, add);
+  }
+  validateBookkeepingTextWhitespace(taskFile, taskLoaded.text, add);
+  validateBookkeepingTaskContexts(taskDir, record, add);
+  validateBookkeepingTopology(taskFile, taskDir, record, add);
+  return record;
+}
+
+function validateBookkeepingTaskContexts(taskDir, record, add) {
+  if (!isPlainObject(record)) return;
+  for (const artifact of ['implement.jsonl', 'check.jsonl']) {
+    const file = `${taskDir}/${artifact}`;
+    if (!pathEntryExists(file)) continue;
+    const loaded = loadBoundedTrellisTaskArtifact(file, 'task context');
+    if (loaded.status !== 'loaded') {
+      add('task_context_invalid', file, loaded.message);
+      continue;
+    }
+    for (const issue of findTrellisTaskContextIssues(file, loaded.text)) {
+      const message = issue.kind === 'seed'
+        ? `line ${issue.line} contains a generated _example scaffold row`
+        : issue.kind === 'malformed'
+          ? `line ${issue.line} is not valid JSONL`
+          : `line ${issue.line} contains a reference outside the allowed spec/research roots`;
+      add(`task_context_${issue.kind}`, file, message);
+    }
+    validateBookkeepingTextWhitespace(file, loaded.text, add);
+  }
+}
+
+function validateBookkeepingTopology(taskFile, taskDir, record, add) {
+  if (!isPlainObject(record)) return;
+  const taskName = taskDir.slice(taskDir.lastIndexOf('/') + 1);
+  const loadReference = (field, name) => {
+    const located = locateTrellisTaskRecord(name);
+    if (located.error) {
+      add('task_topology_unverifiable', taskFile, `${field} ${name} cannot be verified: ${located.error}`);
+      return null;
+    }
+    if (located.paths.length !== 1) {
+      add(
+        located.paths.length === 0 ? 'task_topology_missing' : 'task_topology_ambiguous',
+        taskFile,
+        `${field} ${name} resolves to ${located.paths.length} task records`,
+      );
+      return null;
+    }
+    const loaded = loadTrellisTaskMetadataFile(located.paths[0]);
+    if (loaded.status !== 'loaded') {
+      add('task_topology_unverifiable', located.paths[0], loaded.message);
+      return null;
+    }
+    try {
+      return JSON.parse(loaded.text);
+    } catch (error) {
+      add('task_topology_unverifiable', located.paths[0], `linked task JSON is invalid: ${thrownValueMessage(error)}`);
+      return null;
+    }
+  };
+
+  if (isTrellisTaskDirectoryName(record.parent)) {
+    const parent = loadReference('parent', record.parent);
+    if (parent && (!Array.isArray(parent.children) || !parent.children.includes(taskName))) {
+      add('task_topology_not_reciprocal', taskFile, `parent ${record.parent} does not list ${taskName} as a child`);
+    }
+    if (parent) {
+      for (const issue of validateTrellisPlanningBaseInheritance(record, parent)) {
+        add('task_topology_base_invalid', taskFile, `field ${issue}`);
+      }
+    }
+  }
+  if (Array.isArray(record.children)) {
+    for (const childName of new Set(record.children.filter(isTrellisTaskDirectoryName))) {
+      const child = loadReference('child', childName);
+      if (child && child.parent !== taskName) {
+        add('task_topology_not_reciprocal', taskFile, `child ${childName} does not point back to ${taskName}`);
+      }
+    }
+    if (record.children.length > 0) {
+      const prd = loadTrellisTaskPrdFile(`${taskDir}/prd.md`);
+      if (prd.status === 'loaded') {
+        for (const child of findMissingTrellisChildReferences(prd.text, record.children)) {
+          add('task_topology_prd_missing_child', `${taskDir}/prd.md`, `declared child ${child} is not represented in the PRD`);
+        }
+      }
+    }
+  }
+}
+
+function validateBookkeepingTextWhitespace(file, text, add) {
+  const lines = text.split(/\n/);
+  lines.forEach((line, index) => {
+    const value = line.endsWith('\r') ? line.slice(0, -1) : line;
+    if (/[ \t]+$/.test(value)) {
+      add('bookkeeping_whitespace_invalid', file, `line ${index + 1} has trailing whitespace`);
+    }
+  });
+}
+
+function validateBookkeepingFinalBundle(options, evidence, add) {
+  const baseOid = resolveBookkeepingCommit(options.base, 'base', add);
+  const headOid = resolveBookkeepingCommit(options.head, 'head', add);
+  evidence.baseOid = baseOid;
+  evidence.headOid = headOid;
+  if (!baseOid || !headOid) return;
+
+  const checkedOutHead = gitStdout(['rev-parse', '--verify', 'HEAD^{commit}']);
+  if (checkedOutHead !== headOid) {
+    add('bundle_head_not_checked_out', '', 'the requested final head must be the currently checked-out HEAD', 'indeterminate');
+    return;
+  }
+  for (const diffArgs of [
+    ['diff', '--quiet', 'HEAD', '--', '.trellis/tasks', '.trellis/workspace'],
+    ['diff', '--quiet', '--cached', '--', '.trellis/tasks', '.trellis/workspace'],
+  ]) {
+    const dirty = runGit(diffArgs);
+    if (dirty.status !== 0) {
+      add('bundle_worktree_dirty', '', 'task or workspace bookkeeping differs from the requested committed head', 'indeterminate');
+      return;
+    }
+  }
+
+  const entries = bookkeepingChangedEntries(baseOid, headOid, add);
+  if (!entries) return;
+  const paths = [...new Set(entries.flatMap((entry) => [entry.oldPath, entry.path].filter(Boolean)))].sort();
+  evidence.changedPaths = paths
+    .slice(0, MAX_BOOKKEEPING_CHANGED_PATHS)
+    .map((path) => boundedBookkeepingText(path, 300));
+  if (paths.length > MAX_BOOKKEEPING_CHANGED_PATHS) {
+    add('bundle_changed_paths_oversized', '', `bundle changes more than ${MAX_BOOKKEEPING_CHANGED_PATHS} paths`);
+    return;
+  }
+
+  const unsupported = paths.filter(
+    (path) => !path.startsWith('.trellis/tasks/') && !path.startsWith('.trellis/workspace/'),
+  );
+  for (const path of unsupported) {
+    add('bundle_scope_invalid', path, 'finalization delta contains a non-bookkeeping path');
+  }
+  validateBookkeepingDiffWhitespace(baseOid, headOid, add);
+  if (options.mode === 'completion') {
+    validateCompletionBundle(entries, evidence, baseOid, add);
+  } else {
+    validatePlanningBundle(entries, evidence, baseOid, add);
+  }
+  validateBookkeepingJournalBundle(entries, baseOid, headOid, add);
+}
+
+function resolveBookkeepingCommit(ref, label, add) {
+  if (typeof ref !== 'string' || ref.length > 255 || ref.startsWith('-') || /[\s\0]/.test(ref)) {
+    add('bundle_git_ref_invalid', '', `${label} ref is not a bounded Git commit expression`);
+    return null;
+  }
+  const result = runGit(['rev-parse', '--verify', `${ref}^{commit}`]);
+  if (result.status !== 0) {
+    add('bundle_git_ref_unknown', '', `${label} ref does not resolve to a known commit`, 'indeterminate');
+    return null;
+  }
+  return result.stdout.trim();
+}
+
+function bookkeepingChangedEntries(baseOid, headOid, add) {
+  const result = runGit(['diff', '--name-status', '-z', '--find-renames', baseOid, headOid, '--']);
+  if (result.status !== 0) {
+    add('bundle_diff_unavailable', '', 'Git could not enumerate the finalization delta', 'indeterminate');
+    return null;
+  }
+  const tokens = result.stdout.split('\0');
+  const entries = [];
+  for (let index = 0; index < tokens.length && tokens[index];) {
+    const status = tokens[index++];
+    if (/^[RC]\d+$/.test(status)) {
+      const oldPath = tokens[index++];
+      const path = tokens[index++];
+      if (!oldPath || !path) {
+        add('bundle_diff_malformed', '', 'Git returned a malformed rename/copy record', 'indeterminate');
+        return null;
+      }
+      entries.push({ status, oldPath, path });
+    } else {
+      const path = tokens[index++];
+      if (!/^[AMDUT]$/.test(status) || !path) {
+        add('bundle_diff_malformed', '', 'Git returned an unsupported or malformed path record', 'indeterminate');
+        return null;
+      }
+      entries.push({ status, oldPath: '', path });
+    }
+  }
+  return entries;
+}
+
+function validateBookkeepingDiffWhitespace(baseOid, headOid, add) {
+  const result = runGit(['diff', '--check', baseOid, headOid, '--', '.trellis/tasks', '.trellis/workspace']);
+  if (result.status === 0) return;
+  const detail = (result.stdout || result.stderr).trim();
+  if (!detail) {
+    add('bundle_whitespace_unavailable', '', 'Git whitespace validation could not complete', 'indeterminate');
+    return;
+  }
+  for (const line of detail.split(/\r?\n/).slice(0, MAX_BOOKKEEPING_FINDINGS)) {
+    add('bookkeeping_whitespace_invalid', '', line);
+  }
+}
+
+function validateCompletionBundle(entries, evidence, baseOid, add) {
+  const taskEntries = entries.filter((entry) =>
+    entry.path.startsWith('.trellis/tasks/') || entry.oldPath.startsWith('.trellis/tasks/'));
+  const mappings = [];
+  for (const entry of taskEntries) {
+    if (!entry.path.endsWith('/task.json')) continue;
+    const source = entry.oldPath || '';
+    if (
+      /^\.trellis\/tasks\/\d{2}-\d{2}-[^/]+\/task\.json$/.test(source) &&
+      /^\.trellis\/tasks\/archive\/\d{4}-\d{2}\/\d{2}-\d{2}-[^/]+\/task\.json$/.test(entry.path) &&
+      source.split('/').at(-2) === entry.path.split('/').at(-2)
+    ) {
+      mappings.push({ sourceDir: dirname(source), archiveDir: dirname(entry.path) });
+    }
+  }
+  const deletedTaskFiles = taskEntries
+    .filter((entry) => entry.status === 'D' && /^\.trellis\/tasks\/\d{2}-\d{2}-[^/]+\/task\.json$/.test(entry.path))
+    .map((entry) => entry.path);
+  const addedTaskFiles = taskEntries
+    .filter((entry) => entry.status === 'A' && /^\.trellis\/tasks\/archive\/\d{4}-\d{2}\/\d{2}-\d{2}-[^/]+\/task\.json$/.test(entry.path))
+    .map((entry) => entry.path);
+  for (const source of deletedTaskFiles) {
+    const destination = addedTaskFiles.find(
+      (candidate) => source.split('/').at(-2) === candidate.split('/').at(-2),
+    );
+    if (destination) {
+      mappings.push({ sourceDir: dirname(source), archiveDir: dirname(destination) });
+    }
+  }
+  const uniqueMappings = [...new Map(
+    mappings.map((mapping) => [`${mapping.sourceDir}\0${mapping.archiveDir}`, mapping]),
+  ).values()];
+  if (uniqueMappings.length === 0) {
+    add('completion_archive_move_missing', '', 'completion bundle must move at least one active task into a supported archive month');
+    return;
+  }
+  evidence.taskDirectories = uniqueMappings.map((mapping) => mapping.archiveDir).sort();
+  const allowedPrefixes = uniqueMappings.flatMap((mapping) => [`${mapping.sourceDir}/`, `${mapping.archiveDir}/`]);
+  for (const entry of taskEntries) {
+    for (const path of [entry.oldPath, entry.path].filter(Boolean)) {
+      if (!allowedPrefixes.some((prefix) => path.startsWith(prefix))) {
+        add('completion_task_scope_invalid', path, 'task change is outside the detected archive move set');
+      }
+    }
+  }
+
+  for (const mapping of uniqueMappings) {
+    const source = loadBookkeepingJsonAtRef(baseOid, `${mapping.sourceDir}/task.json`, add);
+    const archived = validateBookkeepingTaskDirectory(mapping.archiveDir, {
+      add,
+      archived: true,
+    });
+    if (!source || !archived) continue;
+    for (const issue of validateTrellisBookkeepingMetadata(source, mapping.sourceDir, false)) {
+      add('completion_source_metadata_invalid', `${mapping.sourceDir}/task.json`, `field ${issue}`);
+    }
+    if (!['in_progress', 'review'].includes(source.status)) {
+      add('completion_source_lifecycle_invalid', `${mapping.sourceDir}/task.json`, 'source status must be in_progress or review');
+    }
+    const stripLifecycle = (record) => {
+      const copy = { ...record };
+      delete copy.status;
+      delete copy.completedAt;
+      return stableJson(copy);
+    };
+    if (stripLifecycle(source) !== stripLifecycle(archived)) {
+      add('completion_archive_identity_changed', `${mapping.archiveDir}/task.json`, 'archive move changed fields other than status and completedAt');
+    }
+  }
+}
+
+function validatePlanningBundle(entries, evidence, baseOid, add) {
+  const taskEntries = entries.filter((entry) =>
+    entry.path.startsWith('.trellis/tasks/') || entry.oldPath.startsWith('.trellis/tasks/'));
+  const taskDirs = new Set();
+  for (const entry of taskEntries) {
+    for (const path of [entry.oldPath, entry.path].filter(Boolean)) {
+      if (path.startsWith('.trellis/tasks/archive/')) {
+        add('planning_archive_mutation', path, 'planning bundle must not mutate archived tasks');
+      }
+      const match = /^(\.trellis\/tasks\/\d{2}-\d{2}-[^/]+)\//.exec(path);
+      if (!match) {
+        add('planning_task_layout_invalid', path, 'planning task change must remain in an active supported task directory');
+      } else {
+        taskDirs.add(match[1]);
+      }
+    }
+    if (entry.status.startsWith('D') || entry.status.startsWith('R')) {
+      add('planning_task_deletion', entry.oldPath || entry.path, 'planning bundle must not delete or move task artifacts');
+    }
+  }
+  if (taskDirs.size === 0) {
+    add('planning_task_change_missing', '', 'planning bundle must include at least one active task artifact change');
+  }
+  evidence.taskDirectories = [...taskDirs].sort();
+  for (const taskDir of evidence.taskDirectories) {
+    const current = validateBookkeepingTaskDirectory(taskDir, { add, archived: false });
+    if (!current) continue;
+    if (current.status !== 'planning' || current.completedAt !== null || current.branch !== null) {
+      add('planning_lifecycle_mutation', `${taskDir}/task.json`, 'planning task must keep status planning, completedAt null, and branch null');
+    }
+    const baseline = loadBookkeepingJsonAtRef(baseOid, `${taskDir}/task.json`, add, { missingAllowed: true });
+    if (baseline && (baseline.status !== 'planning' || baseline.completedAt !== null || baseline.branch !== null)) {
+      add('planning_baseline_invalid', `${taskDir}/task.json`, 'existing task was not a valid planning task at the bundle base');
+    }
+  }
+}
+
+function validateBookkeepingJournalBundle(entries, baseOid, headOid, add) {
+  const workspaceEntries = entries.filter((entry) =>
+    entry.path.startsWith('.trellis/workspace/') || entry.oldPath.startsWith('.trellis/workspace/'));
+  const journalFiles = new Set();
+  const developerDirs = new Set();
+  for (const entry of workspaceEntries) {
+    if (entry.status.startsWith('D') || entry.status.startsWith('R') || entry.status.startsWith('C')) {
+      add(
+        'journal_history_mutated',
+        entry.oldPath || entry.path,
+        'journal and index history is append-or-update only; deletion, rename, and copy are not allowed',
+      );
+    }
+    for (const path of [entry.oldPath, entry.path].filter(Boolean)) {
+      const match = /^(\.trellis\/workspace\/[^/]+)\/(journal-\d+\.md|index\.md)$/.exec(path);
+      if (!match) {
+        add('journal_scope_invalid', path, 'finalization may change only journal-N.md and its sibling index.md');
+        continue;
+      }
+      developerDirs.add(match[1]);
+      if (match[2].startsWith('journal-')) journalFiles.add(path);
+    }
+  }
+  if (journalFiles.size === 0 || developerDirs.size === 0) {
+    add('journal_session_missing', '', 'finalization bundle must include a completed journal session and sibling index update');
+    return;
+  }
+
+  let newCompletedSessions = 0;
+  for (const developerRelative of [...developerDirs].sort()) {
+    const indexFile = `${developerRelative}/index.md`;
+    if (!workspaceEntries.some((entry) => entry.path === indexFile || entry.oldPath === indexFile)) {
+      add('journal_index_missing', indexFile, 'changed journal directory must include its sibling index.md');
+      continue;
+    }
+    const currentJournalFiles = safeJournalFiles(developerRelative, add);
+    const journalSessions = [];
+    const baselineJournalSessions = [];
+    for (const file of currentJournalFiles) {
+      const loaded = loadBoundedTrellisTaskArtifact(file, 'journal');
+      if (loaded.status !== 'loaded') {
+        add('journal_artifact_invalid', file, loaded.message);
+        continue;
+      }
+      validateBookkeepingTextWhitespace(file, loaded.text, add);
+      const current = parseJournalSessionsFromText(file, loaded.text);
+      journalSessions.push(...current);
+      const baselineText = loadBookkeepingTextAtRef(baseOid, file, add, { missingAllowed: true });
+      const baseline = baselineText === null ? [] : parseJournalSessionsFromText(file, baselineText);
+      baselineJournalSessions.push(...baseline);
+      const baselineByNumber = new Map(baseline.map((session) => [session.number, session]));
+      for (const session of current) {
+        const previous = baselineByNumber.get(session.number);
+        if (previous && normalizeJournalSessionContent(previous.content) === normalizeJournalSessionContent(session.content)) {
+          continue;
+        }
+        if (!session.completed) continue;
+        newCompletedSessions += 1;
+        validateNewBookkeepingSession(session, headOid, add);
+      }
+    }
+    const indexLoaded = loadBoundedTrellisTaskArtifact(indexFile, 'journal index');
+    let indexSessions = null;
+    if (indexLoaded.status !== 'loaded') {
+      add('journal_index_invalid', indexFile, indexLoaded.message);
+    } else {
+      validateBookkeepingTextWhitespace(indexFile, indexLoaded.text, add);
+      indexSessions = parseWorkspaceIndexSessionsFromText(indexFile, indexLoaded.text, {
+        onDuplicate: (message) => add('journal_index_duplicate', indexFile, message),
+      });
+    }
+    for (const issue of findHistoricalTrellisJournalSessionEdits(baselineJournalSessions, journalSessions)) {
+      add('journal_history_mutated', issue.session.file, `Session ${issue.session.number} was ${issue.kind}`);
+    }
+    const validation = validateTrellisJournalSessions({
+      baselineJournalSessions,
+      developerRelative,
+      indexFile,
+      indexSessions,
+      journalSessions,
+    });
+    for (const message of validation.failures) {
+      add('journal_index_mismatch', indexFile, message);
+    }
+  }
+  if (newCompletedSessions === 0) {
+    add('journal_session_missing', '', 'finalization bundle adds no completed journal session');
+  }
+}
+
+function safeJournalFiles(developerRelative, add) {
+  let entries;
+  try {
+    entries = readdirSync(resolve(rootDir, developerRelative), { withFileTypes: true });
+  } catch (error) {
+    add('journal_directory_unreadable', developerRelative, `journal directory could not be inspected: ${thrownValueMessage(error)}`);
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.isFile() && /^journal-\d+\.md$/.test(entry.name))
+    .map((entry) => `${developerRelative}/${entry.name}`)
+    .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+}
+
+function validateNewBookkeepingSession(session, headOid, add) {
+  for (const heading of ['Summary', 'Main Changes', 'Testing']) {
+    const section = extractMarkdownSection(session.content, heading)
+      .replace(/^[\s*-]+|[\s*-]+$/g, '')
+      .trim();
+    if (
+      section.length < 4 ||
+      /\(Add (?:details|test results)\)/.test(section) ||
+      /^(?:[-*]\s*)?(?:none|n\/?a|not recorded|see git log)[.!]?$/i.test(section)
+    ) {
+      add('journal_content_missing', session.file, `Session ${session.number} ${heading} must contain real content`);
+    }
+  }
+  if (session.commits.length === 0) {
+    add('journal_commit_missing', session.file, `Session ${session.number} must reference at least one work commit`);
+    return;
+  }
+  for (const hash of session.commits) {
+    const resolved = runGit(['rev-parse', '--verify', `${hash}^{commit}`]);
+    if (resolved.status !== 0) {
+      add('journal_commit_unknown', session.file, `Session ${session.number} references unknown commit ${hash}`);
+      continue;
+    }
+    const ancestor = runGit(['merge-base', '--is-ancestor', resolved.stdout.trim(), headOid]);
+    if (ancestor.status !== 0) {
+      add('journal_commit_unreachable', session.file, `Session ${session.number} commit ${hash} is not reachable from the final head`);
+    }
+  }
+}
+
+function loadBookkeepingJsonAtRef(ref, file, add, options = {}) {
+  const text = loadBookkeepingTextAtRef(ref, file, add, options);
+  if (text === null) return null;
+  try {
+    const value = JSON.parse(text);
+    if (!isPlainObject(value)) throw new Error('top-level value is not an object');
+    return value;
+  } catch (error) {
+    add('task_json_invalid', file, `task metadata at bundle base is invalid: ${thrownValueMessage(error)}`);
+    return null;
+  }
+}
+
+function loadBookkeepingTextAtRef(ref, file, add, options = {}) {
+  const size = runGit(['cat-file', '-s', `${ref}:${file}`]);
+  if (size.status !== 0) {
+    if (options.missingAllowed) return null;
+    add('bundle_base_artifact_missing', file, 'artifact is missing from the bundle base');
+    return null;
+  }
+  const bytes = Number(size.stdout.trim());
+  if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > config.untrackedFileReadLimitBytes) {
+    add('bundle_base_artifact_oversized', file, `artifact exceeds the bounded read limit of ${config.untrackedFileReadLimitBytes} bytes`);
+    return null;
+  }
+  const result = spawnSync('git', ['show', `${ref}:${file}`], {
+    cwd: rootDir,
+    encoding: 'buffer',
+    maxBuffer: GIT_MAX_BUFFER_BYTES,
+  });
+  if (result.error || result.status !== 0 || result.signal) {
+    add('bundle_base_artifact_unreadable', file, 'artifact could not be read from the bundle base', 'indeterminate');
+    return null;
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(result.stdout);
+  } catch {
+    add('bundle_base_artifact_utf8_invalid', file, 'artifact is not valid UTF-8');
+    return null;
+  }
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (isPlainObject(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
 }
 
 export function unsupportedNodeVersionMessage(version) {
@@ -650,7 +1396,7 @@ function checkChangedTrellisTaskMetadata() {
       continue;
     }
 
-    for (const issue of validateTrellisTaskMetadata(record, artifact.taskDir, artifact.archived)) {
+    for (const issue of validateTrellisBookkeepingMetadata(record, artifact.taskDir, artifact.archived)) {
       fail(`${file} field ${issue}.`);
     }
     validateTrellisTaskMetadataLinks(file, artifact.taskDir, record);
@@ -952,6 +1698,52 @@ export function validateTrellisTaskMetadata(record, taskDir, archived) {
   issues.push(...validateTrellisTaskPriorityProvenance(record));
 
   return issues;
+}
+
+export function validateTrellisBookkeepingMetadata(record, taskDir, archived) {
+  if (!isPlainObject(record)) {
+    return ['record must be a JSON object'];
+  }
+
+  const issues = validateTrellisTaskMetadata(record, taskDir, archived);
+  for (const field of ['title', 'description']) {
+    if (typeof record[field] !== 'string' || record[field].trim().length === 0) {
+      issues.push(`${field} must be a non-empty string`);
+    }
+  }
+  if (!isTrellisTimestamp(record.createdAt)) {
+    issues.push('createdAt must be a valid date or timestamp');
+  }
+  if (
+    record.status === 'completed' &&
+    typeof record.completedAt === 'string' &&
+    !isTrellisTimestamp(record.completedAt)
+  ) {
+    issues.push('completedAt must be a valid completion date or timestamp');
+  } else if (
+    record.status === 'completed' &&
+    isTrellisTimestamp(record.createdAt) &&
+    isTrellisTimestamp(record.completedAt) &&
+    Date.parse(record.completedAt) < Date.parse(record.createdAt)
+  ) {
+    issues.push('completedAt must not be earlier than createdAt');
+  }
+  return issues;
+}
+
+function isTrellisTimestamp(value) {
+  if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) {
+    return false;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}(?:T[^\s]+)?$/.test(value)) {
+    return false;
+  }
+  const datePart = value.slice(0, 10);
+  const parsedDate = new Date(`${datePart}T00:00:00Z`);
+  if (!Number.isFinite(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== datePart) {
+    return false;
+  }
+  return value.length === 10 || Number.isFinite(Date.parse(value));
 }
 
 function validateTrellisTaskPriorityProvenance(record) {
@@ -2307,7 +3099,10 @@ function boundedUntrackedFileText(path) {
       }
       bytesRead += count;
     }
-    return { status: 'read', text: buffer.toString('utf8', 0, bytesRead) };
+    return {
+      status: 'read',
+      text: new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, bytesRead)),
+    };
   } catch {
     return { status: 'unreadable', text: '' };
   } finally {
