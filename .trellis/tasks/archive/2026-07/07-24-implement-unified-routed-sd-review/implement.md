@@ -79,4 +79,3 @@
   internal wait ownership to the successor command.
 - `validate-sd-workflow-program-integration` owns the final cross-child matrix
   and release/pilot proof.
-
