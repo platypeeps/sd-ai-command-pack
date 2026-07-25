@@ -251,8 +251,13 @@ class ReviewControllerTests(InstallTestCase):
         controller = self.load_controller()
         root = self.make_repo()
         first = controller._worktree_digest(root)
-        (root / "new.txt").write_text("first\n", encoding="utf-8")
-        second = controller._worktree_digest(root)
+        (root / "new.txt").write_bytes(b"x" * (1024 * 1024 + 1))
+        with mock.patch.object(
+            Path,
+            "read_bytes",
+            side_effect=AssertionError("untracked files must be hashed incrementally"),
+        ):
+            second = controller._worktree_digest(root)
         (root / "new.txt").write_text("second\n", encoding="utf-8")
         third = controller._worktree_digest(root)
         self.assertEqual(len({first, second, third}), 3)
@@ -680,23 +685,6 @@ class ReviewControllerTests(InstallTestCase):
             },
             "dispatch": {"status": "requested", "phase": "acknowledged"},
         }
-        thread_payload = [
-            {
-                "data": {
-                    "repository": {
-                        "pullRequest": {
-                            "reviewThreads": {
-                                "nodes": [],
-                                "pageInfo": {
-                                    "hasNextPage": False,
-                                    "endCursor": None,
-                                },
-                            }
-                        }
-                    }
-                }
-            }
-        ]
         issue_comments = [
             [
                 {
@@ -716,8 +704,6 @@ class ReviewControllerTests(InstallTestCase):
         ]
 
         def fake_gh(_args, *, context, **_kwargs):
-            if context == "collect paginated review threads":
-                return thread_payload
             if context == "collect pull request conversation comments":
                 return issue_comments
             if context == "collect pull request checks":
@@ -817,39 +803,8 @@ class ReviewControllerTests(InstallTestCase):
             "backend": None,
             "dispatch": {"status": "skipped", "phase": "not-started"},
         }
-        thread_payload = [
-            {
-                "data": {
-                    "repository": {
-                        "pullRequest": {
-                            "reviewThreads": {
-                                "nodes": [
-                                    {
-                                        "id": "unrelated-thread",
-                                        "isResolved": False,
-                                        "isOutdated": False,
-                                        "comments": {
-                                            "nodes": [
-                                                {
-                                                    "id": "unrelated-comment",
-                                                    "body": "Unrelated inline feedback",
-                                                    "author": {"login": "someone-else"},
-                                                }
-                                            ],
-                                            "pageInfo": {"hasNextPage": False},
-                                        },
-                                    }
-                                ]
-                            }
-                        }
-                    }
-                }
-            }
-        ]
 
         def fake_gh(_args, *, context, **_kwargs):
-            if context == "collect paginated review threads":
-                return thread_payload
             if context == "collect pull request checks":
                 return []
             self.fail(f"unexpected GitHub context: {context}")
@@ -870,7 +825,11 @@ class ReviewControllerTests(InstallTestCase):
         pr = self.pr(controller, root)
         receipt = {
             "selectedRoute": "none",
-            "backend": None,
+            "backend": {
+                "reviewAuthors": [],
+                "checkNames": [],
+                "findingChannels": ["inline-comment"],
+            },
             "dispatch": {"status": "skipped", "phase": "not-started"},
         }
         rows = [
@@ -921,15 +880,6 @@ class ReviewControllerTests(InstallTestCase):
             },
             "dispatch": {"status": "requested", "phase": "acknowledged"},
         }
-        threads = [
-            {
-                "data": {
-                    "repository": {
-                        "pullRequest": {"reviewThreads": {"nodes": []}}
-                    }
-                }
-            }
-        ]
         comments = [
             [
                 {
@@ -941,8 +891,6 @@ class ReviewControllerTests(InstallTestCase):
         ]
 
         def fake_gh(_args, *, context, **_kwargs):
-            if context == "collect paginated review threads":
-                return threads
             if context == "collect pull request conversation comments":
                 return comments
             if context == "collect pull request checks":

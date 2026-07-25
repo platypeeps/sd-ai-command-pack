@@ -552,9 +552,19 @@ def _worktree_digest(repo: Path) -> str:
             raise ReviewError(f"cannot hash untracked review path {relative}: {error}") from error
         if stat.S_ISLNK(metadata.st_mode):
             payload = os.fsencode(os.readlink(path))
+            payload_digest = hashlib.sha256(payload).hexdigest()
             kind = "symlink"
         elif stat.S_ISREG(metadata.st_mode):
-            payload = path.read_bytes()
+            digest = hashlib.sha256()
+            try:
+                with path.open("rb") as stream:
+                    while chunk := stream.read(1024 * 1024):
+                        digest.update(chunk)
+            except OSError as error:
+                raise ReviewError(
+                    f"cannot hash untracked review path {relative}: {error}"
+                ) from error
+            payload_digest = digest.hexdigest()
             kind = "file"
         else:
             raise ReviewError(
@@ -564,7 +574,7 @@ def _worktree_digest(repo: Path) -> str:
             {
                 "path": safe.as_posix(),
                 "kind": kind,
-                "digest": hashlib.sha256(payload).hexdigest(),
+                "digest": payload_digest,
             }
         )
     return _digest({"trackedDiff": tracked, "untracked": untracked})
@@ -1214,40 +1224,14 @@ def _nested_thread_comments(
     return comments
 
 
-def _collect_observation(
+def _collect_review_threads(
     repo: Path,
     *,
-    pr: Mapping[str, Any],
-    receipt: Mapping[str, Any],
-    receipt_check_name: str,
-    dispositions: Mapping[str, str] | None = None,
-) -> dict[str, Any]:
-    disposition_map = dict(dispositions or {})
-    backend = receipt.get("backend")
-    authors = {
-        str(item).lower()
-        for item in (backend.get("reviewAuthors", []) if isinstance(backend, dict) else [])
-    }
-    check_names = {
-        str(item)
-        for item in (backend.get("checkNames", []) if isinstance(backend, dict) else [])
-    }
-    channels = set(
-        backend.get("findingChannels", []) if isinstance(backend, dict) else []
-    )
-    dispatch = receipt.get("dispatch")
-    if not isinstance(dispatch, dict):
-        raise ReviewError("remote receipt dispatch is invalid")
-    receipt_observations = receipt.get("observations")
-    remote_latency = (
-        receipt_observations.get("latencyMs")
-        if isinstance(receipt_observations, dict)
-        else None
-    )
-    repository = pr["repository"]
-    owner = repository["owner"]
-    name = repository["name"]
-
+    owner: str,
+    name: str,
+    number: int,
+    authors: set[str],
+) -> list[dict[str, Any]]:
     query = """query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id isResolved isOutdated comments(first:100){nodes{id url body path line author{login}} pageInfo{hasNextPage}}}pageInfo{hasNextPage endCursor}}}}}"""
     thread_value = _gh_json(
         [
@@ -1262,7 +1246,7 @@ def _collect_observation(
             "-F",
             f"name={name}",
             "-F",
-            f"number={pr['number']}",
+            f"number={number}",
         ],
         repo=repo,
         context="collect paginated review threads",
@@ -1333,6 +1317,54 @@ def _collect_observation(
                 )
                 if len(threads) > 1_000:
                     raise ReviewError("review threads exceed 1000 rows")
+    return threads
+
+
+def _collect_observation(
+    repo: Path,
+    *,
+    pr: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    receipt_check_name: str,
+    dispositions: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    disposition_map = dict(dispositions or {})
+    backend = receipt.get("backend")
+    authors = {
+        str(item).lower()
+        for item in (backend.get("reviewAuthors", []) if isinstance(backend, dict) else [])
+    }
+    check_names = {
+        str(item)
+        for item in (backend.get("checkNames", []) if isinstance(backend, dict) else [])
+    }
+    channels = set(
+        backend.get("findingChannels", []) if isinstance(backend, dict) else []
+    )
+    dispatch = receipt.get("dispatch")
+    if not isinstance(dispatch, dict):
+        raise ReviewError("remote receipt dispatch is invalid")
+    receipt_observations = receipt.get("observations")
+    remote_latency = (
+        receipt_observations.get("latencyMs")
+        if isinstance(receipt_observations, dict)
+        else None
+    )
+    repository = pr["repository"]
+    owner = repository["owner"]
+    name = repository["name"]
+
+    threads = (
+        _collect_review_threads(
+            repo,
+            owner=owner,
+            name=name,
+            number=pr["number"],
+            authors=authors,
+        )
+        if "inline-comment" in channels
+        else []
+    )
 
     issue_comments = (
         _paginated_rest_array(
