@@ -32,6 +32,13 @@ that diagnostic; do not retry the tool bare or redirect `GH_CONFIG_DIR`.
 - `--dry-run`: render a repository-local candidate without writing. Do not
   combine it with an update mode or `--json`.
 - `--json`: emit one structured report instead of mixed human output.
+- `--planning-attempt ID`: internal read-only review-orchestration mode. It
+  requires `--json`, explicit `--github-repo`, and either `--github-days` or
+  `--github-pr`, and emits one typed path-filtered planning receipt instead of
+  rendering or updating Markdown.
+- `--review-artifact-root ABSOLUTE_PATH`: optional private directory outside
+  the repository for exact receipt reuse within one planning attempt.
+- `--planning-cache-ttl SECONDS`: bounded lifetime for that private receipt.
 - `--base`, `--diff-from`, `--include-working-tree`, `--github-days`,
   `--github-limit`, `--github-pr`, `--github-repo`, `--env-prefix`, and
   `--allow` retain their documented scan controls.
@@ -101,6 +108,17 @@ the repo wrapper.
    cluster retains counts, PRs, path families, time bounds, and bounded
    examples; the report names every truncated evidence dimension.
 
+   The routed-review controller may request an internal planning receipt once
+   per attempt. That receipt contains bounded normalized clusters, selects only
+   categories applicable to the current changed paths, and records source,
+   age, watermark, truncation, and limitations. It never includes full raw
+   comment bodies and never grants positive confidence. It also reports the
+   tracked managed snapshot as current, stale, missing, or unknown. Reuse an
+   exact valid private receipt for the same repository, attempt, request,
+   changed-path fingerprint, and snapshot digest; otherwise perform a fresh
+   bounded scan or report stale or unavailable evidence visibly. Cache a
+   bounded failure receipt too so a degraded attempt does not rescan GitHub.
+
 4. If the repository already has a preferred review-learning file, use
    `--target PATH`. Otherwise the default is `docs/review-learnings.md`. A
    local update must resolve inside the canonical repository root, including
@@ -141,6 +159,10 @@ the repo wrapper.
 - Repeat `--github-pr` to inspect specific PRs. It is mutually exclusive with
   `--github-days`; `sd-review-pr` uses one PR-scoped dry run only after its
   overall review loop completes, never after each remote-review round.
+- Planning mode is for the routed-review workflow, not durable curation. It is
+  bounded to 90 days or 100 explicitly selected PRs, uses at most 10 inventory
+  pages and 500 Copilot comments, and cannot be combined with update, dry-run,
+  or allow modes.
 - Preventive actions are category-specific and appear only when recurring
   historical evidence reaches the command's deterministic threshold. The
   command does not emit generic actions for absent categories.
@@ -153,6 +175,9 @@ the repo wrapper.
 
 - Scan mode performs no file or directory creation, task creation, staging,
   commit, push, review request, or remote mutation.
+- Planning mode has the same tracked-file and remote-mutation boundary. Its
+  only permitted write is an optional atomic mode-0600 receipt beneath an
+  absolute current-user-owned mode-0700 artifact root outside the repository.
 - Validate canonical containment, every existing path component, regular-file
   type, strict UTF-8, current-user ownership, and unchanged target identity and
   digest before replacement. Reject traversal, external absolute paths,

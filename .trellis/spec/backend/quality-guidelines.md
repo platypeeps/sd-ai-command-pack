@@ -119,6 +119,99 @@ Wrong: dimensions=performance runs only performance
 Correct: standard runs its mandatory core and adds performance
 ```
 
+## Review-Learning Planning Signal Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing the review-learning scanner's typed planning
+output, its private attempt receipt, or a routed-review consumer that turns
+historical defect families into current review questions.
+
+### 2. Signatures
+
+- Ordinary JSON scan: `sd-ai-command-pack-review-learnings.py --json` includes
+  a nested schema-version-1 `reviewLearning` signal while retaining the
+  existing top-level report schema.
+- Attempt receipt: add `--planning-attempt ID`, explicit `--github-repo`, and
+  either `--github-days` or repeated `--github-pr`; planning mode requires
+  `--json` and cannot combine with update, dry-run, or allow modes.
+- Optional reuse: `--review-artifact-root ABSOLUTE_PATH` and
+  `--planning-cache-ttl SECONDS` store an exact schema-version-1 receipt.
+
+### 3. Contracts
+
+- Reuse the scanner's deterministic historical-family vocabulary. Each bounded
+  cluster carries family ID/label, comment/signature counts, PR/time/path
+  bounds, representative signature summaries, example references, and
+  per-dimension truncation. Never copy full raw comment bodies into the signal.
+- Map normalized changed paths to applicable families and expose only those
+  clusters as planning inputs. Historical evidence may produce risk questions
+  but always reports `confidenceCredit.granted=false`.
+- Collect at most once per review attempt. A cache hit must match repository,
+  attempt ID, request fingerprint, changed paths, schema, and lifetime and must
+  return the cached GitHub watermark without calling GitHub again.
+- Bound planning collection to 90 days or 100 explicit PRs, 10 inventory
+  pages, 500 Copilot comments, 200 changed paths, a 16-KiB request, and a
+  512-KiB receipt. Incomplete pagination is `truncated`, never complete.
+- Ordinary scan and planning mode never mutate tracked files, Git, or GitHub.
+  The only planning write is an optional atomic mode-0600 receipt beneath a
+  real, absolute, current-user-owned mode-0700 directory outside the repo.
+- Cache corruption or mismatch causes a fresh bounded read. Authentication,
+  rate-limit, network, malformed-payload, or collector failure returns visible
+  stale evidence when a matching expired receipt exists, otherwise visible
+  unavailable evidence; neither grants confidence. Persist the bounded failure
+  receipt so later stages in the same degraded attempt do not rescan.
+- Human output derives planning status, source, applicable families, age, and
+  limitations from the typed signal. It also reports the durable managed
+  snapshot as current, stale, missing, or unknown by comparing its managed
+  update date with the newest observed GitHub evidence. Curation remains an
+  explicit, separately authorized update.
+
+### 4. Validation & Error Matrix
+
+- Unsafe changed path, attempt ID, repository identity, request size/type,
+  cache TTL, or planning argument combination -> controlled exit `2` with no
+  collection or write.
+- Relative, repository-contained, symlinked, non-directory, permissive, or
+  wrong-owner artifact root -> fail before collection.
+- Missing, malformed, oversized, permissive, wrong-owner, or schema/request
+  mismatched receipt -> cache miss and fresh bounded collection.
+- Expired receipt plus successful collection -> refreshed receipt; expired
+  receipt plus collection failure -> explicit stale result.
+- Unavailable history without a valid stale receipt -> explicit unavailable
+  result with zero confidence, a bounded reusable failure receipt when private
+  storage is enabled, and no Markdown write.
+
+### 5. Good / Base / Bad Cases
+
+- Good: a state-controller diff selects recent boundary-validation clusters,
+  records a bounded live receipt, and reuses it for later stages of the same
+  attempt without a second GitHub call.
+- Base: a documentation-only diff selects contract/documentation history and
+  does not load unrelated boundary or generated-surface clusters.
+- Bad: copy every historical comment to provider prompts, treat cache presence
+  as sufficient without fingerprint validation, or let unavailable learning
+  make a review cleaner.
+
+### 6. Tests Required
+
+- Bounded cluster schema and raw-body exclusion, changed-path family selection,
+  truncation/freshness/limitations, and zero confidence.
+- One-scan-per-attempt hit, expired refresh, stale fallback, corrupt cache,
+  invalid permissions/path, unavailable collector, and no tracked writes.
+- Planning CLI argument bounds, explicit PR and time-window collection,
+  root/template parity, manifest installation, and per-file coverage floor.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: rescan GitHub independently for local and remote review stages
+Correct: collect once and reuse the exact attempt receipt
+
+Wrong: historical comments prove that a current path is safe or defective
+Correct: selected history supplies bounded advisory questions with zero confidence credit
+```
+
 ## Pull Request Eligibility Evaluator Contract
 
 ### 1. Scope / Trigger

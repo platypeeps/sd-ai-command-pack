@@ -61,17 +61,17 @@ bookkeeping commit.
 
 ## Acceptance Criteria
 
-- [ ] JSON scan mode exposes the same bounded clusters and truncation facts as
+- [x] JSON scan mode exposes the same bounded clusters and truncation facts as
   Markdown rendering without writing the target file.
-- [ ] A changed state-controller fixture receives relevant boundary/history
+- [x] A changed state-controller fixture receives relevant boundary/history
   prompts; unrelated documentation-only changes do not load the full history.
-- [ ] One review attempt performs at most one bounded GitHub learning scan and
+- [x] One review attempt performs at most one bounded GitHub learning scan and
   reuses its exact receipt across local and remote stages.
-- [ ] Stale cache, unavailable GitHub, rate limit, malformed comments, and
+- [x] Stale cache, unavailable GitHub, rate limit, malformed comments, and
   truncated pagination remain visible and grant no positive confidence.
-- [ ] Ordinary review produces no tracked learning-document diff or additional
+- [x] Ordinary review produces no tracked learning-document diff or additional
   commit; explicit update mode remains atomic and separately authorized.
-- [ ] Focused scanner/report/cache/review-consumption tests, generated parity,
+- [x] Focused scanner/report/cache/review-consumption tests, generated parity,
   `make sync`, and `make check` pass.
 
 ## Out Of Scope

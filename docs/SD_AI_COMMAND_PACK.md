@@ -288,6 +288,22 @@ harness quality, and uncategorized evidence. Cluster summaries retain counts,
 PRs, path families, observed dates, and bounded examples, and explicitly report
 truncation. Preventive actions appear only for detected recurring categories.
 
+The routed-review workflow may invoke the same scanner once per attempt with
+`--planning-attempt ID --json`, an explicit `--github-repo`, and either a
+bounded `--github-days` window or repeated `--github-pr`. The schema-version-1
+receipt exposes bounded normalized historical clusters and only the categories
+applicable to the changed paths. Full raw review bodies are omitted, and the
+signal is advisory evidence with zero confidence credit. An optional
+`--review-artifact-root` must be absolute, private, current-user-owned, and
+outside the repository; exact request receipts are atomically reused until the
+bounded TTL expires. Stale, truncated, corrupt, rate-limited, or unavailable
+evidence is reported visibly and never authorizes tracked-file or GitHub
+mutation. The signal separately reports the durable managed snapshot as
+current, stale, missing, or unknown and recommends explicit curation only when
+newer evidence exists or the snapshot is missing. Failed scans also produce a
+bounded reusable attempt receipt, preventing repeated provider reads during a
+degraded attempt.
+
 The create-pr wrapper honors `SD_AI_COMMAND_PACK_CREATE_PR_BASE` for a base
 branch override, `SD_AI_COMMAND_PACK_CREATE_PR_COMMIT_MESSAGE` when it creates
 a commit without a user-provided message, and
