@@ -55,14 +55,7 @@ Verified the detached legacy checkout was clean and unused, confirmed its commit
 
 ### Main Changes
 
-- Extended the existing review-learning scanner with bounded normalized
-  historical clusters, changed-path family selection, risk questions, and
-  explicit live, truncated, stale, unavailable, and snapshot-freshness state.
-- Added private atomic one-scan-per-attempt receipts that validate repository,
-  request, changed paths, snapshot digest, GitHub watermark, schema, lifetime,
-  ownership, and permissions; degraded results are reused without rescanning.
-- Published the 0.48.0 template/mirror, skill, guide, code-spec, changelog, and
-  exact-payload fleet candidate evidence.
+- Detailed change bullets were not supplied; see the summary above.
 
 ### Git Commits
 
@@ -70,10 +63,7 @@ Verified the detached legacy checkout was clean and unused, confirmed its commit
 
 ### Testing
 
-- `54` focused review-learning tests passed.
-- `make check` passed with scanner coverage at `86%`.
-- All eight configured fleet consumers passed disposable install, audit,
-  preparation, and compatibility checks for the exact 0.48.0 payload.
+- Validation was not recorded for this session.
 
 ### Status
 
@@ -861,7 +851,14 @@ Added bounded path-filtered review-learning planning receipts, exact private cac
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Extended the existing review-learning scanner with bounded normalized
+  historical clusters, changed-path family selection, risk questions, and
+  explicit live, truncated, stale, unavailable, and snapshot-freshness state.
+- Added private atomic one-scan-per-attempt receipts that validate repository,
+  request, changed paths, snapshot digest, GitHub watermark, schema, lifetime,
+  ownership, and permissions; degraded results are reused without rescanning.
+- Published the 0.48.0 template/mirror, skill, guide, code-spec, changelog, and
+  exact-payload fleet candidate evidence.
 
 ### Git Commits
 
@@ -871,7 +868,10 @@ Added bounded path-filtered review-learning planning receipts, exact private cac
 
 ### Testing
 
-- Validation was not recorded for this session.
+- `54` focused review-learning tests passed.
+- `make check` passed with scanner coverage at `86%`.
+- All eight configured fleet consumers passed disposable install, audit,
+  preparation, and compatibility checks for the exact 0.48.0 payload.
 
 ### Status
 
