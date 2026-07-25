@@ -1205,7 +1205,7 @@ def _nested_thread_comments(
     thread_id: str,
     authors: set[str],
 ) -> list[dict[str, Any]]:
-    query = """query($id:ID!,$cursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$cursor){nodes{id url body path line author{login}}pageInfo{hasNextPage endCursor}}}}}"""
+    query = """query($id:ID!,$endCursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$endCursor){nodes{id url body path line author{login}}pageInfo{hasNextPage endCursor}}}}}"""
     value = _gh_json(
         [
             "api",
@@ -1264,7 +1264,7 @@ def _collect_review_threads(
     number: int,
     authors: set[str],
 ) -> list[dict[str, Any]]:
-    query = """query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id isResolved isOutdated comments(first:100){nodes{id url body path line author{login}} pageInfo{hasNextPage}}}pageInfo{hasNextPage endCursor}}}}}"""
+    query = """query($owner:String!,$name:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{id isResolved isOutdated comments(first:100){nodes{id url body path line author{login}} pageInfo{hasNextPage}}}pageInfo{hasNextPage endCursor}}}}}"""
     thread_value = _gh_json(
         [
             "api",

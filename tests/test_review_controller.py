@@ -862,10 +862,18 @@ class ReviewControllerTests(InstallTestCase):
             }
         ]
 
-        def fake_gh(_args, *, context, **_kwargs):
+        def fake_gh(args, *, context, **_kwargs):
             if context == "collect paginated review threads":
+                query = next(item for item in args if item.startswith("query="))
+                self.assertIn("$endCursor:String", query)
+                self.assertIn("after:$endCursor", query)
+                self.assertNotIn("$cursor", query)
                 return thread_payload
             if context == "collect paginated review-thread comments":
+                query = next(item for item in args if item.startswith("query="))
+                self.assertIn("$endCursor:String", query)
+                self.assertIn("after:$endCursor", query)
+                self.assertNotIn("$cursor", query)
                 return nested
             if context == "collect pull request checks":
                 return []
