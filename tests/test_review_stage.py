@@ -653,6 +653,9 @@ class ReviewStageTests(InstallTestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
+        self.addCleanup(
+            lambda: process.kill() if process.poll() is None else None
+        )
         deadline = time.monotonic() + 5
         while not log.exists() and time.monotonic() < deadline:
             time.sleep(0.02)

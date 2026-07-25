@@ -42,9 +42,10 @@ elif provider == "gito":
         output = Path(sys.argv[sys.argv.index("--out") + 1])
     except (ValueError, IndexError):
         raise SystemExit("gito fixture requires --out <path>") from None
-    if output.exists() and not output.is_dir():
-        raise SystemExit("gito fixture --out path is not a directory")
-    output.mkdir(parents=True, exist_ok=True)
+    try:
+        output.mkdir(parents=True, exist_ok=True)
+    except (FileExistsError, NotADirectoryError):
+        raise SystemExit("gito fixture --out path is not a directory") from None
     count = config["gitoCount"]
     issues = [
         {

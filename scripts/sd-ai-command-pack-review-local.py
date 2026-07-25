@@ -35,6 +35,7 @@ MAX_EXPANDED_ARGV_BYTES = 128 * 1024
 MAX_FINDINGS = 1_000
 MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 MAX_TIMEOUT = 3600
+GIT_TIMEOUT_SECONDS = 60
 ID_RE = re.compile(r"[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\Z")
 ATTEMPT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 SCOPES = frozenset({"changes", "branch", "codebase", "pr"})
@@ -389,14 +390,30 @@ def _git(repo: Path, *args: str, binary: Literal[True]) -> bytes: ...
 
 
 def _git(repo: Path, *args: str, binary: bool = False) -> str | bytes:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=repo,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=not binary,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=repo,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=not binary,
+            check=False,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        stderr_value = error.stderr
+        stderr_text = (
+            stderr_value.decode("utf-8", "replace")
+            if isinstance(stderr_value, bytes)
+            else stderr_value
+        )
+        raise ReviewInputError(
+            _bounded(
+                stderr_text
+                or f"git {' '.join(args)} timed out after {GIT_TIMEOUT_SECONDS}s"
+            )
+        ) from error
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", "replace") if binary else result.stderr
         raise ReviewInputError(
@@ -1182,7 +1199,7 @@ def _run_provider(
             b"",
             str(error).encode(),
             None,
-            "failed",
+            "cancelled" if CANCELLATION_EVENT.is_set() else "failed",
         )
     stdout = stdout[:MAX_OUTPUT_BYTES]
     stderr = stderr[:MAX_OUTPUT_BYTES]
