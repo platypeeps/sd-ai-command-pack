@@ -155,7 +155,8 @@ class ReviewStageTests(InstallTestCase):
                         "requiredProviders": [],
                     },
                 }
-            ),
+            )
+            + "\n",
             encoding="utf-8",
         )
         self.run_git(root, "add", str(config.relative_to(root)))
@@ -355,7 +356,7 @@ class ReviewStageTests(InstallTestCase):
             report["receipt"]["attempts"][0]["diagnostic"],
         )
 
-    def test_gito_native_report_limit_is_inclusive_and_oversize_fails(self) -> None:
+    def test_gito_native_report_limit_is_inclusive(self) -> None:
         exact_root = self.make_repo()
         self.write_builtin_config(exact_root, gito_count=1_000)
         exact = self.run_stage(exact_root, "gito-limit", "--local", "gito")
@@ -364,6 +365,7 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(exact.returncode, 1, exact.stdout)
         self.assertEqual(len(exact_report["receipt"]["findings"]), 1_000)
 
+    def test_gito_oversized_native_report_fails_closed(self) -> None:
         oversized_root = self.make_repo()
         self.write_builtin_config(oversized_root, gito_count=1_001)
         oversized = self.run_stage(oversized_root, "gito-oversized", "--local", "gito")
@@ -562,7 +564,7 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(report["receipt"]["attempts"], [])
         self.assertFalse(report["receipt"]["confidence"]["granted"])
 
-    def test_missing_provider_and_timeout_do_not_become_clean(self) -> None:
+    def test_provider_timeout_does_not_become_clean(self) -> None:
         root = self.make_repo()
         self.write_config(root, modes=("clean", "slow"), timeout=1)
         timeout = self.run_stage(root, "timeout", "--local", "gito")
@@ -571,6 +573,9 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(timeout_report["status"], "failed")
         self.assertEqual(timeout_report["receipt"]["attempts"][0]["exitCode"], 124)
 
+    def test_missing_provider_is_reported_as_unavailable(self) -> None:
+        root = self.make_repo()
+        self.write_config(root)
         config = root / ".sd-ai-command-pack/review.json"
         value = json.loads(config.read_text(encoding="utf-8"))
         value["providers"][0]["argv"][0] = "missing-review-provider"

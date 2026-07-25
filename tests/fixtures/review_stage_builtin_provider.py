@@ -38,8 +38,11 @@ if provider == "prism":
             )
         )
 elif provider == "gito":
-    output = Path(sys.argv[sys.argv.index("--out") + 1])
-    output.mkdir(parents=True)
+    try:
+        output = Path(sys.argv[sys.argv.index("--out") + 1])
+    except (ValueError, IndexError):
+        raise SystemExit("gito fixture requires --out <path>") from None
+    output.mkdir(parents=True, exist_ok=True)
     count = config["gitoCount"]
     issues = [
         {

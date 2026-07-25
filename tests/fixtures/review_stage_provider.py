@@ -19,7 +19,9 @@ if mode == "barrier":
     starts = 0
     while time.time() < deadline:
         starts = sum(
-            ":start:" in line for line in log.read_text(encoding="utf-8").splitlines()
+            len(parts) == 3 and parts[1] == "start"
+            for line in log.read_text(encoding="utf-8").splitlines()
+            for parts in [line.split(":", 2)]
         )
         if starts >= 2:
             break

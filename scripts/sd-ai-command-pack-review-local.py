@@ -931,6 +931,10 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
                 process.kill()
         except (OSError, ProcessLookupError):
             pass
+        try:
+            process.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
 
 
 def _cancel_active_processes() -> None:
@@ -1129,7 +1133,20 @@ def _run_provider(
                 status_value = provider.outcome_by_exit.get(exit_code, "failed")
             except subprocess.TimeoutExpired:
                 _terminate(process)
-                stdout, stderr = process.communicate()
+                try:
+                    stdout, stderr = process.communicate(timeout=5)
+                except subprocess.TimeoutExpired as termination_error:
+                    stdout = (
+                        termination_error.output
+                        if isinstance(termination_error.output, bytes)
+                        else b""
+                    )
+                    stderr = (
+                        termination_error.stderr
+                        if isinstance(termination_error.stderr, bytes)
+                        else b""
+                    )
+                    stderr += b"\nprovider process did not terminate after timeout"
                 exit_code = 124
                 status_value = "failed"
                 stderr += (
