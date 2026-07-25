@@ -117,7 +117,13 @@ class ReviewStageTests(InstallTestCase):
             self.run_git(root, "commit", "-m", "configure local review")
         return log
 
-    def write_builtin_config(self, root: Path, *, prism_mode: str = "finding") -> Path:
+    def write_builtin_config(
+        self,
+        root: Path,
+        *,
+        prism_mode: str = "finding",
+        gito_count: int = 1,
+    ) -> Path:
         providers = []
         for identifier, cost in (("prism", "low"), ("gito", "medium")):
             providers.append(
@@ -153,37 +159,31 @@ class ReviewStageTests(InstallTestCase):
             encoding="utf-8",
         )
         self.run_git(root, "add", str(config.relative_to(root)))
-        self.run_git(root, "commit", "-m", "configure builtin adapters")
+        status = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"], cwd=root, check=False
+        )
+        if status.returncode != 0:
+            self.run_git(root, "commit", "-m", "configure builtin adapters")
 
         fake_bin = root.parent / "bin"
-        fake_bin.mkdir()
+        fake_bin.mkdir(exist_ok=True)
         log = root.parent / "builtin.log"
-        prism = fake_bin / "prism"
-        prism.write_text(
-            f"#!{sys.executable}\n"
-            "import json, pathlib, sys\n"
-            f"log = pathlib.Path({str(log)!r})\n"
-            "with log.open('a', encoding='utf-8') as stream: stream.write('prism ' + ' '.join(sys.argv[1:]) + '\\n')\n"
-            + (
-                "print('human finding that must not become clean')\n"
-                if prism_mode == "invalid"
-                else "print(json.dumps({'findings': [{'severity': 'medium', 'category': 'correctness', 'title': 'Prism finding', 'locations': [{'path': 'src/app.py', 'lines': {'start': 2, 'end': 2}}]}]}))\n"
+        fixture = PACK_ROOT / "tests/fixtures/review_stage_builtin_provider.py"
+        (fake_bin / "provider-config.json").write_text(
+            json.dumps(
+                {
+                    "log": str(log),
+                    "prismMode": prism_mode,
+                    "gitoCount": gito_count,
+                }
             ),
             encoding="utf-8",
         )
-        prism.chmod(0o755)
-        gito = fake_bin / "gito"
-        gito.write_text(
-            f"#!{sys.executable}\n"
-            "import json, pathlib, sys\n"
-            f"log = pathlib.Path({str(log)!r})\n"
-            "with log.open('a', encoding='utf-8') as stream: stream.write('gito ' + ' '.join(sys.argv[1:]) + '\\n')\n"
-            "out = pathlib.Path(sys.argv[sys.argv.index('--out') + 1]); out.mkdir(parents=True)\n"
-            "report = {'total_issues': 1, 'issues': {'src/app.py': [{'title': 'Gito finding', 'details': 'details', 'severity': 2, 'tags': ['correctness'], 'affected_lines': [{'start_line': 3}]}]}}\n"
-            "(out / 'code-review-report.json').write_text(json.dumps(report), encoding='utf-8')\n",
-            encoding="utf-8",
-        )
-        gito.chmod(0o755)
+        payload = fixture.read_bytes()
+        for provider in ("prism", "gito"):
+            executable = fake_bin / provider
+            executable.write_bytes(payload)
+            executable.chmod(0o755)
         return log
 
     def reset_base_then_change(self, root: Path, path: str) -> None:
@@ -353,6 +353,27 @@ class ReviewStageTests(InstallTestCase):
         self.assertIn(
             "valid structured review report",
             report["receipt"]["attempts"][0]["diagnostic"],
+        )
+
+    def test_gito_native_report_limit_is_inclusive_and_oversize_fails(self) -> None:
+        exact_root = self.make_repo()
+        self.write_builtin_config(exact_root, gito_count=1_000)
+        exact = self.run_stage(exact_root, "gito-limit", "--local", "gito")
+        exact_report = self.report(exact)
+
+        self.assertEqual(exact.returncode, 1, exact.stdout)
+        self.assertEqual(len(exact_report["receipt"]["findings"]), 1_000)
+
+        oversized_root = self.make_repo()
+        self.write_builtin_config(oversized_root, gito_count=1_001)
+        oversized = self.run_stage(oversized_root, "gito-oversized", "--local", "gito")
+        oversized_report = self.report(oversized)
+
+        self.assertEqual(oversized.returncode, 3, oversized.stdout)
+        self.assertEqual(oversized_report["status"], "failed")
+        self.assertIn(
+            "valid structured review report",
+            oversized_report["receipt"]["attempts"][0]["diagnostic"],
         )
 
     def test_prism_worktree_comma_path_fails_before_dispatch(self) -> None:
@@ -624,6 +645,24 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(result.returncode, 2, result.stdout)
         self.assertEqual(report["status"], "invalid")
 
+    def test_codebase_scope_requires_clean_exact_head(self) -> None:
+        root = self.make_repo()
+        self.write_config(root)
+
+        clean = self.run_stage(
+            root, "clean-codebase", "--scope", "codebase", "--plan-only"
+        )
+        self.assertEqual(clean.returncode, 0, clean.stdout)
+
+        (root / "src/app.py").write_text("uncommitted\n", encoding="utf-8")
+        dirty = self.run_stage(
+            root, "dirty-codebase", "--scope", "codebase", "--plan-only"
+        )
+        dirty_report = self.report(dirty)
+
+        self.assertEqual(dirty.returncode, 2, dirty.stdout)
+        self.assertIn("clean worktree", dirty_report["diagnostic"])
+
     def test_invalid_config_and_artifact_paths_fail_before_dispatch(self) -> None:
         root = self.make_repo()
         log = self.write_config(root)
@@ -649,9 +688,7 @@ class ReviewStageTests(InstallTestCase):
     def test_artifact_root_rejects_lexical_symlink_before_dispatch(self) -> None:
         root = self.make_repo()
         log = self.write_config(root)
-        (root / ".gitignore").write_text(
-            ".build/\n.build-link\n", encoding="utf-8"
-        )
+        (root / ".gitignore").write_text(".build/\n.build-link\n", encoding="utf-8")
         self.run_git(root, "add", ".gitignore")
         self.run_git(root, "commit", "-m", "ignore artifact symlink")
         try:

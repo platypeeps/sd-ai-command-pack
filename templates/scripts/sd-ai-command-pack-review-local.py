@@ -548,6 +548,10 @@ def resolve_target(repo: Path, scope: str, base: str, head: str) -> dict[str, An
         )
         canonical_scope = "worktree"
     else:
+        if dirty:
+            raise ReviewInputError(
+                "codebase scope requires a clean worktree bound to one head"
+            )
         base_oid = head_oid
         paths = _nul_paths(bytes(_git(repo, "ls-files", "-z", binary=True)))
         manifest = _path_manifest(repo, paths)
@@ -998,7 +1002,11 @@ def _gito_payload(attempt_dir: Path) -> dict[str, Any] | None:
     if not isinstance(value, dict) or not isinstance(value.get("issues"), dict):
         return None
     raw_total = value.get("total_issues")
-    if not isinstance(raw_total, int) or isinstance(raw_total, bool):
+    if (
+        not isinstance(raw_total, int)
+        or isinstance(raw_total, bool)
+        or not 0 <= raw_total <= MAX_FINDINGS
+    ):
         return None
     findings: list[dict[str, Any]] = []
     for group_path, raw_group in value["issues"].items():

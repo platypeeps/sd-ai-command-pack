@@ -11,6 +11,7 @@ from pathlib import Path
 provider, artifact, log_value, mode = sys.argv[1:]
 log = Path(log_value)
 Path(artifact).mkdir(parents=True, exist_ok=True)
+log.parent.mkdir(parents=True, exist_ok=True)
 with log.open("a", encoding="utf-8") as stream:
     stream.write(f"{provider}:start:{time.time()}\n")
 if mode == "barrier":
