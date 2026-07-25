@@ -1703,7 +1703,7 @@ def _normalize_findings(
             path = _bounded(str(raw.get("path") or ""), 500)
             line = raw.get("line") if isinstance(raw.get("line"), int) else None
             severity = _bounded(str(raw.get("severity") or "unspecified"), 40)
-            source_family = _bounded(str(raw.get("family") or "other"), 80)
+            source_family = _bounded(str(raw.get("family") or "other"), 80) or "other"
             family = (
                 source_family if source_family in FINDING_FAMILY_IDS else "other"
             )

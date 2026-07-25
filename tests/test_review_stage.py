@@ -584,6 +584,19 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(report["receipt"]["disposition"]["outstanding"], 1)
         self.assertEqual(report["receipt"]["remoteGate"]["state"], "blocked")
 
+    def test_whitespace_provider_family_normalizes_to_other_provenance(self) -> None:
+        root = self.make_repo()
+        self.write_config(root, modes=("finding-whitespace", "clean"))
+
+        result = self.run_stage(root, "finding-whitespace")
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        findings = report["receipt"]["findings"]
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["families"], ["other"])
+        self.assertEqual(findings[0]["sourceFamilies"], ["other"])
+
     def test_provider_failure_is_distinct_and_local_policy_controls_gate(self) -> None:
         root = self.make_repo()
         self.write_config(root, modes=("clean", "fail"))
