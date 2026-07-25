@@ -797,3 +797,43 @@ Standardized private external cache routing across shipped Python and shell entr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 222: Deliver deterministic read-only sd-check
+
+**Date**: 2026-07-24
+**Task**: Deliver deterministic read-only sd-check
+**Branch**: `codex/read-only-sd-check`
+
+### Summary
+
+Published and reviewed the typed sd-check coordinator and shipped-surface closure validator for release 0.47.0.
+
+### Main Changes
+
+- Added the versioned read-only sd-check command, strict argv configuration, typed outcomes, and repository state guard across supported adapters.
+- Added registry and manifest derived shipped-surface closure validation shared by local checks, publication preflight, and CI.
+- Addressed all Copilot findings, refreshed release evidence, and archived the completed parent and child tasks.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a39cd90` | feat: add deterministic read-only sd-check |
+| `93fc291` | fix: address review feedback round 1 |
+
+### Testing
+
+- [OK] make check passed on final reviewed payload
+- [OK] sd-check passed 8 of 8 rows with an unchanged state guard on 93fc291
+- [OK] candidate validation passed all eight fleet consumers
+- [OK] Copilot round 2 reviewed all 75 files with no new comments; CI passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
