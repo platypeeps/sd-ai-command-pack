@@ -55,7 +55,14 @@ Verified the detached legacy checkout was clean and unused, confirmed its commit
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Added the schema-versioned `sd-review` coordinator with exact-scope state,
+  local-provider composition, routed-review capability/dispatch/receipt
+  handling, declared-channel observation, and fail-closed reconciliation.
+- Registered and generated the shared skill and platform command surfaces,
+  extended the strict review configuration, and synchronized release `0.52.0`
+  manifests, provenance, documentation, help, and changelog entries.
+- Added focused state-machine, install, generated-parity, and shipped-script
+  coverage tests plus an all-pass candidate ledger for eight fleet consumers.
 
 ### Git Commits
 
@@ -1045,6 +1052,43 @@ Added canonical pre-archive and final-bundle validation, integrated its retained
 - [OK] typed sd-check state guard
 - [OK] all eight fleet candidate validations
 - [OK] exact-head Copilot review clean and GitHub CI matrix green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 228: Implement unified routed sd-review
+
+**Date**: 2026-07-25
+**Task**: Implement unified routed sd-review
+**Branch**: `codex/implement-unified-routed-sd-review`
+
+### Summary
+
+Added one exact-scope local and routed-remote review lifecycle, strict router receipt state machine, generated command surfaces, tests, documentation, release metadata, and validated fleet candidate evidence.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f065b9a` | feat: add unified routed sd-review |
+
+### Testing
+
+- `make check`
+- Typed `sd-ai-command-pack-check.py --json` (8/8 checks passed with unchanged
+  state guard)
+- Full fleet candidate validation (8/8 consumers passed)
+- Controller branch coverage: 72% against the 70% shipped-script floor
 
 ### Status
 
