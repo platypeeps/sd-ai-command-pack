@@ -44,44 +44,8 @@ class ReviewStageTests(InstallTestCase):
         return root
 
     def provider_script(self, root: Path) -> Path:
-        helper = root.parent / "provider.py"
-        helper.write_text(
-            "import json, pathlib, sys, time\n"
-            "provider, artifact, log, mode = sys.argv[1:]\n"
-            "pathlib.Path(artifact).mkdir(parents=True, exist_ok=True)\n"
-            "with pathlib.Path(log).open('a', encoding='utf-8') as stream:\n"
-            "    stream.write(f'{provider}:start:{time.time()}\\n')\n"
-            "if mode == 'barrier':\n"
-            "    deadline = time.time() + 2\n"
-            "    while time.time() < deadline:\n"
-            "        starts = sum(':start:' in line for line in pathlib.Path(log).read_text(encoding='utf-8').splitlines())\n"
-            "        if starts >= 2: break\n"
-            "        time.sleep(0.02)\n"
-            "    if starts < 2: raise SystemExit('parallel start barrier timed out')\n"
-            "else:\n"
-            "    time.sleep(2 if mode == 'slow' else 0.35)\n"
-            "with pathlib.Path(log).open('a', encoding='utf-8') as stream:\n"
-            "    stream.write(f'{provider}:end:{time.time()}\\n')\n"
-            "if mode == 'finding':\n"
-            "    print(json.dumps({'status': 'findings', 'findings': [{'path': 'src/app.py', 'line': 2, 'severity': 'high', 'summary': 'validate state', 'family': 'boundary-validation'}]}))\n"
-            "elif mode in {'case-upper', 'case-lower'}:\n"
-            "    path = 'SRC/App.py' if mode == 'case-upper' else 'src/app.py'\n"
-            "    print(json.dumps({'status': 'findings', 'findings': [{'path': path, 'line': 2, 'severity': 'medium', 'summary': 'same summary'}]}))\n"
-            "elif mode == 'finding-fail':\n"
-            "    print(json.dumps({'status': 'findings', 'findings': [{'path': 'src/app.py', 'line': 2, 'summary': 'mapped clean finding'}]})); raise SystemExit(9)\n"
-            "elif mode == 'malicious-finding':\n"
-            "    print(json.dumps({'status': 'findings', 'findings': [{'path': '../secret', 'line': True, 'summary': 'unsafe provider fields', 'disposition': 'fixed'}]}))\n"
-            "elif mode == 'fail':\n"
-            "    print(json.dumps({'status': 'clean', 'findings': []})); print('provider failed', file=sys.stderr); raise SystemExit(9)\n"
-            "elif mode == 'rate-limit':\n"
-            "    print('provider rate limited', file=sys.stderr); raise SystemExit(8)\n"
-            "elif mode == 'cancelled':\n"
-            "    print('provider cancelled', file=sys.stderr); raise SystemExit(10)\n"
-            "else:\n"
-            "    print(json.dumps({'status': 'clean', 'findings': []}))\n",
-            encoding="utf-8",
-        )
-        return helper
+        del root
+        return PACK_ROOT / "tests/fixtures/review_stage_provider.py"
 
     def write_config(
         self,
@@ -458,7 +422,7 @@ class ReviewStageTests(InstallTestCase):
 
     def test_findings_are_deduplicated_with_provider_provenance(self) -> None:
         root = self.make_repo()
-        self.write_config(root, modes=("finding", "finding"))
+        self.write_config(root, modes=("finding", "finding-alt"))
 
         result = self.run_stage(root, "findings")
         report = self.report(result)
@@ -468,6 +432,8 @@ class ReviewStageTests(InstallTestCase):
         findings = report["receipt"]["findings"]
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0]["providers"], ["gito", "prism"])
+        self.assertEqual(findings[0]["severity"], "high")
+        self.assertEqual(findings[0]["families"], ["boundary-validation", "security"])
         self.assertEqual(report["receipt"]["disposition"]["outstanding"], 1)
         self.assertEqual(report["receipt"]["remoteGate"]["state"], "blocked")
 

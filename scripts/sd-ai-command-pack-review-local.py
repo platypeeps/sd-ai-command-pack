@@ -50,6 +50,7 @@ OUTCOMES = frozenset(
     {"clean", "findings", "unavailable", "failed", "cancelled", "skipped"}
 )
 TERMINAL_FAILURES = frozenset({"unavailable", "failed", "cancelled"})
+FINDING_SEVERITY_RANK = {"unspecified": 0, "low": 1, "medium": 2, "high": 3}
 ACTIVE_PROCESSES: set[subprocess.Popen[bytes]] = set()
 ACTIVE_PROCESSES_LOCK = threading.Lock()
 CONFIG_KEYS = frozenset({"schemaVersion", "providers", "policy"})
@@ -1187,6 +1188,8 @@ def _normalize_findings(
             summary = _bounded(str(raw.get("summary") or "provider finding"), 500)
             path = _bounded(str(raw.get("path") or ""), 500)
             line = raw.get("line") if isinstance(raw.get("line"), int) else None
+            severity = _bounded(str(raw.get("severity") or "unspecified"), 40)
+            family = _bounded(str(raw.get("family") or "other"), 80)
             key = _digest({"path": path, "line": line, "summary": summary.casefold()})
             row = groups.setdefault(
                 key,
@@ -1194,18 +1197,27 @@ def _normalize_findings(
                     "id": key[:16],
                     "path": path or None,
                     "line": line,
-                    "severity": _bounded(str(raw.get("severity") or "unspecified"), 40),
+                    "severity": severity,
                     "summary": summary,
-                    "family": _bounded(str(raw.get("family") or "other"), 80),
-                    "disposition": _bounded(
-                        str(raw.get("disposition") or "outstanding"), 80
-                    ),
+                    "family": family,
+                    "families": [family],
+                    "disposition": "outstanding",
                     "providers": [],
                 },
             )
+            if FINDING_SEVERITY_RANK.get(severity, 0) > FINDING_SEVERITY_RANK.get(
+                str(row["severity"]), 0
+            ):
+                row["severity"] = severity
+            families = row["families"]
+            if isinstance(families, list) and family not in families:
+                families.append(family)
+                families.sort()
+                row["family"] = families[0]
             providers = row["providers"]
             if isinstance(providers, list) and provider_id not in providers:
                 providers.append(provider_id)
+                providers.sort()
     return sorted(
         groups.values(),
         key=lambda row: (str(row["path"]), int(row["line"] or 0), str(row["id"])),
