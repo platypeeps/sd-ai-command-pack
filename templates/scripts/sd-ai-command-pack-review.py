@@ -53,6 +53,7 @@ CAPABILITY_STATES = frozenset(
     {"ready", "absent", "invalid", "incompatible", "unavailable", "skipped"}
 )
 RECEIPT_ROUTES = frozenset({"cheap", "deep", "copilot", "none"})
+RECEIPT_CHECK_NAME = "sd-github-review/receipt"
 FINDING_CHANNELS = frozenset(
     {"review", "inline-comment", "conversation-comment", "check"}
 )
@@ -737,6 +738,8 @@ def _capability(
         check_name = durable.get("checkName")
         if not isinstance(check_name, str) or not check_name or len(check_name) > 128:
             return {"state": "invalid", "reason": "invalid-receipt-check-name"}
+        if check_name != RECEIPT_CHECK_NAME:
+            return {"state": "incompatible", "reason": "unsupported-receipt-check-name"}
         if not isinstance(workflow, dict):
             return {"state": "invalid", "reason": "workflow-declaration-missing"}
         workflow_path = _safe_relative_path(workflow.get("path"), field="workflow path")

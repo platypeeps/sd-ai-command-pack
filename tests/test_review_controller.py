@@ -146,7 +146,13 @@ class ReviewControllerTests(InstallTestCase):
             "correlationIds": [request["correlationId"]],
         }
 
-    def write_descriptor(self, root: Path, *, contract: int = 1) -> Path:
+    def write_descriptor(
+        self,
+        root: Path,
+        *,
+        contract: int = 1,
+        check_name: str = "sd-github-review/receipt",
+    ) -> Path:
         path = root / "config/routed-review-setup-v1.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -169,7 +175,7 @@ class ReviewControllerTests(InstallTestCase):
                     "supportedOperations": ["route", "finalize", "query"],
                     "durableReceipt": {
                         "supported": True,
-                        "checkName": "sd-github-review/receipt",
+                        "checkName": check_name,
                     },
                     "actionReference": (
                         "platypeeps/sd-github-review@"
@@ -474,6 +480,15 @@ class ReviewControllerTests(InstallTestCase):
             )["state"],
             "incompatible",
         )
+        self.write_descriptor(root, check_name="custom/receipt")
+        incompatible = controller._capability(
+            root,
+            remote=remote,
+            repository=repository,
+            intent="auto",
+        )
+        self.assertEqual(incompatible["state"], "incompatible")
+        self.assertEqual(incompatible["reason"], "unsupported-receipt-check-name")
         self.write_descriptor(root)
         metadata = {
             "state": "active",
