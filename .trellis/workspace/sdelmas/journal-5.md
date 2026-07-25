@@ -1010,3 +1010,46 @@ Implemented and shipped the bounded exact-head family convergence boundary for t
 ### Next Steps
 
 - None - task complete
+
+
+## Session 227: Validate finish-work bookkeeping before push
+
+**Date**: 2026-07-25
+**Task**: Validate finish-work bookkeeping before push
+**Branch**: `codex/validate-finish-work-bookkeeping-before-push`
+
+### Summary
+
+Added canonical pre-archive and final-bundle validation, integrated its retained receipt across the SD shipping tail, and converged portability, configuration, redaction, and CI fixture review findings.
+
+### Main Changes
+
+- Added versioned pre-archive and final-bundle task and journal validation with stable reason codes.
+- Reused one retained bookkeeping receipt across finish-work, review, ship, and housekeeping before the only push.
+- Hardened Windows portability, repository anchoring, diagnostic redaction, configured limits, and isolated Git fixtures.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `22d5d2049d0d2b40d95cdbd8ddb986e715f868b5` | feat: validate finish-work bookkeeping bundles |
+| `cc3cad2846d2546a6a08bc8fcc72b13867ae2f83` | fix: harden bookkeeping validator portability |
+| `e66088ae0df2b96bbcfa93770e5ac2e4a459e87a` | test: isolate bookkeeping fixture identity |
+| `b89e02e743e721e2791f4b33bc9122b989a4efce` | fix: anchor and redact bookkeeping validation |
+| `000c16ca28c2b8ac3b628e5c4f0eae07f907ba23` | fix: align bookkeeping CLI configuration |
+
+### Testing
+
+- [OK] make check
+- [OK] typed sd-check state guard
+- [OK] all eight fleet candidate validations
+- [OK] exact-head Copilot review clean and GitHub CI matrix green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
