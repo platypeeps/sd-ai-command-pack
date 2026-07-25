@@ -53,6 +53,7 @@ TERMINAL_FAILURES = frozenset({"unavailable", "failed", "cancelled"})
 FINDING_SEVERITY_RANK = {"unspecified": 0, "low": 1, "medium": 2, "high": 3}
 ACTIVE_PROCESSES: set[subprocess.Popen[bytes]] = set()
 ACTIVE_PROCESSES_LOCK = threading.Lock()
+CANCELLATION_EVENT = threading.Event()
 CONFIG_KEYS = frozenset({"schemaVersion", "providers", "policy"})
 PROVIDER_KEYS = frozenset(
     {
@@ -945,8 +946,9 @@ def _cancel_active_processes() -> None:
 
 
 def _handle_termination(signum: int, _frame: object) -> None:
+    del signum
+    CANCELLATION_EVENT.set()
     _cancel_active_processes()
-    raise SystemExit(128 + signum)
 
 
 def _parse_json_payload(payload: bytes) -> object | None:
@@ -1102,6 +1104,17 @@ def _run_provider(
         "artifact": str(attempt_dir.relative_to(run_dir.parent.parent)),
     }
     _atomic_json(attempt_dir / "attempt.json", {**base, "status": "running"})
+    if CANCELLATION_EVENT.is_set():
+        result = {
+            **base,
+            "status": "cancelled",
+            "exitCode": None,
+            "durationMs": 0,
+            "diagnostic": "provider cancelled before start",
+            "findings": [],
+        }
+        _atomic_json(attempt_dir / "attempt.json", result)
+        return result
     executable = shutil.which(argv[0], path=environment.get("PATH"))
     if executable is None:
         result = {
@@ -1126,6 +1139,8 @@ def _run_provider(
         )
         with ACTIVE_PROCESSES_LOCK:
             ACTIVE_PROCESSES.add(process)
+        if CANCELLATION_EVENT.is_set():
+            _terminate(process)
         try:
             try:
                 stdout, stderr = process.communicate(timeout=provider.timeout_seconds)
@@ -1152,6 +1167,8 @@ def _run_provider(
                 stderr += (
                     f"\nprovider timed out after {provider.timeout_seconds}s".encode()
                 )
+            if CANCELLATION_EVENT.is_set():
+                status_value = "cancelled"
         finally:
             with ACTIVE_PROCESSES_LOCK:
                 ACTIVE_PROCESSES.discard(process)
@@ -1478,6 +1495,15 @@ def _invalid_report(message: str) -> dict[str, Any]:
     }
 
 
+def _cancelled_report() -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "command": "sd-review-local-stage",
+        "status": "cancelled",
+        "diagnostic": "local review stage cancelled by signal",
+    }
+
+
 def _print_human(report: Mapping[str, Any]) -> None:
     print(f"Local review stage: {report['status']}")
     if report.get("diagnostic"):
@@ -1521,6 +1547,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    report: dict[str, Any]
     try:
         if not ATTEMPT_RE.fullmatch(args.attempt_id):
             raise ReviewInputError("attempt id must be a bounded identifier")
@@ -1546,8 +1573,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             bookkeeping_evidence=evidence,
             configuration_digest=_digest(config),
         )
-        if args.plan_only:
-            report: dict[str, Any] = {
+        if CANCELLATION_EVENT.is_set():
+            report = _cancelled_report()
+            code = 3
+        elif args.plan_only:
+            report = {
                 "schemaVersion": 1,
                 "command": "sd-review-local-stage",
                 "status": "planned",

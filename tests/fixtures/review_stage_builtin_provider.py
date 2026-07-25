@@ -46,7 +46,7 @@ elif provider == "gito":
     count = config["gitoCount"]
     issues = [
         {
-            "title": "Gito finding" if count == 1 else f"Gito finding {index}",
+            "title": "Gito finding" if count == 1 else f"Gito finding {index + 1}",
             "details": "details",
             "severity": 2,
             "tags": ["correctness"],

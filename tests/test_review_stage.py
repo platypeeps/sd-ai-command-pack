@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import signal
+import time
+
 try:
     import install_test_support as _support
 except ModuleNotFoundError as exc:
@@ -603,6 +606,53 @@ class ReviewStageTests(InstallTestCase):
         )
         self.assertEqual(cancelled.returncode, 3, cancelled.stdout)
         self.assertEqual(cancelled_report["status"], "cancelled")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX signal behavior required")
+    def test_signal_cancellation_emits_terminal_report_and_attempt(self) -> None:
+        root = self.make_repo()
+        log = self.write_config(root, modes=("slow", "clean"), timeout=5)
+        cache = root.parent / "cache"
+        cache.mkdir(mode=0o700, exist_ok=True)
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                str(self.SCRIPT),
+                "--repo",
+                str(root),
+                "--base",
+                "main",
+                "--attempt-id",
+                "signal-cancelled",
+                "--local",
+                "prism",
+                "--json",
+            ],
+            cwd=root,
+            env={
+                **os.environ,
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "SD_AI_COMMAND_PACK_CACHE_ROOT": str(cache),
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        deadline = time.monotonic() + 5
+        while not log.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertTrue(log.exists(), "provider did not start before signal deadline")
+        process.send_signal(signal.SIGTERM)
+        stdout, _ = process.communicate(timeout=15)
+        report = json.loads(stdout)
+
+        self.assertEqual(process.returncode, 3, stdout)
+        self.assertEqual(report["status"], "cancelled")
+        attempt = report["receipt"]["attempts"][0]
+        self.assertEqual(attempt["status"], "cancelled")
+        attempt_path = (
+            root / ".build/sd-review/runs/signal-cancelled/prism/attempt.json"
+        )
+        self.assertEqual(json.loads(attempt_path.read_text())["status"], "cancelled")
 
     def test_remote_repository_identity_excludes_credentials(self) -> None:
         root = self.make_repo()
