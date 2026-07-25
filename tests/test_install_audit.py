@@ -231,7 +231,9 @@ class InstallAuditTests(InstallTestCase):
         )
 
         self.assertEqual(result.status, "updated")
-        self.assertEqual(destination.read_text(encoding="utf-8"), '{"version": "old"}\n')
+        self.assertEqual(
+            destination.read_text(encoding="utf-8"), '{"version": "old"}\n'
+        )
 
     def test_install_audit_fails_when_expected_target_is_missing_from_receipt(
         self,
@@ -311,9 +313,7 @@ class InstallAuditTests(InstallTestCase):
         shutil.copytree(PACK_ROOT / "templates", legacy_pack / "templates")
         shutil.copyfile(INSTALLER, legacy_pack / "install.py")
 
-        manifest = json.loads(
-            (PACK_ROOT / "manifest.json").read_text(encoding="utf-8")
-        )
+        manifest = json.loads((PACK_ROOT / "manifest.json").read_text(encoding="utf-8"))
         manifest["version"] = "0.6.99"
         manifest["files"] = [
             record for record in manifest["files"] if record["target"] != target
@@ -350,17 +350,14 @@ class InstallAuditTests(InstallTestCase):
 
         self.assertEqual(refresh.returncode, 0, refresh.stdout)
         self.assertIn(
-            f"skipped     {target} "
-            "(active Trellis claude install not detected)",
+            f"skipped     {target} (active Trellis claude install not detected)",
             refresh.stdout,
         )
         self.assertIn(
             "kept-in-receipt .claude/commands/sd/start.md",
             refresh.stdout,
         )
-        receipt = (root / install.INSTALLED_TARGETS_FILE).read_text(
-            encoding="utf-8"
-        )
+        receipt = (root / install.INSTALLED_TARGETS_FILE).read_text(encoding="utf-8")
         provenance = json.loads(
             (root / install.PROVENANCE_FILE).read_text(encoding="utf-8")
         )
@@ -403,7 +400,9 @@ class InstallAuditTests(InstallTestCase):
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
         receipt = root / install.INSTALLED_TARGETS_FILE
-        self.assertIn(".claude/commands/sd/start.md", receipt.read_text(encoding="utf-8"))
+        self.assertIn(
+            ".claude/commands/sd/start.md", receipt.read_text(encoding="utf-8")
+        )
 
         # A checkout where the gitignored Trellis claude markers are absent:
         # the platform is undetected, but the tracked receipt must keep the
@@ -414,7 +413,9 @@ class InstallAuditTests(InstallTestCase):
         result = self.run_install(root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn(".claude/commands/sd/start.md", receipt.read_text(encoding="utf-8"))
+        self.assertIn(
+            ".claude/commands/sd/start.md", receipt.read_text(encoding="utf-8")
+        )
         self.assertIn("kept-in-receipt .claude/commands/sd/start.md", result.stdout)
         self.assertIn("claude adapter not selected in this checkout", result.stdout)
 
@@ -426,7 +427,9 @@ class InstallAuditTests(InstallTestCase):
         result = self.run_install(root, "--platform", "gemini")
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        receipt_text = (root / install.INSTALLED_TARGETS_FILE).read_text(encoding="utf-8")
+        receipt_text = (root / install.INSTALLED_TARGETS_FILE).read_text(
+            encoding="utf-8"
+        )
         self.assertIn(".claude/commands/sd/start.md", receipt_text)
         self.assertIn("kept-in-receipt .claude/commands/sd/start.md", result.stdout)
 
@@ -442,7 +445,9 @@ class InstallAuditTests(InstallTestCase):
         result = self.run_install(root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        receipt_text = (root / install.INSTALLED_TARGETS_FILE).read_text(encoding="utf-8")
+        receipt_text = (root / install.INSTALLED_TARGETS_FILE).read_text(
+            encoding="utf-8"
+        )
         self.assertNotIn(".claude/commands/sd/start.md", receipt_text)
         self.assertNotIn("kept-in-receipt", result.stdout)
 
@@ -463,7 +468,9 @@ class InstallAuditTests(InstallTestCase):
         result = self.run_install(root)
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        receipt_text = (root / install.INSTALLED_TARGETS_FILE).read_text(encoding="utf-8")
+        receipt_text = (root / install.INSTALLED_TARGETS_FILE).read_text(
+            encoding="utf-8"
+        )
         self.assertIn(".claude/commands/sd/start.md", receipt_text)
         self.assertIn("kept-in-receipt .claude/commands/sd/start.md", result.stdout)
 
@@ -544,7 +551,9 @@ class InstallAuditTests(InstallTestCase):
         extra_path.write_text("# local-only helper\n", encoding="utf-8")
         calls: list[bytes] = []
 
-        def fake_check_ignore(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        def fake_check_ignore(
+            args: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess:
             self.assertEqual(args[:4], ["git", "-C", str(root), "check-ignore"])
             input_payload = kwargs["input"]
             self.assertIsInstance(input_payload, bytes)
@@ -585,7 +594,9 @@ class InstallAuditTests(InstallTestCase):
         extra_path.write_text("# tracked helper\n", encoding="utf-8")
         calls = 0
 
-        def fake_check_ignore(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        def fake_check_ignore(
+            args: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess:
             nonlocal calls
             calls += 1
             return subprocess.CompletedProcess(args, 1, stdout=b"")
@@ -617,11 +628,15 @@ class InstallAuditTests(InstallTestCase):
         }
         calls: list[bytes] = []
 
-        def fake_check_ignore(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        def fake_check_ignore(
+            args: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess:
             input_payload = kwargs["input"]
             self.assertIsInstance(input_payload, bytes)
             calls.append(input_payload)
-            return subprocess.CompletedProcess(args, 0, stdout=f"{ignored_target}\0".encode())
+            return subprocess.CompletedProcess(
+                args, 0, stdout=f"{ignored_target}\0".encode()
+            )
 
         with mock.patch.object(audit.subprocess, "run", side_effect=fake_check_ignore):
             failures, warnings, expected_count, selected_platforms = (
@@ -685,11 +700,15 @@ class InstallAuditTests(InstallTestCase):
         )
         calls: list[bytes] = []
 
-        def fake_check_ignore(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        def fake_check_ignore(
+            args: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess:
             input_payload = kwargs["input"]
             self.assertIsInstance(input_payload, bytes)
             calls.append(input_payload)
-            return subprocess.CompletedProcess(args, 0, stdout=f"{ignored_target}\0".encode())
+            return subprocess.CompletedProcess(
+                args, 0, stdout=f"{ignored_target}\0".encode()
+            )
 
         with mock.patch.object(audit.subprocess, "run", side_effect=fake_check_ignore):
             failures, version = audit.audit_provenance(root)
@@ -725,7 +744,9 @@ class InstallAuditTests(InstallTestCase):
             files["scripts/sd-ai-command-pack-full-check.sh"].startswith("sha256:")
         )
         helper_target = "scripts/sd-ai-command-pack-update-spec-kb.py"
-        helper_source = install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+        helper_source = (
+            install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+        )
         helper_content = helper_source.read_bytes()
         self.assertEqual((root / helper_target).read_bytes(), helper_content)
         self.assertEqual(
@@ -806,7 +827,10 @@ class InstallAuditTests(InstallTestCase):
             reference = Path(temp_dir) / "manifest.json"
             cases = (
                 ("99.0.0", "is behind upstream 99.0.0"),
-                (manifest["version"], f"is current with upstream {manifest['version']}"),
+                (
+                    manifest["version"],
+                    f"is current with upstream {manifest['version']}",
+                ),
                 ("0.0.1", "is ahead of upstream 0.0.1"),
                 ("next", "could not compare"),
             )
@@ -1061,7 +1085,9 @@ class InstallAuditTests(InstallTestCase):
             mock.patch.object(
                 install,
                 "read_existing_provenance_files",
-                side_effect=SystemExit("error: provenance resolves outside target repo"),
+                side_effect=SystemExit(
+                    "error: provenance resolves outside target repo"
+                ),
             ),
         ):
             candidates = install.installed_target_candidates(
@@ -1300,13 +1326,11 @@ class InstallAuditTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
-            "vouched target cannot be inspected: "
-            ".agents/skills/sd-continue/SKILL.md",
+            "vouched target cannot be inspected: .agents/skills/sd-continue/SKILL.md",
             result.stdout,
         )
         self.assertIn(
-            "installed target cannot be inspected: "
-            ".agents/skills/sd-continue/SKILL.md",
+            "installed target cannot be inspected: .agents/skills/sd-continue/SKILL.md",
             result.stdout,
         )
 
@@ -1357,7 +1381,9 @@ class InstallAuditTests(InstallTestCase):
         result = self.run_install(root)
 
         self.assertEqual(result.returncode, 2, result.stdout)
-        self.assertIn("symlink-conflict .sd-ai-command-pack/provenance.json", result.stdout)
+        self.assertIn(
+            "symlink-conflict .sd-ai-command-pack/provenance.json", result.stdout
+        )
         self.assertTrue(provenance.is_symlink())
         self.assertEqual(
             json.loads(bogus.read_text(encoding="utf-8"))["files"][target_key],
@@ -1713,6 +1739,7 @@ class InstallAuditTests(InstallTestCase):
             "sd-ai-command-pack-audit-inventory.py",
             "sd-ai-command-pack-check.py",
             "sd-ai-command-pack-review-full-check.sh",
+            "sd-ai-command-pack-review-local.py",
             "sd-ai-command-pack-status.py",
             "sd-ai-command-pack-surface-check.py",
             "sd-ai-command-pack-toolchain.sh",
@@ -1840,8 +1867,7 @@ class InstallAuditTests(InstallTestCase):
         self.assertNotIn("skipping install audit", result.stdout)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
-            "installed target is missing: "
-            "scripts/sd-ai-command-pack-full-check.sh",
+            "installed target is missing: scripts/sd-ai-command-pack-full-check.sh",
             result.stdout,
         )
 

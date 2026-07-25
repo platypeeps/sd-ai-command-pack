@@ -101,7 +101,9 @@ class CommandSurfaceDriftTests(unittest.TestCase):
             command = self.make_repo(root)
             spec = root / ".trellis/spec/frontend/adapter-guidelines.md"
             spec.parent.mkdir(parents=True)
-            spec.write_text("# Adapter\nUse sd-review-local-all here.\n", encoding="utf-8")
+            spec.write_text(
+                "# Adapter\nUse sd-review-local-all here.\n", encoding="utf-8"
+            )
             retirement = registry.RetiredCommandSurface(
                 id="old-review",
                 identifiers=("sd-review-local-all",),
@@ -122,6 +124,27 @@ class CommandSurfaceDriftTests(unittest.TestCase):
             self.assertEqual(finding.path, spec.relative_to(root).as_posix())
             self.assertEqual(finding.line, 2)
             self.assertEqual(finding.identifier, "sd-review-local-all")
+
+    def test_ignored_build_artifact_is_not_a_live_surface(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            command = self.make_repo(root)
+            artifact = root / ".build/sd-review/provider/stdout.txt"
+            artifact.parent.mkdir(parents=True)
+            artifact.write_text("historical sd-old transcript\n", encoding="utf-8")
+            retirement = registry.RetiredCommandSurface(
+                id="old-command",
+                identifiers=("sd-old",),
+                installed_targets=(),
+                removed_version="1.0.0",
+                owner_task="fixture",
+            )
+
+            report = self.lint(root, command, retirements=(retirement,))
+
+            self.assertFalse(
+                any(finding.path.startswith(".build/") for finding in report.findings)
+            )
 
     def test_reasoned_historical_allowance_suppresses_match(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -191,8 +214,7 @@ class CommandSurfaceDriftTests(unittest.TestCase):
             root = Path(temp_dir)
             command = self.make_repo(root)
             adapter_paths = {
-                registry.PLATFORM_REGISTRY[platform]
-                .command_target_pattern.format(
+                registry.PLATFORM_REGISTRY[platform].command_target_pattern.format(
                     filename="sd-extra.md",
                     name="extra",
                 )
@@ -240,8 +262,7 @@ class CommandSurfaceDriftTests(unittest.TestCase):
             findings = [
                 finding
                 for finding in report.findings
-                if finding.path == "manifest.json"
-                and finding.identifier == "sd-extra"
+                if finding.path == "manifest.json" and finding.identifier == "sd-extra"
             ]
             self.assertEqual(
                 [finding.line for finding in findings],
@@ -274,9 +295,7 @@ class CommandSurfaceDriftTests(unittest.TestCase):
                     "target": ".agents/skills/sd-old/SKILL.md",
                 }
             )
-            (root / "manifest.json").write_text(
-                json.dumps(manifest), encoding="utf-8"
-            )
+            (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
             report = self.lint(root, command, retirements=(retirement,))
 
@@ -301,9 +320,7 @@ class CommandSurfaceDriftTests(unittest.TestCase):
                 and finding.identifier in {"old-command", "sd-old"}
             ]
             self.assertEqual(len(manifest_findings), 1)
-            self.assertEqual(
-                manifest_findings[0].category, "retired_identifier_live"
-            )
+            self.assertEqual(manifest_findings[0].category, "retired_identifier_live")
 
     def test_retired_installed_target_reports_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

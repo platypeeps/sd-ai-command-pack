@@ -5,11 +5,11 @@
 - [x] The parent routed-review PRD/design now defines `local=auto` as a
   policy-selected provider set rather than exactly one provider; reverify that
   contract remains aligned before implementation starts.
-- [ ] Confirm `07-24-implement-read-only-sd-check` has published the typed
+- [x] Confirm `07-24-implement-read-only-sd-check` has published the typed
   deterministic result consumed by the controller.
-- [ ] Confirm the external router capability/receipt contract used by the
+- [x] Confirm the external router capability/receipt contract used by the
   parent unified-review task is available and reviewed.
-- [ ] Confirm `07-24-feed-review-learnings-into-review-planning` has published
+- [x] Confirm `07-24-feed-review-learnings-into-review-planning` has published
   the bounded finding-family evidence shape.
 
 ## Implementation Sequence
@@ -102,6 +102,24 @@
   decision boundary and focused staging rules.
 - Do not merge a partial cutover that leaves both legacy and successor remote
   paths callable. Roll back the entire unified-review release instead.
+
+## Delivered Internal Contract
+
+- Added the non-public exact-scope local-review stage used by the future
+  unified controller. It provides deterministic risk/provider planning,
+  concurrent isolated Prism/Gito attempts, native structured-output parsing,
+  normalized findings, exact-match receipt reuse, and explicit optional versus
+  required remote-gate outcomes without dispatching a remote reviewer.
+- Kept the existing public review commands unchanged. Wiring this stage into
+  `sd-review`, composing it into `sd-ship`, and retiring the legacy surfaces
+  remain owned by the parent and sibling tasks named in the PRD.
+- Exercised real Prism/Gito review rounds while implementing the stage. Those
+  rounds exposed and drove fixes for native-report false-clean handling,
+  process-tree cleanup, option-safe Git refs, lossy path serialization,
+  bounded provider fields, and deterministic multi-provider aggregation.
+- Dispositioned two non-actionable review candidates with repository evidence:
+  the candidate ledger timestamp preceded the live UTC observation, and
+  Trellis-generated `task.json` files conventionally omit a trailing newline.
 
 ## Before `task.py start`
 

@@ -1027,6 +1027,92 @@ Wrong: run an inferred package script or shell string and hope it is read-only
 Correct: validate argv config, run it once, and fail if the state guard changes
 ```
 
+## Exact-Scope Local Review Stage Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing the internal local-review stage consumed by the
+successor `sd-review` lifecycle, its review configuration, provider planning,
+attempt isolation, exact-scope receipts, or pre-remote gate.
+
+### 2. Signatures
+
+- Executable: `scripts/sd-ai-command-pack-review-local.py`.
+- Required coordination identity: `--attempt-id ID`.
+- Typed controls: `--scope changes|branch|codebase|pr`,
+  `--local auto|all|none|PROVIDER`,
+  `--successor first|low-risk|high-risk|repeated-family|bookkeeping`,
+  repeatable `--finding-family ID`, `--local-policy optional|required`, and
+  `--fix auto|ask|none`.
+- Optional consumer-repository configuration filename:
+  **.sd-ai-command-pack/review.json**, schema major 1.
+
+### 3. Contracts
+
+- Resolve one canonical target before provider calls. Branch and PR scopes use
+  the same clean `branch_delta` identity, so PR creation alone does not cause a
+  second paid call. Any base, head, content, provider, adapter, configuration,
+  local/fix policy, finding-family, or other policy change invalidates reuse.
+- Treat source, tests, scripts, executable configuration, state/receipt code,
+  and ambiguous paths as substantive. A first substantive head selects Prism
+  and Gito and starts both isolated attempts before awaiting either. A bounded
+  low-risk successor or documentation/metadata change may select the cheapest
+  eligible provider. Do not substitute an unselected provider after failure.
+- Provider configuration uses validated argv arrays or built-in adapters. Ban
+  shell/code strings, bound argv and timeouts, route tool caches through the
+  shared external cache helper, terminate timed-out process groups, and keep
+  stdout, stderr, and state in separate ignored attempt directories.
+- Built-in adapters request each provider's native structured report and map
+  that report into the normalized outcome. An exit-zero human transcript or a
+  missing/malformed native report fails closed; never infer clean from exit
+  status alone. Avoid lossy path serialization, and reject a provider/scope
+  combination before dispatch when its CLI cannot encode an exact path.
+- Persist an invocation record before dispatch. A partial existing attempt
+  fails closed rather than duplicating a paid call. Write receipts atomically,
+  and reuse only an exact validated receipt.
+- Normalize `clean|findings|unavailable|failed|cancelled|skipped` without
+  treating operational failure as findings or positive confidence. Deduplicate
+  overlapping findings while retaining every provider identity.
+- Outstanding findings block remote routing. Optional local policy may pass a
+  terminal provider failure forward only as an explicit limitation with zero
+  confidence; required local policy blocks. `bookkeeping-successor` skips need
+  exact external evidence and always grant zero new confidence.
+- The router summary is allow-listed and excludes changed paths, raw findings,
+  prompts, transcripts, credentials, configuration values, and local artifact
+  paths. This stage never selects or dispatches a remote reviewer.
+
+### 4. Validation & Error Matrix
+
+- Dirty branch/PR target, unsafe path, malformed config, ineligible required
+  provider, shell string, unsafe artifact root, or mismatched bookkeeping
+  evidence -> invalid before dispatch.
+- Missing provider -> `unavailable`; timeout or unexpected exit -> `failed`;
+  provider finding exit/payload -> `findings`; none becomes clean.
+- Same target and plan with a valid receipt -> reuse; a changed exact field ->
+  new receipt and provider attempt; a conflicting partial attempt -> stop for
+  reconciliation.
+
+### 5. Tests Required
+
+- Prove substantive first-head overlap, artifact isolation, deterministic
+  documentation/metadata/ambiguous plans, and low/high/repeated successor
+  selection.
+- Prove exact branch-to-PR reuse, head/config/policy invalidation, retry
+  collision refusal, timeout termination, missing-provider handling,
+  provenance-preserving finding deduplication, and optional/required gates.
+- Preserve template/root parity, manifest installation, per-file coverage,
+  release-ledger evidence, and `make check`.
+
+### 6. Wrong vs Correct
+
+```text
+Wrong: run Prism, wait, then run Gito and bill both again after PR creation
+Correct: start the selected ensemble concurrently and reuse its exact branch-delta receipt
+
+Wrong: a failed provider silently becomes clean or triggers a different provider
+Correct: retain the selected provider's failure and apply the declared local floor
+```
+
 ## Shipped-Surface Closure Contract
 
 ### 1. Scope / Trigger

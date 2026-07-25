@@ -919,3 +919,53 @@ Converged PR #248 by preserving historical journal state, correcting the mislead
 ### Next Steps
 
 - None - task complete
+
+
+## Session 225: Deliver exact-scope local review stage
+
+**Date**: 2026-07-24
+**Task**: Deliver exact-scope local review stage
+**Branch**: `codex/front-load-local-review-before-remote`
+
+### Summary
+
+Implemented and validated the internal exact-scope local review stage for deterministic, cost-aware pre-remote review.
+
+### Main Changes
+
+- Added deterministic exact-scope provider planning, isolated Prism/Gito execution, normalized findings, and exact receipt reuse.
+- Hardened configuration, Git/path/artifact, cancellation, timeout, diagnostic, native-report, and bounded-output boundaries.
+- Shipped version 0.49.0 with synchronized template/root payload, executable spec, tests, changelog, manifest, and fleet evidence.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4c872c3` | feat: add exact-scope local review stage |
+| `f4d1842` | fix: preserve native local review findings |
+| `3376ce7` | fix: harden local review orchestration |
+| `acf6744` | fix: close local review boundary gaps |
+| `d4ccf90` | fix: merge local findings deterministically |
+| `29e140b` | fix: reject noncanonical review paths |
+| `2dcd815` | fix: bind codebase reviews to clean heads |
+| `0bf7a8f` | fix: bound provider timeout cleanup |
+| `0842b79` | fix: report signal cancellation cleanly |
+| `d503ad1` | fix: reject invalid native severities |
+| `49c77ba` | fix: harden local review subprocess boundaries |
+| `99fe34c` | fix: bound local review provider output |
+
+### Testing
+
+- [OK] make check
+- [OK] 32 focused review-stage tests, Ruff, mypy, and template/root parity
+- [OK] disposable candidate validation passed for all 8 configured consumers
+- [OK] Copilot reviewed all 18 PR files with no comments; all executed CI checks passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
