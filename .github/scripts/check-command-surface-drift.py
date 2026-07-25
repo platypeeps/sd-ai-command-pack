@@ -37,6 +37,7 @@ TEXT_FILENAMES = frozenset({"Makefile"})
 IGNORED_PARTS = frozenset(
     {
         ".git",
+        ".build",
         ".mypy_cache",
         ".obsidian-kb",
         ".pytest_cache",
@@ -63,9 +64,7 @@ SKILL_PUBLIC_ROOTS = tuple(
         )
     )
 )
-SKILL_PUBLIC_ROOT_PATTERN = "|".join(
-    re.escape(root) for root in SKILL_PUBLIC_ROOTS
-)
+SKILL_PUBLIC_ROOT_PATTERN = "|".join(re.escape(root) for root in SKILL_PUBLIC_ROOTS)
 
 
 def _registry_command_path_patterns() -> tuple[tuple[re.Pattern[str], bool], ...]:
@@ -79,9 +78,7 @@ def _registry_command_path_patterns() -> tuple[tuple[re.Pattern[str], bool], ...
         if "{filename}" in target_pattern:
             marker = "__SD_COMMAND_FILENAME__"
             expression = re.escape(target_pattern.replace("{filename}", marker))
-            expression = expression.replace(
-                re.escape(marker), r"(sd-[a-z0-9-]+)\.md"
-            )
+            expression = expression.replace(re.escape(marker), r"(sd-[a-z0-9-]+)\.md")
             patterns.append((re.compile(rf"^{expression}$"), False))
         elif "{name}" in target_pattern:
             marker = "__SD_COMMAND_NAME__"
@@ -115,9 +112,7 @@ PUBLIC_PATH_PATTERNS: tuple[tuple[re.Pattern[str], bool], ...] = (
         True,
     ),
     (
-        re.compile(
-            r"^(?:templates/)?\.github/prompts/(sd-[a-z0-9-]+)\.prompt\.md$"
-        ),
+        re.compile(r"^(?:templates/)?\.github/prompts/(sd-[a-z0-9-]+)\.prompt\.md$"),
         False,
     ),
     *REGISTRY_COMMAND_PATH_PATTERNS,
@@ -206,9 +201,7 @@ def _line_for_literal(text: str, literal: str) -> int:
 
 
 def _token_pattern(identifier: str) -> re.Pattern[str]:
-    return re.compile(
-        rf"(?<![A-Za-z0-9_-]){re.escape(identifier)}(?![A-Za-z0-9_-])"
-    )
+    return re.compile(rf"(?<![A-Za-z0-9_-]){re.escape(identifier)}(?![A-Za-z0-9_-])")
 
 
 def _allowance_matches(
@@ -258,8 +251,7 @@ def _validate_allowances(
 def _required_source_paths(command: CommandInfo) -> tuple[str, ...]:
     paths = [f".github/command-sources/{command.name}.md"]
     if "shared" in command.target_families or any(
-        platform in command.target_families
-        for platform in SKILL_FANOUT_PLATFORMS
+        platform in command.target_families for platform in SKILL_FANOUT_PLATFORMS
     ):
         paths.append(f"templates/.agents/skills/{command.name}/SKILL.md")
     if any(
@@ -388,8 +380,7 @@ def _manifest_findings(
     }
     for retirement in retirements:
         for target in sorted(
-            (set(retirement.installed_targets) & manifest_targets)
-            - reported_targets
+            (set(retirement.installed_targets) & manifest_targets) - reported_targets
         ):
             findings.append(
                 Finding(

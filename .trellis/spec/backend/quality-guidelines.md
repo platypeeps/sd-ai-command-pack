@@ -1062,6 +1062,11 @@ attempt isolation, exact-scope receipts, or pre-remote gate.
   shell/code strings, bound argv and timeouts, route tool caches through the
   shared external cache helper, terminate timed-out process groups, and keep
   stdout, stderr, and state in separate ignored attempt directories.
+- Built-in adapters request each provider's native structured report and map
+  that report into the normalized outcome. An exit-zero human transcript or a
+  missing/malformed native report fails closed; never infer clean from exit
+  status alone. Avoid lossy path serialization, and reject a provider/scope
+  combination before dispatch when its CLI cannot encode an exact path.
 - Persist an invocation record before dispatch. A partial existing attempt
   fails closed rather than duplicating a paid call. Write receipts atomically,
   and reuse only an exact validated receipt.

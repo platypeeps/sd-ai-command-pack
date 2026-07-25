@@ -506,6 +506,7 @@ def resolve_target(repo: Path, scope: str, base: str, head: str) -> dict[str, An
             )
         )
         canonical_scope = "branch_delta"
+        manifest = _path_manifest(repo, paths)
     elif scope == "changes":
         base_oid = head_oid
         unstaged = bytes(
@@ -547,7 +548,6 @@ def resolve_target(repo: Path, scope: str, base: str, head: str) -> dict[str, An
         manifest = _path_manifest(repo, paths)
         diff = _canonical_json(manifest)
         canonical_scope = "codebase"
-    manifest = _path_manifest(repo, paths)
     target = {
         "repository": _repository_identity(repo),
         "scope": canonical_scope,
@@ -820,11 +820,25 @@ def _expand_argv(
                 "review",
                 "range",
                 f"{target['base']}..{target['head']}",
+                "--format",
+                "json",
             ]
         elif scope == "codebase":
-            result = ["prism", "review", "codebase"]
+            result = ["prism", "review", "codebase", "--format", "json"]
         else:
-            result = ["prism", "review", "codebase", "--paths", path_csv]
+            if any("," in path for path in paths):
+                raise ReviewInputError(
+                    "Prism worktree review cannot safely encode a path containing a comma"
+                )
+            result = [
+                "prism",
+                "review",
+                "codebase",
+                "--paths",
+                path_csv,
+                "--format",
+                "json",
+            ]
     elif provider.adapter == "gito":
         output = str(attempt_dir / "provider-output")
         if scope == "codebase":
@@ -834,8 +848,6 @@ def _expand_argv(
                 "--all",
                 "--path",
                 str(repo),
-                "--filter",
-                path_csv,
                 "--out",
                 output,
             ]
@@ -845,8 +857,6 @@ def _expand_argv(
                 "review",
                 "--vs",
                 str(target["base"]),
-                "--filter",
-                path_csv,
                 "--out",
                 output,
             ]
@@ -881,9 +891,16 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
         if os.name == "posix":
             os.killpg(process.pid, signal.SIGTERM)
         else:
-            process.terminate()
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
         process.wait(timeout=5)
-    except (ProcessLookupError, subprocess.TimeoutExpired):
+    except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
         try:
             if os.name == "posix":
                 os.killpg(process.pid, signal.SIGKILL)
@@ -893,19 +910,106 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
             pass
 
 
-def _parse_provider_payload(stdout: bytes) -> dict[str, Any] | None:
-    if len(stdout) > MAX_OUTPUT_BYTES:
+def _parse_json_payload(payload: bytes) -> object | None:
+    if len(payload) > MAX_OUTPUT_BYTES:
         return None
     try:
-        value = json.loads(stdout.decode("utf-8", "strict"))
+        return json.loads(payload.decode("utf-8", "strict"))
     except (UnicodeError, json.JSONDecodeError):
         return None
+
+
+def _parse_argv_payload(stdout: bytes) -> dict[str, Any] | None:
+    value = _parse_json_payload(stdout)
     if not isinstance(value, dict) or value.get("status") not in OUTCOMES:
         return None
     findings = value.get("findings", [])
     if not isinstance(findings, list) or len(findings) > MAX_FINDINGS:
         return None
     return value
+
+
+def _prism_payload(stdout: bytes) -> dict[str, Any] | None:
+    value = _parse_json_payload(stdout)
+    if not isinstance(value, dict) or not isinstance(value.get("findings"), list):
+        return None
+    raw_findings = value["findings"]
+    if len(raw_findings) > MAX_FINDINGS:
+        return None
+    findings: list[dict[str, Any]] = []
+    for raw in raw_findings:
+        if not isinstance(raw, dict):
+            return None
+        locations = raw.get("locations")
+        location = locations[0] if isinstance(locations, list) and locations else {}
+        if not isinstance(location, dict):
+            location = {}
+        lines = location.get("lines")
+        line = lines.get("start") if isinstance(lines, dict) else None
+        findings.append(
+            {
+                "path": location.get("path"),
+                "line": line,
+                "severity": raw.get("severity"),
+                "summary": raw.get("title") or raw.get("message"),
+                "family": raw.get("category"),
+            }
+        )
+    return {"status": "findings" if findings else "clean", "findings": findings}
+
+
+def _gito_payload(attempt_dir: Path) -> dict[str, Any] | None:
+    path = attempt_dir / "provider-output" / "code-review-report.json"
+    try:
+        value = _read_json(path, limit=MAX_OUTPUT_BYTES, label="Gito report")
+    except ReviewInputError:
+        return None
+    if not isinstance(value, dict) or not isinstance(value.get("issues"), dict):
+        return None
+    raw_total = value.get("total_issues")
+    if not isinstance(raw_total, int) or isinstance(raw_total, bool):
+        return None
+    findings: list[dict[str, Any]] = []
+    for group_path, raw_group in value["issues"].items():
+        if not isinstance(group_path, str) or not isinstance(raw_group, list):
+            return None
+        for raw in raw_group:
+            if not isinstance(raw, dict) or len(findings) >= MAX_FINDINGS:
+                return None
+            affected = raw.get("affected_lines")
+            location = affected[0] if isinstance(affected, list) and affected else {}
+            if not isinstance(location, dict):
+                location = {}
+            severity = raw.get("severity")
+            severity_name = (
+                {1: "low", 2: "medium", 3: "high"}.get(severity, "unspecified")
+                if isinstance(severity, int) and not isinstance(severity, bool)
+                else str(severity or "unspecified")
+            )
+            tags = raw.get("tags")
+            family = tags[0] if isinstance(tags, list) and tags else "other"
+            findings.append(
+                {
+                    "path": raw.get("file") or group_path,
+                    "line": location.get("start_line"),
+                    "severity": severity_name,
+                    "summary": raw.get("title") or raw.get("details"),
+                    "family": family,
+                }
+            )
+    if raw_total != len(findings):
+        return None
+    return {"status": "findings" if findings else "clean", "findings": findings}
+
+
+def _parse_provider_payload(
+    provider: Provider, stdout: bytes, attempt_dir: Path
+) -> dict[str, Any] | None:
+    if provider.adapter == "prism":
+        return _prism_payload(stdout)
+    if provider.adapter == "gito":
+        return _gito_payload(attempt_dir)
+    return _parse_argv_payload(stdout)
 
 
 def _bounded_provider_findings(value: object) -> list[dict[str, Any]]:
@@ -988,9 +1092,7 @@ def _run_provider(
         )
     stdout = stdout[:MAX_OUTPUT_BYTES]
     stderr = stderr[:MAX_OUTPUT_BYTES]
-    (attempt_dir / "stdout.txt").write_bytes(stdout)
-    (attempt_dir / "stderr.txt").write_bytes(stderr)
-    payload = _parse_provider_payload(stdout)
+    payload = _parse_provider_payload(provider, stdout, attempt_dir)
     findings = (
         _bounded_provider_findings(payload.get("findings", [])) if payload else []
     )
@@ -1002,6 +1104,11 @@ def _run_provider(
             )
         elif status_value == "findings":
             status_value = "findings"
+    elif exit_code == 0:
+        status_value = "failed"
+        stderr += b"\nprovider did not produce a valid structured review report"
+    (attempt_dir / "stdout.txt").write_bytes(stdout)
+    (attempt_dir / "stderr.txt").write_bytes(stderr[:MAX_OUTPUT_BYTES])
     result = {
         **base,
         "status": status_value,

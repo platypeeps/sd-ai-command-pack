@@ -138,6 +138,75 @@ class ReviewStageTests(InstallTestCase):
             self.run_git(root, "commit", "-m", "configure local review")
         return log
 
+    def write_builtin_config(self, root: Path, *, prism_mode: str = "finding") -> Path:
+        providers = []
+        for identifier, cost in (("prism", "low"), ("gito", "medium")):
+            providers.append(
+                {
+                    "id": identifier,
+                    "adapter": identifier,
+                    "argv": [],
+                    "scopes": ["worktree", "branch_delta", "codebase"],
+                    "dataHandling": "local",
+                    "costTier": cost,
+                    "qualityTier": "standard",
+                    "timeoutSeconds": 5,
+                    "version": "fixture-v1",
+                    "enabled": True,
+                    "outcomeByExitCode": {"0": "clean"},
+                }
+            )
+        config = root / ".sd-ai-command-pack/review.json"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "providers": providers,
+                    "policy": {
+                        "allowedDataHandling": ["local"],
+                        "documentation": "cheapest",
+                        "metadata": "cheapest",
+                        "requiredProviders": [],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", str(config.relative_to(root)))
+        self.run_git(root, "commit", "-m", "configure builtin adapters")
+
+        fake_bin = root.parent / "bin"
+        fake_bin.mkdir()
+        log = root.parent / "builtin.log"
+        prism = fake_bin / "prism"
+        prism.write_text(
+            f"#!{sys.executable}\n"
+            "import json, pathlib, sys\n"
+            f"log = pathlib.Path({str(log)!r})\n"
+            "with log.open('a', encoding='utf-8') as stream: stream.write('prism ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+            + (
+                "print('human finding that must not become clean')\n"
+                if prism_mode == "invalid"
+                else "print(json.dumps({'findings': [{'severity': 'medium', 'category': 'correctness', 'title': 'Prism finding', 'locations': [{'path': 'src/app.py', 'lines': {'start': 2, 'end': 2}}]}]}))\n"
+            ),
+            encoding="utf-8",
+        )
+        prism.chmod(0o755)
+        gito = fake_bin / "gito"
+        gito.write_text(
+            f"#!{sys.executable}\n"
+            "import json, pathlib, sys\n"
+            f"log = pathlib.Path({str(log)!r})\n"
+            "with log.open('a', encoding='utf-8') as stream: stream.write('gito ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+            "out = pathlib.Path(sys.argv[sys.argv.index('--out') + 1]); out.mkdir(parents=True)\n"
+            "report = {'total_issues': 1, 'issues': {'src/app.py': [{'title': 'Gito finding', 'details': 'details', 'severity': 2, 'tags': ['correctness'], 'affected_lines': [{'start_line': 3}]}]}}\n"
+            "(out / 'code-review-report.json').write_text(json.dumps(report), encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        gito.chmod(0o755)
+        return log
+
     def reset_base_then_change(self, root: Path, path: str) -> None:
         self.run_git(root, "branch", "-f", "main", "HEAD")
         target = root / path
@@ -155,6 +224,10 @@ class ReviewStageTests(InstallTestCase):
     ) -> subprocess.CompletedProcess[str]:
         cache = root.parent / "cache"
         cache.mkdir(mode=0o700, exist_ok=True)
+        path = os.environ.get("PATH", "")
+        fake_bin = root.parent / "bin"
+        if fake_bin.is_dir():
+            path = f"{fake_bin}{os.pathsep}{path}"
         return subprocess.run(
             [
                 sys.executable,
@@ -173,6 +246,7 @@ class ReviewStageTests(InstallTestCase):
                 **os.environ,
                 "PYTHONDONTWRITEBYTECODE": "1",
                 "SD_AI_COMMAND_PACK_CACHE_ROOT": str(cache),
+                "PATH": path,
             },
             text=True,
             stdout=subprocess.PIPE,
@@ -225,6 +299,54 @@ class ReviewStageTests(InstallTestCase):
         repository = report["remoteSummary"]["repository"]
         self.assertTrue(repository.startswith("local:"), repository)
         self.assertNotIn(str(root), repository)
+
+    def test_builtin_adapters_parse_native_reports_and_avoid_gito_filter(self) -> None:
+        root = self.make_repo()
+        log = self.write_builtin_config(root)
+
+        result = self.run_stage(root, "native-reports")
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(report["status"], "findings")
+        self.assertEqual(
+            sorted(finding["summary"] for finding in report["receipt"]["findings"]),
+            ["Gito finding", "Prism finding"],
+        )
+        invocation_log = log.read_text(encoding="utf-8")
+        self.assertIn("prism review range", invocation_log)
+        self.assertIn("--format json", invocation_log)
+        self.assertIn("gito review --vs", invocation_log)
+        self.assertNotIn("--filter", invocation_log)
+
+    def test_builtin_adapter_rejects_unstructured_success_output(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(root, prism_mode="invalid")
+
+        result = self.run_stage(root, "invalid-native", "--local", "prism")
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 3, result.stdout)
+        self.assertEqual(report["status"], "failed")
+        self.assertIn(
+            "valid structured review report",
+            report["receipt"]["attempts"][0]["diagnostic"],
+        )
+
+    def test_prism_worktree_comma_path_fails_before_dispatch(self) -> None:
+        root = self.make_repo()
+        log = self.write_builtin_config(root)
+        comma_path = root / "src/with,comma.py"
+        comma_path.write_text("changed\n", encoding="utf-8")
+
+        result = self.run_stage(
+            root, "comma-path", "--scope", "changes", "--local", "prism"
+        )
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("path containing a comma", report["diagnostic"])
+        self.assertFalse(log.exists())
 
     def test_exact_receipt_reuse_avoids_duplicate_provider_calls(self) -> None:
         root = self.make_repo()

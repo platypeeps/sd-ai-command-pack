@@ -12,6 +12,9 @@
 - Keep failures and findings distinct, block remote routing on outstanding
   local findings, and permit bookkeeping-only skips only with exact external
   evidence and zero new confidence.
+- Parse Prism and Gito native structured reports rather than treating exit zero
+  as clean, and fail before dispatch when a provider cannot safely encode the
+  exact target paths.
 
 ## 0.48.0 - 2026-07-24
 
