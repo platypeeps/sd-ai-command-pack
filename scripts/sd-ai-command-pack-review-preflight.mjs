@@ -443,7 +443,7 @@ function parseBookkeepingCli(args) {
   const command = args[0];
   const options = {
     command,
-    rootDir: '.',
+    rootDir: defaultRootDir,
     taskDirs: [],
     json: false,
   };
@@ -574,7 +574,7 @@ export function runBookkeepingValidator(options = {}) {
 
 function boundedBookkeepingText(value, limit) {
   const repoPath = normalizePathSeparators(rootDir);
-  let text = String(value ?? '').replace(/[\r\n\t]+/g, ' ').trim();
+  let text = normalizePathSeparators(String(value ?? '')).replace(/[\r\n\t]+/g, ' ').trim();
   if (repoPath && repoPath !== '/') {
     text = text.split(repoPath).join('<repo>');
   }

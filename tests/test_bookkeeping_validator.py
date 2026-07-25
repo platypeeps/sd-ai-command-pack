@@ -197,6 +197,53 @@ class BookkeepingValidatorTests(InstallTestCase):
         self.assertEqual(result.returncode, 2, result.stdout)
         self.assertIn("[--repo <repo-root>]", result.stdout)
 
+    def test_cli_defaults_to_script_repository_outside_working_directory(self) -> None:
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/07-25-outside-cwd"
+        self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                "outside-cwd",
+                status="in_progress",
+                branch="codex/outside-cwd",
+                completed_at=None,
+            ),
+        )
+
+        result = subprocess.run(
+            [
+                self.node,
+                str(root / "scripts/sd-ai-command-pack-review-preflight.mjs"),
+                "pre-archive",
+                "--task-dir",
+                task_dir,
+                "--json",
+            ],
+            cwd=root.parent,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(json.loads(result.stdout)["status"], "valid")
+
+    def test_diagnostics_redact_repository_path(self) -> None:
+        root = self.make_validator_repo()
+
+        result = self.run_validator(
+            root,
+            "pre-archive",
+            "--task-dir",
+            ".trellis/tasks/07-25-missing-fixture",
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("<repo>", result.stdout)
+        self.assertNotIn(str(root), result.stdout)
+
     def test_pre_archive_reuses_lifecycle_topology_and_context_rules(self) -> None:
         root = self.make_validator_repo()
         parent_name = "07-25-parent-fixture"
