@@ -1981,6 +1981,39 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertIn("[sd-review-learnings:github]", stderr.getvalue())
         self.assertIn("expected list in review learnings payload", stderr.getvalue())
 
+    def test_review_learnings_main_describes_truncation_without_assuming_limit(
+        self,
+    ) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_truncation_warning_test",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-test-")
+        self.addCleanup(tempdir.cleanup)
+        truncated = module.CopilotReviewWindow((), 1, None, True)
+
+        with mock.patch.object(module, "build_local_diff", return_value=""):
+            with mock.patch.object(module, "extract_findings", return_value=[]):
+                with mock.patch.object(
+                    module,
+                    "fetch_copilot_review_for_prs",
+                    return_value=truncated,
+                ):
+                    stderr = io.StringIO()
+                    with contextlib.redirect_stderr(stderr):
+                        result = module.main(
+                            [
+                                "--repo-root",
+                                tempdir.name,
+                                "--github-pr",
+                                "7",
+                            ]
+                        )
+
+        self.assertEqual(result, 0)
+        self.assertIn("truncated by configured safety bounds", stderr.getvalue())
+        self.assertNotIn("--github-limit", stderr.getvalue())
+
     def test_review_learnings_main_reports_git_command_error_without_traceback(
         self,
     ) -> None:

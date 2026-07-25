@@ -2878,8 +2878,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         if review_window.truncated:
             print(
-                "[sd-review-learnings:github] warning: --github-limit truncated "
-                "the requested PR window",
+                "[sd-review-learnings:github] warning: GitHub evidence collection "
+                "was truncated by configured safety bounds",
                 file=sys.stderr,
             )
 
