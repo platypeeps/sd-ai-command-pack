@@ -711,11 +711,14 @@ def _capability(
     descriptor_path = repo / str(remote["descriptorPath"])
     if not descriptor_path.exists():
         return {"state": "absent", "reason": "setup-descriptor-absent"}
-    descriptor = _read_json(
-        descriptor_path,
-        limit=MAX_DESCRIPTOR_BYTES,
-        label="routed-review setup descriptor",
-    )
+    try:
+        descriptor = _read_json(
+            descriptor_path,
+            limit=MAX_DESCRIPTOR_BYTES,
+            label="routed-review setup descriptor",
+        )
+    except ReviewError as error:
+        return {"state": "invalid", "reason": _bounded(error)}
     if not isinstance(descriptor, dict):
         return {"state": "invalid", "reason": "setup-descriptor-not-object"}
     try:

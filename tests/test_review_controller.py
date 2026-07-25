@@ -480,6 +480,16 @@ class ReviewControllerTests(InstallTestCase):
             )["state"],
             "incompatible",
         )
+        descriptor = self.write_descriptor(root)
+        descriptor.write_text("{\n", encoding="utf-8")
+        malformed = controller._capability(
+            root,
+            remote=remote,
+            repository=repository,
+            intent="auto",
+        )
+        self.assertEqual(malformed["state"], "invalid")
+        self.assertIn("cannot read routed-review setup descriptor", malformed["reason"])
         self.write_descriptor(root, check_name="custom/receipt")
         incompatible = controller._capability(
             root,
