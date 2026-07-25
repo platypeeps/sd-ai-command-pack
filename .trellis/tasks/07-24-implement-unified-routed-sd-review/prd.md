@@ -15,6 +15,15 @@ PR review workflows.
   approved routed-review and exact-head contract.
 - `sd-github-review` remains a separate framework and the sole remote backend
   selection/dispatch owner.
+- The released router v1 setup descriptor and on-demand workflow pin
+  `platypeeps/sd-github-review` v0.1.0 at commit
+  `8636a3983d18de17c49907a4c48170a61b1bb713`, expose durable
+  `route|finalize|query` operations, and return exact-head receipts through the
+  `sd-github-review/receipt` Check Run.
+- The completed local-stage children already provide typed `sd-check` output,
+  exact-scope local receipts, concurrent Prism/Gito execution, review-learning
+  inputs, family recurrence, sibling-audit gating, and bookkeeping-successor
+  skips. This task composes those contracts rather than reimplementing them.
 
 ## Dependencies And Boundaries
 
@@ -72,32 +81,39 @@ PR review workflows.
 - R10: Produce one report shape for local and remote stages, including provider,
   run/reuse, scope, outcome, route reason, cost class, latency, findings
   disposition, exact head, channels, and limitations.
+- R11: Persist only bounded, non-secret coordination state below the ignored
+  review artifact root. Resume must reconcile repository, scope, base/head,
+  local receipt, router request fingerprint, and durable receipt before any
+  provider or GitHub side effect.
+- R12: Keep the successor command additive until the separately owned retirement
+  task removes old surfaces. The new command must not call, alias, or fall back
+  to `sd-review-local` or `sd-review-pr`.
 
 ## Acceptance Criteria
 
-- [ ] Changes, branch, codebase, and PR fixtures all use the same public command
+- [x] Changes, branch, codebase, and PR fixtures all use the same public command
   and normalized result contract.
-- [ ] Exact-scope fixtures prove unchanged work is not billed twice and any byte,
+- [x] Exact-scope fixtures prove unchanged work is not billed twice and any byte,
   head, provider, adapter, or configuration change invalidates reuse.
-- [ ] A substantive first-head fixture runs Prism and Gito concurrently,
+- [x] A substantive first-head fixture runs Prism and Gito concurrently,
   deduplicates their current findings before remote routing, and exercises
   low-risk successor selection plus exact bookkeeping-successor skips.
-- [ ] Missing, failed, rate-limited, cancelled, invalid, and unavailable local or
+- [x] Missing, failed, rate-limited, cancelled, invalid, and unavailable local or
   remote providers remain distinct and never gain positive review confidence.
-- [ ] Router-absent optional mode degrades exactly as specified; required,
+- [x] Router-absent optional mode degrades exactly as specified; required,
   explicit, invalid, unavailable, failed, and ambiguous states fail closed with
   no direct fallback dispatch.
-- [ ] Delayed feedback, multi-page threads, successor heads, retries with changed
+- [x] Delayed feedback, multi-page threads, successor heads, retries with changed
   correlation, and bookkeeping-only successor receipts pass state-machine tests.
-- [ ] Same-family repeated findings stop automatic redispatch, require the
+- [x] Same-family repeated findings stop automatic redispatch, require the
   child-owned sibling audit and one batched fix, and require explicit extension
   if the family repeats after that audit.
-- [ ] Current learning is collected at most once per review attempt, remains
+- [x] Current learning is collected at most once per review attempt, remains
   tracked-file read-only, and exposes stale/unavailable limitations without
   granting review confidence.
-- [ ] No local or remote command is constructed through `bash -c`, `eval`, or an
+- [x] No local or remote command is constructed through `bash -c`, `eval`, or an
   equivalent shell-string path.
-- [ ] Focused review/state-machine tests, generated parity, install audit,
+- [x] Focused review/state-machine tests, generated parity, install audit,
   `make sync`, and `make check` pass.
 
 ## Out Of Scope

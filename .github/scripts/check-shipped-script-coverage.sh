@@ -47,6 +47,7 @@ scripts/sd-ai-command-pack-pr-eligibility.py 85
 scripts/sd-ai-command-pack-record-session.py 79
 scripts/sd-ai-command-pack-review-learnings.py 79
 scripts/sd-ai-command-pack-review-local.py 70
+scripts/sd-ai-command-pack-review.py 70
 scripts/sd-ai-command-pack-status.py 80
 scripts/sd-ai-command-pack-surface-check.py 70
 scripts/sd-ai-command-pack-update-spec-kb.py 83

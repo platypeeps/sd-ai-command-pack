@@ -1767,6 +1767,9 @@ class GeneratedParityTests(InstallTestCase):
                 self.assertIn("Resolve the `sd-status` skill by name", content)
                 self.assertIn("scripts/sd-ai-command-pack-toolchain.sh", content)
                 self.assertIn("read-only", content)
+            elif "Resolve the `sd-review` skill by name" in content:
+                self.assertIn("scripts/sd-ai-command-pack-review.py", content)
+                self.assertIn("never fall back to `sd-review-local`", content)
             else:
                 self.assertIn("Resolve the `sd-review-pr` skill by name", content)
 
@@ -1991,6 +1994,7 @@ class GeneratedParityTests(InstallTestCase):
             "update-deps": "Batch-triage open dependency-bot pull requests, merging the safe classes sequentially through the housekeeping gate criteria and parking the rest.",
             "test-gaps": "Close the worst per-file coverage gaps by authoring focused tests for the lowest-covered shipped files.",
             "retro": "Capture a structured retrospective for a debugging stream or incident, record it in the journal, and propose consent-gated prevention tasks.",
+            "review": "Run one exact-scope local and routed-remote Software Delivery review lifecycle.",
             "review-pr": "Run the Software Delivery (SD) pull-request review loop.",
             "review-local": "Run the Software Delivery (SD) local review loop.",
             "ship": "Take the current branch from committed work to a merged pull request by sequencing the standard SD create-pr, review-pr, watch-pr, and housekeeping stages.",

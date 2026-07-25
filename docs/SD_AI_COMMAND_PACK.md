@@ -50,6 +50,8 @@ Quick links:
   planning-quality and artifact-exit contract used by both work selectors.
 - `.agents/skills/sd-work-backlog/references/*-recovery.md`: conditionally
   loaded ledger, ownership, stopped/red, and terminal recovery contracts.
+- `.agents/skills/sd-review/SKILL.md`: unified exact-scope deterministic,
+  local-provider, routed-review, finding-disposition, and exact-head lifecycle.
 - `.agents/skills/sd-review-pr/SKILL.md`: deterministic local gate plus remote
   PR review workflow.
 - `.agents/skills/sd-review-local/SKILL.md`: local review provider fix loop.
@@ -79,6 +81,9 @@ Quick links:
 - `scripts/sd-ai-command-pack-full-check.sh`: canonical full-check script.
 - `scripts/sd-ai-command-pack-check.py`: schema-versioned read-only check
   coordinator.
+- `scripts/sd-ai-command-pack-review.py`: schema-versioned unified review
+  coordinator with private resumable state, router capability discovery,
+  durable receipt reconciliation, and declared-channel observation.
 - `scripts/sd-ai-command-pack-review-full-check.sh`: deterministic
   `sd-review-pr` selector for a repository-owned `check:full` wrapper or the
   canonical pack-script fallback.
@@ -157,12 +162,12 @@ and then performs the architecture-overview check.
 Codex exposes the pack entry points as skills named `sd-help`, `sd-status`,
 `sd-start`, `sd-continue`,
 `sd-finish-work`, `sd-create-pr`, `sd-work-backlog`,
-`sd-check`, `sd-full-check`, `sd-housekeeping`, `sd-review-pr`, `sd-review-local`,
+`sd-check`, `sd-full-check`, `sd-housekeeping`, `sd-review`, `sd-review-pr`, `sd-review-local`,
 `sd-review-learnings`, `sd-audit-repo`, `sd-ship`,
 `sd-watch-pr`, `sd-fix-ci`, `sd-update-deps`,
 `sd-test-gaps`, `sd-retro`, and `sd-update-spec`; type
 `/sd` in Codex command completion or invoke them with
-`$sd-review-pr`-style skill mentions.
+`$sd-review`-style skill mentions.
 The start and continue wrappers run Trellis' existing `trellis-start` and
 `trellis-continue` skills as-is. The finish-work wrapper uses
 `trellis-finish-work` as its primary workflow while replacing the journal
@@ -198,26 +203,31 @@ it. Use a separate request to execute the recommendation.
 3. Run `sd-check` before PR readiness, before asking for remote review, and
    after substantial review fixes. It emits one typed result and does not run
    review providers or refresh generated state.
-4. Fix deterministic failures first, then verify findings from any available
+4. Use `sd-review` for new review work. Its `scope=auto` selection stays local
+   for dirty changes or a branch without a PR, and uses the exact current PR
+   only when that resolution is unambiguous. Use explicit scope/provider/route
+   controls only when policy requires them.
+5. Fix deterministic failures first, then verify findings from any available
    local review provider against the actual code before changing behavior.
-5. Use the review-local command when you want a current-diff local Prism/Gito
+6. Use the review-local command when you specifically need the transitional
+   current-diff local Prism/Gito
    or configured review-tool loop before involving a remote reviewer. It asks
    which findings to fix and repeats until no items are selected.
-6. Use the review-local command with the `all` argument when you want the
+7. Use the review-local command with the `all` argument when you want the
    same local fix loop run
    against the entire checked-out repository rather than just recent diffs.
-7. Use the create-pr command when you want the publishing wrapper: it runs
+8. Use the create-pr command when you want the publishing wrapper: it runs
    `sd-update-spec`, stages only intended files, commits and pushes the feature
    branch when needed, creates or reuses the branch PR, and then enters the
    review-pr loop.
-8. Use the work-backlog command when you want to work through existing Trellis
+9. Use the work-backlog command when you want to work through existing Trellis
    tasks sequentially. It selects one implementation-ready task, completes it
    through create-pr, review-pr, housekeeping, and an extra housekeeping
    verification, then addresses or records follow-ups and learnings before
    selecting the next task. Add `selector=needs-design` when existing tasks
    still need `design.md` or `implement.md`, and `until=design` to stop after
    validating those planning artifacts.
-9. Use the review-pr command for an existing PR loop. It should run the typed
+10. Use the review-pr command only for the transitional existing PR loop. It should run the typed
    deterministic `sd-check` path before requesting remote
    review, then disposition any first-review boundary-risk, authored-source
    size, or multi-task scope advisory before round one. Run `sd-full-check` or
@@ -230,13 +240,17 @@ it. Use a separate request to execute the recommendation.
    review-pr resolves
    `sd-finish-work`; that wrapper owns Trellis finish-work and records concrete
    journal change/test evidence through the pack session recorder.
-10. Request the configured remote reviewer, defaulting to GitHub Copilot, after
+11. In the successor workflow, let the router choose and request the remote
+   backend from the canonical v1 request. Do not request Copilot directly or
+   execute a backend command found in a receipt. Optional descriptor absence is
+   a visible clean-local-only result; every other routing defect fails closed.
+12. In the transitional review-pr workflow, request the configured remote reviewer, defaulting to GitHub Copilot, after
    a clean local pass and again after every pushed review-fix commit made
    during the loop, unless the user explicitly asked for local-only review or
    the trusted fleet workflow proves the exact consumer head qualifies for
    integration-only review. That profile suppresses only a new request and
    still inspects all existing feedback, local gates, and CI.
-11. Let the review-pr command reply to and resolve review threads as part of the
+13. Let the review command reply to and resolve review threads as part of the
    normal loop once findings are fixed, rebutted with evidence, or confirmed
    already addressed.
 12. Use the review-learnings command when review comments repeat across PRs and
@@ -777,6 +791,53 @@ may be installed or uninstalled independently. The Codex CLI itself must remain
 installed and authenticated. Native Codex review has no repository-wide target,
 so `sd-review-local all` runs only the configured full-codebase runner providers
 and reports the Codex scope limitation rather than mixing scopes.
+
+### Unified routed review
+
+`sd-review` invokes `scripts/sd-ai-command-pack-review.py` through the shared
+toolchain resolver. The schema-version-1 coordinator resolves one canonical
+scope, runs the typed `sd-check` gate, consumes the exact-target local review
+receipt, and uses the repository's released router descriptor for PR-only
+remote work. Its normalized controls are:
+
+```text
+scope=auto|changes|branch|codebase|pr
+local=auto|all|none|<configured-provider-id>
+remote=auto|cheap|deep|copilot|none
+fix=auto|ask|none
+pr=<positive-number>
+attempt=<positive-number>
+```
+
+The optional `.sd-ai-command-pack/review.json` `remoteIntegration` object
+accepts only `requirement` (`optional|required`), a repository-contained
+`descriptorPath`, and bounded `receiptPolls`, `pollSeconds`, and `roundLimit`
+integers. Unknown keys, unsafe paths, and out-of-range values are invalid in
+both the controller and the local-stage parser, so one configuration digest
+binds local and remote policy.
+
+For PR scope the setup descriptor must be regular strict JSON, contract major
+1, checkout-free and noninteractive, support the requested route and `route`
+operation, pin an immutable `platypeeps/sd-github-review` action commit, and
+declare the `sd-github-review/receipt` Check Run. The live GitHub workflow path,
+name, and active state must match. Capability is reported as `ready`, `absent`,
+`invalid`, `incompatible`, or `unavailable`.
+
+The controller stores private atomic coordination state outside the checkout,
+persists the canonical request before `workflow_dispatch`, and queries the
+durable exact-head receipt before and after dispatch. An uncertain mutation is
+`reconciliation-required`; it is never retried through a direct provider
+fallback. Receipt-declared review authors, check names, and finding channels
+bound GraphQL review-thread, review, conversation, and CI observation. A
+successful request alone is not review completion: the declared channel must
+materialize on the exact head.
+
+When integration is optional and the descriptor is absent, only a clean local
+receipt may complete, with `router-not-configured` and
+`zero-remote-confidence` limitations. Explicit or required routing, invalid or
+incompatible setup, provider failure, malformed receipts, stale heads, and
+ambiguous dispatch fail closed. The successor never calls `sd-review-local`,
+`sd-review-pr`, or GitHub's reviewer API directly.
 
 Use `bash scripts/sd-ai-command-pack-review-local.sh --full-codebase` or the
 review-local command with the `all` argument when you want a full

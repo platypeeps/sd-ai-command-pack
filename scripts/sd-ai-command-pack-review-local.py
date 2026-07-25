@@ -117,7 +117,9 @@ FAMILY_AUDIT_DIMENSIONS = {
 ACTIVE_PROCESSES: set[subprocess.Popen[bytes]] = set()
 ACTIVE_PROCESSES_LOCK = threading.Lock()
 CANCELLATION_EVENT = threading.Event()
-CONFIG_KEYS = frozenset({"schemaVersion", "providers", "policy"})
+CONFIG_KEYS = frozenset(
+    {"schemaVersion", "providers", "policy", "remoteIntegration"}
+)
 PROVIDER_KEYS = frozenset(
     {
         "id",
@@ -139,6 +141,15 @@ POLICY_KEYS = frozenset(
         "documentation",
         "metadata",
         "requiredProviders",
+    }
+)
+REMOTE_INTEGRATION_KEYS = frozenset(
+    {
+        "requirement",
+        "descriptorPath",
+        "receiptPolls",
+        "pollSeconds",
+        "roundLimit",
     }
 )
 SUBSTANTIVE_SUFFIXES = frozenset(
@@ -258,6 +269,78 @@ def _default_config() -> dict[str, Any]:
             "metadata": "cheapest",
             "requiredProviders": [],
         },
+        "remoteIntegration": {
+            "requirement": "optional",
+            "descriptorPath": "config/routed-review-setup-v1.json",
+            "receiptPolls": 6,
+            "pollSeconds": 5,
+            "roundLimit": 5,
+        },
+    }
+
+
+def _bounded_integer(
+    value: object,
+    *,
+    field: str,
+    minimum: int,
+    maximum: int,
+) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ReviewInputError(f"{field} must be an integer")
+    if not minimum <= value <= maximum:
+        raise ReviewInputError(f"{field} must be between {minimum} and {maximum}")
+    return value
+
+
+def _safe_config_path(value: object, *, field: str) -> str:
+    if not isinstance(value, str) or not value or len(value) > 240:
+        raise ReviewInputError(f"{field} must be a bounded relative path")
+    normalized = value.replace("\\", "/")
+    path = PurePosixPath(normalized)
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or any(not part for part in path.parts)
+        or re.match(r"[A-Za-z]:", normalized)
+        or normalized.startswith("//")
+    ):
+        raise ReviewInputError(f"{field} must stay inside the repository")
+    return path.as_posix()
+
+
+def _parse_remote_integration(value: object) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) - REMOTE_INTEGRATION_KEYS:
+        raise ReviewInputError("remoteIntegration must use only supported fields")
+    requirement = value.get("requirement", "optional")
+    if requirement not in {"optional", "required"}:
+        raise ReviewInputError(
+            "remoteIntegration requirement must be optional or required"
+        )
+    return {
+        "requirement": requirement,
+        "descriptorPath": _safe_config_path(
+            value.get("descriptorPath", "config/routed-review-setup-v1.json"),
+            field="remoteIntegration descriptorPath",
+        ),
+        "receiptPolls": _bounded_integer(
+            value.get("receiptPolls", 6),
+            field="remoteIntegration receiptPolls",
+            minimum=1,
+            maximum=30,
+        ),
+        "pollSeconds": _bounded_integer(
+            value.get("pollSeconds", 5),
+            field="remoteIntegration pollSeconds",
+            minimum=0,
+            maximum=60,
+        ),
+        "roundLimit": _bounded_integer(
+            value.get("roundLimit", 5),
+            field="remoteIntegration roundLimit",
+            minimum=1,
+            maximum=10,
+        ),
     }
 
 
@@ -435,10 +518,14 @@ def load_config(
         "allowedDataHandling": list(allowed),
         "requiredProviders": list(required),
     }
+    normalized_remote = _parse_remote_integration(
+        value.get("remoteIntegration", {})
+    )
     normalized = {
         "schemaVersion": 1,
         "providers": raw_providers,
         "policy": normalized_policy,
+        "remoteIntegration": normalized_remote,
     }
     return normalized, providers, normalized_policy
 
