@@ -1712,6 +1712,7 @@ class InstallAuditTests(InstallTestCase):
         post_rename_scripts = {
             "sd-ai-command-pack-audit-inventory.py",
             "sd-ai-command-pack-check.py",
+            "sd-ai-command-pack-review-local.py",
             "sd-ai-command-pack-review-full-check.sh",
             "sd-ai-command-pack-status.py",
             "sd-ai-command-pack-surface-check.py",

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.49.0 - 2026-07-24
+
+- Add the internal exact-scope local stage consumed by the successor
+  `sd-review` lifecycle, with deterministic risk/cost provider plans and
+  isolated parallel Prism/Gito attempts for substantive first heads.
+- Persist normalized provider evidence and exact target-bound receipts so an
+  unchanged pre-publication branch review can satisfy the PR stage without a
+  duplicate provider call; invalidate reuse on any target, provider, or policy
+  change.
+- Keep failures and findings distinct, block remote routing on outstanding
+  local findings, and permit bookkeeping-only skips only with exact external
+  evidence and zero new confidence.
+
 ## 0.48.0 - 2026-07-24
 
 - Expose bounded, normalized historical review-learning clusters as a typed
