@@ -255,6 +255,16 @@ The aggregate result and every row distinguish `passed`, `failed`, `skipped`,
 if repository or Git state changes. Stale generated output reports its owning
 refresh command but is never rewritten.
 
+The shipped review-preflight executable also owns the schema-version-1 Trellis
+bookkeeping policy used at finish-work boundaries. `pre-archive` validates exact
+active task directories before Trellis can mutate them; `final-bundle` validates
+an explicit `completion` or `planning` task/journal delta between full Git OIDs.
+Both modes are read-only, return stable reason codes in `--json` output, reject
+unsafe or unbounded artifacts, and keep invalid local bookkeeping commits
+unpublished for recovery. The ordinary no-argument review preflight uses the
+same descriptive task metadata rules during local pre-publication and
+`sd-check`.
+
 ### sd-full-check
 
 Runs the deterministic local verification gate before PR readiness. Prism can

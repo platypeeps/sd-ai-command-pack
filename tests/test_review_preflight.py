@@ -46,7 +46,10 @@ class ReviewPreflightTests(InstallTestCase):
         return {
             "id": name,
             "name": name,
+            "title": name.replace("-", " ").title(),
+            "description": f"Validate {name} metadata behavior.",
             "status": status,
+            "createdAt": "2026-07-17",
             "completedAt": completed_at,
             "branch": branch,
             "base_branch": base_branch,
@@ -88,6 +91,7 @@ import {
   trellisTaskDirectory,
   thrownValueMessage,
   unsupportedNodeVersionMessage,
+  validateTrellisBookkeepingMetadata,
   validateTrellisTaskMetadata,
   validateTrellisPlanningBaseInheritance,
   validateTrellisJournalSessions,
@@ -327,6 +331,21 @@ assert.deepEqual(validateTrellisTaskMetadata({
   branch: null,
   base_branch: 'main',
 }, '.trellis/tasks/archive/2026-06/00-bootstrap-guidelines', true), []);
+assert.deepEqual(validateTrellisBookkeepingMetadata({
+  id: 'demo',
+  name: 'demo',
+  title: ' ',
+  description: '',
+  status: 'planning',
+  createdAt: 'not-a-date',
+  completedAt: null,
+  branch: null,
+  base_branch: 'main',
+}, '.trellis/tasks/07-17-demo', false), [
+  'title must be a non-empty string',
+  'description must be a non-empty string',
+  'createdAt must be a valid date or timestamp',
+]);
 assert.deepEqual(validateTrellisTaskMetadata({
   id: 'demo',
   name: 'demo',
@@ -2000,6 +2019,7 @@ assert.deepEqual(
             completed_at="2026-07-21",
         )
         record["id"] = "different-id"
+        record["description"] = " "
         (task / "task.json").write_text(
             json.dumps(record) + "\n",
             encoding="utf-8",
@@ -2019,6 +2039,10 @@ assert.deepEqual(
         )
         self.assertIn(
             "task.json field branch must differ from base_branch",
+            result.stdout,
+        )
+        self.assertIn(
+            "task.json field description must be a non-empty string",
             result.stdout,
         )
 

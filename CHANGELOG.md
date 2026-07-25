@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.51.0 - 2026-07-25
+
+- Extend the canonical review-preflight executable with schema-version-1
+  `pre-archive` and completion/planning `final-bundle` bookkeeping modes.
+- Validate bounded task identity, descriptive metadata, lifecycle, topology,
+  context, archive moves, journal/index content, commit reachability, and
+  whitespace before finish-work may publish its final bookkeeping head.
+- Make finish-work retain one exact validator result for review, ship, and
+  housekeeping callers while preserving failed local archive/journal commits
+  for inspection instead of rewriting or pushing them.
+
 ## 0.50.0 - 2026-07-25
 
 - Add strict exact-head finding-family evidence to the internal local-review

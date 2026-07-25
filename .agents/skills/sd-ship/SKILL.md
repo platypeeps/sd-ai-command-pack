@@ -121,7 +121,9 @@ before Stage 1.
    chain; this leaves the active Trellis task unarchived for a later resume.
 5. Stage 4 — `sd-housekeeping`: invoke housekeeping exactly once. Its gate
    runs finish-work, pushes any resulting task/journal commits and waits for
-   their checks, then invokes the housekeeping script with
+   their checks, and reuses finish-work's retained schema-version-1
+   bookkeeping result bound to that exact final head without rerunning the
+   validator. It then invokes the housekeeping script with
    `--finish-work-head "$(git rev-parse HEAD)"`. That exact-head handoff allows
    the executable gate to own the one post-finish Obsidian KB refresh for
    repositories that already have a KB, perform the merge, and report the

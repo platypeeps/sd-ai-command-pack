@@ -37,8 +37,11 @@ human default without `--json` remains supported for direct operator use.
 
 1. Verify repository, branch, and working-tree scope.
 2. On an open feature-branch PR, run the SD finish-work flow before actual housekeeping:
-   execute the `sd-finish-work` flow. Stop on ambiguous dirty work;
-   push every resulting commit before housekeeping.
+   execute the `sd-finish-work` flow. Stop on ambiguous dirty work. Require its
+   retained schema-version-1 bookkeeping result to be valid and bound to the
+   current full HEAD, then push every resulting commit once before
+   housekeeping. Reuse that exact result; do not rerun or reinterpret the
+   validator in housekeeping.
 3. Refresh `.obsidian-kb` once before fetch or merge through the installed KB
    helper. An absent `.obsidian-kb` is
    created; valid directory symlinks are preserved. Invalid or occupied paths

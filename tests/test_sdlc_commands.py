@@ -443,6 +443,29 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("housekeeping remains its only owner", ship_text)
         self.assertNotIn("sd-ai-command-pack-update-spec-kb.py", ship)
 
+    def test_finish_work_gates_archive_and_single_push_with_one_validator(self) -> None:
+        finish = self._skill_text("sd-finish-work")
+        review = self._skill_text("sd-review-pr")
+        housekeeping = self._skill_text("sd-housekeeping")
+        ship = self._skill_text("sd-ship")
+        finish_text = " ".join(finish.split())
+        review_text = " ".join(review.split())
+        housekeeping_text = " ".join(housekeeping.split())
+        ship_text = " ".join(ship.split())
+
+        validator = "scripts/sd-ai-command-pack-review-preflight.mjs"
+        self.assertEqual(finish.count(validator), 2)
+        self.assertLess(finish.index("pre-archive"), finish.index("task.py archive"))
+        self.assertIn("final-bundle --mode <completion|planning>", finish)
+        self.assertIn("pre_archive_valid", finish)
+        self.assertIn("preserve the archive and journal commits locally", finish_text)
+        self.assertIn("Only after it passes", finish)
+        self.assertIn("one final push", finish)
+        self.assertIn("reuse its exact schema-version-1 valid bookkeeping result", review_text)
+        self.assertIn("Reuse that exact result", housekeeping_text)
+        self.assertIn("do not rerun or reinterpret", housekeeping_text)
+        self.assertIn("reuses finish-work's retained schema-version-1 bookkeeping result", ship_text)
+
     def test_review_pr_consumes_typed_sd_check_without_legacy_selection(self) -> None:
         review = self._skill_text("sd-review-pr")
         local_gate = review.split("## Step 2: Run Typed Deterministic Check", 1)[1].split(
