@@ -183,7 +183,7 @@ def _ignored(relative: PurePosixPath) -> bool:
 def _text_paths(root: Path) -> list[Path]:
     paths: list[Path] = []
     for path in root.rglob("*"):
-        if not path.is_file():
+        if path.is_symlink() or not path.is_file():
             continue
         relative = PurePosixPath(path.relative_to(root).as_posix())
         if _ignored(relative):

@@ -35,11 +35,13 @@ skips into hard errors for parity with CI, which always runs the Node and
 ShellCheck lanes.
 
 `make generate` and the pack-source portion of `make full-check` also run
-`.github/scripts/check-command-surface-drift.py`. The linter derives live and
-retired command footprints from `installer/registry.py`, rejects stale names or
-missing targets across live surfaces, and emits exact-path JSON with `--json`.
-Historical mentions require a bounded `CommandSurfaceAllowance` with a reason;
-do not add broad documentation-root exclusions.
+`scripts/sd-ai-command-pack-surface-check.py`. The versioned validator derives
+the complete affected graph from `installer/registry.py` and `manifest.json`,
+including explicitly source-only references, generated mirrors, caller
+registrations, and release evidence. Its internal command lint rejects stale
+names or missing targets across live surfaces. Historical mentions require a
+bounded `CommandSurfaceAllowance` with a reason; do not add broad
+documentation-root or source-only directory exclusions.
 
 The shipped-script coverage lane has two thresholds: the aggregate
 `scripts/sd-ai-command-pack-*.py` floor remains 76%, and

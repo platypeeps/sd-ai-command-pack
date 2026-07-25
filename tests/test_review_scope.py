@@ -1205,11 +1205,15 @@ class ReviewScopeTests(InstallTestCase):
         for skill_path in skill_paths:
             skill = skill_path.read_text(encoding="utf-8")
             self.assertIn("configured remote reviewer", skill)
-            self.assertIn("deterministic local full-check gate", skill)
-            self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0", skill)
-            self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0", skill)
-            self.assertIn("sd-review-local", skill)
-            self.assertIn("optionally with `all`", skill)
+            self.assertIn("typed deterministic `sd-check`", skill)
+            self.assertIn("scripts/sd-ai-command-pack-check.py --json", skill)
+            self.assertNotIn("SD_AI_COMMAND_PACK_FULL_CHECK_PRISM", skill)
+            self.assertNotIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO", skill)
+            self.assertNotIn(
+                "bash scripts/sd-ai-command-pack-review-full-check.sh",
+                skill,
+            )
+            self.assertIn("Do not discover `package.json` scripts", skill)
             self.assertNotIn("any available local review providers", skill)
             self.assertNotIn("optional local review providers", skill)
             self.assertIn(
@@ -1277,8 +1281,7 @@ class ReviewScopeTests(InstallTestCase):
         for adapter_path in adapter_paths:
             adapter = adapter_path.read_text(encoding="utf-8")
             self.assertIn("configured remote reviewer", adapter)
-            self.assertIn("deterministic local full-check gate", adapter)
-            self.assertIn("Prism/Gito disabled", adapter)
+            self.assertIn("typed deterministic `sd-check` gate", adapter)
             self.assertIn("automatic re-review after pushed fixes", adapter)
             self.assertIn("configured remote review round limit", adapter)
             self.assertNotIn("any available local review providers", adapter)
@@ -1287,7 +1290,8 @@ class ReviewScopeTests(InstallTestCase):
         readme = (install.ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("### sd-review-pr", readme)
         self.assertIn("configured remote reviewer", readme)
-        self.assertIn("Prism and Gito disabled", readme)
+        self.assertIn("typed deterministic `sd-check` gate", readme)
+        self.assertIn("never discovers", readme)
         self.assertIn("re-requests review after each pushed fix", readme)
         self.assertIn("sd-review-local", readme)
         self.assertIn("With the `all` argument", readme)
@@ -1301,10 +1305,7 @@ class ReviewScopeTests(InstallTestCase):
             self.assertRegex(doc, r"(?i)the\s+default remote review request")
             self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER", doc)
             self.assertIn("review-fix commit made", doc)
-            self.assertRegex(
-                doc,
-                r"disables\s+Prism(?:\s+and\s+Gito|[\s\S]*disables\s+Gito)",
-            )
+            self.assertIn("never invokes full-check, Prism, or Gito", doc)
             self.assertIn("sd-review-local", doc)
             self.assertIn("`all`", doc)
 

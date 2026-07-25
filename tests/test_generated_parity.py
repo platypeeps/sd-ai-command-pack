@@ -1042,6 +1042,7 @@ class GeneratedParityTests(InstallTestCase):
         )
         self.assertIn("--fail-under=76", coverage_gate)
         for expected in (
+            "scripts/sd-ai-command-pack-check.py 70",
             "scripts/sd-ai-command-pack-fleet-candidate-check.py 90",
             "scripts/sd-ai-command-pack-fleet-controller.py 76",
             "scripts/sd-ai-command-pack-fleet-finding-classify.py 85",
@@ -1737,6 +1738,9 @@ class GeneratedParityTests(InstallTestCase):
             elif "full-check" in file.target.name:
                 self.assertIn("Resolve the `sd-full-check` skill by name", content)
                 self.assertIn("source of truth for the exact checks", content)
+            elif "check" in file.target.name:
+                self.assertIn("Resolve the `sd-check` skill by name", content)
+                self.assertIn("read-only", content)
             elif "ship" in file.target.name:
                 self.assertIn("Resolve the `sd-ship` skill by name", content)
                 self.assertIn("only merge authority", content)
@@ -1949,6 +1953,7 @@ class GeneratedParityTests(InstallTestCase):
             "review-pr",
             "review-local",
             "review-learnings",
+            "check",
             "full-check",
             "housekeeping",
             "update-spec",
@@ -1990,6 +1995,7 @@ class GeneratedParityTests(InstallTestCase):
             "review-local": "Run the Software Delivery (SD) local review loop.",
             "ship": "Take the current branch from committed work to a merged pull request by sequencing the standard SD create-pr, review-pr, watch-pr, and housekeeping stages.",
             "review-learnings": "Detect or update repository review learnings.",
+            "check": "Run deterministic read-only Software Delivery checks and report a typed result.",
             "full-check": "Run the Software Delivery (SD) full-check gate for deterministic checks, local review, and readiness reporting.",
             "housekeeping": "Run Software Delivery (SD) end-of-stream housekeeping for a completed work stream.",
             "update-spec": "Run the Software Delivery (SD) update-spec workflow for repository knowledge artifacts.",

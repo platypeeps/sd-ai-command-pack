@@ -9,7 +9,7 @@ Use this project-local Software Delivery skill for `sd-create-pr` and
 `/sd:create-pr` style work. It is an orchestration wrapper: it runs the
 installed `sd-update-spec` workflow, commits and pushes the intended branch
 changes, creates or reuses the branch pull request, then hands off to
-`sd-review-pr` for deterministic checks, configured remote reviewer requests,
+`sd-review-pr` for the typed `sd-check` gate, configured remote reviewer requests,
 Copilot-style polling when configured, fixes, CI handling, and the bounded
 review loop.
 
@@ -45,12 +45,11 @@ offer a question as a way to cross the force-push or destructive boundary.
   tools.
 - Do not duplicate the detailed update-spec or review-pr workflows. Use
   `sd-update-spec` for repository knowledge refreshes and `sd-review-pr` for
-  local full-check, configured remote reviewer requests, review polling, fix
+  typed deterministic checks, configured remote reviewer requests, review polling, fix
   loops, CI handling, and final finish-work behavior.
 - Do not run Prism, Gito, or other local review providers directly from this
-  command. Those tools run only when the user explicitly invokes
-  `sd-full-check` or `sd-review-local` (optionally with `all`); `sd-review-pr`
-  disables Prism and Gito for its command-owned local gate.
+  command. `sd-review-pr` owns the typed `sd-check` gate and every configured
+  review-provider stage.
 - Do not create a PR from the repository default branch. If the current branch
   is the default branch, create a feature branch before continuing. Prefer
   `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH` when set; otherwise derive a concise
@@ -382,8 +381,8 @@ skill as the source of truth:
 export SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR="<pr-number-or-url>"
 ```
 
-Let `sd-review-pr` run its deterministic local full-check gate with Prism and
-Gito disabled, request the configured remote reviewer when appropriate, wait for
+Let `sd-review-pr` run its typed deterministic `sd-check` gate, request the
+configured remote reviewer when appropriate, wait for
 review completion, address actionable comments or CI failures, push review-fix
 commits, re-request review after pushed fixes, observe its configured round
 limit, run finish-work after a clean loop, and run housekeeping if it observes
@@ -403,7 +402,7 @@ Report:
   publish result without review.
 - Project checks: configured command or reported candidates, and which project
   checks actually ran.
-- Pack full-check: deterministic gate result with Prism/Gito disabled.
+- SD check: typed aggregate, non-passing rows, and state-guard result.
 - Optional AI review: configured remote-review rounds and outcome.
 - Comments fixed or rebutted, CI status, finish-work actions, and final
   working-tree state.

@@ -43,5 +43,5 @@ Structured interaction policy — apply only at declared decision boundaries:
 1. Resolve the `sd-create-pr` skill by name using the agent's trusted skill discovery mechanism for installed skills.
 2. If that skill is missing, unreadable, empty, resolves to more than one candidate, fails validation, defines contradictory steps that violate this command's safety rules, or requires unavailable tools, stop and report the exact blocker.
 3. Use the skill as the primary instructions. It delegates spec refresh to `sd-update-spec`, avoids duplicate PRs, refuses ambiguous staging, pushes the current branch, creates or reuses the PR, and hands off to `sd-review-pr`.
-4. Do not run Prism, Gito, or other local review providers directly from this command; `sd-review-pr` owns the deterministic local PR gate and configured remote reviewer loop.
+4. Do not run Prism, Gito, or other local review providers directly from this command; `sd-review-pr` owns the typed deterministic `sd-check` gate and configured remote reviewer loop.
 5. If any delegated skill, git command, GitHub command, push, PR creation, provider call, CI check, or fix attempt fails, stop and report the command, exit status, and complete stdout/stderr output.

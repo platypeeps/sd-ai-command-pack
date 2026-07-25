@@ -220,7 +220,14 @@ class PackDriftTests(InstallTestCase):
 
     def test_tracked_template_sources_match_manifest_sources(self) -> None:
         result = subprocess.run(
-            ["git", "ls-files", "templates"],
+            [
+                "git",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "templates",
+            ],
             cwd=install.ROOT,
             text=True,
             stdout=subprocess.PIPE,
@@ -238,16 +245,12 @@ class PackDriftTests(InstallTestCase):
         source_only_template_sources = set()
         for name in install.SOURCE_ONLY_COMMAND_NAMES:
             short = name.removeprefix("sd-")
-            skill_root = (
-                install.ROOT / f"templates/.agents/skills/{name}"
-            ).resolve()
-            source_only_template_sources.update(
-                path
-                for path in tracked_template_sources
-                if path.is_relative_to(skill_root)
-            )
             source_only_template_sources.update(
                 {
+                    (
+                        install.ROOT
+                        / f"templates/.agents/skills/{name}/SKILL.md"
+                    ).resolve(),
                     (install.ROOT / f"templates/.commands/{name}.md").resolve(),
                     (
                         install.ROOT
@@ -262,6 +265,13 @@ class PackDriftTests(InstallTestCase):
                         / f"templates/.github/prompts/{name}.prompt.md"
                     ).resolve(),
                 }
+            )
+            source_only_template_sources.update(
+                (
+                    install.ROOT
+                    / f"templates/.agents/skills/{name}/{reference}"
+                ).resolve()
+                for reference in install.SOURCE_ONLY_SKILL_REFERENCES.get(name, ())
             )
 
         self.assertEqual(
@@ -347,12 +357,12 @@ class PackDriftTests(InstallTestCase):
         self.assertIn("template twin pairs compared:", result.stdout)
         self.assertNotIn("skipping SD-specific source checks", result.stdout)
 
-    def test_pack_source_drift_gate_propagates_command_surface_failure(self) -> None:
+    def test_pack_source_drift_gate_propagates_surface_closure_failure(self) -> None:
         root = self.make_pack_source_fixture()
-        lint = root / ".github/scripts/check-command-surface-drift.py"
-        lint.write_text(
+        checker = root / "scripts/sd-ai-command-pack-surface-check.py"
+        checker.write_text(
             "#!/usr/bin/env python3\n"
-            "print('fixture command surface drift')\n"
+            "print('fixture shipped-surface closure drift')\n"
             "raise SystemExit(1)\n",
             encoding="utf-8",
         )
@@ -360,8 +370,8 @@ class PackDriftTests(InstallTestCase):
         result = self.run_pack_source_drift_gates(root)
 
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("SD command surface drift lint", result.stdout)
-        self.assertIn("fixture command surface drift", result.stdout)
+        self.assertIn("SD shipped-surface closure", result.stdout)
+        self.assertIn("fixture shipped-surface closure drift", result.stdout)
         self.assertNotIn("template twin pairs compared:", result.stdout)
 
     def test_pack_source_drift_gate_skips_se_pack_identity(self) -> None:

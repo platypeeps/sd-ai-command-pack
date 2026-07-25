@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "sd-ai-command-pack",
-  "version": "0.46.0",
+  "version": "0.47.0",
   "license": "MIT",
   "description": "Install project-local SD AI command workflows, Prism/Gito defaults, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
@@ -124,6 +124,20 @@
       "source": "templates/.claude/sd-ai-command-pack/planning-adversarial-review.md",
       "target": ".claude/sd-ai-command-pack/planning-adversarial-review.md",
       "anchor": ".claude"
+    },
+    {
+      "platform": "shared",
+      "kind": "script",
+      "source": "templates/scripts/sd-ai-command-pack-check.py",
+      "target": "scripts/sd-ai-command-pack-check.py",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "script",
+      "source": "templates/scripts/sd-ai-command-pack-surface-check.py",
+      "target": "scripts/sd-ai-command-pack-surface-check.py",
+      "install": "always"
     },
     {
       "platform": "shared",
@@ -3910,6 +3924,181 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-review-learnings/SKILL.md",
       "target": ".trae/skills/sd-review-learnings/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-check/SKILL.md",
+      "target": ".agents/skills/sd-check/SKILL.md",
+      "install": "always"
+    },
+    {
+      "platform": "claude",
+      "kind": "command",
+      "source": "templates/.claude/commands/sd/check.md",
+      "target": ".claude/commands/sd/check.md",
+      "anchor": ".claude"
+    },
+    {
+      "platform": "cursor",
+      "kind": "command",
+      "source": "templates/.commands/sd-check.md",
+      "target": ".cursor/commands/sd-check.md",
+      "anchor": ".cursor"
+    },
+    {
+      "platform": "gemini",
+      "kind": "command",
+      "source": "templates/.gemini/commands/sd/check.toml",
+      "target": ".gemini/commands/sd/check.toml",
+      "anchor": ".gemini"
+    },
+    {
+      "platform": "github",
+      "kind": "prompt",
+      "source": "templates/.github/prompts/sd-check.prompt.md",
+      "target": ".github/prompts/sd-check.prompt.md",
+      "anchor": ".github"
+    },
+    {
+      "platform": "opencode",
+      "kind": "command",
+      "source": "templates/.commands/sd-check.md",
+      "target": ".opencode/commands/sd-check.md",
+      "anchor": ".opencode"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-check.md",
+      "target": ".agent/workflows/sd-check.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "command",
+      "source": "templates/.commands/sd-check.md",
+      "target": ".codebuddy/commands/sd/check.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "devin",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-check.md",
+      "target": ".devin/workflows/sd-check.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "droid",
+      "kind": "command",
+      "source": "templates/.commands/sd-check.md",
+      "target": ".factory/commands/sd/check.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "kilo",
+      "kind": "workflow",
+      "source": "templates/.commands/sd-check.md",
+      "target": ".kilocode/workflows/sd-check.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "pi",
+      "kind": "prompt",
+      "source": "templates/.commands/sd-check.md",
+      "target": ".pi/prompts/sd-check.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "qoder",
+      "kind": "command",
+      "source": "templates/.commands/sd-check.md",
+      "target": ".qoder/commands/sd-check.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "trae",
+      "kind": "command",
+      "source": "templates/.commands/sd-check.md",
+      "target": ".trae/commands/sd-check.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "zcode",
+      "kind": "command",
+      "source": "templates/.commands/sd-check.md",
+      "target": ".zcode/commands/sd/check.md",
+      "anchor": ".zcode"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-check/SKILL.md",
+      "target": ".agent/skills/sd-check/SKILL.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-check/SKILL.md",
+      "target": ".codebuddy/skills/sd-check/SKILL.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-check/SKILL.md",
+      "target": ".devin/skills/sd-check/SKILL.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-check/SKILL.md",
+      "target": ".factory/skills/sd-check/SKILL.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-check/SKILL.md",
+      "target": ".kilocode/skills/sd-check/SKILL.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-check/SKILL.md",
+      "target": ".kiro/skills/sd-check/SKILL.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-check/SKILL.md",
+      "target": ".pi/skills/sd-check/SKILL.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-check/SKILL.md",
+      "target": ".qoder/skills/sd-check/SKILL.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-check/SKILL.md",
+      "target": ".reasonix/skills/sd-check/SKILL.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-check/SKILL.md",
+      "target": ".trae/skills/sd-check/SKILL.md",
       "anchor": ".trae"
     },
     {

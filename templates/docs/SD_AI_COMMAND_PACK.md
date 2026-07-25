@@ -70,11 +70,15 @@ Quick links:
 - `.agents/skills/sd-retro/SKILL.md`: debug retrospective capture workflow.
 - `.agents/skills/sd-ship/SKILL.md`: composite publish-to-merge orchestrator
   chaining create-pr, review-pr, watch-pr, and housekeeping.
+- `.agents/skills/sd-check/SKILL.md`: typed deterministic read-only verification
+  workflow.
 - `.agents/skills/sd-full-check/SKILL.md`: full local verification workflow.
 - `.agents/skills/sd-housekeeping/SKILL.md`: post-merge cleanup workflow.
 - `.agents/skills/sd-update-spec/SKILL.md`: Trellis update-spec workflow plus
   pack-managed repository knowledge refresh.
 - `scripts/sd-ai-command-pack-full-check.sh`: canonical full-check script.
+- `scripts/sd-ai-command-pack-check.py`: schema-versioned read-only check
+  coordinator.
 - `scripts/sd-ai-command-pack-review-full-check.sh`: deterministic
   `sd-review-pr` selector for a repository-owned `check:full` wrapper or the
   canonical pack-script fallback.
@@ -153,7 +157,7 @@ and then performs the architecture-overview check.
 Codex exposes the pack entry points as skills named `sd-help`, `sd-status`,
 `sd-start`, `sd-continue`,
 `sd-finish-work`, `sd-create-pr`, `sd-work-backlog`,
-`sd-full-check`, `sd-housekeeping`, `sd-review-pr`, `sd-review-local`,
+`sd-check`, `sd-full-check`, `sd-housekeeping`, `sd-review-pr`, `sd-review-local`,
 `sd-review-learnings`, `sd-audit-repo`, `sd-ship`,
 `sd-watch-pr`, `sd-fix-ci`, `sd-update-deps`,
 `sd-test-gaps`, `sd-retro`, and `sd-update-spec`; type
@@ -191,9 +195,9 @@ it. Use a separate request to execute the recommendation.
 
 1. Iterate with the narrowest deterministic checks for the files you touched.
 2. Use the continue command when resuming an in-progress Trellis task.
-3. Run the full-check command or `bash scripts/sd-ai-command-pack-full-check.sh`
-   before PR readiness, before asking for remote review, and after substantial
-   review fixes.
+3. Run `sd-check` before PR readiness, before asking for remote review, and
+   after substantial review fixes. It emits one typed result and does not run
+   review providers or refresh generated state.
 4. Fix deterministic failures first, then verify findings from any available
    local review provider against the actual code before changing behavior.
 5. Use the review-local command when you want a current-diff local Prism/Gito
@@ -213,20 +217,17 @@ it. Use a separate request to execute the recommendation.
    selecting the next task. Add `selector=needs-design` when existing tasks
    still need `design.md` or `implement.md`, and `until=design` to stop after
    validating those planning artifacts.
-9. Use the review-pr command for an existing PR loop. It should run the deterministic
-   local full-check path with Prism/Gito disabled before requesting remote
+9. Use the review-pr command for an existing PR loop. It should run the typed
+   deterministic `sd-check` path before requesting remote
    review, then disposition any first-review boundary-risk, authored-source
    size, or multi-task scope advisory before round one. Run `sd-full-check` or
    `sd-review-local` (optionally with `all`) explicitly when you want
    Prism/Gito. The review gate delegates to
-   `scripts/sd-ai-command-pack-review-full-check.sh`. When the root
-   `package.json` defines a non-empty `check:full` script, the helper runs
-   that repository-owned wrapper through
-   `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_RUNNER` (default `npm`);
-   otherwise it invokes the installed pack full-check script directly. The
-   wrapper may perform repository prerequisites before calling the pack script,
-   but it must not invoke `sd-review-pr`, a review-pr adapter, or the helper
-   itself. After a clean non-deferred review, review-pr resolves
+   `scripts/sd-ai-command-pack-check.py --json` through the installed
+   toolchain and consumes strict `.sd-ai-command-pack/check.json` argv entries
+   when present. It never discovers `package.json` `check:full` or falls back
+   to the legacy full-check selector. After a clean non-deferred review,
+   review-pr resolves
    `sd-finish-work`; that wrapper owns Trellis finish-work and records concrete
    journal change/test evidence through the pack session recorder.
 10. Request the configured remote reviewer, defaulting to GitHub Copilot, after
@@ -376,6 +377,7 @@ Claude Code and Gemini CLI:
 /sd:finish-work
 /sd:create-pr
 /sd:work-backlog
+/sd:check
 /sd:full-check
 /sd:housekeeping
 /sd:review-pr
@@ -402,6 +404,7 @@ Qoder commands, Trae commands, Pi prompts, workflow adapters, and Codex skills:
 /sd-finish-work
 /sd-create-pr
 /sd-work-backlog
+/sd-check
 /sd-full-check
 /sd-housekeeping
 /sd-review-pr
@@ -481,6 +484,8 @@ source-owned fix.
 Use the script directly from any shell:
 
 ```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-check.py --json
 bash scripts/sd-ai-command-pack-full-check.sh
 bash scripts/sd-ai-command-pack-review-local.sh
 bash scripts/sd-ai-command-pack-review-local.sh --full-codebase
@@ -534,7 +539,70 @@ repositories and malformed, missing, or stale fleet configuration exit
 nonzero. This repository-status command is separate from `install.py --status`,
 which compares one target's installed payload to the current pack.
 
-The full-check script runs `git diff --check`, `git diff --cached --check`,
+`sd-check` runs `scripts/sd-ai-command-pack-check.py` through the installed
+Python toolchain. Its schema-version-1 JSON contains ordered result rows,
+aggregate status/exit, exact HEAD observation, configuration presence, and a
+before/after state guard. Statuses are `passed`, `failed`, `skipped`,
+`unavailable`, `invalid`, and `indeterminate`; only aggregate `passed` plus a
+passing state guard exits `0`.
+
+Repository-specific deterministic commands use the tracked
+`.sd-ai-command-pack/check.json` file:
+
+```json
+{
+  "schemaVersion": 1,
+  "prerequisites": [
+    {
+      "id": "tooling",
+      "argv": ["python3", "scripts/check-tooling.py"],
+      "cwd": ".",
+      "timeoutSeconds": 120
+    }
+  ],
+  "checks": [
+    {
+      "id": "unit",
+      "argv": ["python3", "-m", "unittest", "discover", "-s", "tests"],
+      "cwd": ".",
+      "timeoutSeconds": 900
+    }
+  ]
+}
+```
+
+The schema is closed and validated completely before execution. It rejects
+shell strings, inline shell/code commands, provider and GitHub review
+executables, non-read-only Git operations, duplicate IDs, path escapes,
+malformed argv arrays, unknown schema versions/fields, and timeouts outside the
+documented bound. Missing configuration is valid and runs only built-ins. A
+failed prerequisite visibly skips later configured checks; a missing declared
+tool is `unavailable`, never a pass.
+
+Built-ins run staged/unstaged whitespace checks plus the installed review
+preflight, payload audit, Obsidian KB `--check`, tooling/generated scope, and
+PR-body scope helpers when applicable. The command never refreshes stale
+knowledge, runs Prism/Gito/Copilot/routed review, mutates Git/GitHub, or reads
+the legacy full-check environment/package-hook contract. Every subprocess uses
+the shared external cache environment. If repository, index, ref, generated
+knowledge, or guarded cache state changes, the state guard fails and reports
+the changed class without reverting user or tool output.
+
+In the pack source repository, the tracked check configuration also invokes
+`scripts/sd-ai-command-pack-surface-check.py`. That schema-version-1 validator
+uses the canonical registry and manifest to compute the affected shipped
+surface across committed, staged, unstaged, and non-ignored untracked paths.
+It distinguishes installable, generated, explicitly source-only,
+documentation-only, check-only, retired, and release-evidence nodes. Missing
+or stale relations fail with exact repository-relative paths and the owning
+preparation command (`make generate`, `make sync`, a manifest entry, or an
+explicit `SOURCE_ONLY_SKILL_REFERENCES` declaration); the validator never runs
+those preparation actions itself. The local pre-publication gate and CI use
+the same helper rather than reconstructing the policy from separate globs.
+
+The independent `sd-full-check` surface remains available only during the
+clean-interface migration. New deterministic callers do not invoke or alias it.
+Its script runs `git diff --check`, `git diff --cached --check`,
 review preflight through `scripts/sd-ai-command-pack-review-preflight.mjs`, any
 configured `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND`, and the
 legacy repo-local `scripts/check-review-preflight.mjs` when present. It then
@@ -1694,15 +1762,16 @@ of bypassing the cache contract.
 - `SD_AI_COMMAND_PACK_HOUSEKEEPING_MERGE_STRATEGY`: auto-merge strategy: `merge`,
   `squash`, or `rebase`. Defaults to `merge`.
 
-Prism is enabled by default when the full-check command is invoked explicitly
-and the executable is present. The `sd-review-pr` cycle disables Prism for its
-command-owned full-check gate. If Prism is missing or credentials/config are
-unavailable, the full-check script reports the skip and continues unless
+Prism is enabled by default when the legacy full-check command is invoked
+explicitly and the executable is present. The `sd-review-pr` cycle consumes
+`sd-check` and never invokes full-check, Prism, or Gito as part of that
+deterministic gate. If Prism is missing or credentials/config are unavailable,
+an explicit full-check reports the skip and continues unless
 `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=required` is set.
 
 Gito is opt-in because it can require `uvx`, cache access outside the repo,
-network access, and configured LLM credentials. The `sd-review-pr` cycle
-disables Gito for its command-owned full-check gate. When enabled explicitly,
+network access, and configured LLM credentials. The `sd-review-pr` cycle does
+not invoke Gito through its `sd-check` gate. When enabled explicitly,
 Gito writes reports to `.build/review/gito` by default so generated review
 artifacts do not land at the repository root. The pack installs
 `.gito/config.toml` for repo-local Gito defaults and

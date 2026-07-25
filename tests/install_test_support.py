@@ -849,6 +849,17 @@ class InstallTestCase(unittest.TestCase):
             "raise SystemExit(0)\n",
             encoding="utf-8",
         )
+        surface_fixture = (
+            "#!/usr/bin/env python3\n"
+            "# Synthetic pack fixtures exercise validator orchestration only.\n"
+            "raise SystemExit(0)\n"
+        )
+        (root / "scripts/sd-ai-command-pack-surface-check.py").write_text(
+            surface_fixture, encoding="utf-8"
+        )
+        (root / "templates/scripts/sd-ai-command-pack-surface-check.py").write_text(
+            surface_fixture, encoding="utf-8"
+        )
         shutil.copyfile(PACK_ROOT / "manifest.json", root / "manifest.json")
         shutil.copyfile(PACK_ROOT / "CHANGELOG.md", root / "CHANGELOG.md")
         (root / "install.py").write_text("# source repo marker\n", encoding="utf-8")

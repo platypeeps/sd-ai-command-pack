@@ -10,8 +10,9 @@
 
 Install reusable AI workflow helpers into
 [Trellis-managed repositories](https://trytrellis.app/). The current pack is
-focused on Trellis enrichment: start, continue, finish-work, local review, PR
-creation/review, full-codebase local review, review learnings, full-check,
+focused on Trellis enrichment: start, continue, finish-work, deterministic
+read-only checks, local review, PR creation/review, full-codebase local review,
+review learnings, full-check,
 read-only repository/fleet status, post-merge housekeeping, update-spec,
 backlog implementation, and backlog design workflows. The repository and `sd`
 command namespace are intentionally
@@ -240,16 +241,32 @@ folder remain unchanged.
 /sd:work-backlog selector=needs-design until=design focus-only="scope:ci"
 ```
 
+### sd-check
+
+Runs the typed deterministic verification gate without AI review, GitHub review
+dispatch, generated-state refresh, Git mutation, or repository-owned cache
+writes. Built-ins cover staged/unstaged whitespace, review preflight, install
+audit, generated-knowledge freshness, tooling/generated scope, and PR-body
+scope when their installed helpers apply. Repository-specific prerequisites and
+checks use strict argv arrays in `.sd-ai-command-pack/check.json`.
+
+The aggregate result and every row distinguish `passed`, `failed`, `skipped`,
+`unavailable`, `invalid`, and `indeterminate`. A before/after state guard fails
+if repository or Git state changes. Stale generated output reports its owning
+refresh command but is never rewritten.
+
 ### sd-full-check
 
 Runs the deterministic local verification gate before PR readiness. Prism can
 run automatically when available; Gito is opt-in through
 `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=1` because it may need network access,
 local caches, and LLM credentials.
+This independent legacy surface remains during the clean-interface migration;
+new deterministic callers use `sd-check` and do not invoke or alias it.
 
 ### sd-review-pr
 
-Runs the deterministic local PR gate with Prism and Gito disabled, requests the
+Runs the typed deterministic `sd-check` gate, requests the
 configured remote reviewer, addresses review comments or CI failures, and
 re-requests review after each pushed fix up to the configured round limit.
 Before remote review it dispositions deterministic boundary-risk and scope
@@ -260,12 +277,9 @@ review request after fail-closed release, audit, provenance, and diff
 classification; existing feedback, local checks, CI, and merge gates remain.
 
 The command-owned deterministic gate runs
-`scripts/sd-ai-command-pack-review-full-check.sh`. If the root
-`package.json` defines a non-empty `check:full` script, the helper runs that
-canonical repository wrapper with Prism and Gito disabled; otherwise it runs
-the installed pack full-check script directly. A canonical wrapper may add
-repository prerequisites before delegating to the pack script, but it must not
-invoke `sd-review-pr` or the helper itself.
+`scripts/sd-ai-command-pack-check.py --json` through the installed toolchain.
+It consumes `.sd-ai-command-pack/check.json` when present and never discovers
+`package.json` scripts or falls back to the legacy full-check selector.
 
 ### sd-review-local
 
@@ -494,7 +508,7 @@ python3 install.py /path/to/trellis/repo
 
 The installer requires `.trellis/config.yaml` in the target repo and will fail
 with the Trellis install link if that marker is missing. It always installs the
-shared `.agents` skills, full-check, the shared shell helper, housekeeping,
+shared `.agents` skills, `sd-check`, full-check, the shared shell helper, housekeeping,
 record-session, review-scope, review-local command assets, review-preflight,
 install-audit, review-learnings, PR-body scope, and update-spec KB scripts,
 Prism/Gito defaults, usage guide, and the
@@ -592,7 +606,7 @@ and the pack-managed `.gitignore`, `.git/info/exclude`, and
 `.github/copilot-instructions.md` blocks; drifted, symlinked, or user-owned
 files are kept unless you add `--force`.
 
-Platform filters always include the shared skills, full-check, the shared shell
+Platform filters always include the shared skills, `sd-check`, full-check, the shared shell
 helper, housekeeping, review-scope, review-preflight, review-local command
 assets, install-audit, review-learnings, PR-body scope, and
 update-spec KB scripts, Prism/Gito defaults, usage guide, and installed-targets
@@ -670,10 +684,14 @@ For the complete maintainer workflow, run `make setup` once and then
 breakdown and release rules. The explicit commands below mirror the main test
 lane for environments without `make`.
 
-Command additions and retirements are guarded by
-`.github/scripts/check-command-surface-drift.py`; it validates registry-backed
-targets and rejects stale live command/configuration references while allowing
-only explicitly reasoned historical locations.
+Shipped payload changes are guarded by
+`scripts/sd-ai-command-pack-surface-check.py`. The versioned read-only helper
+derives installable, generated, source-only, documentation, checker, retired,
+and release-evidence relations from the registry and manifest. `sd-check`, the
+local pre-publication gate, and CI invoke that same executable; stale state is
+reported with `make generate` or `make sync` ownership and is never repaired by
+the checker. The focused `.github/scripts/check-command-surface-drift.py`
+module remains an internal semantic lint consumed by this single entry point.
 
 Run the pack tests with the explicit dev dependencies from
 `requirements-dev.txt`, including `coverage.py` via the `coverage` package.

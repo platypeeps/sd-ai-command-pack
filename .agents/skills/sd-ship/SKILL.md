@@ -104,8 +104,8 @@ before Stage 1.
    publish result without entering `sd-create-pr`'s standalone review handoff.
    Record the PR number and URL for the report. If `until=pr`, stop the chain
    here without running review.
-3. Stage 2 — `sd-review-pr`: run its bounded review loop — deterministic
-   local gate, configured remote review, fixes, replies — until the loop
+3. Stage 2 — `sd-review-pr`: run its bounded review loop — typed deterministic
+   `sd-check`, configured remote review, fixes, replies — until the loop
    stops clean or blocked. Its completed loop owns the one read-only,
    PR-scoped post-cycle review-learning pass; no other ship stage repeats it.
    With `until=review`, invoke it without
