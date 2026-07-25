@@ -13,7 +13,7 @@ log = Path(log_value)
 Path(artifact).mkdir(parents=True, exist_ok=True)
 log.parent.mkdir(parents=True, exist_ok=True)
 with log.open("a", encoding="utf-8") as stream:
-    stream.write(f"{provider}:start:{time.time()}\n")
+    stream.write(f"{provider}:start:{time.monotonic()}\n")
 if mode == "barrier":
     barrier = log.parent / f"{log.name}.{provider}.ready"
     barrier.touch()
@@ -29,7 +29,7 @@ if mode == "barrier":
 else:
     time.sleep(2 if mode == "slow" else 0.35)
 with log.open("a", encoding="utf-8") as stream:
-    stream.write(f"{provider}:end:{time.time()}\n")
+    stream.write(f"{provider}:end:{time.monotonic()}\n")
 if mode == "finding":
     print(
         json.dumps(
@@ -123,5 +123,7 @@ elif mode == "rate-limit":
 elif mode == "cancelled":
     print("provider cancelled", file=sys.stderr)
     raise SystemExit(10)
+elif mode == "large-output":
+    sys.stdout.write("x" * (5 * 1024 * 1024))
 else:
     print(json.dumps({"status": "clean", "findings": []}))

@@ -13,6 +13,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -1050,7 +1051,9 @@ def _gito_payload(attempt_dir: Path) -> dict[str, Any] | None:
             elif severity is None:
                 severity_name = "unspecified"
             elif isinstance(severity, str):
-                severity_name = severity
+                severity_name = severity.casefold()
+                if severity_name not in FINDING_SEVERITY_RANK:
+                    return None
             else:
                 return None
             tags = raw.get("tags")
@@ -1149,60 +1152,69 @@ def _run_provider(
         }
         _atomic_json(attempt_dir / "attempt.json", result)
         return result
+    stdout = b""
+    stderr = b""
+    exit_code: int | None = None
+    status_value = "failed"
+    process: subprocess.Popen[bytes] | None = None
     try:
-        process = subprocess.Popen(
-            list(argv),
-            cwd=repo,
-            env=dict(environment),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=os.name == "posix",
-        )
-        with ACTIVE_PROCESSES_LOCK:
-            ACTIVE_PROCESSES.add(process)
-        if CANCELLATION_EVENT.is_set():
-            _terminate(process)
-        try:
+        with (
+            tempfile.TemporaryFile(mode="w+b", dir=attempt_dir) as stdout_stream,
+            tempfile.TemporaryFile(mode="w+b", dir=attempt_dir) as stderr_stream,
+        ):
             try:
-                stdout, stderr = process.communicate(timeout=provider.timeout_seconds)
-                exit_code = process.returncode
-                status_value = provider.outcome_by_exit.get(exit_code, "failed")
-            except subprocess.TimeoutExpired:
-                _terminate(process)
-                try:
-                    stdout, stderr = process.communicate(timeout=5)
-                except subprocess.TimeoutExpired as termination_error:
-                    stdout = (
-                        termination_error.output
-                        if isinstance(termination_error.output, bytes)
-                        else b""
-                    )
-                    stderr = (
-                        termination_error.stderr
-                        if isinstance(termination_error.stderr, bytes)
-                        else b""
-                    )
-                    stderr += b"\nprovider process did not terminate after timeout"
-                exit_code = 124
-                status_value = "failed"
-                stderr += (
-                    f"\nprovider timed out after {provider.timeout_seconds}s".encode()
+                process = subprocess.Popen(
+                    list(argv),
+                    cwd=repo,
+                    env=dict(environment),
+                    stdin=subprocess.DEVNULL,
+                    stdout=stdout_stream,
+                    stderr=stderr_stream,
+                    start_new_session=os.name == "posix",
                 )
-            if CANCELLATION_EVENT.is_set():
-                status_value = "cancelled"
-        finally:
-            with ACTIVE_PROCESSES_LOCK:
-                ACTIVE_PROCESSES.discard(process)
+                with ACTIVE_PROCESSES_LOCK:
+                    ACTIVE_PROCESSES.add(process)
+                if CANCELLATION_EVENT.is_set():
+                    _terminate(process)
+                try:
+                    process.communicate(timeout=provider.timeout_seconds)
+                    exit_code = process.returncode
+                    status_value = provider.outcome_by_exit.get(exit_code, "failed")
+                except subprocess.TimeoutExpired:
+                    _terminate(process)
+                    try:
+                        process.communicate(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        stderr += b"\nprovider process did not terminate after timeout"
+                    exit_code = 124
+                    status_value = "failed"
+                    stderr += (
+                        f"\nprovider timed out after {provider.timeout_seconds}s".encode()
+                    )
+                if CANCELLATION_EVENT.is_set():
+                    status_value = "cancelled"
+            except OSError as error:
+                if process is not None and process.poll() is None:
+                    _terminate(process)
+                stderr += str(error).encode()
+                status_value = (
+                    "cancelled" if CANCELLATION_EVENT.is_set() else "failed"
+                )
+            finally:
+                if process is not None:
+                    with ACTIVE_PROCESSES_LOCK:
+                        ACTIVE_PROCESSES.discard(process)
+            stdout_stream.seek(0)
+            stdout = stdout_stream.read(MAX_OUTPUT_BYTES)
+            stderr_stream.seek(0)
+            stderr = (stderr_stream.read(MAX_OUTPUT_BYTES) + stderr)[
+                :MAX_OUTPUT_BYTES
+            ]
     except OSError as error:
-        stdout, stderr, exit_code, status_value = (
-            b"",
-            str(error).encode(),
-            None,
-            "cancelled" if CANCELLATION_EVENT.is_set() else "failed",
+        stderr = (stderr + str(error).encode())[:MAX_OUTPUT_BYTES]
+        status_value = (
+            "cancelled" if CANCELLATION_EVENT.is_set() else "failed"
         )
-    stdout = stdout[:MAX_OUTPUT_BYTES]
-    stderr = stderr[:MAX_OUTPUT_BYTES]
     payload = _parse_provider_payload(provider, stdout, attempt_dir)
     findings = (
         _bounded_provider_findings(payload.get("findings", [])) if payload else []

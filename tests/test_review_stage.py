@@ -397,6 +397,16 @@ class ReviewStageTests(InstallTestCase):
             report["receipt"]["attempts"][0]["diagnostic"],
         )
 
+    def test_gito_string_severity_is_normalized(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(root, gito_severity="High")
+
+        result = self.run_stage(root, "gito-string-severity", "--local", "gito")
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(report["receipt"]["findings"][0]["severity"], "high")
+
     def test_prism_worktree_comma_path_fails_before_dispatch(self) -> None:
         root = self.make_repo()
         log = self.write_builtin_config(root)
@@ -605,6 +615,18 @@ class ReviewStageTests(InstallTestCase):
         unavailable_report = self.report(unavailable)
         self.assertEqual(unavailable.returncode, 3, unavailable.stdout)
         self.assertEqual(unavailable_report["status"], "unavailable")
+
+    def test_provider_output_is_bounded_before_parsing(self) -> None:
+        root = self.make_repo()
+        self.write_config(root, modes=("large-output", "clean"))
+
+        result = self.run_stage(root, "large-output", "--local", "prism")
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 3, result.stdout)
+        self.assertEqual(report["status"], "failed")
+        output = root / ".build/sd-review/runs/large-output/prism/stdout.txt"
+        self.assertEqual(output.stat().st_size, 4 * 1024 * 1024)
 
     def test_rate_limit_and_cancellation_remain_distinct_from_clean(self) -> None:
         root = self.make_repo()
