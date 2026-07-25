@@ -175,6 +175,26 @@ class BookkeepingValidatorTests(InstallTestCase):
         self.assertTrue((root / task_dir).is_dir())
         self.assertFalse((root / ".trellis/workspace").exists())
 
+    def test_cli_usage_documents_repository_override(self) -> None:
+        root = self.make_validator_repo()
+
+        result = subprocess.run(
+            [
+                self.node,
+                "scripts/sd-ai-command-pack-review-preflight.mjs",
+                "pre-archive",
+                "--unknown",
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("[--repo <repo-root>]", result.stdout)
+
     def test_pre_archive_reuses_lifecycle_topology_and_context_rules(self) -> None:
         root = self.make_validator_repo()
         parent_name = "07-25-parent-fixture"

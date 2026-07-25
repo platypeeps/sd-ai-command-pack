@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { TextDecoder } from 'node:util';
 
@@ -434,8 +434,8 @@ function isMainModule() {
 function bookkeepingUsage() {
   return [
     'usage:',
-    '  node scripts/sd-ai-command-pack-review-preflight.mjs pre-archive --task-dir <active-task-dir> [--task-dir ...] [--json]',
-    '  node scripts/sd-ai-command-pack-review-preflight.mjs final-bundle --mode <completion|planning> --base <commit> --head <commit> [--json]',
+    '  node scripts/sd-ai-command-pack-review-preflight.mjs pre-archive --task-dir <active-task-dir> [--task-dir ...] [--repo <repo-root>] [--json]',
+    '  node scripts/sd-ai-command-pack-review-preflight.mjs final-bundle --mode <completion|planning> --base <commit> --head <commit> [--repo <repo-root>] [--json]',
   ].join('\n');
 }
 
@@ -606,7 +606,12 @@ function validateBookkeepingTaskDirectory(taskDir, options) {
     return null;
   }
   const absolute = resolve(rootDir, taskDir);
-  if (!absolute.startsWith(`${rootDir}/`)) {
+  const relativeTaskDir = relative(rootDir, absolute);
+  if (
+    relativeTaskDir === '..'
+    || relativeTaskDir.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)
+    || isAbsolute(relativeTaskDir)
+  ) {
     add('task_path_outside_repository', taskDir, 'task directory resolves outside the repository');
     return null;
   }
