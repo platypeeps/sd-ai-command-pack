@@ -198,10 +198,21 @@ class ReviewControllerTests(InstallTestCase):
         default, remote = controller.load_review_configuration(root)
         self.assertEqual(remote["requirement"], "optional")
         self.assertEqual(len(default["providers"]), 2)
+        local_default, _providers, _policy = local_stage.load_config(root)
+        self.assertEqual(default, local_default)
+        self.assertEqual(
+            controller._configuration_digest(default),
+            local_stage._digest(local_default),
+        )
 
         path = root / ".sd-ai-command-pack/review.json"
         path.parent.mkdir(parents=True)
         config = default | {
+            "providers": [
+                default["providers"][0]
+                | {"version": "prism-r\u00e9view-v1"},
+                default["providers"][1],
+            ],
             "remoteIntegration": {
                 "requirement": "required",
                 "descriptorPath": "config/custom-review.json",
@@ -215,7 +226,11 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual(parsed["requirement"], "required")
         self.assertEqual(normalized["remoteIntegration"], parsed)
         local_config, _providers, _policy = local_stage.load_config(root)
-        self.assertEqual(local_config["remoteIntegration"], parsed)
+        self.assertEqual(local_config, normalized)
+        self.assertEqual(
+            controller._configuration_digest(normalized),
+            local_stage._digest(local_config),
+        )
 
         config["remoteIntegration"]["descriptorPath"] = "../escape.json"
         path.write_text(json.dumps(config), encoding="utf-8")
@@ -1296,6 +1311,20 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual((code, report["status"]), (1, "blocked"))
         self.assertEqual(report["diagnostic"], blocked_diagnostic)
         self.assertEqual(report["limitations"], ["local-policy-blocked"])
+        dispatch.assert_not_called()
+
+        root = self.make_repo()
+        invalid_diagnostic = "review configuration policy is invalid"
+        (code, report), dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="pr",
+            local_status="invalid",
+            local_diagnostic=invalid_diagnostic,
+        )
+        self.assertEqual((code, report["status"]), (2, "invalid"))
+        self.assertEqual(report["diagnostic"], invalid_diagnostic)
+        self.assertEqual(report["limitations"], ["local-invalid"])
         dispatch.assert_not_called()
 
         root = self.make_repo()

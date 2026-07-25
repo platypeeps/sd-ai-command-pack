@@ -89,6 +89,17 @@ def _digest(value: object) -> str:
     return hashlib.sha256(_canonical_text(value).encode("utf-8")).hexdigest()
 
 
+def _configuration_digest(value: object) -> str:
+    """Match the local stage's canonical configuration digest exactly."""
+    canonical = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def _bounded(value: object, *, fallback: str = "unavailable") -> str:
     text = " ".join(str(value).replace("\x00", " ").split()) or fallback
     return text if len(text) <= MAX_TEXT else text[: MAX_TEXT - 3] + "..."
@@ -1698,7 +1709,7 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         "remote": args.remote,
         "fix": args.fix,
         "successor": args.successor,
-        "configurationDigest": _digest(config),
+        "configurationDigest": _configuration_digest(config),
     }
     identity = _state_identity(
         repo=repo,
@@ -1825,6 +1836,16 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             status="blocked",
             diagnostic=_bounded(local_diagnostic),
             limitations=("local-policy-blocked",),
+        )
+    if local_status == "invalid":
+        local_diagnostic = local.get("diagnostic")
+        if not isinstance(local_diagnostic, str) or not local_diagnostic.strip():
+            raise ReviewError("invalid local review diagnostic is invalid")
+        return 2, _report(
+            state=state,
+            status="invalid",
+            diagnostic=_bounded(local_diagnostic),
+            limitations=("local-invalid",),
         )
     if local_status not in {"clean", "skipped", "unavailable", "failed", "cancelled"}:
         return 3, _report(
