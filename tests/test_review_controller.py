@@ -368,6 +368,23 @@ class ReviewControllerTests(InstallTestCase):
             head=pr["head"],
         )
         self.assertEqual(failed_summary["confidence"], 0)
+        failed["receipt"]["findings"] = [
+            {"disposition": "outstanding"},
+            {"disposition": "fix"},
+            {"disposition": "fixed"},
+            {"disposition": "rebutted"},
+            {"disposition": "resolved"},
+        ]
+        disposition_summary = controller._router_local_summary(
+            failed,
+            repository=pr["repository"],
+            pr_number=42,
+            head=pr["head"],
+        )
+        self.assertEqual(
+            disposition_summary["dispositionCounts"],
+            {"total": 5, "unresolved": 2, "fixed": 1, "rebutted": 2},
+        )
 
         skipped = self.local_report(controller, pr, status="skipped")
         skipped["receipt"]["attempts"] = []

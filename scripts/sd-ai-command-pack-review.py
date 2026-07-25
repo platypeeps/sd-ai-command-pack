@@ -849,12 +849,24 @@ def _router_local_summary(
             }
         ]
         costs = ["free"]
-    outstanding = sum(
-        1
-        for item in findings
-        if isinstance(item, dict) and item.get("disposition") == "outstanding"
-    )
-    total = len(findings)
+    unresolved = 0
+    fixed = 0
+    rebutted = 0
+    for item in findings:
+        if not isinstance(item, dict):
+            raise ReviewError("local receipt finding is invalid")
+        disposition = item.get("disposition")
+        if disposition in {"outstanding", "fix"}:
+            unresolved += 1
+        elif disposition == "fixed":
+            fixed += 1
+        elif disposition in {"rebutted", "resolved"}:
+            # Router v1 has one terminal non-fix bucket; local `resolved`
+            # carries no fix-commit evidence, so it belongs with rebuttals.
+            rebutted += 1
+        else:
+            raise ReviewError("local receipt finding disposition is invalid")
+    total = unresolved + fixed + rebutted
     mapped_outcome = outcome
     confidence = 90 if outcome == "clean" else 0
     summary = {
@@ -869,9 +881,9 @@ def _router_local_summary(
         "outcome": mapped_outcome,
         "dispositionCounts": {
             "total": total,
-            "unresolved": outstanding,
-            "fixed": 0,
-            "rebutted": total - outstanding,
+            "unresolved": unresolved,
+            "fixed": fixed,
+            "rebutted": rebutted,
         },
         "confidence": confidence,
         "latencyMs": max(durations, default=0),
