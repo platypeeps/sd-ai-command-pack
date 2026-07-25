@@ -21,7 +21,7 @@ import sys
 import tempfile
 from pathlib import Path
 from subprocess import CompletedProcess
-from typing import Any
+from typing import Any, Callable
 
 from sd_ai_command_pack_lib import (
     CommandError,
@@ -57,8 +57,20 @@ MAX_CLUSTER_SIGNATURES = 4
 MAX_CLUSTER_PRS = 8
 MAX_CLUSTER_PATH_FAMILIES = 6
 MAX_CLUSTER_EXAMPLES = 3
+MAX_GITHUB_INVENTORY_PAGES = 10
+MAX_GITHUB_REVIEW_COMMENTS = 500
 MIN_PREVENTIVE_ACTION_COUNT = 2
 REPORT_SCHEMA_VERSION = 1
+PLANNING_SIGNAL_SCHEMA_VERSION = 1
+PLANNING_RECEIPT_SCHEMA_VERSION = 1
+MAX_PLANNING_CHANGED_PATHS = 200
+MAX_PLANNING_REQUEST_BYTES = 16 * 1024
+MAX_PLANNING_RECEIPT_BYTES = 512 * 1024
+DEFAULT_PLANNING_CACHE_TTL_SECONDS = 15 * 60
+MAX_PLANNING_CACHE_TTL_SECONDS = 24 * 60 * 60
+DEFAULT_PLANNING_GITHUB_LIMIT = 50
+MAX_PLANNING_GITHUB_DAYS = 90
+MAX_PLANNING_GITHUB_PRS = 100
 CONTAINMENT_REPOSITORY = "repository-local"
 CONTAINMENT_EXTERNAL = "external"
 
@@ -70,6 +82,32 @@ SIGNAL_CATEGORY_LABELS = {
     SIGNAL_REVIEWER_TEST_HARNESS: "Reviewer/test harness quality",
     SIGNAL_OTHER: "Other recurring signals",
 }
+
+SIGNAL_CATEGORY_ORDER = tuple(SIGNAL_CATEGORY_LABELS)
+
+_SAFE_ATTEMPT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_SNAPSHOT_UPDATED_RE = re.compile(r"_Last updated: (\d{4}-\d{2}-\d{2})_")
+_STATEFUL_PATH_MARKERS = (
+    "controller",
+    "state",
+    "receipt",
+    "workflow",
+    "router",
+    "dispatch",
+    "replay",
+    "lock",
+)
+_SOURCE_PATH_PREFIXES = (
+    "app/",
+    "apps/",
+    "bin/",
+    "cli/",
+    "installer/",
+    "lib/",
+    "packages/",
+    "scripts/",
+    "src/",
+)
 
 GENERATED_SIGNAL_PATH_PREFIXES = (
     "templates/",
@@ -249,6 +287,7 @@ def atomic_write_text(
     *,
     errors: str = "strict",
     revalidate: Any | None = None,
+    mode: int | None = None,
 ) -> None:
     if destination.is_symlink():
         raise OSError("target is a symlink")
@@ -270,7 +309,10 @@ def atomic_write_text(
             raise OSError("atomic update would cross filesystems")
         if revalidate is not None:
             revalidate()
-        os.chmod(temporary_path, default_text_file_mode(destination))
+        os.chmod(
+            temporary_path,
+            mode if mode is not None else default_text_file_mode(destination),
+        )
         if revalidate is not None:
             revalidate()
         os.replace(temporary_path, destination)
@@ -572,6 +614,54 @@ class HistoricalSignalCluster:
         if truncations:
             lines.append(f"  - _Evidence truncated: {', '.join(truncations)}._")
         return lines
+
+    def planning_item(self) -> dict[str, Any]:
+        signature_items = [
+            {
+                "summary": _one_line(_normalize_signal_text(text), limit=110),
+                "count": count,
+            }
+            for text, count in self.signature_examples[:MAX_CLUSTER_SIGNATURES]
+        ]
+        pr_items = list(self.pr_numbers[:MAX_CLUSTER_PRS])
+        path_items = list(self.path_families[:MAX_CLUSTER_PATH_FAMILIES])
+        example_items = [
+            {
+                "prNumber": comment.pr_number,
+                "url": _one_line(comment.pr_url, limit=500),
+                "pathFamily": _path_family(comment.path),
+            }
+            for comment in self.examples[:MAX_CLUSTER_EXAMPLES]
+        ]
+        dimensions = []
+        for kind, included, total in (
+            ("signatures", len(signature_items), self.signature_count),
+            ("prs", len(pr_items), len(self.pr_numbers)),
+            ("pathFamilies", len(path_items), len(self.path_families)),
+            ("examples", len(example_items), self.count),
+        ):
+            if included < total:
+                dimensions.append(
+                    {"kind": kind, "included": included, "total": total}
+                )
+        return {
+            "familyId": self.category,
+            "label": SIGNAL_CATEGORY_LABELS[self.category],
+            "commentCount": self.count,
+            "signatureCount": self.signature_count,
+            "prNumbers": pr_items,
+            "pathFamilies": path_items,
+            "timeBounds": {
+                "firstSeen": self.first_seen or None,
+                "lastSeen": self.last_seen or None,
+            },
+            "representativeSignatures": signature_items,
+            "exampleReferences": example_items,
+            "truncation": {
+                "occurred": bool(dimensions),
+                "dimensions": dimensions,
+            },
+        }
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1215,6 +1305,589 @@ def preventive_actions(clusters: list[HistoricalSignalCluster]) -> list[str]:
     return actions
 
 
+def _normalize_planning_changed_paths(paths: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    normalized: set[str] = set()
+    for raw in paths:
+        if not isinstance(raw, str):
+            raise ValueError("planning changed paths must be strings")
+        value = raw.replace("\\", "/").strip("/")
+        if (
+            not value
+            or value.startswith("../")
+            or "/../" in f"/{value}/"
+            or "\x00" in value
+            or any(ord(character) < 32 for character in value)
+        ):
+            raise ValueError("planning changed path is unsafe")
+        if len(value) > 500:
+            raise ValueError("planning changed path exceeds 500 characters")
+        normalized.add(value)
+    if len(normalized) > MAX_PLANNING_CHANGED_PATHS:
+        raise ValueError(
+            f"planning changed paths exceed {MAX_PLANNING_CHANGED_PATHS} entries"
+        )
+    return tuple(sorted(normalized))
+
+
+def planning_signal_categories(
+    changed_paths: list[str] | tuple[str, ...],
+) -> tuple[str, ...]:
+    categories: set[str] = set()
+    for path in _normalize_planning_changed_paths(changed_paths):
+        lowered = path.casefold()
+        name = Path(lowered).name
+        if lowered.startswith(".trellis/tasks/") or name == "task.json":
+            categories.add(SIGNAL_TASK_METADATA)
+        if lowered.startswith(GENERATED_SIGNAL_PATH_PREFIXES) or lowered in GENERATED_SIGNAL_PATHS:
+            categories.add(SIGNAL_GENERATED_SURFACES)
+        if lowered.startswith(("test/", "tests/")):
+            categories.add(SIGNAL_REVIEWER_TEST_HARNESS)
+        if lowered.startswith("docs/") or lowered in {"readme.md", "changelog.md"}:
+            categories.add(SIGNAL_CONTRACT_DOCUMENTATION)
+        if lowered.startswith(_SOURCE_PATH_PREFIXES) or any(
+            marker in name for marker in _STATEFUL_PATH_MARKERS
+        ):
+            categories.add(SIGNAL_BOUNDARY_VALIDATION)
+    if changed_paths and not categories:
+        categories.add(SIGNAL_OTHER)
+    return tuple(category for category in SIGNAL_CATEGORY_ORDER if category in categories)
+
+
+def _review_learning_watermark(
+    comments: list[PullRequestComment],
+) -> dict[str, Any]:
+    ordered = sorted(
+        comments,
+        key=lambda comment: (
+            comment.pr_number,
+            comment.path,
+            comment.created_at,
+            comment.body,
+            comment.is_resolved,
+            comment.is_outdated,
+        ),
+    )
+    digest = hashlib.sha256()
+    for comment in ordered:
+        row = json.dumps(
+            {
+                "pr": comment.pr_number,
+                "path": comment.path,
+                "createdAt": comment.created_at,
+                "bodyDigest": content_digest(comment.body.encode("utf-8")),
+                "resolved": comment.is_resolved,
+                "outdated": comment.is_outdated,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        digest.update(row.encode("utf-8"))
+        digest.update(b"\n")
+    created_values = [
+        comment.created_at
+        for comment in ordered
+        if _timestamp_value(comment.created_at)
+    ]
+    return {
+        "commentCount": len(ordered),
+        "latestCreatedAt": max(created_values, default=None),
+        "maxPrNumber": max((comment.pr_number for comment in ordered), default=None),
+        "digest": f"sha256:{digest.hexdigest()}",
+    }
+
+
+def _tracked_snapshot_status(
+    *,
+    existing_text: str | None,
+    exists: bool | None,
+    watermark: dict[str, Any],
+) -> dict[str, Any]:
+    latest = watermark.get("latestCreatedAt")
+    base = {
+        "lastUpdatedDate": None,
+        "latestEvidenceAt": latest if isinstance(latest, str) else None,
+        "updateRecommended": False,
+    }
+    if exists is False:
+        return {
+            **base,
+            "status": "missing",
+            "updateRecommended": True,
+            "reason": "tracked snapshot is missing",
+        }
+    if existing_text is None or exists is None:
+        return {
+            **base,
+            "status": "unknown",
+            "reason": "tracked snapshot was not inspected",
+        }
+    start = existing_text.find(MANAGED_START)
+    end = existing_text.find(MANAGED_END, start + len(MANAGED_START))
+    if start < 0 or end < 0:
+        return {
+            **base,
+            "status": "missing",
+            "updateRecommended": True,
+            "reason": "tracked snapshot has no complete managed learning block",
+        }
+    match = _SNAPSHOT_UPDATED_RE.search(existing_text, start, end)
+    if match is None:
+        return {
+            **base,
+            "status": "unknown",
+            "reason": "tracked snapshot update date is unavailable",
+        }
+    try:
+        snapshot_date = dt.date.fromisoformat(match.group(1))
+    except ValueError:
+        return {
+            **base,
+            "status": "unknown",
+            "reason": "tracked snapshot update date is invalid",
+        }
+    base["lastUpdatedDate"] = snapshot_date.isoformat()
+    if not isinstance(latest, str) or not _timestamp_value(latest):
+        return {
+            **base,
+            "status": "unknown",
+            "reason": "current GitHub evidence is unavailable",
+        }
+    latest_date = dt.datetime.fromtimestamp(
+        _timestamp_value(latest),
+        tz=dt.timezone.utc,
+    ).date()
+    if latest_date > snapshot_date:
+        return {
+            **base,
+            "status": "stale",
+            "updateRecommended": True,
+            "reason": "newer GitHub review evidence exists",
+        }
+    return {
+        **base,
+        "status": "current",
+        "reason": "tracked snapshot covers the latest observed review evidence",
+    }
+
+
+def build_review_learning_signal(
+    comments: list[PullRequestComment],
+    review_window: CopilotReviewWindow,
+    *,
+    changed_paths: list[str] | tuple[str, ...],
+    requested: bool,
+    source: str = "live",
+    status_override: str | None = None,
+    limitations: tuple[str, ...] = (),
+    now: dt.datetime | None = None,
+    snapshot_text: str | None = None,
+    snapshot_exists: bool | None = None,
+) -> dict[str, Any]:
+    if source not in {"live", "cached", "stale", "unavailable", "not-requested"}:
+        raise ValueError(f"unsupported review-learning source: {source}")
+    paths = _normalize_planning_changed_paths(changed_paths)
+    selected_categories = planning_signal_categories(paths)
+    actionable, historical = partition_review_comments(comments)
+    clusters = cluster_historical_comments(historical)
+    shown_clusters = clusters[:MAX_HISTORICAL_CLUSTERS]
+    applicable_clusters = [
+        cluster for cluster in clusters if cluster.category in selected_categories
+    ][:MAX_HISTORICAL_CLUSTERS]
+
+    limitation_values = list(dict.fromkeys(limitations))
+    if review_window.truncated:
+        limitation_values.append("github-window-truncated")
+    if len(clusters) > len(shown_clusters):
+        limitation_values.append("historical-clusters-truncated")
+    evidence_truncated = any(
+        cluster.planning_item()["truncation"]["occurred"]
+        for cluster in shown_clusters
+    )
+    if evidence_truncated:
+        limitation_values.append("cluster-evidence-truncated")
+    limitation_values = list(dict.fromkeys(limitation_values))
+
+    if status_override is not None:
+        status = status_override
+    elif not requested:
+        status = "not-requested"
+    elif source in {"cached", "stale", "unavailable"}:
+        status = source
+    elif limitation_values:
+        status = "truncated"
+    else:
+        status = "live"
+    if status not in {"live", "cached", "stale", "truncated", "unavailable", "not-requested"}:
+        raise ValueError(f"unsupported review-learning status: {status}")
+
+    risk_questions = [
+        {
+            "familyId": cluster.category,
+            "question": SIGNAL_PREVENTIVE_ACTIONS[cluster.category],
+        }
+        for cluster in applicable_clusters
+        if cluster.count >= MIN_PREVENTIVE_ACTION_COUNT
+        and cluster.category in SIGNAL_PREVENTIVE_ACTIONS
+    ]
+    observed_at = now or dt.datetime.now(dt.timezone.utc)
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=dt.timezone.utc)
+    observed_at = observed_at.astimezone(dt.timezone.utc)
+    watermark = _review_learning_watermark(comments)
+    tracked_snapshot = _tracked_snapshot_status(
+        existing_text=snapshot_text,
+        exists=snapshot_exists,
+        watermark=watermark,
+    )
+    latest_timestamp = watermark["latestCreatedAt"]
+    evidence_age_seconds: int | None = None
+    if isinstance(latest_timestamp, str) and _timestamp_value(latest_timestamp):
+        evidence_age_seconds = max(
+            0,
+            int(observed_at.timestamp() - _timestamp_value(latest_timestamp)),
+        )
+    return {
+        "schemaVersion": PLANNING_SIGNAL_SCHEMA_VERSION,
+        "status": status,
+        "evidence": {
+            "source": source,
+            "prsInspected": review_window.prs_inspected,
+            "commentCount": len(comments),
+            "actionableCommentCount": len(actionable),
+            "cutoff": review_window.cutoff,
+            "observedAt": observed_at.isoformat().replace("+00:00", "Z"),
+            "ageSeconds": evidence_age_seconds,
+            "watermark": watermark,
+        },
+        "selection": {
+            "changedPaths": list(paths),
+            "pathFamilies": sorted({_path_family(path) for path in paths}),
+            "familyIds": list(selected_categories),
+        },
+        "trackedSnapshot": tracked_snapshot,
+        "historicalClusters": [cluster.planning_item() for cluster in shown_clusters],
+        "applicableClusters": [
+            cluster.planning_item() for cluster in applicable_clusters
+        ],
+        "riskQuestions": risk_questions,
+        "truncation": {
+            "occurred": bool(limitation_values),
+            "totalClusterCount": len(clusters),
+            "returnedClusterCount": len(shown_clusters),
+        },
+        "limitations": limitation_values,
+        "confidenceCredit": {
+            "granted": False,
+            "reason": "historical learning is advisory evidence only",
+        },
+    }
+
+
+def unavailable_review_learning_signal(
+    *,
+    changed_paths: list[str] | tuple[str, ...],
+    limitation: str,
+    snapshot_text: str | None = None,
+    snapshot_exists: bool | None = None,
+) -> dict[str, Any]:
+    return build_review_learning_signal(
+        [],
+        CopilotReviewWindow((), 0, None, False),
+        changed_paths=changed_paths,
+        requested=True,
+        source="unavailable",
+        status_override="unavailable",
+        limitations=(_one_line(limitation, limit=300),),
+        snapshot_text=snapshot_text,
+        snapshot_exists=snapshot_exists,
+    )
+
+
+def _planning_request_fingerprint(
+    *,
+    repository_id: str,
+    attempt_id: str,
+    changed_paths: tuple[str, ...],
+    request: dict[str, Any],
+    snapshot_text: str | None,
+    snapshot_exists: bool | None,
+) -> str:
+    payload = {
+        "schemaVersion": PLANNING_RECEIPT_SCHEMA_VERSION,
+        "repository": repository_id,
+        "attemptId": attempt_id,
+        "changedPaths": list(changed_paths),
+        "request": request,
+        "trackedSnapshot": {
+            "exists": snapshot_exists,
+            "digest": (
+                content_digest(snapshot_text.encode("utf-8"))
+                if snapshot_text is not None
+                else None
+            ),
+        },
+    }
+    try:
+        encoded = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("planning request must be bounded JSON data") from exc
+    if len(encoded) > MAX_PLANNING_REQUEST_BYTES:
+        raise ValueError(
+            f"planning request exceeds {MAX_PLANNING_REQUEST_BYTES} bytes"
+        )
+    return content_digest(encoded)
+
+
+def _validate_private_artifact_directory(path: Path, *, repo_root: Path) -> Path:
+    if not path.is_absolute():
+        raise ValueError("review artifact directory must be absolute")
+    root = repo_root.resolve(strict=True)
+    resolved = path.expanduser().resolve(strict=False)
+    if _path_is_within(resolved, root):
+        raise ValueError("review artifact directory must be outside the repository")
+    try:
+        node = path.lstat()
+    except FileNotFoundError:
+        path.mkdir(mode=0o700, parents=True, exist_ok=False)
+        node = path.lstat()
+    if stat.S_ISLNK(node.st_mode) or not stat.S_ISDIR(node.st_mode):
+        raise ValueError("review artifact directory must be a real directory")
+    _validate_owner(path, label="review artifact directory")
+    if stat.S_IMODE(node.st_mode) & 0o077:
+        raise ValueError("review artifact directory must use private permissions")
+    return resolved
+
+
+def _load_planning_receipt(path: Path) -> dict[str, Any] | None:
+    try:
+        node = path.lstat()
+    except FileNotFoundError:
+        return None
+    if stat.S_ISLNK(node.st_mode) or not stat.S_ISREG(node.st_mode):
+        return None
+    if node.st_size > MAX_PLANNING_RECEIPT_BYTES or stat.S_IMODE(node.st_mode) & 0o077:
+        return None
+    get_euid = getattr(os, "geteuid", None)
+    if get_euid is not None and node.st_uid != get_euid():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8", errors="strict"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _valid_cached_planning_signal(value: Any) -> bool:
+    if not isinstance(value, dict) or value.get("schemaVersion") != PLANNING_SIGNAL_SCHEMA_VERSION:
+        return False
+    if value.get("status") not in {
+        "live",
+        "cached",
+        "stale",
+        "truncated",
+        "unavailable",
+        "not-requested",
+    }:
+        return False
+    evidence = value.get("evidence")
+    confidence = value.get("confidenceCredit")
+    snapshot = value.get("trackedSnapshot")
+    return (
+        isinstance(evidence, dict)
+        and evidence.get("source")
+        in {"live", "cached", "stale", "unavailable", "not-requested"}
+        and isinstance(evidence.get("watermark"), dict)
+        and isinstance(value.get("limitations"), list)
+        and isinstance(value.get("truncation"), dict)
+        and isinstance(snapshot, dict)
+        and snapshot.get("status") in {"current", "stale", "missing", "unknown"}
+        and isinstance(snapshot.get("updateRecommended"), bool)
+        and isinstance(confidence, dict)
+        and confidence.get("granted") is False
+    )
+
+
+def _cache_signal(
+    signal: dict[str, Any],
+    *,
+    source: str,
+    status: str,
+    now: dt.datetime | None = None,
+) -> dict[str, Any]:
+    copied = json.loads(json.dumps(signal, sort_keys=True))
+    copied["status"] = status
+    copied["evidence"]["source"] = source
+    if now is not None:
+        latest = copied["evidence"]["watermark"].get("latestCreatedAt")
+        copied["evidence"]["observedAt"] = now.isoformat().replace("+00:00", "Z")
+        copied["evidence"]["ageSeconds"] = (
+            max(0, int(now.timestamp() - _timestamp_value(latest)))
+            if isinstance(latest, str) and _timestamp_value(latest)
+            else None
+        )
+    copied["confidenceCredit"] = {
+        "granted": False,
+        "reason": "historical learning is advisory evidence only",
+    }
+    return copied
+
+
+def collect_review_learning_signal_once(
+    *,
+    repo_root: Path,
+    repository_id: str,
+    attempt_id: str,
+    changed_paths: list[str] | tuple[str, ...],
+    request: dict[str, Any],
+    fetch_window: Callable[[], CopilotReviewWindow],
+    artifact_root: Path | None = None,
+    ttl_seconds: int = DEFAULT_PLANNING_CACHE_TTL_SECONDS,
+    now: dt.datetime | None = None,
+    snapshot_text: str | None = None,
+    snapshot_exists: bool | None = None,
+) -> dict[str, Any]:
+    if not repository_id or len(repository_id) > 200 or any(
+        ord(character) < 32 for character in repository_id
+    ):
+        raise ValueError("repository identity is invalid")
+    if not _SAFE_ATTEMPT_ID_RE.fullmatch(attempt_id):
+        raise ValueError("review attempt ID is invalid")
+    if isinstance(ttl_seconds, bool) or not 1 <= ttl_seconds <= MAX_PLANNING_CACHE_TTL_SECONDS:
+        raise ValueError(
+            f"planning cache TTL must be between 1 and {MAX_PLANNING_CACHE_TTL_SECONDS} seconds"
+        )
+    paths = _normalize_planning_changed_paths(changed_paths)
+    fingerprint = _planning_request_fingerprint(
+        repository_id=repository_id,
+        attempt_id=attempt_id,
+        changed_paths=paths,
+        request=request,
+        snapshot_text=snapshot_text,
+        snapshot_exists=snapshot_exists,
+    )
+    current = now or dt.datetime.now(dt.timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=dt.timezone.utc)
+    current = current.astimezone(dt.timezone.utc)
+
+    receipt_path: Path | None = None
+    cached: dict[str, Any] | None = None
+    if artifact_root is not None:
+        artifact_dir = _validate_private_artifact_directory(
+            artifact_root,
+            repo_root=repo_root,
+        )
+        repository_key = hashlib.sha256(repository_id.encode("utf-8")).hexdigest()[:24]
+        learning_dir = _validate_private_artifact_directory(
+            artifact_dir / "review-learnings",
+            repo_root=repo_root,
+        )
+        receipt_dir = _validate_private_artifact_directory(
+            learning_dir / repository_key,
+            repo_root=repo_root,
+        )
+        receipt_path = receipt_dir / f"{attempt_id}.json"
+        cached = _load_planning_receipt(receipt_path)
+        if cached is not None and (
+            cached.get("schemaVersion") != PLANNING_RECEIPT_SCHEMA_VERSION
+            or cached.get("kind") != "review-learning-attempt"
+            or cached.get("repository") != repository_id
+            or cached.get("attemptId") != attempt_id
+            or cached.get("requestFingerprint") != fingerprint
+            or not _valid_cached_planning_signal(cached.get("signal"))
+            or cached.get("githubWatermark")
+            != cached["signal"]["evidence"]["watermark"]
+        ):
+            cached = None
+
+    stale_signal: dict[str, Any] | None = None
+    if cached is not None:
+        expires_at = cached.get("expiresAt")
+        try:
+            expires = dt.datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+        except ValueError:
+            cached = None
+        else:
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=dt.timezone.utc)
+            if current < expires.astimezone(dt.timezone.utc):
+                return {
+                    **cached,
+                    "cache": {"status": "hit", "path": str(receipt_path)},
+                }
+            stale_signal = cached["signal"]
+
+    try:
+        window = fetch_window()
+        if not isinstance(window, CopilotReviewWindow):
+            raise TypeError("review-learning collector returned an invalid window")
+        comments = list(window.comments)
+        signal = build_review_learning_signal(
+            comments,
+            window,
+            changed_paths=paths,
+            requested=True,
+            now=current,
+            snapshot_text=snapshot_text,
+            snapshot_exists=snapshot_exists,
+        )
+        cache_status = "miss" if cached is None else "refreshed"
+    except (CommandError, OSError, RuntimeError, TypeError, json.JSONDecodeError) as exc:
+        limitation = f"live review-learning scan unavailable: {_one_line(str(exc), limit=240)}"
+        if stale_signal is not None:
+            signal = _cache_signal(
+                stale_signal,
+                source="stale",
+                status="stale",
+                now=current,
+            )
+            signal["limitations"] = list(
+                dict.fromkeys([*signal.get("limitations", []), limitation])
+            )
+            signal["truncation"]["occurred"] = True
+            cache_status = "stale"
+        else:
+            signal = unavailable_review_learning_signal(
+                changed_paths=paths,
+                limitation=limitation,
+                snapshot_text=snapshot_text,
+                snapshot_exists=snapshot_exists,
+            )
+            cache_status = "unavailable"
+
+    expires = current + dt.timedelta(seconds=ttl_seconds)
+    receipt = {
+        "schemaVersion": PLANNING_RECEIPT_SCHEMA_VERSION,
+        "kind": "review-learning-attempt",
+        "repository": repository_id,
+        "attemptId": attempt_id,
+        "requestFingerprint": fingerprint,
+        "githubWatermark": signal["evidence"]["watermark"],
+        "createdAt": current.isoformat().replace("+00:00", "Z"),
+        "expiresAt": expires.isoformat().replace("+00:00", "Z"),
+        "signal": signal,
+    }
+    if receipt_path is not None:
+        encoded = json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n"
+        if len(encoded.encode("utf-8")) > MAX_PLANNING_RECEIPT_BYTES:
+            raise ValueError(
+                f"review-learning receipt exceeds {MAX_PLANNING_RECEIPT_BYTES} bytes"
+            )
+        atomic_write_text(receipt_path, encoded, mode=0o600)
+    return {
+        **receipt,
+        "cache": {
+            "status": cache_status,
+            "path": str(receipt_path) if receipt_path else None,
+        },
+    }
+
+
 def _run_gh_stdout(args: list[str], repo_root: Path) -> str:
     result = run_gh_command(
         args,
@@ -1267,7 +1940,9 @@ query($owner:String!, $name:String!, $endCursor:String) {
 """.strip()
     prs: list[dict[str, Any]] = []
     cursor: str | None = None
+    page_count = 0
     while True:
+        page_count += 1
         args = [
             "api",
             "graphql",
@@ -1317,6 +1992,8 @@ query($owner:String!, $name:String!, $endCursor:String) {
             break
         if not page_info.get("hasNextPage"):
             break
+        if page_count >= MAX_GITHUB_INVENTORY_PAGES:
+            return prs, cutoff, True
         next_cursor = page_info.get("endCursor")
         if not isinstance(next_cursor, str) or not next_cursor:
             break
@@ -1330,17 +2007,19 @@ def _copilot_comments_for_prs(
     owner: str,
     name: str,
     prs: list[dict[str, Any]],
-) -> list[PullRequestComment]:
+) -> tuple[list[PullRequestComment], bool]:
     query = """
 query($owner:String!, $name:String!, $number:Int!) {
   repository(owner:$owner, name:$name) {
     pullRequest(number:$number) {
       reviewThreads(first:100) {
+        pageInfo { hasNextPage }
         nodes {
           isResolved
           isOutdated
           path
           comments(first:50) {
+            pageInfo { hasNextPage }
             nodes {
               author { login }
               body
@@ -1354,6 +2033,7 @@ query($owner:String!, $name:String!, $number:Int!) {
 }
 """.strip()
     comments: list[PullRequestComment] = []
+    truncated = False
     for pr in prs:
         pr_obj = _as_dict(pr)
         number = pr_obj.get("number")
@@ -1374,14 +2054,19 @@ query($owner:String!, $name:String!, $number:Int!) {
             ],
             repo_root,
         )
-        thread_nodes = _dig(
+        thread_connection = _dig(
             payload,
             "data",
             "repository",
             "pullRequest",
             "reviewThreads",
-            "nodes",
         )
+        if not isinstance(thread_connection, dict):
+            continue
+        page_info = thread_connection.get("pageInfo")
+        if isinstance(page_info, dict) and page_info.get("hasNextPage"):
+            truncated = True
+        thread_nodes = thread_connection.get("nodes")
         if not isinstance(thread_nodes, list):
             continue
         for thread in thread_nodes:
@@ -1389,6 +2074,9 @@ query($owner:String!, $name:String!, $number:Int!) {
             comments_payload = thread_obj.get("comments")
             if not isinstance(comments_payload, dict):
                 continue
+            comment_page_info = comments_payload.get("pageInfo")
+            if isinstance(comment_page_info, dict) and comment_page_info.get("hasNextPage"):
+                truncated = True
             comment_nodes = comments_payload.get("nodes")
             if not isinstance(comment_nodes, list):
                 continue
@@ -1397,6 +2085,8 @@ query($owner:String!, $name:String!, $number:Int!) {
                 author = comment_obj.get("author")
                 if not isinstance(author, dict) or author.get("login") != COPILOT_LOGIN:
                     continue
+                if len(comments) >= MAX_GITHUB_REVIEW_COMMENTS:
+                    return comments, True
                 path = thread_obj.get("path")
                 body = comment_obj.get("body")
                 comments.append(
@@ -1411,7 +2101,7 @@ query($owner:String!, $name:String!, $number:Int!) {
                         str(comment_obj.get("createdAt") or ""),
                     )
                 )
-    return comments
+    return comments, truncated
 
 
 def fetch_recent_copilot_review_window(
@@ -1429,13 +2119,18 @@ def fetch_recent_copilot_review_window(
         owner=owner,
         name=name,
     )
-    comments = _copilot_comments_for_prs(
+    comments, comments_truncated = _copilot_comments_for_prs(
         repo_root,
         owner=owner,
         name=name,
         prs=prs,
     )
-    return CopilotReviewWindow(tuple(comments), len(prs), cutoff, truncated)
+    return CopilotReviewWindow(
+        tuple(comments),
+        len(prs),
+        cutoff,
+        truncated or comments_truncated,
+    )
 
 
 def fetch_copilot_review_for_prs(
@@ -1454,13 +2149,13 @@ def fetch_copilot_review_for_prs(
         }
         for number in unique_numbers
     ]
-    comments = _copilot_comments_for_prs(
+    comments, comments_truncated = _copilot_comments_for_prs(
         repo_root,
         owner=owner,
         name=name,
         prs=prs,
     )
-    return CopilotReviewWindow(tuple(comments), len(prs), None, False)
+    return CopilotReviewWindow(tuple(comments), len(prs), None, comments_truncated)
 
 
 def fetch_recent_copilot_comments(
@@ -1614,6 +2309,7 @@ def _report_payload(
     wrote: bool,
     before_digest: str | None,
     after_digest: str | None,
+    review_learning: dict[str, Any],
     reason: str | None = None,
 ) -> dict[str, Any]:
     return {
@@ -1656,6 +2352,7 @@ def _report_payload(
             "cutoff": review_window.cutoff,
             "truncated": review_window.truncated,
         },
+        "reviewLearning": review_learning,
         "changes": {
             "proposed": proposed_changes,
             "applied": applied_changes,
@@ -1681,6 +2378,25 @@ def _print_human_report(report: dict[str, Any]) -> None:
     print(f"[sd-review-learnings:report] resolved target: {target['resolved']}")
     print(f"[sd-review-learnings:report] containment: {target['containment']}")
     print(f"[sd-review-learnings:report] findings: {report['findings']['count']}")
+    learning = report["reviewLearning"]
+    age = learning["evidence"].get("ageSeconds")
+    age_text = "age unavailable" if age is None else f"age {age}s"
+    print(
+        "[sd-review-learnings:report] planning signal: "
+        f"{learning['status']} from {learning['evidence']['source']}; "
+        f"{len(learning['applicableClusters'])} applicable family/families; "
+        f"{age_text}"
+    )
+    if learning["limitations"]:
+        print(
+            "[sd-review-learnings:report] planning limitations: "
+            + ", ".join(learning["limitations"])
+        )
+    snapshot = learning["trackedSnapshot"]
+    print(
+        "[sd-review-learnings:report] tracked snapshot: "
+        f"{snapshot['status']}; {snapshot['reason']}"
+    )
     print(
         "[sd-review-learnings:report] changes: "
         f"{changes['proposed']} proposed, {changes['applied']} applied"
@@ -1752,6 +2468,10 @@ def _print_early_failure(
             "cutoff": None,
             "truncated": False,
         },
+        "reviewLearning": unavailable_review_learning_signal(
+            changed_paths=(),
+            limitation=reason,
+        ),
         "changes": {"proposed": 0, "applied": 0},
         "write": {
             "status": "skipped" if mode == "scan" else "failed",
@@ -1832,6 +2552,31 @@ def _build_parser() -> argparse.ArgumentParser:
         help="GitHub repository to inspect; defaults to `gh repo view` for the current repo.",
     )
     parser.add_argument(
+        "--planning-attempt",
+        metavar="ID",
+        help=(
+            "Emit one typed review-planning receipt for this attempt instead of "
+            "rendering or updating the durable Markdown snapshot."
+        ),
+    )
+    parser.add_argument(
+        "--review-artifact-root",
+        type=Path,
+        help=(
+            "Optional absolute private review-artifact directory used to reuse "
+            "the exact planning receipt within --planning-attempt."
+        ),
+    )
+    parser.add_argument(
+        "--planning-cache-ttl",
+        type=int,
+        default=DEFAULT_PLANNING_CACHE_TTL_SECONDS,
+        help=(
+            "Private planning receipt lifetime in seconds; valid only with "
+            "--planning-attempt."
+        ),
+    )
+    parser.add_argument(
         "--env-prefix",
         action="append",
         help="Environment-variable prefix to require help coverage for. Repeat to override defaults.",
@@ -1840,9 +2585,45 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _planning_argument_error(args: argparse.Namespace) -> str | None:
+    if args.review_artifact_root is not None and args.planning_attempt is None:
+        return "--review-artifact-root requires --planning-attempt"
+    if (
+        args.planning_cache_ttl != DEFAULT_PLANNING_CACHE_TTL_SECONDS
+        and args.planning_attempt is None
+    ):
+        return "--planning-cache-ttl requires --planning-attempt"
+    if args.planning_attempt is None:
+        return None
+    if not args.json:
+        return "--planning-attempt requires --json"
+    if args.update or args.update_external or args.dry_run or args.allow is not None:
+        return "--planning-attempt cannot be combined with update, dry-run, or allow modes"
+    if not args.github_repo:
+        return "--planning-attempt requires --github-repo OWNER/REPO"
+    if not args.github_days and not args.github_pr:
+        return "--planning-attempt requires --github-days or --github-pr"
+    if args.github_days > MAX_PLANNING_GITHUB_DAYS:
+        return f"--planning-attempt limits --github-days to {MAX_PLANNING_GITHUB_DAYS}"
+    if len(set(args.github_pr)) > MAX_PLANNING_GITHUB_PRS:
+        return f"--planning-attempt limits --github-pr to {MAX_PLANNING_GITHUB_PRS} unique values"
+    if args.github_limit > MAX_PLANNING_GITHUB_PRS:
+        return f"--planning-attempt limits --github-limit to {MAX_PLANNING_GITHUB_PRS}"
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     mode = "update-external" if args.update_external else "update" if args.update else "scan"
+    planning_error = _planning_argument_error(args)
+    if planning_error is not None:
+        _print_early_failure(
+            args=args,
+            mode=mode,
+            phase="setup",
+            reason=planning_error,
+        )
+        return 2
     if args.dry_run and (args.update or args.update_external):
         _print_early_failure(
             args=args,
@@ -1935,7 +2716,12 @@ def main(argv: list[str] | None = None) -> int:
                 base=resolved_base or None,
                 include_working_tree=args.include_working_tree,
             )
-        findings = extract_findings(diff_text, repo_root, env_prefixes=env_prefixes)
+        changed_paths = tuple(sorted(_parse_diff(diff_text)[0]))
+        findings = (
+            []
+            if args.planning_attempt is not None
+            else extract_findings(diff_text, repo_root, env_prefixes=env_prefixes)
+        )
     except (
         CommandError,
         OSError,
@@ -1954,6 +2740,12 @@ def main(argv: list[str] | None = None) -> int:
             wrote=False,
             before_digest=plan.before_digest,
             after_digest=plan.before_digest,
+            review_learning=unavailable_review_learning_signal(
+                changed_paths=(),
+                limitation=f"findings scan failed: {exc}",
+                snapshot_text=plan.existing_text,
+                snapshot_exists=plan.exists,
+            ),
             reason=f"findings scan failed: {exc}",
         )
         if args.json:
@@ -1962,6 +2754,53 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[sd-review-learnings:findings] {exc}", file=sys.stderr)
             _print_report(report, json_output=False)
         return 2
+
+    if args.planning_attempt is not None:
+        assert args.github_repo is not None
+        effective_limit = args.github_limit or DEFAULT_PLANNING_GITHUB_LIMIT
+
+        def fetch_planning_window() -> CopilotReviewWindow:
+            if args.github_pr:
+                return fetch_copilot_review_for_prs(
+                    repo_root,
+                    pr_numbers=args.github_pr,
+                    github_repo=args.github_repo,
+                )
+            return fetch_recent_copilot_review_window(
+                repo_root,
+                days=args.github_days,
+                limit=effective_limit,
+                github_repo=args.github_repo,
+            )
+
+        request = {
+            "githubDays": args.github_days,
+            "githubLimit": effective_limit if args.github_days else 0,
+            "githubPrs": list(dict.fromkeys(args.github_pr)),
+        }
+        try:
+            receipt = collect_review_learning_signal_once(
+                repo_root=repo_root,
+                repository_id=args.github_repo.strip(),
+                attempt_id=args.planning_attempt,
+                changed_paths=changed_paths,
+                request=request,
+                fetch_window=fetch_planning_window,
+                artifact_root=args.review_artifact_root,
+                ttl_seconds=args.planning_cache_ttl,
+                snapshot_text=plan.existing_text,
+                snapshot_exists=plan.exists,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            _print_early_failure(
+                args=args,
+                mode=mode,
+                phase="planning",
+                reason=str(exc),
+            )
+            return 2
+        print(json.dumps(receipt, sort_keys=True))
+        return 0
 
     try:
         if args.github_pr:
@@ -1998,6 +2837,12 @@ def main(argv: list[str] | None = None) -> int:
             wrote=False,
             before_digest=plan.before_digest,
             after_digest=plan.before_digest,
+            review_learning=unavailable_review_learning_signal(
+                changed_paths=changed_paths,
+                limitation=f"GitHub scan failed: {exc}",
+                snapshot_text=plan.existing_text,
+                snapshot_exists=plan.exists,
+            ),
             reason=f"GitHub scan failed: {exc}",
         )
         if args.json:
@@ -2008,6 +2853,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     comments = list(review_window.comments)
+    review_learning = build_review_learning_signal(
+        comments,
+        review_window,
+        changed_paths=changed_paths,
+        requested=bool(args.github_days or args.github_pr),
+        source="live" if (args.github_days or args.github_pr) else "not-requested",
+        snapshot_text=plan.existing_text,
+        snapshot_exists=plan.exists,
+    )
     if not args.json:
         for finding in findings:
             print(finding.render())
@@ -2024,8 +2878,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         if review_window.truncated:
             print(
-                "[sd-review-learnings:github] warning: --github-limit truncated "
-                "the requested PR window",
+                "[sd-review-learnings:github] warning: GitHub evidence collection "
+                "was truncated by configured safety bounds",
                 file=sys.stderr,
             )
 
@@ -2045,6 +2899,7 @@ def main(argv: list[str] | None = None) -> int:
             wrote=False,
             before_digest=plan.before_digest,
             after_digest=plan.before_digest,
+            review_learning=review_learning,
             reason=str(exc),
         )
         if not args.json:
@@ -2076,6 +2931,7 @@ def main(argv: list[str] | None = None) -> int:
                 wrote=False,
                 before_digest=plan.before_digest,
                 after_digest=plan.before_digest,
+                review_learning=review_learning,
                 reason=str(exc),
             )
             if not args.json:
@@ -2094,6 +2950,7 @@ def main(argv: list[str] | None = None) -> int:
             wrote=wrote,
             before_digest=plan.before_digest,
             after_digest=updated_digest,
+            review_learning=review_learning,
         )
         if not args.json:
             shown_target: Path = plan.resolved
@@ -2118,6 +2975,7 @@ def main(argv: list[str] | None = None) -> int:
         wrote=False,
         before_digest=plan.before_digest,
         after_digest=updated_digest,
+        review_learning=review_learning,
         reason="dry-run preview" if args.dry_run else "scan mode is read-only",
     )
     _print_report(report, json_output=args.json)

@@ -837,3 +837,85 @@ Published and reviewed the typed sd-check coordinator and shipped-surface closur
 ### Next Steps
 
 - None - task complete
+
+
+## Session 223: Feed review learnings into review planning
+
+**Date**: 2026-07-24
+**Task**: Feed review learnings into review planning
+**Branch**: `codex/feed-review-learnings-into-planning`
+
+### Summary
+
+Added bounded path-filtered review-learning planning receipts, exact private cache reuse including degraded attempts, tracked-snapshot freshness, normalized evidence, release 0.48.0 documentation, and fleet validation.
+
+### Main Changes
+
+- Extended the existing review-learning scanner with bounded normalized
+  historical clusters, changed-path family selection, risk questions, and
+  explicit live, truncated, stale, unavailable, and snapshot-freshness state.
+- Added private atomic one-scan-per-attempt receipts that validate repository,
+  request, changed paths, snapshot digest, GitHub watermark, schema, lifetime,
+  ownership, and permissions; degraded results are reused without rescanning.
+- Published the 0.48.0 template/mirror, skill, guide, code-spec, changelog, and
+  exact-payload fleet candidate evidence.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8884408` | (see git log) |
+
+### Testing
+
+- `54` focused review-learning tests passed.
+- `make check` passed with scanner coverage at `86%`.
+- All eight configured fleet consumers passed disposable install, audit,
+  preparation, and compatibility checks for the exact 0.48.0 payload.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 224: Review PR #248 and clarify truncation diagnostics
+
+**Date**: 2026-07-24
+**Task**: Review PR #248 and clarify truncation diagnostics
+**Branch**: `codex/feed-review-learnings-into-planning`
+
+### Summary
+
+Converged PR #248 by preserving historical journal state, correcting the misleading human truncation warning, adding regression coverage, refreshing exact-payload fleet evidence, and resolving the Copilot thread.
+
+### Main Changes
+
+- Restored the historical Session 203 journal entry and kept the current implementation record in Session 223.
+- Reworded human GitHub truncation diagnostics to cover every configured safety bound, not only --github-limit, in the template and installed mirror.
+- Added PR-specific regression coverage, refreshed exact-payload evidence across all eight fleet consumers, and replied to and resolved the Copilot finding.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9b13a09` | fix: preserve historical journal session |
+| `02c3bcd` | fix: clarify review-learning truncation warning |
+
+### Testing
+
+- [OK] All 55 review-learning tests passed, including the PR-specific truncation warning regression.
+- [OK] make check passed with scanner coverage at 86%, install/provenance audit, surface closure, lint, types, and security checks green.
+- [OK] All eight fleet consumers passed exact-payload validation; PR #248 CI and Copilot round 2 completed with no new findings.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

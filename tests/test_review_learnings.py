@@ -177,6 +177,50 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertEqual(window.prs_inspected, 1)
         self.assertTrue(window.truncated)
 
+    def test_review_window_marks_unread_pages_as_truncated(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_thread_bounds",
+        )
+        payload = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "pageInfo": {"hasNextPage": True},
+                            "nodes": [
+                                {
+                                    "isResolved": True,
+                                    "isOutdated": False,
+                                    "path": "scripts/controller.py",
+                                    "comments": {
+                                        "pageInfo": {"hasNextPage": True},
+                                        "nodes": [
+                                            {
+                                                "author": {"login": module.COPILOT_LOGIN},
+                                                "body": "Validate the boundary.",
+                                                "createdAt": "2026-07-24T00:00:00Z",
+                                            }
+                                        ],
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                }
+            }
+        }
+
+        with mock.patch.object(module, "_run_gh_json", return_value=payload):
+            window = module.fetch_copilot_review_for_prs(
+                Path("."),
+                pr_numbers=[7],
+                github_repo="owner/name",
+            )
+
+        self.assertEqual(len(window.comments), 1)
+        self.assertTrue(window.truncated)
+
     def test_explicit_pr_review_window_is_bounded_to_requested_pr(self) -> None:
         module = self.load_module_from_path(
             PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
@@ -491,6 +535,753 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertIn("examples 3/9", rendered)
         actions = rendered.split("### Suggested Preventive Actions", 1)[1]
         self.assertNotIn("**Task metadata**", actions)
+
+    def test_planning_signal_exposes_bounded_cluster_contract(self) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_planning_contract",
+        )
+        raw_body = "Validate the boundary and failure matrix. " + "private detail " * 30
+        comments = [
+            learnings.PullRequestComment(
+                pr_number=200 + index,
+                pr_title="historical",
+                pr_url=f"https://github.com/owner/repo/pull/{200 + index}",
+                path=f"scripts/state-controller-{index}.py",
+                body=f"{raw_body}{index}",
+                is_resolved=True,
+                is_outdated=False,
+                created_at=f"2026-07-{10 + index:02d}T00:00:00Z",
+            )
+            for index in range(6)
+        ]
+        window = learnings.CopilotReviewWindow(
+            tuple(comments),
+            6,
+            "2026-07-01T00:00:00Z",
+            False,
+        )
+
+        signal = learnings.build_review_learning_signal(
+            comments,
+            window,
+            changed_paths=("scripts/review-state-controller.py",),
+            requested=True,
+        )
+
+        self.assertEqual(signal["schemaVersion"], 1)
+        self.assertEqual(signal["selection"]["familyIds"], ["boundary-validation"])
+        self.assertEqual(len(signal["historicalClusters"]), 1)
+        cluster = signal["applicableClusters"][0]
+        self.assertEqual(cluster["familyId"], "boundary-validation")
+        self.assertEqual(cluster["commentCount"], 6)
+        self.assertTrue(cluster["truncation"]["occurred"])
+        self.assertEqual(
+            cluster["representativeSignatures"][0]["summary"],
+            cluster["representativeSignatures"][0]["summary"].lower(),
+        )
+        self.assertFalse(signal["confidenceCredit"]["granted"])
+        serialized = json.dumps(signal, sort_keys=True)
+        self.assertNotIn(raw_body, serialized)
+        self.assertNotIn("private detail " * 10, serialized)
+
+    def test_planning_signal_selects_only_relevant_path_families(self) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_planning_selection",
+        )
+        comments = [
+            learnings.PullRequestComment(
+                pr_number=1,
+                pr_title="historical",
+                pr_url="https://github.com/owner/repo/pull/1",
+                path="scripts/state-controller.py",
+                body="Validate the state boundary.",
+                is_resolved=True,
+                is_outdated=False,
+            ),
+            learnings.PullRequestComment(
+                pr_number=2,
+                pr_title="historical",
+                pr_url="https://github.com/owner/repo/pull/2",
+                path="docs/contract.md",
+                body="Align the documentation contract.",
+                is_resolved=True,
+                is_outdated=False,
+            ),
+        ]
+        window = learnings.CopilotReviewWindow(tuple(comments), 2, None, False)
+
+        controller = learnings.build_review_learning_signal(
+            comments,
+            window,
+            changed_paths=("scripts/state-controller.py",),
+            requested=True,
+        )
+        documentation = learnings.build_review_learning_signal(
+            comments,
+            window,
+            changed_paths=("docs/operator-guide.md",),
+            requested=True,
+        )
+
+        self.assertEqual(
+            [item["familyId"] for item in controller["applicableClusters"]],
+            ["boundary-validation"],
+        )
+        self.assertEqual(
+            [item["familyId"] for item in documentation["applicableClusters"]],
+            ["contract-documentation-drift"],
+        )
+        self.assertNotIn(
+            "boundary-validation",
+            documentation["selection"]["familyIds"],
+        )
+
+    def test_planning_signal_reports_tracked_snapshot_freshness(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_snapshot_status",
+        )
+        comment = module.PullRequestComment(
+            pr_number=12,
+            pr_title="historical",
+            pr_url="https://github.com/owner/repo/pull/12",
+            path="docs/contract.md",
+            body="Align the documentation contract.",
+            is_resolved=True,
+            is_outdated=False,
+            created_at="2026-07-24T12:00:00Z",
+        )
+        window = module.CopilotReviewWindow((comment,), 1, None, False)
+
+        def signal(snapshot: str, *, exists: bool = True):
+            return module.build_review_learning_signal(
+                [comment],
+                window,
+                changed_paths=("docs/guide.md",),
+                requested=True,
+                snapshot_text=snapshot,
+                snapshot_exists=exists,
+            )["trackedSnapshot"]
+
+        stale = signal(
+            f"{module.MANAGED_START}\n_Last updated: 2026-07-21_\n{module.MANAGED_END}\n"
+        )
+        current = signal(
+            f"{module.MANAGED_START}\n_Last updated: 2026-07-24_\n{module.MANAGED_END}\n"
+        )
+        invalid = signal(
+            f"{module.MANAGED_START}\n_Last updated: 2026-99-99_\n{module.MANAGED_END}\n"
+        )
+        missing = signal("", exists=False)
+
+        self.assertEqual(stale["status"], "stale")
+        self.assertTrue(stale["updateRecommended"])
+        self.assertEqual(current["status"], "current")
+        self.assertFalse(current["updateRecommended"])
+        self.assertEqual(invalid["status"], "unknown")
+        self.assertEqual(missing["status"], "missing")
+        self.assertTrue(missing["updateRecommended"])
+
+    def test_review_attempt_cache_reuses_one_scan_with_private_receipt(self) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_attempt_cache",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learning-attempt-")
+        self.addCleanup(tempdir.cleanup)
+        base = Path(tempdir.name)
+        repo = base / "repo"
+        repo.mkdir()
+        artifact_root = base / "artifacts"
+        calls = 0
+        comment = learnings.PullRequestComment(
+            pr_number=7,
+            pr_title="historical",
+            pr_url="https://github.com/owner/repo/pull/7",
+            path="scripts/controller.py",
+            body="Validate the boundary.",
+            is_resolved=True,
+            is_outdated=False,
+            created_at="2026-07-24T00:00:00Z",
+        )
+
+        def fetch_window():
+            nonlocal calls
+            calls += 1
+            return learnings.CopilotReviewWindow((comment,), 1, None, False)
+
+        now = learnings.dt.datetime(2026, 7, 24, tzinfo=learnings.dt.timezone.utc)
+        arguments = {
+            "repo_root": repo,
+            "repository_id": "owner/repo",
+            "attempt_id": "attempt-1",
+            "changed_paths": ("scripts/controller.py",),
+            "request": {"githubDays": 30, "githubLimit": 50},
+            "fetch_window": fetch_window,
+            "artifact_root": artifact_root,
+        }
+
+        first = learnings.collect_review_learning_signal_once(**arguments, now=now)
+        second = learnings.collect_review_learning_signal_once(
+            **arguments,
+            now=now + learnings.dt.timedelta(seconds=10),
+        )
+
+        self.assertEqual(calls, 1)
+        self.assertEqual(first["cache"]["status"], "miss")
+        self.assertEqual(second["cache"]["status"], "hit")
+        self.assertEqual(second["signal"], first["signal"])
+        self.assertEqual(first["githubWatermark"], second["githubWatermark"])
+        receipt_path = Path(first["cache"]["path"])
+        self.assertEqual(receipt_path.stat().st_mode & 0o077, 0)
+        self.assertNotIn(str(repo), receipt_path.read_text(encoding="utf-8"))
+        tampered = json.loads(receipt_path.read_text(encoding="utf-8"))
+        tampered["githubWatermark"] = {"digest": "sha256:tampered"}
+        receipt_path.write_text(json.dumps(tampered) + "\n", encoding="utf-8")
+        third = learnings.collect_review_learning_signal_once(
+            **arguments,
+            now=now + learnings.dt.timedelta(seconds=20),
+        )
+        self.assertEqual(calls, 2)
+        self.assertEqual(third["cache"]["status"], "miss")
+
+    def test_review_attempt_cache_reports_stale_and_unavailable_evidence(self) -> None:
+        learnings = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_attempt_stale",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learning-stale-")
+        self.addCleanup(tempdir.cleanup)
+        base = Path(tempdir.name)
+        repo = base / "repo"
+        repo.mkdir()
+        artifact_root = base / "artifacts"
+        now = learnings.dt.datetime(2026, 7, 24, tzinfo=learnings.dt.timezone.utc)
+        comment = learnings.PullRequestComment(
+            pr_number=8,
+            pr_title="historical",
+            pr_url="https://github.com/owner/repo/pull/8",
+            path="docs/contract.md",
+            body="Align the contract wording.",
+            is_resolved=True,
+            is_outdated=False,
+        )
+        common = {
+            "repo_root": repo,
+            "repository_id": "owner/repo",
+            "attempt_id": "attempt-2",
+            "changed_paths": ("docs/guide.md",),
+            "request": {"githubDays": 30, "githubLimit": 50},
+            "artifact_root": artifact_root,
+            "ttl_seconds": 60,
+        }
+        learnings.collect_review_learning_signal_once(
+            **common,
+            fetch_window=lambda: learnings.CopilotReviewWindow((comment,), 1, None, False),
+            now=now,
+        )
+
+        stale = learnings.collect_review_learning_signal_once(
+            **common,
+            fetch_window=lambda: (_ for _ in ()).throw(RuntimeError("rate limited")),
+            now=now + learnings.dt.timedelta(seconds=61),
+        )
+        unavailable_calls = 0
+
+        def unavailable_fetch():
+            nonlocal unavailable_calls
+            unavailable_calls += 1
+            raise RuntimeError("malformed payload")
+
+        unavailable_arguments = {
+            "repo_root": repo,
+            "repository_id": "owner/repo",
+            "attempt_id": "attempt-3",
+            "changed_paths": ("docs/guide.md",),
+            "request": {"githubDays": 30, "githubLimit": 50},
+            "fetch_window": unavailable_fetch,
+            "artifact_root": artifact_root,
+        }
+        unavailable = learnings.collect_review_learning_signal_once(
+            **unavailable_arguments,
+            now=now,
+        )
+        unavailable_hit = learnings.collect_review_learning_signal_once(
+            **unavailable_arguments,
+            now=now + learnings.dt.timedelta(seconds=10),
+        )
+
+        self.assertEqual(stale["cache"]["status"], "stale")
+        self.assertEqual(stale["signal"]["status"], "stale")
+        self.assertIn("rate limited", " ".join(stale["signal"]["limitations"]))
+        self.assertFalse(stale["signal"]["confidenceCredit"]["granted"])
+        self.assertEqual(unavailable["signal"]["status"], "unavailable")
+        self.assertIn(
+            "malformed payload",
+            " ".join(unavailable["signal"]["limitations"]),
+        )
+        self.assertFalse(unavailable["signal"]["confidenceCredit"]["granted"])
+        self.assertEqual(unavailable_calls, 1)
+        self.assertEqual(unavailable_hit["cache"]["status"], "hit")
+        self.assertEqual(unavailable_hit["signal"], unavailable["signal"])
+
+    def test_planning_attempt_cli_reuses_receipt_without_markdown_writes(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_planning_cli",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learning-cli-")
+        self.addCleanup(tempdir.cleanup)
+        base = Path(tempdir.name)
+        repo = base / "repo"
+        repo.mkdir()
+        diff = repo / "review.diff"
+        diff.write_text(
+            "--- a/scripts/controller.py\n"
+            "+++ b/scripts/controller.py\n"
+            "@@ -0,0 +1 @@\n"
+            "+state = {}\n",
+            encoding="utf-8",
+        )
+        artifact_root = base / "artifacts"
+        comment = module.PullRequestComment(
+            pr_number=9,
+            pr_title="historical",
+            pr_url="https://github.com/owner/repo/pull/9",
+            path="scripts/controller.py",
+            body="Validate the boundary.",
+            is_resolved=True,
+            is_outdated=False,
+        )
+        window = module.CopilotReviewWindow((comment,), 1, None, False)
+        command = [
+            "--repo-root",
+            str(repo),
+            "--diff-from",
+            str(diff),
+            "--github-days",
+            "30",
+            "--github-repo",
+            "owner/repo",
+            "--planning-attempt",
+            "attempt-cli",
+            "--review-artifact-root",
+            str(artifact_root),
+            "--json",
+        ]
+
+        with mock.patch.object(
+            module,
+            "fetch_recent_copilot_review_window",
+            return_value=window,
+        ) as fetch:
+            outputs = []
+            for _ in range(2):
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    self.assertEqual(module.main(command), 0)
+                outputs.append(json.loads(stdout.getvalue()))
+
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(outputs[0]["cache"]["status"], "miss")
+        self.assertEqual(outputs[1]["cache"]["status"], "hit")
+        self.assertEqual(outputs[1]["signal"], outputs[0]["signal"])
+        self.assertEqual(outputs[1]["signal"]["trackedSnapshot"]["status"], "missing")
+        self.assertFalse((repo / "docs").exists())
+
+    def test_review_attempt_cache_rejects_repository_storage(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_attempt_boundary",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learning-boundary-")
+        self.addCleanup(tempdir.cleanup)
+        repo = Path(tempdir.name) / "repo"
+        repo.mkdir()
+
+        with self.assertRaisesRegex(ValueError, "outside the repository"):
+            module.collect_review_learning_signal_once(
+                repo_root=repo,
+                repository_id="owner/repo",
+                attempt_id="attempt-boundary",
+                changed_paths=("docs/guide.md",),
+                request={"githubDays": 30, "githubLimit": 50},
+                fetch_window=lambda: module.CopilotReviewWindow((), 0, None, False),
+                artifact_root=repo / ".review-artifacts",
+            )
+
+    def test_planning_arguments_are_bounded_and_mutually_exclusive(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_planning_arguments",
+        )
+        parser = module._build_parser()
+        cases = (
+            (
+                ["--review-artifact-root", "/tmp/review-artifacts"],
+                "--review-artifact-root requires --planning-attempt",
+            ),
+            (
+                ["--planning-cache-ttl", "30"],
+                "--planning-cache-ttl requires --planning-attempt",
+            ),
+            (
+                ["--planning-attempt", "attempt-1"],
+                "--planning-attempt requires --json",
+            ),
+            (
+                ["--planning-attempt", "attempt-1", "--json", "--update"],
+                "cannot be combined",
+            ),
+            (
+                ["--planning-attempt", "attempt-1", "--json"],
+                "requires --github-repo",
+            ),
+            (
+                [
+                    "--planning-attempt",
+                    "attempt-1",
+                    "--json",
+                    "--github-repo",
+                    "owner/repo",
+                ],
+                "requires --github-days or --github-pr",
+            ),
+            (
+                [
+                    "--planning-attempt",
+                    "attempt-1",
+                    "--json",
+                    "--github-repo",
+                    "owner/repo",
+                    "--github-days",
+                    "91",
+                ],
+                "limits --github-days",
+            ),
+            (
+                [
+                    "--planning-attempt",
+                    "attempt-1",
+                    "--json",
+                    "--github-repo",
+                    "owner/repo",
+                    "--github-days",
+                    "30",
+                    "--github-limit",
+                    "101",
+                ],
+                "limits --github-limit",
+            ),
+        )
+
+        self.assertIsNone(module._planning_argument_error(parser.parse_args([])))
+        for argv, expected in cases:
+            with self.subTest(argv=argv):
+                self.assertIn(
+                    expected,
+                    module._planning_argument_error(parser.parse_args(argv)) or "",
+                )
+
+        too_many_prs = [
+            "--planning-attempt",
+            "attempt-1",
+            "--json",
+            "--github-repo",
+            "owner/repo",
+            *[
+                value
+                for number in range(1, module.MAX_PLANNING_GITHUB_PRS + 2)
+                for value in ("--github-pr", str(number))
+            ],
+        ]
+        self.assertIn(
+            "limits --github-pr",
+            module._planning_argument_error(parser.parse_args(too_many_prs)) or "",
+        )
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(module.main(["--planning-attempt", "attempt-1", "--json"]), 2)
+        self.assertIn("requires --github-repo", stdout.getvalue())
+
+    def test_planning_path_and_signal_validation_is_explicit(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_planning_validation",
+        )
+        invalid_paths = (
+            [1],
+            ["../outside.py"],
+            ["x" * 501],
+            [f"docs/item-{number}.md" for number in range(module.MAX_PLANNING_CHANGED_PATHS + 1)],
+        )
+        for paths in invalid_paths:
+            with self.subTest(paths_type=type(paths[0]).__name__, count=len(paths)):
+                with self.assertRaises(ValueError):
+                    module._normalize_planning_changed_paths(paths)
+
+        selected = module.planning_signal_categories(
+            (
+                ".trellis/tasks/example/task.json",
+                "templates/scripts/generated.py",
+                "tests/test_generated.py",
+                "docs/contract.md",
+                "scripts/review-controller.py",
+            )
+        )
+        self.assertEqual(selected, module.SIGNAL_CATEGORY_ORDER[:-1])
+        self.assertEqual(
+            module.planning_signal_categories(("assets/icon.svg",)),
+            (module.SIGNAL_OTHER,),
+        )
+
+        truncated_window = module.CopilotReviewWindow((), 0, None, True)
+        naive_now = module.dt.datetime(2026, 7, 24)
+        truncated = module.build_review_learning_signal(
+            [],
+            truncated_window,
+            changed_paths=(),
+            requested=True,
+            now=naive_now,
+        )
+        self.assertEqual(truncated["status"], "truncated")
+        self.assertIn("github-window-truncated", truncated["limitations"])
+        self.assertEqual(
+            module.build_review_learning_signal(
+                [],
+                truncated_window,
+                changed_paths=(),
+                requested=False,
+            )["status"],
+            "not-requested",
+        )
+        self.assertEqual(
+            module.build_review_learning_signal(
+                [],
+                module.CopilotReviewWindow((), 0, None, False),
+                changed_paths=(),
+                requested=True,
+                source="cached",
+            )["status"],
+            "cached",
+        )
+        with self.assertRaisesRegex(ValueError, "source"):
+            module.build_review_learning_signal(
+                [],
+                truncated_window,
+                changed_paths=(),
+                requested=True,
+                source="invalid",
+            )
+        with self.assertRaisesRegex(ValueError, "status"):
+            module.build_review_learning_signal(
+                [],
+                truncated_window,
+                changed_paths=(),
+                requested=True,
+                status_override="invalid",
+            )
+
+    def test_planning_cache_rejects_unsafe_inputs_and_receipts(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_cache_validation",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learning-security-")
+        self.addCleanup(tempdir.cleanup)
+        base = Path(tempdir.name)
+        repo = base / "repo"
+        repo.mkdir()
+
+        def fetch():
+            return module.CopilotReviewWindow((), 0, None, False)
+
+        common = {
+            "repo_root": repo,
+            "repository_id": "owner/repo",
+            "attempt_id": "attempt-1",
+            "changed_paths": ("docs/guide.md",),
+            "request": {"githubDays": 30},
+            "fetch_window": fetch,
+        }
+
+        for override in (
+            {"repository_id": ""},
+            {"repository_id": "owner/repo\n"},
+            {"repository_id": "x" * 201},
+            {"attempt_id": "unsafe attempt"},
+            {"ttl_seconds": True},
+            {"ttl_seconds": 0},
+            {"ttl_seconds": module.MAX_PLANNING_CACHE_TTL_SECONDS + 1},
+        ):
+            with self.subTest(override=override):
+                with self.assertRaises(ValueError):
+                    module.collect_review_learning_signal_once(**{**common, **override})
+
+        with self.assertRaisesRegex(ValueError, "bounded JSON"):
+            module.collect_review_learning_signal_once(
+                **{**common, "request": {"bad": {1, 2}}}
+            )
+        with self.assertRaisesRegex(ValueError, "exceeds"):
+            module.collect_review_learning_signal_once(
+                **{**common, "request": {"large": "x" * module.MAX_PLANNING_REQUEST_BYTES}}
+            )
+        with self.assertRaisesRegex(ValueError, "absolute"):
+            module.collect_review_learning_signal_once(
+                **{**common, "artifact_root": Path("relative-artifacts")}
+            )
+
+        non_directory = base / "not-a-directory"
+        non_directory.write_text("x", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "real directory"):
+            module.collect_review_learning_signal_once(
+                **{**common, "artifact_root": non_directory}
+            )
+        public_directory = base / "public"
+        public_directory.mkdir(mode=0o755)
+        with self.assertRaisesRegex(ValueError, "private permissions"):
+            module.collect_review_learning_signal_once(
+                **{**common, "artifact_root": public_directory}
+            )
+
+        receipt = base / "receipt.json"
+        self.assertIsNone(module._load_planning_receipt(receipt))
+        receipt.mkdir()
+        self.assertIsNone(module._load_planning_receipt(receipt))
+        receipt.rmdir()
+        receipt.write_text("not-json", encoding="utf-8")
+        receipt.chmod(0o600)
+        self.assertIsNone(module._load_planning_receipt(receipt))
+        receipt.write_text("[]\n", encoding="utf-8")
+        self.assertIsNone(module._load_planning_receipt(receipt))
+        receipt.write_text('{"ok": true}\n', encoding="utf-8")
+        self.assertEqual(module._load_planning_receipt(receipt), {"ok": True})
+        receipt.chmod(0o644)
+        self.assertIsNone(module._load_planning_receipt(receipt))
+
+        valid_signal = module.unavailable_review_learning_signal(
+            changed_paths=(),
+            limitation="offline",
+        )
+        self.assertTrue(module._valid_cached_planning_signal(valid_signal))
+        for invalid in (None, {}, {**valid_signal, "status": "invalid"}):
+            with self.subTest(invalid=invalid):
+                self.assertFalse(module._valid_cached_planning_signal(invalid))
+
+    def test_planning_cache_refreshes_and_handles_invalid_collectors(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_cache_refresh",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learning-refresh-")
+        self.addCleanup(tempdir.cleanup)
+        base = Path(tempdir.name)
+        repo = base / "repo"
+        repo.mkdir()
+        artifact_root = base / "artifacts"
+        now = module.dt.datetime(2026, 7, 24)
+        calls = 0
+
+        def fetch():
+            nonlocal calls
+            calls += 1
+            return module.CopilotReviewWindow((), 0, None, False)
+
+        common = {
+            "repo_root": repo,
+            "repository_id": "owner/repo",
+            "attempt_id": "attempt-refresh",
+            "changed_paths": ("docs/guide.md",),
+            "request": {"githubDays": 30},
+            "fetch_window": fetch,
+            "artifact_root": artifact_root,
+            "ttl_seconds": 1,
+        }
+        first = module.collect_review_learning_signal_once(**common, now=now)
+        refreshed = module.collect_review_learning_signal_once(
+            **common,
+            now=now + module.dt.timedelta(seconds=2),
+        )
+        self.assertEqual(calls, 2)
+        self.assertEqual(first["cache"]["status"], "miss")
+        self.assertEqual(refreshed["cache"]["status"], "refreshed")
+
+        invalid = module.collect_review_learning_signal_once(
+            repo_root=repo,
+            repository_id="owner/repo",
+            attempt_id="attempt-invalid-window",
+            changed_paths=(),
+            request={"githubPrs": [1]},
+            fetch_window=lambda: object(),
+            now=now,
+        )
+        self.assertEqual(invalid["cache"]["status"], "unavailable")
+        self.assertIn("invalid window", " ".join(invalid["signal"]["limitations"]))
+
+        with mock.patch.object(module, "MAX_PLANNING_RECEIPT_BYTES", 1):
+            with self.assertRaisesRegex(ValueError, "receipt exceeds"):
+                module.collect_review_learning_signal_once(
+                    repo_root=repo,
+                    repository_id="owner/repo",
+                    attempt_id="attempt-oversize",
+                    changed_paths=(),
+                    request={},
+                    fetch_window=fetch,
+                    artifact_root=base / "oversize-artifacts",
+                    now=now,
+                )
+
+    def test_planning_cli_supports_explicit_prs_and_reports_collection_errors(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_planning_pr_cli",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learning-pr-cli-")
+        self.addCleanup(tempdir.cleanup)
+        repo = Path(tempdir.name) / "repo"
+        repo.mkdir()
+        diff = repo / "review.diff"
+        diff.write_text(
+            "--- a/docs/guide.md\n+++ b/docs/guide.md\n@@ -0,0 +1 @@\n+guide\n",
+            encoding="utf-8",
+        )
+        command = [
+            "--repo-root",
+            str(repo),
+            "--diff-from",
+            str(diff),
+            "--github-pr",
+            "7",
+            "--github-repo",
+            "owner/repo",
+            "--planning-attempt",
+            "attempt-pr",
+            "--json",
+        ]
+        window = module.CopilotReviewWindow((), 1, None, False)
+        with mock.patch.object(
+            module,
+            "fetch_copilot_review_for_prs",
+            return_value=window,
+        ) as fetch:
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                self.assertEqual(module.main(command), 0)
+            self.assertEqual(json.loads(stdout.getvalue())["cache"]["status"], "miss")
+            fetch.assert_called_once()
+
+        with mock.patch.object(
+            module,
+            "collect_review_learning_signal_once",
+            side_effect=ValueError("unsafe planning request"),
+        ):
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                self.assertEqual(module.main(command), 2)
+            self.assertIn("unsafe planning request", stdout.getvalue())
 
     def test_preventive_actions_require_a_detected_recurring_category(self) -> None:
         learnings = self.load_module_from_path(
@@ -894,6 +1685,12 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertEqual(report["mode"], "scan")
         self.assertEqual(report["repositoryRoot"], str(root.resolve()))
         self.assertEqual(report["target"]["containment"], "repository-local")
+        self.assertEqual(report["reviewLearning"]["status"], "not-requested")
+        self.assertEqual(
+            report["reviewLearning"]["evidence"]["source"],
+            "not-requested",
+        )
+        self.assertFalse(report["reviewLearning"]["confidenceCredit"]["granted"])
         self.assertEqual(report["changes"], {"applied": 0, "proposed": 1})
         self.assertEqual(
             report["write"],
@@ -1183,6 +1980,39 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertEqual(result, 2)
         self.assertIn("[sd-review-learnings:github]", stderr.getvalue())
         self.assertIn("expected list in review learnings payload", stderr.getvalue())
+
+    def test_review_learnings_main_describes_truncation_without_assuming_limit(
+        self,
+    ) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_truncation_warning_test",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-test-")
+        self.addCleanup(tempdir.cleanup)
+        truncated = module.CopilotReviewWindow((), 1, None, True)
+
+        with mock.patch.object(module, "build_local_diff", return_value=""):
+            with mock.patch.object(module, "extract_findings", return_value=[]):
+                with mock.patch.object(
+                    module,
+                    "fetch_copilot_review_for_prs",
+                    return_value=truncated,
+                ):
+                    stderr = io.StringIO()
+                    with contextlib.redirect_stderr(stderr):
+                        result = module.main(
+                            [
+                                "--repo-root",
+                                tempdir.name,
+                                "--github-pr",
+                                "7",
+                            ]
+                        )
+
+        self.assertEqual(result, 0)
+        self.assertIn("truncated by configured safety bounds", stderr.getvalue())
+        self.assertNotIn("--github-limit", stderr.getvalue())
 
     def test_review_learnings_main_reports_git_command_error_without_traceback(
         self,

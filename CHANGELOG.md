@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.48.0 - 2026-07-24
+
+- Expose bounded, normalized historical review-learning clusters as a typed
+  path-filtered planning signal without copying full review comment bodies.
+- Add one-scan-per-attempt private receipts with exact cache reuse, bounded
+  GitHub evidence, explicit tracked-snapshot freshness, visible
+  stale/unavailable states, and zero confidence credit.
+
 ## 0.47.0 - 2026-07-24
 
 - Add `sd-check` as a typed deterministic verification command with strict

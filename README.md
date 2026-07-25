@@ -325,6 +325,15 @@ evidence counts and category-specific preventive actions. Historical review
 paths remain readable remote provenance and are not treated as current checkout
 paths by the local preflight.
 
+The unified review workflow can also request one schema-versioned planning
+receipt per attempt. It selects only historical families relevant to the
+changed paths, omits full raw comment bodies, grants no confidence credit, and
+may reuse an exact private receipt outside the repository. Stale, truncated,
+corrupt, rate-limited, or unavailable evidence remains explicit and never
+changes the tracked read-only boundary of ordinary review. The same typed
+signal reports whether the durable managed snapshot is current, stale, missing,
+or unknown without updating it.
+
 ### sd-audit-repo
 
 Runs the formal multi-dimension repository audit through a deterministic
