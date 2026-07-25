@@ -895,6 +895,7 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
         mutates_local=True,
         interaction_decisions=("review-learnings.external-target",),
     ),
+    CommandInfo("sd-check", "check", "verification-improvement"),
     CommandInfo(
         "sd-full-check", "full-check", "verification-improvement", mutates_local=True
     ),
@@ -1165,6 +1166,14 @@ COMMAND_NAMES: tuple[tuple[str, str], ...] = tuple(
 # checkout, but are not included in consumer manifests. Their workflows depend
 # on source-only operator files such as the fleet registry and install entrypoint.
 SOURCE_ONLY_COMMAND_NAMES = frozenset({"sd-fleet-refresh"})
+
+# Extra template files used only from the pack source checkout. Unlike
+# SHARED_SKILL_REFERENCES these files are intentionally absent from the
+# consumer manifest, so every path must be declared explicitly. This prevents
+# a new source-only reference from silently falling through both inventories.
+SOURCE_ONLY_SKILL_REFERENCES: dict[str, tuple[str, ...]] = {
+    "sd-fleet-refresh": ("references/controller-recovery.md",),
+}
 
 
 def command_installed_targets(
@@ -1519,7 +1528,40 @@ def validate_source_only_command_names(
         )
 
 
+def validate_source_only_skill_references(
+    source_only_names: frozenset[str],
+    references: dict[str, tuple[str, ...]],
+) -> None:
+    """Reject undeclared owners, duplicates, and unsafe source-only paths."""
+
+    unknown = sorted(set(references) - source_only_names)
+    errors = ["unknown source-only skill(s): " + ", ".join(unknown)] if unknown else []
+    for name, paths in references.items():
+        if not isinstance(paths, tuple) or any(
+            not isinstance(value, str) or not value for value in paths
+        ):
+            errors.append(f"{name} contains invalid source-only reference paths")
+            continue
+        if len(paths) != len(set(paths)):
+            errors.append(f"{name} contains duplicate source-only reference paths")
+        for value in paths:
+            path = Path(value)
+            if (
+                path.is_absolute()
+                or ".." in path.parts
+                or len(path.parts) < 2
+                or path.parts[0] != "references"
+                or path.suffix != ".md"
+            ):
+                errors.append(f"{name} contains unsafe source-only reference path: {value}")
+    if errors:
+        raise RuntimeError("invalid SOURCE_ONLY_SKILL_REFERENCES: " + "; ".join(errors))
+
+
 validate_source_only_command_names(COMMAND_NAMES, SOURCE_ONLY_COMMAND_NAMES)
+validate_source_only_skill_references(
+    SOURCE_ONLY_COMMAND_NAMES, SOURCE_ONLY_SKILL_REFERENCES
+)
 validate_shared_skill_references(COMMAND_NAMES, SHARED_SKILL_REFERENCES)
 
 # Pack-owned .gito defaults are not a platform but share the local-gitignore

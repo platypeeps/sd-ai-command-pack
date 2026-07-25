@@ -672,10 +672,16 @@ noise.
   from `COMMAND_REGISTRY` rather than maintained separately.
 - Reference declaration:
   `SHARED_SKILL_REFERENCES[skill_name] = ("references/<file>.md", ...)`.
+- Source-only reference declaration:
+  `SOURCE_ONLY_SKILL_REFERENCES[skill_name] = ("references/<file>.md", ...)`;
+  every such owner must also appear in `SOURCE_ONLY_COMMAND_NAMES`.
 - Generator entry point:
   `.github/scripts/generate-command-surfaces.py [--check]`.
-- Drift-lint entry point:
-  `.github/scripts/check-command-surface-drift.py [--json]`.
+- Shipped-surface validation entry point:
+  `scripts/sd-ai-command-pack-surface-check.py [--json] [--base-ref REF]`.
+- Focused command drift lint:
+  `.github/scripts/check-command-surface-drift.py [--json]`, consumed by the
+  shipped-surface validator rather than invoked as a separate policy gate.
 - Help modes: `list`, `explain`, `compare`, `recommend`, `examples`, and
   `tour`, with optional `family`, `skill`, `skills`, `goal`, and `detail` keys.
 
@@ -688,6 +694,9 @@ noise.
   retired paths, and bounded historical allowances derive from the same
   registry module. Installer compatibility aliases must be derived views, not
   second authoritative lists.
+- Tracked and non-ignored untracked template sources must appear either in the
+  manifest or in an exact source-only reference declaration. Directory-wide
+  source-only allowances are forbidden.
 - Capability metadata is conservative: new commands execute checkout code by
   default. A `trusted_static_only` command cannot execute checkout code, mutate
   local or remote state, or declare a safe mode; non-executing commands must be
@@ -883,93 +892,84 @@ COMMAND_NAMES = tuple((item.name, item.short) for item in COMMAND_REGISTRY)
 The generator derives the compatibility view, catalog, adapters, and manifest
 fanout from the same validated row.
 
-## Scenario: Repository-Owned Review Full-Check Prelude
+## Scenario: Typed Read-Only SD Check
 
 ### 1. Scope / Trigger
 
-- Trigger: `sd-review-pr` must run its deterministic local gate in a consumer
-  repository that may own prerequisites around the pack full-check, such as
-  generated-type cleanup, database readiness, or isolated browser-test setup.
-- Keep the shipped helper, shared skill, distributed docs, manifest, and tests
-  synchronized because the selection behavior is a consumer-facing command
-  contract.
+- Trigger: `sd-check` or a workflow caller needs one deterministic local
+  verification result without review-provider, publishing, generated-refresh,
+  or repository mutation behavior.
+- Keep the coordinator, shared skill, command registry, generated adapters,
+  manifest, distributed docs, and tests synchronized because they expose one
+  consumer-facing result contract.
 
 ### 2. Signatures
 
-- Review helper: `scripts/sd-ai-command-pack-review-full-check.sh`.
-- Repository-owned entry point: package script `check:full` in the root
-  `package.json`.
-- Package runner override:
-  `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_RUNNER` (default `npm`).
-- Direct fallback: `bash scripts/sd-ai-command-pack-full-check.sh`.
+- Coordinator:
+  `python3 scripts/sd-ai-command-pack-check.py [--json] [--repo PATH]`.
+- Repository configuration: `.sd-ai-command-pack/check.json`, schema version 1.
+- Skill entry: `sd-check`; generated platform adapters delegate to the same
+  shared skill.
 
 ### 3. Contracts
 
-- Parse `package.json` with the pack toolchain helper, not shell text matching.
-- A nonempty string `scripts["check:full"]` is authoritative: execute the
-  package runner as `run check:full` so repository-owned preludes run before
-  the pack gate.
-- If the script is absent or invalid, execute the direct pack full-check
-  fallback. Do not treat a selected runner failure as permission to fall back
-  and run a second gate.
-- Force `PRISM=0` and `GITO=0` for both paths so the command-owned PR cycle does
-  not invoke optional local review providers.
-- Reject configured commands that invoke `sd-review-pr`, `sd:review-pr`,
-  `sd/review-pr`, or the review helper itself, preventing recursive review
-  loops.
-- Preserve the selected runner or fallback exit status exactly.
+- Emit schema-version-1 JSON with stable row ordering, typed statuses, bounded
+  diagnostics, aggregate status, exit code, and a before/after state guard.
+- Accept only a closed JSON object containing bounded `prerequisites` and
+  `checks` arrays. Every entry uses a unique safe ID, argv array, repository-
+  contained non-symlink cwd, and explicit bounded timeout.
+- Never infer `package.json` scripts, evaluate shell strings, invoke review
+  providers or GitHub review dispatch, refresh generated state, remediate,
+  commit, push, merge, or mutate branches.
+- Missing shipped helpers and declared executables are `unavailable`; failed
+  prerequisites visibly skip their dependent configured checks. Only truly
+  inapplicable optional checks, such as an absent KB, are clean skips.
+- Route tool caches through the shared external-cache environment and stop
+  before execution when that boundary cannot be guaranteed.
 
 ### 4. Validation & Error Matrix
 
-- Missing `package.json`, malformed JSON, non-object top level, missing or
-  non-object `scripts`, or missing/empty/non-string `check:full` -> direct pack
-  full-check fallback.
-- Present but unreadable `package.json` -> fail with the filesystem diagnostic;
-  do not fall back and bypass repository-owned prerequisites.
-- Configured recursive command -> fail before runner execution.
-- Selected package runner missing -> exit `127`; do not fall back.
-- Toolchain helper missing or failing while configuration is being resolved ->
-  fail with its diagnostic; do not guess repository intent.
-- Direct fallback helper missing -> exit `127` with an actionable diagnostic.
-- Selected runner or fallback returns nonzero -> return the same status.
+- All required rows pass and state is unchanged -> aggregate `passed`, exit 0.
+- Deterministic check failure or detected mutation -> `failed`, exit 1.
+- Invalid repository/configuration/schema/path/argv -> `invalid`, exit 2 before
+  any configured command executes.
+- Missing executable/helper, cache-boundary failure, or timeout without a
+  deterministic verdict -> `unavailable` or `indeterminate`, exit 3.
+- Unknown fields/schema versions, duplicate IDs, escaped paths, symlink cwd,
+  shell/code strings, remote-review executables, and unbounded timeouts are
+  invalid rather than ignored.
 
 ### 5. Good / Base / Bad Cases
 
-- Good: a repository's `check:full` cleans generated types, verifies database
-  readiness, then invokes the pack full-check under `PRISM=0 GITO=0`.
-- Base: a repository without a valid `check:full` script runs the direct pack
-  full-check once.
-- Bad: `sd-review-pr` hardcodes the pack helper and bypasses repository-owned
-  prerequisites, or retries the fallback after the selected package script
-  fails.
+- Good: a repository declares an argv-based unit check; `sd-check` runs it once,
+  returns a typed result, and proves Git/filesystem state is byte-identical.
+- Base: no repository config and no KB; shipped deterministic checks pass and
+  the inapplicable KB row is visibly skipped.
+- Bad: a configured shell string, provider dispatch, or generated refresh is
+  accepted, or a missing shipped helper is normalized to success.
 
 ### 6. Tests Required
 
-- Assert configured selection, package-runner override, forced provider flags,
-  and selected exit-status propagation.
-- Assert fallback selection for every missing or invalid configuration shape
-  and fallback exit-status propagation.
-- Assert recursion rejection, missing runner, authoritative toolchain failure,
-  and missing fallback diagnostics.
+- Assert typed pass/fail/skip/unavailable/invalid/indeterminate outcomes,
+  aggregate precedence, exit codes, prerequisite blocking, and timeouts.
+- Assert malformed configuration, unsafe argv/path/timeout, missing helpers,
+  and repository-local cache roots fail closed.
+- Snapshot tracked, untracked, ignored generated, Git ref/index, and provider
+  sentinel state around passing, failing, stale, and unavailable cases.
 - Preserve root/template parity, install/audit coverage, manifest registration,
-  and shared-skill delegation assertions.
+  generated adapter parity, and shared-skill delegation assertions.
 
 ### 7. Wrong vs Correct
 
-Wrong: `sd-review-pr` calls `sd-ai-command-pack-full-check.sh` directly in
-every consumer, bypassing repository prerequisites.
-
-Correct: `sd-review-pr` calls the review helper, which selects a valid root
-`check:full` script or the direct pack fallback exactly once while disabling
-Prism and Gito.
+Wrong: discover check:full or evaluate an environment-provided shell command
+Correct: consume the typed sd-check result and configure argv-only project rows
 
 The `sd-review-pr` shared skill should continue to define:
 
 - required local checks before starting, including `gh --version`,
   `gh auth status`, and PR resolution from the current branch
-- a deterministic local full-check gate that disables Prism and Gito for the
-  command-owned PR cycle; those local review tools should run only through an
-  explicit `sd-full-check` or `sd-review-local` invocation
+- the typed read-only `sd-check` gate; local review providers run only through
+  the review workflow and never as an implicit check side effect
 - a local `HEAD` versus PR `headRefOid` check before marking a PR ready or
   requesting review, so the remote reviewer sees the pushed code the user
   intends
@@ -1187,9 +1187,10 @@ Correct: keep current action rows complete, cluster only historical evidence,
          and emit bounded category actions backed by visible recurrence counts
 ```
 
-The `sd-full-check` shared skill should continue to define the canonical
-local verification script, deterministic checks, optional local review-provider
-behavior, skipped-check reporting, and no-edit safety rules.
+The `sd-check` shared skill defines the canonical deterministic local
+verification contract. During migration, `sd-full-check` remains an independent
+legacy surface only; callers must not alias, fall back to, or infer it from
+`sd-check`.
 
 The `sd-create-pr` shared skill should never stop only because the current
 checkout is on the repository default branch. It should create a feature

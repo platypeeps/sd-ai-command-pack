@@ -30,3 +30,21 @@
 - Run `make sync` and `make check`.
 - Remove only parity/scope logic that is demonstrably redundant and covered by
   the graph; retain orthogonal behavioral tests.
+
+## Implementation record
+
+- Added `scripts/sd-ai-command-pack-surface-check.py` from the authoritative
+  `templates/scripts/` payload and registered it in the manifest.
+- Added strict schema/path/type bounds, NUL-safe committed/staged/unstaged/
+  untracked inventory, transitive affected-node closure, deterministic
+  finding deduplication, generated-mirror checks, and release evidence.
+- Replaced the directory-wide source-only test allowance with the exact
+  `SOURCE_ONLY_SKILL_REFERENCES` registry contract.
+- Routed `.sd-ai-command-pack/check.json`, full-check, and the CI release gate
+  through the same helper; the focused command-surface lint is now internal to
+  that entry point.
+- Added PR #237 and PR #234 regression fixtures plus platform, retired, docs,
+  checker, schema, unsafe path, symlink, oversize, mutation, and Git-layer
+  coverage in `tests/test_surface_closure.py`.
+- Candidate validation passed all eight consumers after Mezmo's review-cycle
+  policy identified and the implementation removed repeated path literals.

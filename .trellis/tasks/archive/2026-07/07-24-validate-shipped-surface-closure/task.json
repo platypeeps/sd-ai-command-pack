@@ -3,7 +3,7 @@
   "name": "validate-shipped-surface-closure",
   "title": "Validate complete shipped-surface closure",
   "description": "Derive and verify registry-driven closure across templates, manifests, generated mirrors, installed adapters, documentation, and local and CI check scopes before publication.",
-  "status": "planning",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "sdelmas",
   "assignee": "sdelmas",
   "createdAt": "2026-07-24",
-  "completedAt": null,
+  "completedAt": "2026-07-24",
   "branch": null,
   "base_branch": "main",
   "worktree_path": null,
@@ -23,13 +23,16 @@
   "relatedFiles": [
     ".github/scripts/check-command-surface-drift.py",
     ".github/workflows/tests.yml",
+    ".sd-ai-command-pack/check.json",
+    "Makefile",
     "installer/registry.py",
     "manifest.json",
-    "scripts/sd-ai-command-pack-review-preflight.mjs",
-    "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
+    "templates/scripts/sd-ai-command-pack-full-check.sh",
+    "templates/scripts/sd-ai-command-pack-surface-check.py",
+    "tests/test_surface_closure.py",
     "tests/test_pack_drift.py",
     "tests/test_generated_parity.py"
   ],
-  "notes": "Finding F-2 from the 2026-07-24 recent-run review. Planning complete pending user review; the checker must be registry-driven and shared by local and CI callers.",
+  "notes": "Finding F-2 from the 2026-07-24 recent-run review. Implementation is staged for lifecycle review: one shipped registry/manifest graph validator is shared by sd-check, local pre-publication, and CI, with explicit source-only references and exact preparation ownership.",
   "meta": {}
 }

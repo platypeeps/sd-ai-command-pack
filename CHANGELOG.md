@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.47.0 - 2026-07-24
+
+- Add `sd-check` as a typed deterministic verification command with strict
+  argv-array repository configuration and normalized outcome/exit semantics.
+- Keep checks read-only by removing provider and refresh behavior, routing tool
+  caches outside the repository, and failing when before/after repository or
+  Git state differs.
+- Add a registry-derived shipped-surface closure validator shared by
+  `sd-check`, local pre-publication, and CI. It explicitly registers
+  source-only references and reports stale generated state with its owning
+  preparation command.
+
 ## 0.46.0 - 2026-07-24
 
 - Route XDG/GitHub CLI, Python, uv, pip, Ruff, and npm caches through one

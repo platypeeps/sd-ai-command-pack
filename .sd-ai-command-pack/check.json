@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "prerequisites": [],
+  "checks": [
+    {
+      "id": "pack.shipped-surface-closure",
+      "argv": [
+        "bash",
+        "scripts/sd-ai-command-pack-toolchain.sh",
+        "run-python",
+        "--",
+        "scripts/sd-ai-command-pack-surface-check.py"
+      ],
+      "cwd": ".",
+      "timeoutSeconds": 120
+    }
+  ]
+}

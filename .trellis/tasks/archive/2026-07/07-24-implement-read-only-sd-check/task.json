@@ -3,7 +3,7 @@
   "name": "implement-read-only-sd-check",
   "title": "Implement the read-only sd-check command",
   "description": "Replace sd-full-check with the deterministic side-effect-free sd-check primitive, including typed configuration and no AI-review, GitHub-review, generated-state refresh, or shell-string behavior.",
-  "status": "planning",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "sdelmas",
   "assignee": "sdelmas",
   "createdAt": "2026-07-24",
-  "completedAt": null,
+  "completedAt": "2026-07-24",
   "branch": null,
   "base_branch": "main",
   "worktree_path": null,
@@ -23,12 +23,14 @@
   ],
   "parent": "07-22-integrate-routed-review-backends",
   "relatedFiles": [
+    ".sd-ai-command-pack/check.json",
     "installer/registry.py",
     "templates/.agents/skills/sd-check/SKILL.md",
-    "templates/.agents/skills/sd-full-check/SKILL.md",
-    "templates/scripts/sd-ai-command-pack-full-check.sh",
-    "tests/test_review_full_check.py",
-    "tests/test_surface_generation.py"
+    "templates/scripts/sd-ai-command-pack-check.py",
+    "tests/test_check.py",
+    "tests/test_install_audit.py",
+    "tests/test_generated_parity.py",
+    "tests/test_sdlc_commands.py"
   ],
   "notes": "",
   "meta": {}

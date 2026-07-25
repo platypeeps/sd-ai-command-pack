@@ -597,12 +597,12 @@ run_pack_source_drift_gates() {
   fi
 
   section "Pack source drift gates: command surfaces, template twins, release ledger, and env-var docs"
-  local command_surface_lint=".github/scripts/check-command-surface-drift.py"
-  if [ ! -f "$command_surface_lint" ]; then
-    printf 'Command surface drift lint is required but %s is missing.\n' "$command_surface_lint" >&2
+  local surface_check="scripts/sd-ai-command-pack-surface-check.py"
+  if [ ! -f "$surface_check" ]; then
+    printf 'Shipped-surface closure validator is required but %s is missing.\n' "$surface_check" >&2
     return 1
   fi
-  if ! run "SD command surface drift lint" python3 "$command_surface_lint"; then
+  if ! run "SD shipped-surface closure" python3 "$surface_check"; then
     return 1
   fi
   local release_base_ref

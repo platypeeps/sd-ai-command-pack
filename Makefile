@@ -4,7 +4,7 @@ VENV ?= .venv
 VENV_PYTHON = $(VENV)/bin/python
 VENV_BIN = $(VENV)/bin
 
-.PHONY: setup hooks generate sync test lint audit full-check check
+.PHONY: setup hooks generate surface-check sync test lint audit full-check check
 
 setup:
 	"$(PYTHON)" -m venv "$(VENV)"
@@ -17,11 +17,14 @@ hooks:
 generate:
 	@if [ -x "$(VENV_PYTHON)" ]; then \
 		"$(VENV_PYTHON)" .github/scripts/generate-command-surfaces.py; \
-		"$(VENV_PYTHON)" .github/scripts/check-command-surface-drift.py; \
+		"$(VENV_PYTHON)" scripts/sd-ai-command-pack-surface-check.py; \
 	else \
 		"$(PYTHON)" .github/scripts/generate-command-surfaces.py; \
-		"$(PYTHON)" .github/scripts/check-command-surface-drift.py; \
+		"$(PYTHON)" scripts/sd-ai-command-pack-surface-check.py; \
 	fi
+
+surface-check:
+	"$(PYTHON)" scripts/sd-ai-command-pack-surface-check.py
 
 # Self-sync after payload or doc/spec/task edits: refresh the dogfood
 # install from templates/, then regenerate the spec knowledge base.

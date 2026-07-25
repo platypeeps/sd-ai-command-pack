@@ -870,6 +870,122 @@ Wrong: search for "(see git log)" or "(Add test results)" before patching
 Correct: replace hash-keyed commit rows and section bodies by structural anchors
 ```
 
+## Read-Only SD Check Runtime Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing the `sd-check` coordinator, its versioned
+configuration/result schema, built-in verification inventory, state guard, or
+cache boundary.
+
+### 2. Signatures
+
+- `python3 scripts/sd-ai-command-pack-check.py [--json] [--repo PATH]`
+- `.sd-ai-command-pack/check.json` with exact `schemaVersion: 1`,
+  `prerequisites`, and `checks` fields.
+
+### 3. Contracts
+
+- Use argv arrays only; reject shell/code strings, remote-review commands,
+  unknown fields, duplicate IDs, path escapes, symlink cwd traversal, and
+  timeouts outside the documented bound before configured execution.
+- Run the closed shipped deterministic inventory followed by configured
+  prerequisites and checks in declared order. A prerequisite that is not
+  `passed` blocks later configured checks with explicit `skipped` rows.
+- Normalize rows to `passed`, `failed`, `skipped`, `unavailable`, `invalid`, or
+  `indeterminate`; missing shipped helpers are unavailable, never successful.
+- Hash HEAD, symbolic HEAD, refs, index, tracked/nonignored-untracked content,
+  and declared ignored generated paths before and after every row. Report any
+  delta as failure without reverting it.
+- Use `sd_ai_command_pack_lib.py` for sandbox-safe external caches. Never write
+  repository caches, refresh generated output, invoke AI/GitHub review, or
+  perform publish/lifecycle mutation.
+
+### 4. Validation & Error Matrix
+
+- Passed required rows and unchanged state -> exit 0.
+- Check failure or mutation -> exit 1.
+- Invalid repository/configuration -> exit 2 before configured execution.
+- Missing executable/helper, cache-boundary failure, or timeout -> exit 3 with
+  an unavailable or indeterminate row.
+
+### 5. Good / Base / Bad Cases
+
+- Good: stale generated knowledge is reported with its owner command and no
+  byte changes.
+- Base: absent optional knowledge output is visibly skipped while required
+  shipped checks pass.
+- Bad: a helper refreshes output, dispatches a provider, or a missing binary is
+  counted as passed.
+
+### 6. Tests Required
+
+- Typed status/exit/precedence, strict schema, timeout, cache, and prerequisite
+  fixtures.
+- Byte/state snapshots for pass, failure, stale output, unavailable tools, and
+  deliberate mutation, plus provider/GitHub dispatch sentinels.
+- Registry/generated adapter parity, manifest install/audit/provenance, root/
+  template parity, per-file coverage, and `make check`.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: run an inferred package script or shell string and hope it is read-only
+Correct: validate argv config, run it once, and fail if the state guard changes
+```
+
+## Shipped-Surface Closure Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing registry/manifest payload ownership, generated
+platform surfaces, source-only references, checker registration, or release
+evidence.
+
+### 2. Signatures
+
+- `python3 scripts/sd-ai-command-pack-surface-check.py [--json] [--base-ref REF]`
+- JSON result `schemaVersion: 1` with changed paths, affected graph,
+  deterministic finding counts, and owning preparation commands.
+
+### 3. Contracts
+
+- Derive nodes and relations from `installer/registry.py`, `manifest.json`, and
+  the existing generator/lint metadata; do not maintain caller-specific globs.
+- Inventory committed, staged, unstaged, and non-ignored untracked paths with
+  bounded NUL-safe Git commands. Reject unsafe, control-bearing, non-UTF-8,
+  symlinked, oversized, duplicated, mistyped, and unknown-schema inputs.
+- Classify installable, generated, source-only, documentation-only,
+  check-only, retired, and provenance nodes. A source-only reference requires
+  an exact `SOURCE_ONLY_SKILL_REFERENCES` record.
+- `sd-check`, local pre-publication, and CI must invoke the same shipped helper.
+  Human output is rendered from the same typed result as JSON output.
+- Report `make generate`, `make sync`, manifest registration, or source-only
+  registration as ownership. Never prepare, refresh, stage, or repair state.
+
+### 4. Validation & Error Matrix
+
+- Complete closure and unchanged generated mirrors -> exit 0.
+- Missing/stale/duplicate relation -> exit 1 with stable path and relation.
+- Unreadable/unsafe/unknown authoritative input -> exit 2 without mutation.
+
+### 5. Tests Required
+
+- PR #237 unregistered source-only reference and PR #234 platform/duplicate/
+  type/checker-scope regression fixtures.
+- Complete platform fan-out, retired/docs/release node kinds, NUL-safe Git
+  layers, symlink/oversize/unsafe/schema failures, deterministic deduplication,
+  and stale-state no-mutation evidence.
+- Shared caller registration, generated parity, install audit, `make sync`,
+  `sd-check`, and `make check`.
+
+### 6. Wrong vs Correct
+
+```text
+Wrong: allow every file below a source-only skill directory implicitly
+Correct: declare each extra reference and validate the transitive surface graph
+```
+
 ## Toolchain Preflight Runtime Contract
 
 ### 1. Scope / Trigger

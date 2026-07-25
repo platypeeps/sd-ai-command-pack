@@ -3104,11 +3104,13 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("# SD PR Review Loop", review_pr)
         self.assertIn("standing permission to reply", review_pr)
         self.assertIn("sd-ai-command-pack-toolchain.sh doctor", review_pr)
-        self.assertIn("bash scripts/sd-ai-command-pack-review-full-check.sh", review_pr)
+        self.assertIn("scripts/sd-ai-command-pack-check.py --json", review_pr)
         self.assertIn("Project checks:", review_pr)
         self.assertIn("Optional AI review:", review_pr)
-        self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0", review_pr)
-        self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0", review_pr)
+        self.assertNotIn("bash scripts/sd-ai-command-pack-review-full-check.sh", review_pr)
+        self.assertIn("Do not discover `package.json` scripts", review_pr)
+        self.assertNotIn("SD_AI_COMMAND_PACK_FULL_CHECK_PRISM", review_pr)
+        self.assertNotIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO", review_pr)
         self.assertIn("--json name,workflow,state,bucket,link,completedAt", review_pr)
         self.assertNotIn("workflow,status,conclusion,bucket", review_pr)
 
@@ -3331,6 +3333,7 @@ class InstallCoreTests(InstallTestCase):
                 "review-pr",
                 "review-local",
                 "review-learnings",
+                "check",
                 "full-check",
                 "housekeeping",
                 "update-spec",

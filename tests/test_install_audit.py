@@ -1418,6 +1418,38 @@ class InstallAuditTests(InstallTestCase):
         )
         self.assertIn("install audit passed", result.stdout)
 
+    def test_install_audit_allows_repository_owned_check_configuration(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        check_config = root / ".sd-ai-command-pack/check.json"
+        check_config.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "prerequisites": [],
+                    "checks": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("check.json", result.stdout)
+
     def test_install_audit_fails_for_unlisted_tracked_pack_files(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
@@ -1679,8 +1711,10 @@ class InstallAuditTests(InstallTestCase):
         self.assertTrue(current_scripts)
         post_rename_scripts = {
             "sd-ai-command-pack-audit-inventory.py",
+            "sd-ai-command-pack-check.py",
             "sd-ai-command-pack-review-full-check.sh",
             "sd-ai-command-pack-status.py",
+            "sd-ai-command-pack-surface-check.py",
             "sd-ai-command-pack-toolchain.sh",
         }
         self.assertLessEqual(post_rename_scripts, set(current_scripts))
