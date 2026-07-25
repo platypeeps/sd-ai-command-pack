@@ -253,7 +253,7 @@ it. Use a separate request to execute the recommendation.
 13. Let the review command reply to and resolve review threads as part of the
    normal loop once findings are fixed, rebutted with evidence, or confirmed
    already addressed.
-12. Use the review-learnings command when review comments repeat across PRs and
+14. Use the review-learnings command when review comments repeat across PRs and
    you want to capture repo-specific preventive guidance. It scans read-only by
    default. Repository-local persistence requires explicit `--update` and an
    atomically replaceable canonical target; an external target requires
@@ -262,19 +262,19 @@ it. Use a separate request to execute the recommendation.
    publishes the learning file. The review-pr loop
    automatically attempts one read-only, PR-scoped learning pass after the
    overall cycle is clean; it never runs the learning pass after each round.
-13. Run the update-spec command when the work taught you a durable
+15. Run the update-spec command when the work taught you a durable
    implementation contract or convention. It runs the existing update-spec skill
    and also checks whether an existing architectural overview needs to be
    updated.
-14. Run the finish-work command when the coding session is complete and you need
+16. Run the finish-work command when the coding session is complete and you need
    the Trellis finish-work skill's quality gate, archive, journal, and commit
    reminder behavior. Lifecycle commands must chain through `sd-finish-work`
    rather than invoking Trellis directly so the pack's concrete session
    recorder remains in the path.
-15. After the PR merges, run the housekeeping command to get back to the default
+17. After the PR merges, run the housekeeping command to get back to the default
    branch, prune/delete the merged development stream, and see the condensed
    clean-state/anomaly report.
-16. If the review-pr command sees the PR is already merged or becomes merged
+18. If the review-pr command sees the PR is already merged or becomes merged
    while the command is running, it stops the review loop and runs post-merge
    housekeeping before the final report. This does not wake inactive sessions;
    it only runs when the active agent observes the merge.
