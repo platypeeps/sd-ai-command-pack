@@ -51,11 +51,26 @@ class ReviewStageTests(InstallTestCase):
             "pathlib.Path(artifact).mkdir(parents=True, exist_ok=True)\n"
             "with pathlib.Path(log).open('a', encoding='utf-8') as stream:\n"
             "    stream.write(f'{provider}:start:{time.time()}\\n')\n"
-            "time.sleep(0.35 if mode != 'slow' else 2)\n"
+            "if mode == 'barrier':\n"
+            "    deadline = time.time() + 2\n"
+            "    while time.time() < deadline:\n"
+            "        starts = sum(':start:' in line for line in pathlib.Path(log).read_text(encoding='utf-8').splitlines())\n"
+            "        if starts >= 2: break\n"
+            "        time.sleep(0.02)\n"
+            "    if starts < 2: raise SystemExit('parallel start barrier timed out')\n"
+            "else:\n"
+            "    time.sleep(2 if mode == 'slow' else 0.35)\n"
             "with pathlib.Path(log).open('a', encoding='utf-8') as stream:\n"
             "    stream.write(f'{provider}:end:{time.time()}\\n')\n"
             "if mode == 'finding':\n"
             "    print(json.dumps({'status': 'findings', 'findings': [{'path': 'src/app.py', 'line': 2, 'severity': 'high', 'summary': 'validate state', 'family': 'boundary-validation'}]}))\n"
+            "elif mode in {'case-upper', 'case-lower'}:\n"
+            "    path = 'SRC/App.py' if mode == 'case-upper' else 'src/app.py'\n"
+            "    print(json.dumps({'status': 'findings', 'findings': [{'path': path, 'line': 2, 'severity': 'medium', 'summary': 'same summary'}]}))\n"
+            "elif mode == 'finding-fail':\n"
+            "    print(json.dumps({'status': 'findings', 'findings': [{'path': 'src/app.py', 'line': 2, 'summary': 'mapped clean finding'}]})); raise SystemExit(9)\n"
+            "elif mode == 'malicious-finding':\n"
+            "    print(json.dumps({'status': 'findings', 'findings': [{'path': '../secret', 'line': True, 'summary': 'unsafe provider fields', 'disposition': 'fixed'}]}))\n"
             "elif mode == 'fail':\n"
             "    print(json.dumps({'status': 'clean', 'findings': []})); print('provider failed', file=sys.stderr); raise SystemExit(9)\n"
             "elif mode == 'rate-limit':\n"
@@ -264,7 +279,7 @@ class ReviewStageTests(InstallTestCase):
 
     def test_substantive_first_head_runs_prism_and_gito_concurrently(self) -> None:
         root = self.make_repo()
-        log = self.write_config(root)
+        log = self.write_config(root, modes=("barrier", "barrier"))
 
         result = self.run_stage(root, "parallel-first")
         report = self.report(result)
@@ -299,6 +314,49 @@ class ReviewStageTests(InstallTestCase):
         repository = report["remoteSummary"]["repository"]
         self.assertTrue(repository.startswith("local:"), repository)
         self.assertNotIn(str(root), repository)
+
+    def test_case_distinct_paths_are_not_deduplicated(self) -> None:
+        root = self.make_repo()
+        self.write_config(root, modes=("case-upper", "case-lower"))
+
+        result = self.run_stage(root, "case-paths")
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(
+            [finding["path"] for finding in report["receipt"]["findings"]],
+            ["SRC/App.py", "src/app.py"],
+        )
+
+    def test_nonzero_clean_mapping_cannot_hide_structured_findings(self) -> None:
+        root = self.make_repo()
+        self.write_config(root, modes=("finding-fail", "clean"))
+        config = root / ".sd-ai-command-pack/review.json"
+        value = json.loads(config.read_text(encoding="utf-8"))
+        value["providers"][0]["outcomeByExitCode"]["9"] = "clean"
+        config.write_text(json.dumps(value), encoding="utf-8")
+        self.run_git(root, "add", str(config.relative_to(root)))
+        self.run_git(root, "commit", "-m", "map nonzero finding exit to clean")
+
+        result = self.run_stage(root, "mapped-clean", "--local", "prism")
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(report["status"], "findings")
+
+    def test_provider_cannot_self_disposition_or_escape_finding_path(self) -> None:
+        root = self.make_repo()
+        self.write_config(root, modes=("malicious-finding", "clean"))
+
+        result = self.run_stage(root, "unsafe-finding", "--local", "prism")
+        report = self.report(result)
+        finding = report["receipt"]["findings"][0]
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIsNone(finding["path"])
+        self.assertIsNone(finding["line"])
+        self.assertEqual(finding["disposition"], "outstanding")
+        self.assertEqual(report["receipt"]["remoteGate"]["state"], "blocked")
 
     def test_builtin_adapters_parse_native_reports_and_avoid_gito_filter(self) -> None:
         root = self.make_repo()
@@ -553,6 +611,16 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(report["target"]["repository"], "example.com/org/repo")
         self.assertNotIn("review-user", result.stdout)
         self.assertNotIn("secret-token", result.stdout)
+
+    def test_option_like_base_is_not_interpreted_as_git_flag(self) -> None:
+        root = self.make_repo()
+        self.write_config(root)
+
+        result = self.run_stage(root, "option-base", "--base=--octopus", "--plan-only")
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertEqual(report["status"], "invalid")
 
     def test_invalid_config_and_artifact_paths_fail_before_dispatch(self) -> None:
         root = self.make_repo()

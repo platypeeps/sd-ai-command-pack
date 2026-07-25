@@ -13,6 +13,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -49,6 +50,8 @@ OUTCOMES = frozenset(
     {"clean", "findings", "unavailable", "failed", "cancelled", "skipped"}
 )
 TERMINAL_FAILURES = frozenset({"unavailable", "failed", "cancelled"})
+ACTIVE_PROCESSES: set[subprocess.Popen[bytes]] = set()
+ACTIVE_PROCESSES_LOCK = threading.Lock()
 CONFIG_KEYS = frozenset({"schemaVersion", "providers", "policy"})
 PROVIDER_KEYS = frozenset(
     {
@@ -473,14 +476,16 @@ def _repository_identity(repo: Path) -> str:
 
 
 def resolve_target(repo: Path, scope: str, base: str, head: str) -> dict[str, Any]:
-    head_oid = str(_git(repo, "rev-parse", "--verify", f"{head}^{{commit}}")).strip()
+    head_oid = str(
+        _git(repo, "rev-parse", "--verify", "--end-of-options", f"{head}^{{commit}}")
+    ).strip()
     dirty = str(_git(repo, "status", "--porcelain=v1", "--untracked-files=all"))
     if scope in {"branch", "pr"}:
         if dirty:
             raise ReviewInputError(
                 f"{scope} scope requires a clean worktree bound to one head"
             )
-        base_oid = str(_git(repo, "merge-base", base, head_oid)).strip()
+        base_oid = str(_git(repo, "merge-base", "--", base, head_oid)).strip()
         diff = bytes(
             _git(
                 repo,
@@ -790,7 +795,12 @@ def _atomic_json(path: Path, value: object) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     descriptor = os.open(temporary, flags, 0o600)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        try:
+            handle = os.fdopen(descriptor, "w", encoding="utf-8")
+        except BaseException:
+            os.close(descriptor)
+            raise
+        with handle:
             json.dump(value, handle, sort_keys=True, indent=2)
             handle.write("\n")
             handle.flush()
@@ -910,6 +920,18 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
             pass
 
 
+def _cancel_active_processes() -> None:
+    with ACTIVE_PROCESSES_LOCK:
+        processes = tuple(ACTIVE_PROCESSES)
+    for process in processes:
+        _terminate(process)
+
+
+def _handle_termination(signum: int, _frame: object) -> None:
+    _cancel_active_processes()
+    raise SystemExit(128 + signum)
+
+
 def _parse_json_payload(payload: bytes) -> object | None:
     if len(payload) > MAX_OUTPUT_BYTES:
         return None
@@ -1019,16 +1041,24 @@ def _bounded_provider_findings(value: object) -> list[dict[str, Any]]:
     for raw in value[:MAX_FINDINGS]:
         if not isinstance(raw, dict):
             continue
+        raw_path = str(raw.get("path") or "")
+        try:
+            path = _safe_relative(raw_path) if raw_path else ""
+        except ReviewInputError:
+            path = ""
+        raw_line = raw.get("line")
         findings.append(
             {
-                "path": _bounded(str(raw.get("path") or ""), 500),
-                "line": raw.get("line") if isinstance(raw.get("line"), int) else None,
+                "path": _bounded(path, 500),
+                "line": raw_line
+                if isinstance(raw_line, int)
+                and not isinstance(raw_line, bool)
+                and raw_line > 0
+                else None,
                 "severity": _bounded(str(raw.get("severity") or "unspecified"), 40),
                 "summary": _bounded(str(raw.get("summary") or "provider finding"), 500),
                 "family": _bounded(str(raw.get("family") or "other"), 80),
-                "disposition": _bounded(
-                    str(raw.get("disposition") or "outstanding"), 80
-                ),
+                "disposition": "outstanding",
             }
         )
     return findings
@@ -1073,16 +1103,24 @@ def _run_provider(
             stderr=subprocess.PIPE,
             start_new_session=os.name == "posix",
         )
+        with ACTIVE_PROCESSES_LOCK:
+            ACTIVE_PROCESSES.add(process)
         try:
-            stdout, stderr = process.communicate(timeout=provider.timeout_seconds)
-            exit_code = process.returncode
-            status_value = provider.outcome_by_exit.get(exit_code, "failed")
-        except subprocess.TimeoutExpired:
-            _terminate(process)
-            stdout, stderr = process.communicate()
-            exit_code = 124
-            status_value = "failed"
-            stderr += f"\nprovider timed out after {provider.timeout_seconds}s".encode()
+            try:
+                stdout, stderr = process.communicate(timeout=provider.timeout_seconds)
+                exit_code = process.returncode
+                status_value = provider.outcome_by_exit.get(exit_code, "failed")
+            except subprocess.TimeoutExpired:
+                _terminate(process)
+                stdout, stderr = process.communicate()
+                exit_code = 124
+                status_value = "failed"
+                stderr += (
+                    f"\nprovider timed out after {provider.timeout_seconds}s".encode()
+                )
+        finally:
+            with ACTIVE_PROCESSES_LOCK:
+                ACTIVE_PROCESSES.discard(process)
     except OSError as error:
         stdout, stderr, exit_code, status_value = (
             b"",
@@ -1098,12 +1136,14 @@ def _run_provider(
     )
     if payload is not None:
         payload_status = str(payload["status"])
-        if exit_code == 0:
+        if status_value not in TERMINAL_FAILURES:
             status_value = (
-                "findings" if findings and payload_status == "clean" else payload_status
+                "findings"
+                if findings
+                or status_value == "findings"
+                or payload_status == "findings"
+                else payload_status
             )
-        elif status_value == "findings":
-            status_value = "findings"
     elif exit_code == 0:
         status_value = "failed"
         stderr += b"\nprovider did not produce a valid structured review report"
@@ -1141,9 +1181,7 @@ def _normalize_findings(
             summary = _bounded(str(raw.get("summary") or "provider finding"), 500)
             path = _bounded(str(raw.get("path") or ""), 500)
             line = raw.get("line") if isinstance(raw.get("line"), int) else None
-            key = _digest(
-                {"path": path.casefold(), "line": line, "summary": summary.casefold()}
-            )
+            key = _digest({"path": path, "line": line, "summary": summary.casefold()})
             row = groups.setdefault(
                 key,
                 {
@@ -1504,4 +1542,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, _handle_termination)
+    signal.signal(signal.SIGTERM, _handle_termination)
     raise SystemExit(main())
