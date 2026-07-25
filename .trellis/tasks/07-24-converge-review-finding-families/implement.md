@@ -40,3 +40,19 @@
 - Run generated parity, install audit, `make sync`, and `make check`.
 - Dogfood on a seeded state-controller fixture and verify a same-family cluster
   converges in one audit/fix batch.
+
+## Delivered Implementation
+
+- Extended the internal exact-scope local-review stage with a strict,
+  exact-head schema-version-1 family-evidence boundary rather than adding a
+  public command or a parallel review controller.
+- Added the versioned family vocabulary, original-label preservation,
+  deterministic family audit matrices, second-round sibling-audit gating,
+  clean/check/batch evidence validation, and post-audit structured-extension
+  gating.
+- Kept remote dispatch outside the stage. The future unified controller stores
+  the bounded evidence and consumes the stage's family gate, remote eligibility,
+  telemetry, and exact-head receipt.
+- Added subprocess fixtures for same and unrelated families, successful and
+  failed audits, one-commit enforcement, wrong-head rejection, and explicit
+  post-audit extension.

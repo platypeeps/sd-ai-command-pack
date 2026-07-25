@@ -1042,8 +1042,8 @@ attempt isolation, exact-scope receipts, or pre-remote gate.
 - Typed controls: `--scope changes|branch|codebase|pr`,
   `--local auto|all|none|PROVIDER`,
   `--successor first|low-risk|high-risk|repeated-family|bookkeeping`,
-  repeatable `--finding-family ID`, `--local-policy optional|required`, and
-  `--fix auto|ask|none`.
+  repeatable `--finding-family ID`, optional `--family-evidence PATH`,
+  `--local-policy optional|required`, and `--fix auto|ask|none`.
 - Optional consumer-repository configuration filename:
   **.sd-ai-command-pack/review.json**, schema major 1.
 
@@ -1072,7 +1072,23 @@ attempt isolation, exact-scope receipts, or pre-remote gate.
   and reuse only an exact validated receipt.
 - Normalize `clean|findings|unavailable|failed|cancelled|skipped` without
   treating operational failure as findings or positive confidence. Deduplicate
-  overlapping findings while retaining every provider identity.
+  overlapping findings while retaining every provider identity and original
+  provider family. Normalize unknown family labels to the bounded `other`
+  family instead of extending the coordination vocabulary implicitly.
+- Strict schema-version-1 family evidence binds one lifecycle and current
+  round to the exact target head. It carries only bounded finding identity,
+  provider, round/head, normalized family, actionability/disposition, fix/audit
+  references, completed audit evidence, and approved extension decisions; it
+  never copies raw finding text into local-review state.
+- Two actionable observations of the same family on distinct rounds select the
+  repeated-family Prism/Gito plan and block remote routing until one complete
+  family checklist, clean limitation-free local receipt, passing exact-head
+  check, sibling-finding set, and at most one fix commit are recorded. Different
+  families do not share a recurrence counter.
+- A later observation of an already-audited family blocks before provider
+  execution until the existing `review.round-extension` structured decision is
+  recorded for that exact round. Missing, failed, unavailable, incomplete, or
+  head-mismatched audit evidence never completes the sibling gate.
 - Outstanding findings block remote routing. Optional local policy may pass a
   terminal provider failure forward only as an explicit limitation with zero
   confidence; required local policy blocks. `bookkeeping-successor` skips need
@@ -1086,6 +1102,12 @@ attempt isolation, exact-scope receipts, or pre-remote gate.
 - Dirty branch/PR target, unsafe path, malformed config, ineligible required
   provider, shell string, unsafe artifact root, or mismatched bookkeeping
   evidence -> invalid before dispatch.
+- Malformed, oversized, symlinked, wrong-head, unknown-family, duplicate-ID,
+  multi-fix-commit, or unsupported family evidence -> invalid before dispatch.
+- Second same-family round without a complete audit -> local sibling-audit plan
+  may run, but its remote gate remains blocked until the controller records the
+  complete audit bundle. Post-audit recurrence without an approved extension
+  -> blocked before another provider call.
 - Missing provider -> `unavailable`; timeout or unexpected exit -> `failed`;
   provider finding exit/payload -> `findings`; none becomes clean.
 - Same target and plan with a valid receipt -> reuse; a changed exact field ->
@@ -1100,6 +1122,9 @@ attempt isolation, exact-scope receipts, or pre-remote gate.
 - Prove exact branch-to-PR reuse, head/config/policy invalidation, retry
   collision refusal, timeout termination, missing-provider handling,
   provenance-preserving finding deduplication, and optional/required gates.
+- Prove same-family versus unrelated-family recurrence, deterministic family
+  matrices, failed local-audit behavior, one-commit batching, exact-head
+  rejection, post-audit extension gating, and bounded telemetry.
 - Preserve template/root parity, manifest installation, per-file coverage,
   release-ledger evidence, and `make check`.
 

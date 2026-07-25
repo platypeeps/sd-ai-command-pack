@@ -3,7 +3,7 @@
   "name": "converge-review-finding-families",
   "title": "Converge repeated review finding families",
   "description": "Detect repeated review categories, require sibling and root-cause audits, batch related fixes, and bound redispatch so review loops converge before further provider spend.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -26,6 +26,8 @@
     "templates/scripts/sd-ai-command-pack-review-learnings.py",
     "templates/.agents/skills/sd-review-pr/SKILL.md",
     "tests/test_review_learnings.py",
+    "tests/test_review_stage.py",
+    ".trellis/spec/backend/quality-guidelines.md",
     "tests/test_generated_parity.py"
   ],
   "notes": "Finding F-1 from the 2026-07-24 recent-run review. Planning complete pending user review; implementation must remain inside the unified sd-review state machine.",

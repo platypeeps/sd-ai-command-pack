@@ -247,6 +247,98 @@ class ReviewStageTests(InstallTestCase):
         self.assertIsInstance(value, dict)
         return value
 
+    def write_family_evidence(
+        self,
+        root: Path,
+        *,
+        current_round: int,
+        findings: list[dict[str, object]],
+        audits: list[dict[str, object]] | None = None,
+        extensions: list[dict[str, object]] | None = None,
+        blocked_redispatches: int = 0,
+    ) -> Path:
+        path = root.parent / "family-evidence.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "lifecycleId": "pr-123",
+                    "currentRound": current_round,
+                    "currentHead": self.git_output(root, "rev-parse", "HEAD"),
+                    "blockedRedispatches": blocked_redispatches,
+                    "findings": findings,
+                    "audits": audits or [],
+                    "extensions": extensions or [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def family_finding(
+        self,
+        root: Path,
+        identifier: str,
+        round_number: int,
+        family: str,
+    ) -> dict[str, object]:
+        return {
+            "id": identifier,
+            "provider": "copilot",
+            "round": round_number,
+            "head": self.git_output(root, "rev-parse", "HEAD"),
+            "family": family,
+            "actionable": True,
+            "disposition": "outstanding",
+            "fixCommit": None,
+            "siblingAuditId": None,
+        }
+
+    def completed_family_audit(
+        self,
+        root: Path,
+        *,
+        family: str = "boundary-validation",
+        round_number: int = 2,
+        outcome: str = "clean",
+        limitations: list[str] | None = None,
+    ) -> dict[str, object]:
+        dimensions = {
+            "boundary-validation": (
+                "strict-types",
+                "normalization",
+                "persistence-invariants",
+                "state-transitions",
+                "replay-idempotency",
+                "attempts-receipts",
+                "exact-identity-head",
+                "subprocess-failures",
+                "permissions",
+                "paths-symlinks-toctou",
+                "controlled-diagnostics",
+            )
+        }
+        head = self.git_output(root, "rev-parse", "HEAD")
+        return {
+            "id": f"audit-{family}-{round_number}",
+            "family": family,
+            "round": round_number,
+            "head": head,
+            "localReceiptId": "a" * 64,
+            "localHead": head,
+            "localOutcome": outcome,
+            "localLimitations": limitations or [],
+            "checkHead": head,
+            "checkStatus": "passed",
+            "batchSize": 2,
+            "fixCommits": [head],
+            "siblingFindingIds": ["sibling-one", "sibling-two"],
+            "dimensions": [
+                {"id": identifier, "status": "covered"}
+                for identifier in dimensions[family]
+            ],
+        }
+
     def test_substantive_first_head_runs_prism_and_gito_concurrently(self) -> None:
         root = self.make_repo()
         log = self.write_config(root, modes=("barrier", "barrier"))
@@ -485,7 +577,10 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0]["providers"], ["gito", "prism"])
         self.assertEqual(findings[0]["severity"], "high")
-        self.assertEqual(findings[0]["families"], ["boundary-validation", "security"])
+        self.assertEqual(findings[0]["families"], ["boundary-validation", "other"])
+        self.assertEqual(
+            findings[0]["sourceFamilies"], ["boundary-validation", "security"]
+        )
         self.assertEqual(report["receipt"]["disposition"]["outstanding"], 1)
         self.assertEqual(report["receipt"]["remoteGate"]["state"], "blocked")
 
@@ -536,6 +631,291 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(
             planned_report["plan"]["findingFamilies"], ["boundary-validation"]
         )
+
+        unknown = self.run_stage(
+            root,
+            "family-unknown",
+            "--successor",
+            "repeated-family",
+            "--finding-family",
+            "security",
+            "--plan-only",
+        )
+        unknown_report = self.report(unknown)
+        self.assertEqual(unknown.returncode, 2, unknown.stdout)
+        self.assertIn("bounded vocabulary", unknown_report["diagnostic"])
+
+    def test_second_same_family_round_requires_one_sibling_audit(self) -> None:
+        root = self.make_repo()
+        self.write_config(root)
+        evidence = self.write_family_evidence(
+            root,
+            current_round=2,
+            blocked_redispatches=1,
+            findings=[
+                self.family_finding(root, "remote-one", 1, "boundary-validation"),
+                self.family_finding(root, "remote-two", 2, "boundary-validation"),
+            ],
+        )
+
+        planned = self.run_stage(
+            root,
+            "family-second-round-plan",
+            "--family-evidence",
+            str(evidence),
+            "--plan-only",
+        )
+        planned_report = self.report(planned)
+
+        self.assertEqual(planned.returncode, 0, planned.stdout)
+        plan = planned_report["plan"]
+        gate = plan["familyGate"]
+        self.assertEqual(plan["policyId"], "repeated-family")
+        self.assertEqual(
+            [row["id"] for row in plan["providers"]], ["gito", "prism"]
+        )
+        self.assertEqual(gate["state"], "sibling-audit-required")
+        self.assertEqual(gate["roundsAvoided"], 1)
+        row = gate["families"][0]
+        self.assertEqual(row["rounds"], [1, 2])
+        self.assertEqual(
+            [item["id"] for item in row["checklist"]],
+            [
+                "strict-types",
+                "normalization",
+                "persistence-invariants",
+                "state-transitions",
+                "replay-idempotency",
+                "attempts-receipts",
+                "exact-identity-head",
+                "subprocess-failures",
+                "permissions",
+                "paths-symlinks-toctou",
+                "controlled-diagnostics",
+            ],
+        )
+
+        executed = self.run_stage(
+            root,
+            "family-second-round-run",
+            "--family-evidence",
+            str(evidence),
+        )
+        executed_report = self.report(executed)
+        self.assertEqual(executed.returncode, 0, executed.stdout)
+        self.assertEqual(
+            executed_report["receipt"]["remoteGate"],
+            {"state": "blocked", "reason": "sibling-audit-required"},
+        )
+
+    def test_unrelated_families_do_not_trigger_recurrence(self) -> None:
+        root = self.make_repo()
+        self.write_config(root)
+        evidence = self.write_family_evidence(
+            root,
+            current_round=2,
+            findings=[
+                self.family_finding(root, "boundary-one", 1, "boundary-validation"),
+                self.family_finding(root, "generated-two", 2, "generated-surfaces"),
+            ],
+        )
+
+        result = self.run_stage(
+            root, "unrelated-families", "--family-evidence", str(evidence)
+        )
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(report["receipt"]["plan"]["familyGate"]["state"], "observed")
+        self.assertEqual(report["receipt"]["remoteGate"]["state"], "eligible")
+
+    def test_complete_audit_allows_redispatch_and_reports_batch(self) -> None:
+        root = self.make_repo()
+        self.write_config(root)
+        evidence = self.write_family_evidence(
+            root,
+            current_round=2,
+            findings=[
+                self.family_finding(root, "remote-one", 1, "boundary-validation"),
+                self.family_finding(root, "remote-two", 2, "boundary-validation"),
+            ],
+            audits=[self.completed_family_audit(root)],
+        )
+
+        result = self.run_stage(
+            root,
+            "family-audit-complete",
+            "--family-evidence",
+            str(evidence),
+            "--plan-only",
+        )
+        report = self.report(result)
+        gate = report["plan"]["familyGate"]
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(gate["state"], "redispatch-eligible")
+        self.assertEqual(gate["siblingFindings"], 2)
+        self.assertEqual(gate["batchSize"], 2)
+        self.assertTrue(gate["families"][0]["auditComplete"])
+
+    def test_failed_local_audit_cannot_complete_sibling_gate(self) -> None:
+        root = self.make_repo()
+        self.write_config(root)
+        evidence = self.write_family_evidence(
+            root,
+            current_round=2,
+            findings=[
+                self.family_finding(root, "remote-one", 1, "boundary-validation"),
+                self.family_finding(root, "remote-two", 2, "boundary-validation"),
+            ],
+            audits=[
+                self.completed_family_audit(
+                    root, outcome="failed", limitations=["prism:failed"]
+                )
+            ],
+        )
+
+        result = self.run_stage(
+            root,
+            "family-audit-failed",
+            "--family-evidence",
+            str(evidence),
+            "--plan-only",
+        )
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(
+            report["plan"]["familyGate"]["state"], "sibling-audit-required"
+        )
+        self.assertFalse(
+            report["plan"]["familyGate"]["families"][0]["auditComplete"]
+        )
+
+    def test_post_audit_recurrence_requires_explicit_extension(self) -> None:
+        root = self.make_repo()
+        log = self.write_config(root)
+        findings = [
+            self.family_finding(root, f"remote-{round_number}", round_number, "boundary-validation")
+            for round_number in (1, 2, 3)
+        ]
+        evidence = self.write_family_evidence(
+            root,
+            current_round=3,
+            findings=findings,
+            audits=[self.completed_family_audit(root)],
+        )
+
+        blocked = self.run_stage(
+            root, "family-extension-blocked", "--family-evidence", str(evidence)
+        )
+        blocked_report = self.report(blocked)
+
+        self.assertEqual(blocked.returncode, 1, blocked.stdout)
+        self.assertEqual(blocked_report["status"], "blocked")
+        self.assertEqual(
+            blocked_report["familyGate"]["state"], "round-extension-required"
+        )
+        self.assertFalse(log.exists())
+
+        extended = self.write_family_evidence(
+            root,
+            current_round=3,
+            findings=findings,
+            audits=[self.completed_family_audit(root)],
+            extensions=[
+                {
+                    "family": "boundary-validation",
+                    "afterRound": 3,
+                    "decisionId": "review.round-extension",
+                    "approved": True,
+                }
+            ],
+        )
+        planned = self.run_stage(
+            root,
+            "family-extension-approved",
+            "--family-evidence",
+            str(extended),
+            "--plan-only",
+        )
+        planned_report = self.report(planned)
+        self.assertEqual(planned.returncode, 0, planned.stdout)
+        self.assertEqual(
+            planned_report["plan"]["familyGate"]["state"], "redispatch-eligible"
+        )
+
+    def test_family_evidence_rejects_wrong_head_and_multiple_fix_commits(self) -> None:
+        root = self.make_repo()
+        log = self.write_config(root)
+        findings = [
+            self.family_finding(root, "remote-one", 1, "boundary-validation"),
+            self.family_finding(root, "remote-two", 2, "boundary-validation"),
+        ]
+        evidence = self.write_family_evidence(
+            root, current_round=2, findings=findings
+        )
+        value = json.loads(evidence.read_text(encoding="utf-8"))
+        value["currentHead"] = "0" * 40
+        evidence.write_text(json.dumps(value), encoding="utf-8")
+
+        wrong_head = self.run_stage(
+            root, "family-wrong-head", "--family-evidence", str(evidence)
+        )
+        self.assertEqual(wrong_head.returncode, 2, wrong_head.stdout)
+        self.assertIn("exact review head", self.report(wrong_head)["diagnostic"])
+
+        audit = self.completed_family_audit(root)
+        audit["fixCommits"] = [
+            self.git_output(root, "rev-parse", "HEAD"),
+            "1" * 40,
+        ]
+        evidence = self.write_family_evidence(
+            root, current_round=2, findings=findings, audits=[audit]
+        )
+        too_many = self.run_stage(
+            root, "family-too-many-fixes", "--family-evidence", str(evidence)
+        )
+        self.assertEqual(too_many.returncode, 2, too_many.stdout)
+        self.assertIn("at most one fix commit", self.report(too_many)["diagnostic"])
+        self.assertFalse(log.exists())
+
+    def test_family_evidence_rejects_symlink_and_oversized_file_before_dispatch(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        log = self.write_config(root)
+        evidence = self.write_family_evidence(
+            root,
+            current_round=1,
+            findings=[
+                self.family_finding(root, "remote-one", 1, "boundary-validation")
+            ],
+        )
+        target = evidence.with_name("family-evidence-target.json")
+        evidence.replace(target)
+        try:
+            evidence.symlink_to(target)
+        except OSError as error:
+            self.skipTest(f"symlink creation unavailable: {error}")
+
+        symlinked = self.run_stage(
+            root, "family-symlink", "--family-evidence", str(evidence)
+        )
+        self.assertEqual(symlinked.returncode, 2, symlinked.stdout)
+        self.assertIn(
+            "regular non-symlink file", self.report(symlinked)["diagnostic"]
+        )
+        self.assertFalse(log.exists())
+
+        evidence.unlink()
+        evidence.write_bytes(b"{" + b" " * (512 * 1024))
+        oversized = self.run_stage(
+            root, "family-oversized", "--family-evidence", str(evidence)
+        )
+        self.assertEqual(oversized.returncode, 2, oversized.stdout)
+        self.assertIn("exceeds 524288 bytes", self.report(oversized)["diagnostic"])
+        self.assertFalse(log.exists())
 
     def test_documentation_and_ambiguous_plans_are_deterministic(self) -> None:
         docs = self.make_repo(changed_path="docs/guide.md")
