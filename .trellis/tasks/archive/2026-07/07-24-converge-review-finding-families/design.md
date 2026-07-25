@@ -69,3 +69,20 @@ test-name matching cannot mark a dimension covered automatically.
 - Provider unavailability and classifier ambiguity retain zero confidence.
 - Rollback disables family-level transitions and returns to the parent's lower
   round budget; it does not delete finding or review receipts.
+
+## Delivered Internal Boundary
+
+This child lands the executable family gate in the already shipped internal
+exact-scope local-review stage. The future public `sd-review` controller owns
+persisting its bounded `--family-evidence` payload and supplying current remote
+finding, audit, check, batch, and structured-extension records. The child does
+not introduce a second public command, dispatch a remote provider, or duplicate
+the parent controller.
+
+The stage validates and projects that payload into its plan and receipt. A
+second same-family round automatically selects the repeated-family local plan
+and blocks remote eligibility until the parent records a complete audit bundle.
+A post-audit recurrence returns a controlled block before local provider
+execution until the existing `review.round-extension` decision is present.
+This contract lets the parent compose the behavior without keeping safety
+transitions only in prompt prose.

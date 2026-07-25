@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.50.0 - 2026-07-25
+
+- Add strict exact-head finding-family evidence to the internal local-review
+  stage, using the bounded review-learning vocabulary while preserving original
+  provider labels separately.
+- Stop automatic remote eligibility when the same actionable family appears on
+  a second round, emit a deterministic sibling-audit matrix, and require clean
+  local-review, passing check, sibling, batch, and one-commit evidence before
+  redispatch.
+- Stop post-audit recurrence before another provider call until the existing
+  structured round-extension decision is recorded, with bounded family, cost,
+  batch, sibling, and redispatch telemetry.
+
 ## 0.49.0 - 2026-07-24
 
 - Add the internal exact-scope local stage consumed by the successor

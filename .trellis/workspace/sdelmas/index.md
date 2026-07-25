@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 225
-- **Last Active**: 2026-07-24
+- **Total Sessions**: 226
+- **Last Active**: 2026-07-25
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~968 | Active |
+| `journal-5.md` | ~1009 | Active |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 226 | 2026-07-25 | Converge repeated review finding families | `55b026b`, `cbbe162`, `33df03f` | `codex/converge-review-finding-families` |
 | 225 | 2026-07-24 | Deliver exact-scope local review stage | `4c872c3`, `f4d1842`, `3376ce7`, `acf6744`, `d4ccf90`, `29e140b`, `2dcd815`, `0bf7a8f`, `0842b79`, `d503ad1`, `49c77ba`, `99fe34c` | `codex/front-load-local-review-before-remote` |
 | 224 | 2026-07-24 | Review PR #248 and clarify truncation diagnostics | `9b13a09`, `02c3bcd` | `codex/feed-review-learnings-into-planning` |
 | 223 | 2026-07-24 | Feed review learnings into review planning | `8884408` | `codex/feed-review-learnings-into-planning` |

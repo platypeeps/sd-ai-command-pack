@@ -22,7 +22,11 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Mapping, Sequence, overload
 from urllib.parse import urlsplit
 
-from sd_ai_command_pack_lib import CacheSetupError, build_tool_environment
+from sd_ai_command_pack_lib import (
+    REVIEW_FINDING_FAMILY_IDS,
+    CacheSetupError,
+    build_tool_environment,
+)
 
 SCHEMA_VERSION = 1
 CONFIG_PATH = Path(".sd-ai-command-pack/review.json")
@@ -34,11 +38,14 @@ MAX_ARGV = 64
 MAX_ARG_LENGTH = 4096
 MAX_EXPANDED_ARGV_BYTES = 128 * 1024
 MAX_FINDINGS = 1_000
+MAX_FAMILY_AUDITS = 32
+MAX_FAMILY_EXTENSIONS = 32
 MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 MAX_TIMEOUT = 3600
 GIT_TIMEOUT_SECONDS = 60
 ID_RE = re.compile(r"[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\Z")
 ATTEMPT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+OID_RE = re.compile(r"[0-9a-f]{40}\Z")
 SCOPES = frozenset({"changes", "branch", "codebase", "pr"})
 CANONICAL_SCOPES = frozenset({"worktree", "branch_delta", "codebase"})
 DATA_CLASSES = ("local", "private-network", "public-network")
@@ -53,6 +60,60 @@ OUTCOMES = frozenset(
 )
 TERMINAL_FAILURES = frozenset({"unavailable", "failed", "cancelled"})
 FINDING_SEVERITY_RANK = {"unspecified": 0, "low": 1, "medium": 2, "high": 3}
+FINDING_FAMILY_IDS = REVIEW_FINDING_FAMILY_IDS
+FINDING_DISPOSITIONS = frozenset(
+    {"outstanding", "fix", "fixed", "rebutted", "resolved"}
+)
+FAMILY_AUDIT_DIMENSIONS = {
+    "task-metadata": (
+        "identity-fields",
+        "lifecycle-status",
+        "parent-child-links",
+        "branch-base-binding",
+        "archive-journal-bundle",
+    ),
+    "boundary-validation": (
+        "strict-types",
+        "normalization",
+        "persistence-invariants",
+        "state-transitions",
+        "replay-idempotency",
+        "attempts-receipts",
+        "exact-identity-head",
+        "subprocess-failures",
+        "permissions",
+        "paths-symlinks-toctou",
+        "controlled-diagnostics",
+    ),
+    "contract-documentation-drift": (
+        "typed-contract",
+        "human-output",
+        "json-output",
+        "help-documentation",
+        "generated-adapters",
+    ),
+    "generated-surfaces": (
+        "canonical-source",
+        "generated-mirrors",
+        "manifest-registration",
+        "install-audit",
+        "release-evidence",
+    ),
+    "reviewer-test-harness-quality": (
+        "good-fixture",
+        "base-fixture",
+        "failure-fixture",
+        "mutation-sentinel",
+        "non-tautological-assertion",
+    ),
+    "other": (
+        "root-cause",
+        "sibling-paths",
+        "sibling-transitions",
+        "failure-branches",
+        "generated-surfaces",
+    ),
+}
 ACTIVE_PROCESSES: set[subprocess.Popen[bytes]] = set()
 ACTIVE_PROCESSES_LOCK = threading.Lock()
 CANCELLATION_EVENT = threading.Event()
@@ -656,6 +717,379 @@ def _validate_bookkeeping_evidence(
         raise ReviewInputError("bookkeeping evidence does not match the exact target")
 
 
+def _family_id(value: object, *, field: str) -> str:
+    if not isinstance(value, str) or value not in FINDING_FAMILY_IDS:
+        raise ReviewInputError(f"{field} must use the bounded finding-family vocabulary")
+    return value
+
+
+def _safe_id(value: object, *, field: str) -> str:
+    if not isinstance(value, str) or not ATTEMPT_RE.fullmatch(value):
+        raise ReviewInputError(f"{field} must be a bounded identifier")
+    return value
+
+
+def _full_oid(value: object, *, field: str, optional: bool = False) -> str | None:
+    if optional and value is None:
+        return None
+    if not isinstance(value, str) or not OID_RE.fullmatch(value):
+        raise ReviewInputError(f"{field} must be a full lowercase Git object ID")
+    return value
+
+
+def _plain_int(
+    value: object, *, field: str, minimum: int = 0, maximum: int = MAX_FINDINGS
+) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ReviewInputError(f"{field} must be an integer")
+    if not minimum <= value <= maximum:
+        raise ReviewInputError(f"{field} must be between {minimum} and {maximum}")
+    return value
+
+
+def _bounded_strings(
+    value: object, *, field: str, limit: int = MAX_FINDINGS
+) -> list[str]:
+    if not isinstance(value, list) or len(value) > limit:
+        raise ReviewInputError(f"{field} must be a bounded string array")
+    result: list[str] = []
+    for item in value:
+        if (
+            not isinstance(item, str)
+            or not item
+            or len(item) > 500
+            or "\x00" in item
+        ):
+            raise ReviewInputError(f"{field} must be a bounded string array")
+        result.append(item)
+    return result
+
+
+def _audit_complete(audit: Mapping[str, Any]) -> bool:
+    expected = set(FAMILY_AUDIT_DIMENSIONS[str(audit["family"])])
+    dimensions = audit["dimensions"]
+    observed = {
+        str(item["id"]): str(item["status"])
+        for item in dimensions
+        if isinstance(item, Mapping)
+    }
+    return (
+        audit["localOutcome"] == "clean"
+        and not audit["localLimitations"]
+        and audit["checkStatus"] == "passed"
+        and audit["head"] == audit["localHead"] == audit["checkHead"]
+        and set(observed) == expected
+        and set(observed.values()) <= {"covered", "not-applicable"}
+        and len(audit["siblingFindingIds"]) >= 2
+        and audit["batchSize"] == len(audit["siblingFindingIds"])
+        and len(audit["fixCommits"]) <= 1
+    )
+
+
+def _parse_family_finding(value: object, *, current_round: int) -> dict[str, Any]:
+    keys = {
+        "id",
+        "provider",
+        "round",
+        "head",
+        "family",
+        "actionable",
+        "disposition",
+        "fixCommit",
+        "siblingAuditId",
+    }
+    if not isinstance(value, dict) or set(value) != keys:
+        raise ReviewInputError("family finding has unsupported or missing fields")
+    disposition = value["disposition"]
+    if disposition not in FINDING_DISPOSITIONS:
+        raise ReviewInputError("family finding disposition is unsupported")
+    actionable = value["actionable"]
+    if not isinstance(actionable, bool):
+        raise ReviewInputError("family finding actionable must be boolean")
+    if not actionable and disposition in {"outstanding", "fix"}:
+        raise ReviewInputError(
+            "a non-actionable family finding cannot remain outstanding or selected for fix"
+        )
+    fix_commit = _full_oid(
+        value["fixCommit"], field="family finding fixCommit", optional=True
+    )
+    if disposition == "fixed" and fix_commit is None:
+        raise ReviewInputError("a fixed family finding requires fixCommit")
+    audit_id = value["siblingAuditId"]
+    if audit_id is not None:
+        audit_id = _safe_id(audit_id, field="family finding siblingAuditId")
+    return {
+        "id": _safe_id(value["id"], field="family finding id"),
+        "provider": _safe_id(value["provider"], field="family finding provider"),
+        "round": _plain_int(
+            value["round"], field="family finding round", minimum=1, maximum=current_round
+        ),
+        "head": _full_oid(value["head"], field="family finding head"),
+        "family": _family_id(value["family"], field="family finding family"),
+        "actionable": actionable,
+        "disposition": disposition,
+        "fixCommit": fix_commit,
+        "siblingAuditId": audit_id,
+    }
+
+
+def _parse_family_audit(value: object, *, current_round: int) -> dict[str, Any]:
+    keys = {
+        "id",
+        "family",
+        "round",
+        "head",
+        "localReceiptId",
+        "localHead",
+        "localOutcome",
+        "localLimitations",
+        "checkHead",
+        "checkStatus",
+        "batchSize",
+        "fixCommits",
+        "siblingFindingIds",
+        "dimensions",
+    }
+    if not isinstance(value, dict) or set(value) != keys:
+        raise ReviewInputError("family audit has unsupported or missing fields")
+    family = _family_id(value["family"], field="family audit family")
+    outcome = value["localOutcome"]
+    if outcome not in OUTCOMES - {"skipped"}:
+        raise ReviewInputError("family audit localOutcome is unsupported")
+    check_status = value["checkStatus"]
+    if check_status not in {"passed", "failed", "unavailable"}:
+        raise ReviewInputError("family audit checkStatus is unsupported")
+    receipt_id = value["localReceiptId"]
+    if not isinstance(receipt_id, str) or not re.fullmatch(r"[0-9a-f]{64}", receipt_id):
+        raise ReviewInputError("family audit localReceiptId must be a SHA-256 digest")
+    fix_commits = value["fixCommits"]
+    if not isinstance(fix_commits, list) or len(fix_commits) > 1:
+        raise ReviewInputError("family audit permits at most one fix commit")
+    normalized_commits = [
+        _full_oid(item, field="family audit fix commit") for item in fix_commits
+    ]
+    sibling_ids = _bounded_strings(
+        value["siblingFindingIds"], field="family audit siblingFindingIds"
+    )
+    if len(sibling_ids) != len(set(sibling_ids)) or any(
+        not ATTEMPT_RE.fullmatch(item) for item in sibling_ids
+    ):
+        raise ReviewInputError("family audit siblingFindingIds must be unique identifiers")
+    dimensions = value["dimensions"]
+    if not isinstance(dimensions, list) or len(dimensions) > 32:
+        raise ReviewInputError("family audit dimensions must be a bounded array")
+    expected = set(FAMILY_AUDIT_DIMENSIONS[family])
+    normalized_dimensions: list[dict[str, str]] = []
+    seen_dimensions: set[str] = set()
+    for item in dimensions:
+        if not isinstance(item, dict) or set(item) != {"id", "status"}:
+            raise ReviewInputError("family audit dimension is malformed")
+        identifier = item["id"]
+        status_value = item["status"]
+        if identifier not in expected or identifier in seen_dimensions:
+            raise ReviewInputError("family audit dimension is unknown or duplicated")
+        if status_value not in {"covered", "not-applicable", "missing"}:
+            raise ReviewInputError("family audit dimension status is unsupported")
+        seen_dimensions.add(identifier)
+        normalized_dimensions.append({"id": identifier, "status": status_value})
+    normalized_dimensions.sort(key=lambda item: item["id"])
+    return {
+        "id": _safe_id(value["id"], field="family audit id"),
+        "family": family,
+        "round": _plain_int(
+            value["round"], field="family audit round", minimum=1, maximum=current_round
+        ),
+        "head": _full_oid(value["head"], field="family audit head"),
+        "localReceiptId": receipt_id,
+        "localHead": _full_oid(value["localHead"], field="family audit localHead"),
+        "localOutcome": outcome,
+        "localLimitations": _bounded_strings(
+            value["localLimitations"], field="family audit localLimitations", limit=32
+        ),
+        "checkHead": _full_oid(value["checkHead"], field="family audit checkHead"),
+        "checkStatus": check_status,
+        "batchSize": _plain_int(value["batchSize"], field="family audit batchSize"),
+        "fixCommits": normalized_commits,
+        "siblingFindingIds": sibling_ids,
+        "dimensions": normalized_dimensions,
+    }
+
+
+def _parse_family_extension(value: object, *, current_round: int) -> dict[str, Any]:
+    keys = {"family", "afterRound", "decisionId", "approved"}
+    if not isinstance(value, dict) or set(value) != keys:
+        raise ReviewInputError("family extension has unsupported or missing fields")
+    if value["decisionId"] != "review.round-extension" or value["approved"] is not True:
+        raise ReviewInputError("family extension requires an approved review.round-extension decision")
+    return {
+        "family": _family_id(value["family"], field="family extension family"),
+        "afterRound": _plain_int(
+            value["afterRound"],
+            field="family extension afterRound",
+            minimum=1,
+            maximum=current_round,
+        ),
+        "decisionId": "review.round-extension",
+        "approved": True,
+    }
+
+
+def _family_gate(path: Path | None, target: Mapping[str, Any]) -> dict[str, Any]:
+    if path is None:
+        return {
+            "schemaVersion": 1,
+            "state": "inactive",
+            "exactHead": target["head"],
+            "currentRound": 0,
+            "repeatedFamilies": [],
+            "families": [],
+            "roundsAvoided": 0,
+            "siblingFindings": 0,
+            "batchSize": 0,
+        }
+    raw = _read_json(path, limit=512 * 1024, label="family evidence")
+    keys = {
+        "schemaVersion",
+        "lifecycleId",
+        "currentRound",
+        "currentHead",
+        "blockedRedispatches",
+        "findings",
+        "audits",
+        "extensions",
+    }
+    if not isinstance(raw, dict) or set(raw) != keys or raw.get("schemaVersion") != 1:
+        raise ReviewInputError("family evidence must use the exact schemaVersion 1 contract")
+    _safe_id(raw["lifecycleId"], field="family evidence lifecycleId")
+    current_round = _plain_int(
+        raw["currentRound"], field="family evidence currentRound", minimum=1
+    )
+    current_head = _full_oid(raw["currentHead"], field="family evidence currentHead")
+    if current_head != target["head"]:
+        raise ReviewInputError("family evidence does not match the exact review head")
+    findings_value = raw["findings"]
+    audits_value = raw["audits"]
+    extensions_value = raw["extensions"]
+    if not isinstance(findings_value, list) or len(findings_value) > MAX_FINDINGS:
+        raise ReviewInputError("family evidence findings must be a bounded array")
+    if not isinstance(audits_value, list) or len(audits_value) > MAX_FAMILY_AUDITS:
+        raise ReviewInputError("family evidence audits must be a bounded array")
+    if not isinstance(extensions_value, list) or len(extensions_value) > MAX_FAMILY_EXTENSIONS:
+        raise ReviewInputError("family evidence extensions must be a bounded array")
+    findings = [
+        _parse_family_finding(item, current_round=current_round)
+        for item in findings_value
+    ]
+    audits = [
+        _parse_family_audit(item, current_round=current_round) for item in audits_value
+    ]
+    extensions = [
+        _parse_family_extension(item, current_round=current_round)
+        for item in extensions_value
+    ]
+    if len({item["id"] for item in findings}) != len(findings):
+        raise ReviewInputError("family finding ids must be unique")
+    if len({item["id"] for item in audits}) != len(audits):
+        raise ReviewInputError("family audit ids must be unique")
+    audit_by_id = {str(item["id"]): item for item in audits}
+    for finding in findings:
+        audit_id = finding["siblingAuditId"]
+        if audit_id is not None and (
+            audit_id not in audit_by_id
+            or audit_by_id[audit_id]["family"] != finding["family"]
+        ):
+            raise ReviewInputError(
+                "family finding siblingAuditId must reference an audit for the same family"
+            )
+    extension_keys = {
+        (str(item["family"]), int(item["afterRound"])) for item in extensions
+    }
+    if len(extension_keys) != len(extensions):
+        raise ReviewInputError("family extensions must be unique per family and round")
+    family_rows: list[dict[str, Any]] = []
+    for family in FINDING_FAMILY_IDS:
+        observations = [
+            item for item in findings if item["family"] == family and item["actionable"]
+        ]
+        rounds = sorted({int(item["round"]) for item in observations})
+        if not rounds:
+            continue
+        repeated = len(rounds) >= 2
+        complete_audits = sorted(
+            (
+                item
+                for item in audits
+                if item["family"] == family
+                and _audit_complete(item)
+                and (not repeated or item["round"] >= rounds[1])
+            ),
+            key=lambda item: (item["round"], item["id"]),
+        )
+        audit = complete_audits[-1] if complete_audits else None
+        state = "observed"
+        if repeated and audit is None:
+            state = "sibling-audit-required"
+        elif repeated and audit is not None and rounds[-1] > int(audit["round"]):
+            extended = any(
+                item["family"] == family and item["afterRound"] == rounds[-1]
+                for item in extensions
+            )
+            state = "redispatch-eligible" if extended else "round-extension-required"
+        elif repeated:
+            state = "redispatch-eligible"
+        dimension_status = {
+            str(item["id"]): str(item["status"])
+            for item in (audit["dimensions"] if audit is not None else [])
+        }
+        family_rows.append(
+            {
+                "family": family,
+                "state": state,
+                "observationCount": len(observations),
+                "rounds": rounds,
+                "auditId": audit["id"] if audit is not None else None,
+                "auditComplete": audit is not None,
+                "siblingFindings": len(audit["siblingFindingIds"]) if audit else 0,
+                "batchSize": int(audit["batchSize"]) if audit else 0,
+                "checklist": [
+                    {
+                        "id": identifier,
+                        "status": dimension_status.get(identifier, "required"),
+                    }
+                    for identifier in FAMILY_AUDIT_DIMENSIONS[family]
+                ],
+            }
+        )
+    states = {row["state"] for row in family_rows}
+    state = (
+        "round-extension-required"
+        if "round-extension-required" in states
+        else "sibling-audit-required"
+        if "sibling-audit-required" in states
+        else "redispatch-eligible"
+        if "redispatch-eligible" in states
+        else "observed"
+    )
+    repeated_families = [
+        str(row["family"])
+        for row in family_rows
+        if len(row["rounds"]) >= 2
+    ]
+    return {
+        "schemaVersion": 1,
+        "state": state,
+        "exactHead": target["head"],
+        "currentRound": current_round,
+        "repeatedFamilies": repeated_families,
+        "families": family_rows,
+        "roundsAvoided": _plain_int(
+            raw["blockedRedispatches"], field="family evidence blockedRedispatches"
+        ),
+        "siblingFindings": sum(int(row["siblingFindings"]) for row in family_rows),
+        "batchSize": sum(int(row["batchSize"]) for row in family_rows),
+    }
+
+
 def build_plan(
     *,
     providers: Sequence[Provider],
@@ -666,12 +1100,13 @@ def build_plan(
     fix_policy: str,
     successor: str,
     finding_families: Sequence[str],
+    family_gate: Mapping[str, Any],
     bookkeeping_evidence: Path | None,
     configuration_digest: str,
 ) -> dict[str, Any]:
     normalized_families = sorted(set(finding_families))
-    if any(not ID_RE.fullmatch(item) for item in normalized_families):
-        raise ReviewInputError("finding family ids must be bounded identifiers")
+    if any(item not in FINDING_FAMILY_IDS for item in normalized_families):
+        raise ReviewInputError("finding family ids must use the bounded vocabulary")
     if len(normalized_families) > 32:
         raise ReviewInputError("finding family input exceeds 32 entries")
     if successor == "repeated-family" and not normalized_families:
@@ -772,6 +1207,7 @@ def build_plan(
         "policyId": policy_id,
         "successor": successor,
         "findingFamilies": normalized_families,
+        "familyGate": dict(family_gate),
         "localPolicy": local_policy,
         "fixPolicy": fix_policy,
         "configurationDigest": configuration_digest,
@@ -1267,7 +1703,10 @@ def _normalize_findings(
             path = _bounded(str(raw.get("path") or ""), 500)
             line = raw.get("line") if isinstance(raw.get("line"), int) else None
             severity = _bounded(str(raw.get("severity") or "unspecified"), 40)
-            family = _bounded(str(raw.get("family") or "other"), 80)
+            source_family = _bounded(str(raw.get("family") or "other"), 80) or "other"
+            family = (
+                source_family if source_family in FINDING_FAMILY_IDS else "other"
+            )
             key = _digest({"path": path, "line": line, "summary": summary.casefold()})
             row = groups.setdefault(
                 key,
@@ -1279,6 +1718,7 @@ def _normalize_findings(
                     "summary": summary,
                     "family": family,
                     "families": [family],
+                    "sourceFamilies": [source_family],
                     "disposition": "outstanding",
                     "providers": [],
                 },
@@ -1292,6 +1732,13 @@ def _normalize_findings(
                 families.append(family)
                 families.sort()
                 row["family"] = families[0]
+            source_families = row["sourceFamilies"]
+            if (
+                isinstance(source_families, list)
+                and source_family not in source_families
+            ):
+                source_families.append(source_family)
+                source_families.sort()
             providers = row["providers"]
             if isinstance(providers, list) and provider_id not in providers:
                 providers.append(provider_id)
@@ -1314,9 +1761,17 @@ def _aggregate_outcome(attempts: Sequence[Mapping[str, Any]]) -> str:
     return "failed"
 
 
-def _remote_gate(outcome: str, outstanding: int, local_policy: str) -> dict[str, Any]:
+def _remote_gate(
+    outcome: str,
+    outstanding: int,
+    local_policy: str,
+    family_gate: Mapping[str, Any],
+) -> dict[str, Any]:
     if outstanding or outcome == "findings":
         return {"state": "blocked", "reason": "actionable-local-findings"}
+    family_state = family_gate.get("state")
+    if family_state in {"sibling-audit-required", "round-extension-required"}:
+        return {"state": "blocked", "reason": family_state}
     if outcome in TERMINAL_FAILURES:
         return {
             "state": "blocked"
@@ -1468,7 +1923,9 @@ def execute(
             "fixPolicy": fix_policy,
             "maximumFixCommitsBeforeRemote": 1,
         },
-        "remoteGate": _remote_gate(outcome, outstanding, local_policy),
+        "remoteGate": _remote_gate(
+            outcome, outstanding, local_policy, plan["familyGate"]
+        ),
         "confidence": {"granted": outcome == "clean", "limitations": limitations},
         "createdAt": time.time(),
     }
@@ -1504,6 +1961,10 @@ def _remote_summary(receipt: Mapping[str, Any]) -> dict[str, Any]:
             "outstanding": receipt["disposition"]["outstanding"],
         },
         "policyId": plan["policyId"],
+        "familyGate": plan["familyGate"],
+        "providerCostTiers": sorted(
+            {row["provider"]["costTier"] for row in attempts}
+        ),
         "remoteGate": receipt["remoteGate"],
         "confidence": receipt["confidence"],
     }
@@ -1566,6 +2027,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         default="first",
     )
     parser.add_argument("--finding-family", action="append", default=[])
+    parser.add_argument("--family-evidence")
     parser.add_argument("--bookkeeping-evidence")
     parser.add_argument("--attempt-id", required=True)
     parser.add_argument("--artifact-root")
@@ -1595,6 +2057,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.bookkeeping_evidence
             else None
         )
+        family_evidence = (
+            Path(args.family_evidence).absolute()
+            if args.family_evidence
+            else None
+        )
+        family_gate = _family_gate(family_evidence, target)
+        family_values = sorted(
+            set(args.finding_family) | set(family_gate["repeatedFamilies"])
+        )
+        successor = (
+            "repeated-family"
+            if family_gate["state"] == "sibling-audit-required"
+            else args.successor
+        )
         plan = build_plan(
             providers=providers,
             policy=policy,
@@ -1602,14 +2078,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             local=args.local,
             local_policy=args.local_policy,
             fix_policy=args.fix,
-            successor=args.successor,
-            finding_families=args.finding_family,
+            successor=successor,
+            finding_families=family_values,
+            family_gate=family_gate,
             bookkeeping_evidence=evidence,
             configuration_digest=_digest(config),
         )
         if CANCELLATION_EVENT.is_set():
             report = _cancelled_report()
             code = 3
+        elif family_gate["state"] == "round-extension-required":
+            report = {
+                "schemaVersion": 1,
+                "command": "sd-review-local-stage",
+                "status": "blocked",
+                "diagnostic": (
+                    "a repeated post-audit finding family requires an approved "
+                    "review.round-extension decision before another provider request"
+                ),
+                "familyGate": family_gate,
+            }
+            code = 1
         elif args.plan_only:
             report = {
                 "schemaVersion": 1,

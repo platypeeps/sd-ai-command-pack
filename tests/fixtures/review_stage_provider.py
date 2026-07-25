@@ -64,6 +64,23 @@ elif mode == "finding-alt":
             }
         )
     )
+elif mode == "finding-whitespace":
+    print(
+        json.dumps(
+            {
+                "status": "findings",
+                "findings": [
+                    {
+                        "path": "src/app.py",
+                        "line": 2,
+                        "severity": "medium",
+                        "summary": "validate whitespace family",
+                        "family": "   ",
+                    }
+                ],
+            }
+        )
+    )
 elif mode in {"case-upper", "case-lower"}:
     path = "SRC/App.py" if mode == "case-upper" else "src/app.py"
     print(
