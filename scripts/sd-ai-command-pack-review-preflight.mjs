@@ -434,6 +434,7 @@ function isMainModule() {
 function bookkeepingUsage() {
   return [
     'usage:',
+    '  node scripts/sd-ai-command-pack-review-preflight.mjs',
     '  node scripts/sd-ai-command-pack-review-preflight.mjs pre-archive --task-dir <active-task-dir> [--task-dir ...] [--repo <repo-root>] [--json]',
     '  node scripts/sd-ai-command-pack-review-preflight.mjs final-bundle --mode <completion|planning> --base <commit> --head <commit> [--repo <repo-root>] [--json]',
   ].join('\n');
@@ -526,6 +527,11 @@ export function runBookkeepingValidator(options = {}) {
   };
 
   try {
+    const loadedConfig = loadBookkeepingConfig(rootDir, options.configPath);
+    config = loadedConfig.config;
+    for (const message of loadedConfig.failures) {
+      add('validator_config_invalid', '.sd-ai-command-pack/review-preflight.json', message);
+    }
     if (options.command === 'pre-archive') {
       evidence.taskDirectories = [...new Set(options.taskDirs || [])].sort();
       for (const taskDir of evidence.taskDirectories) {
@@ -570,6 +576,17 @@ export function runBookkeepingValidator(options = {}) {
     evidence,
     findings,
   };
+}
+
+function loadBookkeepingConfig(root, configPath) {
+  const previousFailures = failures;
+  failures = [];
+  try {
+    const loaded = loadConfig(root, configPath);
+    return { config: loaded, failures: [...failures] };
+  } finally {
+    failures = previousFailures;
+  }
 }
 
 function boundedBookkeepingText(value, limit) {

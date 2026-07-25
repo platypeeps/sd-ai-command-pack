@@ -195,7 +195,36 @@ class BookkeepingValidatorTests(InstallTestCase):
         )
 
         self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn(
+            "node scripts/sd-ai-command-pack-review-preflight.mjs\n",
+            result.stdout,
+        )
         self.assertIn("[--repo <repo-root>]", result.stdout)
+
+    def test_validator_honors_configured_artifact_limit(self) -> None:
+        root = self.make_validator_repo()
+        config = root / ".sd-ai-command-pack/review-preflight.json"
+        config.parent.mkdir(parents=True)
+        config.write_text(
+            json.dumps({"untrackedFileReadLimitBytes": 16}) + "\n",
+            encoding="utf-8",
+        )
+        task_dir = ".trellis/tasks/07-25-configured-limit"
+        self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                "configured-limit",
+                status="in_progress",
+                branch="codex/configured-limit",
+                completed_at=None,
+            ),
+        )
+
+        result = self.run_validator(root, "pre-archive", "--task-dir", task_dir)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("16 bytes", result.stdout)
 
     def test_cli_defaults_to_script_repository_outside_working_directory(self) -> None:
         root = self.make_validator_repo()
