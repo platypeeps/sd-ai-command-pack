@@ -528,7 +528,11 @@ class ReviewControllerTests(InstallTestCase):
 
         request = {"value": "literal"}
         completed = mock.Mock(returncode=0, stdout="", stderr="")
-        with mock.patch.object(controller, "run_gh", return_value=completed) as run_gh:
+        with mock.patch.object(
+            controller,
+            "_default_branch",
+            return_value="main",
+        ), mock.patch.object(controller, "run_gh", return_value=completed) as run_gh:
             controller._dispatch(
                 root,
                 workflow=".github/workflows/sd-review.yml",
@@ -538,13 +542,38 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual(argv[:3], ["workflow", "run", ".github/workflows/sd-review.yml"])
         self.assertIn('review-request={"value":"literal"}', argv)
         failed = mock.Mock(returncode=1, stdout="", stderr="failed")
-        with mock.patch.object(controller, "run_gh", return_value=failed):
+        with mock.patch.object(
+            controller,
+            "_default_branch",
+            return_value="main",
+        ), mock.patch.object(controller, "run_gh", return_value=failed):
             with self.assertRaisesRegex(controller.CommandError, "uncertain"):
                 controller._dispatch(
                     root,
                     workflow=".github/workflows/sd-review.yml",
                     request=request,
                 )
+
+    def test_default_branch_uses_symbolic_or_unambiguous_remote_ref(self) -> None:
+        controller = self.load_controller()
+        root = self.make_repo()
+        head = self.git_output(root, "rev-parse", "HEAD")
+        self.run_git(root, "update-ref", "refs/remotes/origin/main", head)
+        self.assertEqual(controller._default_branch(root), "main")
+
+        self.run_git(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        self.assertEqual(controller._default_branch(root), "main")
+
+        ambiguous = self.make_repo()
+        ambiguous_head = self.git_output(ambiguous, "rev-parse", "HEAD")
+        self.run_git(ambiguous, "update-ref", "refs/remotes/origin/main", ambiguous_head)
+        self.run_git(ambiguous, "update-ref", "refs/remotes/origin/master", ambiguous_head)
+        with self.assertRaisesRegex(controller.ReviewError, "default branch"):
+            controller._default_branch(ambiguous)
+
+        missing = self.make_repo()
+        with self.assertRaisesRegex(controller.ReviewError, "default branch"):
+            controller._default_branch(missing)
 
     def test_json_command_and_github_boundaries_preserve_typed_failures(self) -> None:
         controller = self.load_controller()

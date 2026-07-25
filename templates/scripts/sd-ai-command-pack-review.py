@@ -932,27 +932,46 @@ def _remote_request(
     return normalized
 
 
+def _default_branch(repo: Path) -> str:
+    symbolic = _git(
+        repo,
+        "symbolic-ref",
+        "--quiet",
+        "refs/remotes/origin/HEAD",
+        required=False,
+    )
+    if symbolic.startswith("refs/remotes/origin/"):
+        return symbolic.removeprefix("refs/remotes/origin/")
+    candidates = [
+        branch
+        for branch in ("main", "master")
+        if _git(
+            repo,
+            "rev-parse",
+            "--verify",
+            f"refs/remotes/origin/{branch}",
+            required=False,
+        )
+    ]
+    if len(candidates) == 1:
+        return candidates[0]
+    raise ReviewError("cannot determine the origin default branch")
+
+
 def _dispatch(
     repo: Path,
     *,
     workflow: str,
     request: Mapping[str, Any],
 ) -> None:
-    default_ref = _git(
-        repo,
-        "symbolic-ref",
-        "--quiet",
-        "--short",
-        "refs/remotes/origin/HEAD",
-        required=False,
-    ).removeprefix("origin/")
+    default_ref = _default_branch(repo)
     result = run_gh(
         [
             "workflow",
             "run",
             workflow,
             "--ref",
-            default_ref or "main",
+            default_ref,
             "-f",
             "operation=route",
             "-f",
