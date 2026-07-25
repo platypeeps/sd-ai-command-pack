@@ -758,6 +758,46 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(gate["batchSize"], 2)
         self.assertTrue(gate["families"][0]["auditComplete"])
 
+    def test_empty_or_mismatched_sibling_batch_cannot_complete_audit(self) -> None:
+        root = self.make_repo()
+        self.write_config(root)
+        findings = [
+            self.family_finding(root, "remote-one", 1, "boundary-validation"),
+            self.family_finding(root, "remote-two", 2, "boundary-validation"),
+        ]
+
+        for batch_size, sibling_ids in (
+            (0, []),
+            (1, ["sibling-one", "sibling-two"]),
+        ):
+            with self.subTest(batch_size=batch_size, sibling_ids=sibling_ids):
+                audit = self.completed_family_audit(root)
+                audit["batchSize"] = batch_size
+                audit["siblingFindingIds"] = sibling_ids
+                evidence = self.write_family_evidence(
+                    root,
+                    current_round=2,
+                    findings=findings,
+                    audits=[audit],
+                )
+
+                result = self.run_stage(
+                    root,
+                    f"family-audit-incomplete-{batch_size}",
+                    "--family-evidence",
+                    str(evidence),
+                    "--plan-only",
+                )
+                report = self.report(result)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertEqual(
+                    report["plan"]["familyGate"]["state"],
+                    "sibling-audit-required",
+                )
+                self.assertFalse(
+                    report["plan"]["familyGate"]["families"][0]["auditComplete"]
+                )
+
     def test_failed_local_audit_cannot_complete_sibling_gate(self) -> None:
         root = self.make_repo()
         self.write_config(root)

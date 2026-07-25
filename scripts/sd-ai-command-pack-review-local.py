@@ -780,6 +780,8 @@ def _audit_complete(audit: Mapping[str, Any]) -> bool:
         and audit["head"] == audit["localHead"] == audit["checkHead"]
         and set(observed) == expected
         and set(observed.values()) <= {"covered", "not-applicable"}
+        and len(audit["siblingFindingIds"]) >= 2
+        and audit["batchSize"] == len(audit["siblingFindingIds"])
         and len(audit["fixCommits"]) <= 1
     )
 

@@ -1083,8 +1083,9 @@ attempt isolation, exact-scope receipts, or pre-remote gate.
 - Two actionable observations of the same family on distinct rounds select the
   repeated-family Prism/Gito plan and block remote routing until one complete
   family checklist, clean limitation-free local receipt, passing exact-head
-  check, sibling-finding set, and at most one fix commit are recorded. Different
-  families do not share a recurrence counter.
+  check, at least two unique sibling-finding IDs whose count equals the declared
+  batch size, and at most one fix commit are recorded. Different families do
+  not share a recurrence counter.
 - A later observation of an already-audited family blocks before provider
   execution until the existing `review.round-extension` structured decision is
   recorded for that exact round. Missing, failed, unavailable, incomplete, or
