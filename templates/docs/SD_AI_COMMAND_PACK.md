@@ -250,8 +250,9 @@ it. Use a separate request to execute the recommendation.
    the trusted fleet workflow proves the exact consumer head qualifies for
    integration-only review. That profile suppresses only a new request and
    still inspects all existing feedback, local gates, and CI.
-13. Let the review command reply to and resolve review threads as part of the
-   normal loop once findings are fixed, rebutted with evidence, or confirmed
+13. Let both the successor `sd-review` workflow and the transitional
+   `sd-review-pr` workflow reply to and resolve review threads as part of their
+   normal loops once findings are fixed, rebutted with evidence, or confirmed
    already addressed.
 14. Use the review-learnings command when review comments repeat across PRs and
    you want to capture repo-specific preventive guidance. It scans read-only by

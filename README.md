@@ -284,8 +284,10 @@ released `sd-github-review` v1 router. Controls are
 `local=auto|all|none|<provider>`,
 `remote=auto|cheap|deep|copilot|none`, and `fix=auto|ask|none`.
 
-PR routing is capability-discovered from a strict repository-owned
-`config/routed-review-setup-v1.json` descriptor. The coordinator persists
+PR routing is capability-discovered from a strict repository-owned descriptor.
+Its path defaults to `config/routed-review-setup-v1.json`; the review
+configuration's `remoteIntegration.descriptorPath` can override it. The
+coordinator persists
 dispatch intent before mutation, reconciles the router's durable
 `sd-github-review/receipt` Check Run, observes only the backend-declared GitHub
 channels, and binds readiness to the exact PR head. When routing is optional
