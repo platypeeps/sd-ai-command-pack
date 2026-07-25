@@ -406,6 +406,25 @@ class ReviewStageTests(InstallTestCase):
         self.assertIn("path containing a comma", report["diagnostic"])
         self.assertFalse(log.exists())
 
+    def test_custom_paths_placeholder_rejects_comma_path_before_dispatch(self) -> None:
+        root = self.make_repo()
+        log = self.write_config(root)
+        config = root / ".sd-ai-command-pack/review.json"
+        value = json.loads(config.read_text(encoding="utf-8"))
+        value["providers"][0]["argv"].append("{paths}")
+        config.write_text(json.dumps(value), encoding="utf-8")
+        comma_path = root / "src/with,comma.py"
+        comma_path.write_text("changed\n", encoding="utf-8")
+
+        result = self.run_stage(
+            root, "custom-comma", "--scope", "changes", "--local", "prism"
+        )
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("path containing a comma", report["diagnostic"])
+        self.assertFalse(log.exists())
+
     def test_exact_receipt_reuse_avoids_duplicate_provider_calls(self) -> None:
         root = self.make_repo()
         log = self.write_config(root)

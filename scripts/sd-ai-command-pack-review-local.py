@@ -871,6 +871,12 @@ def _expand_argv(
                 output,
             ]
     else:
+        if any("," in path for path in paths) and any(
+            "{paths}" in item for item in provider.argv
+        ):
+            raise ReviewInputError(
+                f"provider {provider.identifier} cannot safely encode a path containing a comma"
+            )
         substitutions = {
             "{repo}": str(repo),
             "{base}": str(target["base"]),
@@ -916,7 +922,7 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
                 os.killpg(process.pid, signal.SIGKILL)
             else:
                 process.kill()
-        except ProcessLookupError:
+        except (OSError, ProcessLookupError):
             pass
 
 
