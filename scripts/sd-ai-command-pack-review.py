@@ -1219,6 +1219,12 @@ def _collect_observation(
     dispatch = receipt.get("dispatch")
     if not isinstance(dispatch, dict):
         raise ReviewError("remote receipt dispatch is invalid")
+    receipt_observations = receipt.get("observations")
+    remote_latency = (
+        receipt_observations.get("latencyMs")
+        if isinstance(receipt_observations, dict)
+        else None
+    )
     repository = pr["repository"]
     owner = repository["owner"]
     name = repository["name"]
@@ -1306,6 +1312,8 @@ def _collect_observation(
                         "comments": matching,
                     }
                 )
+                if len(threads) > 1_000:
+                    raise ReviewError("review threads exceed 1000 rows")
 
     issue_comments = (
         _paginated_rest_array(
@@ -1418,6 +1426,7 @@ def _collect_observation(
     return {
         "status": status,
         "materialized": materialized,
+        "latencyMs": remote_latency,
         "reviewThreads": {
             "total": len(threads),
             "unresolved": len(unresolved),
@@ -1469,11 +1478,7 @@ def _report(
         if isinstance(remote_receipt, dict)
         else None
     )
-    observations = (
-        remote_receipt.get("observations")
-        if isinstance(remote_receipt, dict)
-        else None
-    )
+    observation = state.get("observation")
     return {
         "schemaVersion": 1,
         "command": "sd-review",
@@ -1501,8 +1506,8 @@ def _report(
                 "costTier": backend.get("costTier")
                 if isinstance(backend, dict)
                 else None,
-                "latencyMs": observations.get("latencyMs")
-                if isinstance(observations, dict)
+                "latencyMs": observation.get("latencyMs")
+                if isinstance(observation, dict)
                 else None,
             },
         },

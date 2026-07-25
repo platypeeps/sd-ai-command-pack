@@ -779,6 +779,50 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual(observation["status"], "findings")
         self.assertEqual(observation["reviewThreads"]["unresolved"], 1)
 
+    def test_review_thread_pagination_rejects_more_than_one_thousand_rows(self) -> None:
+        controller = self.load_controller()
+        root = self.make_repo()
+        pr = self.pr(controller, root)
+        receipt = {
+            "selectedRoute": "none",
+            "backend": None,
+            "dispatch": {"status": "skipped", "phase": "not-started"},
+        }
+        rows = [
+            {
+                "id": f"thread-{index}",
+                "isResolved": True,
+                "isOutdated": False,
+                "comments": {"nodes": [], "pageInfo": {"hasNextPage": False}},
+            }
+            for index in range(1_001)
+        ]
+        thread_payload = [
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {"reviewThreads": {"nodes": rows}}
+                    }
+                }
+            }
+        ]
+
+        with mock.patch.object(
+            controller,
+            "_gh_json",
+            return_value=thread_payload,
+        ):
+            with self.assertRaisesRegex(
+                controller.ReviewError,
+                "review threads exceed 1000 rows",
+            ):
+                controller._collect_observation(
+                    root,
+                    pr=pr,
+                    receipt=receipt,
+                    receipt_check_name="sd-github-review/receipt",
+                )
+
     def test_remote_rebuttal_disposition_clears_only_matching_stable_id(self) -> None:
         controller = self.load_controller()
         root = self.make_repo()
@@ -1098,6 +1142,22 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual(len(state_files), 1)
         state = json.loads(state_files[0].read_text(encoding="utf-8"))
         self.assertEqual(state["phase"], "ready")
+
+    def test_report_reads_remote_latency_from_durable_observation_state(self) -> None:
+        controller = self.load_controller()
+        report = controller._report(
+            state={
+                "phase": "ready",
+                "identity": {},
+                "remoteReceipt": {
+                    "selectedRoute": "copilot",
+                    "backend": {"id": "copilot", "costTier": "high"},
+                },
+                "observation": {"latencyMs": 321},
+            },
+            status="ready",
+        )
+        self.assertEqual(report["economics"]["remote"]["latencyMs"], 321)
 
     def test_round_limit_fails_before_side_effects(self) -> None:
         controller = self.load_controller()
