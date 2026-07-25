@@ -1,0 +1,32 @@
+{
+  "id": "add-review-effectiveness-command",
+  "name": "add-review-effectiveness-command",
+  "title": "Add review effectiveness command",
+  "description": "Add read-only sd-review-effectiveness reporting for paired correctness, marginal value, reliability, latency, and cost.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-25",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "07-25-add-multi-reviewer-learning-and-effectiveness-analysis",
+  "relatedFiles": [
+    ".github/scripts/generate-command-surfaces.py",
+    "templates/docs/SD_AI_COMMAND_PACK.md",
+    "manifest.json",
+    "tests/test_surface_generation.py",
+    "tests/test_generated_parity.py"
+  ],
+  "notes": "New read-only comparative command; recommendations require paired samples and trusted adjudication coverage and never mutate configuration.",
+  "meta": {}
+}

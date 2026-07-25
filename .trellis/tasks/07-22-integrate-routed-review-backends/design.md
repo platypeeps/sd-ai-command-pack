@@ -170,6 +170,22 @@ closed. A same-head rerequest uses an explicit prior receipt and next attempt
 and is sent only when the receipt declares support and repository policy
 authorizes it.
 
+### Local-Attested Route
+
+A compatible v2 standalone route may select `local-attested` instead of a
+direct handler. After the exact-head local provider stage is terminal, the
+coordinator projects its canonical local receipt into the router-owned bounded
+attestation contract and invokes the trusted repository ingestion workflow.
+That workflow publishes receipts and assurance/gate Checks but does not run a
+reviewer, create a review/comment, or call a provider.
+
+The command pack does not choose trust policy or write Checks directly. It
+persists publication identity/fingerprint for idempotent resume and reports the
+result as `repository_attested`. Wrong-head, rejected, conflicting, or
+ambiguous publication stops without a remote reviewer fallback. `remote=none`
+still means no router probe or GitHub attestation, so any required local-
+attested gate remains unmet.
+
 ## Router Capability And Fallback
 
 PR scope performs a read-only capability preflight before any review-provider
@@ -193,6 +209,7 @@ into the command pack.
 | `remote=auto`, required | `absent` | Stop before provider calls or mutation with setup guidance. |
 | `remote=cheap|deep|copilot` | `absent` | Stop early because the requested remote result cannot be supplied. |
 | `remote=none` | any | Run the intentional local-only path without probing or dispatching. If remote integration is required, report that merge readiness remains unmet. |
+| Routed intent | `ready`, local-attested route | Publish bounded exact-head local evidence; perform no GitHub-side reviewer dispatch. |
 | Routed intent | `invalid` or `unavailable` | Fail closed; do not reinterpret configuration drift or an unreadable state as absence. |
 | Routed request started | failed, missing receipt, or ambiguous | Stop and reconcile the durable receipt/idempotency state. Never dispatch a direct or second reviewer request. |
 
@@ -266,6 +283,9 @@ GitHub comparison for the remote decision.
 
 - `sd-create-pr`: publish or reuse one PR and return its identity.
 - `sd-review`: own review state, remediation, and exact-head review evidence.
+  It also owns nested `config` and `budget` operator operations over
+  published router contracts; these do not create additional public commands
+  or move schema/compiler/ledger authority into the pack.
 - `sd-ship`: compose PR creation, review, finish-work, final-head re-entry, and
   housekeeping.
 - `sd-housekeeping`: consume eligibility and remain the only merge mutation

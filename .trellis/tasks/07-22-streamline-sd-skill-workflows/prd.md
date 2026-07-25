@@ -134,6 +134,9 @@ merge eligibility without mutating the PR.
 - `07-22-determinize-fleet-refresh-orchestration` owns F07.
 - `07-22-streamline-backlog-design-workflows` owns F08 and F11.
 - `07-22-harden-review-learnings-boundaries` owns F12.
+- `07-25-add-multi-reviewer-learning-and-effectiveness-analysis` extends the
+  now-bounded learning surface to all configured reviewers and adds separate
+  read-only effectiveness analysis after trusted adjudication contracts land.
 - `07-22-add-command-surface-drift-lint` owns F13.
 - `07-22-add-portable-structured-questions` owns F14.
 - `07-22-optimize-audit-charter-routing` owns F15.

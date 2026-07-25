@@ -223,3 +223,13 @@ PR or commit identity, and accepted disposition.
 - Adding compatibility aliases for retired command surfaces.
 - Merging the command-pack and `sd-github-review` repositories.
 - Opening an upstream Trellis pull request without separate explicit approval.
+
+## Reconciliation note (2026-07-25)
+
+- The program gained children after this task's scope list was written: the
+  `07-25-add-routed-review-operator-ux` subtree (3 children) and the
+  `07-25-add-multi-reviewer-learning-and-effectiveness-analysis` subtree (2 children),
+  both currently PARKED on external sd-github-review contracts. Before closure, either
+  extend the evidence map and lifecycle matrix to include them, or record explicitly that
+  program closure covers the pre-07-25 finding set (F01-F17/G01-G07/H01-H09) and the
+  parked subtrees close separately. The owning parent's child map already lists them.

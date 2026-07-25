@@ -1,0 +1,32 @@
+{
+  "id": "add-sd-review-finding-adjudication-operations",
+  "name": "add-sd-review-finding-adjudication-operations",
+  "title": "Add sd-review finding adjudication operations",
+  "description": "Add sd-review findings list, adjudicate, and status operations over the trusted finding-adjudication contract.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-25",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "07-25-add-routed-review-operator-ux",
+  "relatedFiles": [
+    "templates/.agents/skills/sd-review/SKILL.md",
+    ".github/command-sources/sd-review.md",
+    "templates/scripts/sd-ai-command-pack-review.py",
+    "tests/test_review_controller.py",
+    "manifest.json"
+  ],
+  "notes": "The command pack presents and invokes trusted adjudication; sd-github-review owns identity and authorization, maintainers decide, and the private control plane stores events.",
+  "meta": {}
+}

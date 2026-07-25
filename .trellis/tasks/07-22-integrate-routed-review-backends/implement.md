@@ -85,6 +85,11 @@
   invalidation.
 - Cover runtime failure, missing receipt, and ambiguous dispatch as
   reconciliation-required failures with no direct or duplicate fallback.
+- After versioned configuration, status, pending, explanation, and recovery
+  contracts stabilize, implement nested `sd-review config` and
+  `sd-review budget` operations through child
+  `07-25-add-routed-review-operator-ux`; do not add a new top-level command or
+  duplicate router authority.
 
 ## 5. Remove The Old Surface
 

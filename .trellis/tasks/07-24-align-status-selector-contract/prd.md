@@ -64,3 +64,10 @@ preserving untracked roadmap-file items as `F-*` follow-ups.
 ## Notes
 
 - Historical archived Trellis artifacts are evidence, not live command surface.
+
+## Reconciliation note (2026-07-25)
+
+- Two additive tasks now also touch the status surface: `07-25-parallelize-fleet-status`
+  (collection concurrency) and `07-24-track-clean-recovery-artifacts` R5 (recovery-receipt
+  reporting). This contract fix should land first or independently of both; they carry
+  matching coordination notes.

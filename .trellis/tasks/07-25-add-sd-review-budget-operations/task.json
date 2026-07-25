@@ -1,0 +1,36 @@
+{
+  "id": "add-sd-review-budget-operations",
+  "name": "add-sd-review-budget-operations",
+  "title": "Add sd-review budget operations",
+  "description": "Add sd-review budget status, pending, explain, and explicitly authorized retry over bounded router contracts.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-25",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "07-25-add-routed-review-operator-ux",
+  "relatedFiles": [
+    "templates/.agents/skills/sd-review/SKILL.md",
+    ".github/command-sources/sd-review.md",
+    "templates/scripts/sd-ai-command-pack-review.py",
+    "templates/docs/SD_AI_COMMAND_PACK.md",
+    "manifest.json",
+    "tests/test_review_controller.py"
+  ],
+  "notes": "Moved from platypeeps/sd-github-review task 07-25-handoff-sd-review-budget-command. Budget operations are nested under sd-review and never own private ledger or recovery policy.",
+  "meta": {
+    "sourceRepo": "platypeeps/sd-github-review",
+    "sourceTask": "07-25-handoff-sd-review-budget-command"
+  }
+}

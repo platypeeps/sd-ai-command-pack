@@ -1,0 +1,32 @@
+{
+  "id": "generalize-review-learnings-across-reviewers",
+  "name": "generalize-review-learnings-across-reviewers",
+  "title": "Generalize review learnings across reviewers",
+  "description": "Make sd-review-learnings consume reviewer-neutral, disposition-aware evidence without ranking reviewers or owning adjudication.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-25",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "07-25-add-multi-reviewer-learning-and-effectiveness-analysis",
+  "relatedFiles": [
+    "templates/.agents/skills/sd-review-learnings/SKILL.md",
+    ".github/command-sources/sd-review-learnings.md",
+    "templates/scripts/sd-ai-command-pack-review-learnings.py",
+    "tests/test_review_learnings.py",
+    "docs/review-learnings.md"
+  ],
+  "notes": "sd-review-learnings remains a recurrence and preventive-guidance tool; it consumes but never writes adjudication and never ranks reviewers.",
+  "meta": {}
+}

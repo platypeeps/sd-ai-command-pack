@@ -22,7 +22,9 @@
     "07-24-implement-read-only-sd-check",
     "07-24-implement-unified-routed-sd-review",
     "07-24-simplify-review-shipping-composition",
-    "07-24-remove-retired-review-surfaces"
+    "07-24-remove-retired-review-surfaces",
+    "07-25-add-routed-review-operator-ux",
+    "07-25-publish-local-review-attestations"
   ],
   "parent": "07-22-evaluate-sd-github-review-consolidation",
   "relatedFiles": [],

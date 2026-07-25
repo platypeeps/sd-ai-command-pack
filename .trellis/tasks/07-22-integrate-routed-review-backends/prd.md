@@ -67,6 +67,12 @@ resolution, CI, and the final report.
   finding `1.4.6.1`; it must land before review integration and retirement.
 - `07-24-implement-unified-routed-sd-review` owns the unified local/remote state
   machine and finding `1.1.2`; it depends on `sd-check` and router v1.
+- `07-25-add-routed-review-operator-ux` owns nested configuration and budget
+  operations over published router contracts; it depends on the unified
+  `sd-review` surface and stable configuration/status/recovery interfaces.
+- `07-25-publish-local-review-attestations` owns bounded publication of the
+  unified coordinator's exact-head local receipt when the router explicitly
+  selects local-attested execution.
 - `07-24-simplify-review-shipping-composition` owns publish/review/ship
   boundaries and finding `1.5.2.1`; it depends on both successor commands.
 - `07-24-remove-retired-review-surfaces` owns exhaustive deletion and installed
@@ -217,6 +223,12 @@ resolution, CI, and the final report.
   executable state machine with versioned JSON state. The skill retains
   judgment and disposition policy but does not remain the authoritative
   transport program.
+- R30: When compatible router discovery selects an explicit v2 local-attested
+  route, publish the canonical exact-head local receipt through the trusted
+  repository workflow instead of dispatching a GitHub-side reviewer. Preserve
+  the same attempt/fingerprint across retries, expose
+  `repository_attested` rather than independent trust, and fail closed without
+  remote fallback on wrong-head, rejected, or ambiguous publication.
 - R29: Make `sd-create-pr` publish or reuse a PR only. Make `sd-ship` explicitly
   compose create, review, finish-work/final-head re-entry, and housekeeping.
   Retire public `sd-watch-pr` and its default merge-capable handoff; internal
@@ -236,8 +248,9 @@ resolution, CI, and the final report.
   attempt that references the prior receipt and is allowed only when backend
   capability and repository policy permit it.
 - R33: Execute the child order explicitly: read-only check, unified review,
-  shipping composition, then retirement. Do not expose a mixed old/new public
-  surface as a completed release between those steps.
+  routed-review operator UX, shipping composition, then retirement. Do not
+  expose a mixed old/new public surface as a completed release between those
+  steps.
 - R34: The final public experience has one vocabulary and authority model:
   `sd-check` checks, `sd-review` reviews, `sd-create-pr` publishes, `sd-ship`
   composes delivery, and `sd-housekeeping` merges/cleans. No other public or
@@ -293,7 +306,11 @@ resolution, CI, and the final report.
   only for optional absence; explicit or required remote review stops early,
   and `remote=none` runs locally without claiming required remote readiness.
 - [ ] Runtime/receipt/ambiguous-dispatch tests fail closed and prove that the
-  command pack never issues a direct or duplicate fallback reviewer request.
+      command pack never issues a direct or duplicate fallback reviewer request.
+- [ ] Local-attested tests publish only bounded exact-head local receipt
+      evidence, dispatch zero GitHub-side reviewers, preserve idempotency, and
+      keep direct-handler, managed, `none`, absent, invalid, and incompatible
+      setup behavior distinct.
 - [ ] `sd-check` leaves tracked, untracked, ignored generated knowledge, Git,
   and GitHub state unchanged while reporting stale artifacts precisely.
 - [ ] A finish-work or other post-review commit cannot inherit a clean verdict
@@ -317,8 +334,8 @@ resolution, CI, and the final report.
   decision boundaries and degrade safely when the host lacks the capability.
 - [ ] Source templates, generated mirrors, manifest/provenance, candidate
   ledger, focused tests, `make check`, and fleet candidate validation pass.
-- [ ] All four implementation children are archived with landed and validated
-  evidence in dependency order.
+- [ ] All five implementation children are archived with landed and validated
+      evidence in dependency order.
 - [ ] A repository-wide live-surface scan and upgrade-from-prior-release fixture
   prove that no old command, code path, shell-string/environment reader, alias,
   wrapper, fallback, hidden mode, or stale receipt remains executable.
