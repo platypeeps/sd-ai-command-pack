@@ -1616,7 +1616,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=".")
     parser.add_argument("--scope", choices=sorted(SCOPES), default="auto")
-    parser.add_argument("--base", default="origin/main")
+    parser.add_argument("--base")
     parser.add_argument("--pr-number", type=int)
     parser.add_argument("--local", default="auto")
     parser.add_argument("--remote", choices=sorted(REMOTE_VALUES), default="auto")
@@ -1659,7 +1659,14 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         )
     scope, pr_number = resolve_scope(repo, args.scope, args.pr_number)
     pr = _pr_evidence(repo, pr_number) if pr_number is not None else None
-    effective_base = pr["base"] if pr else args.base
+    if pr is not None:
+        effective_base = pr["base"]
+    elif args.base is not None:
+        effective_base = args.base
+    elif scope == "branch":
+        effective_base = f"origin/{_default_branch(repo)}"
+    else:
+        effective_base = "origin/main"
     worktree_digest = _worktree_digest(repo) if scope != "pr" else None
     controls = {
         "local": args.local,

@@ -1072,7 +1072,11 @@ class ReviewControllerTests(InstallTestCase):
                     ),
                 ]
             )
-        with patches[0], patches[1]:
+        with patches[0], patches[1], mock.patch.object(
+            controller,
+            "_default_branch",
+            return_value="main",
+        ):
             if len(patches) == 2:
                 return controller.run(args), None
             with patches[2], patches[3], patches[4] as query, patches[5] as dispatch, patches[6]:
@@ -1112,6 +1116,44 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual(code, 3)
         self.assertEqual(report["status"], "indeterminate")
         self.assertIn("clean local review", report["diagnostic"] or "")
+
+    def test_branch_scope_derives_unconfigured_base_from_origin_head(self) -> None:
+        controller = self.load_controller()
+        root = self.make_repo()
+        head = self.git_output(root, "rev-parse", "HEAD")
+        self.run_git(root, "update-ref", "refs/remotes/origin/master", head)
+        args = controller.parse_args(
+            [
+                "--repo",
+                str(root),
+                "--scope",
+                "branch",
+                "--remote",
+                "none",
+                "--artifact-root",
+                str(self.artifact_root(root)),
+                "--json",
+            ]
+        )
+        local = self.local_report(
+            controller,
+            {
+                "head": head,
+                "repository": {"owner": "platypeeps", "name": "example"},
+            },
+        )
+        with mock.patch.object(
+            controller,
+            "_run_check",
+            return_value={"schemaVersion": 1, "status": "passed"},
+        ), mock.patch.object(
+            controller,
+            "_run_local",
+            return_value=local,
+        ) as run_local:
+            code, report = controller.run(args)
+        self.assertEqual((code, report["status"]), (0, "ready"))
+        self.assertEqual(run_local.call_args.kwargs["base"], "origin/master")
 
     def test_run_blocks_local_failure_before_remote_dispatch(self) -> None:
         controller = self.load_controller()
@@ -1251,6 +1293,8 @@ class ReviewControllerTests(InstallTestCase):
                 str(root),
                 "--scope",
                 "branch",
+                "--base",
+                "origin/main",
                 "--attempt",
                 "6",
                 "--round-extension-authorized",
