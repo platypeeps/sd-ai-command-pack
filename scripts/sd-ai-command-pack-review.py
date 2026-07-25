@@ -1386,11 +1386,15 @@ def _collect_observation(
         in {"fail", "pending", "cancel"}
     ]
     matching_checks = [item for item in checks if item.get("name") in check_names]
-    unresolved = [
-        row
-        for row in threads
-        if not row["resolved"] and not row["outdated"] and row["comments"]
-    ]
+    unresolved = (
+        [
+            row
+            for row in threads
+            if not row["resolved"] and not row["outdated"] and row["comments"]
+        ]
+        if "inline-comment" in channels
+        else []
+    )
     review_findings = [
         row
         for row in matching_reviews
@@ -1544,7 +1548,6 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--repo", default=".")
     parser.add_argument("--scope", choices=sorted(SCOPES), default="auto")
     parser.add_argument("--base", default="origin/main")
-    parser.add_argument("--head", default="HEAD")
     parser.add_argument("--pr-number", type=int)
     parser.add_argument("--local", default="auto")
     parser.add_argument("--remote", choices=sorted(REMOTE_VALUES), default="auto")
@@ -1695,7 +1698,7 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             repo,
             scope=scope,
             base=effective_base,
-            head=pr["head"] if pr else args.head,
+            head=pr["head"] if pr else str(identity["head"]),
             attempt_id=attempt_id,
             artifact_root=root,
             args=args,

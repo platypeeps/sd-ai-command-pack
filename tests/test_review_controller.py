@@ -779,6 +779,62 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual(observation["status"], "findings")
         self.assertEqual(observation["reviewThreads"]["unresolved"], 1)
 
+    def test_undeclared_inline_threads_do_not_become_findings(self) -> None:
+        controller = self.load_controller()
+        root = self.make_repo()
+        pr = self.pr(controller, root)
+        receipt = {
+            "selectedRoute": "none",
+            "backend": None,
+            "dispatch": {"status": "skipped", "phase": "not-started"},
+        }
+        thread_payload = [
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [
+                                    {
+                                        "id": "unrelated-thread",
+                                        "isResolved": False,
+                                        "isOutdated": False,
+                                        "comments": {
+                                            "nodes": [
+                                                {
+                                                    "id": "unrelated-comment",
+                                                    "body": "Unrelated inline feedback",
+                                                    "author": {"login": "someone-else"},
+                                                }
+                                            ],
+                                            "pageInfo": {"hasNextPage": False},
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        ]
+
+        def fake_gh(_args, *, context, **_kwargs):
+            if context == "collect paginated review threads":
+                return thread_payload
+            if context == "collect pull request checks":
+                return []
+            self.fail(f"unexpected GitHub context: {context}")
+
+        with mock.patch.object(controller, "_gh_json", side_effect=fake_gh):
+            observation = controller._collect_observation(
+                root,
+                pr=pr,
+                receipt=receipt,
+                receipt_check_name="sd-github-review/receipt",
+            )
+        self.assertEqual(observation["status"], "clean")
+        self.assertEqual(observation["reviewThreads"]["unresolved"], 0)
+
     def test_review_thread_pagination_rejects_more_than_one_thousand_rows(self) -> None:
         controller = self.load_controller()
         root = self.make_repo()
@@ -1169,6 +1225,7 @@ class ReviewControllerTests(InstallTestCase):
             with self.assertRaisesRegex(controller.ReviewError, "roundLimit"):
                 controller.run(args)
         check.assert_not_called()
+
         authorized = controller.parse_args(
             [
                 "--repo",
@@ -1201,6 +1258,11 @@ class ReviewControllerTests(InstallTestCase):
         ):
             code, report = controller.run(authorized)
         self.assertEqual((code, report["status"]), (0, "ready"))
+
+    def test_controller_does_not_expose_an_unbound_head_override(self) -> None:
+        controller = self.load_controller()
+        with mock.patch.object(controller.sys, "stderr"), self.assertRaises(SystemExit):
+            controller.parse_args(["--head", "origin/main"])
 
     def test_human_report_and_main_invalid_result_are_stable(self) -> None:
         controller = self.load_controller()
