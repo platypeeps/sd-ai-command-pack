@@ -316,6 +316,16 @@ class CheckTests(InstallTestCase):
             {"schemaVersion": 2, "prerequisites": [], "checks": []},
             {"schemaVersion": 1, "prerequisites": [], "checks": "echo test"},
             self.config(checks=[self.command_entry("shell", ["bash", "-c", "true"])]),
+            self.config(
+                checks=[self.command_entry("shell-bundle", ["bash", "-lc", "true"])]
+            ),
+            self.config(
+                checks=[
+                    self.command_entry(
+                        "inline-eval", ["node", "-e", "process.exit(0)"]
+                    )
+                ]
+            ),
             self.config(checks=[self.command_entry("remote", ["gh", "pr", "view"])]),
             self.config(checks=[self.command_entry("escape", ["true"], cwd="../outside")]),
             self.config(checks=[self.command_entry("timeout", ["true"], timeout=3601)]),

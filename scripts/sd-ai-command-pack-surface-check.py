@@ -358,7 +358,9 @@ def _graph(
         source = entry["source"]
         target = entry["target"]
         source_id = _add_node(nodes, f"path:{source}", _node_kind(source, source_only), source)
-        target_kind = "check-only" if target == SURFACE_HELPER else "installable"
+        target_kind = (
+            "check-only" if target == SURFACE_HELPER else _node_kind(target, source_only)
+        )
         target_id = _add_node(nodes, f"path:{target}", target_kind, target)
         edges.add(Edge(source_id, "installs-as", target_id))
         edges.add(Edge(manifest_node, "declares", source_id))

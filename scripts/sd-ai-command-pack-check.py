@@ -456,19 +456,60 @@ def _executable_name(value: str) -> str:
     return PurePosixPath(value.replace("\\", "/")).name.casefold()
 
 
+def _leading_options(argv: tuple[str, ...]) -> tuple[str, ...]:
+    options: list[str] = []
+    for argument in argv[1:]:
+        if argument == "--" or not argument.startswith("-") or argument == "-":
+            break
+        options.append(argument)
+    return tuple(options)
+
+
+def _uses_long_option(options: tuple[str, ...], names: frozenset[str]) -> bool:
+    return any(
+        argument in names
+        or any(argument.startswith(f"{name}=") for name in names)
+        for argument in options
+    )
+
+
 def _validate_command_policy(argv: tuple[str, ...], *, field: str) -> None:
     executable = _executable_name(argv[0])
+    options = _leading_options(argv)
     if executable in FORBIDDEN_EXECUTABLES:
         raise CheckInputError(f"{field} uses forbidden executable {executable}")
-    if executable in SHELL_EXECUTABLES and any(
-        argument in {"-c", "--command"} for argument in argv[1:]
+    if executable in SHELL_EXECUTABLES and (
+        any(
+            not argument.startswith("--") and "c" in argument[1:]
+            for argument in options
+        )
+        or _uses_long_option(options, frozenset({"--command"}))
     ):
         raise CheckInputError(f"{field} must not execute a shell command string")
     is_code_string_executable = executable in CODE_STRING_EXECUTABLES or bool(
         re.fullmatch(r"python(?:3(?:\.\d+)*)?", executable)
     )
-    if is_code_string_executable and "-c" in argv[1:]:
-        raise CheckInputError(f"{field} must not execute an inline code string")
+    if is_code_string_executable:
+        short_prefixes: tuple[str, ...]
+        long_options: frozenset[str]
+        if re.fullmatch(r"python(?:3(?:\.\d+)*)?", executable):
+            short_prefixes = ("-c",)
+            long_options = frozenset()
+        elif executable in {"node", "nodejs"}:
+            short_prefixes = ("-e", "-p")
+            long_options = frozenset({"--eval", "--print"})
+        elif executable == "perl":
+            short_prefixes = ("-e", "-E")
+            long_options = frozenset()
+        else:
+            short_prefixes = ("-e",)
+            long_options = frozenset()
+        if any(
+            argument.startswith(short_prefixes)
+            for argument in options
+            if not argument.startswith("--")
+        ) or _uses_long_option(options, long_options):
+            raise CheckInputError(f"{field} must not execute an inline code string")
     if executable == "git":
         subcommand = next(
             (argument for argument in argv[1:] if not argument.startswith("-")),

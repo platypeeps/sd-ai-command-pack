@@ -301,6 +301,15 @@ class SurfaceClosureTests(unittest.TestCase):
                 "registry",
             }.issubset({node.kind for node in nodes.values()})
         )
+        expected_target_kinds = {
+            "docs/SD_AI_COMMAND_PACK.md": "documentation-only",
+            ".github/prompts/sd-check.prompt.md": "check-only",
+            "scripts/sd-ai-command-pack-check.py": "installable",
+            self.checker.SURFACE_HELPER: "check-only",
+        }
+        for target, expected_kind in expected_target_kinds.items():
+            with self.subTest(target=target):
+                self.assertEqual(nodes[f"path:{target}"].kind, expected_kind)
         manifest_targets = {entry["target"] for entry in entries}
         for command in registry.COMMAND_REGISTRY:
             if command.name in registry.SOURCE_ONLY_COMMAND_NAMES:
