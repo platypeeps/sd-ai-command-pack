@@ -476,6 +476,42 @@ class ReviewControllerTests(InstallTestCase):
             "text": controller.RECEIPT_MARKER
             + controller._canonical_text(receipt)
         }
+        observed = receipt | {
+            "observations": {
+                "latencyMs": controller.MAX_REMOTE_LATENCY_MS,
+                "costTier": "low",
+            }
+        }
+        check["output"] = {
+            "text": controller.RECEIPT_MARKER
+            + controller._canonical_text(observed)
+        }
+        self.assertEqual(
+            controller._decode_receipt_check(
+                check,
+                check_name="sd-github-review/receipt",
+                request=first,
+            )["observations"]["latencyMs"],
+            controller.MAX_REMOTE_LATENCY_MS,
+        )
+        for latency in (True, -1, controller.MAX_REMOTE_LATENCY_MS + 1, "1"):
+            invalid = receipt | {
+                "observations": {"latencyMs": latency, "costTier": "low"}
+            }
+            check["output"] = {
+                "text": controller.RECEIPT_MARKER
+                + controller._canonical_text(invalid)
+            }
+            with self.assertRaisesRegex(controller.ReviewError, "latencyMs"):
+                controller._decode_receipt_check(
+                    check,
+                    check_name="sd-github-review/receipt",
+                    request=first,
+                )
+        check["output"] = {
+            "text": controller.RECEIPT_MARKER
+            + controller._canonical_text(receipt)
+        }
         check["external_id"] = "0" * 64
         with self.assertRaisesRegex(controller.ReviewError, "external_id"):
             controller._decode_receipt_check(

@@ -41,6 +41,7 @@ MAX_TEXT = 1200
 MAX_POLLS = 30
 MAX_POLL_SECONDS = 60
 MAX_ROUNDS = 10
+MAX_REMOTE_LATENCY_MS = 86_400_000
 OID_RE = re.compile(r"[0-9a-f]{40}\Z")
 SAFE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 REPOSITORY_RE = re.compile(r"[A-Za-z0-9_.-]{1,100}\Z")
@@ -136,6 +137,20 @@ def _bounded_integer(
 
 def _is_exact_integer(value: object, expected: int) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value == expected
+
+
+def _receipt_latency(receipt: Mapping[str, Any]) -> int | None:
+    observations = receipt.get("observations")
+    if observations is None:
+        return None
+    if not isinstance(observations, dict):
+        raise ReviewError("durable receipt observations must be an object")
+    return _bounded_integer(
+        observations.get("latencyMs"),
+        field="durable receipt observations latencyMs",
+        minimum=0,
+        maximum=MAX_REMOTE_LATENCY_MS,
+    )
 
 
 def _parse_remote_dispositions(values: Sequence[str]) -> dict[str, str]:
@@ -1076,6 +1091,7 @@ def _decode_receipt_check(
     dispatch = receipt.get("dispatch")
     if route not in RECEIPT_ROUTES or not isinstance(dispatch, dict):
         raise ReviewError("durable receipt route or dispatch is invalid")
+    _receipt_latency(receipt)
     if dispatch.get("idempotencyKey") != request["logicalDispatchId"]:
         raise ReviewError("durable receipt idempotency key is invalid")
     if dispatch.get("status") not in {"requested", "already-present", "failed", "skipped"}:
@@ -1376,12 +1392,7 @@ def _collect_observation(
     dispatch = receipt.get("dispatch")
     if not isinstance(dispatch, dict):
         raise ReviewError("remote receipt dispatch is invalid")
-    receipt_observations = receipt.get("observations")
-    remote_latency = (
-        receipt_observations.get("latencyMs")
-        if isinstance(receipt_observations, dict)
-        else None
-    )
+    remote_latency = _receipt_latency(receipt)
     repository = pr["repository"]
     owner = repository["owner"]
     name = repository["name"]
