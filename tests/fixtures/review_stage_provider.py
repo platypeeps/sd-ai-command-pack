@@ -15,6 +15,7 @@ with log.open("a", encoding="utf-8") as stream:
     stream.write(f"{provider}:start:{time.time()}\n")
 if mode == "barrier":
     deadline = time.time() + 2
+    starts = 0
     while time.time() < deadline:
         starts = sum(
             ":start:" in line for line in log.read_text(encoding="utf-8").splitlines()

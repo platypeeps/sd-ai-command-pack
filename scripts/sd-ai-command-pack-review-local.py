@@ -469,9 +469,8 @@ def _repository_identity(repo: Path) -> str:
     normalized_path = remote_path.strip("/")
     if normalized_path.endswith(".git"):
         normalized_path = normalized_path[:-4]
-    if not normalized_path or any(
-        token in PurePosixPath(normalized_path).parts for token in (".", "..")
-    ):
+    raw_parts = normalized_path.split("/")
+    if not normalized_path or any(part in {"", ".", ".."} for part in raw_parts):
         return f"remote:{hashlib.sha256(remote.encode()).hexdigest()}"
     return f"{host.casefold()}/{normalized_path}"
 
@@ -762,6 +761,9 @@ def _artifact_root(repo: Path, value: str | None) -> Path:
     raw = Path(value) if value else DEFAULT_ARTIFACT_ROOT
     path = raw if raw.is_absolute() else repo / raw
     try:
+        lexical = path.relative_to(repo)
+        if ".." in lexical.parts:
+            raise ValueError("artifact root contains parent traversal")
         resolved = path.resolve(strict=False)
         resolved.relative_to(repo)
     except (OSError, ValueError) as error:
@@ -771,9 +773,9 @@ def _artifact_root(repo: Path, value: str | None) -> Path:
     if resolved == repo or ".git" in resolved.relative_to(repo).parts:
         raise ReviewInputError("review artifact root cannot be the repository or .git")
     current = repo
-    for part in resolved.relative_to(repo).parts:
+    for part in lexical.parts:
         current /= part
-        if current.exists() and current.is_symlink():
+        if current.is_symlink():
             raise ReviewInputError(
                 f"review artifact root cannot traverse a symlink: {current}"
             )

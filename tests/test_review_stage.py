@@ -597,6 +597,23 @@ class ReviewStageTests(InstallTestCase):
         self.assertNotIn("review-user", result.stdout)
         self.assertNotIn("secret-token", result.stdout)
 
+    def test_noncanonical_remote_path_uses_opaque_identity(self) -> None:
+        root = self.make_repo()
+        self.write_config(root)
+        self.run_git(
+            root,
+            "remote",
+            "add",
+            "origin",
+            "https://example.com/org/./repo.git",
+        )
+
+        result = self.run_stage(root, "opaque-identity", "--plan-only")
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertTrue(str(report["target"]["repository"]).startswith("remote:"))
+
     def test_option_like_base_is_not_interpreted_as_git_flag(self) -> None:
         root = self.make_repo()
         self.write_config(root)
@@ -628,6 +645,31 @@ class ReviewStageTests(InstallTestCase):
         external_report = self.report(external)
         self.assertEqual(external.returncode, 2, external.stdout)
         self.assertIn("inside the repository", external_report["diagnostic"])
+
+    def test_artifact_root_rejects_lexical_symlink_before_dispatch(self) -> None:
+        root = self.make_repo()
+        log = self.write_config(root)
+        (root / ".gitignore").write_text(
+            ".build/\n.build-link\n", encoding="utf-8"
+        )
+        self.run_git(root, "add", ".gitignore")
+        self.run_git(root, "commit", "-m", "ignore artifact symlink")
+        try:
+            (root / ".build-link").symlink_to(".build", target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"symlink creation unavailable: {error}")
+
+        result = self.run_stage(
+            root,
+            "symlink-root",
+            "--artifact-root",
+            ".build-link/reviews",
+        )
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("cannot traverse a symlink", report["diagnostic"])
+        self.assertFalse(log.exists())
 
     def test_branch_scope_rejects_dirty_worktree_and_retry_collision(self) -> None:
         root = self.make_repo()
