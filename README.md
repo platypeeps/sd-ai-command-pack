@@ -274,6 +274,32 @@ local caches, and LLM credentials.
 This independent legacy surface remains during the clean-interface migration;
 new deterministic callers use `sd-check` and do not invoke or alias it.
 
+### sd-review
+
+Runs one exact-scope review lifecycle for local changes, the current branch,
+the checked-out codebase, or a pull request. It composes the typed `sd-check`
+gate with the existing cost-aware local provider stage and, for PR scope, the
+released `sd-github-review` v1 router. Controls are
+`scope=auto|changes|branch|codebase|pr`,
+`local=auto|all|none|<provider>`,
+`remote=auto|cheap|deep|copilot|none`, and `fix=auto|ask|none`.
+
+PR routing is capability-discovered from a strict repository-owned descriptor.
+Its path defaults to `config/routed-review-setup-v1.json`; the review
+configuration's `remoteIntegration.descriptorPath` can override it. The
+coordinator persists
+dispatch intent before mutation, reconciles the router's durable
+`sd-github-review/receipt` Check Run, observes only the backend-declared GitHub
+channels, and binds readiness to the exact PR head. When routing is optional
+and the framework is not configured, a clean local review completes visibly as
+local-only with zero remote confidence. Explicit or required routing and
+invalid, incompatible, unavailable, failed, or ambiguous states fail closed;
+there is no direct Copilot or custom reviewer fallback.
+
+`sd-review` is additive in this release while callers migrate. The legacy
+`sd-review-pr` and `sd-review-local` surfaces remain independent and are not
+called or aliased by the successor.
+
 ### sd-review-pr
 
 Runs the typed deterministic `sd-check` gate, requests the

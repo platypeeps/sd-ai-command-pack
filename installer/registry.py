@@ -867,6 +867,18 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
         ),
     ),
     CommandInfo(
+        "sd-review",
+        "review",
+        "pull-requests-shipping",
+        mutates_local=True,
+        mutates_remote=True,
+        interaction_decisions=(
+            "review.higher-risk-fixes",
+            "review.scope-expansion",
+            "review.round-extension",
+        ),
+    ),
+    CommandInfo(
         "sd-review-pr",
         "review-pr",
         "pull-requests-shipping",

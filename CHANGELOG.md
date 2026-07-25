@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.52.0 - 2026-07-25
+
+- Add `sd-review` as the unified exact-scope review lifecycle for changes,
+  branches, codebases, and pull requests, composing the typed deterministic
+  check with cost-aware local review receipts and routed GitHub review.
+- Discover the released `sd-github-review` v1 capability from a strict
+  repository descriptor, persist dispatch intent before mutation, reconcile
+  durable exact-head receipts, and observe only receipt-declared finding
+  channels without a direct reviewer fallback.
+- Extend the shared review configuration with bounded `remoteIntegration`
+  policy, keep optional router absence visibly local-only, and fail closed for
+  provider failures, invalid routing, ambiguous dispatch, or stale heads.
+
 ## 0.51.0 - 2026-07-25
 
 - Extend the canonical review-preflight executable with schema-version-1

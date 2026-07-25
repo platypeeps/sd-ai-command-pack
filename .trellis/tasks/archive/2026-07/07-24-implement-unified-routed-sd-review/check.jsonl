@@ -1,0 +1,3 @@
+{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Verify the delivered public command, generated adapters, structured decisions, and unified lifecycle against the executable adapter contract."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify typed outcomes, exact-scope receipts, failure semantics, state guards, and the completed local-stage contract."}
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Verify release payload, generated parity, manifest, provenance, and filesystem safety gates."}

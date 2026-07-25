@@ -172,7 +172,9 @@ class InstallCoreTests(InstallTestCase):
         self.assert_paths_are_files(
             root,
             [
+                ".agents/skills/sd-review/SKILL.md",
                 ".agents/skills/sd-review-pr/SKILL.md",
+                "scripts/sd-ai-command-pack-review.py",
                 "scripts/sd-ai-command-pack-full-check.sh",
                 "scripts/sd-ai-command-pack-toolchain.sh",
                 ".prism/rules.json",
@@ -217,6 +219,7 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-update-deps/SKILL.md",
                 ".agents/skills/sd-test-gaps/SKILL.md",
                 ".agents/skills/sd-retro/SKILL.md",
+                ".agents/skills/sd-review/SKILL.md",
                 ".agents/skills/sd-review-pr/SKILL.md",
                 ".agents/skills/sd-review-local/SKILL.md",
                 ".agents/skills/sd-review-learnings/SKILL.md",
@@ -232,6 +235,7 @@ class InstallCoreTests(InstallTestCase):
                 "scripts/sd-ai-command-pack-review-scope.sh",
                 "scripts/sd-ai-command-pack-review-preflight.mjs",
                 "scripts/sd-ai-command-pack-review-local.sh",
+                "scripts/sd-ai-command-pack-review.py",
                 "scripts/sd-ai-command-pack-review-learnings.py",
                 "scripts/sd-ai-command-pack-pr-body-scope.py",
                 "scripts/sd-ai-command-pack-update-spec-kb.py",
@@ -258,6 +262,7 @@ class InstallCoreTests(InstallTestCase):
                 ".gemini/commands/sd/update-deps.toml",
                 ".gemini/commands/sd/test-gaps.toml",
                 ".gemini/commands/sd/retro.toml",
+                ".gemini/commands/sd/review.toml",
                 ".gemini/commands/sd/review-pr.toml",
                 ".gemini/commands/sd/review-local.toml",
                 ".gemini/commands/sd/review-learnings.toml",
@@ -3114,6 +3119,17 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("--json name,workflow,state,bucket,link,completedAt", review_pr)
         self.assertNotIn("workflow,status,conclusion,bucket", review_pr)
 
+        review = (
+            install.ROOT / "templates/.agents/skills/sd-review/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("name: sd-review", review)
+        self.assertIn("# SD Review", review)
+        self.assertIn("scripts/sd-ai-command-pack-review.py", review)
+        self.assertIn("reconciliation-required", review)
+        self.assertIn("review.round-extension", review)
+        self.assertIn("direct Copilot request", review)
+        self.assertIn("Never call, alias, or fall back", review)
+
         create_pr = (
             install.ROOT / "templates/.agents/skills/sd-create-pr/SKILL.md"
         ).read_text(encoding="utf-8")
@@ -3330,6 +3346,7 @@ class InstallCoreTests(InstallTestCase):
                 "update-deps",
                 "test-gaps",
                 "retro",
+                "review",
                 "review-pr",
                 "review-local",
                 "review-learnings",

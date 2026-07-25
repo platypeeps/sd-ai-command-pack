@@ -120,7 +120,7 @@ authorized by the owning workflow.
 
 ### `review.higher-risk-fixes`
 
-- Owners: `sd-ship`, `sd-review-pr`
+- Owners: `sd-ship`, `sd-review`, `sd-review-pr`
 - Category: `higher-risk-mutation`
 - Header: `Risky fixes`
 - Question: Which higher-risk review findings should I address?
@@ -132,7 +132,7 @@ authorized by the owning workflow.
 
 ### `review.scope-expansion`
 
-- Owners: `sd-ship`, `sd-review-pr`, `sd-review-local`
+- Owners: `sd-ship`, `sd-review`, `sd-review-pr`, `sd-review-local`
 - Category: `higher-risk-mutation`
 - Header: `Review scope`
 - Question: Should this review fix expand beyond the current scope?
@@ -144,7 +144,7 @@ authorized by the owning workflow.
 
 ### `review.round-extension`
 
-- Owners: `sd-ship`, `sd-review-pr`
+- Owners: `sd-ship`, `sd-review`, `sd-review-pr`
 - Category: `bounded-budget-extension`
 - Header: `More rounds`
 - Question: Should review continue beyond the current round budget?

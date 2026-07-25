@@ -964,6 +964,103 @@ fanout from the same validated row.
 Wrong: discover check:full or evaluate an environment-provided shell command
 Correct: consume the typed sd-check result and configure argv-only project rows
 
+## Scenario: Unified exact-scope routed review
+
+### 1. Scope / Trigger
+
+- Trigger: changing `sd-review`, local review configuration, router capability
+  discovery, remote request/receipt handling, GitHub finding observation, or
+  exact-head review readiness.
+- The executable owns deterministic lifecycle and side effects. The shared
+  skill owns verified finding disposition and the three structured decisions
+  for higher-risk fixes, scope expansion, and round extension.
+
+### 2. Signatures
+
+- Coordinator: `python3 scripts/sd-ai-command-pack-review.py --repo PATH
+  --scope auto|changes|branch|codebase|pr --local auto|all|none|PROVIDER
+  --remote auto|cheap|deep|copilot|none --fix auto|ask|none --attempt N
+  [--pr-number N] --json`.
+- Optional consumer-repository configuration filename:
+  **.sd-ai-command-pack/review.json**, schema version 1, with the existing
+  providers/policy plus optional bounded `remoteIntegration`.
+- Capability descriptor: repository-contained
+  `config/routed-review-setup-v1.json`, contract major 1.
+- Skill entry: `sd-review`; generated adapters delegate to that skill and the
+  coordinator rather than reconstructing transport policy.
+
+### 3. Contracts
+
+- Resolve `auto` to an unambiguous current-branch PR, otherwise dirty changes,
+  otherwise branch delta. Never infer codebase scope.
+- Bind state and receipts to repository, scope, base/head, dirty bytes,
+  configuration, provider plan, attempt, request fingerprint, and durable
+  receipt. A changed byte or head is a new identity.
+- Run typed `sd-check` before providers or routing. Local provider failure,
+  outstanding findings, or indeterminate state blocks remote routing.
+- Discover routing from strict repository policy, a regular non-symlink v1
+  descriptor, and matching live workflow metadata. Optional absence may finish
+  only after a clean local receipt; explicit/required, invalid, incompatible,
+  unavailable, or ambiguous routing fails closed.
+- Persist request intent before one argv-array `gh workflow run`. Query the
+  durable receipt before dispatch and reconcile an uncertain outcome from the
+  same logical dispatch ID. Never request Copilot directly, execute receipt
+  commands, or use a fallback backend.
+- Treat receipt dispatch success as request evidence, not review completion.
+  Materialization requires the exact-head receipt-declared review, inline,
+  conversation, or check channel. Page bounded threads/comments and preserve
+  unresolved findings plus typed CI state.
+- Non-PR scopes never stage, commit, push, or touch GitHub. PR review fixes use
+  one focused commit and re-enter on the new exact head.
+- Keep `sd-review` additive until the separately owned retirement task deletes
+  legacy surfaces. It must not call or alias `sd-review-local` or
+  `sd-review-pr`.
+
+### 4. Validation & Error Matrix
+
+- Clean deterministic and local evidence plus clean/settled declared remote
+  channels -> `ready`, exit 0.
+- Verified findings, failed CI, required/explicit router absence, or policy
+  block -> `findings`/`blocked`, exit 1.
+- Invalid controls, configuration, path, descriptor, state, or receipt ->
+  `invalid`, exit 2 before an unsafe side effect.
+- Provider failure, missing capability metadata, delayed receipt/channel,
+  dispatch ambiguity, or reconciliation requirement -> typed
+  `failed`/`pending`/`indeterminate`, exit 3 without positive confidence.
+
+### 5. Good / Base / Bad Cases
+
+- Good: a first substantive PR head runs the selected local providers once,
+  routes one canonical request, observes a matching durable receipt and
+  exact-head declared channels, then becomes ready.
+- Base: a branch without a PR runs deterministic and local review only; a PR in
+  optional router-absent mode completes only from a clean local receipt and
+  reports zero remote confidence.
+- Bad: a successful reviewer-request API call is treated as completed review,
+  an unavailable local provider is hidden by remote routing, or uncertain
+  dispatch is retried directly.
+
+### 6. Tests Required
+
+- Cover every scope/control, dirty-byte and exact-head invalidation, provider
+  outcome, optional/required capability state, canonical request/receipt,
+  intent-before-dispatch persistence, delayed receipt, conversation/review/check
+  channels, nested thread pagination, CI outcomes, and round limits.
+- Preserve template/root parity, generated adapters, registry/help/manifest
+  closure, install/update/audit behavior, strict parser parity, and a shipped
+  helper coverage floor.
+
+### 7. Wrong vs Correct
+
+Wrong: request Copilot directly when routed-review setup is absent
+Correct: report optional clean-local completion or fail the required route
+
+Wrong: mark review clean because the router recorded a successful request
+Correct: wait for the receipt-declared exact-head finding channel to materialize
+
+Wrong: resume dirty changes from only the unchanged Git commit SHA
+Correct: bind resumable state to a digest of tracked and untracked review bytes
+
 The `sd-review-pr` shared skill should continue to define:
 
 - required local checks before starting, including `gh --version`,
