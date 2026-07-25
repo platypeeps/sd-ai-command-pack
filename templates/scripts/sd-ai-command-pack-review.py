@@ -536,6 +536,7 @@ def _worktree_digest(repo: Path) -> str:
             + command_detail(diff, fallback=f"git exited {diff.returncode}")
         )
     tracked = diff.stdout if isinstance(diff.stdout, str) else ""
+    tracked_digest = hashlib.sha256(tracked.encode("utf-8")).hexdigest()
     untracked_text = _git(
         repo,
         "ls-files",
@@ -578,7 +579,7 @@ def _worktree_digest(repo: Path) -> str:
                 "digest": payload_digest,
             }
         )
-    return _digest({"trackedDiff": tracked, "untracked": untracked})
+    return _digest({"trackedDiffDigest": tracked_digest, "untracked": untracked})
 
 
 def _attempt_id(identity: Mapping[str, Any], supplied: str | None) -> str:

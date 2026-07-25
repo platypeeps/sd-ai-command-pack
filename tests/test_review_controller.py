@@ -262,8 +262,15 @@ class ReviewControllerTests(InstallTestCase):
             Path,
             "read_bytes",
             side_effect=AssertionError("untracked files must be hashed incrementally"),
-        ):
+        ), mock.patch.object(
+            controller,
+            "_digest",
+            wraps=controller._digest,
+        ) as digest:
             second = controller._worktree_digest(root)
+        digest_input = digest.call_args.args[0]
+        self.assertNotIn("trackedDiff", digest_input)
+        self.assertRegex(digest_input["trackedDiffDigest"], r"[0-9a-f]{64}\Z")
         (root / "new.txt").write_text("second\n", encoding="utf-8")
         third = controller._worktree_digest(root)
         self.assertEqual(len({first, second, third}), 3)
