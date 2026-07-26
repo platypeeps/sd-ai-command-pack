@@ -52,6 +52,8 @@ STAGE_INDEX = {stage: index for index, stage in enumerate(LANE_STAGES)}
 PR_HEAD_STAGES = frozenset(
     {"review", "merge-eligibility", "merge", "post-merge-verification"}
 )
+PR_HEAD_REPUBLICATION_STAGES = frozenset({"review", "merge-eligibility"})
+PR_HEAD_ADVANCED_REASON = "pr-head-advanced"
 ACTION_IDENTITY_FIELDS = ("actionId", "attempt", "consumer", "release", "stage")
 SIDE_EFFECT_STAGES = frozenset(
     {"install-update", "pr-publication", "review", "merge"}
@@ -393,6 +395,20 @@ def _validate_receipt_semantics(
     if (result in REASON_REQUIRED) != (reason_code is not None):
         requirement = "requires" if result in REASON_REQUIRED else "forbids"
         raise FleetControllerError(f"result {result} {requirement} a reason code")
+    if reason_code == PR_HEAD_ADVANCED_REASON:
+        if result != "retryable-failure" or stage not in PR_HEAD_REPUBLICATION_STAGES:
+            raise FleetControllerError(
+                f"reason {PR_HEAD_ADVANCED_REASON} requires a retryable-failure "
+                "at review or merge-eligibility"
+            )
+        if head is None or pr_number is None:
+            raise FleetControllerError(
+                f"reason {PR_HEAD_ADVANCED_REASON} requires head and PR number"
+            )
+        if blocker is not None or pack_blocker:
+            raise FleetControllerError(
+                f"reason {PR_HEAD_ADVANCED_REASON} forbids blocker evidence"
+            )
     if result in {"passed", "at-target"} and (blocker is not None or pack_blocker):
         raise FleetControllerError(f"result {result} forbids blocker evidence")
     if stage in PR_HEAD_STAGES and head is None:
@@ -1026,14 +1042,30 @@ def _advance_lane(lane: dict[str, Any], receipt: Mapping[str, Any], no_merge: bo
     result = receipt["result"]
     stage = lane["stage"]
     prior_head = lane["head"]
+    prior_pr_number = lane["prNumber"]
     if stage in PR_HEAD_STAGES and (
         prior_head is None or receipt["head"] != prior_head
     ):
         raise FleetControllerError("receipt head does not match the current PR head")
+    if receipt["reasonCode"] == PR_HEAD_ADVANCED_REASON and (
+        prior_pr_number is None or receipt["prNumber"] != prior_pr_number
+    ):
+        raise FleetControllerError(
+            "receipt PR number does not match the current PR number"
+        )
     if result == "passed" and stage == "pr-publication" and (
         receipt["head"] is None or receipt["prNumber"] is None
     ):
         raise FleetControllerError("PR publication requires head and PR number")
+    if (
+        result == "passed"
+        and stage == "pr-publication"
+        and prior_pr_number is not None
+        and receipt["prNumber"] != prior_pr_number
+    ):
+        raise FleetControllerError(
+            "PR republication must reuse the current PR number"
+        )
     if receipt["head"] is not None:
         lane["head"] = receipt["head"]
     if receipt["prNumber"] is not None:
@@ -1061,7 +1093,11 @@ def _advance_lane(lane: dict[str, Any], receipt: Mapping[str, Any], no_merge: bo
         return
     if result == "retryable-failure":
         if lane["attempt"] < 2:
-            lane["attempt"] += 1
+            if receipt["reasonCode"] == PR_HEAD_ADVANCED_REASON:
+                lane["stage"] = "pr-publication"
+                lane["attempt"] = _next_stage_attempt(lane, "pr-publication")
+            else:
+                lane["attempt"] += 1
             lane["status"] = "waiting"
         else:
             lane["status"] = "terminal"

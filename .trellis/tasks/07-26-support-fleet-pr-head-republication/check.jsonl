@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Verify exact-head epochs, retry bounds, schema compatibility, and recovery separation."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify invalid transition behavior is deterministic and state-preserving."}

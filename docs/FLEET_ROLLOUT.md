@@ -149,6 +149,27 @@ start fails closed. `status` and `validate` are read-only. After interruption,
 `resume` exposes reconciliation evidence for issued actions rather than
 reissuing install, PR, review, or merge side effects.
 
+If review or merge-eligibility remediation advances an existing PR, do not
+record the successor SHA against the old publication epoch. Record the issued
+action against its published SHA and PR as a bounded republication retry:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-controller.py record \
+  --repo <absolute-source-root> --campaign <campaign-id> \
+  --release <version> --action-id <issued-action-id> \
+  --consumer <name> --result retryable-failure \
+  --reason-code pr-head-advanced --head <published-full-sha> \
+  --pr-number <existing-pr-number> --json
+```
+
+The first eligible retry returns the lane to `pr-publication`. Reclassify the
+new exact head, reuse the existing PR, and record the issued publication action
+with that successor SHA. This starts a new exact-head epoch. Generic transient
+retries remain on their current stage; a second review-cycle head advance parks
+as retry-exhausted. This path is separate from corrective-release recovery,
+which remains restricted to terminal merge-stage pack blockers.
+
 The controller composes the existing wave planner internally. It issues only
 manifest-policy `canStart` lanes, never exceeds `maxConcurrency`, and issues at
 most one manifest-ordered merge action. A pack blocker stops new starts and
