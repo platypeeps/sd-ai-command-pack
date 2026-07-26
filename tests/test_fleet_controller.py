@@ -101,13 +101,13 @@ class FleetControllerTests(InstallTestCase):
         self.assertTrue(changed)
         self.assertEqual(receipt["stage"], "preflight")
 
-    def pass_lane_action(self, controller, state):
+    def pass_lane_action(self, controller, state, *, head=HEAD, pr_number=17):
         action = controller.issue_next(state)[0]
         kwargs = {}
         if action["stage"] == "pr-publication":
-            kwargs = {"head": HEAD, "pr_number": 17}
+            kwargs = {"head": head, "pr_number": pr_number}
         elif action["stage"] in controller.PR_HEAD_STAGES:
-            kwargs = {"head": HEAD}
+            kwargs = {"head": head}
         controller.record_result(
             state,
             action_id=action["actionId"],
@@ -454,6 +454,236 @@ class FleetControllerTests(InstallTestCase):
             reason_code="temporary-network",
         )
         self.assertEqual(state["lanes"][0]["result"], "retry-exhausted")
+
+    def test_review_head_advance_republishes_and_establishes_new_epoch(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("wave-a",)
+        )
+        self.pass_preflight(controller, state)
+        while state["lanes"][0]["stage"] != "review":
+            self.pass_lane_action(controller, state)
+
+        review = controller.issue_next(state)[0]
+        receipt, changed = controller.record_result(
+            state,
+            action_id=review["actionId"],
+            release="0.37.0",
+            consumer="wave-a",
+            result="retryable-failure",
+            reason_code=controller.PR_HEAD_ADVANCED_REASON,
+            head=HEAD,
+            pr_number=17,
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(receipt["head"], HEAD)
+        lane = state["lanes"][0]
+        self.assertEqual(lane["stage"], "pr-publication")
+        self.assertEqual(lane["attempt"], 2)
+        self.assertEqual(lane["head"], HEAD)
+        self.assertEqual(lane["prNumber"], 17)
+        controller.validate_state(state)
+
+        publication = controller.issue_next(state)[0]
+        self.assertEqual(publication["stage"], "pr-publication")
+        self.assertEqual(publication["attempt"], 2)
+        before = copy.deepcopy(state)
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "reuse the current PR number"
+        ):
+            controller.record_result(
+                state,
+                action_id=publication["actionId"],
+                release="0.37.0",
+                consumer="wave-a",
+                result="passed",
+                head=OTHER_HEAD,
+                pr_number=18,
+            )
+        self.assertEqual(state, before)
+        controller.record_result(
+            state,
+            action_id=publication["actionId"],
+            release="0.37.0",
+            consumer="wave-a",
+            result="passed",
+            head=OTHER_HEAD,
+            pr_number=17,
+        )
+        review = controller.issue_next(state)[0]
+        self.assertEqual(review["stage"], "review")
+        self.assertEqual(review["attempt"], 2)
+        controller.record_result(
+            state,
+            action_id=review["actionId"],
+            release="0.37.0",
+            consumer="wave-a",
+            result="passed",
+            head=OTHER_HEAD,
+        )
+        while state["status"] != "complete":
+            self.pass_lane_action(controller, state, head=OTHER_HEAD)
+
+        publication_heads = [
+            item["head"]
+            for item in lane["receipts"]
+            if item["stage"] == "pr-publication" and item["result"] == "passed"
+        ]
+        self.assertEqual(publication_heads, [HEAD, OTHER_HEAD])
+        self.assertEqual(lane["head"], OTHER_HEAD)
+        self.assertEqual(lane["result"], "merged")
+        controller.validate_state(state)
+
+    def test_merge_eligibility_head_advance_routes_to_republication(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("wave-a",)
+        )
+        self.pass_preflight(controller, state)
+        while state["lanes"][0]["stage"] != "merge-eligibility":
+            self.pass_lane_action(controller, state)
+
+        eligibility = controller.issue_next(state)[0]
+        controller.record_result(
+            state,
+            action_id=eligibility["actionId"],
+            release="0.37.0",
+            consumer="wave-a",
+            result="retryable-failure",
+            reason_code=controller.PR_HEAD_ADVANCED_REASON,
+            head=HEAD,
+            pr_number=17,
+        )
+
+        lane = state["lanes"][0]
+        self.assertEqual(lane["stage"], "pr-publication")
+        self.assertEqual(lane["attempt"], 2)
+        self.assertEqual(controller.issue_next(state)[0]["stage"], "pr-publication")
+        controller.validate_state(state)
+
+    def test_head_advance_retry_is_bounded_to_two_review_attempts(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("wave-a",)
+        )
+        self.pass_preflight(controller, state)
+        while state["lanes"][0]["stage"] != "review":
+            self.pass_lane_action(controller, state)
+
+        first_review = controller.issue_next(state)[0]
+        controller.record_result(
+            state,
+            action_id=first_review["actionId"],
+            release="0.37.0",
+            consumer="wave-a",
+            result="retryable-failure",
+            reason_code=controller.PR_HEAD_ADVANCED_REASON,
+            head=HEAD,
+            pr_number=17,
+        )
+        self.pass_lane_action(controller, state, head=OTHER_HEAD)
+        second_review = controller.issue_next(state)[0]
+        controller.record_result(
+            state,
+            action_id=second_review["actionId"],
+            release="0.37.0",
+            consumer="wave-a",
+            result="retryable-failure",
+            reason_code=controller.PR_HEAD_ADVANCED_REASON,
+            head=OTHER_HEAD,
+            pr_number=17,
+        )
+
+        lane = state["lanes"][0]
+        self.assertEqual(lane["stage"], "review")
+        self.assertEqual(lane["result"], "retry-exhausted")
+        self.assertEqual(lane["blocker"], controller.PR_HEAD_ADVANCED_REASON)
+        controller.validate_state(state)
+
+    def test_head_advance_reason_rejects_invalid_uses_without_mutation(self) -> None:
+        controller = self.load_controller()
+
+        for result, reason_code, blocker, pack_blocker, pr_number, message in (
+            (
+                "product-failure",
+                controller.PR_HEAD_ADVANCED_REASON,
+                None,
+                False,
+                17,
+                "requires a retryable-failure",
+            ),
+            (
+                "retryable-failure",
+                controller.PR_HEAD_ADVANCED_REASON,
+                None,
+                False,
+                None,
+                "requires head and PR number",
+            ),
+            (
+                "retryable-failure",
+                controller.PR_HEAD_ADVANCED_REASON,
+                "contradiction",
+                True,
+                17,
+                "forbids blocker evidence",
+            ),
+            (
+                "retryable-failure",
+                controller.PR_HEAD_ADVANCED_REASON,
+                None,
+                False,
+                18,
+                "current PR number",
+            ),
+        ):
+            with self.subTest(message=message):
+                _root, _fleet, _manifest, state = self.state(
+                    controller, selected=("wave-a",)
+                )
+                self.pass_preflight(controller, state)
+                while state["lanes"][0]["stage"] != "review":
+                    self.pass_lane_action(controller, state)
+                review = controller.issue_next(state)[0]
+                before = copy.deepcopy(state)
+                with self.assertRaisesRegex(controller.FleetControllerError, message):
+                    controller.record_result(
+                        state,
+                        action_id=review["actionId"],
+                        release="0.37.0",
+                        consumer="wave-a",
+                        result=result,
+                        reason_code=reason_code,
+                        blocker=blocker,
+                        pack_blocker=pack_blocker,
+                        head=HEAD,
+                        pr_number=pr_number,
+                    )
+                self.assertEqual(state, before)
+
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("wave-a",)
+        )
+        self.pass_preflight(controller, state)
+        while state["lanes"][0]["stage"] != "local-checks":
+            self.pass_lane_action(controller, state)
+        local_checks = controller.issue_next(state)[0]
+        before = copy.deepcopy(state)
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "at review or merge-eligibility"
+        ):
+            controller.record_result(
+                state,
+                action_id=local_checks["actionId"],
+                release="0.37.0",
+                consumer="wave-a",
+                result="retryable-failure",
+                reason_code=controller.PR_HEAD_ADVANCED_REASON,
+                head=HEAD,
+                pr_number=17,
+            )
+        self.assertEqual(state, before)
 
     def test_wrong_release_and_consumer_receipts_are_rejected(self) -> None:
         controller = self.load_controller()

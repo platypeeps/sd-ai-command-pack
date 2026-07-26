@@ -1274,6 +1274,13 @@ identity, order, concurrency, attempts, receipts, blockers, and next actions.
   PR-open evidence.
 - A PR publication receipt establishes a full head SHA and PR number. Review,
   eligibility, merge, and post-merge receipts must name that exact head.
+- When remediation advances an existing PR during review or merge eligibility,
+  record the issued old-head action as `retryable-failure` with reason
+  `pr-head-advanced`, the published full head, and the existing PR number. The
+  first such retry routes back to `pr-publication`; only its passed receipt may
+  establish the successor head and start a new publication epoch. Generic
+  retries stay on their current stage, and attempt-two head churn parks as
+  `retry-exhausted`.
 - Before a new lane installs the pack, checkout validation creates or activates
   one dedicated consumer Trellis task with substantive release, ownership,
   validation, and completion criteria. A conflicting active task or dirty
@@ -1300,6 +1307,9 @@ identity, order, concurrency, attempts, receipts, blockers, and next actions.
   unknown/out-of-scope consumer, checkout mismatch, action mismatch, skipped
   stage, conflicting replay, stale PR head, or concurrent-policy violation ->
   exit `2` without state replacement or consumer mutation.
+- `pr-head-advanced` outside review or merge eligibility, with a non-retryable
+  result, missing old head or PR, blocker evidence, or a mismatched old head ->
+  exit `2` without state replacement.
 - Identical `plan` or receipt replay -> successful no-op.
 - Retryable failure -> one new attempt; exhaustion parks with a stable reason.
 - Ambiguous result or issued action on resume -> reconciliation; never repeat
@@ -1331,6 +1341,9 @@ identity, order, concurrency, attempts, receipts, blockers, and next actions.
 
 - Transition/idempotency matrices cover wrong release/consumer, skipped stages,
   duplicate/conflicting receipts, retries, terminal results, and stale heads.
+- Head-republication coverage proves review and merge-eligibility routing,
+  immutable old-head receipts, successor publication epochs, invalid-use
+  no-mutation behavior, generic retry preservation, and bounded exhaustion.
 - Scheduler composition covers canary failure, bounded wave starts, pack
   blocker propagation, no-merge completion, and serialized merge order.
 - Persistence/recovery covers private atomic files, manifest drift, locks,
