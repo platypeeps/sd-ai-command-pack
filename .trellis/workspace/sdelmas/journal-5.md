@@ -1115,6 +1115,7 @@ Added a configurable local preflight warning for GitHub Copilot's 300-file pull-
 - Warned locally when the selected review diff exceeds the configured Copilot file limit without making a GitHub request.
 - Synchronized templates, root mirrors, documentation, manifest, provenance, release ledger, and consumer candidate validation for 0.52.1.
 
+
 ### Git Commits
 
 | Hash | Message |
