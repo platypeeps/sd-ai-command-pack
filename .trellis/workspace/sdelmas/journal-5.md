@@ -1258,3 +1258,47 @@ Implemented truthful exact-head completion successor receipts for post-archive r
 ### Next Steps
 
 - None - task complete
+
+
+## Session 233: Recover PR 255 and harden post-archive finalization
+
+**Date**: 2026-07-26
+**Task**: Recover PR 255 and harden post-archive finalization
+**Branch**: `codex/support-post-archive-review-finalization`
+
+### Summary
+
+Reconciled the supported main lineage, recovered the unreopenable PR as #256, hardened exact-head finish-work receipts through five Copilot review rounds, and completed review-clean validation.
+
+### Main Changes
+
+- Recovered PR #255 as PR #256 on the supported main branch without changing upstream Trellis.
+- Added strict, portable, independently versioned completion-successor receipts and fail-closed eligibility replay.
+- Addressed all five Copilot findings and resolved every review thread on the exact reviewed head.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d6d7a12` | chore(task): plan PR 255 recovery |
+| `dd4debe` | chore: reconcile rebased validation evidence |
+| `ab82fde` | fix: validate finish-work receipt subtypes |
+| `1603947` | fix: make finish-work receipts checkout portable |
+| `49aabeb` | fix: separate receipt schema version |
+| `aafcd5d` | fix: fail closed on successor diff errors |
+
+### Testing
+
+- [OK] Focused bookkeeping, eligibility, housekeeping, and result suite: 105 tests passed.
+- [OK] make check passed on exact work head aafcd5de4234cd6a87db7df720474ab205a9f4e1.
+- [OK] Fleet candidate validation passed for all 8 consumers.
+- [OK] GitHub CI passed on PR #256 and the settled exact-head thread fetch found no unresolved threads.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
