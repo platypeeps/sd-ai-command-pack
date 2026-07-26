@@ -907,7 +907,25 @@ function validateCompletionSuccessorRecovery(evidence, headOid, add) {
     const archiveOid = commits[index + 1];
     const baseOid = commits[index + 2];
     const journalEntries = bookkeepingChangedEntries(archiveOid, bookkeepingHeadOid, () => {});
+    if (journalEntries === null) {
+      add(
+        'completion_successor_history_unavailable',
+        '',
+        'Git could not inspect a candidate journal delta during completion recovery',
+        'indeterminate',
+      );
+      return;
+    }
     const archiveEntries = bookkeepingChangedEntries(baseOid, archiveOid, () => {});
+    if (archiveEntries === null) {
+      add(
+        'completion_successor_history_unavailable',
+        '',
+        'Git could not inspect a candidate archive delta during completion recovery',
+        'indeterminate',
+      );
+      return;
+    }
     if (!isAdjacentJournalCommit(journalEntries) || !isAdjacentArchiveCommit(archiveEntries)) {
       continue;
     }

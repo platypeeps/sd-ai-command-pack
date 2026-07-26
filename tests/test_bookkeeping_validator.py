@@ -549,6 +549,34 @@ class BookkeepingValidatorTests(InstallTestCase):
             evidence["completionAnchor"]["bookkeepingHeadOid"], bookkeeping_head
         )
 
+    def test_completion_successor_reports_unavailable_candidate_diff(self) -> None:
+        root, _, bookkeeping_head = self.make_post_archive_successor_repo()
+        (root / "review-fix.txt").write_text("reviewed\n", encoding="utf-8")
+        self.run_git(root, "add", "review-fix.txt")
+        self.run_git(root, "commit", "-m", "fix review finding")
+        head = self.git_output(root, "rev-parse", "HEAD")
+        archive_oid = self.git_output(root, "rev-parse", f"{bookkeeping_head}^")
+        archive_tree = self.git_output(root, "rev-parse", f"{archive_oid}^{{tree}}")
+        (root / ".git/objects" / archive_tree[:2] / archive_tree[2:]).unlink()
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(
+            payload["reasonCodes"], ["completion_successor_history_unavailable"]
+        )
+        self.assertEqual(payload["status"], "indeterminate")
+
     def test_completion_successor_rejects_invalid_nearest_anchor(self) -> None:
         root, _, _ = self.make_post_archive_successor_repo(corrupt_archive=True)
         head = self.git_output(root, "rev-parse", "HEAD")
