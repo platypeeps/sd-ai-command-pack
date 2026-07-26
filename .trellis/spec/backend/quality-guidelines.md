@@ -1016,6 +1016,10 @@ base-to-head delta therefore contains only the successor journal commit.
 - Aggregate at least one active task directory and verify that each referenced
   commit's task record and its parent-baseline record preserve `status:
   planning`, `completedAt: null`, and `branch: null`.
+- Label recovered-commit artifact read and JSON failures with
+  `planning_recovery_commit_*` reason codes and recovered-work-commit wording;
+  reserve `bundle_base_artifact_*` diagnostics for reads from the captured
+  bundle base.
 - Recovery proves already-published scope and lifecycle; it does not
   retroactively apply current metadata, topology, context, PRD, or other
   publication-quality content checks to artifacts before the captured base.
@@ -1037,6 +1041,9 @@ base-to-head delta therefore contains only the successor journal commit.
 - No qualifying active task delta -> `planning_recovery_task_change_missing`.
 - Invalid current or baseline lifecycle -> existing planning lifecycle reason
   codes; no valid result is emitted.
+- Missing, oversized, unreadable, non-UTF-8, or invalid-JSON task metadata at a
+  recovered work commit -> a specific `planning_recovery_commit_*` diagnostic,
+  never a bundle-base diagnostic.
 
 ### 5. Good / Base / Bad Cases
 
@@ -1059,8 +1066,8 @@ base-to-head delta therefore contains only the successor journal commit.
   retroactive content audit, paired with existing normal-planning tests that
   retain full validation.
 - Root/template byte identity, bounded repository-relative diagnostics, Node
-  syntax, a batched tree-query regression assertion, focused lifecycle tests,
-  and `make check`.
+  syntax, a batched tree-query regression assertion, a recovered-commit
+  diagnostic-label regression, focused lifecycle tests, and `make check`.
 
 ### 7. Wrong vs Correct
 
