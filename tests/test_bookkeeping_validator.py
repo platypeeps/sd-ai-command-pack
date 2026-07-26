@@ -8,6 +8,7 @@ except ModuleNotFoundError as exc:
     from . import install_test_support as _support
 
 json = _support.json
+os = _support.os
 shutil = _support.shutil
 subprocess = _support.subprocess
 Path = _support.Path
@@ -148,7 +149,12 @@ class BookkeepingValidatorTests(InstallTestCase):
             "\n".join(index_lines), encoding="utf-8"
         )
 
-    def run_validator(self, root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    def run_validator(
+        self,
+        root: Path,
+        *args: str,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
                 self.node,
@@ -157,6 +163,7 @@ class BookkeepingValidatorTests(InstallTestCase):
                 "--json",
             ],
             cwd=root,
+            env=env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -519,10 +526,80 @@ class BookkeepingValidatorTests(InstallTestCase):
             source.index(entry_loop, batched_call_offset),
         )
         self.assertIn(
-            "runGit(['ls-tree', '-z', commitOid, '--', ...paths])",
+            "runGit(['ls-tree', '-z', commitOid, '--', ...batch])",
             source,
         )
+        self.assertIn("chunkBookkeepingGitPathspecs(paths)", source)
         self.assertNotIn("bookkeepingPathIsRegularAtCommit", source)
+
+    def test_journal_only_recovery_chunks_large_pathspec_batches(self) -> None:
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/07-25-large-pathspec-fixture"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                "large-pathspec-fixture",
+                status="planning",
+                branch=None,
+                completed_at=None,
+            ),
+        )
+        for number in range(60):
+            filename = f"artifact-{number:03d}-{'x' * 180}.md"
+            (task / filename).write_text("bounded pathspec fixture\n", encoding="utf-8")
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "add large pathspec planning fixture")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        base = work_commit
+        self.write_session(root, work_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record large pathspec recovery journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        real_git = shutil.which("git")
+        self.assertIsNotNone(real_git)
+        shim_dir = root / ".test-bin"
+        shim_dir.mkdir()
+        log_path = root / ".test-git.log"
+        git_shim = shim_dir / "git"
+        git_shim.write_text(
+            "#!/usr/bin/env python3\n"
+            "import subprocess\n"
+            "import sys\n"
+            f"real_git = {real_git!r}\n"
+            f"log_path = {str(log_path)!r}\n"
+            f"tracked_commit = {work_commit!r}\n"
+            "args = sys.argv[1:]\n"
+            "if len(args) > 2 and args[:2] == ['ls-tree', '-z'] and args[2] == tracked_commit:\n"
+            "    with open(log_path, 'a', encoding='utf-8') as log:\n"
+            "        log.write(str(len(args[4:])) + '\\n')\n"
+            "raise SystemExit(subprocess.run([real_git, *args]).returncode)\n",
+            encoding="utf-8",
+        )
+        git_shim.chmod(0o755)
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+            env={**os.environ, "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(json.loads(result.stdout)["status"], "valid")
+        batches = [
+            int(line)
+            for line in log_path.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        self.assertGreater(len(batches), 1)
+        self.assertEqual(sum(batches), 64)
 
     def test_journal_only_recovery_does_not_reaudit_published_content(self) -> None:
         root = self.make_validator_repo()

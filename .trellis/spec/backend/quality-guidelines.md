@@ -1044,6 +1044,9 @@ base-to-head delta therefore contains only the successor journal commit.
 - Missing, oversized, unreadable, non-UTF-8, or invalid-JSON task metadata at a
   recovered work commit or its parent -> a specific
   `planning_recovery_commit_*` diagnostic, never a bundle-base diagnostic.
+- Regular-artifact inspection chunks pathspec arguments under a conservative
+  cross-platform command-line budget and fails closed if any batch cannot be
+  inspected.
 
 ### 5. Good / Base / Bad Cases
 
@@ -1066,7 +1069,7 @@ base-to-head delta therefore contains only the successor journal commit.
   retroactive content audit, paired with existing normal-planning tests that
   retain full validation.
 - Root/template byte identity, bounded repository-relative diagnostics, Node
-  syntax, a batched tree-query regression assertion, a recovered-commit
+  syntax, a runtime argument-budget batching regression, a recovered-commit
   diagnostic-label regression, focused lifecycle tests, and `make check`.
 
 ### 7. Wrong vs Correct

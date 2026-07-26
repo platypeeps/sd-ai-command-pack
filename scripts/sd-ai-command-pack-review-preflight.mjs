@@ -26,6 +26,9 @@ const MAX_TRELLIS_PRIORITY_RATIONALE_LENGTH = 1000;
 const MAX_BOOKKEEPING_FINDINGS = 100;
 const MAX_BOOKKEEPING_CHANGED_PATHS = 500;
 const MAX_BOOKKEEPING_RECOVERY_COMMITS = 100;
+// Stay well below Windows' roughly 32 KiB process command-line ceiling after
+// accounting for executable, fixed arguments, quoting, and UTF-16 expansion.
+const MAX_BOOKKEEPING_GIT_PATHSPEC_BYTES = 8 * 1024;
 const BOOKKEEPING_SCHEMA_VERSION = 1;
 const TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review', 'completed']);
 const ACTIVE_TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review']);
@@ -1339,18 +1342,38 @@ function validateJournalOnlyPlanningRecovery(entries, journalSummary, evidence, 
 
 function bookkeepingRegularPathsAtCommit(commitOid, paths) {
   if (paths.length === 0) return new Set();
-  const result = runGit(['ls-tree', '-z', commitOid, '--', ...paths]);
-  if (result.status !== 0) return new Set();
   const regularPaths = new Set();
-  for (const record of result.stdout.split('\0').filter(Boolean)) {
-    const separator = record.indexOf('\t');
-    if (separator <= 0) continue;
-    const metadata = record.slice(0, separator);
-    if (/^100(?:644|755) blob [0-9a-f]{40,64}$/.test(metadata)) {
-      regularPaths.add(record.slice(separator + 1));
+  for (const batch of chunkBookkeepingGitPathspecs(paths)) {
+    const result = runGit(['ls-tree', '-z', commitOid, '--', ...batch]);
+    if (result.status !== 0) return new Set();
+    for (const record of result.stdout.split('\0').filter(Boolean)) {
+      const separator = record.indexOf('\t');
+      if (separator <= 0) continue;
+      const metadata = record.slice(0, separator);
+      if (/^100(?:644|755) blob [0-9a-f]{40,64}$/.test(metadata)) {
+        regularPaths.add(record.slice(separator + 1));
+      }
     }
   }
   return regularPaths;
+}
+
+function chunkBookkeepingGitPathspecs(paths) {
+  const batches = [];
+  let batch = [];
+  let batchBytes = 0;
+  for (const path of paths) {
+    const pathBytes = Buffer.byteLength(path, 'utf8') + 1;
+    if (batch.length > 0 && batchBytes + pathBytes > MAX_BOOKKEEPING_GIT_PATHSPEC_BYTES) {
+      batches.push(batch);
+      batch = [];
+      batchBytes = 0;
+    }
+    batch.push(path);
+    batchBytes += pathBytes;
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
 }
 
 function loadBookkeepingJsonAtRef(ref, file, add, options = {}) {
