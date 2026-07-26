@@ -1008,6 +1008,8 @@ base-to-head delta therefore contains only the successor journal commit.
   immutable captured base, have exactly one parent, remain within the bounded
   commit/path limits, and change only regular files below active dated
   Trellis task directories.
+- Inspect regular-file modes with one bounded Git tree query per referenced
+  commit; never spawn one subprocess per changed path.
 - Reject archives, workspace history, code, specs, configuration, deletion,
   rename, copy, Git links, symlinks, roots, merges, unknown objects, and
   non-ancestor commits. A mixed task/non-task commit is invalid in full.
@@ -1057,7 +1059,8 @@ base-to-head delta therefore contains only the successor journal commit.
   retroactive content audit, paired with existing normal-planning tests that
   retain full validation.
 - Root/template byte identity, bounded repository-relative diagnostics, Node
-  syntax, focused lifecycle tests, and `make check`.
+  syntax, a batched tree-query regression assertion, focused lifecycle tests,
+  and `make check`.
 
 ### 7. Wrong vs Correct
 

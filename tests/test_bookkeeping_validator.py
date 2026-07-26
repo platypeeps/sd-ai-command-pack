@@ -505,6 +505,25 @@ class BookkeepingValidatorTests(InstallTestCase):
         )
         self.assertEqual(payload["evidence"]["taskDirectories"], [task_dir])
 
+    def test_journal_only_recovery_batches_regular_path_inspection(self) -> None:
+        source = (
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs"
+        ).read_text(encoding="utf-8")
+
+        batched_call = "bookkeepingRegularPathsAtCommit(commit.oid, commitPaths)"
+        entry_loop = "for (const entry of commitEntries)"
+        self.assertIn(batched_call, source)
+        batched_call_offset = source.index(batched_call)
+        self.assertLess(
+            batched_call_offset,
+            source.index(entry_loop, batched_call_offset),
+        )
+        self.assertIn(
+            "runGit(['ls-tree', '-z', commitOid, '--', ...paths])",
+            source,
+        )
+        self.assertNotIn("bookkeepingPathIsRegularAtCommit", source)
+
     def test_journal_only_recovery_does_not_reaudit_published_content(self) -> None:
         root = self.make_validator_repo()
         task_dir = ".trellis/tasks/07-25-published-content-debt"
