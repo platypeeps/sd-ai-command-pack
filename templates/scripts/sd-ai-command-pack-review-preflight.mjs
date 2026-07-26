@@ -1266,6 +1266,7 @@ function validateJournalOnlyPlanningRecovery(entries, journalSummary, evidence, 
       );
       continue;
     }
+    const regularPaths = bookkeepingRegularPathsAtCommit(commit.oid, commitPaths);
 
     for (const entry of commitEntries) {
       const invalidOperation =
@@ -1287,7 +1288,7 @@ function validateJournalOnlyPlanningRecovery(entries, journalSummary, evidence, 
           );
           continue;
         }
-        if (!invalidOperation && path === entry.path && !bookkeepingPathIsRegularAtCommit(commit.oid, path)) {
+        if (!invalidOperation && path === entry.path && !regularPaths.has(path)) {
           add(
             'planning_recovery_commit_scope_invalid',
             path,
@@ -1315,11 +1316,20 @@ function validateJournalOnlyPlanningRecovery(entries, journalSummary, evidence, 
   }
 }
 
-function bookkeepingPathIsRegularAtCommit(commitOid, path) {
-  const result = runGit(['ls-tree', '-z', commitOid, '--', path]);
-  if (result.status !== 0) return false;
-  const record = result.stdout.split('\0')[0] || '';
-  return /^100(?:644|755) blob [0-9a-f]{40,64}\t/.test(record);
+function bookkeepingRegularPathsAtCommit(commitOid, paths) {
+  if (paths.length === 0) return new Set();
+  const result = runGit(['ls-tree', '-z', commitOid, '--', ...paths]);
+  if (result.status !== 0) return new Set();
+  const regularPaths = new Set();
+  for (const record of result.stdout.split('\0').filter(Boolean)) {
+    const separator = record.indexOf('\t');
+    if (separator <= 0) continue;
+    const metadata = record.slice(0, separator);
+    if (/^100(?:644|755) blob [0-9a-f]{40,64}$/.test(metadata)) {
+      regularPaths.add(record.slice(separator + 1));
+    }
+  }
+  return regularPaths;
 }
 
 function loadBookkeepingJsonAtRef(ref, file, add, options = {}) {
