@@ -153,7 +153,7 @@ class BookkeepingValidatorTests(InstallTestCase):
         self,
         root: Path,
         *args: str,
-        env: dict[str, str] | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
@@ -163,11 +163,11 @@ class BookkeepingValidatorTests(InstallTestCase):
                 "--json",
             ],
             cwd=root,
-            env=env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=False,
+            env={**os.environ, **(extra_env or {})},
         )
 
     def test_pre_archive_rejects_blank_description_without_mutation(self) -> None:
@@ -577,6 +577,47 @@ class BookkeepingValidatorTests(InstallTestCase):
         )
         self.assertEqual(payload["status"], "indeterminate")
 
+    def test_completion_successor_reports_unavailable_commit_subject(self) -> None:
+        root, _, _ = self.make_post_archive_successor_repo()
+        (root / "review-fix.txt").write_text("reviewed\n", encoding="utf-8")
+        self.run_git(root, "add", "review-fix.txt")
+        self.run_git(root, "commit", "-m", "fix review finding")
+        head = self.git_output(root, "rev-parse", "HEAD")
+        real_git = shutil.which("git")
+        self.assertIsNotNone(real_git)
+        stub_bin = root / ".test-bin"
+        stub_bin.mkdir()
+        git_stub = stub_bin / "git"
+        git_stub.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "log" ] && [ "$2" = "-1" ] '
+            '&& [ "$3" = "--format=%s" ]; then\n'
+            "  exit 73\n"
+            "fi\n"
+            f"exec {json.dumps(real_git)} \"$@\"\n",
+            encoding="utf-8",
+        )
+        git_stub.chmod(0o755)
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+            extra_env={"PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"},
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(
+            payload["reasonCodes"], ["completion_successor_history_unavailable"]
+        )
+        self.assertEqual(payload["status"], "indeterminate")
+
     def test_completion_successor_rejects_invalid_nearest_anchor(self) -> None:
         root, _, _ = self.make_post_archive_successor_repo(corrupt_archive=True)
         head = self.git_output(root, "rev-parse", "HEAD")
@@ -907,7 +948,7 @@ class BookkeepingValidatorTests(InstallTestCase):
             base,
             "--head",
             head,
-            env={**os.environ, "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"},
+            extra_env={"PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"},
         )
 
         self.assertEqual(result.returncode, 0, result.stdout)

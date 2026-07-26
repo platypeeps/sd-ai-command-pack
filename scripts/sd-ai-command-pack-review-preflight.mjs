@@ -1084,7 +1084,17 @@ function evaluateCompletionSuccessorRange(anchorOid, headOid) {
       );
       continue;
     }
-    const subject = gitStdout(['log', '-1', '--format=%s', oid]);
+    const subjectResult = runGit(['log', '-1', '--format=%s', oid]);
+    if (subjectResult.status !== 0) {
+      add(
+        'completion_successor_history_unavailable',
+        '',
+        `Git could not inspect the subject for successor commit ${oid.slice(0, 12)}`,
+        'indeterminate',
+      );
+      return { status: 'indeterminate', evidence: {}, findings };
+    }
+    const subject = subjectResult.stdout.trim();
     commitEvidence.push({
       oid,
       subjectDigest: `sha256:${createHash('sha256').update(subject).digest('hex')}`,
