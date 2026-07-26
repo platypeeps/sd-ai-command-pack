@@ -1342,3 +1342,43 @@ Added the v0.54.1 corrective controller/task-lifecycle recovery, validated it ac
 ### Next Steps
 
 - None - task complete
+
+
+## Session 235: Support fleet PR head republication
+
+**Date**: 2026-07-26
+**Task**: Support fleet PR head republication
+**Branch**: `codex/support-fleet-pr-head-republication`
+
+### Summary
+
+Added a fail-closed, bounded republication transition so fleet review fixes can establish a successor exact-head epoch on the same PR without manual controller-state edits.
+
+### Main Changes
+
+- Added the pr-head-advanced retry contract for review and merge-eligibility actions, preserving old-head receipts and routing through publication attempt two.
+- Enforced exact old-head evidence and same-PR reuse before accepting a successor publication epoch; invalid combinations leave state unchanged.
+- Documented the operator recovery sequence and added complete Trellis task planning and traceability artifacts.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a6d3d173d44a80e0d31c29e23454fc746c90ff27` | fix: support fleet PR head republication |
+| `6bfeef1c12dbd0e42aa238d588117f21145ded3c` | docs(task): link PR 258 |
+
+### Testing
+
+- [OK] Focused fleet-controller suite: 30 tests passed.
+- [OK] Ruff and mypy passed for the changed controller and tests.
+- [OK] make check passed, including all tests, lint, type checks, Zizmor, review preflight, install audit, shipped-surface closure, and 81% controller coverage.
+- [OK] PR #258 CI Result passed; exact-head Copilot review produced no comments; GraphQL review threads were empty.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
