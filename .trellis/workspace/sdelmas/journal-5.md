@@ -1136,3 +1136,42 @@ Captured the July 25 routed-review, cross-platform agent, workflow reliability, 
 ### Next Steps
 
 - Select the next open planning task through the normal backlog workflow.
+
+
+## Session 230: Journal-only planning finalization recovery
+
+**Date**: 2026-07-25
+**Task**: Journal-only planning finalization recovery
+**Branch**: `codex/support-journal-only-finalization-recovery`
+
+### Summary
+
+Implemented and validated fail-closed recovery for journal-only planning finalization tails while preserving the existing completion and planning interface.
+
+### Main Changes
+
+- Added automatic journal-only recovery from one completed session's already-published, single-parent, task-only commits.
+- Kept normal planning validation intact and added bounded diagnostics, lifecycle-only historical proof, and regression coverage.
+- Updated sd-finish-work, code specs, synchronized mirrors, release metadata 0.53.0, and fleet candidate evidence.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dcddf77` | feat: recover journal-only planning finalization |
+
+### Testing
+
+- [OK] Focused bookkeeping and SD lifecycle suite: 47 tests passed
+- [OK] Exact 9c9b8c3..686f484 recovery range: planning_bundle_valid
+- [OK] make check: passed
+- [OK] Fleet candidate validation: eight consumers passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
