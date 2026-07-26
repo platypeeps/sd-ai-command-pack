@@ -1007,7 +1007,11 @@ function validatePlanningBundle(entries, evidence, baseOid, add, options = {}) {
 function loadRecoveredPlanningTaskRecord(taskDir, add, ref) {
   const taskFile = `${taskDir}/task.json`;
   if (ref) {
-    return loadBookkeepingJsonAtRef(ref, taskFile, add);
+    return loadBookkeepingJsonAtRef(ref, taskFile, add, {
+      artifactReasonPrefix: 'planning_recovery_commit_artifact',
+      refLabel: 'the recovered work commit',
+      jsonReasonCode: 'planning_recovery_commit_task_json_invalid',
+    });
   }
   const loaded = loadTrellisTaskMetadataFile(taskFile);
   if (loaded.status !== 'loaded') {
@@ -1340,21 +1344,31 @@ function loadBookkeepingJsonAtRef(ref, file, add, options = {}) {
     if (!isPlainObject(value)) throw new Error('top-level value is not an object');
     return value;
   } catch (error) {
-    add('task_json_invalid', file, `task metadata at bundle base is invalid: ${thrownValueMessage(error)}`);
+    add(
+      options.jsonReasonCode || 'task_json_invalid',
+      file,
+      `task metadata at ${options.refLabel || 'the bundle base'} is invalid: ${thrownValueMessage(error)}`,
+    );
     return null;
   }
 }
 
 function loadBookkeepingTextAtRef(ref, file, add, options = {}) {
+  const artifactReasonPrefix = options.artifactReasonPrefix || 'bundle_base_artifact';
+  const refLabel = options.refLabel || 'the bundle base';
   const size = runGit(['cat-file', '-s', `${ref}:${file}`]);
   if (size.status !== 0) {
     if (options.missingAllowed) return null;
-    add('bundle_base_artifact_missing', file, 'artifact is missing from the bundle base');
+    add(`${artifactReasonPrefix}_missing`, file, `artifact is missing from ${refLabel}`);
     return null;
   }
   const bytes = Number(size.stdout.trim());
   if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > config.untrackedFileReadLimitBytes) {
-    add('bundle_base_artifact_oversized', file, `artifact exceeds the bounded read limit of ${config.untrackedFileReadLimitBytes} bytes`);
+    add(
+      `${artifactReasonPrefix}_oversized`,
+      file,
+      `artifact at ${refLabel} exceeds the bounded read limit of ${config.untrackedFileReadLimitBytes} bytes`,
+    );
     return null;
   }
   const result = spawnSync('git', ['show', `${ref}:${file}`], {
@@ -1363,13 +1377,18 @@ function loadBookkeepingTextAtRef(ref, file, add, options = {}) {
     maxBuffer: GIT_MAX_BUFFER_BYTES,
   });
   if (result.error || result.status !== 0 || result.signal) {
-    add('bundle_base_artifact_unreadable', file, 'artifact could not be read from the bundle base', 'indeterminate');
+    add(
+      `${artifactReasonPrefix}_unreadable`,
+      file,
+      `artifact could not be read from ${refLabel}`,
+      'indeterminate',
+    );
     return null;
   }
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(result.stdout);
   } catch {
-    add('bundle_base_artifact_utf8_invalid', file, 'artifact is not valid UTF-8');
+    add(`${artifactReasonPrefix}_utf8_invalid`, file, `artifact at ${refLabel} is not valid UTF-8`);
     return null;
   }
 }

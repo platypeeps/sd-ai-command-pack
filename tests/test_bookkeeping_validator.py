@@ -569,6 +569,62 @@ class BookkeepingValidatorTests(InstallTestCase):
         self.assertNotIn("task_context_seed", payload["reasonCodes"])
         self.assertNotIn("task_metadata_invalid", payload["reasonCodes"])
 
+    def test_journal_only_recovery_labels_historical_task_json_failure(self) -> None:
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/07-25-invalid-historical-json"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                "invalid-historical-json",
+                status="planning",
+                branch=None,
+                completed_at=None,
+            ),
+        )
+        task_file = task / "task.json"
+        valid_task = task_file.read_text(encoding="utf-8")
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "create historical-json fixture")
+        task_file.write_text("{\n", encoding="utf-8")
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "corrupt historical task metadata")
+        invalid_commit = self.git_output(root, "rev-parse", "HEAD")
+        task_file.write_text(valid_task, encoding="utf-8")
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "restore historical task metadata")
+        base = self.git_output(root, "rev-parse", "HEAD")
+        self.write_session(root, invalid_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record historical-json recovery journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertIn(
+            "planning_recovery_commit_task_json_invalid",
+            payload["reasonCodes"],
+        )
+        finding = next(
+            item
+            for item in payload["findings"]
+            if item["reasonCode"]
+            == "planning_recovery_commit_task_json_invalid"
+        )
+        self.assertIn("the recovered work commit", finding["message"])
+        self.assertNotIn("bundle base", finding["message"])
+
     def test_journal_only_recovery_rejects_non_task_commit_scopes(self) -> None:
         fixtures = (
             ("src/app.py", "production code"),
