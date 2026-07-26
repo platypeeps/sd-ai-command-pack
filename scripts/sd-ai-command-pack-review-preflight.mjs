@@ -1005,7 +1005,15 @@ function validatePlanningBundle(entries, evidence, baseOid, add, options = {}) {
     if (current.status !== 'planning' || current.completedAt !== null || current.branch !== null) {
       add('planning_lifecycle_mutation', `${taskDir}/task.json`, 'planning task must keep status planning, completedAt null, and branch null');
     }
-    const baseline = loadBookkeepingJsonAtRef(baseOid, `${taskDir}/task.json`, add, { missingAllowed: true });
+    const baselineOptions = options.lifecycleOnly
+      ? {
+          missingAllowed: true,
+          artifactReasonPrefix: 'planning_recovery_commit_parent_artifact',
+          refLabel: 'the recovered work commit parent',
+          jsonReasonCode: 'planning_recovery_commit_parent_task_json_invalid',
+        }
+      : { missingAllowed: true };
+    const baseline = loadBookkeepingJsonAtRef(baseOid, `${taskDir}/task.json`, add, baselineOptions);
     if (baseline && (baseline.status !== 'planning' || baseline.completedAt !== null || baseline.branch !== null)) {
       add('planning_baseline_invalid', `${taskDir}/task.json`, 'existing task was not a valid planning task at the bundle base');
     }
