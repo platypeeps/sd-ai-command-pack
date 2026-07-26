@@ -700,11 +700,11 @@ When finish-work is not deferred:
    resolving `trellis-finish-work` and recording the journal through
    `scripts/sd-ai-command-pack-record-session.py`; do not bypass it with a
    direct Trellis finish-work invocation.
-4. If finish-work creates archive or journal commits, require and reuse its
-   exact schema-version-1 valid bookkeeping result for the current full HEAD.
-   Do not rerun the validator or reconstruct its reason codes. Push the current
-   branch once only after those commits are created and that retained result
-   passes:
+4. Require and retain finish-work's private schema-version-1 JSON receipt for
+   the current full HEAD, including when it automatically proves a
+   post-archive review successor without creating another task or journal.
+   Do not reconstruct its reason codes. Push the current branch once only
+   after any new commits are created and the retained result passes:
 
 ```bash
 git status -sb

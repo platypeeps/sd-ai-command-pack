@@ -418,6 +418,293 @@ class BookkeepingValidatorTests(InstallTestCase):
         self.assertEqual(payload["reasonCodes"], ["completion_bundle_valid"])
         self.assertNotIn(str(root), result.stdout)
 
+    def make_post_archive_successor_repo(
+        self, *, prehistory_commits: int = 0, corrupt_archive: bool = False
+    ) -> tuple[Path, str, str]:
+        root = self.make_validator_repo()
+        for index in range(prehistory_commits):
+            self.run_git(
+                root,
+                "commit",
+                "--allow-empty",
+                "-m",
+                f"historical commit {index + 1}",
+            )
+        name = "completion-successor"
+        active_dir = f".trellis/tasks/07-25-{name}"
+        active = self.write_task(
+            root,
+            active_dir,
+            self.task_record(
+                name,
+                status="in_progress",
+                branch="codex/completion-successor",
+                completed_at=None,
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "fixture work")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+
+        archive_dir = f".trellis/tasks/archive/2026-07/07-25-{name}"
+        archive = root / archive_dir
+        archive.parent.mkdir(parents=True)
+        active.rename(archive)
+        record = json.loads((archive / "task.json").read_text(encoding="utf-8"))
+        record["status"] = "completed"
+        record["completedAt"] = None if corrupt_archive else "2026-07-25"
+        (archive / "task.json").write_text(
+            json.dumps(record, indent=2) + "\n", encoding="utf-8"
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "archive fixture")
+        self.write_session(root, work_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record fixture journal")
+        bookkeeping_head = self.git_output(root, "rev-parse", "HEAD")
+        return root, archive_dir, bookkeeping_head
+
+    def test_completion_successor_recovers_post_archive_review_fixes(self) -> None:
+        root, archive_dir, bookkeeping_head = self.make_post_archive_successor_repo()
+        (root / "src").mkdir()
+        (root / "src/app.py").write_text("value = 1\n", encoding="utf-8")
+        self.run_git(root, "add", "src/app.py")
+        self.run_git(root, "commit", "-m", "fix review finding")
+        (root / "src/app.py").write_text("value = 2\n", encoding="utf-8")
+        self.run_git(root, "add", "src/app.py")
+        self.run_git(root, "commit", "-m", "fix follow-up finding")
+        head = self.git_output(root, "rev-parse", "HEAD")
+        before = self.git_output(root, "status", "--porcelain")
+
+        first = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+        )
+        second = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(first.returncode, 0, first.stdout)
+        self.assertEqual(first.stdout, second.stdout)
+        payload = json.loads(first.stdout)
+        evidence = payload["evidence"]
+        self.assertEqual(payload["reasonCodes"], ["completion_bundle_valid"])
+        self.assertEqual(
+            evidence["completionSubtype"], "post-archive-review-successor"
+        )
+        self.assertEqual(
+            evidence["completionAnchor"]["bookkeepingHeadOid"], bookkeeping_head
+        )
+        self.assertEqual(evidence["taskDirectories"], [archive_dir])
+        self.assertEqual(
+            [item["oid"] for item in evidence["successor"]["commits"]],
+            self.git_output(
+                root,
+                "rev-list",
+                "--first-parent",
+                "--reverse",
+                f"{bookkeeping_head}..{head}",
+            ).splitlines(),
+        )
+        self.assertEqual(evidence["successor"]["changedPaths"], ["src/app.py"])
+        self.assertRegex(evidence["repository"]["rootDigest"], r"^sha256:[0-9a-f]{64}$")
+        self.assertEqual(self.git_output(root, "status", "--porcelain"), before)
+
+    def test_completion_successor_finds_recent_anchor_in_long_history(self) -> None:
+        root, _, bookkeeping_head = self.make_post_archive_successor_repo(
+            prehistory_commits=101
+        )
+        (root / "review-fix.txt").write_text("reviewed\n", encoding="utf-8")
+        self.run_git(root, "add", "review-fix.txt")
+        self.run_git(root, "commit", "-m", "fix review finding")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        evidence = json.loads(result.stdout)["evidence"]
+        self.assertEqual(
+            evidence["completionAnchor"]["bookkeepingHeadOid"], bookkeeping_head
+        )
+
+    def test_completion_successor_rejects_invalid_nearest_anchor(self) -> None:
+        root, _, _ = self.make_post_archive_successor_repo(corrupt_archive=True)
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(
+            json.loads(result.stdout)["reasonCodes"],
+            ["completion_successor_anchor_invalid"],
+        )
+
+    def test_completion_successor_enforces_commit_bound(self) -> None:
+        root, _, _ = self.make_post_archive_successor_repo()
+        for index in range(51):
+            self.run_git(
+                root,
+                "commit",
+                "--allow-empty",
+                "-m",
+                f"review remediation {index + 1}",
+            )
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "completion_successor_history_oversized",
+            json.loads(result.stdout)["reasonCodes"],
+        )
+
+    def test_completion_successor_rejects_runtime_evidence_changes(self) -> None:
+        root, _, _ = self.make_post_archive_successor_repo()
+        runtime = root / ".trellis/.runtime"
+        runtime.mkdir(parents=True)
+        (runtime / "finish-work.json").write_text("{}\n", encoding="utf-8")
+        self.run_git(root, "add", ".trellis/.runtime/finish-work.json")
+        self.run_git(root, "commit", "-m", "persist forbidden finish-work state")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "completion_successor_scope_invalid",
+            json.loads(result.stdout)["reasonCodes"],
+        )
+
+    def test_completion_successor_rejects_bookkeeping_changes_after_archive(
+        self,
+    ) -> None:
+        root, archive_dir, _ = self.make_post_archive_successor_repo()
+        task_file = root / archive_dir / "task.json"
+        record = json.loads(task_file.read_text(encoding="utf-8"))
+        record["notes"] = "changed after completion"
+        task_file.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        self.run_git(root, "add", archive_dir)
+        self.run_git(root, "commit", "-m", "mutate archived bookkeeping")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "completion_successor_scope_invalid",
+            json.loads(result.stdout)["reasonCodes"],
+        )
+
+    def test_completion_successor_rejects_merge_commit(self) -> None:
+        root, _, bookkeeping_head = self.make_post_archive_successor_repo()
+        self.run_git(root, "switch", "-c", "review-side")
+        (root / "side.txt").write_text("side\n", encoding="utf-8")
+        self.run_git(root, "add", "side.txt")
+        self.run_git(root, "commit", "-m", "side review fix")
+        self.run_git(root, "switch", "main")
+        self.run_git(root, "merge", "--no-ff", "review-side", "-m", "merge review fix")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertIn("completion_successor_history_non_linear", payload["reasonCodes"])
+        self.assertEqual(
+            payload["evidence"]["headOid"],
+            head,
+        )
+        self.assertNotEqual(bookkeeping_head, head)
+
+    def test_completion_successor_requires_a_canonical_anchor(self) -> None:
+        root = self.make_validator_repo()
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(
+            json.loads(result.stdout)["reasonCodes"],
+            ["completion_successor_anchor_missing"],
+        )
+
     def test_valid_planning_task_and_journal_bundle(self) -> None:
         root = self.make_validator_repo()
         base = self.git_output(root, "rev-parse", "HEAD")

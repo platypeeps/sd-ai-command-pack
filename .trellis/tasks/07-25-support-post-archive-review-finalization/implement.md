@@ -4,7 +4,8 @@
 
 - Extend backend quality and frontend adapter contracts with the completion
   successor subtype, evidence fields, limits, and stable error matrix.
-- Define the repository-local ignored receipt store and strict parser.
+- Define a private temporary receipt handoff and strict regular-file parser;
+  do not add repository-local state.
 - Keep `completion|planning` as the only public finalization modes.
 
 ## 2. Extend Canonical Validation
@@ -27,7 +28,7 @@
 ## 4. Add Failure And Idempotence Coverage
 
 - Build the PR #253-shaped positive fixture.
-- Cover missing/ambiguous anchors, invalid prior completion, bookkeeping drift,
+- Cover missing or invalid anchors, invalid prior completion, bookkeeping drift,
   stale/forged receipts, head/repository mismatch, merges, missing objects, and
   bounds.
 - Prove repeated finish-work and housekeeping retries create no extra journal,
@@ -47,7 +48,7 @@
 
 ## Rollback
 
-- Disable completion-successor selection and remove its receipt from ignored
-  runtime state.
+- Disable completion-successor selection and remove the temporary receipt
+  handoff.
 - Leave ordinary completion/planning behavior intact; affected PRs return the
   prior `finish_work_missing` block rather than merging with weaker evidence.

@@ -55,11 +55,10 @@ Allow reviewed pull requests with post-archive remediation commits to produce tr
   or another bookkeeping surface. Code, tests, specs, and generated payload
   changes may remain in the successor range because final-head review and CI
   gates validate them separately.
-- R5: If a durable prior receipt is unavailable, allow only one bounded,
-  unambiguous historical recovery: identify an adjacent canonical archive and
-  journal completion tail, re-run the existing completion validator over its
-  original range, and fail closed on missing, rewritten, nonlinear, oversized,
-  or ambiguous history.
+- R5: Use one bounded historical recovery: identify the nearest adjacent
+  canonical archive and journal completion tail, re-run the existing completion
+  validator over its original range, and fail closed on missing, rewritten,
+  nonlinear, or oversized history. Do not add durable repository receipt state.
 - R6: `sd-finish-work` must emit or reuse the exact-head typed receipt without
   archiving, recording another journal session, staging, committing, pushing,
   or changing a task/session pointer. Repeated runs at the same head are
@@ -73,9 +72,9 @@ Allow reviewed pull requests with post-archive remediation commits to produce tr
   as the parent finalization contract migrates; do not introduce another
   head-only fallback.
 - R9: A stale receipt, changed bookkeeping, missing objects, unrelated prior
-  completion, multiple candidate tails, head mismatch, merge commit, dirty
-  tree, or absent proof must return stable blocked/indeterminate reason codes
-  and must never reach merge mutation.
+  completion, invalid nearest candidate tail, head mismatch, merge commit,
+  dirty tree, or absent proof must return stable blocked/indeterminate reason
+  codes and must never reach merge mutation.
 - R10: Avoid a bookkeeping-only successor commit after review convergence so
   this lifecycle does not trigger a redundant full CI and remote-review cycle.
 - R11: Preserve normal completion, planning-only, and journal-only recovery
@@ -97,16 +96,11 @@ Allow reviewed pull requests with post-archive remediation commits to produce tr
 - [ ] Housekeeping accepts the verified receipt only at the matching clean PR
   head and remains the sole operation capable of merging and deleting the
   proven source branch.
-- [ ] Missing prior completion, ambiguous candidates, altered task/workspace
-  files, stale or forged receipts, rewritten ancestry, merges, and head
-  mismatches all block with stable typed diagnostics.
+- [ ] Missing or invalid prior completion, altered task/workspace files, stale
+  or forged receipts, rewritten ancestry, merges, and head mismatches all block
+  with stable typed diagnostics.
 - [ ] Existing completion, planning, journal-only recovery, eligibility,
   housekeeping, and status fixtures remain green without compatibility aliases
   or a third public finalization mode.
 - [ ] Template/root mirrors are byte-identical; focused tests, `sd-check`,
   `make check`, and fleet candidate validation pass.
-
-## Notes
-
-- This is a planning task only. Implementation requires a separate explicit
-  start/approval step.

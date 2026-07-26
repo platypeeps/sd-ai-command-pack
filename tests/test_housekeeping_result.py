@@ -62,7 +62,6 @@ class HousekeepingResultTests(unittest.TestCase):
             "dry_run": False,
             "keep_remote_branch": False,
             "dependency_pr_number": None,
-            "finish_work_head": HEAD,
             "action": [["branch_switched", "switched to main"]],
             "anomaly": [],
         }
@@ -79,7 +78,16 @@ class HousekeepingResultTests(unittest.TestCase):
                 "reasonCodes": reasons,
                 "pullRequest": {"number": 42, "url": "https://example.test/42"},
                 "head": {"startOid": HEAD, "endOid": HEAD, "remoteOid": HEAD},
-                "finishWork": {"required": True, "providedHead": HEAD},
+                "finishWork": {
+                    "required": True,
+                    "provided": True,
+                    "mode": "completion",
+                    "completionSubtype": "post-archive-review-successor",
+                    "planningSubtype": None,
+                    "headOid": HEAD,
+                    "matchesCurrentHead": True,
+                    "verified": True,
+                },
             },
         )
         return path
@@ -260,7 +268,7 @@ class HousekeepingResultTests(unittest.TestCase):
         self.assertIn("schemaVersion must be 2", stderr.getvalue())
         self.assertNotIn("Traceback", stderr.getvalue())
 
-    def test_parser_rejects_invalid_numeric_and_head_arguments(self) -> None:
+    def test_parser_rejects_invalid_numeric_arguments(self) -> None:
         base = [
             "--repository",
             "/repo",
@@ -276,7 +284,6 @@ class HousekeepingResultTests(unittest.TestCase):
         for extra in (
             ["--status-exit", "256"],
             ["--dependency-pr-number", "0"],
-            ["--finish-work-head", "BAD"],
         ):
             with self.subTest(extra=extra), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit):

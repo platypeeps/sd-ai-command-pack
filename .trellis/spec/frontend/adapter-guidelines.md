@@ -1718,12 +1718,23 @@ around the delegated lifecycle.
   evidence. The wrapper still supplies `mode: planning`; it never exposes a
   third mode, widens the captured base, or retries by rewriting the retained
   commits.
+- A completion final range with no task entries may select the validator's
+  internal `post-archive-review-successor` subtype only from a canonically
+  revalidated adjacent archive/journal anchor and a bounded linear successor.
+  The wrapper still supplies `mode: completion`; it creates no duplicate task
+  or journal mutation.
 - Successful recovery proves one index-matched journal session, already-
   published single-parent task-only commits, and planning lifecycle state. It
   does not retroactively apply current publication-quality content checks to
   artifacts before the captured base; normal task-plus-journal planning keeps
   the complete validator.
 - Internal defer modes preserve the existing single lifecycle owner.
+- `sd-finish-work` writes successful validator JSON to a private temporary
+  file. Review and ship pass that file unchanged to housekeeping, which uses
+  `--finish-work-receipt` and independently requires exact canonical replay.
+  Preserve it across a clean downstream handoff and delete it after
+  housekeeping consumes it, the proof is abandoned, or the lifecycle blocks;
+  never replace it with a head-only assertion or repository-local authority.
 
 ### 4. Validation & Error Matrix
 
@@ -1736,11 +1747,16 @@ around the delegated lifecycle.
 - Missing, malformed, invalid, or indeterminate journal-only evidence ->
   preserve the local commits and report the exact unchanged recheck; never
   widen the base or select recovery from prose.
+- Missing, stale, invalid, forged, or unavailable completion receipt -> stop
+  before GitHub collection or merge according to the eligibility evaluator's
+  typed reason; never fall back to caller attestation.
 
 ### 5. Good / Base / Bad Cases
 
 - Good: standalone review resolves `sd-finish-work`, which delegates to
   Trellis and records concrete change/test journal lines.
+- Good: review fixes follow an existing archive/journal tail, so finish-work
+  emits a deterministic successor receipt without recording another session.
 - Base: merge-through ship review defers finish-work to housekeeping exactly as
   before.
 - Bad: review resolves `trellis-finish-work` directly and leaves the default
@@ -1756,6 +1772,9 @@ around the delegated lifecycle.
 - Assert journal-only recovery remains an automatic `planning` subtype,
   preserves the established valid code, and is described identically by the
   canonical/root skill twins without exposing a caller-selectable mode.
+- Assert post-archive recovery remains an automatic `completion` subtype,
+  hands one private receipt through review/ship/housekeeping, and contains no
+  compatibility head-attestation option.
 
 ### 7. Wrong vs Correct
 
@@ -1770,6 +1789,11 @@ journal recovery mode.
 
 Correct: the validator derives journal-only recovery from the exact retained
 range and returns ordinary planning evidence only after the proof succeeds.
+
+Wrong: advance finish-work by recording another completed journal after review.
+
+Correct: replay the original completion anchor and hand its verified successor
+receipt to the sole housekeeping merge owner.
 
 The `sd-update-spec` shared skill should locate the existing Trellis
 `trellis-update-spec` skill, follow that skill as-is for its `.trellis/spec/`

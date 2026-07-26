@@ -11,7 +11,7 @@ SELF_TEST=0
 JSON_OUTPUT=0
 DELETE_REMOTE_BRANCH=1
 AUTO_MERGE=1
-FINISH_WORK_HEAD=""
+FINISH_WORK_RECEIPT=""
 DEPENDENCY_PR=""
 MERGE_STRATEGY="${SD_AI_COMMAND_PACK_HOUSEKEEPING_MERGE_STRATEGY:-merge}"
 HOUSEKEEPING_GIT_TIMEOUT_SECONDS=60
@@ -40,8 +40,9 @@ Options:
   --json                 Emit one schema-version-1 result on stdout; progress
                          and diagnostics are written to stderr.
   --no-auto-merge        Do not merge an already-green open PR.
-  --finish-work-head <oid> Attest that SD finish-work completed for this exact
-                           commit and any resulting commits were pushed.
+  --finish-work-receipt <path>
+                         Supply the retained schema-version-1 JSON receipt from
+                         SD finish-work for independent exact-head validation.
   --dependency-pr <number> Internal sd-update-deps mode: evaluate and merge one
                            dependency PR without Trellis finish-work evidence.
   --merge-strategy <name> Merge strategy for ready open PRs: merge, squash, or rebase. Defaults to merge.
@@ -149,25 +150,19 @@ parse_args() {
       --no-auto-merge)
         AUTO_MERGE=0
         ;;
-      --finish-work-head)
+      --finish-work-receipt)
         shift
         if [ "$#" -eq 0 ] || [ -z "${1:-}" ]; then
-          printf 'error: --finish-work-head requires a commit OID\n' >&2
+          printf 'error: --finish-work-receipt requires a path\n' >&2
           exit 2
         fi
-        # Enumerate lowercase hex digits because locale-aware ranges can treat
-        # uppercase letters as members of [a-f] on older macOS Bash versions.
         case "$1" in
-          *[!0123456789abcdef]*)
-            printf 'error: --finish-work-head must be a full 40-character commit OID in lowercase\n' >&2
+          -*)
+            printf 'error: --finish-work-receipt path must not start with "-"\n' >&2
             exit 2
             ;;
         esac
-        if [ "${#1}" -ne 40 ]; then
-          printf 'error: --finish-work-head must be a full 40-character commit OID in lowercase\n' >&2
-          exit 2
-        fi
-        FINISH_WORK_HEAD="$1"
+        FINISH_WORK_RECEIPT="$1"
         ;;
       --merge-strategy)
         shift
@@ -222,8 +217,8 @@ parse_args() {
     esac
     shift
   done
-  if [ -n "$DEPENDENCY_PR" ] && [ -n "$FINISH_WORK_HEAD" ]; then
-    printf 'error: --dependency-pr cannot be combined with --finish-work-head\n' >&2
+  if [ -n "$DEPENDENCY_PR" ] && [ -n "$FINISH_WORK_RECEIPT" ]; then
+    printf 'error: --dependency-pr cannot be combined with --finish-work-receipt\n' >&2
     exit 2
   fi
   if [ -n "$DEPENDENCY_PR" ] && [ "$AUTO_MERGE" -eq 0 ]; then
@@ -552,8 +547,8 @@ evaluate_pr_eligibility() {
     --default-branch "$DEFAULT_BRANCH"
     --format json-shell
   )
-  if [ -n "$FINISH_WORK_HEAD" ]; then
-    args+=(--finish-work-head "$FINISH_WORK_HEAD")
+  if [ -n "$FINISH_WORK_RECEIPT" ]; then
+    args+=(--finish-work-receipt "$FINISH_WORK_RECEIPT")
   fi
   if [ -n "$GITHUB_REPO_SLUG" ]; then
     args+=(--github-repository "$GITHUB_REPO_SLUG")
@@ -972,9 +967,6 @@ emit_json_result() {
   if [ -n "$DEPENDENCY_PR" ]; then
     result_args+=(--dependency-pr-number "$DEPENDENCY_PR")
   fi
-  if [ -n "$FINISH_WORK_HEAD" ]; then
-    result_args+=(--finish-work-head "$FINISH_WORK_HEAD")
-  fi
   if [ -n "$ELIGIBILITY_JSON" ]; then
     eligibility_file="${status_file%/*}/eligibility.json"
     printf '%s\n' "$ELIGIBILITY_JSON" >"$eligibility_file"
@@ -1100,7 +1092,7 @@ self_test_scenario() {
     PATH=''
     DEFAULT_BRANCH="$default_branch"
     AUTO_MERGE=1
-    FINISH_WORK_HEAD=headoid
+    FINISH_WORK_RECEIPT=self-test-receipt.json
     MERGE_STRATEGY=merge
     GITHUB_REPO_SLUG=owner/repo
     ANOMALIES=()
@@ -1165,8 +1157,8 @@ run_self_test() {
 
   # Retain the original installed self-test labels as consumer-facing contract
   # aliases while the evaluator owns their detailed fixture coverage.
-  self_test_scenario "finish-work head required" refuse blocked "finish-work evidence missing; skipped auto-merge" || failures=$((failures + 1))
-  self_test_scenario "stale finish-work head refuses" refuse blocked "finish-work evidence stale; skipped auto-merge" || failures=$((failures + 1))
+  self_test_scenario "finish-work receipt required" refuse blocked "finish-work evidence missing; skipped auto-merge" || failures=$((failures + 1))
+  self_test_scenario "stale finish-work receipt refuses" refuse blocked "finish-work evidence stale; skipped auto-merge" || failures=$((failures + 1))
   self_test_scenario "green executed checks merge" merge eligible "eligible" || failures=$((failures + 1))
 
   if [ "$failures" -ne 0 ]; then
