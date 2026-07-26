@@ -545,10 +545,15 @@ class InstallTestCase(unittest.TestCase):
         for expected in install.PLATFORM_LOCAL_GITIGNORE_PATTERNS:
             self.assertIn(expected, content)
         # Claude is committed by default like every other platform: the block
-        # must not blanket-ignore .claude/ or carry SD allow-list negations.
+        # must not blanket-ignore .claude/ or carry any .claude allow-list
+        # negation (the old blanket-punch-through scheme).
         block_lines = content.splitlines()
         self.assertNotIn(".claude/**", block_lines)
-        self.assertNotIn("!.claude/commands/", block_lines)
+        self.assertEqual(
+            [line for line in block_lines if line.startswith("!.claude/")],
+            [],
+            "managed block must carry no .claude allow-list negations",
+        )
         self.assertNotIn(".trellis/", content.splitlines())
         self.assertNotIn(".trellis", content.splitlines())
         for platform_dir in (
