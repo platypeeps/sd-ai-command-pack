@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-26T02:42:05Z",
-  "packVersion": "0.53.0",
-  "payloadDigest": "sha256:3632c119d73d5bf171137f7cdafb70ec7e99cb0d2e3357fefe8d95e3fe88cd94",
+  "validatedAt": "2026-07-26T04:10:40Z",
+  "packVersion": "0.54.0",
+  "payloadDigest": "sha256:ca07ad2b3f07b658f73b23e2209f16fe650086bf2313fa65f2fadae2c5f64b51",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "c9acd5f81a27f0c746ab93f8ecae36f064588853",
+      "baseCommit": "b05a52a1400958f1b473eba9398631a5cb630834",
       "status": "passed",
       "prepares": [
         [
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "a81a3f795d2973f8f90e7917231d86a673476f4e",
+      "baseCommit": "65807a77aa5fe69ccb070d9ab0c89e3c7bb73810",
       "status": "passed",
       "prepares": [
         [
@@ -121,7 +121,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "9b7b9021e4c6321c9f6e4e8af136028c515e72b5",
+      "baseCommit": "dabdda114758de7acea07b18d1c0d644bdcc0ad8",
       "status": "passed",
       "prepares": [
         [

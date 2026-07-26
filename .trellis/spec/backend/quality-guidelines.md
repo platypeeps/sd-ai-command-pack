@@ -253,7 +253,9 @@ may enter housekeeping's merge mutation path.
   blocking; malformed, incomplete, unauthorized, rate-limited, or otherwise
   unreadable evidence is `indeterminate`, never clean.
 - `local-branch` requires a clean working tree, equal local, remote, and PR head
-  OIDs, and finish-work evidence attested for that exact head.
+  OIDs, and a schema-version-1 final-bundle receipt for that exact head. The
+  evaluator reruns the canonical validator with the receipt's mode, base, and
+  head and requires exact JSON equality before collecting remote evidence.
 - `dependency-pr` evaluates a classified PR from a clean default branch and
   does not fabricate Trellis finish-work evidence. Its PR head is still read
   twice and must remain exact.
@@ -278,7 +280,13 @@ may enter housekeeping's merge mutation path.
 - Failed, timed-out, malformed, missing, non-string, or non-OID final PR-head
   read -> retryable `indeterminate` with `head_unavailable` and a nullable
   `pullRequest.finalHeadOid`.
-- Missing or stale finish-work evidence in `local-branch` -> `blocked`.
+- Missing or stale finish-work evidence in `local-branch` -> `blocked` with
+  `finish_work_missing` or `finish_work_stale`.
+- A valid-looking receipt whose canonical replay is invalid -> `blocked` with
+  `finish_work_invalid`; a replay that is valid but differs from the supplied
+  JSON -> `blocked` with `finish_work_receipt_mismatch`.
+- Missing helper, nonzero/unreadable replay, or malformed replay JSON ->
+  retryable `indeterminate` with `finish_work_unavailable`.
 - PR head changes between the first and final observation -> retryable
   `indeterminate`, even if all earlier evidence was green.
 
@@ -298,8 +306,9 @@ may enter housekeeping's merge mutation path.
 
 - Eligible exact-head evaluation with mutation-spy assertions.
 - Failed, pending, skipped, neutral, and no-success check combinations.
-- Missing and stale finish-work evidence, dirty local state, and local/remote/PR
-  head mismatches.
+- Missing, stale, invalid, forged, mismatched, and unavailable finish-work
+  receipts; dirty local state; and local/remote/PR head mismatches. Assert that
+  invalid local evidence stops before GitHub collection.
 - Multi-page resolved and unresolved review threads.
 - Provider/auth/rate-limit failures and malformed JSON/check/thread payloads.
 - Unknown schema major, unknown fields, strict mode/policy validation, local
@@ -316,6 +325,9 @@ Correct: retain the PR number, re-read that exact PR at completion, and record i
 
 Wrong: overload local-branch head.endOid with the final PR observation
 Correct: preserve existing head semantics and add pullRequest.finalHeadOid within schema major 1
+
+Wrong: accept a caller-provided head OID as proof that finish-work occurred
+Correct: replay the canonical final-bundle validator and require exact receipt equality
 ```
 
 ## Housekeeping Result Contract
@@ -1062,6 +1074,115 @@ Correct: keep the captured range and prove its one journal session's referenced 
 
 Wrong: rerun today's entire task-content audit over historical published planning artifacts
 Correct: prove historical task-only scope and lifecycle while keeping full checks on normal new planning bundles
+```
+
+## Post-Archive Completion Successor Receipt Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing `final-bundle --mode completion` in
+`sd-ai-command-pack-review-preflight.mjs`, its template twin, finish-work
+receipt handoff, eligibility revalidation, or housekeeping's local-branch
+merge gate. It covers code-review remediation committed after the task archive
+and completed journal already exist.
+
+### 2. Signatures
+
+- Validator: `node scripts/sd-ai-command-pack-review-preflight.mjs
+  final-bundle --mode completion --base COMMIT --head COMMIT --repo PATH
+  --json`.
+- Handoff: `sd-finish-work` writes the unchanged JSON result to a private
+  caller-owned `mktemp` file; housekeeping accepts only
+  `--finish-work-receipt PATH`.
+- A successful recovery keeps schema version 1, `mode: completion`, and
+  `completion_bundle_valid`, adding
+  `evidence.completionSubtype: post-archive-review-successor`, repository
+  branch/root-digest identity, a canonical `completionAnchor`, and a bounded
+  ordered `successor`.
+
+### 3. Contracts
+
+- Select recovery automatically only when completion validation is requested
+  for an empty exact range, normally `base == head`; callers never select a
+  third mode or subtype.
+- Search at most 100 first-parent commits plus the one base object needed to
+  prove a candidate. A long repository history is not itself oversized when a
+  recent anchor is found.
+- The nearest shaped candidate must be an adjacent task-only archive commit
+  followed by a journal/index-only commit. Re-run the normal completion
+  validator over the candidate's original base-to-journal-head range before
+  trusting it.
+- The journal-head-to-final-head range contains at most 50 ordered,
+  single-parent commits and 500 changed paths. Reject every change below
+  `.trellis/tasks/`, `.trellis/workspace/`, `.trellis/.runtime/`, or the
+  finish-work runtime namespace; code, tests, specs, and generated payloads
+  remain allowed because later exact-head CI/review gates own their quality.
+- Evidence contains full commit OIDs, repository-relative paths, SHA-256
+  subject digests, archived task directories, and completed journal session
+  identity. It never contains the absolute repository path or raw unbounded
+  commit subjects.
+- Receipt persistence is ephemeral and caller-owned. It is not repository
+  state, a cache, or independent authority. Eligibility checks its branch and
+  exact head, reruns the same validator from its base/head, and requires the
+  complete JSON documents to match before any GitHub query or merge mutation.
+- Repeated finalization at the same head may recreate the same deterministic
+  receipt but must not archive, journal, stage, commit, push, request review,
+  or alter the task/session pointer. Preserve the private file across a clean
+  downstream handoff; delete it after housekeeping consumes it, the proof is
+  abandoned, or the owning lifecycle blocks.
+
+### 4. Validation & Error Matrix
+
+- No candidate inside the complete bounded history ->
+  `completion_successor_anchor_missing`; no candidate within a truncated
+  100-commit window -> `completion_successor_history_oversized`.
+- Shaped nearest candidate fails canonical completion ->
+  `completion_successor_anchor_invalid`.
+- Git history/object inspection unavailable -> indeterminate
+  `completion_successor_history_unavailable`.
+- More than 50 successor commits ->
+  `completion_successor_history_oversized`; merge/root/non-single-parent
+  successor -> `completion_successor_history_non_linear`.
+- More than 500 changed paths -> `completion_successor_scope_oversized`;
+  protected bookkeeping/runtime path -> `completion_successor_scope_invalid`.
+- Receipt branch/head mismatch -> `finish_work_stale`; canonical replay invalid
+  -> `finish_work_invalid`; valid replay differs ->
+  `finish_work_receipt_mismatch`; unavailable replay ->
+  `finish_work_unavailable`.
+
+### 5. Good / Base / Bad Cases
+
+- Good: work, archive, journal, then several code/test/spec review-fix commits
+  produce one deterministic exact-head completion receipt and no Git or
+  filesystem mutation beyond the caller's private temporary file.
+- Base: task/archive/journal are still in the requested range, so ordinary
+  completion validation runs and returns no successor subtype.
+- Bad: accept a copied head OID, mutate an archived task, record a second
+  journal merely to advance the head, persist authoritative receipt state in
+  the repository, or let a merge commit pass as a linear successor.
+
+### 6. Tests Required
+
+- Hermetic positive fixture with multiple successor fixes, deterministic replay,
+  repository-relative bounded evidence, and a no-mutation assertion.
+- Recent anchor in a repository with more than 100 total commits, plus missing
+  or invalid anchor, altered bookkeeping/runtime paths, merges, missing Git
+  evidence, and commit/path bound failures.
+- Strict regular-file receipt loading; stale, invalid, forged, mismatched, and
+  unavailable replay behavior; assert no GitHub call occurs before valid local
+  proof.
+- End-to-end housekeeping acceptance at the matching clean head, typed subtype
+  propagation, old head-attestation removal, root/template byte identity, and
+  preservation of normal completion/planning/journal-only fixtures.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: write a durable receipt beside Trellis state and trust it on the next run
+Correct: hand off private temporary JSON and replay the canonical validator exactly
+
+Wrong: reject every old repository once first-parent history exceeds the search limit
+Correct: bound the search window while accepting a valid anchor near the current head
 ```
 
 ## Read-Only SD Check Runtime Contract

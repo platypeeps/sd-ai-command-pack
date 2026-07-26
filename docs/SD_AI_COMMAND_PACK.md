@@ -1049,9 +1049,10 @@ Copy-Item -Recurse -Force -Path "C:\path\to\repo\.obsidian-kb\*" -Destination "C
 The housekeeping command ends a single active development stream. On an open
 PR, it runs the SD finish-work flow before actual cleanup and pushes any
 archive or journal commits that finish-work creates. It then runs the
-housekeeping script with `--finish-work-head "$(git rev-parse HEAD)"`. The
-exact-head attestation is valid only after that lifecycle step and its required
-checks finish; without it, or if the branch advances afterward, the executable
+housekeeping script with `--finish-work-receipt "$FINISH_WORK_RECEIPT"`. The
+private JSON receipt is valid only after that lifecycle step and its required
+checks finish; eligibility independently recomputes its exact mode/base/head
+evidence. Without it, or if the branch advances afterward, the executable
 leaves an open PR unmerged. The script then checks a strict auto-merge gate:
 
 - the working tree is clean
@@ -1367,9 +1368,10 @@ Lifecycle side effects have one owner. `until=review` keeps finish-work in
 watches with `no-merge` in Stage 3, and invokes housekeeping exactly once in
 Stage 4. A blocked or timed-out watch therefore leaves the active Trellis task
 available for a later resume instead of archiving it before the PR settles.
-After finish-work, housekeeping passes `--finish-work-head` with the exact
-current commit to the shell gate and owns one normal KB refresh before merge so
-archived task documentation is current. A missing handoff leaves the PR open.
+After finish-work, housekeeping passes `--finish-work-receipt` with the exact
+retained JSON to the shell gate; eligibility recomputes and compares the proof.
+Housekeeping owns one normal KB refresh before merge so archived task
+documentation is current. A missing handoff leaves the PR open.
 The refresh creates an absent
 KB and preserves a valid root directory symlink. `sd-ship` does not repeat that
 refresh.
@@ -1869,8 +1871,8 @@ checks.
 ## Housekeeping cadence
 
 Run housekeeping at the end of a development stream. From an open PR branch it
-owns finish-work before applying the merge gate and passes the exact current
-commit through `--finish-work-head` only after the lifecycle handoff succeeds;
+owns finish-work before applying the merge gate and passes the exact retained
+JSON through `--finish-work-receipt` only after the lifecycle handoff succeeds;
 after an already-merged PR it performs the remaining cleanup and verification
 without the flag. If the command reports anomalies, treat them as the next
 manual action: dirty files, an unmerged PR, extra branches, open PRs/issues, or

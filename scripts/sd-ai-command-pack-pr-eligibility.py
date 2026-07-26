@@ -39,7 +39,7 @@ REQUEST_FIELDS = frozenset(
         "remote",
         "defaultBranch",
         "finishWorkRequired",
-        "finishWorkHead",
+        "finishWorkReceipt",
         "githubRepository",
     }
 )
@@ -175,18 +175,12 @@ def validate_request(value: object) -> dict[str, Any]:
         raise EligibilityInputError(
             "eligibility input finishWorkRequired must be a boolean"
         )
-    finish_work_head = value.get("finishWorkHead")
-    if finish_work_head is not None:
-        finish_work_head = require_string(
-            finish_work_head, "finishWorkHead", limit=40, allow_option=True
-        )
-        if not COMMIT_RE.fullmatch(finish_work_head):
-            raise EligibilityInputError(
-                "eligibility input finishWorkHead must be a full lowercase commit OID"
-            )
-    if not finish_work_required and finish_work_head is not None:
+    finish_work_receipt = value.get("finishWorkReceipt")
+    if finish_work_receipt is not None:
+        finish_work_receipt = validate_finish_work_receipt(finish_work_receipt)
+    if not finish_work_required and finish_work_receipt is not None:
         raise EligibilityInputError(
-            "eligibility input finishWorkHead must be null when finishWorkRequired is false"
+            "eligibility input finishWorkReceipt must be null when finishWorkRequired is false"
         )
     if mode == "local-branch" and not finish_work_required:
         raise EligibilityInputError(
@@ -216,9 +210,72 @@ def validate_request(value: object) -> dict[str, Any]:
         "remote": remote,
         "defaultBranch": default_branch,
         "finishWorkRequired": finish_work_required,
-        "finishWorkHead": finish_work_head,
+        "finishWorkReceipt": finish_work_receipt,
         "githubRepository": github_repository,
     }
+
+
+def validate_finish_work_receipt(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise EligibilityInputError(
+            "eligibility input finishWorkReceipt must be a JSON object"
+        )
+    if value.get("schemaVersion") != SCHEMA_VERSION:
+        raise EligibilityInputError(
+            f"eligibility input finishWorkReceipt schemaVersion must be {SCHEMA_VERSION}"
+        )
+    if value.get("kind") != "trellis-bookkeeping-validation":
+        raise EligibilityInputError(
+            "eligibility input finishWorkReceipt kind is invalid"
+        )
+    if value.get("command") != "final-bundle":
+        raise EligibilityInputError(
+            "eligibility input finishWorkReceipt command must be final-bundle"
+        )
+    mode = value.get("mode")
+    if mode not in {"completion", "planning"}:
+        raise EligibilityInputError(
+            "eligibility input finishWorkReceipt mode must be completion or planning"
+        )
+    if value.get("status") != "valid":
+        raise EligibilityInputError(
+            "eligibility input finishWorkReceipt status must be valid"
+        )
+    if value.get("reasonCodes") != [f"{mode}_bundle_valid"]:
+        raise EligibilityInputError(
+            "eligibility input finishWorkReceipt reasonCodes are invalid"
+        )
+    if value.get("findings") != []:
+        raise EligibilityInputError(
+            "eligibility input finishWorkReceipt findings must be empty"
+        )
+    evidence = value.get("evidence")
+    if not isinstance(evidence, Mapping):
+        raise EligibilityInputError(
+            "eligibility input finishWorkReceipt evidence must be an object"
+        )
+    for field in ("baseOid", "headOid"):
+        oid = evidence.get(field)
+        if not isinstance(oid, str) or not COMMIT_RE.fullmatch(oid):
+            raise EligibilityInputError(
+                f"eligibility input finishWorkReceipt evidence.{field} must be a full lowercase commit OID"
+            )
+    repository = evidence.get("repository")
+    if not isinstance(repository, Mapping):
+        raise EligibilityInputError(
+            "eligibility input finishWorkReceipt evidence.repository must be an object"
+        )
+    branch = repository.get("branch")
+    if branch is not None:
+        require_string(branch, "finishWorkReceipt evidence.repository.branch")
+    root_digest = repository.get("rootDigest")
+    if not isinstance(root_digest, str) or not re.fullmatch(
+        r"sha256:[0-9a-f]{64}", root_digest
+    ):
+        raise EligibilityInputError(
+            "eligibility input finishWorkReceipt evidence.repository.rootDigest is invalid"
+        )
+    return dict(value)
 
 
 def load_request(path: Path) -> object:
@@ -234,6 +291,108 @@ def load_request(path: Path) -> object:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise EligibilityInputError(f"cannot read eligibility input {path}: {exc}") from exc
+
+
+def load_finish_work_receipt(path: Path) -> dict[str, Any]:
+    return validate_finish_work_receipt(load_request(path))
+
+
+def revalidate_finish_work_receipt(
+    receipt: Mapping[str, Any],
+    *,
+    repo: Path,
+    branch: str,
+    head: str,
+    runner: Runner,
+) -> tuple[str, dict[str, Any], str]:
+    evidence = receipt["evidence"]
+    receipt_head = str(evidence["headOid"])
+    receipt_branch = evidence["repository"].get("branch")
+    summary = {
+        "required": True,
+        "provided": True,
+        "mode": receipt["mode"],
+        "completionSubtype": evidence.get("completionSubtype"),
+        "planningSubtype": evidence.get("planningSubtype"),
+        "headOid": receipt_head,
+        "matchesCurrentHead": receipt_head == head,
+        "verified": False,
+    }
+    if receipt_head != head or receipt_branch != branch:
+        return (
+            "stale",
+            summary,
+            "finish-work receipt does not match the current branch and exact head",
+        )
+    helper = Path(__file__).resolve().with_name(
+        "sd-ai-command-pack-review-preflight.mjs"
+    )
+    result = runner(
+        [
+            "node",
+            str(helper),
+            "final-bundle",
+            "--mode",
+            str(receipt["mode"]),
+            "--base",
+            str(evidence["baseOid"]),
+            "--head",
+            receipt_head,
+            "--repo",
+            str(repo),
+            "--json",
+        ],
+        repo,
+        COMMAND_TIMEOUT_SECONDS,
+    )
+    if result.returncode not in {0, 1} or not result.stdout.strip():
+        return (
+            "unavailable",
+            summary,
+            "finish-work receipt could not be independently revalidated",
+        )
+    try:
+        observed = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return (
+            "unavailable",
+            summary,
+            "finish-work validator returned malformed JSON",
+        )
+    if not isinstance(observed, Mapping):
+        return (
+            "unavailable",
+            summary,
+            "finish-work validator returned a non-object result",
+        )
+    if observed.get("status") == "indeterminate":
+        reasons = observed.get("reasonCodes")
+        reason_text = ", ".join(
+            str(item) for item in reasons[:8]
+        ) if isinstance(reasons, list) else "unavailable evidence"
+        return (
+            "unavailable",
+            summary,
+            f"finish-work receipt revalidation is indeterminate: {safe_text(reason_text)}",
+        )
+    if observed.get("status") != "valid":
+        reasons = observed.get("reasonCodes")
+        reason_text = ", ".join(
+            str(item) for item in reasons[:8]
+        ) if isinstance(reasons, list) else "invalid evidence"
+        return (
+            "invalid",
+            summary,
+            f"finish-work receipt no longer validates: {safe_text(reason_text)}",
+        )
+    if dict(observed) != dict(receipt):
+        return (
+            "mismatch",
+            summary,
+            "finish-work receipt differs from independently recomputed evidence",
+        )
+    summary["verified"] = True
+    return "valid", summary, ""
 
 
 def parse_json_object(result: CommandResult, label: str) -> dict[str, Any]:
@@ -549,8 +708,13 @@ def evaluate_dependency_request(
         "head": {"startOid": start_head, "endOid": None, "remoteOid": start_head},
         "finishWork": {
             "required": False,
-            "providedHead": None,
+            "provided": False,
+            "mode": None,
+            "completionSubtype": None,
+            "planningSubtype": None,
+            "headOid": None,
             "matchesCurrentHead": False,
+            "verified": False,
         },
         "pullRequest": pr,
         "checks": {
@@ -720,8 +884,13 @@ def evaluate_request(
         "head": {"startOid": start_head, "endOid": None, "remoteOid": None},
         "finishWork": {
             "required": request["finishWorkRequired"],
-            "providedHead": request["finishWorkHead"],
+            "provided": request["finishWorkReceipt"] is not None,
+            "mode": None,
+            "completionSubtype": None,
+            "planningSubtype": None,
+            "headOid": None,
             "matchesCurrentHead": False,
+            "verified": False,
         },
         "pullRequest": None,
         "checks": {"items": [], "blockingCount": None, "successfulCount": None},
@@ -828,6 +997,50 @@ def evaluate_request(
             "working tree has uncommitted changes; skipped auto-merge",
         )
 
+    if request["finishWorkRequired"]:
+        receipt = request["finishWorkReceipt"]
+        if receipt is None:
+            return finish(
+                "blocked",
+                ["finish_work_missing"],
+                f"SD finish-work evidence is missing for PR branch {branch}; run sd-finish-work and pass its retained JSON receipt to housekeeping; skipped auto-merge",
+            )
+        receipt_status, receipt_summary, receipt_diagnostic = (
+            revalidate_finish_work_receipt(
+                receipt,
+                repo=repo,
+                branch=branch,
+                head=start_head,
+                runner=runner,
+            )
+        )
+        evidence["finishWork"] = receipt_summary
+        if receipt_status == "stale":
+            return finish(
+                "blocked",
+                ["finish_work_stale"],
+                f"{receipt_diagnostic}; rerun sd-finish-work for the current head before housekeeping; skipped auto-merge",
+            )
+        if receipt_status == "invalid":
+            return finish(
+                "blocked",
+                ["finish_work_invalid"],
+                f"{receipt_diagnostic}; skipped auto-merge",
+            )
+        if receipt_status == "mismatch":
+            return finish(
+                "blocked",
+                ["finish_work_receipt_mismatch"],
+                f"{receipt_diagnostic}; skipped auto-merge",
+            )
+        if receipt_status != "valid":
+            return finish(
+                "indeterminate",
+                ["finish_work_unavailable"],
+                f"{receipt_diagnostic}; skipped auto-merge",
+                retryable=True,
+            )
+
     slug = request["githubRepository"]
     if slug is None:
         return finish(
@@ -882,21 +1095,6 @@ def evaluate_request(
             f"PR #{pr_number} base is {pr['baseRefName']}, expected {request['defaultBranch']}; skipped auto-merge",
         )
 
-    if request["finishWorkRequired"]:
-        finish_head = request["finishWorkHead"]
-        if finish_head is None:
-            return finish(
-                "blocked",
-                ["finish_work_missing"],
-                f"SD finish-work completion was not attested for PR #{pr_number}; run the sd-finish-work flow, push any resulting commits, wait for required checks, then rerun housekeeping with --finish-work-head \"$(git rev-parse HEAD)\"; skipped auto-merge",
-            )
-        evidence["finishWork"]["matchesCurrentHead"] = finish_head == start_head
-        if finish_head != start_head:
-            return finish(
-                "blocked",
-                ["finish_work_stale"],
-                f"SD finish-work was attested for {finish_head}, but local {branch} is now at {start_head}; rerun finish-work for the current head before housekeeping; skipped auto-merge",
-            )
     if pr["headOid"] != start_head:
         return finish(
             "blocked",
@@ -1003,8 +1201,15 @@ def invalid_result(
         "head": {"startOid": None, "endOid": None, "remoteOid": None},
         "finishWork": {
             "required": False if request is None else request.get("finishWorkRequired"),
-            "providedHead": None if request is None else request.get("finishWorkHead"),
+            "provided": False
+            if request is None
+            else request.get("finishWorkReceipt") is not None,
+            "mode": None,
+            "completionSubtype": None,
+            "planningSubtype": None,
+            "headOid": None,
             "matchesCurrentHead": False,
+            "verified": False,
         },
         "pullRequest": None,
         "checks": {"items": [], "blockingCount": None, "successfulCount": None},
@@ -1056,7 +1261,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--dependency-pr-number", type=int)
     parser.add_argument("--remote")
     parser.add_argument("--default-branch")
-    parser.add_argument("--finish-work-head")
+    parser.add_argument("--finish-work-receipt", type=Path)
     parser.add_argument("--github-repository")
     parser.add_argument(
         "--format", choices=("json", "shell", "json-shell"), default="json"
@@ -1071,7 +1276,7 @@ def request_from_args(args: argparse.Namespace) -> object:
         args.dependency_pr_number,
         args.remote,
         args.default_branch,
-        args.finish_work_head,
+        args.finish_work_receipt,
         args.github_repository,
     )
     if args.input is not None:
@@ -1094,9 +1299,9 @@ def request_from_args(args: argparse.Namespace) -> object:
         raise EligibilityInputError(
             "--branch and --dependency-pr-number are mutually exclusive"
         )
-    if args.dependency_pr_number is not None and args.finish_work_head is not None:
+    if args.dependency_pr_number is not None and args.finish_work_receipt is not None:
         raise EligibilityInputError(
-            "--finish-work-head is not valid with --dependency-pr-number"
+            "--finish-work-receipt is not valid with --dependency-pr-number"
         )
     if missing:
         raise EligibilityInputError(
@@ -1112,7 +1317,9 @@ def request_from_args(args: argparse.Namespace) -> object:
         "remote": args.remote,
         "defaultBranch": args.default_branch,
         "finishWorkRequired": not dependency_mode,
-        "finishWorkHead": None if dependency_mode else args.finish_work_head,
+        "finishWorkReceipt": None
+        if dependency_mode or args.finish_work_receipt is None
+        else load_finish_work_receipt(args.finish_work_receipt),
         "githubRepository": args.github_repository,
     }
 

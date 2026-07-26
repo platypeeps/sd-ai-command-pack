@@ -623,11 +623,105 @@ class InstallTestCase(unittest.TestCase):
         self.run_git(repo, "fetch", "origin")
         self.run_git(repo, "remote", "set-head", "origin", "-a")
         self.run_git(repo, "switch", "-c", "feature/cleanup")
+        active_task = repo / ".trellis/tasks/07-25-housekeeping-receipt"
+        active_task.mkdir(parents=True)
+        task_record = {
+            "id": "housekeeping-receipt",
+            "name": "housekeeping-receipt",
+            "title": "Housekeeping receipt fixture",
+            "description": "Exercise exact finish-work receipt validation.",
+            "status": "in_progress",
+            "createdAt": "2026-07-25",
+            "completedAt": None,
+            "branch": "feature/cleanup",
+            "base_branch": "main",
+            "parent": None,
+            "children": [],
+        }
+        (active_task / "task.json").write_text(
+            json.dumps(task_record, indent=2) + "\n", encoding="utf-8"
+        )
+        (active_task / "prd.md").write_text(
+            "# Housekeeping receipt fixture\n\nValidated fixture.\n",
+            encoding="utf-8",
+        )
+        (active_task / "implement.jsonl").write_text("", encoding="utf-8")
+        (active_task / "check.jsonl").write_text("", encoding="utf-8")
         (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
-        self.run_git(repo, "add", "feature.txt")
+        self.run_git(repo, "add", "feature.txt", ".trellis/tasks")
         self.run_git(repo, "commit", "-m", "feature")
+        work_commit = self.git_output(repo, "rev-parse", "HEAD")
+
+        archive_task = (
+            repo
+            / ".trellis/tasks/archive/2026-07/07-25-housekeeping-receipt"
+        )
+        archive_task.parent.mkdir(parents=True)
+        active_task.rename(archive_task)
+        task_record["status"] = "completed"
+        task_record["completedAt"] = "2026-07-25"
+        (archive_task / "task.json").write_text(
+            json.dumps(task_record, indent=2) + "\n", encoding="utf-8"
+        )
+        self.run_git(repo, "add", "-A", ".trellis/tasks")
+        self.run_git(repo, "commit", "-m", "archive housekeeping fixture")
+
+        workspace = repo / ".trellis/workspace/dev"
+        workspace.mkdir(parents=True)
+        (workspace / "journal-1.md").write_text(
+            "# Development Journal\n\n"
+            "## Session 1: Housekeeping receipt fixture\n\n"
+            "### Summary\n\nValidated housekeeping receipt integration.\n\n"
+            "### Main Changes\n\n- Added one canonical completed task fixture.\n\n"
+            "### Git Commits\n\n| Hash | Message |\n|------|---------|\n"
+            f"| `{work_commit[:12]}` | feature |\n\n"
+            "### Testing\n\n- [OK] housekeeping fixture\n\n"
+            "### Status\n\n[OK] **Completed**\n\n"
+            "### Next Steps\n\n- None\n",
+            encoding="utf-8",
+        )
+        (workspace / "index.md").write_text(
+            "# Sessions\n\n"
+            "| # | Date | Title | Commits | Branch |\n"
+            "|---|------|-------|---------|--------|\n"
+            f"| 1 | 2026-07-25 | Housekeeping receipt fixture | `{work_commit[:12]}` | `feature/cleanup` |\n",
+            encoding="utf-8",
+        )
+        self.run_git(repo, "add", ".trellis/workspace")
+        self.run_git(repo, "commit", "-m", "record housekeeping fixture journal")
+
+        (repo / "feature.txt").write_text("feature review fix\n", encoding="utf-8")
+        self.run_git(repo, "add", "feature.txt")
+        self.run_git(repo, "commit", "-m", "fix housekeeping review finding")
         self.run_git(repo, "push", "-u", "origin", "feature/cleanup")
         return self.git_output(repo, "rev-parse", "HEAD")
+
+    def write_finish_work_receipt(self, repo: Path, head_oid: str) -> Path:
+        receipt = repo.parent / "finish-work-receipt.json"
+        result = subprocess.run(
+            [
+                "node",
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs"),
+                "final-bundle",
+                "--mode",
+                "completion",
+                "--base",
+                head_oid,
+                "--head",
+                head_oid,
+                "--repo",
+                str(repo),
+                "--json",
+            ],
+            cwd=repo,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        receipt.write_text(result.stdout, encoding="utf-8")
+        return receipt
 
     def make_housekeeping_repo(self) -> tuple[Path, Path, Path, str]:
         """Return an isolated ``(repo, remote, stub_bin, head_oid)`` tuple.
@@ -1010,14 +1104,15 @@ class InstallTestCase(unittest.TestCase):
         if shutil.which("jq") is None:
             self.skipTest("jq is not available on PATH")
         repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        receipt = self.write_finish_work_receipt(repo, head_oid)
         marker = repo.parent / "merged-pr"
         self.write_auto_merge_gh_stub(stub_bin, marker, rollup_json=rollup_json)
         result = subprocess.run(
             [
                 "bash",
                 str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
-                "--finish-work-head",
-                head_oid,
+                "--finish-work-receipt",
+                str(receipt),
             ],
             cwd=repo,
             env={

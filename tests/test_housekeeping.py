@@ -32,6 +32,12 @@ InstallTestCase = _support.InstallTestCase
 class HousekeepingTests(InstallTestCase):
     """Tests for housekeeping skill/script behavior and merge cleanup."""
 
+    def finish_work_receipt_args(self, repo: Path, head_oid: str) -> list[str]:
+        return [
+            "--finish-work-receipt",
+            str(self.write_finish_work_receipt(repo, head_oid)),
+        ]
+
     def test_housekeeping_adapters_run_finish_work_before_housekeeping_script(
         self,
     ) -> None:
@@ -51,7 +57,8 @@ class HousekeepingTests(InstallTestCase):
                 script_index,
                 f"{adapter}: finish-work must run before housekeeping script",
             )
-            self.assertIn("--finish-work-head", content)
+            self.assertIn("--finish-work-receipt", content)
+            self.assertNotIn("--finish-work-head", content)
 
     def test_housekeeping_clean_check_fails_closed_on_git_failure(self) -> None:
         if self._bash_path is None:
@@ -91,15 +98,14 @@ class HousekeepingTests(InstallTestCase):
         self.assertEqual(result.returncode, 2, result.stdout)
         self.assertIn('--remote value must not start with "-"', result.stdout)
 
-    def test_housekeeping_rejects_malformed_finish_work_head(self) -> None:
+    def test_housekeeping_rejects_option_like_finish_work_receipt_path(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
         result = subprocess.run(
             [
                 self._bash_path,
                 str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
-                "--finish-work-head",
-                "not-a-commit",
+                "--finish-work-receipt",
                 "--self-test",
             ],
             text=True,
@@ -108,18 +114,16 @@ class HousekeepingTests(InstallTestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 2, result.stdout)
-        self.assertIn("full 40-character commit OID", result.stdout)
+        self.assertIn('path must not start with "-"', result.stdout)
 
-    def test_housekeeping_rejects_uppercase_finish_work_head(self) -> None:
+    def test_housekeeping_requires_finish_work_receipt_value(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
         result = subprocess.run(
             [
                 self._bash_path,
                 str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
-                "--finish-work-head",
-                "A" * 40,
-                "--self-test",
+                "--finish-work-receipt",
             ],
             text=True,
             stdout=subprocess.PIPE,
@@ -127,7 +131,7 @@ class HousekeepingTests(InstallTestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 2, result.stdout)
-        self.assertIn("commit OID in lowercase", result.stdout)
+        self.assertIn("requires a path", result.stdout)
 
     def test_housekeeping_default_branch_ignores_gh_null(self) -> None:
         if self._bash_path is None:
@@ -220,14 +224,14 @@ class HousekeepingTests(InstallTestCase):
             "The current Trellis task (its id + status, or `none active`).",
             "PR review rounds:",
             "--no-auto-merge",
-            "--finish-work-head <oid>",
+            "--finish-work-receipt <path>",
             "--dependency-pr <number>",
             "sd-ai-command-pack-pr-eligibility.py",
         ]:
             self.assertIn(text, skill)
         for text in [
             "--no-auto-merge",
-            "--finish-work-head",
+            "--finish-work-receipt",
             "--dependency-pr",
             "--merge-strategy",
             "evaluate_pr_eligibility()",
@@ -534,8 +538,7 @@ class HousekeepingTests(InstallTestCase):
             [
                 "bash",
                 str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
-                "--finish-work-head",
-                head_oid,
+                *self.finish_work_receipt_args(repo, head_oid),
             ],
             cwd=repo,
             env={
@@ -583,8 +586,7 @@ class HousekeepingTests(InstallTestCase):
             [
                 "bash",
                 str(install.ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
-                "--finish-work-head",
-                head_oid,
+                *self.finish_work_receipt_args(repo, head_oid),
                 "--json",
             ],
             cwd=repo,
@@ -604,14 +606,19 @@ class HousekeepingTests(InstallTestCase):
         self.assertEqual(payload["outcome"]["status"], "clean")
         self.assertEqual(payload["eligibility"]["status"], "eligible")
         self.assertEqual(payload["eligibility"]["head"]["startOid"], head_oid)
-        self.assertEqual(payload["identity"]["finishWork"]["providedHead"], head_oid)
+        self.assertEqual(payload["identity"]["finishWork"]["headOid"], head_oid)
+        self.assertTrue(payload["identity"]["finishWork"]["verified"])
+        self.assertEqual(
+            payload["identity"]["finishWork"]["completionSubtype"],
+            "post-archive-review-successor",
+        )
         self.assertEqual(payload["identity"]["pullRequest"]["number"], 6)
         action_codes = {item["code"] for item in payload["actions"]}
         self.assertIn("pull_request_merged", action_codes)
         self.assertIn("remote_branch_deleted", action_codes)
         self.assertTrue(marker.exists())
 
-    def test_housekeeping_requires_finish_work_head_before_auto_merge(self) -> None:
+    def test_housekeeping_requires_finish_work_receipt_before_auto_merge(self) -> None:
         repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
         marker = repo.parent / "merged-pr"
         self.write_auto_merge_gh_stub(stub_bin, marker)
@@ -634,12 +641,9 @@ class HousekeepingTests(InstallTestCase):
         )
 
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("SD finish-work completion was not attested", result.stdout)
-        self.assertIn(
-            '--finish-work-head "$(git rev-parse HEAD)"',
-            result.stdout,
-        )
-        self.assertNotIn(f'--finish-work-head "{head_oid}"', result.stdout)
+        self.assertIn("SD finish-work evidence is missing", result.stdout)
+        self.assertIn("pass its retained JSON receipt", result.stdout)
+        self.assertNotIn("--finish-work-head", result.stdout)
         self.assertFalse(marker.exists())
 
     def test_housekeeping_dependency_pr_mode_merges_from_clean_default_branch(
@@ -684,20 +688,24 @@ class HousekeepingTests(InstallTestCase):
         self.assertTrue(marker.exists())
         self.assertFalse((repo / ".obsidian-kb").exists())
 
-    def test_housekeeping_rejects_stale_finish_work_head_before_auto_merge(
+    def test_housekeeping_rejects_stale_finish_work_receipt_before_auto_merge(
         self,
     ) -> None:
         repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
         marker = repo.parent / "merged-pr"
         self.write_auto_merge_gh_stub(stub_bin, marker)
         stale_head = "0" * 40
+        receipt = self.write_finish_work_receipt(repo, head_oid)
+        receipt_payload = json.loads(receipt.read_text(encoding="utf-8"))
+        receipt_payload["evidence"]["headOid"] = stale_head
+        receipt.write_text(json.dumps(receipt_payload), encoding="utf-8")
 
         result = subprocess.run(
             [
                 "bash",
                 str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
-                "--finish-work-head",
-                stale_head,
+                "--finish-work-receipt",
+                str(receipt),
             ],
             cwd=repo,
             env={
@@ -712,11 +720,8 @@ class HousekeepingTests(InstallTestCase):
         )
 
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn(
-            f"SD finish-work was attested for {stale_head}, but local "
-            f"feature/cleanup is now at {head_oid}",
-            result.stdout,
-        )
+        self.assertIn("finish-work receipt does not match", result.stdout)
+        self.assertIn("rerun sd-finish-work", result.stdout)
         self.assertFalse(marker.exists())
 
     def test_housekeeping_prunes_stale_tracking_ref_on_auto_delete_head_branch(
@@ -736,8 +741,7 @@ class HousekeepingTests(InstallTestCase):
             [
                 "bash",
                 str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
-                "--finish-work-head",
-                head_oid,
+                *self.finish_work_receipt_args(repo, head_oid),
             ],
             cwd=repo,
             env={
@@ -797,8 +801,7 @@ class HousekeepingTests(InstallTestCase):
             [
                 "bash",
                 str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
-                "--finish-work-head",
-                head_oid,
+                *self.finish_work_receipt_args(repo, head_oid),
             ],
             cwd=repo,
             env={
@@ -1030,8 +1033,7 @@ class HousekeepingTests(InstallTestCase):
             [
                 "bash",
                 str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
-                "--finish-work-head",
-                head_oid,
+                *self.finish_work_receipt_args(repo, head_oid),
             ],
             cwd=repo,
             env={
@@ -1066,8 +1068,7 @@ class HousekeepingTests(InstallTestCase):
             [
                 "bash",
                 str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
-                "--finish-work-head",
-                head_oid,
+                *self.finish_work_receipt_args(repo, head_oid),
             ],
             cwd=repo,
             env={
@@ -1139,8 +1140,7 @@ class HousekeepingTests(InstallTestCase):
             [
                 "bash",
                 str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
-                "--finish-work-head",
-                head_oid,
+                *self.finish_work_receipt_args(repo, head_oid),
             ],
             cwd=repo,
             env={

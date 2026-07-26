@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -26,6 +27,8 @@ const MAX_TRELLIS_PRIORITY_RATIONALE_LENGTH = 1000;
 const MAX_BOOKKEEPING_FINDINGS = 100;
 const MAX_BOOKKEEPING_CHANGED_PATHS = 500;
 const MAX_BOOKKEEPING_RECOVERY_COMMITS = 100;
+const MAX_BOOKKEEPING_SUCCESSOR_COMMITS = 50;
+const MAX_BOOKKEEPING_ANCHOR_SEARCH_COMMITS = 100;
 const BOOKKEEPING_SCHEMA_VERSION = 1;
 const TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review', 'completed']);
 const ACTIVE_TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review']);
@@ -779,17 +782,19 @@ function validateBookkeepingTextWhitespace(file, text, add) {
   });
 }
 
-function validateBookkeepingFinalBundle(options, evidence, add) {
+function validateBookkeepingFinalBundle(options, evidence, add, runtime = {}) {
   const baseOid = resolveBookkeepingCommit(options.base, 'base', add);
   const headOid = resolveBookkeepingCommit(options.head, 'head', add);
   evidence.baseOid = baseOid;
   evidence.headOid = headOid;
   if (!baseOid || !headOid) return;
 
-  const checkedOutHead = gitStdout(['rev-parse', '--verify', 'HEAD^{commit}']);
-  if (checkedOutHead !== headOid) {
-    add('bundle_head_not_checked_out', '', 'the requested final head must be the currently checked-out HEAD', 'indeterminate');
-    return;
+  if (!runtime.historical) {
+    const checkedOutHead = gitStdout(['rev-parse', '--verify', 'HEAD^{commit}']);
+    if (checkedOutHead !== headOid) {
+      add('bundle_head_not_checked_out', '', 'the requested final head must be the currently checked-out HEAD', 'indeterminate');
+      return;
+    }
   }
   for (const diffArgs of [
     ['diff', '--quiet', 'HEAD', '--', '.trellis/tasks', '.trellis/workspace'],
@@ -804,12 +809,22 @@ function validateBookkeepingFinalBundle(options, evidence, add) {
 
   const entries = bookkeepingChangedEntries(baseOid, headOid, add);
   if (!entries) return;
+  evidence.repository = bookkeepingRepositoryEvidence();
   const paths = [...new Set(entries.flatMap((entry) => [entry.oldPath, entry.path].filter(Boolean)))].sort();
   evidence.changedPaths = paths
     .slice(0, MAX_BOOKKEEPING_CHANGED_PATHS)
     .map((path) => boundedBookkeepingText(path, 300));
   if (paths.length > MAX_BOOKKEEPING_CHANGED_PATHS) {
     add('bundle_changed_paths_oversized', '', `bundle changes more than ${MAX_BOOKKEEPING_CHANGED_PATHS} paths`);
+    return;
+  }
+
+  if (
+    options.mode === 'completion'
+    && entries.length === 0
+    && runtime.allowCompletionSuccessor !== false
+  ) {
+    validateCompletionSuccessorRecovery(evidence, headOid, add);
     return;
   }
 
@@ -821,6 +836,7 @@ function validateBookkeepingFinalBundle(options, evidence, add) {
   }
   validateBookkeepingDiffWhitespace(baseOid, headOid, add);
   const journalSummary = validateBookkeepingJournalBundle(entries, baseOid, headOid, add);
+  evidence.journalSessions = bookkeepingJournalSessionEvidence(journalSummary);
   if (options.mode === 'completion') {
     validateCompletionBundle(entries, evidence, baseOid, add);
   } else {
@@ -831,6 +847,256 @@ function validateBookkeepingFinalBundle(options, evidence, add) {
       validateJournalOnlyPlanningRecovery(entries, journalSummary, evidence, baseOid, add);
     }
   }
+}
+
+function bookkeepingRepositoryEvidence() {
+  const branch = gitStdout(['symbolic-ref', '--quiet', '--short', 'HEAD']);
+  const rootDigest = createHash('sha256')
+    .update(realpathSync(rootDir))
+    .digest('hex');
+  return {
+    branch: branch || null,
+    rootDigest: `sha256:${rootDigest}`,
+  };
+}
+
+function bookkeepingJournalSessionEvidence(summary) {
+  return (summary?.newCompletedSessions || []).map((session) => ({
+    file: session.file,
+    number: session.number,
+    commits: session.resolvedCommits.map((commit) => commit.oid),
+  }));
+}
+
+function validateCompletionSuccessorRecovery(evidence, headOid, add) {
+  evidence.completionSubtype = 'post-archive-review-successor';
+  const history = runGit([
+    'rev-list',
+    '--first-parent',
+    `--max-count=${MAX_BOOKKEEPING_ANCHOR_SEARCH_COMMITS + 1}`,
+    headOid,
+  ]);
+  if (history.status !== 0) {
+    add(
+      'completion_successor_history_unavailable',
+      '',
+      'Git could not enumerate bounded first-parent history for completion recovery',
+      'indeterminate',
+    );
+    return;
+  }
+  const commits = history.stdout.trim().split(/\s+/).filter(Boolean);
+
+  const eligible = [];
+  let shapedTailCount = 0;
+  let nearestAnchorFailure = null;
+  for (let index = 0; index + 2 < commits.length; index += 1) {
+    const bookkeepingHeadOid = commits[index];
+    const archiveOid = commits[index + 1];
+    const baseOid = commits[index + 2];
+    const journalEntries = bookkeepingChangedEntries(archiveOid, bookkeepingHeadOid, () => {});
+    const archiveEntries = bookkeepingChangedEntries(baseOid, archiveOid, () => {});
+    if (!isAdjacentJournalCommit(journalEntries) || !isAdjacentArchiveCommit(archiveEntries)) {
+      continue;
+    }
+    shapedTailCount += 1;
+    const successor = evaluateCompletionSuccessorRange(bookkeepingHeadOid, headOid);
+    if (successor.status !== 'valid') {
+      for (const finding of successor.findings) {
+        add(finding.reasonCode, finding.path, finding.message, finding.disposition);
+      }
+      return;
+    }
+    const anchor = evaluateHistoricalCompletionBundle(baseOid, bookkeepingHeadOid);
+    if (anchor.status !== 'valid') {
+      if (nearestAnchorFailure === null) nearestAnchorFailure = anchor;
+      break;
+    }
+    eligible.push({ anchor, successor });
+    break;
+  }
+  if (eligible.length === 0) {
+    if (shapedTailCount > 0 && nearestAnchorFailure) {
+      const reasons = [...new Set(nearestAnchorFailure.findings.map((finding) => finding.reasonCode))]
+        .slice(0, 8)
+        .join(', ');
+      add(
+        'completion_successor_anchor_invalid',
+        '',
+        `the nearest adjacent archive/journal tail failed canonical completion validation${reasons ? `: ${reasons}` : ''}`,
+      );
+      return;
+    }
+    if (commits.length > MAX_BOOKKEEPING_ANCHOR_SEARCH_COMMITS) {
+      add(
+        'completion_successor_history_oversized',
+        '',
+        `no completion anchor was found within ${MAX_BOOKKEEPING_ANCHOR_SEARCH_COMMITS} first-parent commits`,
+      );
+      return;
+    }
+    add(
+      'completion_successor_anchor_missing',
+      '',
+      'no bounded adjacent archive/journal completion tail is reachable from the final head',
+    );
+    return;
+  }
+
+  const selected = eligible[0];
+  evidence.taskDirectories = [...selected.anchor.evidence.taskDirectories];
+  evidence.journalSessions = [...selected.anchor.evidence.journalSessions];
+  evidence.completionAnchor = {
+    source: 'historical-adjacent-tail',
+    baseOid: selected.anchor.evidence.baseOid,
+    bookkeepingHeadOid: selected.anchor.evidence.headOid,
+    taskDirectories: [...selected.anchor.evidence.taskDirectories],
+    journalSessions: [...selected.anchor.evidence.journalSessions],
+  };
+  evidence.successor = selected.successor.evidence;
+}
+
+function isAdjacentJournalCommit(entries) {
+  if (!entries || entries.length === 0) return false;
+  let hasJournal = false;
+  let hasIndex = false;
+  for (const entry of entries) {
+    if (entry.status.startsWith('D') || entry.status.startsWith('R') || entry.status.startsWith('C')) {
+      return false;
+    }
+    for (const path of [entry.oldPath, entry.path].filter(Boolean)) {
+      if (!/^\.trellis\/workspace\/[^/]+\/(?:journal-\d+\.md|index\.md)$/.test(path)) {
+        return false;
+      }
+      hasJournal ||= /\/journal-\d+\.md$/.test(path);
+      hasIndex ||= path.endsWith('/index.md');
+    }
+  }
+  return hasJournal && hasIndex;
+}
+
+function isAdjacentArchiveCommit(entries) {
+  if (!entries || entries.length === 0) return false;
+  const paths = entries.flatMap((entry) => [entry.oldPath, entry.path].filter(Boolean));
+  if (paths.some((path) => !path.startsWith('.trellis/tasks/'))) return false;
+  const activeTaskNames = new Set(
+    paths
+      .map((path) => /^\.trellis\/tasks\/(\d{2}-\d{2}-[^/]+)\/task\.json$/.exec(path)?.[1])
+      .filter(Boolean),
+  );
+  return paths.some((path) => {
+    const match = /^\.trellis\/tasks\/archive\/\d{4}-\d{2}\/(\d{2}-\d{2}-[^/]+)\/task\.json$/.exec(path);
+    return Boolean(match && activeTaskNames.has(match[1]));
+  });
+}
+
+function evaluateHistoricalCompletionBundle(baseOid, headOid) {
+  const findings = [];
+  const localAdd = (reasonCode, path, message, disposition = 'invalid') => {
+    if (findings.length >= MAX_BOOKKEEPING_FINDINGS) return;
+    findings.push({ reasonCode, path, message, disposition });
+  };
+  const localEvidence = {
+    baseOid: null,
+    headOid: null,
+    taskDirectories: [],
+    changedPaths: [],
+  };
+  validateBookkeepingFinalBundle(
+    { command: 'final-bundle', mode: 'completion', base: baseOid, head: headOid },
+    localEvidence,
+    localAdd,
+    { historical: true, allowCompletionSuccessor: false },
+  );
+  return {
+    status: findings.length === 0 ? 'valid' : 'invalid',
+    evidence: localEvidence,
+    findings,
+  };
+}
+
+function evaluateCompletionSuccessorRange(anchorOid, headOid) {
+  const findings = [];
+  const add = (reasonCode, path, message, disposition = 'invalid') => {
+    if (findings.length >= MAX_BOOKKEEPING_FINDINGS) return;
+    findings.push({ reasonCode, path, message, disposition });
+  };
+  const range = runGit(['rev-list', '--first-parent', '--reverse', `${anchorOid}..${headOid}`]);
+  if (range.status !== 0) {
+    add(
+      'completion_successor_history_unavailable',
+      '',
+      'Git could not inspect the completion-successor commit range',
+      'indeterminate',
+    );
+    return { status: 'indeterminate', evidence: {}, findings };
+  }
+  const commits = range.stdout.trim().split(/\s+/).filter(Boolean);
+  if (commits.length > MAX_BOOKKEEPING_SUCCESSOR_COMMITS) {
+    add(
+      'completion_successor_history_oversized',
+      '',
+      `completion successor contains more than ${MAX_BOOKKEEPING_SUCCESSOR_COMMITS} commits`,
+    );
+  }
+  const commitEvidence = [];
+  for (const oid of commits.slice(0, MAX_BOOKKEEPING_SUCCESSOR_COMMITS)) {
+    const parents = runGit(['rev-list', '--parents', '-n', '1', oid]);
+    const fields = parents.status === 0
+      ? parents.stdout.trim().split(/\s+/).filter(Boolean)
+      : [];
+    if (fields.length !== 2 || fields[0] !== oid) {
+      add(
+        'completion_successor_history_non_linear',
+        '',
+        `successor commit ${oid.slice(0, 12)} must have exactly one parent`,
+        parents.status === 0 ? 'invalid' : 'indeterminate',
+      );
+      continue;
+    }
+    const subject = gitStdout(['log', '-1', '--format=%s', oid]);
+    commitEvidence.push({
+      oid,
+      subjectDigest: `sha256:${createHash('sha256').update(subject).digest('hex')}`,
+    });
+  }
+
+  const entries = bookkeepingChangedEntries(anchorOid, headOid, add);
+  const paths = entries === null
+    ? []
+    : [...new Set(entries.flatMap((entry) => [entry.oldPath, entry.path].filter(Boolean)))].sort();
+  if (paths.length > MAX_BOOKKEEPING_CHANGED_PATHS) {
+    add(
+      'completion_successor_scope_oversized',
+      '',
+      `completion successor changes more than ${MAX_BOOKKEEPING_CHANGED_PATHS} paths`,
+    );
+  }
+  for (const path of paths.slice(0, MAX_BOOKKEEPING_CHANGED_PATHS)) {
+    if (
+      path.startsWith('.trellis/tasks/')
+      || path.startsWith('.trellis/workspace/')
+      || path.startsWith('.trellis/.runtime/')
+      || path.startsWith('.sd-ai-command-pack/finish-work')
+    ) {
+      add(
+        'completion_successor_scope_invalid',
+        path,
+        'completion successor must not change task, workspace, or finalization runtime evidence',
+      );
+    }
+  }
+  const invalid = findings.some((finding) => finding.disposition === 'invalid');
+  return {
+    status: invalid ? 'invalid' : findings.length > 0 ? 'indeterminate' : 'valid',
+    evidence: {
+      anchorOid,
+      headOid,
+      commits: commitEvidence,
+      changedPaths: paths.slice(0, MAX_BOOKKEEPING_CHANGED_PATHS),
+    },
+    findings,
+  };
 }
 
 function resolveBookkeepingCommit(ref, label, add) {
