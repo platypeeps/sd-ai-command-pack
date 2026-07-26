@@ -522,6 +522,25 @@ class PrEligibilityTests(unittest.TestCase):
             eligibility.load_finish_work_receipt(receipt_path)["status"], "valid"
         )
 
+        eligibility_schema = eligibility.SCHEMA_VERSION
+        eligibility.SCHEMA_VERSION = eligibility_schema + 1
+        try:
+            self.assertEqual(
+                eligibility.load_finish_work_receipt(receipt_path)["schemaVersion"],
+                eligibility.FINISH_WORK_RECEIPT_SCHEMA_VERSION,
+            )
+        finally:
+            eligibility.SCHEMA_VERSION = eligibility_schema
+
+        malformed = finish_work_receipt()
+        malformed["schemaVersion"] = eligibility.FINISH_WORK_RECEIPT_SCHEMA_VERSION + 1
+        receipt_path.write_text(json.dumps(malformed), encoding="utf-8")
+        with self.assertRaisesRegex(
+            eligibility.EligibilityInputError,
+            f"schemaVersion must be {eligibility.FINISH_WORK_RECEIPT_SCHEMA_VERSION}",
+        ):
+            eligibility.load_finish_work_receipt(receipt_path)
+
         malformed = finish_work_receipt()
         malformed["evidence"]["repository"]["lineageDigest"] = str(self.repo)
         receipt_path.write_text(json.dumps(malformed), encoding="utf-8")

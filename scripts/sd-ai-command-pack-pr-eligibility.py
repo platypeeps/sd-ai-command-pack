@@ -20,6 +20,7 @@ sys.dont_write_bytecode = True
 from sd_ai_command_pack_lib import CacheSetupError, build_tool_environment  # noqa: E402
 
 SCHEMA_VERSION = 1
+FINISH_WORK_RECEIPT_SCHEMA_VERSION = 1
 TOOL_VERSION = "1.1.0"
 COMMAND_TIMEOUT_SECONDS = 60
 GH_TIMEOUT_SECONDS = 120
@@ -220,9 +221,10 @@ def validate_finish_work_receipt(value: object) -> dict[str, Any]:
         raise EligibilityInputError(
             "eligibility input finishWorkReceipt must be a JSON object"
         )
-    if value.get("schemaVersion") != SCHEMA_VERSION:
+    if value.get("schemaVersion") != FINISH_WORK_RECEIPT_SCHEMA_VERSION:
         raise EligibilityInputError(
-            f"eligibility input finishWorkReceipt schemaVersion must be {SCHEMA_VERSION}"
+            "eligibility input finishWorkReceipt schemaVersion must be "
+            f"{FINISH_WORK_RECEIPT_SCHEMA_VERSION}"
         )
     if value.get("kind") != "trellis-bookkeeping-validation":
         raise EligibilityInputError(

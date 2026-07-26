@@ -1735,6 +1735,8 @@ around the delegated lifecycle.
   Repository identity in that receipt uses a portable digest of the Git root
   commit set, not the checkout path, so an otherwise identical replay remains
   valid after a checkout relocation or across worktrees and clones.
+  Version the receipt independently from eligibility request/result JSON so a
+  change to either public schema cannot silently invalidate the other.
   Preserve it across a clean downstream handoff and delete it after
   housekeeping consumes it, the proof is abandoned, or the lifecycle blocks;
   never replace it with a head-only assertion or repository-local authority.
