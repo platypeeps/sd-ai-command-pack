@@ -1045,8 +1045,8 @@ base-to-head delta therefore contains only the successor journal commit.
   recovered work commit or its parent -> a specific
   `planning_recovery_commit_*` diagnostic, never a bundle-base diagnostic.
 - Regular-artifact inspection chunks pathspec arguments under a conservative
-  cross-platform command-line budget and fails closed if any batch cannot be
-  inspected.
+  cross-platform command-line budget and fails closed if any batch or single
+  pathspec cannot be safely inspected.
 
 ### 5. Good / Base / Bad Cases
 

@@ -1203,6 +1203,7 @@ function validateJournalOnlyPlanningRecovery(entries, journalSummary, evidence, 
     add('planning_recovery_task_change_missing', '', 'journal-only planning recovery proves no active task change');
     return;
   }
+  if (sessions.length !== 1) return;
 
   const session = sessions[0];
   evidence.planningSubtype = 'journal-only-recovery';
@@ -1364,6 +1365,7 @@ function chunkBookkeepingGitPathspecs(paths) {
   let batchBytes = 0;
   for (const path of paths) {
     const pathBytes = Buffer.byteLength(path, 'utf8') + 1;
+    if (pathBytes > MAX_BOOKKEEPING_GIT_PATHSPEC_BYTES) return [];
     if (batch.length > 0 && batchBytes + pathBytes > MAX_BOOKKEEPING_GIT_PATHSPEC_BYTES) {
       batches.push(batch);
       batch = [];

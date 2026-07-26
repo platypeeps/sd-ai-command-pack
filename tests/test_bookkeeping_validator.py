@@ -530,6 +530,10 @@ class BookkeepingValidatorTests(InstallTestCase):
             source,
         )
         self.assertIn("chunkBookkeepingGitPathspecs(paths)", source)
+        self.assertIn(
+            "if (pathBytes > MAX_BOOKKEEPING_GIT_PATHSPEC_BYTES) return [];",
+            source,
+        )
         self.assertNotIn("bookkeepingPathIsRegularAtCommit", source)
 
     def test_journal_only_recovery_chunks_large_pathspec_batches(self) -> None:
@@ -1032,10 +1036,13 @@ class BookkeepingValidatorTests(InstallTestCase):
         )
 
         self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
         self.assertIn(
             "planning_recovery_session_count_invalid",
-            json.loads(result.stdout)["reasonCodes"],
+            payload["reasonCodes"],
         )
+        self.assertNotIn("planningSubtype", payload["evidence"])
+        self.assertEqual(payload["evidence"]["taskDirectories"], [])
 
     def test_journal_only_recovery_rejects_unknown_commit(self) -> None:
         root = self.make_validator_repo()
