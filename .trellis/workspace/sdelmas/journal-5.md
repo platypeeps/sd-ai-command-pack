@@ -1302,3 +1302,43 @@ Reconciled the supported main lineage, recovered the unreopenable PR as #256, ha
 ### Next Steps
 
 - None - task complete
+
+
+## Session 234: Recover taskless fleet refresh finish-work
+
+**Date**: 2026-07-26
+**Task**: Recover taskless fleet refresh finish-work
+**Branch**: `codex/roll-out-sd-ai-command-pack-0-54-0-fleet`
+
+### Summary
+
+Added the v0.54.1 corrective controller/task-lifecycle recovery, validated it across the fleet, and addressed review feedback.
+
+### Main Changes
+
+- Required dedicated consumer Trellis tasks before fleet installation and documented append-only taskless recovery.
+- Added schema-compatible corrective recovery with exact-head publication epochs and fail-closed transition validation.
+- Published v0.54.1 candidate evidence and fixed conflicting-release recovery without mutating state.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `492514be7b86985f38dce556e8b9d8dc186ec5f6` | fix: recover taskless fleet refresh completion |
+| `ee36c974983c5734df09d9be97350c493fe26ad7` | fix: reject conflicting fleet recovery releases |
+
+### Testing
+
+- [OK] make check and make full-check
+- [OK] 52 focused controller and command-contract tests
+- [OK] full eight-consumer candidate validation
+- [OK] PR #257 Copilot review and CI
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
