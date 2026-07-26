@@ -19,7 +19,8 @@
   "pr_url": null,
   "subtasks": [],
   "children": [
-    "07-25-support-journal-only-finalization-recovery"
+    "07-25-support-journal-only-finalization-recovery",
+    "07-25-support-post-archive-review-finalization"
   ],
   "parent": "07-22-streamline-sd-skill-workflows",
   "relatedFiles": [
