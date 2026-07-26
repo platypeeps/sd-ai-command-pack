@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 231
+- **Total Sessions**: 232
 - **Last Active**: 2026-07-25
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~1213 | Active |
+| `journal-5.md` | ~1260 | Active |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 232 | 2026-07-25 | Support post-archive review finalization | `02128a9739d6186a45808897c0f9e2227fe8d468` | `codex/support-post-archive-review-finalization` |
 | 231 | 2026-07-25 | Journal-only planning finalization recovery | `4417953`, `7b8ca07`, `c8b1e00`, `50f98c7`, `bb56860`, `32fcd96`, `9b4355d`, `5ecb725` | `codex/support-journal-only-finalization-recovery` |
 | 230 | 2026-07-25 | Record planning wave and repair consumer config references | `d97244e`, `9c9b8c3` | `main` |
 | 229 | 2026-07-25 | Warn on Copilot review file cap | `5b413f2` | `codex/warn-copilot-review-file-cap` |

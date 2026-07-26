@@ -1220,3 +1220,41 @@ Implemented and validated fail-closed recovery for journal-only planning finaliz
 ### Next Steps
 
 - None - task complete
+
+
+## Session 232: Support post-archive review finalization
+
+**Date**: 2026-07-25
+**Task**: Support post-archive review finalization
+**Branch**: `codex/support-post-archive-review-finalization`
+
+### Summary
+
+Implemented truthful exact-head completion successor receipts for post-archive review remediation, migrated housekeeping eligibility away from caller head attestations, and validated the 0.54.0 payload across the fleet.
+
+### Main Changes
+
+- Added bounded canonical post-archive completion successor validation and private exact-head receipt handoff.
+- Integrated receipt verification through finish-work, review, eligibility, housekeeping, status output, and synchronized generated surfaces.
+- Aligned the sd-github-review consumer test through merged PR #25 and regenerated the 0.54.0 fleet candidate ledger.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `02128a9739d6186a45808897c0f9e2227fe8d468` | feat: support post-archive review finalization |
+
+### Testing
+
+- [OK] make check
+- [OK] sd-check: 8/8 rows passed with unchanged state guard
+- [OK] fleet candidate validation: 8/8 consumers passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
