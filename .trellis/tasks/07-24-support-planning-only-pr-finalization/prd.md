@@ -48,6 +48,11 @@ is not sufficient.
   finding H09.
 - Journal-only recovery child:
   `07-25-support-journal-only-finalization-recovery`.
+- Post-archive review finalization child:
+  `07-25-support-post-archive-review-finalization`; it owns exact-head
+  completion-successor evidence when reviewed code fixes follow an already
+  validated archive/journal tail, without widening planning mode or recording a
+  duplicate session.
 - Depends on `07-24-validate-finish-work-bookkeeping-before-push` publishing
   the canonical versioned task/journal validator. Extend that validator with a
   planning-finalization mode rather than creating a second metadata policy.
