@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 236
+- **Total Sessions**: 237
 - **Last Active**: 2026-07-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~1422 | Active |
+| `journal-5.md` | ~1461 | Active |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 237 | 2026-07-26 | Reverse .claude/ gitignore to commit-by-default (0.55.0) | `d02e39ab25395335198e084816a07966314a5d30` | `codex/align-claude-gitignore-commit-model` |
 | 236 | 2026-07-26 | Complete v0.54.0 fleet rollout | `cc446cb`, `05b2ea4`, `8aea461` | `codex/roll-out-sd-ai-command-pack-0-54-0-fleet` |
 | 235 | 2026-07-26 | Support fleet PR head republication | `a6d3d173d44a80e0d31c29e23454fc746c90ff27`, `6bfeef1c12dbd0e42aa238d588117f21145ded3c` | `codex/support-fleet-pr-head-republication` |
 | 234 | 2026-07-26 | Recover taskless fleet refresh finish-work | `492514be7b86985f38dce556e8b9d8dc186ec5f6`, `ee36c974983c5734df09d9be97350c493fe26ad7` | `codex/roll-out-sd-ai-command-pack-0-54-0-fleet` |

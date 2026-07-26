@@ -1426,3 +1426,36 @@ Completed the controller-owned v0.54.0 fleet campaign, recorded six merged consu
 - Rerun `mezmo_benchmark` after its unrelated active Trellis tasks release the checkout.
 - Implement `07-26-resolve-v0-54-0-static-analysis-hygiene-findings` in a later reviewed release.
 - Rotate and remove the embedded Anthropic credential from the local `prism` wrapper.
+
+
+## Session 237: Reverse .claude/ gitignore to commit-by-default (0.55.0)
+
+**Date**: 2026-07-26
+**Task**: Reverse .claude/ gitignore to commit-by-default (0.55.0)
+**Branch**: `codex/align-claude-gitignore-commit-model`
+
+### Summary
+
+Reversed the deliberate .claude/** blanket-ignore so Trellis-on-Claude runtime, agents, settings.json, and repo-authored skills commit like every other platform. A two-round adversarial planning review (Codex + host) corrected the framing (deliberate, documented design — not a bug) and expanded scope. Changes: installer/registry.py claude local_gitignore_patterns -> 7-pattern deny-list, trellis_local_only += agents + settings.json; review-scope.sh + review-preflight.mjs (both twins) recognize .claude/settings.json; retired the dogfood .gitignore negation; tracked 52 newly-exposed .claude files; .gitattributes exempts vendored Trellis skill copies from whitespace checks; new git check-ignore regression tests + cross-platform marker invariant; docs/specs updated; minor bump to 0.55.0; candidate-validation refreshed (8/8 consumers pass). Shipped as PR #260 — all CI green, Copilot comment rebutted with evidence and thread resolved, merge-ready.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d02e39ab25395335198e084816a07966314a5d30` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
