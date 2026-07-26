@@ -8,6 +8,7 @@ except ModuleNotFoundError as exc:
     from . import install_test_support as _support
 
 json = _support.json
+os = _support.os
 shutil = _support.shutil
 subprocess = _support.subprocess
 Path = _support.Path
@@ -33,6 +34,7 @@ class BookkeepingValidatorTests(InstallTestCase):
         )
         self.run_git(root, "add", ".")
         self.run_git(root, "commit", "-m", "seed validator")
+        self.run_git(root, "branch", "-M", "main")
         return root
 
     @staticmethod
@@ -80,16 +82,26 @@ class BookkeepingValidatorTests(InstallTestCase):
         commit: str,
         *,
         commit_in_journal: str | None = None,
+        commits_in_journal: list[str] | None = None,
     ) -> None:
+        commits = commits_in_journal or [commit_in_journal or commit]
+        self.write_sessions(root, [commits])
+
+    def write_sessions(self, root: Path, sessions: list[list[str]]) -> None:
         workspace = root / ".trellis/workspace/dev"
         workspace.mkdir(parents=True)
-        journal_commit = commit_in_journal or commit
-        (workspace / "journal-1.md").write_text(
-            "\n".join(
+        journal_lines = ["# Development Journal", ""]
+        index_lines = [
+            "# Sessions",
+            "",
+            "| # | Date | Title | Commits | Branch |",
+            "|---|------|-------|---------|--------|",
+        ]
+        for number, commits in enumerate(sessions, start=1):
+            title = "Validate bookkeeping" if number == 1 else f"Validate bookkeeping {number}"
+            journal_lines.extend(
                 [
-                    "# Development Journal",
-                    "",
-                    "## Session 1: Validate bookkeeping",
+                    f"## Session {number}: {title}",
                     "",
                     "### Summary",
                     "",
@@ -103,7 +115,13 @@ class BookkeepingValidatorTests(InstallTestCase):
                     "",
                     "| Hash | Message |",
                     "|------|---------|",
-                    f"| `{journal_commit[:12]}` | fixture work |",
+                ]
+            )
+            journal_lines.extend(
+                f"| `{commit[:12]}` | fixture work |" for commit in commits
+            )
+            journal_lines.extend(
+                [
                     "",
                     "### Testing",
                     "",
@@ -118,24 +136,25 @@ class BookkeepingValidatorTests(InstallTestCase):
                     "- None",
                     "",
                 ]
-            ),
-            encoding="utf-8",
+            )
+            index_commits = ", ".join(f"`{commit[:12]}`" for commit in commits)
+            index_lines.append(
+                f"| {number} | 2026-07-25 | {title} | {index_commits} | `fixture` |"
+            )
+        index_lines.append("")
+        (workspace / "journal-1.md").write_text(
+            "\n".join(journal_lines), encoding="utf-8"
         )
         (workspace / "index.md").write_text(
-            "\n".join(
-                [
-                    "# Sessions",
-                    "",
-                    "| # | Date | Title | Commits | Branch |",
-                    "|---|------|-------|---------|--------|",
-                    f"| 1 | 2026-07-25 | Validate bookkeeping | `{journal_commit[:12]}` | `fixture` |",
-                    "",
-                ]
-            ),
-            encoding="utf-8",
+            "\n".join(index_lines), encoding="utf-8"
         )
 
-    def run_validator(self, root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    def run_validator(
+        self,
+        root: Path,
+        *args: str,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
                 self.node,
@@ -144,6 +163,7 @@ class BookkeepingValidatorTests(InstallTestCase):
                 "--json",
             ],
             cwd=root,
+            env=env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -437,6 +457,665 @@ class BookkeepingValidatorTests(InstallTestCase):
         self.assertEqual(payload["status"], "valid")
         self.assertEqual(payload["mode"], "planning")
         self.assertEqual(payload["reasonCodes"], ["planning_bundle_valid"])
+
+    def test_valid_journal_only_planning_recovery(self) -> None:
+        root = self.make_validator_repo()
+        name = "journal-only-planning"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name,
+                status="planning",
+                branch=None,
+                completed_at=None,
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "create planning fixture")
+        create_commit = self.git_output(root, "rev-parse", "HEAD")
+        (task / "prd.md").write_text(
+            "# Fixture\n\nValidated journal-only planning recovery.\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "refine planning fixture")
+        refine_commit = self.git_output(root, "rev-parse", "HEAD")
+        base = refine_commit
+        self.write_session(
+            root,
+            refine_commit,
+            commits_in_journal=[create_commit, refine_commit],
+        )
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record recovered planning journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "valid")
+        self.assertEqual(payload["reasonCodes"], ["planning_bundle_valid"])
+        self.assertEqual(
+            payload["evidence"]["planningSubtype"], "journal-only-recovery"
+        )
+        self.assertEqual(payload["evidence"]["taskDirectories"], [task_dir])
+
+    def test_journal_only_recovery_batches_regular_path_inspection(self) -> None:
+        source = (
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs"
+        ).read_text(encoding="utf-8")
+
+        batched_call = "bookkeepingRegularPathsAtCommit(commit.oid, commitPaths)"
+        entry_loop = "for (const entry of commitEntries)"
+        self.assertIn(batched_call, source)
+        batched_call_offset = source.index(batched_call)
+        self.assertLess(
+            batched_call_offset,
+            source.index(entry_loop, batched_call_offset),
+        )
+        self.assertIn(
+            "runGit(['ls-tree', '-z', commitOid, '--', ...batch])",
+            source,
+        )
+        self.assertIn("chunkBookkeepingGitPathspecs(paths)", source)
+        self.assertIn(
+            "if (pathBytes > MAX_BOOKKEEPING_GIT_PATHSPEC_BYTES) return [];",
+            source,
+        )
+        self.assertNotIn("bookkeepingPathIsRegularAtCommit", source)
+
+    def test_journal_only_recovery_chunks_large_pathspec_batches(self) -> None:
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/07-25-large-pathspec-fixture"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                "large-pathspec-fixture",
+                status="planning",
+                branch=None,
+                completed_at=None,
+            ),
+        )
+        for number in range(60):
+            filename = f"artifact-{number:03d}-{'x' * 180}.md"
+            (task / filename).write_text("bounded pathspec fixture\n", encoding="utf-8")
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "add large pathspec planning fixture")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        base = work_commit
+        self.write_session(root, work_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record large pathspec recovery journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        real_git = shutil.which("git")
+        self.assertIsNotNone(real_git)
+        shim_dir = root / ".test-bin"
+        shim_dir.mkdir()
+        log_path = root / ".test-git.log"
+        git_shim = shim_dir / "git"
+        git_shim.write_text(
+            "#!/usr/bin/env python3\n"
+            "import subprocess\n"
+            "import sys\n"
+            f"real_git = {real_git!r}\n"
+            f"log_path = {str(log_path)!r}\n"
+            f"tracked_commit = {work_commit!r}\n"
+            "args = sys.argv[1:]\n"
+            "if len(args) > 2 and args[:2] == ['ls-tree', '-z'] and args[2] == tracked_commit:\n"
+            "    with open(log_path, 'a', encoding='utf-8') as log:\n"
+            "        log.write(str(len(args[4:])) + '\\n')\n"
+            "raise SystemExit(subprocess.run([real_git, *args]).returncode)\n",
+            encoding="utf-8",
+        )
+        git_shim.chmod(0o755)
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+            env={**os.environ, "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(json.loads(result.stdout)["status"], "valid")
+        batches = [
+            int(line)
+            for line in log_path.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        self.assertGreater(len(batches), 1)
+        self.assertEqual(sum(batches), 64)
+
+    def test_journal_only_recovery_does_not_reaudit_published_content(self) -> None:
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/07-25-published-content-debt"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                "published-content-debt",
+                status="planning",
+                branch=None,
+                completed_at=None,
+                description=" ",
+            ),
+        )
+        seed = '{"_example":{"file":"src/example.py"}}\n'
+        (task / "implement.jsonl").write_text(seed, encoding="utf-8")
+        (task / "check.jsonl").write_text(seed, encoding="utf-8")
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "publish planning content debt")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        base = work_commit
+        self.write_session(root, work_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record content-debt recovery journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(
+            payload["evidence"]["planningSubtype"], "journal-only-recovery"
+        )
+        self.assertNotIn("task_context_seed", payload["reasonCodes"])
+        self.assertNotIn("task_metadata_invalid", payload["reasonCodes"])
+
+    def test_journal_only_recovery_labels_historical_task_json_failures(self) -> None:
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/07-25-invalid-historical-json"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                "invalid-historical-json",
+                status="planning",
+                branch=None,
+                completed_at=None,
+            ),
+        )
+        task_file = task / "task.json"
+        valid_task = task_file.read_text(encoding="utf-8")
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "create historical-json fixture")
+        task_file.write_text("{\n", encoding="utf-8")
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "corrupt historical task metadata")
+        invalid_commit = self.git_output(root, "rev-parse", "HEAD")
+        task_file.write_text(valid_task, encoding="utf-8")
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "restore historical task metadata")
+        restored_commit = self.git_output(root, "rev-parse", "HEAD")
+        base = restored_commit
+        self.write_session(
+            root,
+            restored_commit,
+            commits_in_journal=[invalid_commit, restored_commit],
+        )
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record historical-json recovery journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertIn(
+            "planning_recovery_commit_task_json_invalid",
+            payload["reasonCodes"],
+        )
+        self.assertIn(
+            "planning_recovery_commit_parent_task_json_invalid",
+            payload["reasonCodes"],
+        )
+        current_finding = next(
+            item
+            for item in payload["findings"]
+            if item["reasonCode"]
+            == "planning_recovery_commit_task_json_invalid"
+        )
+        parent_finding = next(
+            item
+            for item in payload["findings"]
+            if item["reasonCode"]
+            == "planning_recovery_commit_parent_task_json_invalid"
+        )
+        self.assertIn("the recovered work commit", current_finding["message"])
+        self.assertIn(
+            "the recovered work commit parent",
+            parent_finding["message"],
+        )
+        self.assertNotIn("bundle base", current_finding["message"])
+        self.assertNotIn("bundle base", parent_finding["message"])
+
+    def test_journal_only_recovery_rejects_non_task_commit_scopes(self) -> None:
+        fixtures = (
+            ("src/app.py", "production code"),
+            (".trellis/spec/backend/example.md", "specification"),
+            (".sd-ai-command-pack/review.json", "configuration"),
+            (".trellis/workspace/other/note.md", "workspace history"),
+        )
+        for path, content in fixtures:
+            with self.subTest(path=path):
+                root = self.make_validator_repo()
+                artifact = root / path
+                artifact.parent.mkdir(parents=True, exist_ok=True)
+                artifact.write_text(content + "\n", encoding="utf-8")
+                self.run_git(root, "add", path)
+                self.run_git(root, "commit", "-m", "record non-task fixture")
+                work_commit = self.git_output(root, "rev-parse", "HEAD")
+                base = work_commit
+                self.write_session(root, work_commit)
+                self.run_git(root, "add", ".trellis/workspace/dev")
+                self.run_git(root, "commit", "-m", "record recovery journal")
+                head = self.git_output(root, "rev-parse", "HEAD")
+
+                result = self.run_validator(
+                    root,
+                    "final-bundle",
+                    "--mode",
+                    "planning",
+                    "--base",
+                    base,
+                    "--head",
+                    head,
+                )
+
+                self.assertEqual(result.returncode, 1, result.stdout)
+                reason_codes = json.loads(result.stdout)["reasonCodes"]
+                self.assertIn("planning_recovery_commit_scope_invalid", reason_codes)
+                self.assertIn("planning_recovery_task_change_missing", reason_codes)
+
+    def test_journal_only_recovery_rejects_merge_commit(self) -> None:
+        root = self.make_validator_repo()
+        self.run_git(root, "switch", "-c", "fixture-side")
+        task_dir = ".trellis/tasks/07-25-merge-fixture"
+        self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                "merge-fixture", status="planning", branch=None, completed_at=None
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "add merge-side planning fixture")
+        self.run_git(root, "switch", "main")
+        self.run_git(root, "merge", "--no-ff", "fixture-side", "-m", "merge fixture")
+        merge_commit = self.git_output(root, "rev-parse", "HEAD")
+        base = merge_commit
+        self.write_session(root, merge_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record merge recovery journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "planning_recovery_commit_non_linear",
+            json.loads(result.stdout)["reasonCodes"],
+        )
+
+    def test_journal_only_recovery_rejects_root_commit(self) -> None:
+        root = self.make_validator_repo()
+        root_commit = self.git_output(root, "rev-list", "--max-parents=0", "HEAD")
+        base = self.git_output(root, "rev-parse", "HEAD")
+        self.write_session(root, root_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record root recovery journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "planning_recovery_commit_non_linear",
+            json.loads(result.stdout)["reasonCodes"],
+        )
+
+    def test_journal_only_recovery_rejects_non_regular_task_artifact(self) -> None:
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/07-25-symlink-fixture"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                "symlink-fixture", status="planning", branch=None, completed_at=None
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "seed regular planning fixture")
+        (task / "linked-design.md").symlink_to("design.md")
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "add unsafe task symlink")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        base = work_commit
+        self.write_session(root, work_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record symlink recovery journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "planning_recovery_commit_scope_invalid",
+            json.loads(result.stdout)["reasonCodes"],
+        )
+
+    def test_journal_only_recovery_rejects_non_ancestor_commit(self) -> None:
+        root = self.make_validator_repo()
+        self.run_git(root, "switch", "-c", "unpublished-side")
+        task_dir = ".trellis/tasks/07-25-unpublished-fixture"
+        self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                "unpublished-fixture",
+                status="planning",
+                branch=None,
+                completed_at=None,
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "add unpublished planning fixture")
+        unpublished = self.git_output(root, "rev-parse", "HEAD")
+        self.run_git(root, "switch", "main")
+        base = self.git_output(root, "rev-parse", "HEAD")
+        self.write_session(root, unpublished)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record invalid recovery journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        reason_codes = json.loads(result.stdout)["reasonCodes"]
+        self.assertIn("journal_commit_unreachable", reason_codes)
+        self.assertIn("planning_recovery_commit_not_published", reason_codes)
+
+    def test_journal_only_recovery_rejects_duplicate_resolved_commit(self) -> None:
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/07-25-duplicate-fixture"
+        self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                "duplicate-fixture", status="planning", branch=None, completed_at=None
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "add duplicate planning fixture")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        base = work_commit
+        self.write_session(
+            root,
+            work_commit,
+            commits_in_journal=[work_commit, work_commit[:12]],
+        )
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record duplicate recovery journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "planning_recovery_commit_duplicate",
+            json.loads(result.stdout)["reasonCodes"],
+        )
+
+    def test_journal_only_recovery_rejects_invalid_planning_lifecycle(self) -> None:
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/07-25-started-fixture"
+        self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                "started-fixture",
+                status="in_progress",
+                branch="codex/started-fixture",
+                completed_at=None,
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "start planning fixture")
+        invalid_commit = self.git_output(root, "rev-parse", "HEAD")
+        task_record = json.loads(
+            (root / task_dir / "task.json").read_text(encoding="utf-8")
+        )
+        task_record["status"] = "planning"
+        task_record["branch"] = None
+        (root / task_dir / "task.json").write_text(
+            json.dumps(task_record, indent=2) + "\n", encoding="utf-8"
+        )
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "restore planning lifecycle")
+        restored_commit = self.git_output(root, "rev-parse", "HEAD")
+        base = restored_commit
+        self.write_session(
+            root,
+            restored_commit,
+            commits_in_journal=[invalid_commit, restored_commit],
+        )
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record lifecycle recovery journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "planning_lifecycle_mutation",
+            json.loads(result.stdout)["reasonCodes"],
+        )
+
+    def test_journal_only_recovery_rejects_multiple_new_sessions(self) -> None:
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/07-25-session-count-fixture"
+        self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                "session-count-fixture",
+                status="planning",
+                branch=None,
+                completed_at=None,
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "add session-count fixture")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        base = work_commit
+        self.write_sessions(root, [[work_commit], [work_commit]])
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record multiple recovery sessions")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertIn(
+            "planning_recovery_session_count_invalid",
+            payload["reasonCodes"],
+        )
+        self.assertNotIn("planningSubtype", payload["evidence"])
+        self.assertEqual(payload["evidence"]["taskDirectories"], [])
+
+    def test_journal_only_recovery_rejects_unknown_commit(self) -> None:
+        root = self.make_validator_repo()
+        base = self.git_output(root, "rev-parse", "HEAD")
+        self.write_session(root, base, commit_in_journal="deadbee")
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record unknown recovery commit")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        reason_codes = json.loads(result.stdout)["reasonCodes"]
+        self.assertIn("journal_commit_unknown", reason_codes)
+        self.assertIn("planning_recovery_task_change_missing", reason_codes)
+
+    def test_journal_only_recovery_rejects_task_deletion_and_rename(self) -> None:
+        for operation in ("delete", "rename"):
+            with self.subTest(operation=operation):
+                root = self.make_validator_repo()
+                task_dir = ".trellis/tasks/07-25-history-fixture"
+                task = self.write_task(
+                    root,
+                    task_dir,
+                    self.task_record(
+                        "history-fixture",
+                        status="planning",
+                        branch=None,
+                        completed_at=None,
+                    ),
+                )
+                (task / "design.md").write_text(
+                    "# Design\n\nHistorical fixture.\n", encoding="utf-8"
+                )
+                self.run_git(root, "add", ".trellis/tasks")
+                self.run_git(root, "commit", "-m", "seed task history fixture")
+                if operation == "delete":
+                    (task / "design.md").unlink()
+                else:
+                    (task / "design.md").rename(task / "implement.md")
+                self.run_git(root, "add", "-A", ".trellis/tasks")
+                self.run_git(root, "commit", "-m", f"{operation} task artifact")
+                work_commit = self.git_output(root, "rev-parse", "HEAD")
+                base = work_commit
+                self.write_session(root, work_commit)
+                self.run_git(root, "add", ".trellis/workspace")
+                self.run_git(root, "commit", "-m", "record history recovery journal")
+                head = self.git_output(root, "rev-parse", "HEAD")
+
+                result = self.run_validator(
+                    root,
+                    "final-bundle",
+                    "--mode",
+                    "planning",
+                    "--base",
+                    base,
+                    "--head",
+                    head,
+                )
+
+                self.assertEqual(result.returncode, 1, result.stdout)
+                reason_codes = json.loads(result.stdout)["reasonCodes"]
+                self.assertIn("planning_recovery_commit_scope_invalid", reason_codes)
+                self.assertIn("planning_task_deletion", reason_codes)
 
     def test_final_bundle_rejects_unknown_journal_commit_and_whitespace(self) -> None:
         root = self.make_validator_repo()

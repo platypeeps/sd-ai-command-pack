@@ -46,6 +46,8 @@ is not sufficient.
 
 - Parent: `07-22-streamline-sd-skill-workflows`; this task owns recent-run
   finding H09.
+- Journal-only recovery child:
+  `07-25-support-journal-only-finalization-recovery`.
 - Depends on `07-24-validate-finish-work-bookkeeping-before-push` publishing
   the canonical versioned task/journal validator. Extend that validator with a
   planning-finalization mode rather than creating a second metadata policy.

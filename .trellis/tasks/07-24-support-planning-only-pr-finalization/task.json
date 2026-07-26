@@ -18,7 +18,9 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [],
+  "children": [
+    "07-25-support-journal-only-finalization-recovery"
+  ],
   "parent": "07-22-streamline-sd-skill-workflows",
   "relatedFiles": [
     "templates/.agents/skills/sd-finish-work/SKILL.md",

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.53.0 - 2026-07-25
+
+- Let planning finish-work automatically validate a journal-only successor
+  when its referenced work commits were already published before the captured
+  finalization base.
+- Prove one exact journal/index pair, unique published single-parent commits,
+  regular active-task-only deltas, and planning lifecycle state while keeping
+  normal planning bundles on the complete content-quality validator.
+- Preserve schema version 1, `mode: planning`, and `planning_bundle_valid`,
+  adding only the machine-visible `journal-only-recovery` evidence subtype and
+  bounded recovered task directories.
+
 ## 0.52.1 - 2026-07-25
 
 - Warn deterministically before remote review when the selected diff exceeds

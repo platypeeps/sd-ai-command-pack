@@ -978,6 +978,110 @@ Wrong: search for "(see git log)" or "(Add test results)" before patching
 Correct: replace hash-keyed commit rows and section bodies by structural anchors
 ```
 
+## Journal-Only Planning Finalization Recovery Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing `final-bundle --mode planning` in
+`sd-ai-command-pack-review-preflight.mjs`, its template twin, or the
+`sd-finish-work` retained-result boundary. It covers the narrow case where
+planning work was published before finish-work captured its base and the exact
+base-to-head delta therefore contains only the successor journal commit.
+
+### 2. Signatures
+
+- CLI remains `final-bundle --mode completion|planning --base COMMIT --head
+  COMMIT --json`; journal-only recovery is not a third public mode.
+- A successful recovery keeps schema version 1, `mode: planning`, and
+  `planning_bundle_valid`, adding only
+  `evidence.planningSubtype: journal-only-recovery` and recovered active task
+  directories.
+
+### 3. Contracts
+
+- Select recovery automatically only when the exact final range has no task
+  entries. Normal task-plus-journal planning and completion validation remain
+  unchanged.
+- Require exactly one newly completed, index-matched journal session and no
+  exact-range paths beyond that journal file and its sibling index.
+- Resolve every journal commit uniquely. Each commit must be at or before the
+  immutable captured base, have exactly one parent, remain within the bounded
+  commit/path limits, and change only regular files below active dated
+  Trellis task directories.
+- Inspect regular-file modes with one bounded Git tree query per referenced
+  commit; never spawn one subprocess per changed path.
+- Reject archives, workspace history, code, specs, configuration, deletion,
+  rename, copy, Git links, symlinks, roots, merges, unknown objects, and
+  non-ancestor commits. A mixed task/non-task commit is invalid in full.
+- Aggregate at least one active task directory and verify that each referenced
+  commit's task record and its parent-baseline record preserve `status:
+  planning`, `completedAt: null`, and `branch: null`.
+- Label recovered-commit and recovered-commit-parent artifact read and JSON
+  failures with `planning_recovery_commit_*` reason codes and precise
+  recovered-work-commit wording; reserve `bundle_base_artifact_*` diagnostics
+  for reads from the captured bundle base.
+- Recovery proves already-published scope and lifecycle; it does not
+  retroactively apply current metadata, topology, context, PRD, or other
+  publication-quality content checks to artifacts before the captured base.
+  The normal planning bundle retains those complete checks.
+- Never widen the captured base, rewrite the preserved journal commit, execute
+  referenced content, or infer success from an invalid/indeterminate result.
+
+### 4. Validation & Error Matrix
+
+- Zero or multiple new completed sessions ->
+  `planning_recovery_session_count_invalid`.
+- Duplicate full commit identity -> `planning_recovery_commit_duplicate`.
+- Commit not at or before captured base ->
+  `planning_recovery_commit_not_published`; unavailable ancestry evidence is
+  indeterminate.
+- Root or merge commit -> `planning_recovery_commit_non_linear`.
+- Non-task, non-regular, deletion, rename, copy, or oversized commit delta ->
+  `planning_recovery_commit_scope_invalid` plus applicable planning findings.
+- No qualifying active task delta -> `planning_recovery_task_change_missing`.
+- Invalid current or baseline lifecycle -> existing planning lifecycle reason
+  codes; no valid result is emitted.
+- Missing, oversized, unreadable, non-UTF-8, or invalid-JSON task metadata at a
+  recovered work commit or its parent -> a specific
+  `planning_recovery_commit_*` diagnostic, never a bundle-base diagnostic.
+- Regular-artifact inspection chunks pathspec arguments under a conservative
+  cross-platform command-line budget and fails closed if any batch or single
+  pathspec cannot be safely inspected.
+
+### 5. Good / Base / Bad Cases
+
+- Good: two already-published linear planning commits are listed by one new
+  journal session; both are task-only and lifecycle-safe, so the journal-only
+  tail validates without changing the captured range.
+- Base: task artifacts and a journal are both inside the exact range, so the
+  existing normal planning validator runs with its full content checks.
+- Bad: widen the base to rediscover task changes, treat a merge parent as the
+  work delta, or accept a commit because some of its paths belong to a task.
+
+### 6. Tests Required
+
+- Positive normal planning, completion, journal-only recovery, and the
+  preserved real-range regression.
+- Unknown/non-ancestor and duplicate commits, roots/merges, code/spec/config/
+  workspace scope, deletion/rename, non-regular artifacts, invalid lifecycle,
+  multiple sessions, and no-task evidence.
+- A published-content-debt fixture proving recovery does not become a
+  retroactive content audit, paired with existing normal-planning tests that
+  retain full validation.
+- Root/template byte identity, bounded repository-relative diagnostics, Node
+  syntax, a runtime argument-budget batching regression, a recovered-commit
+  diagnostic-label regression, focused lifecycle tests, and `make check`.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: change --base until the already-published task commits reappear
+Correct: keep the captured range and prove its one journal session's referenced commits
+
+Wrong: rerun today's entire task-content audit over historical published planning artifacts
+Correct: prove historical task-only scope and lifecycle while keeping full checks on normal new planning bundles
+```
+
 ## Read-Only SD Check Runtime Contract
 
 ### 1. Scope / Trigger

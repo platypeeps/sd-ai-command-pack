@@ -94,6 +94,17 @@ task. Ordinary task archival, journal work, and validation need no confirmation.
 
    Require schema version 1, `status: valid`, the expected mode-specific valid
    reason code, and an `evidence.headOid` equal to the current full HEAD OID.
+   In `planning` mode, when the exact captured range contains only one newly
+   completed journal session and its sibling index, the helper may
+   automatically prove the session's already-published, single-parent,
+   task-only work commits. A successful result remains
+   `planning_bundle_valid` and identifies
+   `evidence.planningSubtype: journal-only-recovery`; callers never select a
+   third mode, widen the captured base, or reinterpret a failed result. This
+   subtype verifies task-only scope and planning lifecycle state without
+   retroactively applying current publication-quality content checks to work
+   that predates the captured base. Normal task-plus-journal planning bundles
+   retain their complete validation.
    Retain this exact JSON result and head as the finalization handoff for
    `sd-review-pr`, `sd-ship`, and `sd-housekeeping`; later callers reuse it and
    must not rerun a divergent bookkeeping interpretation. Only after it passes

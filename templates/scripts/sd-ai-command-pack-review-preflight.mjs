@@ -25,6 +25,10 @@ const MAX_TRELLIS_TASK_REFERENCE_LENGTH = 255;
 const MAX_TRELLIS_PRIORITY_RATIONALE_LENGTH = 1000;
 const MAX_BOOKKEEPING_FINDINGS = 100;
 const MAX_BOOKKEEPING_CHANGED_PATHS = 500;
+const MAX_BOOKKEEPING_RECOVERY_COMMITS = 100;
+// Stay well below Windows' roughly 32 KiB process command-line ceiling after
+// accounting for executable, fixed arguments, quoting, and UTF-16 expansion.
+const MAX_BOOKKEEPING_GIT_PATHSPEC_BYTES = 8 * 1024;
 const BOOKKEEPING_SCHEMA_VERSION = 1;
 const TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review', 'completed']);
 const ACTIVE_TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review']);
@@ -828,12 +832,17 @@ function validateBookkeepingFinalBundle(options, evidence, add) {
     add('bundle_scope_invalid', path, 'finalization delta contains a non-bookkeeping path');
   }
   validateBookkeepingDiffWhitespace(baseOid, headOid, add);
+  const journalSummary = validateBookkeepingJournalBundle(entries, baseOid, headOid, add);
   if (options.mode === 'completion') {
     validateCompletionBundle(entries, evidence, baseOid, add);
   } else {
-    validatePlanningBundle(entries, evidence, baseOid, add);
+    const taskEntries = bookkeepingTaskEntries(entries);
+    if (taskEntries.length > 0) {
+      validatePlanningBundle(entries, evidence, baseOid, add);
+    } else {
+      validateJournalOnlyPlanningRecovery(entries, journalSummary, evidence, baseOid, add);
+    }
   }
-  validateBookkeepingJournalBundle(entries, baseOid, headOid, add);
 }
 
 function resolveBookkeepingCommit(ref, label, add) {
@@ -963,9 +972,13 @@ function validateCompletionBundle(entries, evidence, baseOid, add) {
   }
 }
 
-function validatePlanningBundle(entries, evidence, baseOid, add) {
-  const taskEntries = entries.filter((entry) =>
+function bookkeepingTaskEntries(entries) {
+  return entries.filter((entry) =>
     entry.path.startsWith('.trellis/tasks/') || entry.oldPath.startsWith('.trellis/tasks/'));
+}
+
+function validatePlanningBundle(entries, evidence, baseOid, add, options = {}) {
+  const taskEntries = bookkeepingTaskEntries(entries);
   const taskDirs = new Set();
   for (const entry of taskEntries) {
     for (const path of [entry.oldPath, entry.path].filter(Boolean)) {
@@ -988,15 +1001,51 @@ function validatePlanningBundle(entries, evidence, baseOid, add) {
   }
   evidence.taskDirectories = [...taskDirs].sort();
   for (const taskDir of evidence.taskDirectories) {
-    const current = validateBookkeepingTaskDirectory(taskDir, { add, archived: false });
+    const current = options.lifecycleOnly
+      ? loadRecoveredPlanningTaskRecord(taskDir, add, options.currentRef)
+      : validateBookkeepingTaskDirectory(taskDir, { add, archived: false });
     if (!current) continue;
     if (current.status !== 'planning' || current.completedAt !== null || current.branch !== null) {
       add('planning_lifecycle_mutation', `${taskDir}/task.json`, 'planning task must keep status planning, completedAt null, and branch null');
     }
-    const baseline = loadBookkeepingJsonAtRef(baseOid, `${taskDir}/task.json`, add, { missingAllowed: true });
+    const baselineOptions = options.lifecycleOnly
+      ? {
+          missingAllowed: true,
+          artifactReasonPrefix: 'planning_recovery_commit_parent_artifact',
+          refLabel: 'the recovered work commit parent',
+          jsonReasonCode: 'planning_recovery_commit_parent_task_json_invalid',
+        }
+      : { missingAllowed: true };
+    const baseline = loadBookkeepingJsonAtRef(baseOid, `${taskDir}/task.json`, add, baselineOptions);
     if (baseline && (baseline.status !== 'planning' || baseline.completedAt !== null || baseline.branch !== null)) {
       add('planning_baseline_invalid', `${taskDir}/task.json`, 'existing task was not a valid planning task at the bundle base');
     }
+  }
+  return evidence.taskDirectories;
+}
+
+function loadRecoveredPlanningTaskRecord(taskDir, add, ref) {
+  const taskFile = `${taskDir}/task.json`;
+  if (ref) {
+    return loadBookkeepingJsonAtRef(ref, taskFile, add, {
+      artifactReasonPrefix: 'planning_recovery_commit_artifact',
+      refLabel: 'the recovered work commit',
+      jsonReasonCode: 'planning_recovery_commit_task_json_invalid',
+    });
+  }
+  const loaded = loadTrellisTaskMetadataFile(taskFile);
+  if (loaded.status !== 'loaded') {
+    add('task_artifact_invalid', taskFile, loaded.message);
+    return null;
+  }
+  validateBookkeepingTextWhitespace(taskFile, loaded.text, add);
+  try {
+    const record = JSON.parse(loaded.text);
+    if (!isPlainObject(record)) throw new Error('top-level value is not an object');
+    return record;
+  } catch (error) {
+    add('task_json_invalid', taskFile, `task metadata is not valid JSON: ${thrownValueMessage(error)}`);
+    return null;
   }
 }
 
@@ -1025,10 +1074,10 @@ function validateBookkeepingJournalBundle(entries, baseOid, headOid, add) {
   }
   if (journalFiles.size === 0 || developerDirs.size === 0) {
     add('journal_session_missing', '', 'finalization bundle must include a completed journal session and sibling index update');
-    return;
+    return { newCompletedSessions: [] };
   }
 
-  let newCompletedSessions = 0;
+  const newCompletedSessions = [];
   for (const developerRelative of [...developerDirs].sort()) {
     const indexFile = `${developerRelative}/index.md`;
     if (!workspaceEntries.some((entry) => entry.path === indexFile || entry.oldPath === indexFile)) {
@@ -1057,8 +1106,10 @@ function validateBookkeepingJournalBundle(entries, baseOid, headOid, add) {
           continue;
         }
         if (!session.completed) continue;
-        newCompletedSessions += 1;
-        validateNewBookkeepingSession(session, headOid, add);
+        newCompletedSessions.push({
+          ...session,
+          resolvedCommits: validateNewBookkeepingSession(session, headOid, add),
+        });
       }
     }
     const indexLoaded = loadBoundedTrellisTaskArtifact(indexFile, 'journal index');
@@ -1085,9 +1136,10 @@ function validateBookkeepingJournalBundle(entries, baseOid, headOid, add) {
       add('journal_index_mismatch', indexFile, message);
     }
   }
-  if (newCompletedSessions === 0) {
+  if (newCompletedSessions.length === 0) {
     add('journal_session_missing', '', 'finalization bundle adds no completed journal session');
   }
+  return { newCompletedSessions };
 }
 
 function safeJournalFiles(developerRelative, add) {
@@ -1105,6 +1157,7 @@ function safeJournalFiles(developerRelative, add) {
 }
 
 function validateNewBookkeepingSession(session, headOid, add) {
+  const resolvedCommits = [];
   for (const heading of ['Summary', 'Main Changes', 'Testing']) {
     const section = extractMarkdownSection(session.content, heading)
       .replace(/^[\s*-]+|[\s*-]+$/g, '')
@@ -1119,7 +1172,7 @@ function validateNewBookkeepingSession(session, headOid, add) {
   }
   if (session.commits.length === 0) {
     add('journal_commit_missing', session.file, `Session ${session.number} must reference at least one work commit`);
-    return;
+    return resolvedCommits;
   }
   for (const hash of session.commits) {
     const resolved = runGit(['rev-parse', '--verify', `${hash}^{commit}`]);
@@ -1127,11 +1180,202 @@ function validateNewBookkeepingSession(session, headOid, add) {
       add('journal_commit_unknown', session.file, `Session ${session.number} references unknown commit ${hash}`);
       continue;
     }
-    const ancestor = runGit(['merge-base', '--is-ancestor', resolved.stdout.trim(), headOid]);
+    const oid = resolved.stdout.trim();
+    resolvedCommits.push({ hash, oid });
+    const ancestor = runGit(['merge-base', '--is-ancestor', oid, headOid]);
     if (ancestor.status !== 0) {
       add('journal_commit_unreachable', session.file, `Session ${session.number} commit ${hash} is not reachable from the final head`);
     }
   }
+  return resolvedCommits;
+}
+
+function validateJournalOnlyPlanningRecovery(entries, journalSummary, evidence, baseOid, add) {
+  const sessions = journalSummary?.newCompletedSessions || [];
+  if (sessions.length !== 1) {
+    add(
+      'planning_recovery_session_count_invalid',
+      '',
+      `journal-only planning recovery requires exactly one newly completed session; found ${sessions.length}`,
+    );
+  }
+  if (sessions.length === 0) {
+    add('planning_recovery_task_change_missing', '', 'journal-only planning recovery proves no active task change');
+    return;
+  }
+  if (sessions.length !== 1) return;
+
+  const session = sessions[0];
+  evidence.planningSubtype = 'journal-only-recovery';
+  const allowedBundlePaths = new Set([session.file, `${dirname(session.file)}/index.md`]);
+  for (const entry of entries) {
+    for (const path of [entry.oldPath, entry.path].filter(Boolean)) {
+      if (!allowedBundlePaths.has(path)) {
+        add(
+          'planning_recovery_bundle_scope_invalid',
+          path,
+          'journal-only planning recovery may contain only the new session journal and its sibling index',
+        );
+      }
+    }
+  }
+
+  if (session.commits.length > MAX_BOOKKEEPING_RECOVERY_COMMITS) {
+    add(
+      'planning_recovery_commits_oversized',
+      session.file,
+      `journal-only planning recovery references more than ${MAX_BOOKKEEPING_RECOVERY_COMMITS} commits`,
+    );
+    add('planning_recovery_task_change_missing', '', 'journal-only planning recovery proves no bounded active task change');
+    return;
+  }
+
+  const uniqueCommits = [];
+  const seenCommits = new Set();
+  for (const commit of session.resolvedCommits) {
+    if (seenCommits.has(commit.oid)) {
+      add(
+        'planning_recovery_commit_duplicate',
+        session.file,
+        `Session ${session.number} resolves more than one commit reference to ${commit.oid.slice(0, 12)}`,
+      );
+      continue;
+    }
+    seenCommits.add(commit.oid);
+    uniqueCommits.push(commit);
+  }
+
+  const recoveredTaskDirs = new Set();
+  for (const commit of uniqueCommits) {
+    const published = runGit(['merge-base', '--is-ancestor', commit.oid, baseOid]);
+    if (published.status !== 0) {
+      add(
+        'planning_recovery_commit_not_published',
+        session.file,
+        `Session ${session.number} commit ${commit.hash} is not an ancestor of the captured finalization base`,
+        published.status === 1 ? 'invalid' : 'indeterminate',
+      );
+      continue;
+    }
+
+    const parentResult = runGit(['rev-list', '--parents', '-n', '1', commit.oid]);
+    if (parentResult.status !== 0) {
+      add(
+        'planning_recovery_commit_unavailable',
+        session.file,
+        `Git could not inspect parents for commit ${commit.hash}`,
+        'indeterminate',
+      );
+      continue;
+    }
+    const parentFields = parentResult.stdout.trim().split(/\s+/).filter(Boolean);
+    if (parentFields.length !== 2 || parentFields[0] !== commit.oid) {
+      add(
+        'planning_recovery_commit_non_linear',
+        session.file,
+        `Session ${session.number} commit ${commit.hash} must have exactly one parent`,
+      );
+      continue;
+    }
+
+    const commitEntries = bookkeepingChangedEntries(parentFields[1], commit.oid, add);
+    if (!commitEntries) continue;
+    const commitPaths = [...new Set(
+      commitEntries.flatMap((entry) => [entry.oldPath, entry.path].filter(Boolean)),
+    )];
+    if (commitPaths.length > MAX_BOOKKEEPING_CHANGED_PATHS) {
+      add(
+        'planning_recovery_commit_scope_invalid',
+        '',
+        `commit ${commit.hash} changes more than ${MAX_BOOKKEEPING_CHANGED_PATHS} paths`,
+      );
+      continue;
+    }
+    const regularPaths = bookkeepingRegularPathsAtCommit(commit.oid, commitPaths);
+
+    for (const entry of commitEntries) {
+      const invalidOperation =
+        entry.status.startsWith('D') || entry.status.startsWith('R') || entry.status.startsWith('C');
+      if (invalidOperation) {
+        add(
+          'planning_recovery_commit_scope_invalid',
+          entry.oldPath || entry.path,
+          `commit ${commit.hash} deletes, renames, or copies a task artifact`,
+        );
+      }
+      for (const path of [entry.oldPath, entry.path].filter(Boolean)) {
+        const match = /^(\.trellis\/tasks\/\d{2}-\d{2}-[A-Za-z0-9][A-Za-z0-9._-]*)\/(.+)$/.exec(path);
+        if (!match || /[\0\r\n]/.test(path)) {
+          add(
+            'planning_recovery_commit_scope_invalid',
+            path,
+            `commit ${commit.hash} changes a path outside an active task directory`,
+          );
+          continue;
+        }
+        if (!invalidOperation && path === entry.path && !regularPaths.has(path)) {
+          add(
+            'planning_recovery_commit_scope_invalid',
+            path,
+            `commit ${commit.hash} does not leave a regular task artifact at this path`,
+          );
+        }
+      }
+    }
+
+    const commitEvidence = { taskDirectories: [] };
+    for (const taskDir of validatePlanningBundle(
+      commitEntries,
+      commitEvidence,
+      parentFields[1],
+      add,
+      { lifecycleOnly: true, currentRef: commit.oid },
+    )) {
+      recoveredTaskDirs.add(taskDir);
+    }
+  }
+
+  evidence.taskDirectories = [...recoveredTaskDirs].sort();
+  if (evidence.taskDirectories.length === 0) {
+    add('planning_recovery_task_change_missing', '', 'journal-only planning recovery proves no active task change');
+  }
+}
+
+function bookkeepingRegularPathsAtCommit(commitOid, paths) {
+  if (paths.length === 0) return new Set();
+  const regularPaths = new Set();
+  for (const batch of chunkBookkeepingGitPathspecs(paths)) {
+    const result = runGit(['ls-tree', '-z', commitOid, '--', ...batch]);
+    if (result.status !== 0) return new Set();
+    for (const record of result.stdout.split('\0').filter(Boolean)) {
+      const separator = record.indexOf('\t');
+      if (separator <= 0) continue;
+      const metadata = record.slice(0, separator);
+      if (/^100(?:644|755) blob [0-9a-f]{40,64}$/.test(metadata)) {
+        regularPaths.add(record.slice(separator + 1));
+      }
+    }
+  }
+  return regularPaths;
+}
+
+function chunkBookkeepingGitPathspecs(paths) {
+  const batches = [];
+  let batch = [];
+  let batchBytes = 0;
+  for (const path of paths) {
+    const pathBytes = Buffer.byteLength(path, 'utf8') + 1;
+    if (pathBytes > MAX_BOOKKEEPING_GIT_PATHSPEC_BYTES) return [];
+    if (batch.length > 0 && batchBytes + pathBytes > MAX_BOOKKEEPING_GIT_PATHSPEC_BYTES) {
+      batches.push(batch);
+      batch = [];
+      batchBytes = 0;
+    }
+    batch.push(path);
+    batchBytes += pathBytes;
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
 }
 
 function loadBookkeepingJsonAtRef(ref, file, add, options = {}) {
@@ -1142,21 +1386,31 @@ function loadBookkeepingJsonAtRef(ref, file, add, options = {}) {
     if (!isPlainObject(value)) throw new Error('top-level value is not an object');
     return value;
   } catch (error) {
-    add('task_json_invalid', file, `task metadata at bundle base is invalid: ${thrownValueMessage(error)}`);
+    add(
+      options.jsonReasonCode || 'task_json_invalid',
+      file,
+      `task metadata at ${options.refLabel || 'the bundle base'} is invalid: ${thrownValueMessage(error)}`,
+    );
     return null;
   }
 }
 
 function loadBookkeepingTextAtRef(ref, file, add, options = {}) {
+  const artifactReasonPrefix = options.artifactReasonPrefix || 'bundle_base_artifact';
+  const refLabel = options.refLabel || 'the bundle base';
   const size = runGit(['cat-file', '-s', `${ref}:${file}`]);
   if (size.status !== 0) {
     if (options.missingAllowed) return null;
-    add('bundle_base_artifact_missing', file, 'artifact is missing from the bundle base');
+    add(`${artifactReasonPrefix}_missing`, file, `artifact is missing from ${refLabel}`);
     return null;
   }
   const bytes = Number(size.stdout.trim());
   if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > config.untrackedFileReadLimitBytes) {
-    add('bundle_base_artifact_oversized', file, `artifact exceeds the bounded read limit of ${config.untrackedFileReadLimitBytes} bytes`);
+    add(
+      `${artifactReasonPrefix}_oversized`,
+      file,
+      `artifact at ${refLabel} exceeds the bounded read limit of ${config.untrackedFileReadLimitBytes} bytes`,
+    );
     return null;
   }
   const result = spawnSync('git', ['show', `${ref}:${file}`], {
@@ -1165,13 +1419,18 @@ function loadBookkeepingTextAtRef(ref, file, add, options = {}) {
     maxBuffer: GIT_MAX_BUFFER_BYTES,
   });
   if (result.error || result.status !== 0 || result.signal) {
-    add('bundle_base_artifact_unreadable', file, 'artifact could not be read from the bundle base', 'indeterminate');
+    add(
+      `${artifactReasonPrefix}_unreadable`,
+      file,
+      `artifact could not be read from ${refLabel}`,
+      'indeterminate',
+    );
     return null;
   }
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(result.stdout);
   } catch {
-    add('bundle_base_artifact_utf8_invalid', file, 'artifact is not valid UTF-8');
+    add(`${artifactReasonPrefix}_utf8_invalid`, file, `artifact at ${refLabel} is not valid UTF-8`);
     return null;
   }
 }
