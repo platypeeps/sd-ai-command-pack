@@ -1173,3 +1173,50 @@ Captured the July 25 routed-review, cross-platform agent, workflow reliability, 
 ### Next Steps
 
 - Select the next open planning task through the normal backlog workflow.
+
+
+## Session 231: Journal-only planning finalization recovery
+
+**Date**: 2026-07-25
+**Task**: Journal-only planning finalization recovery
+**Branch**: `codex/support-journal-only-finalization-recovery`
+
+### Summary
+
+Implemented and validated fail-closed recovery for journal-only planning finalization tails while preserving the existing completion and planning interface.
+
+### Main Changes
+
+- Added automatic journal-only recovery from one completed session's already-published, single-parent, task-only commits.
+- Kept normal planning validation intact and added bounded diagnostics, lifecycle-only historical proof, and regression coverage.
+- Bounded historical tree inspection by both path count and cross-platform command-line size, with fail-closed handling for invalid recovery cardinality and oversized pathspecs.
+- Updated sd-finish-work, code specs, synchronized mirrors, release metadata 0.53.0, and fleet candidate evidence.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4417953` | feat: recover journal-only planning finalization |
+| `7b8ca07` | fix: make bookkeeping fixtures branch-independent |
+| `c8b1e00` | fix: batch recovery tree inspection |
+| `50f98c7` | fix: distinguish recovery artifact diagnostics |
+| `bb56860` | fix: label recovery parent diagnostics |
+| `32fcd96` | chore: reconcile rebased validation evidence |
+| `9b4355d` | fix: bound recovery pathspec batches |
+| `5ecb725` | fix: fail closed on recovery bounds |
+
+### Testing
+
+- [OK] Focused bookkeeping validator suite: 25 tests passed
+- [OK] make check: passed
+- [OK] Fleet candidate validation: eight consumers passed
+- [OK] Three exact-head Copilot review rounds converged with all six threads resolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

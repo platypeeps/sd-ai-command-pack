@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 230
+- **Total Sessions**: 231
 - **Last Active**: 2026-07-25
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~1174 | Active |
+| `journal-5.md` | ~1213 | Active |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 231 | 2026-07-25 | Journal-only planning finalization recovery | `4417953`, `7b8ca07`, `c8b1e00`, `50f98c7`, `bb56860`, `32fcd96`, `9b4355d`, `5ecb725` | `codex/support-journal-only-finalization-recovery` |
 | 230 | 2026-07-25 | Record planning wave and repair consumer config references | `d97244e`, `9c9b8c3` | `main` |
 | 229 | 2026-07-25 | Warn on Copilot review file cap | `5b413f2` | `codex/warn-copilot-review-file-cap` |
 | 228 | 2026-07-25 | Implement unified routed sd-review | `f065b9a` | `codex/implement-unified-routed-sd-review` |
