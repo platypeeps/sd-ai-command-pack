@@ -564,8 +564,8 @@ installed footprint. For normal shared installs, it also maintains a managed
 `sd-ai-command-pack trellis-gitignore` block in the repo root `.gitignore` that
 ignores Trellis and AI-tool local/runtime state (caches, logs, sessions, tmp,
 Gito artifacts, `node_modules/`) while keeping shareable `.trellis` and platform
-adapter files — plus tracked Claude SD commands and the pack-owned planning
-review rule — committed.
+adapter files — including Claude's SD commands, the pack-owned planning review
+rule, and Trellis runtime, agents, settings, and skills — committed.
 It installs platform adapters only when the target repo has the corresponding
 platform directory and a Trellis-owned marker for that platform, such as a
 Trellis command, hook, skill, or Copilot hook file. A plain `.github` directory
