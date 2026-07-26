@@ -1115,7 +1115,6 @@ Added a configurable local preflight warning for GitHub Copilot's 300-file pull-
 - Warned locally when the selected review diff exceeds the configured Copilot file limit without making a GitHub request.
 - Synchronized templates, root mirrors, documentation, manifest, provenance, release ledger, and consumer candidate validation for 0.52.1.
 
-
 ### Git Commits
 
 | Hash | Message |
@@ -1135,3 +1134,41 @@ Added a configurable local preflight warning for GitHub Copilot's 300-file pull-
 ### Next Steps
 
 - None - task complete
+
+
+## Session 230: Record planning wave and repair consumer config references
+
+**Date**: 2026-07-25
+**Task**: Record planning wave and repair consumer config references
+**Branch**: `main`
+
+### Summary
+
+Captured the July 25 routed-review, cross-platform agent, workflow reliability, and performance planning wave, then corrected two repository-path references so the planning set passes deterministic review preflight.
+
+### Main Changes
+
+- Recorded and reconciled the July 25 Trellis planning wave across routed review operations, agent surfaces, workflow reliability, and performance follow-ups.
+- Clarified that sd-review.yml is a future consumer-repository configuration path rather than a file owned by this pack checkout.
+- Kept every planning item active because no current or completed task qualified for archival.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d97244e` | chore: record planning wave and cross-repo reconciliation (2026-07-25) |
+| `9c9b8c3` | docs: qualify consumer review config paths |
+
+### Testing
+
+- [OK] Review preflight passed with zero failures and zero warnings after the path correction.
+- [OK] git diff --check passed for the two-file reference repair.
+- [OK] main matched origin/main and the working tree was clean before finalization.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Select the next open planning task through the normal backlog workflow.
