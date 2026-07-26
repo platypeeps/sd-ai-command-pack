@@ -1212,11 +1212,14 @@ def recover_pack_blocker(
             for item in state["recoveries"]
             if item["consumer"] == consumer
             and item["fromActionId"] == blocker_receipt["actionId"]
-            and item["correctiveRelease"] == corrective_release
         ),
         None,
     )
     if existing is not None:
+        if existing["correctiveRelease"] != corrective_release:
+            raise FleetControllerError(
+                "corrective recovery source action is already bound to a different release"
+            )
         return existing, False
     if (
         lane["status"] != "terminal"

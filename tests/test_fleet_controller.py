@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+
 try:
     import install_test_support as _support
 except ModuleNotFoundError as exc:
@@ -743,6 +745,17 @@ class FleetControllerTests(InstallTestCase):
         )
         self.assertFalse(replay_changed)
         self.assertEqual(replay, recovery)
+        recovered_state = copy.deepcopy(state)
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "already bound to a different release"
+        ):
+            controller.recover_pack_blocker(
+                state,
+                consumer="wave-a",
+                corrective_release="0.39.0",
+                actual_release="0.39.0",
+            )
+        self.assertEqual(state, recovered_state)
 
         publication = controller.issue_next(state)[0]
         self.assertEqual(publication["stage"], "pr-publication")
