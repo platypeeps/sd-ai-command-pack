@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 230
+- **Total Sessions**: 231
 - **Last Active**: 2026-07-25
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~1174 | Active |
+| `journal-5.md` | ~1213 | Active |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 231 | 2026-07-25 | Support post-archive review finalization | `671d4947554f7325d5af6d0940b4552ee6a8835c` | `codex/support-post-archive-review-finalization` |
 | 230 | 2026-07-25 | Journal-only planning finalization recovery | `dcddf77` | `codex/support-journal-only-finalization-recovery` |
 | 229 | 2026-07-25 | Record planning wave and repair consumer config references | `d97244e`, `9c9b8c3` | `main` |
 | 228 | 2026-07-25 | Implement unified routed sd-review | `f065b9a` | `codex/implement-unified-routed-sd-review` |
