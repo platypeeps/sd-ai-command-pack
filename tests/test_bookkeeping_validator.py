@@ -33,6 +33,7 @@ class BookkeepingValidatorTests(InstallTestCase):
         )
         self.run_git(root, "add", ".")
         self.run_git(root, "commit", "-m", "seed validator")
+        self.run_git(root, "branch", "-M", "main")
         return root
 
     @staticmethod
