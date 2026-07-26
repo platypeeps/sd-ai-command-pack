@@ -747,13 +747,15 @@ child of `.trellis/tasks/` has completed status, names the offending record,
 and provides the Trellis archive command; archived, non-completed, and
 symlinked task entries are ignored. Target repos can tune roots,
 path-reference prefixes, integration paths, optional paths, copied-template
-paths, and the `diffSizeWarningLines`, `largeFileWarningLines`,
+paths, and the `copilotReviewFileLimit`, `diffSizeWarningLines`, `largeFileWarningLines`,
 `sourceReviewWarningLines`, and `untrackedFileReadLimitBytes` warning thresholds
 with `.sd-ai-command-pack/review-preflight.json`. The config's additive
 `reviewRiskCategorySignals` object maps a stable category ID to at most 20
 literal, nonblank signals of at most 120 characters each; invalid or unknown
 category configuration fails the preflight instead of silently changing the
-matrix. Repos that intentionally
+matrix. `copilotReviewFileLimit` defaults to `300`, accepts only a positive
+integer, and warns before remote review when the selected local diff exceeds
+GitHub Copilot's changed-file limit. Repos that intentionally
 document service-user paths under `/home/<user>/` can add those service users to
 `allowedLinuxHomeUsers` in that config. The script requires Node 16.9 or newer
 and scans regular documentation files only; symlinked docs are skipped
