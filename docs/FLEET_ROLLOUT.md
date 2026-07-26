@@ -160,7 +160,10 @@ into terminal PR-open evidence without issuing a merge.
 For each `refresh-needed` repo:
 
 1. Record the exact default-branch commit, then create a PR-only branch in that
-   consumer repo.
+   consumer repo. During checkout validation, create or activate one dedicated
+   Trellis task with substantive release, ownership, validation, and completion
+   criteria before installing. Stop when an unrelated active task or dirty
+   Trellis state makes ownership ambiguous.
 2. Run the printed `python3 install.py <repo> --force --platform ...` command
    from this pack checkout.
 3. Run the printed `python3 scripts/sd-ai-command-pack-install-audit.py --repo
@@ -356,7 +359,29 @@ canonical full-fleet candidate validation with the no-filter command. Only the
 no-filter canonical command may update `docs/fleet/candidate-validation.json`.
 
 Merge and tag the corrective release through the source lifecycle, then resume
-the original fleet task from a fresh preflight. If an urgent independent
+the original fleet task from a fresh preflight. A terminal merge-stage
+`packBlocker` caused by a taskless finish-work lane must first use the explicit
+controller transition:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-controller.py resume \
+  --repo . --campaign <campaign-id> \
+  --recover-consumer <consumer> --corrective-release <version> --json
+```
+
+Use that transition only when the corrective release is published and current
+and the exact blocked head and PR still match. For the issued publication
+action, preserve the consumer's existing implementation and journal commits,
+append a substantive planning task without activating it, and validate the
+original planning bundle from the implementation head through the new head.
+Push and reuse the PR only after that bundle is valid. The new publication
+receipt establishes a second exact-head epoch; review, CI, eligibility,
+housekeeping, and post-merge audit run again, while the failed merge action is
+never replayed. Do not weaken the bookkeeping validator or rewrite the
+preserved journal history.
+
+If an urgent independent
 security defect would become riskier while waiting for the bounded sweep, it
 may ship immediately with that reason recorded; keep the remaining campaign
 open rather than silently discarding it.

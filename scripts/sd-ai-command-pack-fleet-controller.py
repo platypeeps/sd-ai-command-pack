@@ -251,7 +251,7 @@ class CampaignStore:
             raise FleetControllerError("campaign lock cannot be created") from None
 
     def load(self) -> dict[str, Any]:
-        state = _load_json(self.state_path, "campaign state")
+        state = _normalize_state(_load_json(self.state_path, "campaign state"))
         validate_state(state)
         if state["repositoryDigest"] != self.repository_digest:
             raise FleetControllerError("campaign repository identity does not match")
@@ -332,6 +332,13 @@ def _strict_fields(value: Mapping[str, Any], fields: set[str], label: str) -> No
         raise FleetControllerError(f"{label} is missing field: {missing[0]}")
     if unknown:
         raise FleetControllerError(f"{label} has unknown field: {unknown[0]}")
+
+
+def _normalize_state(state: dict[str, Any]) -> dict[str, Any]:
+    if state.get("schemaVersion") == SCHEMA_VERSION and "recoveries" not in state:
+        state = dict(state)
+        state["recoveries"] = []
+    return state
 
 
 def _integer(value: object, label: str, minimum: int = 0) -> int:
@@ -518,14 +525,52 @@ def validate_lane(value: object, label: str) -> None:
         raise FleetControllerError(f"{label} issuedAction requires issued status")
     if not isinstance(value["receipts"], list):
         raise FleetControllerError(f"{label} receipts must be an array")
+    head_epoch: str | None = None
     for index, receipt in enumerate(value["receipts"]):
         validate_receipt(receipt, f"{label} receipts[{index}]")
-        if receipt["stage"] in PR_HEAD_STAGES and (
-            value["head"] is None or receipt["head"] != value["head"]
-        ):
+        if receipt["stage"] == "pr-publication" and receipt["result"] == "passed":
+            head_epoch = receipt["head"]
+        elif receipt["stage"] in PR_HEAD_STAGES and receipt["head"] != head_epoch:
             raise FleetControllerError(
-                f"{label} receipts[{index}] head does not match the current PR head"
+                f"{label} receipts[{index}] head does not match its publication epoch or current PR head"
             )
+    if head_epoch is not None and value["head"] != head_epoch:
+        raise FleetControllerError(f"{label} head does not match the latest publication")
+
+
+def validate_recovery(value: object, label: str) -> None:
+    if not isinstance(value, dict):
+        raise FleetControllerError(f"{label} must be an object")
+    _strict_fields(
+        value,
+        {
+            "consumer",
+            "correctiveRelease",
+            "fromActionId",
+            "fromAttempt",
+            "fromBlocker",
+            "fromHead",
+            "fromPrNumber",
+            "fromStage",
+            "recordedAt",
+            "toAttempt",
+            "toStage",
+        },
+        label,
+    )
+    safe_token(value["consumer"], f"{label} consumer")
+    safe_token(value["correctiveRelease"], f"{label} correctiveRelease")
+    safe_token(value["fromActionId"], f"{label} fromActionId")
+    _integer(value["fromAttempt"], f"{label} fromAttempt", 1)
+    safe_token(value["fromBlocker"], f"{label} fromBlocker")
+    full_sha(value["fromHead"], f"{label} fromHead")
+    _integer(value["fromPrNumber"], f"{label} fromPrNumber", 1)
+    if value["fromStage"] != "merge":
+        raise FleetControllerError(f"{label} fromStage must be merge")
+    utc_timestamp(value["recordedAt"], f"{label} recordedAt")
+    _integer(value["toAttempt"], f"{label} toAttempt", 1)
+    if value["toStage"] != "pr-publication":
+        raise FleetControllerError(f"{label} toStage must be pr-publication")
 
 
 def validate_state(state: Mapping[str, Any]) -> None:
@@ -540,6 +585,7 @@ def validate_state(state: Mapping[str, Any]) -> None:
             "manifestConsumers",
             "noMerge",
             "preflight",
+            "recoveries",
             "release",
             "repositoryDigest",
             "schemaVersion",
@@ -639,6 +685,19 @@ def validate_state(state: Mapping[str, Any]) -> None:
         raise FleetControllerError("lane consumer identities are invalid")
     if priorities != sorted(priorities) or len(priorities) != len(set(priorities)):
         raise FleetControllerError("lane priorities must be unique and ordered")
+    if not isinstance(state["recoveries"], list):
+        raise FleetControllerError("recoveries must be an array")
+    recovery_keys: set[tuple[str, str]] = set()
+    for index, recovery in enumerate(state["recoveries"]):
+        validate_recovery(recovery, f"recoveries[{index}]")
+        if recovery["consumer"] not in names:
+            raise FleetControllerError(
+                f"recoveries[{index}] consumer is outside the campaign"
+            )
+        key = (recovery["consumer"], recovery["fromActionId"])
+        if key in recovery_keys:
+            raise FleetControllerError("recoveries must have unique source actions")
+        recovery_keys.add(key)
 
 
 def _manifest(path: Path) -> tuple[dict[str, Any], list[Any], Any, str]:
@@ -752,6 +811,7 @@ def new_state(
             "receipts": [],
             "status": "waiting",
         },
+        "recoveries": [],
         "release": release,
         "repositoryDigest": _digest_path(repo),
         "schemaVersion": SCHEMA_VERSION,
@@ -988,8 +1048,9 @@ def _advance_lane(lane: dict[str, Any], receipt: Mapping[str, Any], no_merge: bo
             lane["status"] = "terminal"
             lane["result"] = "merged"
             return
-        lane["stage"] = LANE_STAGES[STAGE_INDEX[stage] + 1]
-        lane["attempt"] = 1
+        next_stage = LANE_STAGES[STAGE_INDEX[stage] + 1]
+        lane["stage"] = next_stage
+        lane["attempt"] = _next_stage_attempt(lane, next_stage)
         lane["status"] = "waiting"
         return
     if result == "at-target":
@@ -1109,6 +1170,106 @@ def retry_consumer(state: dict[str, Any], consumer: str) -> None:
     lane["status"] = "waiting"
     state["status"] = "active"
     state["updatedAt"] = utc_now()
+
+
+def _next_stage_attempt(lane: Mapping[str, Any], stage: str) -> int:
+    attempts = [
+        receipt["attempt"]
+        for receipt in lane["receipts"]
+        if receipt["stage"] == stage
+    ]
+    return max(attempts, default=0) + 1
+
+
+def recover_pack_blocker(
+    state: dict[str, Any],
+    *,
+    consumer: str,
+    corrective_release: str,
+    actual_release: str,
+) -> tuple[dict[str, Any], bool]:
+    consumer = safe_token(consumer, "consumer")
+    corrective_release = safe_token(corrective_release, "corrective release")
+    actual_release = safe_token(actual_release, "pack manifest version")
+    if corrective_release == state["release"]:
+        raise FleetControllerError(
+            "corrective release must differ from the campaign target"
+        )
+    if corrective_release != actual_release:
+        raise FleetControllerError(
+            "corrective release does not match the current pack manifest"
+        )
+    try:
+        lane = next(item for item in state["lanes"] if item["name"] == consumer)
+    except StopIteration:
+        raise FleetControllerError("consumer is outside the campaign") from None
+    if not lane["receipts"]:
+        raise FleetControllerError("consumer has no blocker receipt to recover")
+    blocker_receipt = lane["receipts"][-1]
+    existing = next(
+        (
+            item
+            for item in state["recoveries"]
+            if item["consumer"] == consumer
+            and item["fromActionId"] == blocker_receipt["actionId"]
+        ),
+        None,
+    )
+    if existing is not None:
+        if existing["correctiveRelease"] != corrective_release:
+            raise FleetControllerError(
+                "corrective recovery source action is already bound to a different release"
+            )
+        return existing, False
+    if (
+        lane["status"] != "terminal"
+        or lane["result"] != "review-finding"
+        or not lane["packBlocker"]
+        or lane["stage"] != "merge"
+    ):
+        raise FleetControllerError(
+            "corrective recovery requires a terminal merge-stage pack review-finding"
+        )
+    if lane["issuedAction"] is not None:
+        raise FleetControllerError("corrective recovery cannot replace an issued action")
+    if lane["head"] is None or lane["prNumber"] is None:
+        raise FleetControllerError("corrective recovery requires an exact PR head")
+    if (
+        blocker_receipt["stage"] != "merge"
+        or blocker_receipt["result"] != "review-finding"
+        or not blocker_receipt["packBlocker"]
+        or blocker_receipt["blocker"] != lane["blocker"]
+        or blocker_receipt["head"] != lane["head"]
+        or blocker_receipt["prNumber"] != lane["prNumber"]
+    ):
+        raise FleetControllerError(
+            "corrective recovery blocker receipt does not match the lane"
+        )
+    to_attempt = _next_stage_attempt(lane, "pr-publication")
+    recovery = {
+        "consumer": consumer,
+        "correctiveRelease": corrective_release,
+        "fromActionId": blocker_receipt["actionId"],
+        "fromAttempt": blocker_receipt["attempt"],
+        "fromBlocker": lane["blocker"],
+        "fromHead": lane["head"],
+        "fromPrNumber": lane["prNumber"],
+        "fromStage": lane["stage"],
+        "recordedAt": utc_now(),
+        "toAttempt": to_attempt,
+        "toStage": "pr-publication",
+    }
+    state["recoveries"].append(recovery)
+    lane["attempt"] = to_attempt
+    lane["blocker"] = None
+    lane["packBlocker"] = False
+    lane["result"] = None
+    lane["stage"] = "pr-publication"
+    lane["status"] = "waiting"
+    state["updatedAt"] = utc_now()
+    _refresh_campaign_status(state)
+    validate_state(state)
+    return recovery, True
 
 
 def resolve_reconciliation(
@@ -1311,6 +1472,7 @@ def resume_report(state: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "campaignId": state["campaignId"],
         "reconciliation": reconciliation,
+        "recoveries": list(state["recoveries"]),
         "release": state["release"],
         "schemaVersion": REPORT_SCHEMA_VERSION,
         "status": state["status"],
@@ -1360,6 +1522,7 @@ def status_report(state: Mapping[str, Any]) -> dict[str, Any]:
             "receiptCount": len(state["preflight"]["receipts"]),
             "status": state["preflight"]["status"],
         },
+        "recoveries": list(state["recoveries"]),
         "release": state["release"],
         "schemaVersion": REPORT_SCHEMA_VERSION,
         "status": state["status"],
@@ -1447,6 +1610,8 @@ def build_parser() -> argparse.ArgumentParser:
     resume = commands.add_parser("resume")
     _common(resume)
     resume.add_argument("--retry-consumer")
+    resume.add_argument("--recover-consumer")
+    resume.add_argument("--corrective-release")
     resume.add_argument("--resolve-action")
     resume.add_argument("--release")
     resume.add_argument("--consumer")
@@ -1517,8 +1682,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         if (
             args.command == "resume"
             and args.retry_consumer is None
+            and args.recover_consumer is None
             and args.resolve_action is None
         ):
+            if args.corrective_release is not None:
+                raise FleetControllerError(
+                    "corrective-release requires recover-consumer"
+                )
             _render(resume_report(store.load()), args.json)
             return 0
 
@@ -1567,14 +1737,44 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 0
             if args.command == "resume":
                 resume_receipt: dict[str, Any] | None
-                if args.retry_consumer is not None and args.resolve_action is not None:
+                recovery: dict[str, Any] | None = None
+                changed = True
+                modes = sum(
+                    item is not None
+                    for item in (
+                        args.retry_consumer,
+                        args.recover_consumer,
+                        args.resolve_action,
+                    )
+                )
+                if modes > 1:
                     raise FleetControllerError(
-                        "resume accepts retry-consumer or resolve-action, not both"
+                        "resume accepts only one recovery mode"
                     )
                 if args.retry_consumer is not None:
+                    if args.corrective_release is not None:
+                        raise FleetControllerError(
+                            "corrective-release is valid only with recover-consumer"
+                        )
                     retry_consumer(state, args.retry_consumer)
                     resume_receipt = None
+                elif args.recover_consumer is not None:
+                    if args.corrective_release is None:
+                        raise FleetControllerError(
+                            "recover-consumer requires corrective-release"
+                        )
+                    recovery, changed = recover_pack_blocker(
+                        state,
+                        consumer=args.recover_consumer,
+                        corrective_release=args.corrective_release,
+                        actual_release=_pack_release(args.repo / "manifest.json"),
+                    )
+                    resume_receipt = None
                 else:
+                    if args.corrective_release is not None:
+                        raise FleetControllerError(
+                            "corrective-release is valid only with recover-consumer"
+                        )
                     if args.release is None or args.result is None:
                         raise FleetControllerError(
                             "resolve-action requires release and result"
@@ -1591,9 +1791,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                         head=args.head,
                         pr_number=args.pr_number,
                     )
-                store.write(state)
+                if changed:
+                    store.write(state)
                 report = resume_report(state)
                 report["receipt"] = resume_receipt
+                if recovery is not None:
+                    report["recovery"] = recovery
+                    report["changed"] = changed
                 _render(report, args.json)
                 return 0
     except (FleetControllerError, fleet_lib.FleetConfigError) as error:

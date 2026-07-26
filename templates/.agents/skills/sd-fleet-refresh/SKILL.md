@@ -116,16 +116,25 @@ but defines no ordering or transition policy:
   authoritative.
 - `checkout-validation`: confirm the configured checkout exists and is clean,
   has no live no-touch/loop owner, capture the exact base commit, and create one
-  isolated refresh branch. Dirty or externally owned means `ownership-skip`;
-  never stash, reset, clean, or install.
+  isolated refresh branch. Before installation, create and activate one
+  dedicated lightweight Trellis task for this consumer and target release when
+  no current task exists. Give its PRD the immutable release identity, managed
+  scope, preparation/check commands, and finish-work expectation; bind it to
+  the refresh branch. An unrelated current task, dirty Trellis state, or
+  externally owned checkout means `ownership-skip`; never repurpose another
+  task, stash, reset, clean, or install.
 - `install-update` and `install-audit`: run only the commands printed by
   preflight. The installer, provenance, and audit remain authoritative.
 - `candidate-prepare`, `focused-candidate`, and `local-checks`: run the
   manifest-ordered preparation/check commands and the consumer's documented
   full local gate.
-- `pr-publication`: commit only installer-managed output, classify the exact
-  base/head with `sd-ai-command-pack-fleet-review-classify.py`, push, and create
-  or reuse one PR. Record the published head and PR number.
+- `pr-publication`: commit only the dedicated consumer task artifacts,
+  installer-managed output, receipts/provenance, and deterministic preparation
+  output. Classify the exact base/head with
+  `sd-ai-command-pack-fleet-review-classify.py`, push, and create or reuse one
+  PR. Record the published head and PR number. A corrective recovery may reuse
+  this stage to append and validate task evidence before pushing a replacement
+  head; it never replays the earlier merge action.
 - `review`: invoke `sd-review-pr` once with trusted `caller: sd-fleet-refresh`,
   `return-after: review-result`, and `defer-finish-work: true`. Supply either
   the exact-head `integration-only` context or the normal `remote` profile.
@@ -148,8 +157,10 @@ but defines no ordering or transition policy:
   through `sd-watch-pr` with its internal `no-merge` handoff, and prove the
   recorded head remains green, comment-clean, and mergeable.
 - `merge`: only the controller's single eligible action may invoke the
-  consumer's `sd-housekeeping` gate. The controller alone invokes housekeeping;
-  it never merges in completion order.
+  consumer's `sd-housekeeping` gate. Complete the dedicated task through
+  `sd-finish-work`, retain its exact-head receipt, and pass that receipt to
+  housekeeping. The controller alone invokes housekeeping; it never merges in
+  completion order.
 - `post-merge-verification`: verify the installed target version, install audit,
   clean default branch, deleted refresh branch, and pruned refs.
 
@@ -231,7 +242,9 @@ thread resolution.
 - Never touch a dirty, missing, or externally owned consumer checkout; never
   stash, reset, clean, force-push, clone, or create a new checkout here.
 - Change only installer-managed files, receipts, provenance, and repo-owned
-  deterministic preparation output. Never edit consumer product code.
+- Change only the dedicated task artifacts, installer-managed files, receipts,
+  provenance, and repo-owned deterministic preparation output. Never edit
+  consumer product code.
 - Preflight release identity, candidate evidence, install/audit, local checks,
   review, complete thread polling, CI, exact-head eligibility, housekeeping,
   and post-merge audit keep their existing authority.
