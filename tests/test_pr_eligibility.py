@@ -47,7 +47,7 @@ def finish_work_receipt(
             "changedPaths": [],
             "repository": {
                 "branch": branch,
-                "rootDigest": f"sha256:{'a' * 64}",
+                "lineageDigest": f"sha256:{'a' * 64}",
             },
             "journalSessions": [],
             "completionSubtype": "post-archive-review-successor",
@@ -523,9 +523,9 @@ class PrEligibilityTests(unittest.TestCase):
         )
 
         malformed = finish_work_receipt()
-        malformed["evidence"]["repository"]["rootDigest"] = str(self.repo)
+        malformed["evidence"]["repository"]["lineageDigest"] = str(self.repo)
         receipt_path.write_text(json.dumps(malformed), encoding="utf-8")
-        with self.assertRaisesRegex(eligibility.EligibilityInputError, "rootDigest"):
+        with self.assertRaisesRegex(eligibility.EligibilityInputError, "lineageDigest"):
             eligibility.load_finish_work_receipt(receipt_path)
 
         malformed = finish_work_receipt()

@@ -290,12 +290,12 @@ def validate_finish_work_receipt(value: object) -> dict[str, Any]:
     branch = repository.get("branch")
     if branch is not None:
         require_string(branch, "finishWorkReceipt evidence.repository.branch")
-    root_digest = repository.get("rootDigest")
-    if not isinstance(root_digest, str) or not re.fullmatch(
-        r"sha256:[0-9a-f]{64}", root_digest
+    lineage_digest = repository.get("lineageDigest")
+    if not isinstance(lineage_digest, str) or not re.fullmatch(
+        r"sha256:[0-9a-f]{64}", lineage_digest
     ):
         raise EligibilityInputError(
-            "eligibility input finishWorkReceipt evidence.repository.rootDigest is invalid"
+            "eligibility input finishWorkReceipt evidence.repository.lineageDigest is invalid"
         )
     return dict(value)
 

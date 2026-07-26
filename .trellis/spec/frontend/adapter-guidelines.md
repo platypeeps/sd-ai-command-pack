@@ -1732,6 +1732,9 @@ around the delegated lifecycle.
 - `sd-finish-work` writes successful validator JSON to a private temporary
   file. Review and ship pass that file unchanged to housekeeping, which uses
   `--finish-work-receipt` and independently requires exact canonical replay.
+  Repository identity in that receipt uses a portable digest of the Git root
+  commit set, not the checkout path, so an otherwise identical replay remains
+  valid after a checkout relocation or across worktrees and clones.
   Preserve it across a clean downstream handoff and delete it after
   housekeeping consumes it, the proof is abandoned, or the lifecycle blocks;
   never replace it with a head-only assertion or repository-local authority.

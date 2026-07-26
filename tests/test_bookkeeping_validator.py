@@ -520,8 +520,34 @@ class BookkeepingValidatorTests(InstallTestCase):
             ).splitlines(),
         )
         self.assertEqual(evidence["successor"]["changedPaths"], ["src/app.py"])
-        self.assertRegex(evidence["repository"]["rootDigest"], r"^sha256:[0-9a-f]{64}$")
+        self.assertRegex(
+            evidence["repository"]["lineageDigest"], r"^sha256:[0-9a-f]{64}$"
+        )
         self.assertEqual(self.git_output(root, "status", "--porcelain"), before)
+
+        relocated = root / "relocated-checkout"
+        clone = subprocess.run(
+            ["git", "clone", "--quiet", str(root), str(relocated)],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(clone.returncode, 0, clone.stdout)
+        replay = self.run_validator(
+            relocated,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+        )
+        self.assertEqual(replay.returncode, 0, replay.stdout)
+        replay_payload = json.loads(replay.stdout)
+        self.assertEqual(replay_payload["evidence"]["repository"], evidence["repository"])
 
     def test_completion_successor_finds_recent_anchor_in_long_history(self) -> None:
         root, _, bookkeeping_head = self.make_post_archive_successor_repo(

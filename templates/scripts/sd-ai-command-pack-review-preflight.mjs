@@ -863,12 +863,28 @@ function validateBookkeepingFinalBundle(options, evidence, add, runtime = {}) {
 
 function bookkeepingRepositoryEvidence() {
   const branch = gitStdout(['symbolic-ref', '--quiet', '--short', 'HEAD']);
-  const rootDigest = createHash('sha256')
-    .update(realpathSync(rootDir))
-    .digest('hex');
+  const roots = runGit(['rev-list', '--max-parents=0', 'HEAD']);
+  if (roots.status !== 0) {
+    throw new GitCommandError('git rev-list could not determine repository lineage');
+  }
+  const rootOids = roots.stdout
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .sort();
+  if (
+    rootOids.length === 0
+    || rootOids.some((oid) => !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid))
+  ) {
+    throw new GitCommandError('git rev-list returned invalid repository lineage');
+  }
+  const lineageHash = createHash('sha256').update('git-root-oids-v1\0');
+  for (const oid of rootOids) {
+    lineageHash.update(oid).update('\0');
+  }
   return {
     branch: branch || null,
-    rootDigest: `sha256:${rootDigest}`,
+    lineageDigest: `sha256:${lineageHash.digest('hex')}`,
   };
 }
 
