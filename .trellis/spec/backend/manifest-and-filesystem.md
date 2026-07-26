@@ -1252,6 +1252,9 @@ identity, order, concurrency, attempts, receipts, blockers, and next actions.
   ordered lanes, attempts, exact heads/PRs, blockers, actions, and receipts.
 - `next` atomically issues action IDs derived from campaign, release, consumer,
   stage, and attempt. `record` accepts only the matching current action.
+- `resume --recover-consumer NAME --corrective-release VERSION` is the sole
+  transition from a terminal merge-stage pack blocker into a new
+  `pr-publication` attempt after the named corrective release is current.
 
 ### 3. Contracts
 
@@ -1271,6 +1274,22 @@ identity, order, concurrency, attempts, receipts, blockers, and next actions.
   PR-open evidence.
 - A PR publication receipt establishes a full head SHA and PR number. Review,
   eligibility, merge, and post-merge receipts must name that exact head.
+- Before a new lane installs the pack, checkout validation creates or activates
+  one dedicated consumer Trellis task with substantive release, ownership,
+  validation, and completion criteria. A conflicting active task or dirty
+  Trellis state stops the lane before installer mutation.
+- Schema-version-1 state may omit `recoveries`; loading normalizes that legacy
+  shape to an empty list. Each recovery row binds the consumer, blocking head
+  and PR, corrective release, source action, and destination publication
+  attempt. Historical receipts remain immutable.
+- A recovered lane starts a new publication epoch. Head equality is required
+  within each epoch, while a later publication receipt may establish the new
+  exact head used by its review, eligibility, merge, and post-merge receipts.
+- Recovery of an already-published taskless lane is append-only: preserve its
+  journal commit, add a substantive planning task artifact, validate the
+  original planning bundle from the implementation head through the new head,
+  then push and reuse the PR only after that bundle is valid. Do not weaken the
+  bookkeeping validator or replay the failed merge action.
 - Ownership skip is terminal for its attempt. Only explicit `resume
   --retry-consumer` after the owner clears creates a new checkout-validation
   attempt; it never mutates or discards the prior owner's work.
@@ -1286,6 +1305,11 @@ identity, order, concurrency, attempts, receipts, blockers, and next actions.
 - Ambiguous result or issued action on resume -> reconciliation; never repeat
   install, PR publication, review dispatch, or merge blindly.
 - Verified pack blocker -> stop starts and hold unsettled merges.
+- Recovery with the campaign release, an unreleased or non-current corrective
+  version, a nonterminal lane, a non-merge blocker, mismatched head/PR, or a
+  non-pack-blocker result -> exit `2` without changing campaign state.
+- Recovery selectors combined with ownership retry or issued-action
+  reconciliation selectors -> usage error before state mutation.
 
 ### 5. Good / Base / Bad Cases
 
@@ -1293,8 +1317,15 @@ identity, order, concurrency, attempts, receipts, blockers, and next actions.
   proves the PR/head, records the original receipt, and advances to review.
 - Base: preflight passes, sequential canaries settle, two wave lanes issue,
   ready PRs merge in manifest order, and the receipt report completes.
+- Base: an existing schema-version-1 campaign has no `recoveries` key and loads
+  as an empty recovery history without rewriting state.
+- Good: a corrective release is current, the exact terminal blocker matches,
+  and recovery creates publication attempt two while retaining every attempt-
+  one receipt and blocker.
 - Bad: a restarted prompt calls install again because it does not remember the
-  prior side effect, or records a review receipt for a successor head.
+  prior side effect, records a review receipt for a successor head without a
+  publication receipt, or deletes the invalid journal tail to make recovery
+  appear clean.
 
 ### 6. Tests Required
 
@@ -1304,9 +1335,23 @@ identity, order, concurrency, attempts, receipts, blockers, and next actions.
   blocker propagation, no-merge completion, and serialized merge order.
 - Persistence/recovery covers private atomic files, manifest drift, locks,
   issued action reconciliation, explicit ownership retry, and concise reports.
+- Corrective recovery covers legacy schema normalization, strict release and
+  terminal-blocker preconditions, mutually exclusive resume modes, idempotent
+  source actions, collision-free stage attempts, and multiple exact-head
+  publication epochs.
 - Skill/docs/parity tests prove the controller remains source-only, public
   adapters expose no campaign/state controls, rare recovery is conditionally
   loaded, and prompt text no longer owns the lane/timing state machines.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: install into a taskless consumer lane and hope finish-work can archive it
+Wrong: reset or amend an invalid journal commit, or replay the blocked merge
+Correct: create the lane task before install; for a legacy blocked lane, publish
+         an append-only planning task under an explicit corrective-release
+         transition, validate the bundle, and run review through merge again
+```
 
 Reference files:
 

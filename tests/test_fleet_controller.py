@@ -116,6 +116,25 @@ class FleetControllerTests(InstallTestCase):
         )
         return action
 
+    def block_lane_at_merge(self, controller, state):
+        self.pass_preflight(controller, state)
+        while state["lanes"][0]["stage"] != "merge":
+            self.pass_lane_action(controller, state)
+        action = controller.issue_next(state)[0]
+        controller.record_result(
+            state,
+            action_id=action["actionId"],
+            release="0.37.0",
+            consumer=action["consumer"],
+            result="review-finding",
+            reason_code="taskless-finish-work-invalid",
+            blocker="taskless-finish-work-invalid",
+            pack_blocker=True,
+            head=HEAD,
+            pr_number=17,
+        )
+        return action
+
     def run_cli(self, controller, *arguments):
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -686,6 +705,150 @@ class FleetControllerTests(InstallTestCase):
         ):
             controller.retry_consumer(parked, "canary-a")
 
+    def test_corrective_release_reopens_merge_pack_blocker_at_publication(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("wave-a",)
+        )
+        blocked_action = self.block_lane_at_merge(controller, state)
+        old_publication = next(
+            receipt
+            for receipt in state["lanes"][0]["receipts"]
+            if receipt["stage"] == "pr-publication"
+        )
+
+        recovery, changed = controller.recover_pack_blocker(
+            state,
+            consumer="wave-a",
+            corrective_release="0.38.0",
+            actual_release="0.38.0",
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(recovery["fromActionId"], blocked_action["actionId"])
+        self.assertEqual(recovery["fromHead"], HEAD)
+        self.assertEqual(recovery["toStage"], "pr-publication")
+        self.assertEqual(state["status"], "active")
+        lane = state["lanes"][0]
+        self.assertEqual(lane["stage"], "pr-publication")
+        self.assertEqual(lane["attempt"], 2)
+        self.assertIsNone(lane["result"])
+        self.assertFalse(lane["packBlocker"])
+        self.assertEqual(lane["receipts"][-1]["result"], "review-finding")
+        replay, replay_changed = controller.recover_pack_blocker(
+            state,
+            consumer="wave-a",
+            corrective_release="0.38.0",
+            actual_release="0.38.0",
+        )
+        self.assertFalse(replay_changed)
+        self.assertEqual(replay, recovery)
+
+        publication = controller.issue_next(state)[0]
+        self.assertEqual(publication["stage"], "pr-publication")
+        self.assertEqual(publication["attempt"], 2)
+        self.assertNotEqual(publication["actionId"], old_publication["actionId"])
+        controller.record_result(
+            state,
+            action_id=publication["actionId"],
+            release="0.37.0",
+            consumer="wave-a",
+            result="passed",
+            head=OTHER_HEAD,
+            pr_number=17,
+        )
+        review = controller.issue_next(state)[0]
+        self.assertEqual(review["stage"], "review")
+        self.assertEqual(review["attempt"], 2)
+        self.assertNotEqual(
+            review["actionId"],
+            next(
+                receipt["actionId"]
+                for receipt in lane["receipts"]
+                if receipt["stage"] == "review" and receipt["attempt"] == 1
+            ),
+        )
+        controller.record_result(
+            state,
+            action_id=review["actionId"],
+            release="0.37.0",
+            consumer="wave-a",
+            result="passed",
+            head=OTHER_HEAD,
+        )
+        controller.validate_state(state)
+        self.assertEqual(state["lanes"][0]["head"], OTHER_HEAD)
+        self.assertEqual(
+            controller.status_report(state)["recoveries"][0]["correctiveRelease"],
+            "0.38.0",
+        )
+
+    def test_corrective_recovery_rejects_wrong_release_and_lane_state(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, waiting = self.state(
+            controller, selected=("wave-a",)
+        )
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "must differ"
+        ):
+            controller.recover_pack_blocker(
+                waiting,
+                consumer="wave-a",
+                corrective_release="0.37.0",
+                actual_release="0.37.0",
+            )
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "current pack manifest"
+        ):
+            controller.recover_pack_blocker(
+                waiting,
+                consumer="wave-a",
+                corrective_release="0.38.0",
+                actual_release="0.39.0",
+            )
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "no blocker receipt"
+        ):
+            controller.recover_pack_blocker(
+                waiting,
+                consumer="wave-a",
+                corrective_release="0.38.0",
+                actual_release="0.38.0",
+            )
+
+        _root, _fleet, _manifest, ownership = self.state(
+            controller, selected=("wave-a",)
+        )
+        self.pass_preflight(controller, ownership)
+        action = controller.issue_next(ownership)[0]
+        controller.record_result(
+            ownership,
+            action_id=action["actionId"],
+            release="0.37.0",
+            consumer="wave-a",
+            result="ownership-skip",
+            reason_code="active-external-owner",
+        )
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "terminal merge-stage"
+        ):
+            controller.recover_pack_blocker(
+                ownership,
+                consumer="wave-a",
+                corrective_release="0.38.0",
+                actual_release="0.38.0",
+            )
+
+    def test_schema_one_campaign_without_recoveries_is_normalized(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(controller)
+        state.pop("recoveries")
+
+        normalized = controller._normalize_state(state)
+
+        self.assertEqual(normalized["recoveries"], [])
+        controller.validate_state(normalized)
+
     def test_manifest_drift_and_invalid_concurrency_fail_closed(self) -> None:
         controller = self.load_controller()
         _root, fleet, _manifest, state = self.state(controller)
@@ -982,6 +1145,67 @@ class FleetControllerTests(InstallTestCase):
             error, "error: filesystem operation failed: Permission denied\n"
         )
         self.assertNotIn("/private/state", error)
+
+    def test_cli_corrective_recovery_requires_matching_manifest_and_one_mode(self) -> None:
+        controller = self.load_controller()
+        root, _fleet, manifest, state = self.state(
+            controller, selected=("wave-a",)
+        )
+        self.block_lane_at_merge(controller, state)
+        state_home = root.parent / f"{root.name}-recovery-state"
+        store = controller.CampaignStore(root, "campaign-1", state_home)
+        with store.locked():
+            store.write(state)
+        common = (
+            "--repo",
+            str(root),
+            "--campaign",
+            "campaign-1",
+            "--state-home",
+            str(state_home),
+            "--json",
+        )
+
+        status, output, error = self.run_cli(
+            controller,
+            "resume",
+            *common,
+            "--recover-consumer",
+            "wave-a",
+            "--corrective-release",
+            "0.38.0",
+        )
+        self.assertEqual((status, output), (2, None))
+        self.assertIn("current pack manifest", error)
+
+        manifest.write_text(json.dumps({"version": "0.38.0"}), encoding="utf-8")
+        status, output, error = self.run_cli(
+            controller,
+            "resume",
+            *common,
+            "--recover-consumer",
+            "wave-a",
+            "--corrective-release",
+            "0.38.0",
+        )
+        self.assertEqual((status, error), (0, ""))
+        self.assertTrue(output["changed"])
+        self.assertEqual(output["recovery"]["toStage"], "pr-publication")
+        self.assertEqual(output["recoveries"], [output["recovery"]])
+
+        status, output, error = self.run_cli(
+            controller,
+            "resume",
+            *common,
+            "--recover-consumer",
+            "wave-a",
+            "--retry-consumer",
+            "wave-a",
+            "--corrective-release",
+            "0.38.0",
+        )
+        self.assertEqual((status, output), (2, None))
+        self.assertIn("only one recovery mode", error)
 
 
 if __name__ == "__main__":

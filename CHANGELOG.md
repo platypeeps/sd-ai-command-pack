@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.54.1 - 2026-07-26
+
+- Require fleet refresh lanes to establish a dedicated consumer Trellis task
+  before installation so deferred finish-work can produce canonical completion
+  evidence instead of a structurally invalid taskless journal.
+- Add an explicit corrective-release controller transition that preserves the
+  blocker receipt, records recovery evidence, republishes on a new exact-head
+  epoch, and avoids replaying the failed merge action.
+- Document an append-only recovery for already-published taskless refresh PRs
+  while keeping ordinary journal-only planning validation fail closed for
+  arbitrary implementation commits.
+
 ## 0.54.0 - 2026-07-25
 
 - Recover a canonical adjacent completion tail when review fixes follow task

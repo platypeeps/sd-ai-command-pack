@@ -242,6 +242,36 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("references/controller-recovery.md", fleet)
         self.assertIn("only when", fleet.casefold())
 
+    def test_fleet_refresh_prepares_task_lifecycle_and_append_only_recovery(self) -> None:
+        fleet = " ".join(self._skill_text("sd-fleet-refresh").split())
+        recovery = " ".join(
+            (
+                install.ROOT
+                / "templates/.agents/skills/sd-fleet-refresh/references/controller-recovery.md"
+            )
+            .read_text(encoding="utf-8")
+            .split()
+        )
+
+        for pin in (
+            "create and activate one dedicated lightweight Trellis task",
+            "immutable release identity",
+            "bind it to the refresh branch",
+            "dedicated consumer task artifacts",
+            "complete the dedicated task through `sd-finish-work`",
+        ):
+            self.assertIn(pin.casefold(), fleet.casefold())
+        for pin in (
+            "--recover-consumer <name>",
+            "--corrective-release <version>",
+            "task.py create --no-start",
+            "preserve the failed finish-work journal commit",
+            "never deletes the blocker receipt",
+            "or replays the prior merge action",
+            "do not widen ordinary journal-only recovery",
+        ):
+            self.assertIn(pin.casefold(), recovery.casefold())
+
     def test_fleet_refresh_records_internal_timing_without_public_controls(
         self,
     ) -> None:

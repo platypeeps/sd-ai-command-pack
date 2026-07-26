@@ -81,6 +81,39 @@ When the finding gate returns `pause-corrective-release`:
 6. Merge and tag through the source lifecycle, then resume the original fleet
    task from fresh preflight evidence. Do not create a duplicate rollout.
 
+For a terminal merge-stage pack blocker caused by missing consumer task
+evidence, use the released controller's explicit recovery transition only
+after the corrective source version is the current `manifest.json` version:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-controller.py resume \
+  --repo <absolute-source-root> --campaign <campaign-id> \
+  --recover-consumer <name> --corrective-release <version> --json
+```
+
+The transition is valid only for a terminal `review-finding` with
+`packBlocker: true` at `merge`, an exact PR/head, and a matching blocker
+receipt. It records the corrective release and returns the lane to a new
+`pr-publication` attempt. It never deletes the blocker receipt, changes the
+campaign target release, or replays the prior merge action.
+
+Execute the newly issued publication action append-only. Preserve the failed
+finish-work journal commit. Create one substantive planning task with
+`task.py create --no-start`, leave its lifecycle at `planning` with no branch,
+and commit only those task artifacts after the journal. Rerun the original
+`final-bundle --mode planning` command with the failed receipt's exact base and
+the new full head. Require `planning_bundle_valid`, retain that receipt, then
+push the new head and reuse the PR. Classification, remote review, CI,
+merge-eligibility, and housekeeping all run again. If the reviewed head stays
+unchanged, pass the retained receipt to housekeeping instead of recording
+another journal.
+
+Any different result/stage, missing or stale PR/head, unrelated dirty path,
+invalid task bundle, corrective-version mismatch, or second unresolved pack
+blocker remains paused. Do not widen ordinary journal-only recovery or rewrite
+consumer history to make it pass.
+
 An urgent independent security defect may ship first only when waiting would
 increase risk. Record the exception and keep the remaining corrective campaign
 open.
