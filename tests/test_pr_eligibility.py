@@ -142,7 +142,17 @@ class FixtureRunner:
                 self.remote_returncode,
                 f"{self.remote_head}\trefs/heads/feature/eligibility\n",
             )
-        if args[:1] == ("node",):
+        if (
+            len(args) == 12
+            and args[0] == "node"
+            and Path(args[1]).name == "sd-ai-command-pack-review-preflight.mjs"
+            and args[2] == "final-bundle"
+            and args[3] == "--mode"
+            and args[5] == "--base"
+            and args[7] == "--head"
+            and args[9] == "--repo"
+            and args[11] == "--json"
+        ):
             return eligibility.CommandResult(
                 self.finish_work_returncode,
                 json.dumps(self.finish_work_result),
@@ -234,6 +244,23 @@ class PrEligibilityTests(unittest.TestCase):
         commands = {call[:3] for call in runner.calls}
         self.assertNotIn(("gh", "pr", "merge"), commands)
         self.assertFalse(any(call[:2] == ("git", "push") for call in runner.calls))
+        self.assertEqual(
+            [call[2:] for call in runner.calls if call[:1] == ("node",)],
+            [
+                (
+                    "final-bundle",
+                    "--mode",
+                    "completion",
+                    "--base",
+                    HEAD,
+                    "--head",
+                    HEAD,
+                    "--repo",
+                    str(self.repo),
+                    "--json",
+                )
+            ],
+        )
         self.assertEqual(
             [call for call in runner.calls if call[-1:] == ("headRefOid",)],
             [

@@ -644,6 +644,47 @@ class BookkeepingValidatorTests(InstallTestCase):
         )
         self.assertEqual(payload["status"], "indeterminate")
 
+    def test_completion_successor_reports_unavailable_successor_diff(self) -> None:
+        root, _, bookkeeping_head = self.make_post_archive_successor_repo()
+        (root / "review-fix.txt").write_text("reviewed\n", encoding="utf-8")
+        self.run_git(root, "add", "review-fix.txt")
+        self.run_git(root, "commit", "-m", "fix review finding")
+        head = self.git_output(root, "rev-parse", "HEAD")
+        real_git = shutil.which("git")
+        self.assertIsNotNone(real_git)
+        stub_bin = root / ".test-diff-bin"
+        stub_bin.mkdir()
+        git_stub = stub_bin / "git"
+        git_stub.write_text(
+            "#!/bin/sh\n"
+            f"if [ \"$1\" = diff ] && [ \"$5\" = {bookkeeping_head} ] "
+            f"&& [ \"$6\" = {head} ]; then\n"
+            "  exit 73\n"
+            "fi\n"
+            f"exec {json.dumps(real_git)} \"$@\"\n",
+            encoding="utf-8",
+        )
+        git_stub.chmod(0o755)
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+            extra_env={"PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"},
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(
+            payload["reasonCodes"], ["completion_successor_history_unavailable"]
+        )
+        self.assertEqual(payload["status"], "indeterminate")
+
     def test_completion_successor_rejects_invalid_nearest_anchor(self) -> None:
         root, _, _ = self.make_post_archive_successor_repo(corrupt_archive=True)
         head = self.git_output(root, "rev-parse", "HEAD")

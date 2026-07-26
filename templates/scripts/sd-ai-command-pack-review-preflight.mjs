@@ -1117,10 +1117,19 @@ function evaluateCompletionSuccessorRange(anchorOid, headOid) {
     });
   }
 
-  const entries = bookkeepingChangedEntries(anchorOid, headOid, add);
-  const paths = entries === null
-    ? []
-    : [...new Set(entries.flatMap((entry) => [entry.oldPath, entry.path].filter(Boolean)))].sort();
+  const entries = bookkeepingChangedEntries(anchorOid, headOid, () => {});
+  if (entries === null) {
+    add(
+      'completion_successor_history_unavailable',
+      '',
+      'Git could not inspect changed paths in the completion-successor range',
+      'indeterminate',
+    );
+    return { status: 'indeterminate', evidence: {}, findings };
+  }
+  const paths = [...new Set(
+    entries.flatMap((entry) => [entry.oldPath, entry.path].filter(Boolean)),
+  )].sort();
   if (paths.length > MAX_BOOKKEEPING_CHANGED_PATHS) {
     add(
       'completion_successor_scope_oversized',
