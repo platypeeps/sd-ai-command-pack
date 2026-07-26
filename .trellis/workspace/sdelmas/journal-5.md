@@ -1382,3 +1382,47 @@ Added a fail-closed, bounded republication transition so fleet review fixes can 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 236: Complete v0.54.0 fleet rollout
+
+**Date**: 2026-07-26
+**Task**: Complete v0.54.0 fleet rollout
+**Branch**: `codex/roll-out-sd-ai-command-pack-0-54-0-fleet`
+
+### Summary
+
+Completed the controller-owned v0.54.0 fleet campaign, recorded six merged consumers, preserved one retry-exhausted lane and one ownership skip, and consolidated deferred static-analysis follow-up work.
+
+### Main Changes
+
+- Recorded exact controller-terminal results and immutable release evidence for all eight consumers.
+- Documented controller recoveries, append-only timing limitations, and preserved consumer follow-ups.
+- Expanded the existing static-analysis hygiene task for repeated PR 299 findings and retargeted it to main.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cc446cb` | docs(task): record repeated fleet review findings |
+| `05b2ea4` | docs(task): record fleet rollout completion |
+| `8aea461` | docs(task): link PR 259 |
+
+### Testing
+
+- [OK] Controller validate returned valid and status returned complete.
+- [OK] Typed sd-check passed all 8 rows with a clean state guard.
+- [OK] make full-check passed after refreshing the ignored Obsidian KB mirror.
+- [OK] GitHub CI passed on exact PR head 8aea461adb607fdd955430edc9934ed7565dd191; the only Copilot thread was resolved with lifecycle evidence.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Resume the preserved `rwbp-website` refresh after its backup-media blocker is repaired.
+- Rerun `mezmo_benchmark` after its unrelated active Trellis tasks release the checkout.
+- Implement `07-26-resolve-v0-54-0-static-analysis-hygiene-findings` in a later reviewed release.
+- Rotate and remove the embedded Anthropic credential from the local `prism` wrapper.

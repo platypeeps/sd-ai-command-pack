@@ -29,46 +29,46 @@
 
 ## Controller action loop
 
-- [ ] Repeatedly call controller `next`; validate and execute every returned
+- [x] Repeatedly call controller `next`; validate and execute every returned
       action once, then record one receipt before requesting more work.
-- [ ] For checkout validation, reject dirty/missing/divergent/live-owned
+- [x] For checkout validation, reject dirty/missing/divergent/live-owned
       checkouts without stash, reset, clean, clone, or overwrite.
-- [ ] Run preflight-issued install/audit commands, manifest preparation/check
+- [x] Run preflight-issued install/audit commands, manifest preparation/check
       commands, and each consumer's documented full local gate.
-- [ ] Commit only managed rollout output; classify exact base/head, push, and
+- [x] Commit only managed rollout output; classify exact base/head, push, and
       create or reuse one PR. Start reviewer and CI timing together.
-- [ ] Invoke `sd-review-pr` with the controller-bound fleet context and selected
+- [x] Invoke `sd-review-pr` with the controller-bound fleet context and selected
       integration-only or remote profile. Inspect all existing feedback.
-- [ ] Classify every verified finding; stop for pack blockers or capture
+- [x] Classify every verified finding; stop for pack blockers or capture
       deferred owners and follow-up tasks before continuing.
-- [ ] Settle exact-head checks through `sd-watch-pr`, record merge eligibility,
+- [x] Settle exact-head checks through `sd-watch-pr`, record merge eligibility,
       and allow only the controller's serialized merge action to invoke
       consumer housekeeping.
-- [ ] Verify post-merge version, install audit, clean default branch, deleted
+- [x] Verify post-merge version, install audit, clean default branch, deleted
       refresh branch, and pruned refs before recording the terminal result.
-- [ ] Respect canary order, post-canary concurrency two, AMC-last ordering, and
+- [x] Respect canary order, post-canary concurrency two, AMC-last ordering, and
       the controller's manifest-ordered merge serialization.
 
 ## Final validation and reporting
 
-- [ ] Run controller `validate` and `status` after all selected consumers are
+- [x] Run controller `validate` and `status` after all selected consumers are
       terminal.
-- [ ] Finish every timing consumer result and run `report --complete`.
-- [ ] Update this task with the campaign ID, immutable release/preflight
+- [x] Finish every timing consumer result and run `report --complete`.
+- [x] Update this task with the campaign ID, immutable release/preflight
       evidence, consumer result table, scheduling/retry/finding/timing summary,
       and every remaining follow-up.
-- [ ] Run `trellis-check`, required source bookkeeping validation, and
+- [x] Run `trellis-check`, required source bookkeeping validation, and
       `trellis-update-spec`; commit only task/session artifacts in the source
       repository, then finish work through the normal source lifecycle.
 
-## Corrective release hold
+## Corrective release resolution
 
-- Controller status: `blocked` after the `rwbp-coordinator` merge action.
-- Blocking owner: `fleet-0-54-0-taskless-finish-work` (`correctness`, pack blocker).
-- Evidence: PR #177 passed install audit, local checks, review, all thread settlement, CI, and merge eligibility; its deferred taskless finish-work receipt failed with `planning_recovery_commit_scope_invalid` before push or merge.
-- Preserved consumer state: PR head `7a8711bce6e591cf929cc9839e45797c6867dbd7`; local append-only journal head `44f74ab1dbc19bb719fa46fc8d824340645f4c45` remains unpushed and unmodified.
-- Corrective task: `07-26-support-taskless-fleet-refresh-finish-work`.
-- Remaining seven lanes have not started and are held by the controller.
+- Corrective task `07-26-support-taskless-fleet-refresh-finish-work` shipped in
+  release `0.54.1` through PR #257 and recovered PR #177.
+- Corrective task `07-26-support-fleet-pr-head-republication` shipped through
+  PR #258 and recovered the later PR #299 head-advance lifecycle gap.
+- Controller status is `complete`; validation is `valid`; all eight lanes are
+  terminal.
 
 ## Validation commands
 
