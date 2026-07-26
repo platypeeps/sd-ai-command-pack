@@ -11,7 +11,8 @@ Implementation remains gated on stable contracts and normal task selection.
 
 `sd-github-review` remains authoritative for:
 
-- `.github/sd-review.yml` and compiled-manifest schemas;
+- consumer config path `<consumer-repository>/.github/sd-review.yml` and
+  compiled-manifest schemas;
 - deterministic source/catalog compilation and canonical digests;
 - installer pending/active promotion and drift contracts;
 - runtime plan, receipt, status, and recovery-workflow contracts; and

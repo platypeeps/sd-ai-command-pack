@@ -9,9 +9,10 @@ operator layer over repository-owned configuration and compiler contracts.
 
 ## Requirements
 
-- R1: `init` scaffolds a complete explicit `.github/sd-review.yml` from a
-  pinned versioned preset. It creates no runtime imports, inheritance, hidden
-  profiles, or contextual defaults. Managed presets materialize explicit
+- R1: `init` scaffolds a complete explicit consumer configuration at
+  `<consumer-repository>/.github/sd-review.yml` from a pinned versioned preset.
+  It creates no runtime imports, inheritance, hidden profiles, or contextual
+  defaults. Managed presets materialize explicit
   `budgetExhaustion.<lane>.merge=block|allow`; fresh presets visibly use
   `block` unless the operator supplies a reviewed choice.
   The requested `standalone` or `managed` mode is explicit; a standalone preset
