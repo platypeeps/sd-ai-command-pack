@@ -17,7 +17,6 @@ TOOL_VERSION = "1.0.0"
 MAX_INPUT_BYTES = 2 * 1024 * 1024
 MAX_MESSAGE_LENGTH = 1000
 CODE_RE = re.compile(r"[a-z][a-z0-9_]{0,63}")
-COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 INDETERMINATE_ANOMALY_CODES = frozenset(
     {
@@ -208,7 +207,9 @@ def build_result(args: argparse.Namespace) -> dict[str, Any]:
             "dryRun": args.dry_run,
             "keepRemoteBranch": args.keep_remote_branch,
             "dependencyPullRequestNumber": args.dependency_pr_number,
-            "finishWorkHead": args.finish_work_head,
+            "finishWorkReceiptProvided": bool(
+                isinstance(finish_work, Mapping) and finish_work.get("provided")
+            ),
         },
         "identity": {
             "startBranch": args.start_branch,
@@ -251,7 +252,6 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--keep-remote-branch", action="store_true")
     parser.add_argument("--dependency-pr-number", type=int)
-    parser.add_argument("--finish-work-head")
     parser.add_argument("--action", action="append", nargs=2, default=[])
     parser.add_argument("--anomaly", action="append", nargs=2, default=[])
     args = parser.parse_args(argv)
@@ -259,10 +259,6 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         parser.error("--status-exit must be between 0 and 255")
     if args.dependency_pr_number is not None and args.dependency_pr_number <= 0:
         parser.error("--dependency-pr-number must be positive")
-    if args.finish_work_head is not None and not COMMIT_RE.fullmatch(
-        args.finish_work_head
-    ):
-        parser.error("--finish-work-head must be a full lowercase commit OID")
     return args
 
 

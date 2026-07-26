@@ -26,6 +26,36 @@ HEAD = "1" * 40
 OTHER_HEAD = "2" * 40
 
 
+def finish_work_receipt(
+    *,
+    head: str = HEAD,
+    branch: str = "feature/eligibility",
+) -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "kind": "trellis-bookkeeping-validation",
+        "status": "valid",
+        "command": "final-bundle",
+        "mode": "completion",
+        "reasonCodes": ["completion_bundle_valid"],
+        "evidence": {
+            "baseOid": head,
+            "headOid": head,
+            "taskDirectories": [
+                ".trellis/tasks/archive/2026-07/07-25-eligibility"
+            ],
+            "changedPaths": [],
+            "repository": {
+                "branch": branch,
+                "lineageDigest": f"sha256:{'a' * 64}",
+            },
+            "journalSessions": [],
+            "completionSubtype": "post-archive-review-successor",
+        },
+        "findings": [],
+    }
+
+
 def check_run(
     conclusion: str | None,
     *,
@@ -75,6 +105,8 @@ class FixtureRunner:
         self.git_status_returncode = 0
         self.remote_returncode = 0
         self.pr_failure = False
+        self.finish_work_result = finish_work_receipt()
+        self.finish_work_returncode = 0
         self.thread_failure = False
         self.thread_pages = [thread_page([])]
         self.pr_payload: dict[str, Any] = {
@@ -109,6 +141,21 @@ class FixtureRunner:
             return eligibility.CommandResult(
                 self.remote_returncode,
                 f"{self.remote_head}\trefs/heads/feature/eligibility\n",
+            )
+        if (
+            len(args) == 12
+            and args[0] == "node"
+            and Path(args[1]).name == "sd-ai-command-pack-review-preflight.mjs"
+            and args[2] == "final-bundle"
+            and args[3] == "--mode"
+            and args[5] == "--base"
+            and args[7] == "--head"
+            and args[9] == "--repo"
+            and args[11] == "--json"
+        ):
+            return eligibility.CommandResult(
+                self.finish_work_returncode,
+                json.dumps(self.finish_work_result),
             )
         if args[:3] == ("gh", "pr", "view"):
             if self.pr_failure:
@@ -146,7 +193,7 @@ class PrEligibilityTests(unittest.TestCase):
             "remote": "origin",
             "defaultBranch": "main",
             "finishWorkRequired": True,
-            "finishWorkHead": HEAD,
+            "finishWorkReceipt": finish_work_receipt(),
             "githubRepository": "example/repo",
         }
         request.update(updates)
@@ -162,7 +209,7 @@ class PrEligibilityTests(unittest.TestCase):
             "remote": "origin",
             "defaultBranch": "main",
             "finishWorkRequired": False,
-            "finishWorkHead": None,
+            "finishWorkReceipt": None,
             "githubRepository": "example/repo",
         }
         request.update(updates)
@@ -187,11 +234,33 @@ class PrEligibilityTests(unittest.TestCase):
         self.assertEqual(result["pullRequest"]["headOid"], HEAD)
         self.assertEqual(result["pullRequest"]["finalHeadOid"], HEAD)
         self.assertTrue(result["finishWork"]["matchesCurrentHead"])
+        self.assertTrue(result["finishWork"]["verified"])
+        self.assertEqual(
+            result["finishWork"]["completionSubtype"],
+            "post-archive-review-successor",
+        )
         self.assertEqual(result["checks"]["successfulCount"], 1)
         self.assertEqual(result["reviewThreads"]["unresolvedCount"], 0)
         commands = {call[:3] for call in runner.calls}
         self.assertNotIn(("gh", "pr", "merge"), commands)
         self.assertFalse(any(call[:2] == ("git", "push") for call in runner.calls))
+        self.assertEqual(
+            [call[2:] for call in runner.calls if call[:1] == ("node",)],
+            [
+                (
+                    "final-bundle",
+                    "--mode",
+                    "completion",
+                    "--base",
+                    HEAD,
+                    "--head",
+                    HEAD,
+                    "--repo",
+                    str(self.repo),
+                    "--json",
+                )
+            ],
+        )
         self.assertEqual(
             [call for call in runner.calls if call[-1:] == ("headRefOid",)],
             [
@@ -238,15 +307,71 @@ class PrEligibilityTests(unittest.TestCase):
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["reasonCodes"], ["checks_blocking"])
 
-    def test_missing_and_stale_finish_work_are_blocked(self) -> None:
+    def test_missing_and_stale_finish_work_receipts_are_blocked(self) -> None:
         missing = self.evaluate(
-            self.local_request(finishWorkHead=None), FixtureRunner(self.repo)
+            self.local_request(finishWorkReceipt=None), FixtureRunner(self.repo)
         )
         stale = self.evaluate(
-            self.local_request(finishWorkHead=OTHER_HEAD), FixtureRunner(self.repo)
+            self.local_request(
+                finishWorkReceipt=finish_work_receipt(head=OTHER_HEAD)
+            ),
+            FixtureRunner(self.repo),
         )
         self.assertEqual(missing["reasonCodes"], ["finish_work_missing"])
         self.assertEqual(stale["reasonCodes"], ["finish_work_stale"])
+
+    def test_forged_or_unavailable_finish_work_receipt_fails_closed(self) -> None:
+        mismatch_runner = FixtureRunner(self.repo)
+        mismatch_runner.finish_work_result = finish_work_receipt()
+        mismatch_runner.finish_work_result["evidence"]["taskDirectories"] = []
+        mismatch = self.evaluate(self.local_request(), mismatch_runner)
+        self.assertEqual(mismatch["status"], "blocked")
+        self.assertEqual(
+            mismatch["reasonCodes"], ["finish_work_receipt_mismatch"]
+        )
+        self.assertFalse(
+            any(call[:1] == ("gh",) for call in mismatch_runner.calls)
+        )
+
+        invalid_runner = FixtureRunner(self.repo)
+        invalid_runner.finish_work_returncode = 1
+        invalid_runner.finish_work_result = {
+            **finish_work_receipt(),
+            "status": "invalid",
+            "reasonCodes": ["completion_successor_scope_invalid"],
+        }
+        invalid = self.evaluate(self.local_request(), invalid_runner)
+        self.assertEqual(invalid["status"], "blocked")
+        self.assertEqual(invalid["reasonCodes"], ["finish_work_invalid"])
+        self.assertFalse(
+            any(call[:1] == ("gh",) for call in invalid_runner.calls)
+        )
+
+        unavailable_runner = FixtureRunner(self.repo)
+        unavailable_runner.finish_work_returncode = 127
+        unavailable_runner.finish_work_result = {}
+        unavailable = self.evaluate(self.local_request(), unavailable_runner)
+        self.assertEqual(unavailable["status"], "indeterminate")
+        self.assertEqual(unavailable["reasonCodes"], ["finish_work_unavailable"])
+        self.assertFalse(
+            any(call[:1] == ("gh",) for call in unavailable_runner.calls)
+        )
+
+        indeterminate_runner = FixtureRunner(self.repo)
+        indeterminate_runner.finish_work_returncode = 1
+        indeterminate_runner.finish_work_result = {
+            **finish_work_receipt(),
+            "status": "indeterminate",
+            "reasonCodes": ["completion_successor_history_unavailable"],
+        }
+        indeterminate = self.evaluate(self.local_request(), indeterminate_runner)
+        self.assertEqual(indeterminate["status"], "indeterminate")
+        self.assertEqual(
+            indeterminate["reasonCodes"], ["finish_work_unavailable"]
+        )
+        self.assertFalse(
+            any(call[:1] == ("gh",) for call in indeterminate_runner.calls)
+        )
 
     def test_head_change_overrides_other_evidence_as_retryable(self) -> None:
         runner = FixtureRunner(self.repo)
@@ -341,7 +466,9 @@ class PrEligibilityTests(unittest.TestCase):
     def test_mode_specific_finish_work_policy_is_strict(self) -> None:
         with self.assertRaisesRegex(eligibility.EligibilityInputError, "must be true"):
             eligibility.validate_request(
-                self.local_request(finishWorkRequired=False, finishWorkHead=None)
+                self.local_request(
+                    finishWorkRequired=False, finishWorkReceipt=None
+                )
             )
         with self.assertRaisesRegex(eligibility.EligibilityInputError, "must be false"):
             eligibility.validate_request(
@@ -381,9 +508,9 @@ class PrEligibilityTests(unittest.TestCase):
             (self.dependency_request(pullRequestNumber=True), "positive integer"),
             (self.local_request(remote="--upload-pack=x"), "must not start"),
             (self.local_request(finishWorkRequired="yes"), "must be a boolean"),
-            (self.local_request(finishWorkHead="ABC"), "full lowercase"),
+            (self.local_request(finishWorkReceipt="ABC"), "JSON object"),
             (
-                self.dependency_request(finishWorkHead=HEAD),
+                self.dependency_request(finishWorkReceipt=finish_work_receipt()),
                 "must be null when finishWorkRequired is false",
             ),
             (self.local_request(githubRepository="not-a-slug"), "owner/repo"),
@@ -414,6 +541,79 @@ class PrEligibilityTests(unittest.TestCase):
         link.symlink_to(request_path)
         with self.assertRaisesRegex(eligibility.EligibilityInputError, "regular file"):
             eligibility.load_request(link)
+
+    def test_finish_work_receipt_loader_is_strict_and_regular_file_only(self) -> None:
+        receipt_path = self.repo / "finish-work.json"
+        receipt_path.write_text(json.dumps(finish_work_receipt()), encoding="utf-8")
+        self.assertEqual(
+            eligibility.load_finish_work_receipt(receipt_path)["status"], "valid"
+        )
+
+        eligibility_schema = eligibility.SCHEMA_VERSION
+        eligibility.SCHEMA_VERSION = eligibility_schema + 1
+        try:
+            self.assertEqual(
+                eligibility.load_finish_work_receipt(receipt_path)["schemaVersion"],
+                eligibility.FINISH_WORK_RECEIPT_SCHEMA_VERSION,
+            )
+        finally:
+            eligibility.SCHEMA_VERSION = eligibility_schema
+
+        malformed = finish_work_receipt()
+        malformed["schemaVersion"] = eligibility.FINISH_WORK_RECEIPT_SCHEMA_VERSION + 1
+        receipt_path.write_text(json.dumps(malformed), encoding="utf-8")
+        with self.assertRaisesRegex(
+            eligibility.EligibilityInputError,
+            f"schemaVersion must be {eligibility.FINISH_WORK_RECEIPT_SCHEMA_VERSION}",
+        ):
+            eligibility.load_finish_work_receipt(receipt_path)
+
+        malformed = finish_work_receipt()
+        malformed["evidence"]["repository"]["lineageDigest"] = str(self.repo)
+        receipt_path.write_text(json.dumps(malformed), encoding="utf-8")
+        with self.assertRaisesRegex(eligibility.EligibilityInputError, "lineageDigest"):
+            eligibility.load_finish_work_receipt(receipt_path)
+
+        malformed = finish_work_receipt()
+        malformed["evidence"]["completionSubtype"] = 7
+        receipt_path.write_text(json.dumps(malformed), encoding="utf-8")
+        with self.assertRaisesRegex(
+            eligibility.EligibilityInputError, "completionSubtype.*non-empty string"
+        ):
+            eligibility.load_finish_work_receipt(receipt_path)
+
+        malformed = finish_work_receipt()
+        malformed["evidence"]["planningSubtype"] = "journal-only-recovery"
+        receipt_path.write_text(json.dumps(malformed), encoding="utf-8")
+        with self.assertRaisesRegex(
+            eligibility.EligibilityInputError,
+            "planningSubtype must be null in completion mode",
+        ):
+            eligibility.load_finish_work_receipt(receipt_path)
+
+        planning = finish_work_receipt()
+        planning["mode"] = "planning"
+        planning["reasonCodes"] = ["planning_bundle_valid"]
+        planning["evidence"].pop("completionSubtype")
+        planning["evidence"]["planningSubtype"] = "journal-only-recovery"
+        receipt_path.write_text(json.dumps(planning), encoding="utf-8")
+        self.assertEqual(
+            eligibility.load_finish_work_receipt(receipt_path)["mode"], "planning"
+        )
+
+        planning["evidence"]["completionSubtype"] = "post-archive-review-successor"
+        receipt_path.write_text(json.dumps(planning), encoding="utf-8")
+        with self.assertRaisesRegex(
+            eligibility.EligibilityInputError,
+            "completionSubtype must be null in planning mode",
+        ):
+            eligibility.load_finish_work_receipt(receipt_path)
+
+        receipt_path.write_text(json.dumps(finish_work_receipt()), encoding="utf-8")
+        link = self.repo / "finish-work-link.json"
+        link.symlink_to(receipt_path)
+        with self.assertRaisesRegex(eligibility.EligibilityInputError, "regular file"):
+            eligibility.load_finish_work_receipt(link)
 
     def test_parse_helpers_fail_closed_and_classify_status_contexts(self) -> None:
         with self.assertRaisesRegex(eligibility.EligibilityInputError, "unavailable"):

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.54.0 - 2026-07-25
+
+- Recover a canonical adjacent completion tail when review fixes follow task
+  archival, proving a bounded linear successor without another journal or
+  bookkeeping-only commit.
+- Replace the head-only housekeeping attestation with the exact retained
+  finish-work JSON receipt and independently recompute it inside eligibility
+  before any merge mutation.
+- Keep the public finalization modes at `completion|planning`, expose the
+  internal `post-archive-review-successor` subtype, and fail closed on stale,
+  forged, nonlinear, invalid-anchor, or bookkeeping-mutating successor evidence.
+
 ## 0.53.0 - 2026-07-25
 
 - Let planning finish-work automatically validate a journal-only successor

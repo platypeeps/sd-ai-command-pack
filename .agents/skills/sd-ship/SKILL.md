@@ -122,13 +122,14 @@ before Stage 1.
 5. Stage 4 — `sd-housekeeping`: invoke housekeeping exactly once. Its gate
    runs finish-work, pushes any resulting task/journal commits and waits for
    their checks, and reuses finish-work's retained schema-version-1
-   bookkeeping result bound to that exact final head without rerunning the
-   validator. It then invokes the housekeeping script with
-   `--finish-work-head "$(git rev-parse HEAD)"`. That exact-head handoff allows
-   the executable gate to own the one post-finish Obsidian KB refresh for
+   bookkeeping receipt bound to that exact final head. It then invokes the
+   housekeeping script with `--finish-work-receipt "$FINISH_WORK_RECEIPT"`;
+   eligibility independently recomputes the same validator result before
+   merge. That exact-head proof lets the executable gate own the one
+   post-finish Obsidian KB refresh for
    repositories that already have a KB, perform the merge, and report the
    post-merge state; housekeeping remains its only owner and `sd-ship` relays
-   that outcome. Never pass the handoff flag when finish-work blocked or its
+   that outcome. Never pass the receipt when finish-work blocked or its
    commits are not pushed and green.
    Under the trusted `sd-work-backlog` context, convert that report into the
    compact nested result below and return control to the parent controller.

@@ -1220,3 +1220,85 @@ Implemented and validated fail-closed recovery for journal-only planning finaliz
 ### Next Steps
 
 - None - task complete
+
+
+## Session 232: Support post-archive review finalization
+
+**Date**: 2026-07-25
+**Task**: Support post-archive review finalization
+**Branch**: `codex/support-post-archive-review-finalization`
+
+### Summary
+
+Implemented truthful exact-head completion successor receipts for post-archive review remediation, migrated housekeeping eligibility away from caller head attestations, and validated the 0.54.0 payload across the fleet.
+
+### Main Changes
+
+- Added bounded canonical post-archive completion successor validation and private exact-head receipt handoff.
+- Integrated receipt verification through finish-work, review, eligibility, housekeeping, status output, and synchronized generated surfaces.
+- Aligned the sd-github-review consumer test through merged PR #25 and regenerated the 0.54.0 fleet candidate ledger.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `02128a9739d6186a45808897c0f9e2227fe8d468` | feat: support post-archive review finalization |
+
+### Testing
+
+- [OK] make check
+- [OK] sd-check: 8/8 rows passed with unchanged state guard
+- [OK] fleet candidate validation: 8/8 consumers passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 233: Recover PR 255 and harden post-archive finalization
+
+**Date**: 2026-07-26
+**Task**: Recover PR 255 and harden post-archive finalization
+**Branch**: `codex/support-post-archive-review-finalization`
+
+### Summary
+
+Reconciled the supported main lineage, recovered the unreopenable PR as #256, hardened exact-head finish-work receipts through five Copilot review rounds, and completed review-clean validation.
+
+### Main Changes
+
+- Recovered PR #255 as PR #256 on the supported main branch without changing upstream Trellis.
+- Added strict, portable, independently versioned completion-successor receipts and fail-closed eligibility replay.
+- Addressed all five Copilot findings and resolved every review thread on the exact reviewed head.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d6d7a12` | chore(task): plan PR 255 recovery |
+| `dd4debe` | chore: reconcile rebased validation evidence |
+| `ab82fde` | fix: validate finish-work receipt subtypes |
+| `1603947` | fix: make finish-work receipts checkout portable |
+| `49aabeb` | fix: separate receipt schema version |
+| `aafcd5d` | fix: fail closed on successor diff errors |
+
+### Testing
+
+- [OK] Focused bookkeeping, eligibility, housekeeping, and result suite: 105 tests passed.
+- [OK] make check passed on exact work head aafcd5de4234cd6a87db7df720474ab205a9f4e1.
+- [OK] Fleet candidate validation passed for all 8 consumers.
+- [OK] GitHub CI passed on PR #256 and the settled exact-head thread fetch found no unresolved threads.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

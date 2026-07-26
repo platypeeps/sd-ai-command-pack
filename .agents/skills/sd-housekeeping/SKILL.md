@@ -27,11 +27,13 @@ run:
 
 ```bash
 bash scripts/sd-ai-command-pack-housekeeping.sh \
-  --finish-work-head "$(git rev-parse HEAD)" --json
+  --finish-work-receipt "$FINISH_WORK_RECEIPT" --json
 ```
 
-`--finish-work-head <oid>` is an exact-head attestation, never a shortcut. The
-human default without `--json` remains supported for direct operator use.
+`--finish-work-receipt <path>` supplies the exact retained validator JSON; the
+eligibility evaluator reruns the canonical validator and requires an exact
+match before merge. The human default without `--json` remains supported for
+direct operator use.
 
 ## Task List
 
@@ -40,8 +42,8 @@ human default without `--json` remains supported for direct operator use.
    execute the `sd-finish-work` flow. Stop on ambiguous dirty work. Require its
    retained schema-version-1 bookkeeping result to be valid and bound to the
    current full HEAD, then push every resulting commit once before
-   housekeeping. Reuse that exact result; do not rerun or reinterpret the
-   validator in housekeeping.
+   housekeeping. Pass its private receipt file unchanged; housekeeping's
+   eligibility evaluator independently recomputes and compares the proof.
 3. Refresh `.obsidian-kb` once before fetch or merge through the installed KB
    helper. An absent `.obsidian-kb` is
    created; valid directory symlinks are preserved. Invalid or occupied paths
@@ -146,7 +148,8 @@ there is genuinely no work, write
 - `--json`: one schema-version-1 result on stdout; progress goes to stderr.
 - `--dry-run`: preview mutating Git operations without executing them.
 - `--no-auto-merge`: skip open-PR merge and perform cleanup only.
-- `--finish-work-head <oid>`: attest finish-work for the exact pushed head.
+- `--finish-work-receipt <path>`: supply retained finish-work JSON for
+  independent exact-head verification.
 - `--dependency-pr <number>`: internal classified dependency-PR handoff from a
   clean default branch; finish-work is explicitly not applicable.
 - `--merge-strategy <merge|squash|rebase>`: select merge strategy.
