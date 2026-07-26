@@ -273,6 +273,7 @@ function defaultConfig() {
     copiedTemplateExtraPaths: [],
     allowedLinuxHomeUsers: [],
     reviewRiskCategorySignals: {},
+    copilotReviewFileLimit: 300,
     diffSizeWarningLines: 20000,
     largeFileWarningLines: 5000,
     sourceReviewWarningLines: 1000,
@@ -316,6 +317,14 @@ function loadConfig(root, explicitPath) {
   for (const key of ['diffSizeWarningLines', 'largeFileWarningLines', 'sourceReviewWarningLines', 'untrackedFileReadLimitBytes']) {
     if (Number.isFinite(raw[key])) {
       merged[key] = raw[key];
+    }
+  }
+
+  if (raw.copilotReviewFileLimit !== undefined) {
+    if (Number.isInteger(raw.copilotReviewFileLimit) && raw.copilotReviewFileLimit > 0) {
+      merged.copilotReviewFileLimit = raw.copilotReviewFileLimit;
+    } else {
+      fail(`${configPath} copilotReviewFileLimit must be a positive integer.`);
     }
   }
 
@@ -2483,6 +2492,19 @@ function checkDiffSize() {
   }
 
   const changedLines = diff.files.reduce((total, file) => total + file.added + file.deleted, 0);
+
+  if (diff.files.length > config.copilotReviewFileLimit) {
+    warn(
+      `${diff.label} changes ${diff.files.length} files, above GitHub Copilot's ` +
+        `${config.copilotReviewFileLimit}-file review limit; Copilot will not review this diff. ` +
+        'Split the change before requesting remote review.',
+    );
+  } else {
+    pass(
+      `${diff.label} changes ${diff.files.length} file(s), at or below GitHub Copilot's ` +
+        `${config.copilotReviewFileLimit}-file review limit.`,
+    );
+  }
 
   if (changedLines > config.diffSizeWarningLines) {
     warn(`${diff.label} changes ${changedLines} lines; Copilot may skip review above roughly ${config.diffSizeWarningLines} changed lines.`);

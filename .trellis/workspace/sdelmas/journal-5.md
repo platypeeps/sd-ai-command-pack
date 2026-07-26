@@ -1097,3 +1097,41 @@ Added one exact-scope local and routed-remote review lifecycle, strict router re
 ### Next Steps
 
 - None - task complete
+
+
+## Session 229: Warn on Copilot review file cap
+
+**Date**: 2026-07-25
+**Task**: Warn on Copilot review file cap
+**Branch**: `codex/warn-copilot-review-file-cap`
+
+### Summary
+
+Added a configurable local preflight warning for GitHub Copilot's 300-file pull-request review limit and synchronized the release surfaces.
+
+### Main Changes
+
+- Added copilotReviewFileLimit with a default of 300 and positive-integer validation.
+- Warned locally when the selected review diff exceeds the configured Copilot file limit without making a GitHub request.
+- Synchronized templates, root mirrors, documentation, manifest, provenance, release ledger, and consumer candidate validation for 0.52.1.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5b413f2` | fix: warn on Copilot review file cap |
+
+### Testing
+
+- [OK] Focused 300/301 boundary, override, and invalid-configuration tests
+- [OK] make check
+- [OK] 8-consumer fleet candidate validation
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

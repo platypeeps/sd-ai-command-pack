@@ -423,6 +423,11 @@ that exercise the generic JavaScript review preflight.
   tree and add untracked regular files. The authored-source threshold excludes
   installed pack/Trellis mirrors, task/workspace records, and known generated
   reports; canonical `templates/**` sources remain included.
+- The same selected diff compares its complete file count with the positive
+  integer `copilotReviewFileLimit`, which defaults to `300`. Equality passes;
+  a greater count warns that GitHub Copilot will not review the diff and tells
+  the author to split it before requesting remote review. This check remains
+  local and deterministic and never queries GitHub.
 - Changed production code that adds structured-input/strict-type, subprocess,
   environment/global-state, path/filesystem, normalization/canonical-evidence,
   or diagnostic/redaction behavior emits one advisory with stable category IDs
@@ -515,6 +520,9 @@ that exercise the generic JavaScript review preflight.
   warning just like a staged or branch diff would.
 - Malformed `.sd-ai-command-pack/review-preflight.json` -> fail the preflight
   without wiping the failure during result-buffer reset.
+- Missing `copilotReviewFileLimit` -> use `300`; a positive integer override ->
+  apply that boundary; zero, negative, fractional, string, or other invalid
+  values -> fail configuration validation without weakening the default check.
 - Older Trellis journal session differs from the review base -> fail with the
   session number and direct the author to restore history and edit the intended
   current session by heading.
@@ -566,6 +574,8 @@ that exercise the generic JavaScript review preflight.
   the total-size warning but exclude them from the authored-source threshold.
 - Two changed task directories -> warn to confirm one reviewable outcome or
   split the work.
+- Exactly 300 changed files at the default boundary -> pass; 301 changed files
+  -> warn with both counts, the Copilot consequence, and split guidance.
 - A live changed PRD references a missing local path -> fail; the same
   historical reference in an archived task PRD -> remain accepted after that
   path is deleted.
@@ -630,6 +640,8 @@ that exercise the generic JavaScript review preflight.
   production-source exclusions, workflow YAML, authored-source exclusions,
   and multi-task directory extraction, plus a real Git fixture covering all
   three advisory types.
+- Real-Git file-count coverage at 300 and 301 files, a positive configured
+  override, and invalid zero, negative, fractional, and string values.
 - Positive CLI/environment/file split cases and a negative routine string
   split case, exercised through both the exported helper and executable
   preflight path.
@@ -648,6 +660,9 @@ Correct: realpath(import.meta.url path) === realpath(process.argv[1])
 
 Wrong: currentChangedPaths returns the first non-empty diff source
 Correct: currentChangedPaths unions staged, branch, working-tree, and untracked paths
+
+Wrong: wait for Copilot to reject an already-published 301-file pull request
+Correct: warn locally from the selected diff before requesting remote review
 
 Wrong: replace the first repeated fallback sentence in a whole journal file
 Correct: edit content inside the explicit current `## Session <n>:` block

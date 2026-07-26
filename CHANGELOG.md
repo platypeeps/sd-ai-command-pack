@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.52.1 - 2026-07-25
+
+- Warn deterministically before remote review when the selected diff exceeds
+  GitHub Copilot's configurable 300-file review limit.
+
 ## 0.52.0 - 2026-07-25
 
 - Add `sd-review` as the unified exact-scope review lifecycle for changes,

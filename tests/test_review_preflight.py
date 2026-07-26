@@ -1149,6 +1149,87 @@ assert.deepEqual(
             result.stdout,
         )
 
+    def test_review_preflight_warns_above_copilot_file_limit(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        for count in (300, 301):
+            with self.subTest(count=count):
+                root = self.make_repo()
+                self.assertEqual(self.run_install(root).returncode, 0)
+                self.run_git(root, "config", "user.email", "test@example.com")
+                self.run_git(root, "config", "user.name", "Test User")
+                self.run_git(root, "add", "-A")
+                self.run_git(root, "commit", "-m", "baseline")
+
+                fixture_dir = root / "fixtures/copilot-file-count"
+                fixture_dir.mkdir(parents=True)
+                for index in range(count):
+                    (fixture_dir / f"file-{index:03d}.dat").write_text(
+                        "fixture\n", encoding="utf-8"
+                    )
+
+                result = self.run_review_preflight(node, root)
+
+                self.assertEqual(result.returncode, 0, result.stdout)
+                if count == 300:
+                    self.assertIn(
+                        "changes 300 file(s), at or below GitHub Copilot's "
+                        "300-file review limit",
+                        result.stdout,
+                    )
+                    self.assertNotIn("Copilot will not review this diff", result.stdout)
+                else:
+                    self.assertIn(
+                        "changes 301 files, above GitHub Copilot's 300-file "
+                        "review limit; Copilot will not review this diff",
+                        result.stdout,
+                    )
+                    self.assertIn(
+                        "Split the change before requesting remote review",
+                        result.stdout,
+                    )
+
+    def test_review_preflight_validates_configured_copilot_file_limit(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        config = root / ".sd-ai-command-pack/review-preflight.json"
+        config.write_text(
+            json.dumps({"copilotReviewFileLimit": 1}), encoding="utf-8"
+        )
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+        for name in ("one.dat", "two.dat"):
+            (root / name).write_text("fixture\n", encoding="utf-8")
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "changes 2 files, above GitHub Copilot's 1-file review limit",
+            result.stdout,
+        )
+
+        for invalid in (0, -1, 1.5, "300"):
+            with self.subTest(invalid=invalid):
+                config.write_text(
+                    json.dumps({"copilotReviewFileLimit": invalid}),
+                    encoding="utf-8",
+                )
+                invalid_result = self.run_review_preflight(node, root)
+                self.assertEqual(invalid_result.returncode, 1, invalid_result.stdout)
+                self.assertIn(
+                    "copilotReviewFileLimit must be a positive integer",
+                    invalid_result.stdout,
+                )
+
     def test_review_preflight_bounds_large_untracked_code_risk_scan(self) -> None:
         node = shutil.which("node")
         if node is None:
