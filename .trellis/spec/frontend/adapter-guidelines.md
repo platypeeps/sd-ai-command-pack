@@ -1687,8 +1687,9 @@ modify Trellis' built-in `trellis-start`, `trellis-continue`,
 `trellis-finish-work`, or `trellis-update-spec` skills in `templates/`. Each
 shared wrapper should locate the matching Trellis-provided skill in the target
 repo and use it as the primary workflow. Any pack-owned extension must be
-explicit and tested; `sd-finish-work` currently replaces only the journal
-write step with the safe pack recorder.
+explicit and tested; `sd-finish-work` replaces the journal write step with the
+safe pack recorder and owns the pack's pre-archive/final-bundle validation
+around the delegated lifecycle.
 
 ## Scenario: Wrapper-preserving lifecycle chaining
 
@@ -1701,7 +1702,9 @@ write step with the safe pack recorder.
 
 - Non-deferred `sd-review-pr` finish step -> resolved `sd-finish-work` skill.
 - `sd-finish-work` -> resolved `trellis-finish-work` skill plus
-  `scripts/sd-ai-command-pack-record-session.py` at journal time.
+  `scripts/sd-ai-command-pack-record-session.py` at journal time and
+  `sd-ai-command-pack-review-preflight.mjs final-bundle --mode
+  completion|planning` before its one push.
 
 ### 3. Contracts
 
@@ -1710,6 +1713,16 @@ write step with the safe pack recorder.
 - The wrapper retains ownership of pack-specific validation and journal
   recording while the Trellis skill retains archive and session-finalization
   policy.
+- A planning final range with no task entries may select the validator's
+  internal `journal-only-recovery` subtype only from exact journal and Git
+  evidence. The wrapper still supplies `mode: planning`; it never exposes a
+  third mode, widens the captured base, or retries by rewriting the retained
+  commits.
+- Successful recovery proves one index-matched journal session, already-
+  published single-parent task-only commits, and planning lifecycle state. It
+  does not retroactively apply current publication-quality content checks to
+  artifacts before the captured base; normal task-plus-journal planning keeps
+  the complete validator.
 - Internal defer modes preserve the existing single lifecycle owner.
 
 ### 4. Validation & Error Matrix
@@ -1720,6 +1733,9 @@ write step with the safe pack recorder.
   finish-work.
 - Non-deferred review -> run `sd-finish-work`; direct
   `trellis-finish-work` resolution is a contract failure.
+- Missing, malformed, invalid, or indeterminate journal-only evidence ->
+  preserve the local commits and report the exact unchanged recheck; never
+  widen the base or select recovery from prose.
 
 ### 5. Good / Base / Bad Cases
 
@@ -1737,6 +1753,9 @@ write step with the safe pack recorder.
 - Assert deferred lifecycle wording and single-owner behavior remain intact.
 - Assert preflight rejects a completed contradictory journal record while
   accepting incomplete, planning-only, failed/skipped, and concrete records.
+- Assert journal-only recovery remains an automatic `planning` subtype,
+  preserves the established valid code, and is described identically by the
+  canonical/root skill twins without exposing a caller-selectable mode.
 
 ### 7. Wrong vs Correct
 
@@ -1745,6 +1764,12 @@ owns the underlying archive phase.
 
 Correct: `sd-review-pr` invokes `sd-finish-work`, and that wrapper composes the
 Trellis phase with the pack's safe journal recorder.
+
+Wrong: a failed planning tail changes its base or asks the caller to select a
+journal recovery mode.
+
+Correct: the validator derives journal-only recovery from the exact retained
+range and returns ordinary planning evidence only after the proof succeeds.
 
 The `sd-update-spec` shared skill should locate the existing Trellis
 `trellis-update-spec` skill, follow that skill as-is for its `.trellis/spec/`
