@@ -528,6 +528,41 @@ class PrEligibilityTests(unittest.TestCase):
         with self.assertRaisesRegex(eligibility.EligibilityInputError, "rootDigest"):
             eligibility.load_finish_work_receipt(receipt_path)
 
+        malformed = finish_work_receipt()
+        malformed["evidence"]["completionSubtype"] = 7
+        receipt_path.write_text(json.dumps(malformed), encoding="utf-8")
+        with self.assertRaisesRegex(
+            eligibility.EligibilityInputError, "completionSubtype.*non-empty string"
+        ):
+            eligibility.load_finish_work_receipt(receipt_path)
+
+        malformed = finish_work_receipt()
+        malformed["evidence"]["planningSubtype"] = "journal-only-recovery"
+        receipt_path.write_text(json.dumps(malformed), encoding="utf-8")
+        with self.assertRaisesRegex(
+            eligibility.EligibilityInputError,
+            "planningSubtype must be null in completion mode",
+        ):
+            eligibility.load_finish_work_receipt(receipt_path)
+
+        planning = finish_work_receipt()
+        planning["mode"] = "planning"
+        planning["reasonCodes"] = ["planning_bundle_valid"]
+        planning["evidence"].pop("completionSubtype")
+        planning["evidence"]["planningSubtype"] = "journal-only-recovery"
+        receipt_path.write_text(json.dumps(planning), encoding="utf-8")
+        self.assertEqual(
+            eligibility.load_finish_work_receipt(receipt_path)["mode"], "planning"
+        )
+
+        planning["evidence"]["completionSubtype"] = "post-archive-review-successor"
+        receipt_path.write_text(json.dumps(planning), encoding="utf-8")
+        with self.assertRaisesRegex(
+            eligibility.EligibilityInputError,
+            "completionSubtype must be null in planning mode",
+        ):
+            eligibility.load_finish_work_receipt(receipt_path)
+
         receipt_path.write_text(json.dumps(finish_work_receipt()), encoding="utf-8")
         link = self.repo / "finish-work-link.json"
         link.symlink_to(receipt_path)

@@ -254,6 +254,28 @@ def validate_finish_work_receipt(value: object) -> dict[str, Any]:
         raise EligibilityInputError(
             "eligibility input finishWorkReceipt evidence must be an object"
         )
+    completion_subtype = evidence.get("completionSubtype")
+    planning_subtype = evidence.get("planningSubtype")
+    if completion_subtype is not None:
+        require_string(
+            completion_subtype,
+            "finishWorkReceipt evidence.completionSubtype",
+            limit=100,
+        )
+    if planning_subtype is not None:
+        require_string(
+            planning_subtype,
+            "finishWorkReceipt evidence.planningSubtype",
+            limit=100,
+        )
+    if mode == "completion" and planning_subtype is not None:
+        raise EligibilityInputError(
+            "eligibility input finishWorkReceipt evidence.planningSubtype must be null in completion mode"
+        )
+    if mode == "planning" and completion_subtype is not None:
+        raise EligibilityInputError(
+            "eligibility input finishWorkReceipt evidence.completionSubtype must be null in planning mode"
+        )
     for field in ("baseOid", "headOid"):
         oid = evidence.get(field)
         if not isinstance(oid, str) or not COMMIT_RE.fullmatch(oid):
