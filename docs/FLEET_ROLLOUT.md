@@ -149,9 +149,10 @@ start fails closed. `status` and `validate` are read-only. After interruption,
 `resume` exposes reconciliation evidence for issued actions rather than
 reissuing install, PR, review, or merge side effects.
 
-If review or merge-eligibility remediation advances an existing PR, do not
-record the successor SHA against the old publication epoch. Record the issued
-action against its published SHA and PR as a bounded republication retry:
+If review remediation, merge-eligibility remediation, or required finish-work
+before merge advances an existing PR, do not record the successor SHA against
+the old publication epoch. Record the issued action against its published SHA
+and PR as a bounded republication retry:
 
 ```bash
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
@@ -166,9 +167,13 @@ bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
 The first eligible retry returns the lane to `pr-publication`. Reclassify the
 new exact head, reuse the existing PR, and record the issued publication action
 with that successor SHA. This starts a new exact-head epoch. Generic transient
-retries remain on their current stage; a second review-cycle head advance parks
-as retry-exhausted. This path is separate from corrective-release recovery,
-which remains restricted to terminal merge-stage pack blockers.
+retries remain on their current stage; a second head advance at the same stage
+parks as retry-exhausted. For a merge-stage finish-work successor, retain the
+valid finish-work receipt, stop before housekeeping, publish and re-review the
+already-pushed successor, then pass that receipt to housekeeping on the new
+merge action if its head remains unchanged. This ordinary successor path is
+separate from corrective-release recovery, which remains restricted to
+terminal merge-stage pack blockers such as missing task evidence.
 
 The controller composes the existing wave planner internally. It issues only
 manifest-policy `canStart` lanes, never exceeds `maxConcurrency`, and issues at

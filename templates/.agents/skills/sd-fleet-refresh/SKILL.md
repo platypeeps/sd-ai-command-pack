@@ -146,9 +146,13 @@ but defines no ordering or transition policy:
   installer-managed output, receipts/provenance, and deterministic preparation
   output. Classify the exact base/head with
   `sd-ai-command-pack-fleet-review-classify.py`, push, and create or reuse one
-  PR. Record the published head and PR number. A corrective recovery may reuse
-  this stage to append and validate task evidence before pushing a replacement
-  head; it never replays the earlier merge action.
+  PR. Record the published head and PR number. When a prior merge action
+  returned here because `sd-finish-work` advanced the PR, do not create another
+  commit or push: verify the retained finish-work receipt names the current
+  local and remote PR head, reclassify that exact successor, reuse the existing
+  PR, and record the new publication epoch. A corrective recovery may instead
+  reuse this stage to append and validate missing task evidence before pushing
+  a replacement head; neither path replays the earlier merge action.
 - `review`: invoke `sd-review-pr` once with trusted `caller: sd-fleet-refresh`,
   `return-after: review-result`, and `defer-finish-work: true`. Supply either
   the exact-head `integration-only` context or the normal `remote` profile.
@@ -172,12 +176,20 @@ but defines no ordering or transition policy:
   recorded head remains green, comment-clean, and mergeable.
 - `merge`: only the controller's single eligible action may invoke the
   consumer's `sd-housekeeping` gate. Complete the dedicated task through
-  `sd-finish-work`, retain its exact-head receipt, and pass that receipt to
-  housekeeping. The controller alone invokes housekeeping; it never merges in
-  completion order. Execute that issued merge without another approval prompt,
-  including when the eligible head contains in-scope changes that addressed
-  rollout review findings; campaign invocation already authorizes this normal
-  end-to-end action.
+  `sd-finish-work` and retain its exact-head receipt. Compare the resulting
+  local and remote PR head with the controller's published head before invoking
+  housekeeping. If finish-work advanced the PR, record the issued merge action
+  as `retryable-failure --reason-code pr-head-advanced` against the old
+  published full head and existing PR number, retain the receipt, and stop this
+  action before housekeeping; the controller will issue a bounded successor
+  publication, review, and eligibility cycle. On the next merge action, when
+  the retained receipt names the unchanged reviewed head, pass it to
+  housekeeping without running finish-work again. The controller alone invokes
+  housekeeping; it never merges in completion order.
+  Execute that issued merge without another approval prompt, including when
+  the head contains
+  in-scope changes that addressed rollout review findings; campaign invocation
+  already authorizes this normal end-to-end action.
 - `post-merge-verification`: verify the installed target version, install audit,
   clean default branch, deleted refresh branch, and pruned refs.
 
@@ -258,7 +270,6 @@ thread resolution.
   Never broaden scope through discovery, a typo, or missing state.
 - Never touch a dirty, missing, or externally owned consumer checkout; never
   stash, reset, clean, force-push, clone, or create a new checkout here.
-- Change only installer-managed files, receipts, provenance, and repo-owned
 - Change only the dedicated task artifacts, installer-managed files, receipts,
   provenance, and repo-owned deterministic preparation output. Never edit
   consumer product code.

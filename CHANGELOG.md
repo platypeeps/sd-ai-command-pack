@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.55.3 - 2026-07-27
+
+- Let a controller-issued merge action record the required finish-work head
+  advance as one bounded `pr-head-advanced` republication instead of forcing a
+  contradictory old-head merge receipt or terminal pack blocker.
+- Retain the exact finish-work receipt across successor publication, review,
+  and merge eligibility, then consume it through housekeeping only after the
+  new PR head remains unchanged and fully eligible.
+- Preserve exact publication epochs, serialized merges, the two-attempt head
+  churn bound, and the separate corrective-release path for terminal missing
+  task evidence.
+
 ## 0.55.2 - 2026-07-27
 
 - Make publication and review workflow invocation explicit standing approval
