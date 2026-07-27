@@ -3,7 +3,7 @@
   "name": "complete-sd-github-review-rollout-after-retry-exhaustion",
   "title": "PARKED: Complete sd-github-review 0.55.2 rollout after retry exhaustion",
   "description": "Resume PR #28 from exact head 92f855080e5ccb668f2d93a4567e0800c80b8291 only after a new controller-authorized rollout attempt; rerun exact-head remote review, eligibility, finish-work receipt validation, housekeeping, and post-merge audit.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
