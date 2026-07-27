@@ -1580,3 +1580,43 @@ Made merge-stage finish-work successor heads re-enter bounded fleet PR publicati
 ### Next Steps
 
 - None - task complete
+
+
+## Session 241: Record fleet 0.55.2 campaign outcomes
+
+**Date**: 2026-07-27
+**Task**: Record fleet 0.55.2 campaign outcomes
+**Branch**: `codex/fleet-rollout-v0-55-2-20260727`
+
+### Summary
+
+Closed the deterministic 0.55.2 fleet campaign, recorded terminal consumer outcomes, and created scoped follow-ups for deferred review findings and the parked sd-github-review lane.
+
+### Main Changes
+
+- Recorded four merged and post-merge-audited consumers plus three ownership skips.
+- Parked sd-github-review PR #28 at its verified remediation head after bounded controller retry exhaustion.
+- Added validated follow-up tasks for classifier parity, Trellis statusline UTF-8 ownership, and the parked consumer continuation.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d33a74c645202117218a44ea033e4041227dbc35` | chore(task): record fleet rollout outcomes |
+
+### Testing
+
+- [OK] Fleet controller validation passed with every selected lane terminal and no issued action outstanding.
+- [OK] Complete timing report accounted for all eight selected consumers.
+- [OK] All new and updated Trellis task context manifests validated with zero example rows.
+
+### Status
+
+[OK] **Campaign recorded; rollout task remains in progress**
+
+### Next Steps
+
+- Resume `07-27-complete-sd-github-review-rollout-after-retry-exhaustion`
+  through a fresh controller-authorized attempt, then complete the parent
+  rollout task.
