@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.55.4 - 2026-07-27
+
+- Accept a completed task archive move when Git reports a rewritten active PRD
+  as deleted but exposes the matching task metadata only at its changed archive
+  destination.
+- Keep the topology guard fail closed when a live task directory is missing
+  `task.json`, with focused regression coverage for both paths.
+
 ## 0.55.3 - 2026-07-27
 
 - Let a controller-issued merge action record the required finish-work head

@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-27T14:42:32Z",
-  "packVersion": "0.55.3",
-  "payloadDigest": "sha256:e6ed303c4d0eb1738bb10ff62924c8c9d28dfd072a6eee74ab32a186bb7c056e",
+  "validatedAt": "2026-07-27T21:40:05Z",
+  "packVersion": "0.55.4",
+  "payloadDigest": "sha256:65583bd7165412e324a418fc693726ded6ee3a17794e33befccb7e3df6263376",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "07644b214ed520b4d4a8863d0b1501fe2862f0a0",
+      "baseCommit": "3f9a8cd7d4398ed8d016cbaeec3bbed93555c7bf",
       "status": "passed",
       "prepares": [
         [
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "6c488969469e846a09bf9f335027f395ea01b4d7",
+      "baseCommit": "9f4a55b2907cc53811f0823ae5a1194d5172bea7",
       "status": "passed",
       "prepares": [
         [
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "6cd888bbe4a06676bdc8bb75af955cb5c44cd353",
+      "baseCommit": "0e1af80b04e155878ab56bf9eaca088e03e87ffc",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "a709b6b44951761bb347d41d49bf9280bd0d4299",
+      "baseCommit": "edba1e3b62e20d3b2da475254e79b14fa3c0a760",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -121,7 +121,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "3d21420b48ccf9fd42b18c1cf711ef8a9a902d94",
+      "baseCommit": "bb2a24583f09f8f1876f9ce6da1710cd00bc8820",
       "status": "passed",
       "prepares": [
         [
