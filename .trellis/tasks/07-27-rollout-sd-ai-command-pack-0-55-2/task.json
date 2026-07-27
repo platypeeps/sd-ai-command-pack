@@ -19,14 +19,10 @@
   "pr_url": null,
   "subtasks": [],
   "children": [
-    "07-27-correct-fleet-merge-finalization-head-epoch",
-    "07-27-align-review-scope-gemini-settings",
-    "07-27-align-review-preflight-claude-hooks",
-    "07-27-complete-sd-github-review-rollout-after-retry-exhaustion",
-    "07-27-upstream-claude-statusline-utf8-stdin-fix"
+    "07-27-correct-fleet-merge-finalization-head-epoch"
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Campaign fleet-v0-55-2-20260727T135308Z is terminal and validated. Four consumers merged and post-merge audited; three were ownership-skipped without mutation. sd-github-review PR #28 is parked at 92f855080e5ccb668f2d93a4567e0800c80b8291 after bounded retry exhaustion and is owned by child task 07-27-complete-sd-github-review-rollout-after-retry-exhaustion. Parent remains in_progress until that lane completes.",
+  "notes": "",
   "meta": {}
 }
