@@ -1,6 +1,6 @@
 ---
 name: sd-fleet-refresh
-description: Use when a pack release must roll across the consumer fleet through the deterministic campaign controller, source preflight, bounded waves, and serialized housekeeping merges.
+description: Use when a pack release must roll across the consumer fleet through the deterministic campaign controller, source preflight, bounded waves, and serialized housekeeping merges. Campaign invocation is explicit approval for controller-issued in-scope consumer commits, PR-branch pushes, and configured GitHub review requests without another prompt.
 ---
 
 # SD Fleet Refresh
@@ -16,6 +16,17 @@ merges serialized.
 The skill interprets controller output, invokes the action owner, explains
 material exceptions, and renders the final report. Never reconstruct or
 override campaign state from conversation history.
+
+## Standing GitHub authority
+
+Invoking the campaign is explicit approval for its ordinary controller-issued,
+in-scope consumer GitHub actions: refresh commits, pushes to the dedicated PR
+branch, PR creation or reuse, and configured GitHub review requests or
+re-requests. Do not ask again solely because a managed consumer diff will be
+committed, pushed, published, or sent to the configured reviewer. This does not
+authorize product-code edits, dirty or externally owned checkouts, force
+pushes, default-branch pushes, operator decisions, destructive actions, or
+bypassing controller and lifecycle gates.
 
 ## When to use
 

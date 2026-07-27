@@ -249,7 +249,10 @@ it. Use a separate request to execute the recommendation.
    during the loop, unless the user explicitly asked for local-only review or
    the trusted fleet workflow proves the exact consumer head qualifies for
    integration-only review. That profile suppresses only a new request and
-   still inspects all existing feedback, local gates, and CI.
+   still inspects all existing feedback, local gates, and CI. The workflow
+   invocation is already explicit approval for these in-scope review-fix
+   commits, PR-branch pushes, and configured review requests; do not insert a
+   second approval prompt for them.
 13. Let both the successor `sd-review` workflow and the transitional
    `sd-review-pr` workflow reply to and resolve review threads as part of their
    normal loops once findings are fixed, rebutted with evidence, or confirmed
@@ -396,7 +399,11 @@ portable structured-question contract. Claude uses `AskUserQuestion`; other
 hosts use a native structured capability only when available and otherwise ask
 one concise plain question or apply the decision's stop, park, or report-only
 behavior. The contract does not add confirmations for routine actions already
-authorized by the invocation, and no answer can override a safety gate.
+authorized by the invocation. For publication and review workflows, that
+standing authority includes in-scope commits, pushes to the current PR branch,
+and configured GitHub review requests or re-requests; do not ask for another
+approval solely to send the diff/code through normal GitHub review. No answer
+can override a safety gate.
 
 Claude Code and Gemini CLI:
 

@@ -729,9 +729,10 @@ noise.
 - Structured answers select or narrow behavior inside existing invocation
   authority. They cannot override checkout trust, exact-head, required-review,
   failed-closed, no-touch, destructive-operation, or merge gates. Do not add
-  prompts for deterministic checks, ordinary in-scope fixes, bounded polling,
-  review-thread replies or resolution, normal backlog iterations, or an
-  already-authorized housekeeping merge.
+  prompts for deterministic checks, ordinary in-scope fixes, in-scope commits
+  or pushes to the current PR branch, configured GitHub review requests or
+  re-requests, bounded polling, review-thread replies or resolution, normal
+  backlog iterations, or an already-authorized housekeeping merge.
 - Checkout trust is classified using trusted host-provided, read-only Git and
   GitHub metadata. Fork heads are untrusted; detached, unreadable, unavailable,
   or contradictory identity is indeterminate. Both states stop before any
@@ -1073,6 +1074,9 @@ The `sd-review-pr` shared skill should continue to define:
 - dirty working-tree classification before staging or committing
 - the configured remote reviewer request path and fallback, with GitHub Copilot
   as the default reviewer
+- invocation-level standing permission for in-scope review-fix commits, pushes
+  to the current PR branch, and configured GitHub review requests or
+  re-requests; these routine actions do not receive another approval prompt
 - polling behavior that avoids fetching full comment bodies on every interval
 - thread-aware review inspection through GraphQL when using `gh`
 - CI check inspection through the stable `gh pr checks` fields `name`,

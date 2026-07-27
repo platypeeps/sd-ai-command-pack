@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.55.2 - 2026-07-27
+
+- Make publication and review workflow invocation explicit standing approval
+  for in-scope commits, PR-branch pushes, and configured GitHub review requests
+  or re-requests, while preserving ambiguity, risk, round-limit, destructive,
+  exact-head, and merge gates.
+- Surface that authority in startup-visible skill descriptions and prevent the
+  portable structured-question contract from adding redundant approval prompts
+  for routine GitHub publication or review actions.
+
 ## 0.55.1 - 2026-07-26
 
 - Pin strict UTF-8 decoding explicitly in the shipped housekeeping-result JSON
