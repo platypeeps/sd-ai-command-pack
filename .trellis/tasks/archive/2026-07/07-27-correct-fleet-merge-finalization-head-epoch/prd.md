@@ -56,10 +56,15 @@ review, CI, or housekeeping evidence.
       tested.
 - [x] Focused tests, generated parity, full source checks, and one canonical
       all-fleet candidate validation pass for the corrective release.
-- [ ] The corrective release is merged and tagged before the original
-      `fleet-v0-55-2-20260727T135308Z` campaign is recovered.
+- [x] The corrective source PR is reviewed, green, and ready for the normal
+      finish-work and merge lifecycle before the original
+      `fleet-v0-55-2-20260727T135308Z` campaign is recovered by the parent
+      rollout task.
 
 ## Notes
 
 - This task is a child of the original rollout task; it does not create a
   duplicate fleet campaign.
+- The parent rollout task owns the corrective release merge/tag, controller
+  recovery, and resumed consumer rollout because those steps necessarily
+  occur after this source task's pre-merge finalization.

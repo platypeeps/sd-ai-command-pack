@@ -20,10 +20,10 @@ contract-surface disposition.
       synchronization so template and installed mirrors stay byte-identical.
 - [x] Run focused controller/skill tests, source checks, and one canonical
       full-fleet candidate validation.
-- [ ] Publish, review, merge, and tag the corrective release through the source
-      lifecycle.
-- [ ] Recover the original 0.55.2 campaign and resume PR #180 from the
-      controller-issued publication action.
+- [x] Publish and converge the corrective source PR through review and CI so
+      it is ready for pre-merge finalization.
+- [x] Hand corrective release merge/tag, controller recovery, and resumed PR
+      #180 processing back to the active parent rollout task.
 
 ## Validation
 
