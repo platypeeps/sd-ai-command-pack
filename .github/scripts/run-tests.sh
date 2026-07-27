@@ -62,6 +62,19 @@ export COVERAGE_PROCESS_START="$REPO_ROOT/.coveragerc"
 export COVERAGE_FILE="$REPO_ROOT/.coverage"
 export PYTHONPATH="$REPO_ROOT/tests/coverage_sitecustomize${PYTHONPATH:+:$PYTHONPATH}"
 
+# Git 2.54 can detach automatic maintenance after commits and pushes. The test
+# suite creates and removes many short-lived repositories, so a detached repack
+# can race either TemporaryDirectory cleanup or a cached fixture copy. Disable
+# automatic maintenance for every test subprocess; explicit maintenance tests
+# can still override these command-scope values when they invoke Git directly.
+export GIT_CONFIG_COUNT=3
+export GIT_CONFIG_KEY_0=maintenance.auto
+export GIT_CONFIG_VALUE_0=false
+export GIT_CONFIG_KEY_1=gc.auto
+export GIT_CONFIG_VALUE_1=0
+export GIT_CONFIG_KEY_2=receive.autogc
+export GIT_CONFIG_VALUE_2=false
+
 # Start clean so combine and the skip gate only see this run's data. Create the
 # log up front so the skip gate and final cat always have a file to read, even
 # if a shard dies before writing any output.

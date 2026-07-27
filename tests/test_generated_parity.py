@@ -1066,6 +1066,9 @@ class GeneratedParityTests(InstallTestCase):
             'COVERAGE_FILE="$REPO_ROOT/.coverage"',
             "tests/coverage_sitecustomize",
             "coverage run --parallel-mode -m unittest",
+            "GIT_CONFIG_KEY_0=maintenance.auto",
+            "GIT_CONFIG_KEY_1=gc.auto",
+            "GIT_CONFIG_KEY_2=receive.autogc",
         ):
             self.assertIn(expected, runner)
 
