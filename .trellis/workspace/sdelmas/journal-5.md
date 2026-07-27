@@ -1542,3 +1542,41 @@ Made GitHub publication and review dispatch standing-authority actions, automate
 ### Next Steps
 
 - None - task complete
+
+
+## Session 240: Correct fleet merge finalization head epochs
+
+**Date**: 2026-07-27
+**Task**: Correct fleet merge finalization head epochs
+**Branch**: `codex/fleet-rollout-v0-55-2-20260727`
+
+### Summary
+
+Made merge-stage finish-work successor heads re-enter bounded fleet PR publication, added regression coverage, updated shipped guidance, and prepared corrective release 0.55.3.
+
+### Main Changes
+
+- Allow the fleet controller to republish a PR when finish-work advances the head during an issued merge action.
+- Document exact-head successor handling and preserve the retained completion receipt across the retry.
+- Release and validate the synchronized 0.55.3 source payload across the configured fleet candidates.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3ee66082780ab9aa448ff8463e65d7704ad4887e` | fix: republish fleet finish-work merge heads |
+
+### Testing
+
+- [OK] make full-check
+- [OK] all-fleet candidate validation for 0.55.3
+- [OK] PR #263 CI and Copilot review converged with no findings
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 239
+- **Total Sessions**: 240
 - **Last Active**: 2026-07-27
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~1542 | Active |
+| `journal-5.md` | ~1580 | Active |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 240 | 2026-07-27 | Correct fleet merge finalization head epochs | `3ee66082780ab9aa448ff8463e65d7704ad4887e` | `codex/fleet-rollout-v0-55-2-20260727` |
 | 239 | 2026-07-27 | Codify standing workflow authority and documentation visual routing | `d9c97d3`, `94c95e0`, `1996ef4`, `b54d117` | `codex/rollout-sd-ai-command-pack-0-55-1` |
 | 238 | 2026-07-26 | Correct 0.55.0 consumer compatibility blockers | `2ea31a50d18f1e63e981bfa3a9af72946ff73ba6`, `32f0cc30a358a6bf56153b2421febe076509c2e8`, `9057c7f934af30545eae0ab1bc627f617558f89b` | `codex/correct-0550-consumer-compatibility-blockers` |
 | 237 | 2026-07-26 | Reverse .claude/ gitignore to commit-by-default (0.55.0) | `d02e39ab25395335198e084816a07966314a5d30` | `codex/align-claude-gitignore-commit-model` |
