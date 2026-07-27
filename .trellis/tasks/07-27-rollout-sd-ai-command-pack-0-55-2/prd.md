@@ -38,18 +38,42 @@ controller, including review, merge, and post-merge verification.
 - Stop new mutations for a verified pack-owned blocker, ambiguous side effect,
   invalid controller state, or unsafe ownership condition.
 
+## Campaign Outcome
+
+- Controller campaign `fleet-v0-55-2-20260727T135308Z` completed with a valid
+  ledger and complete timing evidence.
+- Merged and post-merge audited: `rwbp-coordinator` PR #180, `loadsmith` PR
+  #172, `hoa-manager` PR #186, and `se-ai-command-pack` PR #108.
+- Ownership-skipped without mutation: `rwbp-website` (active PR #179 and task),
+  `mezmo_benchmark` (active dirty 0.55.0 stream), and
+  `anomaly-metric-creator` (active automation PR #306 for 0.55.1).
+- `sd-github-review` PR #28 reached exact head
+  `92f855080e5ccb668f2d93a4567e0800c80b8291` with its Windows UTF-8 stdin
+  review finding fixed and resolved, then parked as `retry-exhausted` after the
+  second legitimate head advance. Child task
+  `07-27-complete-sd-github-review-rollout-after-retry-exhaustion` owns the
+  required fresh controller-authorized continuation.
+- The finding severity gate classified all three review observations as
+  non-blocking hardening. Their follow-ups are captured in
+  `07-27-align-review-scope-gemini-settings`,
+  `07-27-align-review-preflight-claude-hooks`, and
+  `07-27-upstream-claude-statusline-utf8-stdin-fix`.
+
 ## Acceptance Criteria
 
-- [ ] Controller planning and source preflight validate immutable release
+- [x] Controller planning and source preflight validate immutable release
       `0.55.2`, the full-fleet ledger, fleet policy, and checkout identities.
-- [ ] Every selected consumer reaches a terminal controller outcome with no
+- [x] Every selected consumer reaches a terminal controller outcome with no
       unrecorded issued action.
-- [ ] Every refreshed consumer passes install audit, repository checks, review
+- [x] Every merged refreshed consumer passes install audit, repository checks, review
       convergence, exact-head merge eligibility, managed housekeeping, and
       post-merge installed-version/audit verification.
-- [ ] At-target or ownership-skipped consumers have explicit evidence and are
+- [ ] The parked `sd-github-review` lane completes exact-head re-review,
+      eligibility, housekeeping merge, and post-merge audit through a fresh
+      controller-authorized attempt.
+- [x] At-target or ownership-skipped consumers have explicit evidence and are
       not mutated.
-- [ ] Controller `validate` and final `status` pass, and the complete timing
+- [x] Controller `validate` and final `status` pass, and the complete timing
       report accounts for all selected consumers.
-- [ ] The final report itemizes campaign, fleet, scheduling, findings, timing,
+- [x] The final report itemizes campaign, fleet, scheduling, findings, timing,
       and follow-ups, explicitly using `none` for empty categories.
