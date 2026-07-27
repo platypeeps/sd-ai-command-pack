@@ -33,7 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 241 | 2026-07-27 | Record fleet 0.55.2 campaign outcomes | `d33a74c645202117218a44ea033e4041227dbc35` | `codex/fleet-rollout-v0-55-2-20260727` |
+| 241 | 2026-07-27 | Record fleet 0.55.2 campaign outcomes | `d33a74c645202117218a44ea033e4041227dbc35`, `e85d5b6b867e1a8cff31ce26e3c64ff31d3aec89` | `codex/fleet-rollout-v0-55-2-20260727` |
 | 240 | 2026-07-27 | Correct fleet merge finalization head epochs | `3ee66082780ab9aa448ff8463e65d7704ad4887e` | `codex/fleet-rollout-v0-55-2-20260727` |
 | 239 | 2026-07-27 | Codify standing workflow authority and documentation visual routing | `d9c97d3`, `94c95e0`, `1996ef4`, `b54d117` | `codex/rollout-sd-ai-command-pack-0-55-1` |
 | 238 | 2026-07-26 | Correct 0.55.0 consumer compatibility blockers | `2ea31a50d18f1e63e981bfa3a9af72946ff73ba6`, `32f0cc30a358a6bf56153b2421febe076509c2e8`, `9057c7f934af30545eae0ab1bc627f617558f89b` | `codex/correct-0550-consumer-compatibility-blockers` |
