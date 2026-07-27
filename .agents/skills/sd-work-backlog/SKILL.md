@@ -1,6 +1,6 @@
 ---
 name: sd-work-backlog
-description: "Use when the user wants an autonomous, resumable loop that plans and completes Trellis backlog tasks sequentially through green merged pull requests. Invocation is explicit approval for the run's in-scope commits, PR-branch pushes, and configured GitHub review requests without another prompt."
+description: "Use when the user wants an autonomous, resumable loop that plans and completes Trellis backlog tasks sequentially through green merged pull requests. Invocation is explicit approval for the run's in-scope commits, PR-branch pushes, and configured GitHub review requests or re-requests without another prompt."
 ---
 
 # SD Work Backlog

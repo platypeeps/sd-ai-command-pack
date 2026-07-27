@@ -26,7 +26,7 @@ Prepare implementation-ready plans and work the task backlog.
 
 | Command | Bundled availability | Description |
 |---|---|---|
-| `sd-work-backlog` | included in installed pack | Use when the user wants an autonomous, resumable loop that plans and completes Trellis backlog tasks sequentially through green merged pull requests. Invocation is explicit approval for the run's in-scope commits, PR-branch pushes, and configured GitHub review requests without another prompt. |
+| `sd-work-backlog` | included in installed pack | Use when the user wants an autonomous, resumable loop that plans and completes Trellis backlog tasks sequentially through green merged pull requests. Invocation is explicit approval for the run's in-scope commits, PR-branch pushes, and configured GitHub review requests or re-requests without another prompt. |
 
 ## Verification and improvement
 
@@ -48,11 +48,11 @@ Publish, review, watch, merge, and clean up delivery streams.
 
 | Command | Bundled availability | Description |
 |---|---|---|
-| `sd-create-pr` | included in installed pack | Use when the user wants to update specs through the SD wrapper, commit and push the current branch, create or reuse a GitHub pull request, then enter the SD PR review loop. Invocation is explicit approval for those in-scope commits, PR-branch pushes, and configured GitHub review requests without another prompt. |
+| `sd-create-pr` | included in installed pack | Use when the user wants to update specs through the SD wrapper, commit and push the current branch, create or reuse a GitHub pull request, then enter the SD PR review loop. Invocation is explicit approval for those in-scope commits, PR-branch pushes, and configured GitHub review requests or re-requests without another prompt. |
 | `sd-watch-pr` | included in installed pack | Use when the user asks to watch the current branch's open pull request until checks and reviews settle, then hand a green PR to the housekeeping merge gate or report the blockers. |
-| `sd-ship` | included in installed pack | Use when the user asks to take the current branch all the way from committed work to a merged pull request through the standard SD stages. Invocation is explicit approval for its in-scope commits, PR-branch pushes, and configured GitHub review requests without another prompt. |
-| `sd-review` | included in installed pack | Use when the user asks to review local changes, a branch, a codebase, or a pull request through one exact-scope lifecycle that runs deterministic checks, cost-aware local providers, and the optional routed GitHub review backend. For PR scope, invocation is explicit approval for in-scope review-fix commits, PR-branch pushes, and configured GitHub review requests without another prompt. |
-| `sd-review-pr` | included in installed pack | Use when the user asks to ready a pull request, run the typed deterministic sd-check gate, optionally request the configured remote reviewer when available, address review comments or CI failures, and repeat until no actionable comments remain. Invocation is explicit approval for in-scope review-fix commits, PR-branch pushes, and configured GitHub review requests without another prompt. |
+| `sd-ship` | included in installed pack | Use when the user asks to take the current branch all the way from committed work to a merged pull request through the standard SD stages. Invocation is explicit approval for its in-scope commits, PR-branch pushes, and configured GitHub review requests or re-requests without another prompt. |
+| `sd-review` | included in installed pack | Use when the user asks to review local changes, a branch, a codebase, or a pull request through one exact-scope lifecycle that runs deterministic checks, cost-aware local providers, and the optional routed GitHub review backend. For PR scope, invocation is explicit approval for in-scope review-fix commits, PR-branch pushes, and configured GitHub review requests or re-requests without another prompt. |
+| `sd-review-pr` | included in installed pack | Use when the user asks to ready a pull request, run the typed deterministic sd-check gate, optionally request the configured remote reviewer when available, address review comments or CI failures, and repeat until no actionable comments remain. Invocation is explicit approval for in-scope review-fix commits, PR-branch pushes, and configured GitHub review requests or re-requests without another prompt. |
 | `sd-housekeeping` | included in installed pack | Use at the end of a development stream to run finish-work before merging a ready PR, clean up after merge, prune stale refs, and report the expected clean repo state plus anomalies. Invocation is explicit approval for its in-scope task, archive, and journal commits and PR-branch push without another prompt. |
 
 ## Maintenance and fleet
@@ -62,4 +62,4 @@ Maintain dependencies and roll pack releases across repositories.
 | Command | Bundled availability | Description |
 |---|---|---|
 | `sd-update-deps` | included in installed pack | Use when open dependency-bot PRs need batch triage — classify every dependabot or renovate PR, merge the safe class sequentially under the housekeeping gate criteria, and park the rest with one-line recommendations. |
-| `sd-fleet-refresh` | source-checkout-only | Use when a pack release must roll across the consumer fleet through the deterministic campaign controller, source preflight, bounded waves, and serialized housekeeping merges. Campaign invocation is explicit approval for controller-issued in-scope consumer commits, PR-branch pushes, and configured GitHub review requests without another prompt. |
+| `sd-fleet-refresh` | source-checkout-only | Use when a pack release must roll across the consumer fleet through the deterministic campaign controller, source preflight, bounded waves, and serialized housekeeping merges. Campaign invocation is explicit approval for controller-issued in-scope consumer commits, PR-branch pushes, and configured GitHub review requests or re-requests without another prompt. |

@@ -1,6 +1,6 @@
 ---
 name: sd-ship
-description: Use when the user asks to take the current branch all the way from committed work to a merged pull request through the standard SD stages. Invocation is explicit approval for its in-scope commits, PR-branch pushes, and configured GitHub review requests without another prompt.
+description: Use when the user asks to take the current branch all the way from committed work to a merged pull request through the standard SD stages. Invocation is explicit approval for its in-scope commits, PR-branch pushes, and configured GitHub review requests or re-requests without another prompt.
 ---
 
 # SD Ship

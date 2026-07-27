@@ -534,7 +534,7 @@ class SurfaceGenerationTests(InstallTestCase):
         for command in review_commands:
             with self.subTest(review_command=command):
                 self.assertIn(
-                    "configured GitHub review requests",
+                    "configured GitHub review requests or re-requests",
                     generator.skill_description(command),
                 )
 

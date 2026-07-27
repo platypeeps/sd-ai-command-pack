@@ -251,8 +251,8 @@ it. Use a separate request to execute the recommendation.
    integration-only review. That profile suppresses only a new request and
    still inspects all existing feedback, local gates, and CI. The workflow
    invocation is already explicit approval for these in-scope review-fix
-   commits, PR-branch pushes, and configured review requests; do not insert a
-   second approval prompt for them.
+   commits, PR-branch pushes, and configured GitHub review requests or
+   re-requests; do not insert a second approval prompt for them.
 13. Let both the successor `sd-review` workflow and the transitional
    `sd-review-pr` workflow reply to and resolve review threads as part of their
    normal loops once findings are fixed, rebutted with evidence, or confirmed

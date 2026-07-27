@@ -1,6 +1,6 @@
 ---
 name: sd-create-pr
-description: Use when the user wants to update specs through the SD wrapper, commit and push the current branch, create or reuse a GitHub pull request, then enter the SD PR review loop. Invocation is explicit approval for those in-scope commits, PR-branch pushes, and configured GitHub review requests without another prompt.
+description: Use when the user wants to update specs through the SD wrapper, commit and push the current branch, create or reuse a GitHub pull request, then enter the SD PR review loop. Invocation is explicit approval for those in-scope commits, PR-branch pushes, and configured GitHub review requests or re-requests without another prompt.
 ---
 
 # SD Create Pull Request

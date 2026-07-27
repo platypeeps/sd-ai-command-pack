@@ -1,6 +1,6 @@
 ---
 name: sd-review
-description: Use when the user asks to review local changes, a branch, a codebase, or a pull request through one exact-scope lifecycle that runs deterministic checks, cost-aware local providers, and the optional routed GitHub review backend. For PR scope, invocation is explicit approval for in-scope review-fix commits, PR-branch pushes, and configured GitHub review requests without another prompt.
+description: Use when the user asks to review local changes, a branch, a codebase, or a pull request through one exact-scope lifecycle that runs deterministic checks, cost-aware local providers, and the optional routed GitHub review backend. For PR scope, invocation is explicit approval for in-scope review-fix commits, PR-branch pushes, and configured GitHub review requests or re-requests without another prompt.
 ---
 
 # SD Review

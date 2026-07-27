@@ -1,6 +1,6 @@
 ---
 name: sd-review-pr
-description: Use when the user asks to ready a pull request, run the typed deterministic sd-check gate, optionally request the configured remote reviewer when available, address review comments or CI failures, and repeat until no actionable comments remain. Invocation is explicit approval for in-scope review-fix commits, PR-branch pushes, and configured GitHub review requests without another prompt.
+description: Use when the user asks to ready a pull request, run the typed deterministic sd-check gate, optionally request the configured remote reviewer when available, address review comments or CI failures, and repeat until no actionable comments remain. Invocation is explicit approval for in-scope review-fix commits, PR-branch pushes, and configured GitHub review requests or re-requests without another prompt.
 ---
 
 # SD PR Review Loop
