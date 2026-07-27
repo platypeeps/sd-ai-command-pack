@@ -1459,3 +1459,44 @@ Reversed the deliberate .claude/** blanket-ignore so Trellis-on-Claude runtime, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 238: Correct 0.55.0 consumer compatibility blockers
+
+**Date**: 2026-07-26
+**Task**: Correct 0.55.0 consumer compatibility blockers
+**Branch**: `codex/correct-0550-consumer-compatibility-blockers`
+
+### Summary
+
+Prepared corrective release 0.55.1, closed consumer UTF-8 compatibility gaps, and converged PR #261 through exact-head review.
+
+### Main Changes
+
+- Pinned explicit strict UTF-8 decoding in the shipped housekeeping-result template and mirror, plus the equivalent source fleet-preflight boundary.
+- Added malformed-UTF-8 regression coverage and refreshed the 0.55.1 release, generated catalog, manifest, and full-fleet candidate ledger.
+- Addressed both Copilot findings by covering fleet provenance fallback and narrowing the housekeeping result spec to its intended scope.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2ea31a50d18f1e63e981bfa3a9af72946ff73ba6` | fix: declare strict UTF-8 policy for housekeeping input |
+| `32f0cc30a358a6bf56153b2421febe076509c2e8` | test: cover malformed fleet provenance encoding |
+| `9057c7f934af30545eae0ab1bc627f617558f89b` | docs: narrow housekeeping UTF-8 contract |
+
+### Testing
+
+- [OK] 23 focused fleet-preflight and housekeeping-result tests passed
+- [OK] make full-check passed with release and candidate ledgers valid
+- [OK] typed sd-check passed 8/8 with an unchanged state guard on exact head 9057c7f
+- [OK] PR #261 CI passed and final exact-head Copilot review produced no new comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.55.1 - 2026-07-26
+
+- Pin strict UTF-8 decoding explicitly in the shipped housekeeping-result JSON
+  reader and the source fleet-preflight provenance reader, preserving existing
+  fail-closed behavior while satisfying consumer static-analysis contracts.
+
 ## 0.55.0 - 2026-07-26
 
 - Commit `.claude/` by default like every other platform: replace the

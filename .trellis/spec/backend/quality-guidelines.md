@@ -357,6 +357,10 @@ delegation.
 - Identity binds repository, start/default/current branches, PR, full heads,
   and finish-work evidence. Actions/anomalies contain lowercase stable codes
   and bounded control-free messages.
+- Every JSON file input consumed by the housekeeping result builder uses
+  `encoding="utf-8", errors="strict"` explicitly. Do not rely on the decoder's
+  implicit default even when behavior is equivalent; consumer static-analysis
+  gates treat the declared policy as part of the shipped helper contract.
 - Outcome is exactly `clean|blocked|indeterminate|failed`. Eligibility
   indeterminacy and unavailable evidence remain indeterminate; known blocking
   eligibility, coded anomalies, or status anomalies are blocked; status
@@ -368,8 +372,8 @@ delegation.
 ### 4. Validation & Error Matrix
 
 - Unknown schema major, non-object JSON, unsafe/symlinked/oversized input,
-  invalid code/message, or contradictory status input/error -> controlled exit
-  `2`, no traceback or mutation.
+  malformed UTF-8, invalid code/message, or contradictory status input/error
+  -> controlled exit `2`, no traceback or mutation.
 - Valid status with strict anomalies -> typed `blocked` even when no shell
   anomaly was recorded.
 - Missing/empty status result with an explicit collector error -> typed
@@ -389,7 +393,8 @@ delegation.
 ### 6. Tests Required
 
 - Clean, blocked, indeterminate, failed, null-eligibility, and missing-status
-  classification; invalid schema/code/message/path inputs; CLI error behavior.
+  classification; invalid schema/code/message/path inputs; malformed UTF-8;
+  CLI error behavior.
 - End-to-end JSON stdout/stderr separation plus unchanged human lifecycle,
   exact-head, checks, thread, merge, cleanup, and dry-run tests.
 - Root/template parity, manifest/provenance/install coverage, generated skill
@@ -400,6 +405,8 @@ delegation.
 ```text
 Wrong: run status and eligibility twice so the JSON can disagree with the merge receipt
 Correct: collect each once, embed its versioned document, and keep Bash as mutation owner
+Wrong: Path.read_text(encoding="utf-8")
+Correct: Path.read_text(encoding="utf-8", errors="strict")
 ```
 
 ## Review Preflight Runtime Contract
