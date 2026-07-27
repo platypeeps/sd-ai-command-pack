@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.55.0 - 2026-07-26
+
+- Commit `.claude/` by default like every other platform: replace the
+  `.claude/**` blanket plus SD allow-list in the managed `.gitignore` block with
+  the standard runtime deny-list, so Trellis runtime, agents, `settings.json`,
+  and repo-authored skills are tracked instead of hidden. Only local Claude
+  state (`settings.local.json`, caches, logs, tmp) stays ignored.
+- Extend the Claude `--local-only` exclude set and the review-scope and
+  review-preflight classifiers to cover `.claude/agents/trellis-*.md` and
+  `.claude/settings.json`, and add a `git check-ignore` regression test that no
+  platform ignores its own declared markers.
+
 ## 0.54.1 - 2026-07-26
 
 - Require fleet refresh lanes to establish a dedicated consumer Trellis task

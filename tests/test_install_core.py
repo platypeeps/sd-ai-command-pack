@@ -82,18 +82,24 @@ class InstallCoreTests(InstallTestCase):
             f"{install.TRELLIS_GITIGNORE_END}\n"
         )
 
+        # Claude is now committed by default, so the generated block no longer
+        # re-adds the legacy sequence: an old unmanaged `.claude/**` block is
+        # migrated away entirely rather than preserved.
         merged = install.merge_trellis_gitignore_block(sequence + managed)
-        self.assertEqual(merged.count(sequence), 1)
+        self.assertEqual(merged.count(sequence), 0)
+        self.assertNotIn(".claude/**", merged.splitlines())
         self.assertEqual(merged, install.merge_trellis_gitignore_block(merged))
 
         appended = install.merge_trellis_gitignore_block(sequence + "dist/\n")
-        self.assertEqual(appended.count(sequence), 1)
+        self.assertEqual(appended.count(sequence), 0)
         self.assertTrue(appended.startswith("dist/\n\n"))
 
+        # The merge only rewrites the managed block and its prefix, so a legacy
+        # copy that trails the managed block is left untouched.
         later_override = install.merge_trellis_gitignore_block(
             sequence + managed + sequence
         )
-        self.assertEqual(later_override.count(sequence), 2)
+        self.assertEqual(later_override.count(sequence), 1)
         self.assertTrue(later_override.endswith(sequence))
 
     def test_install_replaces_blanket_trellis_gitignore_entry(self) -> None:
@@ -1997,8 +2003,11 @@ class InstallCoreTests(InstallTestCase):
 
         gitignore = install.PLATFORM_LOCAL_GITIGNORE_PATTERNS
         self.assertEqual(gitignore[-1], "node_modules/")
-        claude_ignore = gitignore.index(".claude/**")
-        self.assertEqual(gitignore[claude_ignore + 1], "!.claude/commands/")
+        # Claude is committed by default like every other platform: no blanket
+        # ignore, no SD allow-list negations; only its runtime deny-list.
+        self.assertNotIn(".claude/**", gitignore)
+        claude_ignore = gitignore.index(".claude/settings.local.json")
+        self.assertEqual(gitignore[claude_ignore + 1], ".claude/**/*.local.*")
 
         # A registry row's entries must actually reach the derived tables:
         # any platform carrying gitignore or local-only data has to hold a
@@ -2116,6 +2125,60 @@ class InstallCoreTests(InstallTestCase):
                 any(pattern.startswith(f"{directory}/") for pattern in scope_patterns),
                 f"{directory} missing from pr-body-scope DEFAULT_RULES",
             )
+
+    def test_claude_committed_by_default_via_git_check_ignore(self) -> None:
+        # Real git check-ignore against the generated managed block: Claude
+        # runtime, agents, settings, and skills (incl. repo-authored) are
+        # committed; only local state is ignored.
+        root = self.make_git_repo_without_trellis()
+        (root / ".gitignore").write_text(
+            install.merge_trellis_gitignore_block(""), encoding="utf-8"
+        )
+        tracked = (
+            ".claude/commands/trellis/continue.md",
+            ".claude/hooks/session-start.py",
+            ".claude/agents/trellis-check.md",
+            ".claude/settings.json",
+            ".claude/skills/trellis-before-dev/SKILL.md",
+            ".claude/skills/authored-example/SKILL.md",
+        )
+        ignored = (
+            ".claude/settings.local.json",
+            ".claude/foo.local.json",
+            ".claude/nested/.cache/x",
+            ".claude/nested/logs/x",
+            ".claude/nested/tmp/x",
+            ".claude/nested/run.log",
+        )
+        for path in tracked:
+            self.assertEqual(
+                self._run_git_process(root, "check-ignore", "-q", path).returncode,
+                1,
+                f"{path} must be committed, not ignored",
+            )
+        for path in ignored:
+            self.assertEqual(
+                self._run_git_process(root, "check-ignore", "-q", path).returncode,
+                0,
+                f"{path} must be ignored",
+            )
+
+    def test_platform_markers_not_ignored_by_generated_block(self) -> None:
+        # Invariant: no platform may ignore its own declared detection markers,
+        # verified through real git check-ignore against the generated block.
+        root = self.make_git_repo_without_trellis()
+        (root / ".gitignore").write_text(
+            install.merge_trellis_gitignore_block(""), encoding="utf-8"
+        )
+        for platform, info in sorted(install.PLATFORM_REGISTRY.items()):
+            for marker in info.markers:
+                self.assertEqual(
+                    self._run_git_process(
+                        root, "check-ignore", "-q", marker
+                    ).returncode,
+                    1,
+                    f"{platform} marker {marker} must not be ignored",
+                )
 
     def test_zcode_requires_zcode_owned_markers(self) -> None:
         root = self.make_repo()

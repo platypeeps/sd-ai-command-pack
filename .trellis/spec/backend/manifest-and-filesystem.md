@@ -448,9 +448,10 @@ Reference files:
 
 The installed-targets receipt is declared installed state and can be
 git-tracked while some recorded targets (and the markers/anchors that select
-them) are gitignored — the claude adapter's markers all live under
-`.claude/`. A refresh run from a checkout where a platform is merely not
-visible must not erase what another checkout legitimately installed:
+them) are gitignored — for example a `--local-only` install, whose adapter
+files are excluded through `.git/info/exclude`. A refresh run from a checkout
+where a platform is merely not visible must not erase what another checkout
+legitimately installed:
 
 - Keep existing receipt entries for manifest files skipped by marker
   detection or by a `--platform` filter, and report each kept entry as
