@@ -2049,6 +2049,116 @@ assert.deepEqual(
         )
         self.assertNotIn("archived-child", result.stdout)
 
+    def test_review_preflight_accepts_archived_task_with_rewritten_prd(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        task_name = "07-18-archived-after-rewrite"
+        active = root / ".trellis/tasks" / task_name
+        active.mkdir(parents=True)
+        (active / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record("archived-after-rewrite"),
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (active / "prd.md").write_text(
+            "# Planning\n\nA short active-task plan.\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline active task")
+        self.run_git(root, "branch", "-M", "main")
+        self.run_git(root, "update-ref", "refs/remotes/origin/main", "main")
+        self.run_git(
+            root,
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        )
+        self.run_git(root, "switch", "-c", "codex/archive-task")
+
+        archived = root / ".trellis/tasks/archive/2026-07" / task_name
+        archived.parent.mkdir(parents=True)
+        active.rename(archived)
+        completed = self.trellis_task_record(
+            "archived-after-rewrite",
+            status="completed",
+            completed_at="2026-07-18T12:00:00Z",
+        )
+        (archived / "task.json").write_text(
+            json.dumps(completed, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        (archived / "prd.md").write_text(
+            "# Completed rollout\n\n"
+            "The final evidence replaces the original planning narrative.\n\n"
+            "## Outcome\n\n"
+            "Every target completed and the archived record is authoritative.\n",
+            encoding="utf-8",
+        )
+
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "archive completed task")
+        changed_paths = self.git_output(
+            root,
+            "diff",
+            "--name-only",
+            "main...HEAD",
+        ).splitlines()
+        self.assertIn(f".trellis/tasks/{task_name}/prd.md", changed_paths)
+        self.assertNotIn(f".trellis/tasks/{task_name}/task.json", changed_paths)
+        self.assertIn(
+            f".trellis/tasks/archive/2026-07/{task_name}/task.json",
+            changed_paths,
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn(
+            "missing while checking active parent PRD child representation",
+            result.stdout,
+        )
+
+    def test_review_preflight_rejects_live_task_prd_without_metadata(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+        task = root / ".trellis/tasks/07-18-missing-metadata"
+        task.mkdir(parents=True)
+        (task / "prd.md").write_text(
+            "# Missing metadata\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            ".trellis/tasks/07-18-missing-metadata/task.json is missing "
+            "while checking active parent PRD child representation",
+            result.stdout,
+        )
+
     def test_review_preflight_grandfathers_unchanged_task_metadata(self) -> None:
         node = shutil.which("node")
         if node is None:

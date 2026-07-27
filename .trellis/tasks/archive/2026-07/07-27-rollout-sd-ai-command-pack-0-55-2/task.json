@@ -3,7 +3,7 @@
   "name": "rollout-sd-ai-command-pack-0-55-2",
   "title": "Roll out sd-ai-command-pack 0.55.2 across the fleet",
   "description": "Roll out immutable sd-ai-command-pack 0.55.2 through the deterministic full-fleet campaign and any required corrective-release recovery.",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,8 +11,8 @@
   "creator": "sdelmas",
   "assignee": "sdelmas",
   "createdAt": "2026-07-27",
-  "completedAt": null,
-  "branch": "codex/fleet-rollout-v0-55-2-20260727",
+  "completedAt": "2026-07-27",
+  "branch": "codex/complete-fleet-rollout-v0-55-2",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
@@ -23,6 +23,6 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "Original campaign fleet-v0-55-2-20260727T135308Z validates complete with all eight lanes terminal. Four consumers merged, three were ownership-skipped, and the retry-exhausted sd-github-review lane was subsequently completed by controller-authorized recovery campaign fleet-v0-55-2-sd-recovery-20260727T175924Z; PR #28 merged and the immutable 0.55.2 audit passed all 174 managed targets.",
   "meta": {}
 }
