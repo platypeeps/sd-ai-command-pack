@@ -52,7 +52,9 @@ STAGE_INDEX = {stage: index for index, stage in enumerate(LANE_STAGES)}
 PR_HEAD_STAGES = frozenset(
     {"review", "merge-eligibility", "merge", "post-merge-verification"}
 )
-PR_HEAD_REPUBLICATION_STAGES = frozenset({"review", "merge-eligibility"})
+PR_HEAD_REPUBLICATION_STAGES = frozenset(
+    {"review", "merge-eligibility", "merge"}
+)
 PR_HEAD_ADVANCED_REASON = "pr-head-advanced"
 ACTION_IDENTITY_FIELDS = ("actionId", "attempt", "consumer", "release", "stage")
 SIDE_EFFECT_STAGES = frozenset(
@@ -399,7 +401,7 @@ def _validate_receipt_semantics(
         if result != "retryable-failure" or stage not in PR_HEAD_REPUBLICATION_STAGES:
             raise FleetControllerError(
                 f"reason {PR_HEAD_ADVANCED_REASON} requires a retryable-failure "
-                "at review or merge-eligibility"
+                "at review, merge-eligibility, or merge"
             )
         if head is None or pr_number is None:
             raise FleetControllerError(

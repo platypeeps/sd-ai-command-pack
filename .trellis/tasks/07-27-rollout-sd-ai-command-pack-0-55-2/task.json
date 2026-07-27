@@ -1,0 +1,28 @@
+{
+  "id": "rollout-sd-ai-command-pack-0-55-2",
+  "name": "rollout-sd-ai-command-pack-0-55-2",
+  "title": "Roll out sd-ai-command-pack 0.55.2 across the fleet",
+  "description": "Roll out immutable sd-ai-command-pack 0.55.2 through the deterministic full-fleet campaign and any required corrective-release recovery.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-27",
+  "completedAt": null,
+  "branch": "codex/fleet-rollout-v0-55-2-20260727",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-27-correct-fleet-merge-finalization-head-epoch"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

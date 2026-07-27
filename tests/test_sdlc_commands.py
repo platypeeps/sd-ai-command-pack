@@ -259,6 +259,8 @@ class SdlcCommandsTests(InstallTestCase):
             "bind it to the refresh branch",
             "dedicated consumer task artifacts",
             "complete the dedicated task through `sd-finish-work`",
+            "record the issued merge action as `retryable-failure --reason-code pr-head-advanced`",
+            "pass it to housekeeping without running finish-work again",
         ):
             self.assertIn(pin.casefold(), fleet.casefold())
         for pin in (

@@ -118,6 +118,24 @@ An urgent independent security defect may ship first only when waiting would
 increase risk. Record the exception and keep the remaining corrective campaign
 open.
 
+## Ordinary Merge-Finalization Successor
+
+A valid `sd-finish-work` completion receipt that advances the existing PR head
+is not a terminal corrective-recovery case. On a controller version that
+accepts `pr-head-advanced` at merge, record the issued merge action against its
+old published full head and existing PR number as `retryable-failure` with that
+reason. Preserve the new finish-work commit and receipt; do not call
+housekeeping or replay the merge action. Execute the controller-issued
+`pr-publication` action by verifying and classifying the already-pushed
+successor head, then rerun review and merge eligibility. If the head stays
+unchanged, the next merge action passes the retained receipt to housekeeping
+without running finish-work again.
+
+If the released controller rejects merge-stage `pr-head-advanced`, record the
+verified contradiction as a terminal merge-stage pack blocker and follow the
+corrective-campaign procedure. Never label the successor head as the result of
+the old merge action or record the old head as a successful merge.
+
 ## Invalid Or Changed State
 
 Run controller `validate`. Do not hand-edit, delete, downgrade, or copy state
