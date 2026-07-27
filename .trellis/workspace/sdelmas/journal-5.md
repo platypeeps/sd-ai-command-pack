@@ -1622,3 +1622,42 @@ Closed the deterministic 0.55.2 fleet campaign, recorded terminal consumer outco
 - Resume `07-27-complete-sd-github-review-rollout-after-retry-exhaustion`
   through a fresh controller-authorized attempt, then complete the parent
   rollout task.
+
+
+## Session 242: Complete sd-github-review rollout recovery
+
+**Date**: 2026-07-27
+**Task**: Complete sd-github-review rollout recovery
+**Branch**: `codex/complete-sd-github-review-rollout-after-retry-exhaustion`
+
+### Summary
+
+Completed the controller-authorized sd-github-review 0.55.2 recovery campaign, merged PR #28, verified post-merge state, and closed the source recovery task.
+
+### Main Changes
+
+- Completed fresh controller campaign fleet-v0-55-2-sd-recovery-20260727T175924Z with terminal merged evidence for sd-github-review.
+- Recorded exact-head review, merge, audit, and task branch identity evidence before archiving the recovery task.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4731d27` | chore: resume sd-github-review rollout recovery |
+| `8dcfa31` | chore(task): complete sd-github-review rollout recovery |
+| `41eca00` | chore(task): bind rollout recovery branch |
+
+### Testing
+
+- [OK] Controller ledger validated complete; PR #28 merged at reviewed head 92f8550 with green CI and zero unresolved threads.
+- [OK] Immutable 0.55.2 post-merge audit passed all 174 managed targets.
+- [OK] Source make check and Trellis pre-archive validation passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

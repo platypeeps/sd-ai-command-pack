@@ -1,4 +1,4 @@
-# PARKED: Complete sd-github-review 0.55.2 rollout after retry exhaustion
+# Complete sd-github-review 0.55.2 rollout after retry exhaustion
 
 ## Goal
 
@@ -41,13 +41,13 @@ parked its second legitimate PR-head advance as `retry-exhausted`.
 
 ## Acceptance Criteria
 
-- [ ] A new controller-authorized action is bound to the unchanged PR #28 head,
+- [x] A new controller-authorized action is bound to the unchanged PR #28 head,
       or the task records the safe replacement head and why it changed.
-- [ ] The exact merge head has materialized remote-review evidence, green
+- [x] The exact merge head has materialized remote-review evidence, green
       required checks, and zero unresolved review threads.
-- [ ] Housekeeping consumes a valid exact-head completion receipt and merges
+- [x] Housekeeping consumes a valid exact-head completion receipt and merges
       PR #28 without bypassing the controller or retry bound.
-- [ ] The immutable 0.55.2 audit passes for all 174 managed targets on the
+- [x] The immutable 0.55.2 audit passes for all 174 managed targets on the
       synchronized default branch, and the refresh branch is removed.
 
 ## Notes
@@ -56,3 +56,12 @@ parked its second legitimate PR-head advance as `retry-exhausted`.
   the completed campaign's `retry-exhausted` receipt.
 - PR #28 already contains the verified Windows UTF-8 stdin remediation at
   `92f855080e5ccb668f2d93a4567e0800c80b8291`.
+- Completed by controller campaign
+  `fleet-v0-55-2-sd-recovery-20260727T175924Z`; its ledger validates with 11
+  consumer receipts and terminal result `merged`.
+- Copilot materialized a clean exact-head review at `2026-07-27T18:15:45Z`;
+  CI passed and the authoritative thread read found zero unresolved threads.
+- Housekeeping merged PR #28 as `bb2a24583f09f8f1876f9ce6da1710cd00bc8820`,
+  removed the local and remote refresh branches, and synchronized `main`.
+- The immutable 0.55.2 post-merge check reported 174 unchanged, vouched
+  targets across Claude, Gemini, GitHub, and OpenCode.
