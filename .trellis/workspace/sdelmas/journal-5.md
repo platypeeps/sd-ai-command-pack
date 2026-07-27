@@ -1604,16 +1604,18 @@ Closed the deterministic 0.55.2 fleet campaign, recorded terminal consumer outco
 | Hash | Message |
 |------|---------|
 | `d33a74c645202117218a44ea033e4041227dbc35` | chore(task): record fleet rollout outcomes |
+| `e85d5b6b867e1a8cff31ce26e3c64ff31d3aec89` | chore(task): keep fleet follow-ups standalone |
 
 ### Testing
 
 - [OK] Fleet controller validation passed with every selected lane terminal and no issued action outstanding.
 - [OK] Complete timing report accounted for all eight selected consumers.
 - [OK] All new and updated Trellis task context manifests validated with zero example rows.
+- [OK] Planning finalization topology leaves the existing in-progress rollout task unchanged.
 
 ### Status
 
-[OK] **Campaign recorded; rollout task remains in progress**
+[OK] **Completed**
 
 ### Next Steps
 
