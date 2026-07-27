@@ -750,7 +750,9 @@ test -x "$BREW_PYTHON" || BREW_PYTHON=/usr/local/bin/python3.13  # Intel Homebre
 "$BREW_PYTHON" -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements-dev.txt
-python -m ruff check install.py installer scripts templates/scripts tests
+python -m ruff check install.py installer scripts templates/scripts tests \
+  .github/scripts/check-command-surface-drift.py \
+  .github/scripts/prepare-release.py
 if command -v node >/dev/null 2>&1; then
   node --check scripts/sd-ai-command-pack-review-preflight.mjs
   node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs
@@ -793,39 +795,29 @@ Pull request CI runs the same release payload gate as a small standalone job
 against the PR base and feeds that result into `CI Result`, so payload drift is
 blocked remotely even when the local full-check was missed.
 
-Before merging a release payload change, validate the working candidate against
-disposable clones of every fleet consumer:
+When the release payload, version, changelog, and documentation edits are
+ready, run the canonical preparation command:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-candidate-check.py
+make release-prep
 ```
 
-The all-pass run updates `docs/fleet/candidate-validation.json`. The local/CI
-release gate and automatic tag creator verify that ledger against the exact
-pack payload and fleet manifest, so stale or partial evidence cannot release.
-The validator never modifies active consumer worktrees. See the fleet runbook
-for diagnostic filters and failure policy.
-
-For docs, spec, README, or PRD edits, refresh the local KB before full-check:
-
-```bash
-python3 scripts/sd-ai-command-pack-update-spec-kb.py
-```
+This single workflow regenerates command surfaces, self-syncs the dogfood
+install and local spec KB, and checks release/version prerequisites before any
+expensive fleet work. It runs the full-fleet candidate validator only when the
+exact payload or fleet manifest makes the existing ledger stale, then requires
+strict shipped-surface closure and finishes with `make check`. The validator
+uses disposable origin clones and never modifies active consumer worktrees.
+See the fleet runbook for diagnostic filters and failure policy.
 
 Housekeeping uses the normal refresh so an absent KB is created after
 finish-work. Intentional guarded callers, such as the backlog loop's final
 follow-up refresh, use `--if-present` when they must refresh generated
 knowledge without creating a KB. Missing KBs then return success with a visible
 skip reason; existing invalid or conflicting KB paths still fail.
-
-Run the local release gate with local AI reviewers disabled unless the release
-is explicitly about Prism or Gito behavior:
-
-```bash
-SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 \
-  bash scripts/sd-ai-command-pack-full-check.sh
-```
+`make release-prep` owns the normal generate, sync, candidate-evidence, and
+final-check order; run its component commands directly only for focused
+diagnosis.
 
 Use a conventional release commit such as
 `chore: release sd-ai-command-pack <version>` and merge the PR. After the

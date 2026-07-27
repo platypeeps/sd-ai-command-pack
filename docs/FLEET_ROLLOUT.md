@@ -31,13 +31,17 @@ a local-only snapshot or `--json` for schema-versioned automation output.
 
 ## Release Candidate Validation
 
-Before merging/tagging a version that changes shipped payload, validate the
-working candidate against disposable clones of every consumer origin:
+For normal release preparation, run the source repository's canonical command:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-candidate-check.py
+make release-prep
 ```
+
+It regenerates and self-syncs the exact payload, rejects version, changelog,
+generated-surface, mirror, or other closure defects before fleet work, and
+invokes the full validator only when the current ledger is stale. A current
+exact-payload ledger is reused. The command requires strict closure after a
+refresh and finishes with the repository's complete `make check` gate.
 
 The validator does not write to active consumer worktrees. It discovers each
 checkout's `origin`, clones the default branch under a temporary directory,
@@ -76,7 +80,9 @@ bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
 ```
 
 Use `--consumer <name>` for a diagnostic rerun. Partial runs never replace the
-canonical full-fleet ledger.
+canonical full-fleet ledger. Direct full-fleet invocation remains available
+for focused operation; prefer `make release-prep` so generation and sync cannot
+invalidate evidence after it runs.
 
 ## Preflight
 
