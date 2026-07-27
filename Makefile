@@ -4,7 +4,7 @@ VENV ?= .venv
 VENV_PYTHON = $(VENV)/bin/python
 VENV_BIN = $(VENV)/bin
 
-.PHONY: setup hooks generate surface-check sync test lint audit full-check check
+.PHONY: setup hooks generate surface-check sync release-prep test lint audit full-check check
 
 setup:
 	"$(PYTHON)" -m venv "$(VENV)"
@@ -32,6 +32,12 @@ sync:
 	"$(VENV_PYTHON)" install.py . --force
 	"$(VENV_PYTHON)" scripts/sd-ai-command-pack-update-spec-kb.py
 
+# Canonical release preparation: generate and self-sync first, refresh exact
+# fleet evidence only when stale, then run the complete maintainer gate.
+release-prep:
+	"$(VENV_PYTHON)" .github/scripts/prepare-release.py
+	$(MAKE) check
+
 test:
 	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/run-tests.sh
 	@if grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log; then printf '%s\n' "Tests skipped locally; install required tools or make the skip explicit."; exit 1; fi
@@ -45,8 +51,8 @@ test:
 # scripts/*.py; templates/scripts/ twins are byte-identical mirrors kept
 # out of the run so duplicate script names cannot collide.
 lint:
-	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py
-	"$(VENV_PYTHON)" -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py
+	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/prepare-release.py
+	"$(VENV_PYTHON)" -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/prepare-release.py
 	@if command -v node >/dev/null 2>&1; then \
 		node --check scripts/sd-ai-command-pack-review-preflight.mjs; \
 		node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs; \

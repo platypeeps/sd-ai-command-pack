@@ -45,16 +45,80 @@ run the same pack-source drift gate against the PR base:
 - payload changes require a `manifest.json` version bump;
 - a version bump requires the top `CHANGELOG.md` heading to match
   `## <version> - YYYY-MM-DD`;
-- run `make generate` before `make sync` when the version changes because
-  generated command surfaces embed the pack version and sync installs existing
-  templates without regenerating them; refresh the exact-payload candidate
-  ledger only after both steps;
+- `make release-prep` is the canonical maintainer entry point. It generates
+  before self-sync because generated command surfaces embed the pack version,
+  permits only the expected stale-ledger state to reach fleet validation,
+  reuses current exact-payload evidence, and finishes with `make check`;
 - non-payload changes must pass without a release bump.
+
+### Release Preparation Contract
+
+1. **Scope / Trigger**: Before publishing a pack release, use one maintainer
+   entry point to generate and synchronize local surfaces, refresh derived
+   knowledge, reject cheap release defects, refresh fleet evidence only when
+   necessary, and then run the authoritative full check.
+2. **Signatures**:
+   - `make release-prep` is the public maintainer command and invokes the
+     source-only `.github/scripts/prepare-release.py` with `$(VENV_PYTHON)`.
+   - `prepare_release(root: Path = ROOT, python: str = sys.executable) -> None`
+     performs preparation; the Make target invokes `$(MAKE) check` only after
+     it exits successfully.
+3. **Contracts**:
+   - Run command-surface generation, forced self-install, spec-KB refresh, and
+     shipped-surface inspection in that order.
+   - Consume schema-version-1 shipped-surface JSON with exact scalar and
+     container types, complete findings, a consistent status/exit pair, and a
+     string-array `changedPaths` field.
+   - Permit fleet validation only for one `provenance.candidate-stale` finding
+     whose path is `docs/fleet/candidate-validation.json` and whose relation is
+     `requires-release-evidence`. Clean evidence skips fleet validation.
+   - A shipped-payload diff requires a manifest version change relative to the
+     report's resolved base and a matching top `CHANGELOG.md` heading. The
+     optional `SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF` selects the base
+     when automatic base resolution is unavailable.
+   - After fleet validation, shipped-surface closure must be clean. Final
+     `make check` remains authoritative.
+4. **Validation & Error Matrix**:
+   - Generator, self-install, KB refresh, fleet validation, or final check
+     nonzero/missing/timeout -> stop immediately with a controlled failure.
+   - Malformed JSON, wrong types including boolean-as-integer, truncation,
+     status/exit disagreement, inconsistent counts, or any extra finding ->
+     fail before fleet validation.
+   - Missing release base, unchanged version, malformed manifest, symlink or
+     oversized release input, or mismatched changelog heading -> fail before
+     fleet validation.
+   - Candidate refresh succeeds but closure remains stale -> fail; never run
+     final `make check` on unresolved evidence.
+5. **Good / Base / Bad Cases**:
+   - Good: shipped payload and version ledger are aligned, stale candidate
+     evidence is refreshed once, closure becomes clean, and `make check`
+     passes.
+   - Base: no shipped payload changed and candidate evidence is already
+     current, so the expensive fleet validator is skipped before `make check`.
+   - Bad: run fleet validation despite unrelated closure findings, accept a
+     boolean count as an integer, or treat preparation as the final verdict.
+6. **Tests Required**: Assert exact step order and fail-fast behavior; current
+   and stale candidate branches; failed and still-stale candidate refreshes;
+   malformed, inconsistent, truncated, extra, and wrong-type surface reports;
+   missing, nonzero, and timed-out subprocesses; regular, symlinked, and
+   oversized release inputs; version/base/changelog gates; and Make target
+   ordering with recursive `$(MAKE) check` after the orchestrator.
+7. **Wrong vs Correct**:
+
+   ```text
+   Wrong: run the full fleet for every documentation-only change, then discover
+          a missing version bump or unrelated closure defect afterward
+   Correct: prepare deterministic local surfaces, fail closed on cheap gates,
+            refresh only stale exact-payload fleet evidence, then run make check
+   ```
 
 Wire any future release-gate changes through the shared
 `run_pack_source_drift_gates` implementation in
 `scripts/sd-ai-command-pack-full-check.sh` and its template twin. Do not create
-a separate CI-only interpretation of shipped-payload paths.
+a separate CI-only interpretation of shipped-payload paths. Keep the
+source-only preparation preflight's payload boundary aligned with that
+authoritative final gate; preparation is an early cost guard, not a weaker
+release verdict.
 
 ### Release Candidate Fleet Ledger Contract
 

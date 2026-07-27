@@ -75,14 +75,25 @@ insufficient.
 
 ## Release And Payload Rules
 
+- Use the canonical release-preparation command after the release payload,
+  version, changelog, and documentation edits are ready:
+
+  ```bash
+  make release-prep
+  ```
+
+  It regenerates command surfaces, self-syncs the dogfood install and spec KB,
+  rejects release/version/closure defects before fleet work, refreshes the
+  exact-payload fleet ledger only when it is stale, and finishes with
+  `make check`. Do not run the full-fleet validator earlier in the edit cycle;
+  later generation or sync changes can invalidate its evidence.
 - Bump `manifest.json` whenever shipped payload changes: `templates/**`,
   `docs/SD_AI_COMMAND_PACK.md`, or the manifest itself.
 - Pull request CI runs a `Release payload gate` job against the PR base and
   includes it in `CI Result`, so payload changes without the manifest bump and
   matching top `CHANGELOG.md` heading are blocked before merge. A version bump
-  also requires an all-pass `docs/fleet/candidate-validation.json` matching the
-  exact payload and fleet manifest; generate it with
-  `scripts/sd-ai-command-pack-fleet-candidate-check.py` before the final gate.
+  also requires the all-pass `docs/fleet/candidate-validation.json` produced or
+  reused by `make release-prep` to match the exact payload and fleet manifest.
 - Treat `templates/**` as the source of truth for shipped files. Root-level
   copies under `.agents/`, `.opencode/`, `scripts/`, and similar dogfood paths
   are mirrors.
@@ -98,9 +109,9 @@ insufficient.
     scripts/sd-ai-command-pack-update-spec-kb.py
   ```
 
-- Run the fleet candidate validator only after payload/template sync is final.
-  It uses disposable origin clones and does not mutate active consumer trees.
-  A partial `--consumer` diagnostic run never replaces the full-fleet ledger.
+- Use `--consumer` with the fleet validator only for diagnosis. It uses a
+  disposable origin clone, and a partial or failing run never replaces the
+  canonical full-fleet ledger.
 
 ## Versioning
 
