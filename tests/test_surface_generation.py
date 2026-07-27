@@ -489,6 +489,7 @@ class SurfaceGenerationTests(InstallTestCase):
             "review-thread replies or",
             "normal backlog iterations",
             "housekeeping merge",
+            "controller-issued fleet merge",
         ):
             self.assertIn(routine, normalized)
 
@@ -537,6 +538,41 @@ class SurfaceGenerationTests(InstallTestCase):
                     "configured GitHub review requests or re-requests",
                     generator.skill_description(command),
                 )
+
+        fleet_description = generator.skill_description("sd-fleet-refresh")
+        fleet_skill = (
+            PACK_ROOT / "templates/.agents/skills/sd-fleet-refresh/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("eligible managed consumer PR merges", fleet_description)
+        self.assertIn(
+            "Execute that issued merge without another approval prompt",
+            fleet_skill,
+        )
+        self.assertIn("review findings", fleet_skill)
+
+    def test_update_spec_prefers_optional_archify_for_repository_visuals(
+        self,
+    ) -> None:
+        skill = (
+            PACK_ROOT / "templates/.agents/skills/sd-update-spec/SKILL.md"
+        ).read_text(encoding="utf-8")
+        architecture = (
+            PACK_ROOT
+            / "templates/.agents/skills/sd-update-spec/references/architecture.md"
+        ).read_text(encoding="utf-8")
+        docs = (PACK_ROOT / "templates/docs/SD_AI_COMMAND_PACK.md").read_text(
+            encoding="utf-8"
+        )
+
+        for content in (skill, architecture, docs):
+            with self.subTest(source=content[:80]):
+                normalized = " ".join(content.lower().split())
+                self.assertIn("archify", normalized)
+                self.assertIn("it is available", normalized)
+        self.assertIn("optional enhancement, not a pack dependency", architecture)
+        self.assertIn("Do not install Archify", architecture)
+        self.assertIn("invoke it when no", architecture)
+        self.assertIn("`Repository visuals`", skill)
 
     def test_manifest_fans_interaction_reference_with_help_to_every_skill_root(
         self,

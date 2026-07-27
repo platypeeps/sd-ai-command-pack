@@ -18,7 +18,7 @@ Start or resume work, preserve knowledge, and close a session.
 | `sd-start` | included in installed pack | Use when the user wants the Software Delivery start command to initialize Trellis session context and classify the next action. |
 | `sd-finish-work` | included in installed pack | Use when the user wants the Software Delivery finish-work command to wrap up a Trellis coding session. Invocation is explicit approval for its in-scope task, archive, and journal commits and PR-branch push without another prompt. |
 | `sd-retro` | included in installed pack | Use when the user wants to capture a structured retrospective after a debugging stream, incident, or gate near-miss, record it as a journal entry via the session recorder, and propose consent-gated prevention tasks. |
-| `sd-update-spec` | included in installed pack | Use when the user wants the Software Delivery update-spec command to run Trellis update-spec and the pack's extended spec-refresh features. |
+| `sd-update-spec` | included in installed pack | Use when the user wants the Software Delivery update-spec command to run Trellis update-spec, the pack's extended spec-refresh features, and optional Archify-backed repository documentation visuals. |
 
 ## Planning and backlog
 
@@ -62,4 +62,4 @@ Maintain dependencies and roll pack releases across repositories.
 | Command | Bundled availability | Description |
 |---|---|---|
 | `sd-update-deps` | included in installed pack | Use when open dependency-bot PRs need batch triage — classify every dependabot or renovate PR, merge the safe class sequentially under the housekeeping gate criteria, and park the rest with one-line recommendations. |
-| `sd-fleet-refresh` | source-checkout-only | Use when a pack release must roll across the consumer fleet through the deterministic campaign controller, source preflight, bounded waves, and serialized housekeeping merges. Campaign invocation is explicit approval for controller-issued in-scope consumer commits, PR-branch pushes, and configured GitHub review requests or re-requests without another prompt. |
+| `sd-fleet-refresh` | source-checkout-only | Use when a pack release must roll across the consumer fleet through the deterministic campaign controller, source preflight, bounded waves, and serialized housekeeping merges. Campaign invocation is explicit approval for controller-issued in-scope consumer commits, PR-branch pushes, configured GitHub review requests or re-requests, and eligible managed consumer PR merges without another prompt. |

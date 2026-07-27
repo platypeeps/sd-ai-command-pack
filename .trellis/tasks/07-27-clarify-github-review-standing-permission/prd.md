@@ -7,6 +7,12 @@ part of every review-capable SD workflow. Once the user invokes such a
 workflow, creating and pushing its in-scope commits to the current pull-request
 branch, and sending that pull-request diff or code through its configured
 GitHub review path, must not trigger another approval question.
+For a merge-capable fleet campaign, the same standing authority extends through
+each eligible controller-issued consumer merge so an end-to-end rollout does
+not pause again after its review findings are addressed. Repository
+documentation refreshes should also consistently prefer Archify for generated
+technical visuals when that skill is available, without making it a required
+dependency.
 
 ## Background
 
@@ -41,6 +47,10 @@ GitHub review path, must not trigger another approval question.
   confirmation, or other approval prompt solely because an in-scope commit will
   be created/pushed to the PR branch or a configured GitHub reviewer will
   receive the diff/code.
+- For `sd-fleet-refresh`, state that invoking a merge-capable campaign grants
+  standing approval for every eligible controller-issued consumer
+  `sd-housekeeping` merge, including after in-scope review-finding remediation;
+  `no-merge` remains the explicit opt-out.
 - Preserve questions for genuine decision boundaries such as scope expansion,
   higher-risk fixes, and attempts beyond the configured review-round limit.
 - Preserve all independent safety and authority boundaries, including checkout
@@ -51,6 +61,12 @@ GitHub review path, must not trigger another approval question.
   GitHub review path and must not hard-code Copilot as the only allowed backend.
 - Update `templates/**` first, synchronize installed root mirrors, and add a
   focused contract test that prevents future workflow drift.
+- Route workflow, architecture, sequence, data-flow, lifecycle/state, and
+  similar technical visuals created or materially updated in repository
+  documentation through `archify` when that skill is available.
+- Keep the visual route optional and scoped: fall back gracefully to documented
+  repo-native tooling or the existing manual format when Archify is absent, do
+  not create unsolicited visuals, and report the route and validation used.
 
 ## Acceptance Criteria
 
@@ -63,9 +79,15 @@ GitHub review path, must not trigger another approval question.
       language.
 - [x] The guidance remains backend-neutral and does not bypass review-round,
       safety, destructive-action, merge, or upstream-Trellis-PR approval gates.
+- [x] `sd-fleet-refresh` discovers and executes eligible serialized consumer
+      merges without another approval prompt in merge-capable mode, while
+      retaining `no-merge` and every controller/lifecycle gate.
 - [x] Template and installed skill copies remain synchronized.
 - [x] Focused tests assert the standing-permission contract, and the relevant
       generated-parity/pack checks pass.
+- [x] `sd-update-spec` prefers Archify for in-scope repository documentation
+      visuals, reports the selected route, and retains a tested graceful
+      fallback when Archify is unavailable.
 
 ## Out of Scope
 
@@ -76,3 +98,7 @@ GitHub review path, must not trigger another approval question.
 - Authorizing force pushes, pushes to the default branch, or commits that do
   not clearly belong to the active task or pull request.
 - Changing upstream Trellis.
+- Changing fleet merge eligibility, serialization order, or housekeeping
+  validation.
+- Requiring Archify, installing it automatically, or changing a repository's
+  documentation format solely to accommodate it.

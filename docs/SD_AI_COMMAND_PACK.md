@@ -982,6 +982,16 @@ command surfaces, data flow, persistence, external integrations, config/env, or
 runtime/deployment topology, the wrapper updates it. Otherwise it leaves the
 overview untouched and reports `not present` or `not warranted`.
 
+When that work creates or materially updates a workflow, architecture,
+sequence, data-flow, lifecycle/state, or similar technical visual that belongs
+in the repository documentation, the architecture extension prefers the
+`archify` skill when it is available. Archify supplies the matching renderer
+and deterministic validation/delivery workflow while the target repository
+continues to own the document format, artifact location, and naming. Archify is
+not a required pack dependency: if it is unavailable, update-spec continues
+with documented repo-native visual tooling or the existing manual format and
+reports the fallback. No visual is created merely because Archify is present.
+
 The canonical update-spec skill keeps routine Trellis delegation, extension
 ordering, the normal KB command, safety, and final reporting inline. It loads no
 optional reference for a routine spec-only pass. Existing repository-map
@@ -1280,6 +1290,13 @@ names such as `loadsmith rwbp-website`, or `consumer=a,b`, filter the run;
 `no-merge` stops before merging, `dry-run` reports preflight only, and
 `remote-review` forces normal remote review, while `remote=<name>` selects the
 release-authority Git remote (default `origin`).
+Invoking normal merge-capable mode is standing approval for every eligible,
+controller-issued consumer housekeeping merge, including after in-scope
+review findings are addressed; the workflow does not ask again before those
+serialized merges. This changes no gate: exact-head review, CI, thread state,
+finish-work, housekeeping eligibility, and post-merge verification must all
+pass. `no-merge` is the explicit opt-out when the operator wants PR-open
+completion instead of an end-to-end rollout.
 In `no-merge` mode the source scheduler accepts PR-open canaries as settled,
 holds all merges, and emits no merge candidate; normal mode still requires
 canaries to be at-target or merged.

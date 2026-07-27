@@ -30,7 +30,7 @@ condition into approval. Do not ask for deterministic checks, ordinary
 low-risk in-scope fixes, in-scope commits or pushes to the current PR
 branch, configured GitHub review requests or re-requests, bounded retries
 or polls, review-thread replies or resolution, normal backlog iterations,
-or a housekeeping merge already authorized by the owning workflow.
+or a housekeeping merge already authorized by the owning workflow, including a controller-issued fleet merge in a merge-capable campaign.
 
 ## Decision Registry
 
