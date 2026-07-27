@@ -1700,3 +1700,36 @@ Reconciled the completed original and recovery campaigns, recorded final fleet e
 ### Next Steps
 
 - None - task complete
+
+
+## Session 244: Add canonical release preparation
+
+**Date**: 2026-07-27
+**Task**: Add canonical release preparation
+**Branch**: `codex/add-release-prep-command`
+
+### Summary
+
+Added make release-prep to generate and self-sync surfaces, refresh the spec KB, fail closed on cheap release gates, refresh stale fleet evidence only when needed, and run the authoritative final check; documented and tested the workflow.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `da7c4cc` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
