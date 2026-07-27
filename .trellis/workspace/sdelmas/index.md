@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 237
+- **Total Sessions**: 238
 - **Last Active**: 2026-07-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~1461 | Active |
+| `journal-5.md` | ~1499 | Active |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 238 | 2026-07-26 | Correct 0.55.0 consumer compatibility blockers | `2ea31a50d18f1e63e981bfa3a9af72946ff73ba6`, `32f0cc30a358a6bf56153b2421febe076509c2e8`, `9057c7f934af30545eae0ab1bc627f617558f89b` | `codex/correct-0550-consumer-compatibility-blockers` |
 | 237 | 2026-07-26 | Reverse .claude/ gitignore to commit-by-default (0.55.0) | `d02e39ab25395335198e084816a07966314a5d30` | `codex/align-claude-gitignore-commit-model` |
 | 236 | 2026-07-26 | Complete v0.54.0 fleet rollout | `cc446cb`, `05b2ea4`, `8aea461` | `codex/roll-out-sd-ai-command-pack-0-54-0-fleet` |
 | 235 | 2026-07-26 | Support fleet PR head republication | `a6d3d173d44a80e0d31c29e23454fc746c90ff27`, `6bfeef1c12dbd0e42aa238d588117f21145ded3c` | `codex/support-fleet-pr-head-republication` |
