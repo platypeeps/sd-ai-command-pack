@@ -116,6 +116,17 @@ class FleetPreflightTests(InstallTestCase):
         pack_manifest.write_text('{"version": "0.8.5"}\n', encoding="utf-8")
         return fleet_manifest, pack_manifest
 
+    def test_read_installed_version_treats_malformed_utf8_as_unreadable(self) -> None:
+        fleet = self.load_fleet_module()
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            provenance = root / ".sd-ai-command-pack/provenance.json"
+            provenance.parent.mkdir(parents=True)
+            provenance.write_bytes(b'{"version": "\xff"}\n')
+
+            self.assertIsNone(fleet.read_installed_version(root))
+
     def test_checked_in_fleet_manifest_lists_real_consumers(self) -> None:
         fleet = self.load_fleet_module()
 
