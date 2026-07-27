@@ -483,12 +483,96 @@ class SurfaceGenerationTests(InstallTestCase):
         for routine in (
             "deterministic checks",
             "ordinary low-risk in-scope fixes",
+            "in-scope commits or pushes to the current PR branch",
+            "configured GitHub review requests or re-requests",
             "bounded retries or polls",
             "review-thread replies or",
             "normal backlog iterations",
             "housekeeping merge",
+            "controller-issued fleet merge",
         ):
             self.assertIn(routine, normalized)
+
+    def test_github_publication_authority_is_visible_in_skill_descriptions(
+        self,
+    ) -> None:
+        generator = load_surface_generator()
+        authority_commands = (
+            "sd-review",
+            "sd-review-pr",
+            "sd-create-pr",
+            "sd-ship",
+            "sd-work-backlog",
+            "sd-fleet-refresh",
+            "sd-fix-ci",
+            "sd-finish-work",
+            "sd-housekeeping",
+        )
+        review_commands = (
+            "sd-review",
+            "sd-review-pr",
+            "sd-create-pr",
+            "sd-ship",
+            "sd-work-backlog",
+            "sd-fleet-refresh",
+        )
+
+        for command in authority_commands:
+            with self.subTest(command=command):
+                description = generator.skill_description(command)
+                skill = (
+                    PACK_ROOT / f"templates/.agents/skills/{command}/SKILL.md"
+                ).read_text(encoding="utf-8")
+                normalized_skill = " ".join(skill.split())
+                self.assertIn("explicit approval", description)
+                self.assertIn("without another prompt", description)
+                self.assertIn("## Standing GitHub authority", skill)
+                self.assertIn(
+                    "Do not ask again solely because",
+                    normalized_skill,
+                )
+
+        for command in review_commands:
+            with self.subTest(review_command=command):
+                self.assertIn(
+                    "configured GitHub review requests or re-requests",
+                    generator.skill_description(command),
+                )
+
+        fleet_description = generator.skill_description("sd-fleet-refresh")
+        fleet_skill = (
+            PACK_ROOT / "templates/.agents/skills/sd-fleet-refresh/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("eligible managed consumer PR merges", fleet_description)
+        self.assertIn(
+            "Execute that issued merge without another approval prompt",
+            fleet_skill,
+        )
+        self.assertIn("review findings", fleet_skill)
+
+    def test_update_spec_prefers_optional_archify_for_repository_visuals(
+        self,
+    ) -> None:
+        skill = (
+            PACK_ROOT / "templates/.agents/skills/sd-update-spec/SKILL.md"
+        ).read_text(encoding="utf-8")
+        architecture = (
+            PACK_ROOT
+            / "templates/.agents/skills/sd-update-spec/references/architecture.md"
+        ).read_text(encoding="utf-8")
+        docs = (PACK_ROOT / "templates/docs/SD_AI_COMMAND_PACK.md").read_text(
+            encoding="utf-8"
+        )
+
+        for content in (skill, architecture, docs):
+            with self.subTest(source=content[:80]):
+                normalized = " ".join(content.lower().split())
+                self.assertIn("archify", normalized)
+                self.assertIn("it is available", normalized)
+        self.assertIn("optional enhancement, not a pack dependency", architecture)
+        self.assertIn("Do not install Archify", architecture)
+        self.assertIn("invoke it when no", architecture)
+        self.assertIn("`Repository visuals`", skill)
 
     def test_manifest_fans_interaction_reference_with_help_to_every_skill_root(
         self,

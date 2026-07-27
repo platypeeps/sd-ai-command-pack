@@ -1500,3 +1500,45 @@ Prepared corrective release 0.55.1, closed consumer UTF-8 compatibility gaps, an
 ### Next Steps
 
 - None - task complete
+
+
+## Session 239: Codify standing workflow authority and documentation visual routing
+
+**Date**: 2026-07-27
+**Task**: Codify standing workflow authority and documentation visual routing
+**Branch**: `codex/rollout-sd-ai-command-pack-0-55-1`
+
+### Summary
+
+Made GitHub publication and review dispatch standing-authority actions, automated eligible fleet merges, added optional Archify routing for repository documentation visuals, and corrected task branch metadata for guarded finalization.
+
+### Main Changes
+
+- Codified standing permission for in-scope PR commits, pushes, configured review requests, and post-fix re-requests across publication and review workflows.
+- Made merge-capable fleet refresh campaigns execute eligible controller-issued consumer merges without repeated approval while retaining no-merge and every lifecycle gate.
+- Routed in-scope repository workflow and architecture visuals through Archify when available with a documented repo-native fallback.
+- Aligned the active task branch and base-branch metadata with PR #262 so pre-archive validation could complete.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d9c97d3` | feat: codify standing GitHub workflow authority |
+| `94c95e0` | fix: align standing review authority wording |
+| `1996ef4` | feat: automate fleet merges and route documentation visuals |
+| `b54d117` | fix(task): align feature branch metadata |
+
+### Testing
+
+- [OK] make check passed, including tests, coverage floors, Ruff, mypy, zizmor, installer audit, KB freshness, and full-check.
+- [OK] Canonical fleet candidate validation passed for all eight configured consumers.
+- [OK] Exact-head sd-check passed 8/8 with an unchanged state guard; GitHub CI and Copilot review passed with zero unresolved threads.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

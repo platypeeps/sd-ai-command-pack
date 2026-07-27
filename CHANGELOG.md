@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.55.2 - 2026-07-27
+
+- Make publication and review workflow invocation explicit standing approval
+  for in-scope commits, PR-branch pushes, and configured GitHub review requests
+  or re-requests, while preserving ambiguity, risk, round-limit, destructive,
+  exact-head, and merge gates.
+- Surface that authority in startup-visible skill descriptions and prevent the
+  portable structured-question contract from adding redundant approval prompts
+  for routine GitHub publication or review actions.
+- Make a merge-capable `sd-fleet-refresh` campaign standing approval for every
+  eligible controller-issued consumer housekeeping merge, including after
+  review-finding remediation; retain `no-merge` as the explicit opt-out.
+- Prefer the optional `archify` skill when `sd-update-spec` creates or
+  materially updates repository documentation visuals, with a reported
+  repo-native fallback when Archify is unavailable.
+
 ## 0.55.1 - 2026-07-26
 
 - Pin strict UTF-8 decoding explicitly in the shipped housekeeping-result JSON

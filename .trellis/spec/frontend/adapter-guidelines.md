@@ -729,9 +729,12 @@ noise.
 - Structured answers select or narrow behavior inside existing invocation
   authority. They cannot override checkout trust, exact-head, required-review,
   failed-closed, no-touch, destructive-operation, or merge gates. Do not add
-  prompts for deterministic checks, ordinary in-scope fixes, bounded polling,
-  review-thread replies or resolution, normal backlog iterations, or an
-  already-authorized housekeeping merge.
+  prompts for deterministic checks, ordinary in-scope fixes, in-scope commits
+  or pushes to the current PR branch, configured GitHub review requests or
+  re-requests, bounded polling, review-thread replies or resolution, normal
+  backlog iterations, an already-authorized housekeeping merge, or an eligible
+  controller-issued fleet merge already authorized by a merge-capable
+  campaign.
 - Checkout trust is classified using trusted host-provided, read-only Git and
   GitHub metadata. Fork heads are untrusted; detached, unreadable, unavailable,
   or contradictory identity is indeterminate. Both states stop before any
@@ -1073,6 +1076,9 @@ The `sd-review-pr` shared skill should continue to define:
 - dirty working-tree classification before staging or committing
 - the configured remote reviewer request path and fallback, with GitHub Copilot
   as the default reviewer
+- invocation-level standing permission for in-scope review-fix commits, pushes
+  to the current PR branch, and configured GitHub review requests or
+  re-requests; these routine actions do not receive another approval prompt
 - polling behavior that avoids fetching full comment bodies on every interval
 - thread-aware review inspection through GraphQL when using `gh`
 - CI check inspection through the stable `gh pr checks` fields `name`,
@@ -1835,6 +1841,15 @@ architectural-overview gate, and rebuild the repo-local `.obsidian-kb` folder:
   services, command surfaces, data flow, persistence, external integrations,
   config/env, or runtime/deployment topology.
 - Do not create a new overview unless the user asks.
+- When a workflow, architecture, sequence, data-flow, lifecycle/state, or
+  similar technical visual in repository documentation is created or
+  materially updated, prefer the `archify` skill when available and use its
+  matching renderer plus deterministic validation/delivery contract.
+- Treat Archify as optional: if unavailable, continue through documented
+  repo-native visual tooling or the existing manual format, report the
+  fallback, and do not fail update-spec solely because Archify is absent.
+- Do not invoke Archify when no repository visual is in scope, and do not
+  create an unsolicited visual merely because the skill is available.
 - Ensure `.obsidian-kb/` is listed in the repo root `.gitignore`.
 - Run `python3 scripts/sd-ai-command-pack-update-spec-kb.py` to create or
   refresh `.obsidian-kb/` with real copies of repository-knowledge files such
@@ -1860,8 +1875,8 @@ architectural-overview gate, and rebuild the repo-local `.obsidian-kb` folder:
   `.git/`, `.trellis/workspace/`, or broad source trees unless a specific source
   entrypoint is intentionally maintained as repo documentation.
 - Report `Update-spec skill`, `Spec updates`, `Repospec`,
-  `Architectural overview`, `Obsidian KB`, `Obsidian vault copy`, and
-  `Validation` in the final response.
+  `Architectural overview`, `Repository visuals`, `Obsidian KB`, `Obsidian
+  vault copy`, and `Validation` in the final response.
 
 ## Scenario: Claude planning-artifact adversarial review
 

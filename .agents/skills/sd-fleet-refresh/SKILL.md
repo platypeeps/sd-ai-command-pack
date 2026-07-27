@@ -1,6 +1,6 @@
 ---
 name: sd-fleet-refresh
-description: Use when a pack release must roll across the consumer fleet through the deterministic campaign controller, source preflight, bounded waves, and serialized housekeeping merges.
+description: Use when a pack release must roll across the consumer fleet through the deterministic campaign controller, source preflight, bounded waves, and serialized housekeeping merges. Campaign invocation is explicit approval for controller-issued in-scope consumer commits, PR-branch pushes, configured GitHub review requests or re-requests, and eligible managed consumer PR merges without another prompt.
 ---
 
 # SD Fleet Refresh
@@ -16,6 +16,20 @@ merges serialized.
 The skill interprets controller output, invokes the action owner, explains
 material exceptions, and renders the final report. Never reconstruct or
 override campaign state from conversation history.
+
+## Standing GitHub authority
+
+Invoking the campaign is explicit approval for its ordinary controller-issued,
+in-scope consumer GitHub actions: refresh commits, pushes to the dedicated PR
+branch, PR creation or reuse, and configured GitHub review requests or
+re-requests, plus controller-issued eligible merges through the consumer's
+housekeeping lifecycle. Do not ask again solely because a managed consumer diff
+will be committed, pushed, published, sent to the configured reviewer, or
+merged after its findings are addressed and every gate passes. Omitting
+`no-merge` selects this end-to-end merge authority; the explicit `no-merge`
+flag remains the opt-out. This does not authorize product-code edits, dirty or
+externally owned checkouts, force pushes, default-branch pushes, operator
+decisions, destructive actions, or bypassing controller and lifecycle gates.
 
 ## When to use
 
@@ -160,7 +174,10 @@ but defines no ordering or transition policy:
   consumer's `sd-housekeeping` gate. Complete the dedicated task through
   `sd-finish-work`, retain its exact-head receipt, and pass that receipt to
   housekeeping. The controller alone invokes housekeeping; it never merges in
-  completion order.
+  completion order. Execute that issued merge without another approval prompt,
+  including when the eligible head contains in-scope changes that addressed
+  rollout review findings; campaign invocation already authorizes this normal
+  end-to-end action.
 - `post-merge-verification`: verify the installed target version, install audit,
   clean default branch, deleted refresh branch, and pruned refs.
 
@@ -251,6 +268,10 @@ thread resolution.
 - A verified pack blocker stops new starts and holds unsettled merges. A
   controller or telemetry error pauses mutation; prompt prose never overrides
   an invalid transition.
+- In merge-capable mode, do not ask again before an eligible controller-issued
+  consumer merge, including after in-scope finding remediation. Ask only when
+  the controller emits a genuine operator decision; `no-merge` remains the
+  explicit way to stop before merge.
 - Use the portable structured-question contract only for a genuinely ambiguous
   operator policy choice. Normal retries, polling, receipts, and optional
   absence do not prompt.
