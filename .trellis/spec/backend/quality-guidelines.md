@@ -357,10 +357,10 @@ delegation.
 - Identity binds repository, start/default/current branches, PR, full heads,
   and finish-work evidence. Actions/anomalies contain lowercase stable codes
   and bounded control-free messages.
-- Every JSON input boundary uses `encoding="utf-8", errors="strict"`
-  explicitly. Do not rely on the decoder's implicit default even when behavior
-  is equivalent; consumer static-analysis gates treat the declared policy as
-  part of the shipped helper contract.
+- Every JSON file input consumed by the housekeeping result builder uses
+  `encoding="utf-8", errors="strict"` explicitly. Do not rely on the decoder's
+  implicit default even when behavior is equivalent; consumer static-analysis
+  gates treat the declared policy as part of the shipped helper contract.
 - Outcome is exactly `clean|blocked|indeterminate|failed`. Eligibility
   indeterminacy and unavailable evidence remain indeterminate; known blocking
   eligibility, coded anomalies, or status anomalies are blocked; status
