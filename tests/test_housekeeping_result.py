@@ -210,6 +210,13 @@ class HousekeepingResultTests(unittest.TestCase):
                 path.write_text(content, encoding="utf-8")
                 with self.assertRaises(result_builder.ResultInputError):
                     result_builder.load_json(path, "fixture")
+        invalid_utf8 = self.root / "invalid-utf8.json"
+        invalid_utf8.write_bytes(b"\xff{\"schemaVersion\": 1}")
+        with self.assertRaisesRegex(
+            result_builder.ResultInputError,
+            "fixture is not readable JSON",
+        ):
+            result_builder.load_json(invalid_utf8, "fixture")
         with self.assertRaises(result_builder.ResultInputError):
             result_builder.load_json(self.root / "missing.json", "fixture")
 

@@ -59,7 +59,9 @@ def load_fleet_consumers(path: Path = DEFAULT_FLEET_MANIFEST) -> list[FleetConsu
 def read_installed_version(repo_path: Path) -> str | None:
     provenance = repo_path / PROVENANCE_FILE
     try:
-        payload = json.loads(provenance.read_text(encoding="utf-8"))
+        payload = json.loads(
+            provenance.read_text(encoding="utf-8", errors="strict")
+        )
     except (FileNotFoundError, OSError, UnicodeError, ValueError):
         return None
     version = payload.get("version") if isinstance(payload, dict) else None
