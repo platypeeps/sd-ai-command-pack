@@ -2,17 +2,17 @@
 
 ## Execution Checklist
 
-- [ ] Start the Trellis task on the dedicated source rollout branch.
-- [ ] Plan the full-fleet controller campaign and initialize timing evidence.
-- [ ] Execute and record the issued immutable-release preflight.
-- [ ] Repeatedly execute only controller-issued consumer actions, creating one
+- [x] Start the Trellis task on the dedicated source rollout branch.
+- [x] Plan the full-fleet controller campaign and initialize timing evidence.
+- [x] Execute and record the issued immutable-release preflight.
+- [x] Repeatedly execute only controller-issued consumer actions, creating one
       dedicated Trellis task per eligible consumer during checkout validation.
-- [ ] Publish, classify, review, and settle each exact PR head.
-- [ ] Run exact-head eligibility and serialized managed housekeeping merges.
-- [ ] Verify every merged default branch, installed version, audit, branch
+- [x] Publish, classify, review, and settle each exact PR head.
+- [x] Run exact-head eligibility and serialized managed housekeeping merges.
+- [x] Verify every merged default branch, installed version, audit, branch
       deletion, and pruned refs.
-- [ ] Run controller validation/status and complete the timing report.
-- [ ] Finish the source rollout task through the normal source lifecycle.
+- [x] Run controller validation/status and complete the timing report.
+- [x] Finish the source rollout task through the normal source lifecycle.
 
 ## Validation Commands
 

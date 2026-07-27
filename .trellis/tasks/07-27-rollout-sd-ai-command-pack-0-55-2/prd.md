@@ -40,16 +40,77 @@ controller, including review, merge, and post-merge verification.
 
 ## Acceptance Criteria
 
-- [ ] Controller planning and source preflight validate immutable release
+- [x] Controller planning and source preflight validate immutable release
       `0.55.2`, the full-fleet ledger, fleet policy, and checkout identities.
-- [ ] Every selected consumer reaches a terminal controller outcome with no
+- [x] Every selected consumer reaches a terminal controller outcome with no
       unrecorded issued action.
-- [ ] Every refreshed consumer passes install audit, repository checks, review
+- [x] Every refreshed consumer passes install audit, repository checks, review
       convergence, exact-head merge eligibility, managed housekeeping, and
       post-merge installed-version/audit verification.
-- [ ] At-target or ownership-skipped consumers have explicit evidence and are
+- [x] At-target or ownership-skipped consumers have explicit evidence and are
       not mutated.
-- [ ] Controller `validate` and final `status` pass, and the complete timing
+- [x] Controller `validate` and final `status` pass, and the complete timing
       report accounts for all selected consumers.
-- [ ] The final report itemizes campaign, fleet, scheduling, findings, timing,
+- [x] The final report itemizes campaign, fleet, scheduling, findings, timing,
       and follow-ups, explicitly using `none` for empty categories.
+
+## Completion Evidence
+
+### Campaign
+
+- Original campaign: `fleet-v0-55-2-20260727T135308Z` for immutable release
+  `0.55.2`; schema version 1, preflight `passed`, validation `valid`, and final
+  controller status `complete` with every selected lane terminal.
+- Recovery campaign: `fleet-v0-55-2-sd-recovery-20260727T175924Z`; the archived
+  recovery task records a valid 11-receipt ledger and terminal `merged` result
+  for the previously retry-exhausted `sd-github-review` lane.
+- Merge mode: end-to-end managed merge. Controller anomalies: none.
+
+### Fleet
+
+| Consumer | Final outcome | Evidence |
+| --- | --- | --- |
+| `rwbp-coordinator` | merged | PR #180, head `607c8ad62759764ccb55280347ab32c69ebe60b2`, post-merge verification passed |
+| `loadsmith` | merged | PR #172, head `795cd71efe1f7f6e2a978a03d8c290b4cb21191c`, post-merge verification passed |
+| `hoa-manager` | merged | PR #186, head `82ba9ea6e01f4938a62cf5f0474f14674c1e880d`, post-merge verification passed |
+| `rwbp-website` | ownership skip | Existing PR #179 and active 0.55.0 task; no mutation |
+| `mezmo_benchmark` | ownership skip | Dirty active 0.55.0 stream; no mutation |
+| `se-ai-command-pack` | merged | PR #108, head `0f1cdab63a9e36acba6573fdedfbcb9f24ecb3a2`, post-merge verification passed |
+| `sd-github-review` | merged by recovery | PR #28 merged at reviewed head `92f855080e5ccb668f2d93a4567e0800c80b8291`; immutable 0.55.2 audit passed 174 targets |
+| `anomaly-metric-creator` | ownership skip | Existing pack-refresh PR #306; no mutation |
+
+### Scheduling
+
+- Sequential canaries completed before the bounded post-canary and final
+  cohorts; controller-issued merges remained serialized.
+- The original campaign recorded 16 retries. Its bounded second
+  `sd-github-review` head advance ended as `retry-exhausted`; the fresh
+  controller-authorized recovery campaign completed that lane without editing
+  the immutable original ledger.
+- Remaining controller action: none.
+
+### Findings
+
+- No rollout-blocking finding remains.
+- Deferred classifier and upstream findings are owned by
+  `07-27-align-review-scope-gemini-settings`,
+  `07-27-align-review-preflight-claude-hooks`, and
+  `07-27-upstream-claude-statusline-utf8-stdin-fix`.
+- Duplicate findings: none. Overrides: none.
+
+### Timing
+
+- Completed run `fleet-v0-55-2-20260727T135308Z`: critical path
+  13018.280 seconds, active wall 7309.171 seconds, summed stage elapsed
+  11293.113 seconds, reviewer/CI overlap 2322.633 seconds, and 16 retries.
+- Slowest consumer: `rwbp-coordinator` at 5026.789 seconds. Slowest stage:
+  `ci-wait` at 3581.755 seconds. Timing anomalies: none.
+
+### Follow-ups
+
+- Open rollout PRs: none.
+- Ownership-skipped consumers remain preserved under their existing owners;
+  this task schedules no automatic retry against them.
+- Corrective work: completed. Recovery artifacts are archived under
+  `07-27-complete-sd-github-review-rollout-after-retry-exhaustion`.
+- Controller or timing anomalies requiring operator action: none.
