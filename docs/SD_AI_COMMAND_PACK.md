@@ -1587,14 +1587,18 @@ export SD_AI_COMMAND_PACK_CACHE_ROOT="${SD_AI_COMMAND_PACK_CACHE_ROOT:-${TMPDIR:
 bash scripts/sd-ai-command-pack-toolchain.sh doctor
 ```
 
-The builder validates the parent, creates private deterministic namespaces,
-and sets `XDG_CACHE_HOME`, `PYTHONPYCACHEPREFIX`, `UV_CACHE_DIR`,
+The builder validates the parent, then creates a private deterministic
+namespace whose directory name embeds the current user's UID and is created
+mode 0700, and sets `XDG_CACHE_HOME`, `PYTHONPYCACHEPREFIX`, `UV_CACHE_DIR`,
 `UV_TOOL_DIR`, `PIP_CACHE_DIR`, `RUFF_CACHE_DIR`, and `NPM_CONFIG_CACHE`.
 `XDG_CACHE_HOME` always points to the private pack namespace; a valid inherited
 value may supply the namespace's safe parent but is not preserved verbatim.
 Existing valid overrides keep precedence for the other per-tool cache
-variables. Relative, repository-contained, symlinked, non-directory, or
-non-private overrides fail before the external tool runs. `GH_CONFIG_DIR`,
+variables. Relative, repository-contained, symlinked, non-directory,
+non-private, or foreign-owned overrides and namespaces fail before the external
+tool runs, so a co-tenant on a shared host cannot pre-create a cache or tool
+directory and have it reused — or planted bytecode and tool binaries executed —
+under another user's identity. `GH_CONFIG_DIR`,
 tokens, credential helpers, and unrelated environment variables are never
 rewritten. Reusable pack-created caches remain after successful commands;
 ordinary housekeeping does not delete them. Shared workflows invoke non-Python

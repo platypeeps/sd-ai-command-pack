@@ -173,6 +173,62 @@ class ScriptLibTests(InstallTestCase):
                 environ={lib.CACHE_ROOT_ENV: str(cache_root)},
             )
 
+    def test_tool_environment_namespace_path_embeds_current_uid(self) -> None:
+        lib = self.load_lib()
+        repo, cache_root = self.cache_fixture()
+        _, cache_paths, namespace = lib.build_tool_environment(
+            repo=repo,
+            environ={lib.CACHE_ROOT_ENV: str(cache_root)},
+        )
+        self.assertTrue(namespace.name.startswith("sd-ai-command-pack-"))
+        if hasattr(os, "getuid"):
+            uid = str(os.getuid())
+            self.assertIn(uid, namespace.name)
+            # Every default per-tool cache (Python bytecode, uv, uv tools, ruff,
+            # ...) inherits the uid-scoped namespace, so no class escapes it.
+            for variable, path in cache_paths.items():
+                with self.subTest(variable=variable):
+                    self.assertIn(uid, str(path))
+
+    def test_ensure_private_directory_rejects_foreign_owned_path(self) -> None:
+        lib = self.load_lib()
+        if not hasattr(lib.os, "getuid"):
+            self.skipTest("POSIX ownership semantics unavailable")
+        _repo, cache_root = self.cache_fixture()
+        planted = cache_root / "sd-ai-command-pack-planted"
+        planted.mkdir(parents=True, mode=0o700)
+        self.addCleanup(planted.chmod, 0o700)
+        foreign_uid = lib.os.getuid() + 1
+        with mock.patch.object(lib.os, "getuid", return_value=foreign_uid):
+            with self.assertRaisesRegex(
+                lib.CacheSetupError, "not owned by the current user"
+            ):
+                lib._ensure_private_directory(planted, label="pack cache namespace")
+
+    def test_tool_environment_rejects_foreign_owned_namespace(self) -> None:
+        lib = self.load_lib()
+        if not hasattr(lib.os, "getuid"):
+            self.skipTest("POSIX ownership semantics unavailable")
+        repo, cache_root = self.cache_fixture()
+        cache_root.mkdir(mode=0o700)
+        # A co-tenant pre-creates the victim's deterministic namespace at 0700.
+        fixed_name = "sd-ai-command-pack-planted-namespace"
+        planted = cache_root / fixed_name
+        planted.mkdir(mode=0o700)
+        self.addCleanup(planted.chmod, 0o700)
+        foreign_uid = lib.os.getuid() + 1
+        with (
+            mock.patch.object(lib, "_cache_namespace_name", return_value=fixed_name),
+            mock.patch.object(lib.os, "getuid", return_value=foreign_uid),
+        ):
+            with self.assertRaisesRegex(
+                lib.CacheSetupError, "not owned by the current user"
+            ):
+                lib.build_tool_environment(
+                    repo=repo,
+                    environ={lib.CACHE_ROOT_ENV: str(cache_root)},
+                )
+
     def test_tool_environment_skips_posix_metadata_checks_on_windows(self) -> None:
         lib = self.load_lib()
         _repo, cache_root = self.cache_fixture()
