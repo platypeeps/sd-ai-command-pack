@@ -104,14 +104,16 @@ jobs:
                and (.evidenceRunId == null or (((.evidenceRunId | type) == "number") and .evidenceRunId > 0 and .evidenceRunId == (.evidenceRunId | floor)))
                and (.evidenceCheckRunId == null or (((.evidenceCheckRunId | type) == "number") and .evidenceCheckRunId > 0 and .evidenceCheckRunId == (.evidenceCheckRunId | floor)))' \
               "$result_file" >/dev/null
-            printf 'mode=%s\n' "$(jq -r '.mode' "$result_file")" >>"$GITHUB_OUTPUT"
-            printf 'reason=%s\n' "$(jq -r '.reasonCode' "$result_file")" >>"$GITHUB_OUTPUT"
-            printf 'before_sha=%s\n' "$(jq -r '.beforeSha // ""' "$result_file")" >>"$GITHUB_OUTPUT"
-            printf 'after_sha=%s\n' "$(jq -r '.afterSha // ""' "$result_file")" >>"$GITHUB_OUTPUT"
-            printf 'validation_mode=%s\n' "$(jq -r '.validationMode' "$result_file")" >>"$GITHUB_OUTPUT"
-            printf 'evidence_run_id=%s\n' "$(jq -r '.evidenceRunId // ""' "$result_file")" >>"$GITHUB_OUTPUT"
-            printf 'evidence_check_run_id=%s\n' "$(jq -r '.evidenceCheckRunId // ""' "$result_file")" >>"$GITHUB_OUTPUT"
-            printf 'evidence_scope=%s\n' "$(jq -r '.evidenceScope' "$result_file")" >>"$GITHUB_OUTPUT"
+            {
+              printf 'mode=%s\n' "$(jq -r '.mode' "$result_file")"
+              printf 'reason=%s\n' "$(jq -r '.reasonCode' "$result_file")"
+              printf 'before_sha=%s\n' "$(jq -r '.beforeSha // ""' "$result_file")"
+              printf 'after_sha=%s\n' "$(jq -r '.afterSha // ""' "$result_file")"
+              printf 'validation_mode=%s\n' "$(jq -r '.validationMode' "$result_file")"
+              printf 'evidence_run_id=%s\n' "$(jq -r '.evidenceRunId // ""' "$result_file")"
+              printf 'evidence_check_run_id=%s\n' "$(jq -r '.evidenceCheckRunId // ""' "$result_file")"
+              printf 'evidence_scope=%s\n' "$(jq -r '.evidenceScope' "$result_file")"
+            } >>"$GITHUB_OUTPUT"
           }
 
           select_full() {
@@ -137,7 +139,7 @@ jobs:
           if [ -z "$classifier_record" ]; then
             select_full "prior_classifier_missing"
           fi
-          read -r classifier_mode classifier_type classifier_oid classifier_path <<<"$classifier_record"
+          read -r classifier_mode classifier_type _ classifier_path <<<"$classifier_record"
           if [ "$classifier_mode" != "100644" ] || [ "$classifier_type" != "blob" ] || [ "$classifier_path" != ".github/scripts/bookkeeping_ci_scope.py" ]; then
             select_full "prior_classifier_unsafe"
           fi
