@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import stat
@@ -626,17 +627,66 @@ def validate_environment_blocked_evidence(fragment: object) -> dict[str, object]
     )
 
 
+def cache_setup_blocked_evidence(
+    error: CacheSetupError,
+    *,
+    operation: str,
+    checkpoint: str = "cache-setup",
+) -> dict[str, object]:
+    """Classify a cache-setup failure as a tool-cache environment block.
+
+    Cache preparation runs before any lifecycle mutation and is idempotent:
+    `build_tool_environment` reuses the same private per-repository namespace on
+    a repeat run (see the namespace-reuse tests), so a failure never leaves a
+    partial mutation and is always safe to retry once the environment is fixed.
+    The recovery action is operator-side configuration expressed as a bounded
+    skill instruction, never a command to auto-run.
+    """
+    return build_environment_blocked_evidence(
+        boundary="tool-cache",
+        operation=operation,
+        checkpoint=checkpoint,
+        mutation_state="none",
+        retryable=True,
+        recovery_action={
+            "kind": "skill",
+            "instruction": (
+                f"Set {CACHE_ROOT_ENV} to a private writable directory outside "
+                f"the repository, then retry {operation}."
+            ),
+        },
+        diagnostic=str(error),
+    )
+
+
 def _cache_env_main(argv: Sequence[str]) -> int:
-    if len(argv) != 3 or argv[0] != "cache-env" or argv[1] != "--repo":
-        print("usage: sd_ai_command_pack_lib.py cache-env --repo PATH", file=sys.stderr)
+    args = list(argv)
+    as_json = "--json" in args
+    if as_json:
+        args = [item for item in args if item != "--json"]
+    if len(args) != 3 or args[0] != "cache-env" or args[1] != "--repo":
+        print(
+            "usage: sd_ai_command_pack_lib.py cache-env --repo PATH [--json]",
+            file=sys.stderr,
+        )
         return 2
     try:
-        environment, _, _ = build_tool_environment(repo=argv[2])
+        environment, _, _ = build_tool_environment(repo=args[2])
     except CacheSetupError as error:
-        print(f"error: {error}", file=sys.stderr)
+        if as_json:
+            evidence = cache_setup_blocked_evidence(
+                error, operation="toolchain cache setup"
+            )
+            print(json.dumps({"outcome": "blocked", "environmentBlocked": evidence}))
+        else:
+            print(f"error: {error}", file=sys.stderr)
         return 2
-    for variable in CACHE_ENV_KEYS:
-        print(f"{variable}={environment[variable]}")
+    if as_json:
+        cache_env = {variable: environment[variable] for variable in CACHE_ENV_KEYS}
+        print(json.dumps({"outcome": "ok", "cacheEnv": cache_env}))
+    else:
+        for variable in CACHE_ENV_KEYS:
+            print(f"{variable}={environment[variable]}")
     return 0
 
 

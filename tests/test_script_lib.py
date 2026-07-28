@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import io
+import json
 import stat
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stderr, redirect_stdout
 
 try:
     import install_test_support as _support
@@ -763,6 +766,83 @@ class ScriptLibTests(InstallTestCase):
         )
         self.assertNotIn("surprise", normalized)
         self.assertEqual(normalized["boundary"], "kb-target")
+
+    # -- tool-cache boundary: cache-setup classifier and CLI ---------------
+
+    def test_cache_setup_blocked_evidence_is_retryable_tool_cache(self) -> None:
+        lib = self.load_lib()
+        evidence = lib.cache_setup_blocked_evidence(
+            lib.CacheSetupError(
+                "cache setup failed for external tools: "
+                "https://user:s3cr3t@example.com denied"
+            ),
+            operation="record session",
+        )
+        self.assertEqual(evidence["boundary"], "tool-cache")
+        self.assertEqual(evidence["mutationState"], "none")
+        self.assertTrue(evidence["retryable"])
+        self.assertEqual(evidence["recoveryAction"]["kind"], "skill")
+        self.assertIn(lib.CACHE_ROOT_ENV, evidence["recoveryAction"]["instruction"])
+        self.assertNotIn("s3cr3t", evidence["diagnostic"])
+        # A consumer can validate exactly what the owner emitted.
+        self.assertEqual(lib.validate_environment_blocked_evidence(evidence), evidence)
+
+    def test_cache_env_main_json_success_emits_cache_env(self) -> None:
+        lib = self.load_lib()
+        fake_env = {variable: f"/cache/{variable}" for variable in lib.CACHE_ENV_KEYS}
+        stream = io.StringIO()
+        with mock.patch.object(
+            lib, "build_tool_environment", return_value=(fake_env, {}, Path("/ns"))
+        ), redirect_stdout(stream):
+            code = lib._cache_env_main(["cache-env", "--repo", "/repo", "--json"])
+        self.assertEqual(code, 0)
+        payload = json.loads(stream.getvalue())
+        self.assertEqual(payload["outcome"], "ok")
+        self.assertEqual(set(payload["cacheEnv"]), set(lib.CACHE_ENV_KEYS))
+        self.assertNotIn("environmentBlocked", payload)
+
+    def test_cache_env_main_json_failure_emits_validated_fragment(self) -> None:
+        lib = self.load_lib()
+        stream = io.StringIO()
+        with mock.patch.object(
+            lib,
+            "build_tool_environment",
+            side_effect=lib.CacheSetupError(
+                "cache setup failed for external tools: boom"
+            ),
+        ), redirect_stdout(stream):
+            code = lib._cache_env_main(["cache-env", "--repo", "/repo", "--json"])
+        self.assertEqual(code, 2)
+        payload = json.loads(stream.getvalue())
+        self.assertEqual(payload["outcome"], "blocked")
+        fragment = payload["environmentBlocked"]
+        self.assertEqual(fragment["boundary"], "tool-cache")
+        self.assertTrue(fragment["retryable"])
+        # The emitted fragment survives consumer validation unchanged.
+        self.assertEqual(lib.validate_environment_blocked_evidence(fragment), fragment)
+
+    def test_cache_env_main_plaintext_paths_are_unchanged(self) -> None:
+        lib = self.load_lib()
+        fake_env = {variable: f"/cache/{variable}" for variable in lib.CACHE_ENV_KEYS}
+        out = io.StringIO()
+        with mock.patch.object(
+            lib, "build_tool_environment", return_value=(fake_env, {}, Path("/ns"))
+        ), redirect_stdout(out):
+            code = lib._cache_env_main(["cache-env", "--repo", "/repo"])
+        self.assertEqual(code, 0)
+        lines = out.getvalue().splitlines()
+        self.assertEqual(
+            lines,
+            [f"{variable}=/cache/{variable}" for variable in lib.CACHE_ENV_KEYS],
+        )
+        # Failure still goes to stderr as a bounded plaintext error, not JSON.
+        err = io.StringIO()
+        with mock.patch.object(
+            lib, "build_tool_environment", side_effect=lib.CacheSetupError("boom")
+        ), redirect_stderr(err):
+            fail_code = lib._cache_env_main(["cache-env", "--repo", "/repo"])
+        self.assertEqual(fail_code, 2)
+        self.assertTrue(err.getvalue().startswith("error:"))
 
 
 if __name__ == "__main__":
