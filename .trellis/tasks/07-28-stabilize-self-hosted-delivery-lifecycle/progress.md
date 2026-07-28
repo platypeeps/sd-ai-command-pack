@@ -11,8 +11,8 @@ local checks/review have completed.
 - Lifecycle activation: d79ba90 — umbrella + all 11 work packages set to
   in_progress and assigned the shared branch; investigation and rollout tasks
   remain planning.
-- Current package: 5 / 11 — 07-28-route-housekeeping-by-pr-lifecycle-state (not started)
-- Last verified commit: 6f873db
+- Current package: 6 / 11 — 07-28-enforce-pre-archive-acceptance-readiness (not started)
+- Last verified commit: 865d169
 - Cumulative matrix: not run
 - Pull request: none
 - Finalization receipt: none
@@ -30,7 +30,7 @@ local checks/review have completed.
 | 2 | `07-28-decide-housekeeping-result-schema-compatibility` | done | 78b7b05 | test_housekeeping_result (15, +3 migration) + generated_parity + pack_drift + ruff + mypy green | self-review clean; explicit no-alias migration, reconciled with parent R6 |
 | 3 | `07-24-support-planning-only-pr-finalization` | done (validated) | 7bf587a | finalization lifecycle battery 212 tests green (bookkeeping_validator, review_preflight, pr_eligibility, housekeeping, housekeeping_result, review_stage) | integration proof; feature already in origin/main, not re-implemented |
 | 4 | `07-28-validate-finish-work-receipt-path` | done | 6f873db | test_housekeeping (39, +8 receipt-path) + generated_parity + pack_drift (56) + ruff + shellcheck green | self-review clean; early fail-fast before side effects, downstream eligibility unchanged |
-| 5 | `07-28-route-housekeeping-by-pr-lifecycle-state` | pending | — | — | — |
+| 5 | `07-28-route-housekeeping-by-pr-lifecycle-state` | done | 865d169 | test_housekeeping (42, +3 lifecycle routes) + test_housekeeping_result (15) + pr_eligibility + generated_parity + pack_drift + ruff + mypy + shellcheck green | self-review clean; single resolved identity, sole merge owner preserved, eligibility null on merged route |
 | 6 | `07-28-enforce-pre-archive-acceptance-readiness` | pending | — | — | — |
 | 7 | `07-25-user-scope-toolchain-caches` | pending | — | — | — |
 | 8 | `07-25-fix-work-loop-lock-race` | pending | — | — | — |
@@ -39,6 +39,26 @@ local checks/review have completed.
 | 11 | `07-28-standardize-environment-blocked-recovery-evidence` | pending | — | — | — |
 
 ## Last checkpoint
+
+Package 5 (`07-28-route-housekeeping-by-pr-lifecycle-state`) complete at commit
+`865d169`. Replaced the unconditional merge-then-cleanup pair in the housekeeping
+script with `route_branch_pr_lifecycle`, which resolves one bounded PR identity
+and lifecycle state before choosing work. OPEN keeps the exact-head eligibility
+gate, re-resolves after the merge attempt, and cleans up only if the merge
+landed (else one `pull_request_open` anomaly, branch untouched); MERGED skips
+eligibility and cleans up from the resolved identity (no finish-work receipt
+required, `eligibility` stays null); CLOSED stops with `pull_request_not_merged`;
+an unresolvable identity or unexpected state fails closed with a bounded anomaly,
+and the new `pull_request_state_indeterminate` code was added to the result
+composer's indeterminate set so the composed outcome is `indeterminate`, not
+`blocked`. The exact-head cleanup body was extracted into `cleanup_merged_branch`
+(the working-tree gate now lives there, inspected once per run). Housekeeping
+remains the sole merge/cleanup owner. Template edited first; root mirror, doc
+(`SD_AI_COMMAND_PACK.md`), and composer kept byte-identical via `make sync`.
+Checks: `test_housekeeping` (42, +3 lifecycle-route tests, 2 message updates, 1
+source-order update) + `test_housekeeping_result` (15) + `test_pr_eligibility`
++ `test_generated_parity` + `test_pack_drift` green; `ruff`, `mypy` (result
+composer), and `shellcheck -S warning` clean.
 
 Package 4 (`07-28-validate-finish-work-receipt-path`) complete at commit
 `6f873db`. Added `validate_finish_work_receipt` to the housekeeping script and
@@ -92,5 +112,5 @@ cumulative integration: `candidate-validation.json` `payloadDigest` (refreshed
 by release preparation), so `make generate` surface-check still reports the
 candidate-ledger digest as stale until then.
 
-Next: implement work package 5,
-`07-28-route-housekeeping-by-pr-lifecycle-state`.
+Next: implement work package 6,
+`07-28-enforce-pre-archive-acceptance-readiness`.
