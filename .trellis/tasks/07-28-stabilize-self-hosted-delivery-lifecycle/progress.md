@@ -11,8 +11,8 @@ local checks/review have completed.
 - Lifecycle activation: d79ba90 — umbrella + all 11 work packages set to
   in_progress and assigned the shared branch; investigation and rollout tasks
   remain planning.
-- Current package: 4 / 11 — 07-28-validate-finish-work-receipt-path (not started)
-- Last verified commit: 7bf587a
+- Current package: 5 / 11 — 07-28-route-housekeeping-by-pr-lifecycle-state (not started)
+- Last verified commit: 6f873db
 - Cumulative matrix: not run
 - Pull request: none
 - Finalization receipt: none
@@ -29,7 +29,7 @@ local checks/review have completed.
 | 1 | `07-28-clarify-completion-housekeeping-obligations` | done | 2616735 | unittest (completion_lifecycle 9, sdlc_commands, help_command, surface_generation, generated_parity, pack_drift, install) + ruff + mypy green | self-review clean; candidate-ledger digest deferred to cumulative integration |
 | 2 | `07-28-decide-housekeeping-result-schema-compatibility` | done | 78b7b05 | test_housekeeping_result (15, +3 migration) + generated_parity + pack_drift + ruff + mypy green | self-review clean; explicit no-alias migration, reconciled with parent R6 |
 | 3 | `07-24-support-planning-only-pr-finalization` | done (validated) | 7bf587a | finalization lifecycle battery 212 tests green (bookkeeping_validator, review_preflight, pr_eligibility, housekeeping, housekeeping_result, review_stage) | integration proof; feature already in origin/main, not re-implemented |
-| 4 | `07-28-validate-finish-work-receipt-path` | pending | — | — | — |
+| 4 | `07-28-validate-finish-work-receipt-path` | done | 6f873db | test_housekeeping (39, +8 receipt-path) + generated_parity + pack_drift (56) + ruff + shellcheck green | self-review clean; early fail-fast before side effects, downstream eligibility unchanged |
 | 5 | `07-28-route-housekeeping-by-pr-lifecycle-state` | pending | — | — | — |
 | 6 | `07-28-enforce-pre-archive-acceptance-readiness` | pending | — | — | — |
 | 7 | `07-25-user-scope-toolchain-caches` | pending | — | — | — |
@@ -39,6 +39,21 @@ local checks/review have completed.
 | 11 | `07-28-standardize-environment-blocked-recovery-evidence` | pending | — | — | — |
 
 ## Last checkpoint
+
+Package 4 (`07-28-validate-finish-work-receipt-path`) complete at commit
+`6f873db`. Added `validate_finish_work_receipt` to the housekeeping script and
+call it in `main()` right after the repository root is resolved (so relative
+receipt paths resolve identically to downstream eligibility) and before cache
+prep, Obsidian KB refresh, network access, or Git mutation. It requires an
+existing readable regular file and rejects symlinks (checked first), missing
+paths, directories, and other non-regular files with stable exit-code-2
+diagnostics that never echo the path. `--self-test` (exits earlier) and
+dependency-PR mode (empty receipt) are unaffected; downstream exact-head
+eligibility revalidation is unchanged. Template edited first, root mirror kept
+byte-identical via `make sync`. Checks: `test_housekeeping` (39, +8 receipt-path
+cases) + `test_generated_parity` + `test_pack_drift` (56) green; `ruff` and
+`shellcheck -S warning` clean. (`make check` mypy scope excludes `tests/`; the
+only non-test edit is the shell script, covered by shellcheck.)
 
 Package 3 (`07-24-support-planning-only-pr-finalization`) validated at commit
 `7bf587a`. Its deterministic completion/planning finalization machinery
@@ -77,5 +92,5 @@ cumulative integration: `candidate-validation.json` `payloadDigest` (refreshed
 by release preparation), so `make generate` surface-check still reports the
 candidate-ledger digest as stale until then.
 
-Next: implement work package 4,
-`07-28-validate-finish-work-receipt-path`.
+Next: implement work package 5,
+`07-28-route-housekeeping-by-pr-lifecycle-state`.
