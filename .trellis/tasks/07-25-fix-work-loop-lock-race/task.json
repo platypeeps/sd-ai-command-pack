@@ -2,7 +2,7 @@
   "id": "fix-work-loop-lock-race",
   "name": "fix-work-loop-lock-race",
   "title": "Fix work-loop stale-lock recovery race",
-  "description": "",
+  "description": "Make work-loop stale-lock recovery identity-checked so a concurrent runner cannot reclaim a lock that is still held.",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,

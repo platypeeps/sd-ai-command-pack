@@ -2,7 +2,7 @@
   "id": "user-scope-toolchain-caches",
   "name": "user-scope-toolchain-caches",
   "title": "User-scope toolchain tmp caches",
-  "description": "",
+  "description": "Route toolchain and tool caches into a private per-user namespace outside the repository to close a co-tenant cache-planting vector.",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,

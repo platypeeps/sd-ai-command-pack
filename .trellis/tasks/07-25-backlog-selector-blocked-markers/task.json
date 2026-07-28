@@ -2,7 +2,7 @@
   "id": "backlog-selector-blocked-markers",
   "name": "backlog-selector-blocked-markers",
   "title": "Machine-visible blocked markers and backlog ordering",
-  "description": "",
+  "description": "Surface parked, skipped, failed, and blocked backlog selections as machine-visible markers with deterministic ordering in the work-loop selector.",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,

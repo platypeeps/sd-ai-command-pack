@@ -46,6 +46,13 @@ parallel-review correctness, complementarity, reliability, latency, and cost.
       lifecycle, changelog/release ledger, focused tests, `make check`, and
       fleet validation pass.
 
+## Children
+
+- `07-25-generalize-review-learnings-across-reviewers` — the `sd-review-learnings`
+  generalization command over recurring valid feedback.
+- `07-25-add-review-effectiveness-command` — the read-only `sd-review-effectiveness`
+  paired reviewer/model evaluation command.
+
 ## Dependencies
 
 - `platypeeps/sd-github-review` tasks

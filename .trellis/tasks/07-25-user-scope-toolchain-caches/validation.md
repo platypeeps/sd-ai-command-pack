@@ -10,7 +10,7 @@ resolver's cache/tool directories and planting Python bytecode or tool binaries
 executed under the victim's identity — is already remediated in code by the
 COMPLETED predecessor `07-24-standardize-sandbox-safe-tool-cache-routing`
 (streamline program H06), which centralized all cache/env routing into
-`scripts/sd_ai_command_pack_lib.py:build_tool_environment`. That code is present
+`build_tool_environment` in `scripts/sd_ai_command_pack_lib.py`. That code is present
 unchanged in `origin/main` (`git diff origin/main -- .../sd_ai_command_pack_lib.py`
 is empty). The PRD's cited defect site (`configure_cache_defaults`,
 `prepare_gito_uv_env`, the unqualified `${TMPDIR:-/tmp}/sd-ai-command-pack-*`
