@@ -18,6 +18,7 @@ import argparse
 import dataclasses
 import filecmp
 import functools
+import json
 import os
 import shlex
 import shutil
@@ -26,7 +27,10 @@ import tempfile
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-from sd_ai_command_pack_lib import CommandError
+from sd_ai_command_pack_lib import (
+    CommandError,
+    build_environment_blocked_evidence,
+)
 from sd_ai_command_pack_lib import git_stdout as run_git_stdout
 
 KB_DIR = Path(".obsidian-kb")
@@ -1371,6 +1375,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="skip successfully without writes when .obsidian-kb is absent",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help=(
+            "emit a structured environment-blocked fragment on stdout when a "
+            "filesystem or permission boundary stops the KB target refresh"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1497,7 +1509,40 @@ def check_current(root: Path) -> int:
     return 1 if conflicts else 0
 
 
-def refresh(root: Path) -> int:
+def _emit_kb_target_block(
+    *, operation: str, checkpoint: str, mutation_state: str, error: OSError, as_json: bool
+) -> None:
+    """Emit the shared kb-target block for a linked-KB write or inspection fault.
+
+    The KB copy folder is a fully regenerable mirror: re-running the refresh
+    rewrites every generated entry and prunes stale ones, so a partial write is
+    recoverable and the operation is safe to retry once the target is writable.
+    The fragment rides stdout only under ``--json``; the human stderr line and
+    exit code are unchanged.
+    """
+
+    if not as_json:
+        return
+    evidence = build_environment_blocked_evidence(
+        boundary="kb-target",
+        operation=operation,
+        checkpoint=checkpoint,
+        mutation_state=mutation_state,
+        retryable=True,
+        recovery_action={
+            "kind": "skill",
+            "instruction": (
+                "Ensure the .obsidian-kb target (and any linked vault) is a "
+                "writable directory, then re-run the KB refresh; it regenerates "
+                "every entry and prunes stale ones without duplicating work."
+            ),
+        },
+        diagnostic=str(error),
+    )
+    print(json.dumps({"outcome": "blocked", "environmentBlocked": evidence}))
+
+
+def refresh(root: Path, *, as_json: bool = False) -> int:
     try:
         ensure_kb_root(root, create=False)
         gitignore_state = ensure_gitignore(root)
@@ -1522,6 +1567,13 @@ def refresh(root: Path) -> int:
             conflicts.append(overview_conflict)
     except OSError as error:
         print(f"error: failed to refresh {KB_DIR}: {error}", file=sys.stderr)
+        _emit_kb_target_block(
+            operation="refresh the linked Obsidian KB copies",
+            checkpoint="kb-refresh",
+            mutation_state="partial-recoverable",
+            error=error,
+            as_json=as_json,
+        )
         return 2
 
     report_kb_state(
@@ -1555,9 +1607,16 @@ def main(argv: list[str] | None = None) -> int:
             return dry_run(root)
         if args.check:
             return check_current(root)
-        return refresh(root)
+        return refresh(root, as_json=args.json)
     except OSError as error:
         print(f"error: failed to inspect {KB_DIR}: {error}", file=sys.stderr)
+        _emit_kb_target_block(
+            operation="inspect the linked Obsidian KB state",
+            checkpoint="kb-inspect",
+            mutation_state="none",
+            error=error,
+            as_json=args.json,
+        )
         return 2
 
 

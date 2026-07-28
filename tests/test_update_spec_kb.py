@@ -224,6 +224,107 @@ class UpdateSpecKbTests(InstallTestCase):
         self.assertEqual(result.returncode, 3, result.stdout)
         self.assertIn("conflicts:", result.stdout)
 
+    def test_update_spec_kb_refresh_block_emits_kb_target_fragment(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py",
+            "sd_ai_command_pack_update_spec_kb_kb_target_block",
+        )
+        root = self.make_repo()
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+
+        stdout = io.StringIO()
+        with mock.patch.object(
+            module, "create_copies", side_effect=OSError("Permission denied: kb copy")
+        ):
+            with contextlib.redirect_stdout(stdout):
+                rc = module.refresh(root, as_json=True)
+        self.assertEqual(rc, 2)
+
+        payload = json.loads(stdout.getvalue().strip().splitlines()[-1])
+        self.assertEqual(payload["outcome"], "blocked")
+        evidence = payload["environmentBlocked"]
+        self.assertEqual(evidence["schemaVersion"], 1)
+        self.assertEqual(evidence["boundary"], "kb-target")
+        self.assertEqual(evidence["mutationState"], "partial-recoverable")
+        self.assertTrue(evidence["retryable"])
+        self.assertEqual(evidence["checkpoint"], "kb-refresh")
+        self.assertEqual(evidence["recoveryAction"]["kind"], "skill")
+        self.assertIn("re-run", evidence["recoveryAction"]["instruction"].lower())
+        self.assertIn("Permission denied", evidence["diagnostic"])
+
+        # Without --json the stdout envelope must not appear (opt-in only); the
+        # human error line rides stderr and the exit code is unchanged.
+        plain = io.StringIO()
+        with mock.patch.object(
+            module, "create_copies", side_effect=OSError("blocked")
+        ):
+            with contextlib.redirect_stdout(plain):
+                rc_plain = module.refresh(root, as_json=False)
+        self.assertEqual(rc_plain, 2)
+        self.assertNotIn("environmentBlocked", plain.getvalue())
+
+    def test_update_spec_kb_refresh_block_is_retryable_via_idempotent_reconcile(
+        self,
+    ) -> None:
+        # The kb-target block claims retryable=True: the KB copy folder is a
+        # regenerable mirror, so re-running the refresh after the block clears
+        # reconciles to the same tree without duplicating entries.
+        root = self.make_repo()
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        script = PACK_ROOT / "scripts/sd-ai-command-pack-update-spec-kb.py"
+
+        def _refresh() -> None:
+            result = subprocess.run(
+                [sys.executable, str(script)],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+
+        def _tree() -> tuple[tuple[str, str], ...]:
+            entries = []
+            for path in sorted((root / ".obsidian-kb").rglob("*")):
+                if path.is_file():
+                    rel = str(path.relative_to(root))
+                    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                    entries.append((rel, digest))
+            return tuple(entries)
+
+        _refresh()
+        first = _tree()
+        self.assertTrue(first)
+        _refresh()
+        second = _tree()
+        self.assertEqual(first, second)
+
+    def test_update_spec_kb_inspect_block_emits_none_mutation_fragment(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py",
+            "sd_ai_command_pack_update_spec_kb_kb_inspect_block",
+        )
+        root = self.make_repo()
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+
+        stdout = io.StringIO()
+        with mock.patch.object(module, "repo_root", return_value=root):
+            with mock.patch.object(
+                module, "check_current", side_effect=OSError("Permission denied: kb read")
+            ):
+                with contextlib.redirect_stdout(stdout):
+                    rc = module.main(["--check", "--json"])
+        self.assertEqual(rc, 2)
+
+        evidence = json.loads(stdout.getvalue().strip().splitlines()[-1])[
+            "environmentBlocked"
+        ]
+        self.assertEqual(evidence["boundary"], "kb-target")
+        self.assertEqual(evidence["mutationState"], "none")
+        self.assertTrue(evidence["retryable"])
+        self.assertEqual(evidence["checkpoint"], "kb-inspect")
+
     def test_update_spec_kb_script_builds_gitignored_copy_folder(self) -> None:
         root = self.make_repo()
         self.run_git(root, "remote", "add", "origin", "git@github.com:example/project.git")
