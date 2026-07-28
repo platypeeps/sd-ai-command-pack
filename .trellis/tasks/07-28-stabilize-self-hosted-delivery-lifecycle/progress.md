@@ -11,8 +11,8 @@ local checks/review have completed.
 - Lifecycle activation: d79ba90 — umbrella + all 11 work packages set to
   in_progress and assigned the shared branch; investigation and rollout tasks
   remain planning.
-- Current package: 8 / 11 — 07-25-fix-work-loop-lock-race (not started)
-- Last verified commit: 715559ab
+- Current package: 9 / 11 — 07-25-backlog-selector-blocked-markers (not started)
+- Last verified commit: 18739c75
 - Cumulative matrix: not run
 - Pull request: none
 - Finalization receipt: none
@@ -33,12 +33,42 @@ local checks/review have completed.
 | 5 | `07-28-route-housekeeping-by-pr-lifecycle-state` | done | 865d169 | test_housekeeping (42, +3 lifecycle routes) + test_housekeeping_result (15) + pr_eligibility + generated_parity + pack_drift + ruff + mypy + shellcheck green | self-review clean; single resolved identity, sole merge owner preserved, eligibility null on merged route |
 | 6 | `07-28-enforce-pre-archive-acceptance-readiness` | done | 9eaf2ee2 | test_bookkeeping_validator (44, +8) + test_review_preflight + test_sdlc_commands + test_completion_lifecycle + test_generated_parity + test_pack_drift green; ruff clean | self-review clean; completion-ready-gated, read-only, no false positives (handoff prose / non-canonical / fenced boxes) |
 | 7 | `07-25-user-scope-toolchain-caches` | done | 715559ab | test_script_lib (27, +3 uid/ownership) + test_generated_parity + test_pack_drift (56) green; ruff clean | self-review clean; security code already shipped by H06, this pins acceptance properties + documents the guarantee, no re-route |
-| 8 | `07-25-fix-work-loop-lock-race` | pending | — | — | — |
+| 8 | `07-25-fix-work-loop-lock-race` | done | 18739c75 | test_work_loop (78, +3 concurrent-recovery/helper) + test_generated_parity + test_pack_drift (56) green; ruff + mypy clean | self-review clean; identity-checked rename-aside recovery, error strings + `--recover-stale-lock` flow unchanged, no consumer touched |
 | 9 | `07-25-backlog-selector-blocked-markers` | pending | — | — | — |
 | 10 | `07-24-track-clean-recovery-artifacts` | pending | — | — | — |
 | 11 | `07-28-standardize-environment-blocked-recovery-evidence` | pending | — | — | — |
 
 ## Last checkpoint
+
+Package 8 (`07-25-fix-work-loop-lock-race`) complete at commit `18739c75`. Two
+processes recovering the same stale work-loop lock could both acquire it: the
+three recovery sites deleted the lock by path (`lock_path.unlink()`), so once the
+first recoverer removed the stale lock and `O_EXCL`-created its own, a second
+recoverer's unlink deleted that fresh competitor lock and let both runs proceed
+concurrently. Added `_recover_locked_path`, which renames the lock aside under a
+private `.recovering-<uuid>` name and deletes it only while its identity still
+matches what was judged — `runId` for a stale lock, unreadable for a malformed
+one — and, if a competitor already replaced the lock, restores the moved bytes
+via `os.link` without clobbering the newer lock (so the caller re-observes it and
+refuses to double-acquire) before failing closed on any restore error. Wired the
+three unlink-by-path sites (`acquire_lock` malformed + stale, `acquire_terminal_lock`
+stale) to it; the operator-facing error strings (`cannot recover {unreadable,
+stale} work-loop lock`, `stale terminal reconciliation lock`) and the documented
+`--recover-stale-lock` flow (`sd-work-backlog` `ownership-recovery.md`) are
+byte-for-byte unchanged. Package 8's own `design.md`/`implement.md` are
+intentionally empty — the umbrella design of record plus the child `prd.md` drive
+the work, so no active-task planning artifact was created or materially updated
+and the planning adversarial-review rule does not fire for these script/test
+edits. The regression test `test_concurrent_stale_recovery_cannot_both_acquire`
+drives a deterministic delete-time interleave (a competitor fully recovers and
+acquires as `run-3` while the first recoverer holds a stale-judgment) and asserts
+the late recoverer restores `run-3` and refuses to acquire; two unit tests pin the
+match (delete) and mismatch (preserve competitor, no `.recovering-` residue)
+branches of the helper directly. Template edited first; root mirror byte-identical
+via `make sync` (`conflicts: none`); no consumer touched. Version/changelog/fleet
+deferred to cumulative integration and the post-STOP fleet boundary. Checks:
+`test_work_loop` (78, +3) + `test_generated_parity` + `test_pack_drift` (56)
+green; `ruff` + `mypy` clean on both work-loop copies and the test.
 
 Package 7 (`07-25-user-scope-toolchain-caches`) complete at commit `715559ab`.
 Its security defect — a co-tenant pre-creating the toolchain resolver's Python
@@ -167,5 +197,5 @@ cumulative integration: `candidate-validation.json` `payloadDigest` (refreshed
 by release preparation), so `make generate` surface-check still reports the
 candidate-ledger digest as stale until then.
 
-Next: implement work package 8,
-`07-25-fix-work-loop-lock-race`.
+Next: implement work package 9,
+`07-25-backlog-selector-blocked-markers`.
