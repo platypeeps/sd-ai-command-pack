@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 246
+- **Total Sessions**: 247
 - **Last Active**: 2026-07-27
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~1812 | Active |
+| `journal-5.md` | ~1851 | Active |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 247 | 2026-07-27 | Republish bookkeeping CI fast lane on linear history | `b16d9e69869d7715185372cff7d041cc85fe1f85`, `6d0d4532bab7c26c51a15b4d256654c39fa3573b` | `codex/republish-bookkeeping-ci-fast-lane-linear` |
 | 246 | 2026-07-27 | Align Gemini settings review scope | `4ff53706574419846c8e228916951ee7c293060a`, `c41013bd` | `codex/fix-gemini-settings-review-scope` |
 | 245 | 2026-07-27 | Recover preserved Trellis task drafts | `9749002`, `a2345db` | `codex/recover-preserved-task-drafts` |
 | 244 | 2026-07-27 | Add canonical release preparation | `da7c4cc` | `codex/add-release-prep-command` |

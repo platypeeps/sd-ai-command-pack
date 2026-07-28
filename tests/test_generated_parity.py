@@ -987,12 +987,12 @@ class GeneratedParityTests(InstallTestCase):
             "os: macos-latest",
             "unittest-output.log",
             "skipped=[1-9][0-9]*",
-            "python3 -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py",
+            "python3 -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py",
             "node --check scripts/sd-ai-command-pack-review-preflight.mjs",
             "node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             "bash .github/scripts/check-opencode-js.sh",
-            "python3 -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py",
-            "needs: [unittest, lint, security, release-payload-gate, main-push-scope]",
+            "python3 -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py",
+            "needs: [ci-scope, unittest, lint, security, release-payload-gate, main-push-scope]",
             "RELEASE_PAYLOAD_GATE_RESULT",
             "LINT_RESULT",
         ):
@@ -1180,7 +1180,7 @@ class GeneratedParityTests(InstallTestCase):
         )
         self.assertEqual(
             workflow.count("actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"),
-            6,
+            8,
         )
         self.assertEqual(
             workflow.count(
@@ -1199,7 +1199,11 @@ class GeneratedParityTests(InstallTestCase):
         self.assertIn("set -o pipefail", workflow)
         merge_probe = 'git rev-parse --verify --quiet "${GITHUB_SHA}^2" >/dev/null'
         self.assertIn(merge_probe, workflow)
-        self.assertLess(workflow.index(merge_probe), workflow.index("gh api"))
+        main_push_start = workflow.index("main-push-scope:")
+        self.assertLess(
+            workflow.index(merge_probe, main_push_start),
+            workflow.index("gh api", main_push_start),
+        )
         self.assertIn("invalid pull-request merge evidence", workflow)
         self.assertIn("SD_AI_COMMAND_PACK_MAIN_PUSH_PR_MERGE", workflow)
         self.assertIn("git diff --no-renames --name-only -z", main_push_guard)

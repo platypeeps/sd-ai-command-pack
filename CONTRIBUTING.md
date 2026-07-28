@@ -67,6 +67,14 @@ hook prevents other paths locally, and the `Main push scope` CI job detects the
 same violation after any accepted push. Use a pull request for every non-chore
 change; CI cannot undo an accidental direct push.
 
+Every pull-request head and direct `main` push still receives the required
+`CI Result`. A linear task/workspace-only successor of a successful exact head
+uses the bookkeeping lane: it revalidates the current metadata and journal
+bundle while skipping the unit matrix, lint, security, and release-payload
+jobs. Missing prior evidence, mixed paths, unsafe tree entries, invalid
+bookkeeping, or any classifier ambiguity fails closed to full CI or a failed
+aggregate; the fast lane is never a path-ignore exemption.
+
 CI intentionally tests the supported Python floor (3.10) and current project
 runtime (3.13), plus macOS on 3.13. Intermediate 3.11/3.12 jobs would duplicate
 the same compatibility interval while increasing Actions cost; add one only
