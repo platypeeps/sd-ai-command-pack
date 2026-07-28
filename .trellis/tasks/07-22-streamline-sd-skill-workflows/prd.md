@@ -169,6 +169,10 @@ merge eligibility without mutating the PR.
   deterministically proven planning finalization that records the session and
   preserves planned task state, replaces the bare finish-work-head attestation
   with typed evidence, and leaves housekeeping as the sole merge owner.
+- `07-28-route-housekeeping-by-pr-lifecycle-state` owns the cleanup-only
+  lifecycle-ordering gap found by the recurring-instability investigation.
+- `07-28-standardize-environment-blocked-recovery-evidence` owns the shared
+  typed boundary/checkpoint contract for environmental recovery failures.
 - Every implementation child owns its task-local F17 scenario coverage.
 - `07-22-normalize-sd-workflow-program-task-topology` is the completed
   bookkeeping child that converted the program design and implementation plan

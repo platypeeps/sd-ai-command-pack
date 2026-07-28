@@ -1,0 +1,32 @@
+{
+  "id": "decide-housekeeping-result-schema-compatibility",
+  "name": "decide-housekeeping-result-schema-compatibility",
+  "title": "Decide housekeeping result schema compatibility",
+  "description": "Resolve whether schema-version-1 housekeeping results must retain finishWorkHead as a deprecated alias or adopt an explicit schema migration.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-28",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "07-24-support-planning-only-pr-finalization",
+  "relatedFiles": [
+    "templates/scripts/sd-ai-command-pack-housekeeping-result.py",
+    "scripts/sd-ai-command-pack-housekeeping-result.py",
+    "tests/test_housekeeping_result.py",
+    "docs/SD_AI_COMMAND_PACK.md",
+    ".trellis/tasks/07-24-support-planning-only-pr-finalization/prd.md"
+  ],
+  "notes": "Copilot finding from platypeeps/people-profiles PR #3: removing invocation.finishWorkHead under schema version 1 may break consumers.",
+  "meta": {}
+}

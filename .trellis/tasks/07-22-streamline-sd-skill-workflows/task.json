@@ -40,7 +40,9 @@
     "07-24-standardize-sandbox-safe-tool-cache-routing",
     "07-24-reread-pr-head-at-eligibility-completion",
     "07-24-support-planning-only-pr-finalization",
-    "07-25-add-multi-reviewer-learning-and-effectiveness-analysis"
+    "07-25-add-multi-reviewer-learning-and-effectiveness-analysis",
+    "07-28-route-housekeeping-by-pr-lifecycle-state",
+    "07-28-standardize-environment-blocked-recovery-evidence"
   ],
   "parent": null,
   "relatedFiles": [],

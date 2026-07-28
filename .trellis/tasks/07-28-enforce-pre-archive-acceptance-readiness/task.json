@@ -1,0 +1,33 @@
+{
+  "id": "enforce-pre-archive-acceptance-readiness",
+  "name": "enforce-pre-archive-acceptance-readiness",
+  "title": "Enforce pre-archive acceptance readiness",
+  "description": "Extend the command-pack bookkeeping validator to reject task archival when required pre-archive acceptance criteria remain incomplete or lifecycle ownership is ambiguous.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-28",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
+    "scripts/sd-ai-command-pack-review-preflight.mjs",
+    "templates/.agents/skills/sd-finish-work/SKILL.md",
+    "tests/test_bookkeeping_validator.py",
+    "tests/test_sdlc_commands.py",
+    "templates/docs/SD_AI_COMMAND_PACK.md"
+  ],
+  "notes": "Depends on 07-28-clarify-completion-housekeeping-obligations. Origin: rwbp-coordinator PR #187 discussion_r3661730449 and the earlier 07-06-close-fleet-refresh-loop reconciliation.",
+  "meta": {}
+}

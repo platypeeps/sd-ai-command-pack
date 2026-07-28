@@ -53,6 +53,10 @@ is not sufficient.
   completion-successor evidence when reviewed code fixes follow an already
   validated archive/journal tail, without widening planning mode or recording a
   duplicate session.
+- Result-schema compatibility child:
+  `07-28-decide-housekeeping-result-schema-compatibility`.
+- Receipt-path validation child:
+  `07-28-validate-finish-work-receipt-path`.
 - Depends on `07-24-validate-finish-work-bookkeeping-before-push` publishing
   the canonical versioned task/journal validator. Extend that validator with a
   planning-finalization mode rather than creating a second metadata policy.

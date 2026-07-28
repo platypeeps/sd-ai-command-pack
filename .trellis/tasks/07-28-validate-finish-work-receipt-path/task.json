@@ -1,0 +1,33 @@
+{
+  "id": "validate-finish-work-receipt-path",
+  "name": "validate-finish-work-receipt-path",
+  "title": "Validate finish-work receipt paths at CLI boundary",
+  "description": "Reject missing, unreadable, non-regular, or unsafe finish-work receipt paths before housekeeping performs external work, while preserving authoritative downstream revalidation.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-28",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "07-24-support-planning-only-pr-finalization",
+  "relatedFiles": [
+    "templates/scripts/sd-ai-command-pack-housekeeping.sh",
+    "scripts/sd-ai-command-pack-housekeeping.sh",
+    "templates/scripts/sd-ai-command-pack-pr-eligibility.py",
+    "scripts/sd-ai-command-pack-pr-eligibility.py",
+    "tests/test_housekeeping.py",
+    "docs/SD_AI_COMMAND_PACK.md"
+  ],
+  "notes": "Copilot finding from platypeeps/people-profiles PR #3: --finish-work-receipt accepts directories and missing files before downstream validation.",
+  "meta": {}
+}

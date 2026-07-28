@@ -1,0 +1,29 @@
+{
+  "id": "analyze-recurring-trellis-workflow-instability",
+  "name": "analyze-recurring-trellis-workflow-instability",
+  "title": "Analyze recurring Trellis workflow instability",
+  "description": "Review recent Trellis-backed sessions across repositories, identify recurring status and journaling recovery failures, determine root causes and fixes, and map findings to existing sd-ai-command-pack tasks.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-28",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-28-roll-out-stabilized-pack-release-to-fleet",
+    "07-28-stabilize-self-hosted-delivery-lifecycle"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
