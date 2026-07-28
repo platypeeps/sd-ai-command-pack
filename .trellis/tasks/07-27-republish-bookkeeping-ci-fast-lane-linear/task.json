@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-07-27",
   "completedAt": null,
-  "branch": null,
+  "branch": "codex/republish-bookkeeping-ci-fast-lane-linear",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
