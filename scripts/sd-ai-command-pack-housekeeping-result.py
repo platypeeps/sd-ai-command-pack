@@ -30,6 +30,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from sd_ai_command_pack_lib import build_environment_blocked_evidence
+
 SCHEMA_VERSION = 1
 STATUS_SCHEMA_VERSION = 2
 TOOL_VERSION = "1.0.0"
@@ -47,6 +49,79 @@ INDETERMINATE_ANOMALY_CODES = frozenset(
         "status_unavailable",
     }
 )
+
+# Fixed, generic recovery instructions for the environment boundaries below.
+# They request only the narrow authority to re-run the same cleanup after the
+# operator clears the environment fault; they never carry a command to auto-run.
+_GIT_REMOTE_RECOVERY = (
+    "Resolve the git remote condition -- network access, authentication, or a "
+    "stale lock -- then re-run housekeeping; the pull request is already merged "
+    "and only this remote cleanup step retries."
+)
+_GIT_LOCAL_RECOVERY = (
+    "Resolve the local git condition -- a stale index lock or a worktree still "
+    "holding the branch -- then re-run housekeeping to delete the merged branch."
+)
+_KB_TARGET_RECOVERY = (
+    "Ensure the .obsidian-kb target is a writable directory, then re-run; the KB "
+    "refresh regenerates every entry and prunes stale ones without duplicating "
+    "work."
+)
+
+# Anomaly codes that are an unambiguous environment or authority boundary on an
+# owner-side cleanup or refresh step, mapped to the classification used to build
+# a structured environment_blocked fragment. Only genuine environment boundaries
+# appear here: repository-state and policy conditions (a missing ref, a
+# non-fast-forward, a protected branch, a missing tool, an unmerged pull request)
+# are intentionally excluded so a repository defect is never mislabeled as a
+# retryable permission issue. mutationState is derived from what the failed
+# operation can leave behind (an atomic single-ref delete leaves nothing; a
+# multi-ref prune or a regenerable mirror can leave a recoverable partial state);
+# every entry is retryable because it is post-merge cleanup or a read that the
+# operator can safely repeat. Diagnostics are fixed and generic so no remote URL
+# or raw filesystem error reaches the durable result.
+ENVIRONMENT_BLOCK_CLASSIFICATION: dict[str, dict[str, str]] = {
+    "remote_fetch_failed": {
+        "boundary": "git-metadata",
+        "operation": "fetch and prune the git remote",
+        "checkpoint": "remote-fetch",
+        "mutationState": "partial-recoverable",
+        "recovery": _GIT_REMOTE_RECOVERY,
+        "diagnostic": "The git remote fetch and prune was refused by the environment.",
+    },
+    "remote_prune_failed": {
+        "boundary": "git-metadata",
+        "operation": "prune stale remote-tracking refs",
+        "checkpoint": "remote-prune",
+        "mutationState": "partial-recoverable",
+        "recovery": _GIT_REMOTE_RECOVERY,
+        "diagnostic": "Pruning stale remote-tracking refs was refused by the environment.",
+    },
+    "local_branch_delete_failed": {
+        "boundary": "git-metadata",
+        "operation": "delete the merged local branch",
+        "checkpoint": "local-branch-delete",
+        "mutationState": "none",
+        "recovery": _GIT_LOCAL_RECOVERY,
+        "diagnostic": "Deleting the merged local branch was refused by the environment.",
+    },
+    "remote_branch_delete_failed": {
+        "boundary": "git-metadata",
+        "operation": "delete the merged remote branch",
+        "checkpoint": "remote-branch-delete",
+        "mutationState": "none",
+        "recovery": _GIT_REMOTE_RECOVERY,
+        "diagnostic": "Deleting the merged remote branch was refused by the environment.",
+    },
+    "kb_refresh_failed": {
+        "boundary": "kb-target",
+        "operation": "refresh the linked Obsidian KB copies",
+        "checkpoint": "kb-refresh",
+        "mutationState": "partial-recoverable",
+        "recovery": _KB_TARGET_RECOVERY,
+        "diagnostic": "The linked knowledge-base refresh could not write to its target.",
+    },
+}
 
 
 class ResultInputError(ValueError):
@@ -179,6 +254,38 @@ def classify_outcome(
     return {"status": outcome, "reasonCodes": deduplicate(reasons)}
 
 
+def build_environment_blocks(
+    anomalies: Sequence[Mapping[str, str]],
+) -> list[dict[str, Any]]:
+    """Return an environment_blocked fragment for each environment-boundary anomaly.
+
+    Classification is a deterministic lookup on the control-flow-selected anomaly
+    code, never a heuristic read of the message text: only codes in
+    ENVIRONMENT_BLOCK_CLASSIFICATION produce a fragment. The fragment is built
+    owner-side through the shared composer, so it is validated and redacted the
+    same way every other producer's is. The blocks are additive evidence and do
+    not affect outcome classification.
+    """
+
+    blocks: list[dict[str, Any]] = []
+    for anomaly in anomalies:
+        spec = ENVIRONMENT_BLOCK_CLASSIFICATION.get(anomaly["code"])
+        if spec is None:
+            continue
+        blocks.append(
+            build_environment_blocked_evidence(
+                boundary=spec["boundary"],
+                operation=spec["operation"],
+                checkpoint=spec["checkpoint"],
+                mutation_state=spec["mutationState"],
+                retryable=True,
+                recovery_action={"kind": "skill", "instruction": spec["recovery"]},
+                diagnostic=spec["diagnostic"],
+            )
+        )
+    return blocks
+
+
 def build_result(args: argparse.Namespace) -> dict[str, Any]:
     status_error = (
         None
@@ -242,6 +349,7 @@ def build_result(args: argparse.Namespace) -> dict[str, Any]:
         "eligibility": eligibility,
         "actions": actions,
         "anomalies": anomalies,
+        "environmentBlocks": build_environment_blocks(anomalies),
         "statusError": status_error,
         "status": status,
         "outcome": classify_outcome(

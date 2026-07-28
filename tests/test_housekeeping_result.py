@@ -117,6 +117,91 @@ class HousekeepingResultTests(unittest.TestCase):
             ["checks_blocking", "merge_blocked"],
         )
 
+    def test_environment_boundary_anomalies_attach_structured_blocks(self) -> None:
+        from sd_ai_command_pack_lib import validate_environment_blocked_evidence
+
+        result = result_builder.build_result(
+            self.args(
+                status_exit=1,
+                anomaly=[
+                    ["remote_fetch_failed", "git fetch --prune origin failed"],
+                    ["remote_prune_failed", "git fetch --prune origin failed"],
+                    ["local_branch_delete_failed", "git branch -D feature failed"],
+                    ["remote_branch_delete_failed", "git push --delete origin failed"],
+                    ["kb_refresh_failed", "KB refresh exited nonzero"],
+                    ["pull_request_not_merged", "PR is CLOSED, not MERGED"],
+                ],
+            )
+        )
+
+        blocks = result["environmentBlocks"]
+        by_checkpoint = {block["checkpoint"]: block for block in blocks}
+        self.assertEqual(
+            set(by_checkpoint),
+            {
+                "remote-fetch",
+                "remote-prune",
+                "local-branch-delete",
+                "remote-branch-delete",
+                "kb-refresh",
+            },
+        )
+        # The policy anomaly (a repository/PR-state fact) must never be labeled a
+        # retryable environment boundary.
+        self.assertNotIn("pull_request_not_merged", str(blocks))
+
+        self.assertEqual(by_checkpoint["remote-fetch"]["boundary"], "git-metadata")
+        self.assertEqual(
+            by_checkpoint["remote-fetch"]["mutationState"], "partial-recoverable"
+        )
+        self.assertEqual(
+            by_checkpoint["local-branch-delete"]["mutationState"], "none"
+        )
+        self.assertEqual(by_checkpoint["kb-refresh"]["boundary"], "kb-target")
+
+        for block in blocks:
+            # Every block is a genuine composer product and survives consumer-side
+            # validation unchanged; no remote URL or control text leaks into the
+            # durable diagnostic.
+            self.assertTrue(block["retryable"])
+            self.assertEqual(block["recoveryAction"]["kind"], "skill")
+            self.assertNotIn("://", block["diagnostic"])
+            self.assertEqual(validate_environment_blocked_evidence(block), block)
+
+    def test_policy_anomalies_emit_no_environment_block(self) -> None:
+        result = result_builder.build_result(
+            self.args(
+                status_exit=1,
+                anomaly=[
+                    ["remote_not_configured", "git remote get-url origin failed"],
+                    ["default_remote_ref_missing", "remote default ref absent"],
+                    ["working_tree_dirty", "uncommitted changes present"],
+                    ["kb_helper_missing", "KB helper not found"],
+                ],
+            )
+        )
+        self.assertEqual(result["environmentBlocks"], [])
+
+    def test_environment_block_is_additive_and_does_not_alter_outcome(self) -> None:
+        # A clean run carries an empty list; attaching a block never injects a
+        # reason code or flips the outcome the anomaly already determined.
+        clean = self.eligibility("eligible", [])
+        clean_result = result_builder.build_result(
+            self.args(eligibility_input=clean)
+        )
+        self.assertEqual(clean_result["environmentBlocks"], [])
+        self.assertEqual(clean_result["outcome"]["status"], "clean")
+
+        blocked = result_builder.build_result(
+            self.args(
+                status_exit=1,
+                anomaly=[["remote_prune_failed", "git fetch --prune origin failed"]],
+            )
+        )
+        self.assertEqual(blocked["outcome"]["status"], "blocked")
+        self.assertEqual(blocked["outcome"]["reasonCodes"], ["remote_prune_failed"])
+        self.assertEqual(len(blocked["environmentBlocks"]), 1)
+
     def test_indeterminate_and_status_failure_are_distinct(self) -> None:
         path = self.eligibility("indeterminate", ["review_threads_unavailable"])
         indeterminate = result_builder.build_result(
