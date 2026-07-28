@@ -323,6 +323,7 @@ class ReleaseLedgerTests(InstallTestCase):
         # skipped on main pushes and silently skips auto-tagging.
         self.assertIn("!cancelled()", job["if"])
         self.assertIn("needs.ci-result.result == 'success'", job["if"])
+        self.assertIn("needs.ci-result.outputs.mode == 'full'", job["if"])
         run_step = job["steps"][1]
         self.assertIn(".github/scripts/create-release-tag.py", run_step["run"])
         self.assertEqual(run_step["env"]["BASE_SHA"], "${{ github.event.before }}")
@@ -356,7 +357,7 @@ class ReleaseLedgerTests(InstallTestCase):
         self.assertIn("release-payload-gate", aggregate["needs"])
         aggregate_run = aggregate["steps"][0]["run"]
         self.assertIn("RELEASE_PAYLOAD_GATE_RESULT", aggregate["steps"][0]["env"])
-        self.assertIn("The release payload gate failed.", aggregate_run)
+        self.assertIn(".github/scripts/check-ci-result.sh", aggregate_run)
 
 
 if __name__ == "__main__":

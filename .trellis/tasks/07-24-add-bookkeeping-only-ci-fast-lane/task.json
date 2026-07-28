@@ -3,7 +3,7 @@
   "name": "add-bookkeeping-only-ci-fast-lane",
   "title": "Add a bookkeeping-only CI fast lane",
   "description": "Reduce redundant CI cost and merge latency for exact-head finish-work task/archive/journal successors without weakening branch protection, metadata validation, or fail-closed full-CI behavior.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-07-24",
   "completedAt": null,
-  "branch": null,
+  "branch": "codex/add-bookkeeping-only-ci-fast-lane",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
@@ -31,6 +31,6 @@
     "tests/test_review_preflight.py",
     "tests/test_generated_parity.py"
   ],
-  "notes": "Planning is complete pending user review and captures the observed PR #243 duplicate full-CI cycle. Implementation is not started and must preserve exact-head CI, review, and housekeeping gates.",
+  "notes": "Implemented the prior-head classifier, canonical bookkeeping validation lane, mode-strict CI Result aggregate, full-only auto-tag guard, contributor/spec contract, and 21 focused classifier/workflow tests. Focused risk evidence covers typed API payloads, Git failures and unavailable evidence, explicit workflow environment inputs, regular-file/path/size boundaries, exact normalized SHA/run identities, and bounded diagnostics; Zizmor, ShellCheck, Ruff, mypy, all test shards, coverage, and the full-check with the external KB lane disabled pass. The canonical finish-work and review contracts still create archive/journal commits before one final push. Exact-head PR dogfood and the linked Obsidian KB refresh remain for the PR lifecycle.",
   "meta": {}
 }
