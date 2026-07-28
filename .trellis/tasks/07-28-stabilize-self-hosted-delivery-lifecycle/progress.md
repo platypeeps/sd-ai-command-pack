@@ -11,8 +11,8 @@ local checks/review have completed.
 - Lifecycle activation: d79ba90 — umbrella + all 11 work packages set to
   in_progress and assigned the shared branch; investigation and rollout tasks
   remain planning.
-- Current package: 3 / 11 — 07-24-support-planning-only-pr-finalization (not started)
-- Last verified commit: 78b7b05
+- Current package: 4 / 11 — 07-28-validate-finish-work-receipt-path (not started)
+- Last verified commit: 7bf587a
 - Cumulative matrix: not run
 - Pull request: none
 - Finalization receipt: none
@@ -28,7 +28,7 @@ local checks/review have completed.
 | ---: | --- | --- | --- | --- | --- |
 | 1 | `07-28-clarify-completion-housekeeping-obligations` | done | 2616735 | unittest (completion_lifecycle 9, sdlc_commands, help_command, surface_generation, generated_parity, pack_drift, install) + ruff + mypy green | self-review clean; candidate-ledger digest deferred to cumulative integration |
 | 2 | `07-28-decide-housekeeping-result-schema-compatibility` | done | 78b7b05 | test_housekeeping_result (15, +3 migration) + generated_parity + pack_drift + ruff + mypy green | self-review clean; explicit no-alias migration, reconciled with parent R6 |
-| 3 | `07-24-support-planning-only-pr-finalization` | pending | — | — | — |
+| 3 | `07-24-support-planning-only-pr-finalization` | done (validated) | 7bf587a | finalization lifecycle battery 212 tests green (bookkeeping_validator, review_preflight, pr_eligibility, housekeeping, housekeeping_result, review_stage) | integration proof; feature already in origin/main, not re-implemented |
 | 4 | `07-28-validate-finish-work-receipt-path` | pending | — | — | — |
 | 5 | `07-28-route-housekeeping-by-pr-lifecycle-state` | pending | — | — | — |
 | 6 | `07-28-enforce-pre-archive-acceptance-readiness` | pending | — | — | — |
@@ -39,6 +39,16 @@ local checks/review have completed.
 | 11 | `07-28-standardize-environment-blocked-recovery-evidence` | pending | — | — | — |
 
 ## Last checkpoint
+
+Package 3 (`07-24-support-planning-only-pr-finalization`) validated at commit
+`7bf587a`. Its deterministic completion/planning finalization machinery
+(`final-bundle` evaluator, finish-work mode gate, typed eligibility evidence,
+retired `finishWorkHead`) already shipped to `origin/main` in prior releases and
+is not re-implemented; the campaign records integration validation on the branch
+head. Focused finalization lifecycle battery (`bookkeeping_validator`,
+`review_preflight`, `pr_eligibility`, `housekeeping`, `housekeeping_result`,
+`review_stage`) = 212 tests green. Deliverable is `validation.md`; dogfood and
+program integration (H09/07-22) are satisfied/deferred by the umbrella itself.
 
 Package 2 (`07-28-decide-housekeeping-result-schema-compatibility`) complete at
 commit `78b7b05`. Consumer inventory proved no shipped/documented/tested consumer
@@ -67,5 +77,5 @@ cumulative integration: `candidate-validation.json` `payloadDigest` (refreshed
 by release preparation), so `make generate` surface-check still reports the
 candidate-ledger digest as stale until then.
 
-Next: implement work package 3,
-`07-24-support-planning-only-pr-finalization`.
+Next: implement work package 4,
+`07-28-validate-finish-work-receipt-path`.
