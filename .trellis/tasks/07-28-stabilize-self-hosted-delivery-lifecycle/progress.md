@@ -11,8 +11,8 @@ local checks/review have completed.
 - Lifecycle activation: d79ba90 — umbrella + all 11 work packages set to
   in_progress and assigned the shared branch; investigation and rollout tasks
   remain planning.
-- Current package: 10 / 11 — 07-24-track-clean-recovery-artifacts (not started)
-- Last verified commit: b233db10
+- Current package: 11 / 11 — 07-28-standardize-environment-blocked-recovery-evidence (not started)
+- Last verified commit: 1aa2359d
 - Cumulative matrix: not run
 - Pull request: none
 - Finalization receipt: none
@@ -35,10 +35,59 @@ local checks/review have completed.
 | 7 | `07-25-user-scope-toolchain-caches` | done | 715559ab | test_script_lib (27, +3 uid/ownership) + test_generated_parity + test_pack_drift (56) green; ruff clean | self-review clean; security code already shipped by H06, this pins acceptance properties + documents the guarantee, no re-route |
 | 8 | `07-25-fix-work-loop-lock-race` | done | 18739c75 | test_work_loop (78, +3 concurrent-recovery/helper) + test_generated_parity + test_pack_drift (56) green; ruff + mypy clean | self-review clean; identity-checked rename-aside recovery, error strings + `--recover-stale-lock` flow unchanged, no consumer touched |
 | 9 | `07-25-backlog-selector-blocked-markers` | done | b233db10 | test_work_loop (81, +3 block-status/rank-order + envelope update) + test_generated_parity + test_pack_drift (56) green; ruff + mypy clean on both work-loop copies | self-review clean; formalized existing PARKED convention (no parallel one), Trellis-core task.py not forked, selector view provides AC1 machine-visible distinction |
-| 10 | `07-24-track-clean-recovery-artifacts` | pending | — | — | — |
+| 10 | `07-24-track-clean-recovery-artifacts` | done | 1aa2359d | recovery+housekeeping suites (90) + test_generated_parity + test_pack_drift (56) + test_install_audit (59) + surface generation/drift (28) green; ruff + mypy (35 files) + shellcheck + housekeeping self-test clean; only deferred `provenance.candidate-stale` remains for release prep | self-review clean; pre-existing registry/classify/cleanup integrated (not forked); housekeeping is the sole general cleanup owner, creating workflow owns success-path cleanup, ambiguous/unique defaults to preserve, sd-status stays read-only; new shared reference fanned out via manifest, both copies byte-identical; no consumer touched |
 | 11 | `07-28-standardize-environment-blocked-recovery-evidence` | pending | — | — | — |
 
 ## Last checkpoint
+
+Package 10 (`07-24-track-clean-recovery-artifacts`) complete at commit
+`1aa2359d`, the final of five staged subsystem commits: `5c90234c`
+(recovery-artifact registry + read-only classify), `176041af` (proof-gated,
+locked destructive cleanup), `7ba4d0c9` (sd-status surfaces artifact state
+read-only), `5e61eedf` (coverage-floor + legacy-advisory gates), and this
+`1aa2359d` (housekeeping reconcile + skill/doc lifecycle contract). The R1-R9
+design is a receipt-gated ownership boundary: every pack-created recovery stash
+or worktree carries a versioned, user-local, owner-only receipt keyed by
+repository identity and a unique artifact ID, and cleanup acts only through
+receipts (an artifact with no receipt is `unowned-artifact` and never touched).
+The creating workflow `register`s the receipt atomically the instant after the
+artifact exists and, on the success path, retires its own artifact and receipt
+in a `finally` through `cleanup --mode owner --artifact-id` (owner mode is the
+only lane that may prune a receipt whose Git object is already gone); an
+interruption preserves both for recovery (R3/R4). `sd-status` classifies every
+artifact read-only as `active`, `safe-cleanable`, `needs-review`,
+`missing-artifact`, or `unowned-artifact` and moves nothing (R5). This commit
+adds `cleanup --format shell` — one `\x1f`-delimited summary line (retired,
+preserved, failed, first-failure detail), safe because `_bounded` strips all
+control bytes — and wires `sd-ai-command-pack-housekeeping.sh`
+`reconcile_recovery_artifacts()` to run `cleanup --mode housekeeping` after
+branch/merge work and before the status report, skipped in dependency-PR mode
+(mirroring its KB-refresh skip). Housekeeping retires only a stash proven
+redundant/superseded at its exact object or a worktree clean at its exact
+registered path with a matching common dir, no lock, and a reachable/retained
+head (R6/R7); it preserves every ambiguous, `needs-review`, missing, or foreign
+artifact (R8), surfaces retired artifacts as `recovery_artifacts_retired`
+actions and refused/failed retires as `recovery_cleanup_*` anomalies, never
+prunes receipts, never forces a removal, and always returns 0 so it cannot abort
+housekeeping. The durable receipt JSON is bounded and exposes no secrets, remote
+URLs, or raw filesystem errors (R9). The R1-R9 contract is authored once as a new
+shared reference `sd-help/references/recovery-artifacts.md`, registered in
+`SHARED_SKILL_REFERENCES` and fanned out across all IDE targets by
+`generate-command-surfaces.py`; `sd-status`/`sd-housekeeping` SKILLs and
+`SD_AI_COMMAND_PACK.md` point at it. No existing skill creates stashes or
+worktrees today, so the register-then-`finally` protocol is authored as a
+forward-looking contract rather than fabricated into current skill steps. This
+commit edits scripts, tests, skills, and docs — no active-task
+`prd.md`/`design.md`/`implement.md` was created or materially updated — so the
+planning adversarial-review rule does not fire. Templates edited first; root
+mirrors byte-identical via `make sync` (`conflicts: none`); no consumer touched.
+Version/changelog/fleet and the candidate-ledger restamp are deferred to
+cumulative integration and the post-STOP fleet boundary; the lone
+`provenance.candidate-stale` surface finding is that expected deferral, not a
+regression. Checks: recovery+housekeeping suites (90) + `test_generated_parity` +
+`test_pack_drift` (56) + `test_install_audit` (59) + surface generation/drift
+(28) green; `ruff` + `mypy` (35 files) + `shellcheck` + housekeeping self-test
+clean.
 
 Package 9 (`07-25-backlog-selector-blocked-markers`) complete at commit
 `b233db10`. Formalized the already-present `PARKED:` title convention as the one
