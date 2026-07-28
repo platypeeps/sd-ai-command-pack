@@ -525,7 +525,10 @@ class BookkeepingWorkflowContractTests(unittest.TestCase):
     def test_scope_job_is_read_only_prior_head_and_exact_event_head(self) -> None:
         scope = self.workflow["jobs"]["ci-scope"]
         self.assertEqual(scope["name"], "CI scope")
-        self.assertEqual(scope["permissions"], {"actions": "read", "contents": "read"})
+        self.assertEqual(
+            scope["permissions"],
+            {"actions": "read", "checks": "read", "contents": "read"},
+        )
         checkout = scope["steps"][0]
         self.assertEqual(checkout["with"]["fetch-depth"], "0")
         self.assertEqual(

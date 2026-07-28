@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: read
+      checks: read
       contents: read
     outputs:
       mode: ${{ steps.classify.outputs.mode }}

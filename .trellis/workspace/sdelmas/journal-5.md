@@ -1774,7 +1774,48 @@ Recovered the durable planning work from the preserved stash, removed obsolete d
 - None - task complete
 
 
-## Session 246: Add bookkeeping-only CI fast lane
+## Session 246: Align Gemini settings review scope
+
+**Date**: 2026-07-27
+**Task**: Align Gemini settings review scope
+**Branch**: `codex/fix-gemini-settings-review-scope`
+
+### Summary
+
+Prepared and reviewed the sd-ai-command-pack 0.55.5 Gemini settings classifier parity release.
+
+### Main Changes
+
+- Added .gemini/settings.json to the canonical Gemini Trellis-local registry and shipped shell review-scope classifier.
+- Added regression coverage and a durable runtime-classifier parity contract, then regenerated version and fleet release evidence.
+- Corrected the task branch/base binding before canonical finalization and preserved the rejected recovery tail on a local backup branch.
+- Published PR #269 and converged Copilot review, GraphQL thread state, and required CI on the implementation head.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4ff53706574419846c8e228916951ee7c293060a` | fix: align Gemini settings review scope |
+| `c41013bd` | fix(task): bind Gemini review-scope task branch |
+
+### Testing
+
+- [OK] make release-prep, including the eight-consumer fleet candidate validation
+- [OK] sd-check passed 8 of 8 rows with a passing state guard
+- [OK] GitHub CI passed and Copilot reviewed all 15 changed files with zero findings
+- [OK] pre-archive validation returned pre_archive_valid from base c41013bd
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 247: Add bookkeeping-only CI fast lane
 
 **Date**: 2026-07-27
 **Task**: Add bookkeeping-only CI fast lane
@@ -1796,7 +1837,9 @@ Implemented a fail-closed exact-head bookkeeping CI mode with prior-head evidenc
 
 ### Testing
 
-- Validation was not recorded for this session.
+- [OK] `make check` passed, including the unit suite, lint, type checks,
+  security checks, review preflight, install audit, shipped-surface closure,
+  and linked Obsidian KB freshness validation.
 
 ### Status
 
