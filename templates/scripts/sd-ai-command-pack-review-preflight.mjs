@@ -1031,6 +1031,16 @@ function validateBookkeepingFinalBundle(options, evidence, add, runtime = {}) {
   for (const path of unsupported) {
     add('bundle_scope_invalid', path, 'finalization delta contains a non-bookkeeping path');
   }
+  for (const entry of entries) {
+    if (entry.status.startsWith('D')) continue;
+    if (entry.mode !== '100644') {
+      add(
+        'bundle_unsupported_file_mode',
+        entry.path,
+        `finalization delta introduces unsupported file mode ${entry.mode}; only regular non-executable files are allowed`,
+      );
+    }
+  }
   validateBookkeepingDiffWhitespace(baseOid, headOid, add);
   const journalSummary = validateBookkeepingJournalBundle(entries, baseOid, headOid, add);
   evidence.journalSessions = bookkeepingJournalSessionEvidence(journalSummary);
@@ -1363,7 +1373,7 @@ function resolveBookkeepingCommit(ref, label, add) {
 }
 
 function bookkeepingChangedEntries(baseOid, headOid, add) {
-  const result = runGit(['diff', '--name-status', '-z', '--find-renames', baseOid, headOid, '--']);
+  const result = runGit(['diff', '--raw', '-z', '--find-renames', baseOid, headOid, '--']);
   if (result.status !== 0) {
     add('bundle_diff_unavailable', '', 'Git could not enumerate the finalization delta', 'indeterminate');
     return null;
@@ -1371,7 +1381,18 @@ function bookkeepingChangedEntries(baseOid, headOid, add) {
   const tokens = result.stdout.split('\0');
   const entries = [];
   for (let index = 0; index < tokens.length && tokens[index];) {
-    const status = tokens[index++];
+    // Raw metadata token for a two-endpoint diff:
+    // ":<srcmode> <dstmode> <srcsha> <dstsha> <status>". Capturing the
+    // destination mode lets the bundle validators reject executable, symlink,
+    // and gitlink/submodule entries that name-status alone cannot distinguish.
+    const meta = /^:(\d{6}) (\d{6}) [0-9a-f]+ [0-9a-f]+ ([A-Z]\d*)$/.exec(tokens[index++]);
+    if (!meta) {
+      add('bundle_diff_malformed', '', 'Git returned a malformed raw diff record', 'indeterminate');
+      return null;
+    }
+    const srcMode = meta[1];
+    const mode = meta[2];
+    const status = meta[3];
     if (/^[RC]\d+$/.test(status)) {
       const oldPath = tokens[index++];
       const path = tokens[index++];
@@ -1379,14 +1400,14 @@ function bookkeepingChangedEntries(baseOid, headOid, add) {
         add('bundle_diff_malformed', '', 'Git returned a malformed rename/copy record', 'indeterminate');
         return null;
       }
-      entries.push({ status, oldPath, path });
+      entries.push({ status, oldPath, path, srcMode, mode });
     } else {
       const path = tokens[index++];
       if (!/^[AMDUT]$/.test(status) || !path) {
         add('bundle_diff_malformed', '', 'Git returned an unsupported or malformed path record', 'indeterminate');
         return null;
       }
-      entries.push({ status, oldPath: '', path });
+      entries.push({ status, oldPath: '', path, srcMode, mode });
     }
   }
   return entries;
@@ -1504,11 +1525,16 @@ function validatePlanningBundle(entries, evidence, baseOid, add, options = {}) {
     add('planning_task_change_missing', '', 'planning bundle must include at least one active task artifact change');
   }
   evidence.taskDirectories = [...taskDirs].sort();
+  const changedNames = new Set(
+    evidence.taskDirectories.map((taskDir) => taskDir.slice(taskDir.lastIndexOf('/') + 1)),
+  );
+  const changedRecords = [];
   for (const taskDir of evidence.taskDirectories) {
     const current = options.lifecycleOnly
       ? loadRecoveredPlanningTaskRecord(taskDir, add, options.currentRef)
       : validateBookkeepingTaskDirectory(taskDir, { add, archived: false });
     if (!current) continue;
+    changedRecords.push(current);
     if (current.status !== 'planning' || current.completedAt !== null || current.branch !== null) {
       add('planning_lifecycle_mutation', `${taskDir}/task.json`, 'planning task must keep status planning, completedAt null, and branch null');
     }
@@ -1525,7 +1551,47 @@ function validatePlanningBundle(entries, evidence, baseOid, add, options = {}) {
       add('planning_baseline_invalid', `${taskDir}/task.json`, 'existing task was not a valid planning task at the bundle base');
     }
   }
+  validatePlanningClosureActiveTasks(changedRecords, changedNames, add);
   return evidence.taskDirectories;
+}
+
+// A valid planning finalization preserves only planning tasks. When a changed
+// planning task links (parent/child) to a task outside the changed set that is
+// itself an active in_progress/review task, the finalization would step over
+// in-flight implementation work, so it blocks with a stable reason.
+function validatePlanningClosureActiveTasks(changedRecords, changedNames, add) {
+  const inspected = new Set();
+  for (const record of changedRecords) {
+    if (!isPlainObject(record)) continue;
+    const neighbors = [];
+    if (isTrellisTaskDirectoryName(record.parent)) neighbors.push(record.parent);
+    if (Array.isArray(record.children)) {
+      for (const child of record.children) {
+        if (isTrellisTaskDirectoryName(child)) neighbors.push(child);
+      }
+    }
+    for (const name of neighbors) {
+      if (changedNames.has(name) || inspected.has(name)) continue;
+      inspected.add(name);
+      const located = locateTrellisTaskRecord(name);
+      if (located.error || located.paths.length !== 1) continue;
+      const loaded = loadTrellisTaskMetadataFile(located.paths[0]);
+      if (loaded.status !== 'loaded') continue;
+      let neighbor;
+      try {
+        neighbor = JSON.parse(loaded.text);
+      } catch {
+        continue;
+      }
+      if (isPlainObject(neighbor) && (neighbor.status === 'in_progress' || neighbor.status === 'review')) {
+        add(
+          'planning_active_task_outside_closure',
+          located.paths[0],
+          `linked task ${name} is ${neighbor.status}; planning finalization must not leave an active task outside the changed planning closure`,
+        );
+      }
+    }
+  }
 }
 
 function loadRecoveredPlanningTaskRecord(taskDir, add, ref) {
@@ -1855,7 +1921,7 @@ function bookkeepingRegularPathsAtCommit(commitOid, paths) {
       const separator = record.indexOf('\t');
       if (separator <= 0) continue;
       const metadata = record.slice(0, separator);
-      if (/^100(?:644|755) blob [0-9a-f]{40,64}$/.test(metadata)) {
+      if (/^100644 blob [0-9a-f]{40,64}$/.test(metadata)) {
         regularPaths.add(record.slice(separator + 1));
       }
     }

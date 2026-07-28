@@ -1808,3 +1808,308 @@ class BookkeepingValidatorTests(InstallTestCase):
         payload = json.loads(result.stdout)
         self.assertIn("bookkeeping_whitespace_invalid", payload["reasonCodes"])
         self.assertIn("journal_commit_unknown", payload["reasonCodes"])
+
+    def test_planning_bundle_rejects_executable_file_mode(self) -> None:
+        root = self.make_validator_repo()
+        base = self.git_output(root, "rev-parse", "HEAD")
+        name = "exec-mode"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name,
+                status="planning",
+                branch=None,
+                completed_at=None,
+            ),
+        )
+        tool = task / "tool.sh"
+        tool.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+        tool.chmod(0o755)
+        self.run_git(root, "add", ".trellis/tasks")
+        # Force the executable bit into the committed tree even when the runner
+        # has core.fileMode disabled, so the raw-diff mode is 100755.
+        self.run_git(root, "update-index", "--chmod=+x", f"{task_dir}/tool.sh")
+        self.run_git(root, "commit", "-m", "plan fixture with executable")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        self.write_session(root, work_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record planning journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "invalid")
+        self.assertIn("bundle_unsupported_file_mode", payload["reasonCodes"])
+
+    def test_planning_bundle_rejects_symlink_file_mode(self) -> None:
+        root = self.make_validator_repo()
+        base = self.git_output(root, "rev-parse", "HEAD")
+        name = "symlink-mode"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name,
+                status="planning",
+                branch=None,
+                completed_at=None,
+            ),
+        )
+        os.symlink("prd.md", str(task / "link.md"))
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "plan fixture with symlink")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        self.write_session(root, work_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record planning journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "invalid")
+        self.assertIn("bundle_unsupported_file_mode", payload["reasonCodes"])
+
+    def test_planning_bundle_rejects_submodule_gitlink(self) -> None:
+        # Isolated, auto-cleaned source repository for the gitlink. A real
+        # submodule (not a bare cacheinfo entry) keeps the worktree clean so the
+        # mode check runs instead of tripping the dirty-worktree precondition.
+        inner = self.make_repo()
+        self.run_git(inner, "config", "user.email", "submodule@example.com")
+        self.run_git(inner, "config", "user.name", "Submodule Source")
+        (inner / "readme.txt").write_text("vendored\n", encoding="utf-8")
+        self.run_git(inner, "add", ".")
+        self.run_git(inner, "commit", "-m", "seed submodule source")
+
+        root = self.make_validator_repo()
+        base = self.git_output(root, "rev-parse", "HEAD")
+        name = "gitlink-mode"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name,
+                status="planning",
+                branch=None,
+                completed_at=None,
+            ),
+        )
+        self.run_git(
+            root,
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            str(inner),
+            f"{task_dir}/vendored",
+        )
+        self.run_git(root, "add", ".trellis/tasks", ".gitmodules")
+        self.run_git(root, "commit", "-m", "plan fixture with submodule")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        self.write_session(root, work_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record planning journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "invalid")
+        self.assertIn("bundle_unsupported_file_mode", payload["reasonCodes"])
+
+    def test_planning_bundle_rejects_archived_task_mutation(self) -> None:
+        root = self.make_validator_repo()
+        base = self.git_output(root, "rev-parse", "HEAD")
+        name = "archive-guard"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        # A valid active planning change accompanies the offending archive edit so
+        # the salient rejection is the archive mutation, not a missing task change.
+        self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name,
+                status="planning",
+                branch=None,
+                completed_at=None,
+            ),
+        )
+        archived = root / ".trellis/tasks/archive/2026-07/07-20-old-work"
+        archived.mkdir(parents=True, exist_ok=True)
+        (archived / "task.json").write_text(
+            json.dumps(
+                self.task_record(
+                    "old-work",
+                    status="completed",
+                    branch=None,
+                    completed_at="2026-07-20T00:00:00Z",
+                ),
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "plan fixture touching archive")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        self.write_session(root, work_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record planning journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "invalid")
+        self.assertIn("planning_archive_mutation", payload["reasonCodes"])
+
+    def test_planning_bundle_blocks_active_task_outside_closure(self) -> None:
+        root = self.make_validator_repo()
+        parent_name = "ac2-parent"
+        child_name = "ac2-child"
+        parent_dir = f".trellis/tasks/07-25-{parent_name}"
+        child_dir = f".trellis/tasks/07-25-{child_name}"
+        parent = self.task_record(
+            parent_name,
+            status="in_progress",
+            branch="codex/ac2-parent-work",
+            completed_at=None,
+        )
+        parent["children"] = [f"07-25-{child_name}"]
+        self.write_task(root, parent_dir, parent)
+        self.run_git(root, "add", ".trellis/tasks")
+        # The active parent is committed at/below base, so it stays outside the
+        # changed planning closure.
+        self.run_git(root, "commit", "-m", "seed active in-progress parent")
+        base = self.git_output(root, "rev-parse", "HEAD")
+
+        child = self.task_record(
+            child_name,
+            status="planning",
+            branch=None,
+            completed_at=None,
+        )
+        child["parent"] = f"07-25-{parent_name}"
+        self.write_task(root, child_dir, child)
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "add planning child")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        self.write_session(root, work_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record planning journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "invalid")
+        self.assertIn(
+            "planning_active_task_outside_closure", payload["reasonCodes"]
+        )
+
+    def test_planning_bundle_allows_planning_neighbor_closure(self) -> None:
+        root = self.make_validator_repo()
+        parent_name = "ac2-plan-parent"
+        child_name = "ac2-plan-child"
+        parent_dir = f".trellis/tasks/07-25-{parent_name}"
+        child_dir = f".trellis/tasks/07-25-{child_name}"
+        parent = self.task_record(
+            parent_name,
+            status="planning",
+            branch=None,
+            completed_at=None,
+        )
+        parent["children"] = [f"07-25-{child_name}"]
+        self.write_task(root, parent_dir, parent)
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "seed planning parent")
+        base = self.git_output(root, "rev-parse", "HEAD")
+
+        child = self.task_record(
+            child_name,
+            status="planning",
+            branch=None,
+            completed_at=None,
+        )
+        child["parent"] = f"07-25-{parent_name}"
+        self.write_task(root, child_dir, child)
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "add planning child")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        self.write_session(root, work_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record planning journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "valid")
+        self.assertNotIn(
+            "planning_active_task_outside_closure", payload["reasonCodes"]
+        )

@@ -830,6 +830,71 @@ class HousekeepingTests(InstallTestCase):
         self.assertIn("remote_branch_deleted", action_codes)
         self.assertTrue(marker.exists())
 
+    def test_housekeeping_merges_planning_finalization_and_preserves_tasks(
+        self,
+    ) -> None:
+        (
+            repo,
+            remote,
+            stub_bin,
+            base_oid,
+            head_oid,
+        ) = self.make_planning_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_merge_gh_stub(stub_bin, marker)
+        receipt = self.write_planning_finish_work_receipt(repo, base_oid, head_oid)
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(install.ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--finish-work-receipt",
+                str(receipt),
+                "--json",
+            ],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["outcome"]["status"], "clean")
+        self.assertEqual(payload["eligibility"]["status"], "eligible")
+        self.assertEqual(payload["eligibility"]["head"]["startOid"], head_oid)
+        finish_work = payload["identity"]["finishWork"]
+        self.assertEqual(finish_work["headOid"], head_oid)
+        self.assertTrue(finish_work["verified"])
+        self.assertEqual(finish_work["mode"], "planning")
+        # A planning receipt never carries completion evidence.
+        self.assertIsNone(finish_work["completionSubtype"])
+        action_codes = {item["code"] for item in payload["actions"]}
+        self.assertIn("pull_request_merged", action_codes)
+        self.assertTrue(marker.exists())
+
+        # On synchronized main, every planning task is preserved in planning and
+        # nothing was archived by the merge.
+        self.assertEqual(self.git_output(repo, "branch", "--show-current"), "main")
+        for name in (
+            "07-25-planning-preserved",
+            "07-25-planning-alpha",
+            "07-25-planning-beta",
+        ):
+            record = json.loads(
+                (repo / ".trellis/tasks" / name / "task.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(record["status"], "planning", name)
+        self.assertFalse((repo / ".trellis/tasks/archive").exists())
+
     def test_housekeeping_requires_finish_work_receipt_before_auto_merge(self) -> None:
         repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
         marker = repo.parent / "merged-pr"
