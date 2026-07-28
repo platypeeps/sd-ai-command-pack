@@ -1149,7 +1149,12 @@ Pass `--json` to reserve stdout for one schema-version-1 housekeeping result;
 progress and diagnostics move to stderr. The result embeds the existing PR
 eligibility JSON unchanged, stable coded actions/anomalies, and the complete
 delegated `sd-status --json` report. Its final `outcome.status` is
-`clean|blocked|indeterminate|failed`. The read-only
+`clean|blocked|indeterminate|failed`. When an environment or authority boundary
+refuses a Git-metadata or KB-refresh write, the result also carries an additive
+`environmentBlocks` array of `environment_blocked` fragments — each naming the
+exact boundary, last verified checkpoint, mutation state, and a bounded,
+non-authoritative recovery action — without changing `outcome`; consumers that
+do not understand the array ignore it. The read-only
 `sd-ai-command-pack-housekeeping-result.py` helper validates and composes these
 documents but collects no Git/GitHub evidence and owns no mutation.
 
