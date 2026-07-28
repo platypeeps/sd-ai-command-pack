@@ -22,8 +22,10 @@ A blocked owner emits one `environment_blocked` fragment (schemaVersion `1`):
   unknown`.
 - `recoveryAction` — bounded, redacted **data**: `null`, an `argv` token list,
   or a `skill` instruction string. It carries no executable authority.
-- `diagnostic` — a bounded, secret-safe line. No secrets, remote URLs, or raw
-  filesystem errors.
+- `diagnostic` — a bounded, secret-safe line. Secrets and any credentials
+  embedded in URLs are stripped, and absolute filesystem paths are rendered as
+  `[path]`; plain remote URLs and error descriptions (for example "Permission
+  denied") are preserved as diagnostic context.
 
 ## The boundaries
 
