@@ -108,6 +108,12 @@ The JSON result is the primary deterministic handoff:
 - `eligibility` embeds the existing evaluator result unchanged, or is `null`
   when no PR evaluation applied;
 - `actions` and `anomalies` contain stable codes and bounded human messages;
+- `environmentBlocks` lists any `environment_blocked` fragments an owning
+  operation attached when an environment boundary refused a write (Git metadata
+  or KB refresh); it is additive and never changes `outcome`. Report the exact
+  boundary and checkpoint and request only the narrow bounded retry — never a
+  merge, branch deletion, archive, force operation, or broad cleanup. See
+  [`../sd-help/references/environment-blocked-recovery.md`](../sd-help/references/environment-blocked-recovery.md);
 - `status` embeds the complete delegated `sd-status` result, including
   repo-wide open PRs/issues, Trellis inventory, review rounds, F/T/R selectors,
   and next steps; and

@@ -688,6 +688,83 @@
     {
       "platform": "shared",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/environment-blocked-recovery.md",
+      "target": ".agents/skills/sd-help/references/environment-blocked-recovery.md",
+      "install": "always"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/environment-blocked-recovery.md",
+      "target": ".agent/skills/sd-help/references/environment-blocked-recovery.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/environment-blocked-recovery.md",
+      "target": ".codebuddy/skills/sd-help/references/environment-blocked-recovery.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/environment-blocked-recovery.md",
+      "target": ".devin/skills/sd-help/references/environment-blocked-recovery.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/environment-blocked-recovery.md",
+      "target": ".factory/skills/sd-help/references/environment-blocked-recovery.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/environment-blocked-recovery.md",
+      "target": ".kilocode/skills/sd-help/references/environment-blocked-recovery.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/environment-blocked-recovery.md",
+      "target": ".kiro/skills/sd-help/references/environment-blocked-recovery.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/environment-blocked-recovery.md",
+      "target": ".pi/skills/sd-help/references/environment-blocked-recovery.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/environment-blocked-recovery.md",
+      "target": ".qoder/skills/sd-help/references/environment-blocked-recovery.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/environment-blocked-recovery.md",
+      "target": ".reasonix/skills/sd-help/references/environment-blocked-recovery.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/environment-blocked-recovery.md",
+      "target": ".trae/skills/sd-help/references/environment-blocked-recovery.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-help/references/examples.md",
       "target": ".agents/skills/sd-help/references/examples.md",
       "install": "always"

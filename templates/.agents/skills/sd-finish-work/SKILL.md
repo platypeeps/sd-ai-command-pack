@@ -106,7 +106,12 @@ task. Ordinary task archival, journal work, and validation need no confirmation.
    Do not stage the whole workspace or combine unrelated dirty files with this
    commit. If the wrapper script is missing, fall back to
    `add_session.py` and fill the `(Add details)`, `(Add test results)`, and
-   `(see git log)` placeholders manually before pushing.
+   `(see git log)` placeholders manually before pushing. If the recorder reports
+   an `environment_blocked` git-metadata fragment instead, report its exact
+   boundary and checkpoint and re-run only that bounded step once the boundary
+   clears — never widen it into a merge, archive, force operation, or cleanup.
+   See
+   [`../sd-help/references/environment-blocked-recovery.md`](../sd-help/references/environment-blocked-recovery.md).
 7. After the archive and journal commits exist, but before any push, create one
    private temporary receipt file and run the mode-specific final gate across
    the complete local bookkeeping range:

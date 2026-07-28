@@ -1481,6 +1481,7 @@ SHARED_SKILL_REFERENCES: dict[str, tuple[str, ...]] = {
     "sd-help": (
         "references/command-catalog.md",
         "references/completion-lifecycle.md",
+        "references/environment-blocked-recovery.md",
         "references/examples.md",
         "references/recovery-artifacts.md",
         "references/structured-questions.md",

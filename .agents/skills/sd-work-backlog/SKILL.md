@@ -118,6 +118,13 @@ state root only with an absolute path. Otherwise the helper uses the documented
 XDG, Windows local-app-data, or home-state fallback. Never create a tracked
 loop ledger in the target repository.
 
+If the helper reports an `environment_blocked` `user-state` fragment, the
+private state root is unwritable. Report its exact boundary and checkpoint and
+re-run only that bounded step once the state root is writable; never treat the
+block as license to merge, delete a branch, archive, force, or clean broadly.
+See
+[`../sd-help/references/environment-blocked-recovery.md`](../sd-help/references/environment-blocked-recovery.md).
+
 At startup, resume, every phase boundary, and every iteration boundary:
 
 1. Read the helper's status JSON.

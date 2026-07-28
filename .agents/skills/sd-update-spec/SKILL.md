@@ -44,6 +44,11 @@ ask for a normal bounded spec refresh already requested by the user.
      Load [`references/obsidian-kb.md`](references/obsidian-kb.md) only for an
      explicit preview, an occupied/symlinked/conflicting KB path, helper
      failure recovery, or detailed ownership/report interpretation.
+   - If the refresh reports an `environment_blocked` `kb-target` fragment
+     (`--json`), report its exact boundary and checkpoint and re-run only the
+     idempotent refresh once the target is writable; never widen it into cleanup
+     or any authority-expanding action. See
+     [`../sd-help/references/environment-blocked-recovery.md`](../sd-help/references/environment-blocked-recovery.md).
    - A routine spec-only run loads no optional reference. Independent
      extensions may load more than one direct reference, but load each at most
      once and never follow a reference from another reference.
