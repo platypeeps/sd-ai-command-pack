@@ -296,6 +296,60 @@ class HousekeepingResultTests(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     result_builder.parse_args(base + extra)
 
+    def test_finish_work_head_is_retired_and_verified_head_relocated(self) -> None:
+        """Schema v1 migration: the retired ``invocation.finishWorkHead`` field is
+        absent, and the exact merge head lives only on the verified
+        ``identity.finishWork`` object.
+
+        Decision:
+        .trellis/tasks/07-28-decide-housekeeping-result-schema-compatibility.
+        """
+
+        path = self.eligibility("eligible", [])
+        result = result_builder.build_result(self.args(eligibility_input=path))
+
+        self.assertEqual(result["schemaVersion"], 1)
+        # Absence semantics: no field named finishWorkHead anywhere in the result.
+        self.assertNotIn("finishWorkHead", result["invocation"])
+        self.assertNotIn("finishWorkHead", json.dumps(result))
+        # The verified head is relocated to identity.finishWork, gated on verified.
+        finish_work = result["identity"]["finishWork"]
+        self.assertEqual(finish_work["headOid"], HEAD)
+        self.assertTrue(finish_work["verified"])
+        # invocation carries only a boolean provenance flag, never a head value.
+        self.assertIs(result["invocation"]["finishWorkReceiptProvided"], True)
+
+    def test_missing_eligibility_omits_finish_work_head_without_alias(self) -> None:
+        """Without an eligibility receipt there is no finish-work head to echo; the
+        result still exposes no finishWorkHead alias or fallback."""
+
+        result = result_builder.build_result(self.args())
+
+        self.assertIsNone(result["identity"]["finishWork"])
+        self.assertNotIn("finishWorkHead", result["invocation"])
+        self.assertNotIn("finishWorkHead", json.dumps(result))
+        self.assertIs(result["invocation"]["finishWorkReceiptProvided"], False)
+
+    def test_retired_finish_work_head_cli_is_not_restored(self) -> None:
+        """AC4: the caller-trusted ``--finish-work-head`` input stays retired; the
+        parser rejects it rather than reviving a trust bypass."""
+
+        base = [
+            "--repository",
+            "/repo",
+            "--status-input",
+            str(self.status_path),
+            "--status-exit",
+            "0",
+            "--remote",
+            "origin",
+            "--merge-strategy",
+            "merge",
+        ]
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                result_builder.parse_args(base + ["--finish-work-head", HEAD])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,24 @@
 #!/usr/bin/env python3
-"""Build a typed housekeeping result from delegated runtime evidence."""
+"""Build a typed housekeeping result from delegated runtime evidence.
+
+Schema version 1 finish-work evidence (explicit in-major migration record):
+
+- The sole finish-work head evidence is the independently verified
+  ``identity.finishWork`` object; its ``headOid`` is the exact merge head and
+  ``verified`` proves it was recomputed, not caller-asserted.
+- ``invocation.finishWorkReceiptProvided`` is a boolean provenance flag only,
+  never a head value.
+- The previously emitted ``invocation.finishWorkHead`` attestation is retired,
+  not aliased. No shipped, documented, or tested consumer read it; the
+  replacement is strictly more authoritative; and the retired caller-trusted
+  ``--finish-work-head`` input is not restored.
+
+The schema major stays 1 deliberately. Because the removed field had no
+consumer and its replacement is independently verified, this is an explicit
+documented in-major migration, not a silent contract break or a compatibility
+alias. Decision record:
+``.trellis/tasks/07-28-decide-housekeeping-result-schema-compatibility``.
+"""
 
 from __future__ import annotations
 
