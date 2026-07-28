@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.56.0 - 2026-07-28
+
+- Add a typed, additive `environment_blocked` recovery contract. When an
+  environment or authority boundary refuses a Git-metadata, user-state,
+  tool-cache, or knowledge-base write, the owning operation attaches a bounded,
+  secret-safe fragment naming the boundary, last verified checkpoint, mutation
+  state, and a non-authoritative recovery action, without changing its own
+  outcome or exit. The housekeeping result surfaces these as an additive
+  `environmentBlocks` array that consumers which do not understand it ignore.
+- Route housekeeping by pull-request lifecycle state and validate the
+  finish-work receipt path before any side effect, failing fast on an invalid
+  receipt while leaving downstream merge eligibility unchanged.
+- Gate task archival on a read-only pre-archive acceptance-readiness check that
+  does not fire on handoff prose, non-canonical directories, or fenced examples.
+- Make housekeeping the sole owner of general recovery-artifact cleanup while
+  the creating workflow keeps success-path cleanup; ambiguous or unique content
+  defaults to preserve and `sd-status` stays read-only.
+- Recover a stale work-loop lock with an identity-checked rename-aside so a
+  concurrent run cannot remove a live lock, and expose blocked and parked
+  backlog markers so the selector distinguishes parked work from ready work.
+- Scope toolchain caches per user with uid and ownership checks, and record the
+  housekeeping-result schema migration explicitly as an in-major change with no
+  silent contract break or compatibility alias.
+
 ## 0.55.5 - 2026-07-27
 
 - Classify `.gemini/settings.json` consistently as Trellis-owned across the

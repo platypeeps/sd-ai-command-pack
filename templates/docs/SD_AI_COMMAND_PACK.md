@@ -274,7 +274,17 @@ it. Use a separate request to execute the recommendation.
    the Trellis finish-work skill's quality gate, archive, journal, and commit
    reminder behavior. Lifecycle commands must chain through `sd-finish-work`
    rather than invoking Trellis directly so the pack's concrete session
-   recorder remains in the path.
+   recorder remains in the path. Every acceptance criterion is satisfied before
+   archive; merge and cleanup are the task's `Post-archive handoff`, never
+   unchecked acceptance criteria. The shared boundary and authoring examples live
+   in `sd-help/references/completion-lifecycle.md`. The read-only `pre-archive`
+   bookkeeping validator enforces this: a task whose canonical `Acceptance
+   Criteria` section still has an unchecked required item fails closed with a
+   stable `pre_archive_acceptance_incomplete` reason before Trellis mutates
+   anything, and malformed, duplicated, or checkbox-shaped handoff structures
+   fail with `pre_archive_acceptance_malformed`. Prose `Post-archive handoff`
+   bullets and unchecked boxes outside the canonical section are never mistaken
+   for incomplete criteria.
 17. After the PR merges, run the housekeeping command to get back to the default
    branch, prune/delete the merged development stream, and see the condensed
    clean-state/anomaly report.
@@ -348,6 +358,17 @@ ten iterations it offers a non-blocking stop, but continues unless the user
 asks to stop. Task-local pre-mutation blockers can be parked; contradictory or
 dirty repository-wide state stops safely. Unavoidable user input gets one
 recommended question and a wait of up to 15 minutes when supported.
+
+A task blocked on an external dependency is machine-visible through one shared
+convention: a `PARKED:` title prefix (the same marker the status board reads),
+an explicit `blocked`/`blockedOn` field, or a park note. The `rank` helper flags
+each candidate `blocked` with a reason, reports `actionableCount`, and sorts
+every blocked task after every actionable one, so a blocked `P0` never outranks
+an actionable `P3`; the controller selects the first non-blocked candidate and
+reports the rest with the reason each was skipped. An optional integer `order`
+field breaks ties within a priority band while the `prd.md` keeps the ordering
+nuance. When no actionable task remains, the loop stops with
+`all_remaining_tasks_blocked` instead of picking a blocked one.
 
 Lifecycle phases and mutable evidence are separate contracts. `transition`
 advances a phase, while the helper's `evidence` subcommand records verified
@@ -539,7 +560,8 @@ branch, staged/unstaged/untracked counts, Git stash count, upstream ahead/behind
 and local/remote branches, installed SD pack and Trellis versions, relevant PR,
 open PRs/issues, current/in-progress/planned Trellis work, completed tasks
 stranded outside the Trellis archive, user-local autonomous loop state,
-anomalies, complete selectable F-prefixed follow-ups and T-prefixed unarchived
+pack recovery-artifact classifications, anomalies, complete selectable
+F-prefixed follow-ups and T-prefixed unarchived
 tasks, and numbered next steps. Task-like items in bounded roadmap sources are
 reported as source-backed F-prefixed follow-ups only when no unarchived Trellis
 task represents them. Sources are limited to roadmap/backlog/TODO/program-design
@@ -562,6 +584,27 @@ positional path selects another checkout, so
 not fetch and label ref-derived values `cached`. Relevant-PR review totals use
 GitHub's GraphQL `reviews.totalCount`, so repositories with more than one REST
 page of review events are reported accurately without fetching every review.
+
+`scripts/sd-ai-command-pack-recovery-artifacts.py` owns the lifecycle of
+pack-created Git recovery artifacts — the stashes and worktrees a workflow makes
+to protect uncommitted work before a risky operation. Each artifact carries a
+versioned, user-local, owner-only receipt keyed by repository identity and a
+unique artifact ID; cleanup acts only through receipts, so an artifact with no
+receipt is never touched. A creating workflow `register`s the receipt atomically
+the instant after the artifact exists and, on the success path, retires its own
+artifact and receipt in a `finally` through `cleanup --mode owner --artifact-id`;
+an interruption preserves both for recovery. `sd-status` classifies every
+artifact read-only as `active`, `safe-cleanable`, `needs-review`,
+`missing-artifact`, or `unowned-artifact`, and moves nothing. `sd-housekeeping`
+is the sole general cleanup owner: `cleanup --mode housekeeping` retires only a
+stash proven redundant or superseded at its exact object, or a worktree clean at
+its exact registered path with a matching common directory, no lock, and a
+reachable or retained head, and preserves every ambiguous, `needs-review`,
+missing, or foreign artifact. Housekeeping surfaces retired artifacts as actions
+and refused or failed retires as anomalies, never prunes receipts, and never
+forces a removal. The receipt JSON is bounded and exposes no secrets, remote
+URLs, or raw filesystem errors. The shared ownership lifecycle is documented in
+`.agents/skills/sd-help/references/recovery-artifacts.md`.
 
 The optional positional `fleet` mode works from any installed checkout. It
 resolves the canonical fleet manifest from `--fleet-manifest`,
@@ -1084,12 +1127,18 @@ leaves an open PR unmerged. The script then checks a strict auto-merge gate:
   cancelled, or timed out). Classifier-skipped checks do not block.
 - there are no unresolved review threads
 
-When that is true, it merges the PR and then performs normal cleanup. If that gate is
-not satisfied, it behaves as a post-merge cleanup command: fetch/prune
-`origin`, confirm the current feature branch's PR is merged and the local branch
-head matches that PR before deleting it, switch to the default branch,
-fast-forward from `origin`, and delete the merged local and remote branch. The
-script then invokes the installed `sd-status` collector in strict mode, passing
+The script resolves one bounded PR identity and lifecycle state for the current
+branch before choosing work, then routes on that state so housekeeping stays the
+sole owner of the merge-then-cleanup transition. An **open** PR must pass the
+gate above to merge; after the attempt the script re-resolves the PR and cleans
+up only if the merge actually landed, otherwise it records one anomaly and
+leaves the open branch untouched. A **merged** PR skips the eligibility gate and
+is cleaned up directly from the already-resolved identity: after fetch/prune of
+`origin`, confirm the local branch head matches the merged PR before deleting
+it, switch to the default branch, fast-forward from `origin`, and delete the
+merged local and remote branch. A **closed** (unmerged) PR, or an indeterminate
+lifecycle state, stops with a single bounded anomaly and no merge, switch, or
+delete. The script then invokes the installed `sd-status` collector in strict mode, passing
 the default/source branches, remote-branch policy, cleanup anomalies, and a
 `refreshed` label after a successful fetch/prune. That shared collector owns the
 final Git verification, pack/Trellis versions, relevant PR/review count,
@@ -1100,7 +1149,12 @@ Pass `--json` to reserve stdout for one schema-version-1 housekeeping result;
 progress and diagnostics move to stderr. The result embeds the existing PR
 eligibility JSON unchanged, stable coded actions/anomalies, and the complete
 delegated `sd-status --json` report. Its final `outcome.status` is
-`clean|blocked|indeterminate|failed`. The read-only
+`clean|blocked|indeterminate|failed`. When an environment or authority boundary
+refuses a Git-metadata or KB-refresh write, the result also carries an additive
+`environmentBlocks` array of `environment_blocked` fragments — each naming the
+exact boundary, last verified checkpoint, mutation state, and a bounded,
+non-authoritative recovery action — without changing `outcome`; consumers that
+do not understand the array ignore it. The read-only
 `sd-ai-command-pack-housekeeping-result.py` helper validates and composes these
 documents but collects no Git/GitHub evidence and owns no mutation.
 
@@ -1571,14 +1625,18 @@ export SD_AI_COMMAND_PACK_CACHE_ROOT="${SD_AI_COMMAND_PACK_CACHE_ROOT:-${TMPDIR:
 bash scripts/sd-ai-command-pack-toolchain.sh doctor
 ```
 
-The builder validates the parent, creates private deterministic namespaces,
-and sets `XDG_CACHE_HOME`, `PYTHONPYCACHEPREFIX`, `UV_CACHE_DIR`,
+The builder validates the parent, then creates a private deterministic
+namespace whose directory name embeds the current user's UID and is created
+mode 0700, and sets `XDG_CACHE_HOME`, `PYTHONPYCACHEPREFIX`, `UV_CACHE_DIR`,
 `UV_TOOL_DIR`, `PIP_CACHE_DIR`, `RUFF_CACHE_DIR`, and `NPM_CONFIG_CACHE`.
 `XDG_CACHE_HOME` always points to the private pack namespace; a valid inherited
 value may supply the namespace's safe parent but is not preserved verbatim.
 Existing valid overrides keep precedence for the other per-tool cache
-variables. Relative, repository-contained, symlinked, non-directory, or
-non-private overrides fail before the external tool runs. `GH_CONFIG_DIR`,
+variables. Relative, repository-contained, symlinked, non-directory,
+non-private, or foreign-owned overrides and namespaces fail before the external
+tool runs, so a co-tenant on a shared host cannot pre-create a cache or tool
+directory and have it reused — or planted bytecode and tool binaries executed —
+under another user's identity. `GH_CONFIG_DIR`,
 tokens, credential helpers, and unrelated environment variables are never
 rewritten. Reusable pack-created caches remain after successful commands;
 ordinary housekeeping does not delete them. Shared workflows invoke non-Python

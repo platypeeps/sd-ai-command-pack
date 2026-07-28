@@ -33,6 +33,18 @@ before asking. During its review stage this composite carries
 `review.round-extension` unchanged from `sd-review-pr`. It adds no confirmation
 between routine stages already authorized by the invocation.
 
+## Completion boundary
+
+`sd-ship` sequences the stages across the completion boundary and owns none of
+their gates; merge authority stays in `sd-housekeeping` alone. An acceptance
+criterion is any outcome that must be true before Trellis archives the task;
+every such criterion is checked before `task.py archive` marks the task
+`completed`. Merge, branch deletion, default-branch synchronization,
+superseded-PR closure, and post-merge fleet checks are the **Post-archive
+handoff**, never left as unchecked acceptance criteria. See
+[`../sd-help/references/completion-lifecycle.md`](../sd-help/references/completion-lifecycle.md)
+for the shared ownership sequence and authoring examples.
+
 ## When to use
 
 Run this command when work on a feature branch should travel the whole

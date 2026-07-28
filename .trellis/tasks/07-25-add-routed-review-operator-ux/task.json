@@ -1,7 +1,7 @@
 {
   "id": "add-routed-review-operator-ux",
   "name": "add-routed-review-operator-ux",
-  "title": "Add routed review operator UX",
+  "title": "PARKED: Add routed review operator UX",
   "description": "Add configuration, budget, finding-adjudication, and data-retention operations within the unified sd-review command surface using sd-github-review published contracts.",
   "status": "planning",
   "dev_type": null,

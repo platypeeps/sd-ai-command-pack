@@ -25,6 +25,7 @@ sys.dont_write_bytecode = True
 from sd_ai_command_pack_lib import (  # noqa: E402
     CACHE_ROOT_ENV,
     CacheSetupError,
+    build_environment_blocked_evidence,
     build_tool_environment,
 )
 
@@ -38,6 +39,10 @@ STATE_HOME_ENV = "SD_AI_COMMAND_PACK_STATE_HOME"
 FOCUS_FIELDS = frozenset({"priority", "package", "task", "status", "scope"})
 FOCUS_PREFIX_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):(.*)$", re.DOTALL)
 WORD_RE = re.compile(r"[A-Za-z0-9_.-]+")
+# Canonical machine-visible "blocked on an external dependency" marker: a
+# ``PARKED:`` title prefix (shared with sd-ai-command-pack-status.py so the
+# board and the selector read one convention, not a parallel one).
+PARKED_PREFIX_RE = re.compile(r"^PARKED\s*:\s*", re.IGNORECASE)
 COMMIT_RE = re.compile(r"[0-9a-f]{40,64}")
 SECRET_KEY_RE = re.compile(
     r"(?:token|secret|password|credential|api[_-]?key)", re.IGNORECASE
@@ -128,6 +133,47 @@ CONTEXT_SIGNALS = frozenset(
 
 class WorkLoopError(ValueError):
     """Raised when loop state is invalid or unsafe to mutate."""
+
+
+class StatePersistenceError(OSError):
+    """A user-local state or lock write hit a filesystem or permission boundary.
+
+    Subclasses OSError so the atomic-write contract and every existing OSError
+    handler keep working unchanged; it only carries the structured
+    ``environment_blocked`` evidence the CLI surfaces. Every raise site is a
+    pre-commit directory creation or an atomic-replace write, so a failure never
+    leaves a partial mutation — the prior state is intact (mutationState
+    ``none``) and the operation is safe to retry once the environment is
+    repaired.
+    """
+
+    def __init__(self, evidence: Mapping[str, Any], *, cause: OSError) -> None:
+        super().__init__(str(cause))
+        self.evidence: dict[str, Any] = dict(evidence)
+
+
+def _user_state_blocked(
+    operation: str, checkpoint: str, error: OSError
+) -> StatePersistenceError:
+    """Build a user-state environment block from a caught state-write OSError."""
+
+    evidence = build_environment_blocked_evidence(
+        boundary="user-state",
+        operation=operation,
+        checkpoint=checkpoint,
+        mutation_state="none",
+        retryable=True,
+        recovery_action={
+            "kind": "skill",
+            "instruction": (
+                "Ensure the work-loop state directory is a writable private "
+                f"directory (or set {STATE_HOME_ENV} to one), then retry "
+                f"{operation}."
+            ),
+        },
+        diagnostic=str(error),
+    )
+    return StatePersistenceError(evidence, cause=error)
 
 
 def utc_now() -> str:
@@ -288,7 +334,12 @@ def state_paths(identity: Mapping[str, str], state_root: Path) -> tuple[Path, Pa
 def ensure_private_directory(path: Path) -> None:
     if path.is_symlink():
         raise WorkLoopError(f"state directory must not be a symlink: {path}")
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as error:
+        raise _user_state_blocked(
+            "prepare the work-loop state directory", "state-directory", error
+        ) from error
     if path.is_symlink() or not path.is_dir():
         raise WorkLoopError(f"state directory is unusable: {path}")
     try:
@@ -591,33 +642,42 @@ def atomic_write_json(path: Path, value: Mapping[str, Any]) -> None:
     payload = _json_payload(value)
     if len(payload.encode("utf-8")) > MAX_LEDGER_BYTES:
         raise WorkLoopError(f"refusing to write oversized work-loop state: {path}")
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
-    )
-    temporary = Path(temporary_name)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", errors="strict") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+        )
+        temporary = Path(temporary_name)
         try:
-            path.chmod(0o600)
-        except OSError:
-            # The atomic write succeeded; unsupported chmod must not discard it.
-            pass
-    except Exception:
-        try:
-            os.close(descriptor)
-        except OSError:
-            # Cleanup failures must not hide the original write failure.
-            pass
-        try:
-            temporary.unlink()
-        except OSError:
-            # Cleanup failures must not hide the original write failure.
-            pass
+            with os.fdopen(descriptor, "w", encoding="utf-8", errors="strict") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+            try:
+                path.chmod(0o600)
+            except OSError:
+                # The atomic write succeeded; unsupported chmod must not discard it.
+                pass
+        except Exception:
+            try:
+                os.close(descriptor)
+            except OSError:
+                # Cleanup failures must not hide the original write failure.
+                pass
+            try:
+                temporary.unlink()
+            except OSError:
+                # Cleanup failures must not hide the original write failure.
+                pass
+            raise
+    except StatePersistenceError:
         raise
+    except OSError as error:
+        # Every failure here is a temp-create or atomic-replace fault: the prior
+        # state file is untouched, so the mutation is none and retry is safe.
+        raise _user_state_blocked(
+            "persist work-loop state", "state-file", error
+        ) from error
 
 
 def normalize_focus(
@@ -734,6 +794,48 @@ def focus_match(
     return False, []
 
 
+def candidate_block_status(
+    candidate: Mapping[str, Any],
+) -> tuple[bool, str | None]:
+    """Report whether a candidate is blocked on an external dependency and why.
+
+    One convention, three surfaces: an explicit ``blocked`` flag, a
+    ``blockedOn`` dependency string, or the canonical ``PARKED:`` title prefix
+    already carried by the board and matched by the status helper. A blocked
+    candidate is never selectable; the returned reason lets the selector report
+    why it was skipped instead of silently dropping it.
+    """
+    reason = candidate.get("blockedReason") or candidate.get("blockedOn")
+    reason_text = reason.strip() if isinstance(reason, str) and reason.strip() else None
+    if candidate.get("blocked") is True:
+        return True, reason_text or "blocked"
+    title = candidate.get("title")
+    if isinstance(title, str) and PARKED_PREFIX_RE.match(title.strip()):
+        return True, reason_text or "parked"
+    if reason_text is not None and isinstance(reason, str) and candidate.get("blockedOn"):
+        return True, reason_text
+    return False, None
+
+
+def candidate_order(candidate: Mapping[str, Any]) -> int:
+    """Explicit ordering signal honored within a priority band (lower first).
+
+    Non-integer or absent values sort as ``0`` so the field is a pure,
+    deterministic tie-break refinement; PRD prose remains the source of nuance.
+    """
+    value = candidate.get("order")
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return int(value.strip())
+        except ValueError:
+            return 0
+    return 0
+
+
 def base_candidate_key(candidate: Mapping[str, Any]) -> tuple[Any, ...]:
     status_order = {"in_progress": 0, "planning": 1}
     priority_order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
@@ -741,6 +843,7 @@ def base_candidate_key(candidate: Mapping[str, Any]) -> tuple[Any, ...]:
     return (
         status_order.get(str(candidate.get("status")), 9),
         priority_order.get(str(candidate.get("priority")), 9),
+        candidate_order(candidate),
         0 if artifacts_complete else 1,
         str(candidate.get("createdAt") or "9999-99-99"),
         str(candidate.get("id") or candidate.get("task") or "").casefold(),
@@ -771,14 +874,18 @@ def rank_candidates(
                 break
         if focus.get("mode") == "only" and band is None:
             continue
+        blocked, blocked_reason = candidate_block_status(candidate)
         item = dict(candidate)
         item["focusMatch"] = band is not None
         item["focusBand"] = band
         item["focusEvidence"] = evidence
         item["focusMatchKind"] = match_kind
+        item["blocked"] = blocked
+        item["blockedReason"] = blocked_reason
         ranked.append(item)
     ranked.sort(
         key=lambda item: (
+            1 if item["blocked"] else 0,
             item["focusBand"] if item["focusBand"] is not None else len(selectors) + 1,
             0 if item["focusMatchKind"] == "structured" else 1,
             base_candidate_key(item),
@@ -909,6 +1016,63 @@ def lock_is_stale(
     return True
 
 
+def _recover_locked_path(
+    lock_path: Path,
+    *,
+    expected_run_id: str | None,
+    context: str,
+) -> None:
+    """Delete a lock previously judged stale or unreadable, verifying identity
+    at delete time.
+
+    A plain ``unlink`` by path races a concurrent recoverer: once one process
+    removes the stale lock and creates its own, a second recoverer's ``unlink``
+    would delete that fresh lock and let both runs proceed. Instead, atomically
+    rename the lock aside under a private name and delete it only while its
+    identity still matches what was judged — ``runId`` for a stale lock, or
+    unreadable for a malformed one. If a competitor already replaced the lock,
+    restore what was moved without clobbering the newer lock so the caller
+    re-observes it on the next attempt rather than recreating over it.
+    """
+    aside = lock_path.with_name(f"{lock_path.name}.recovering-{uuid.uuid4().hex}")
+    try:
+        os.rename(lock_path, aside)
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise WorkLoopError(f"cannot recover {context}: {error}") from error
+    try:
+        moved = read_json(aside)
+        validate_lock(moved)
+    except WorkLoopError:
+        matches = expected_run_id is None
+    else:
+        matches = expected_run_id is not None and moved.get("runId") == expected_run_id
+    if matches:
+        try:
+            aside.unlink()
+        except OSError as error:
+            raise WorkLoopError(f"cannot recover {context}: {error}") from error
+        return
+    restore_error: OSError | None = None
+    try:
+        os.link(aside, lock_path)
+    except FileExistsError:
+        pass
+    except OSError as error:
+        restore_error = error
+    try:
+        aside.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        restore_error = restore_error or error
+    if restore_error is not None:
+        raise WorkLoopError(
+            f"cannot recover {context}: {restore_error}"
+        ) from restore_error
+
+
 def acquire_lock(
     lock_path: Path,
     state: Mapping[str, Any],
@@ -956,12 +1120,11 @@ def acquire_lock(
                         "work-loop lock is unreadable or malformed; inspect it or retry with "
                         "--recover-stale-lock"
                     ) from error
-                try:
-                    lock_path.unlink()
-                except OSError as unlink_error:
-                    raise WorkLoopError(
-                        f"cannot recover unreadable work-loop lock: {unlink_error}"
-                    ) from unlink_error
+                _recover_locked_path(
+                    lock_path,
+                    expected_run_id=None,
+                    context="unreadable work-loop lock",
+                )
                 continue
             if current.get("runId") == state["runId"]:
                 current["heartbeatAt"] = utc_now()
@@ -975,12 +1138,11 @@ def acquire_lock(
                     f"repository has {article} {state_label} work-loop lock owned by "
                     f"run {current.get('runId')}; reconcile before recovery"
                 ) from None
-            try:
-                lock_path.unlink()
-            except OSError as error:
-                raise WorkLoopError(
-                    f"cannot recover stale work-loop lock: {error}"
-                ) from error
+            _recover_locked_path(
+                lock_path,
+                expected_run_id=current.get("runId"),
+                context="stale work-loop lock",
+            )
             continue
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             stream.write(_json_payload(payload))
@@ -1049,12 +1211,11 @@ def acquire_terminal_lock(
                     "repository has a stale terminal reconciliation lock; "
                     "retry with --recover-stale-lock"
                 ) from None
-            try:
-                lock_path.unlink()
-            except OSError as error:
-                raise WorkLoopError(
-                    f"cannot recover stale terminal reconciliation lock: {error}"
-                ) from error
+            _recover_locked_path(
+                lock_path,
+                expected_run_id=current.get("runId"),
+                context="stale terminal reconciliation lock",
+            )
             continue
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             stream.write(_json_payload(payload))
@@ -2474,7 +2635,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not isinstance(payload, list):
                 raise WorkLoopError("candidate file must contain a JSON array")
             ranked = rank_candidates(payload, state["focus"])
-            output = {"count": len(ranked), "candidates": ranked}
+            actionable = sum(1 for item in ranked if not item["blocked"])
+            output = {
+                "count": len(ranked),
+                "actionableCount": actionable,
+                "candidates": ranked,
+            }
             _print(output, as_json=args.json)
             return 0
 
@@ -2666,6 +2832,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         _print(state, as_json=args.json)
         return 0
+    except StatePersistenceError as error:
+        # A user-state write hit a filesystem or permission boundary. Emit the
+        # structured, retryable blocked fragment additively on stdout under
+        # --json; the stderr line and exit code are unchanged for plain callers.
+        if args.json:
+            _print(
+                {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "outcome": "blocked",
+                    "environmentBlocked": dict(error.evidence),
+                },
+                as_json=True,
+            )
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     except (WorkLoopError, OSError, UnicodeError, json.JSONDecodeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

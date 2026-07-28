@@ -44,6 +44,19 @@ does not authorize unrelated or ambiguous files, force pushes, default-branch
 pushes, destructive cleanup, or bypassing finish-work, review, exact-head,
 eligibility, merge, or deletion gates.
 
+## Completion boundary
+
+This skill owns the **Post-archive handoff** — merge, branch deletion,
+default-branch synchronization, superseded-PR closure, and post-merge fleet
+checks — behind its exact-head eligibility, merge, and deletion gates, which it
+never relaxes. An acceptance criterion is any outcome that must be true before
+Trellis archives the task; every such criterion is checked before `task.py
+archive` marks the task `completed`. Merge, branch deletion, default-branch
+synchronization, superseded-PR closure, and post-merge fleet checks are the
+**Post-archive handoff**, never left as unchecked acceptance criteria. See
+[`../sd-help/references/completion-lifecycle.md`](../sd-help/references/completion-lifecycle.md)
+for the shared ownership sequence and authoring examples.
+
 ## Task List
 
 1. Verify repository, branch, and working-tree scope.
@@ -71,9 +84,18 @@ eligibility, merge, or deletion gates.
 8. Switch to and fast-forward the default branch, then delete only the proven
    merged local branch and, unless retained, its exact remote branch. Prune
    resulting stale refs.
-9. Let the executable invoke the installed `sd-status --json` collector in
-   strict mode. Do not run a parallel final-state or inventory collector.
-10. Interpret the schema-version-1 housekeeping result and give the concise
+9. Reconcile pack recovery artifacts once through the installed
+   recovery-artifacts helper in housekeeping mode, after branch and merge work
+   and before the status report; skip it in dependency-PR mode. Retire only
+   proven-safe stashes and worktrees and preserve every `needs-review`,
+   ambiguous, missing, or foreign artifact. Surface each retired artifact as an
+   action and each refused or failed retire as an anomaly; never prune receipts
+   and never force a removal. See
+   [`../sd-help/references/recovery-artifacts.md`](../sd-help/references/recovery-artifacts.md)
+   for the shared ownership lifecycle.
+10. Let the executable invoke the installed `sd-status --json` collector in
+    strict mode. Do not run a parallel final-state or inventory collector.
+11. Interpret the schema-version-1 housekeeping result and give the concise
     final report below. Preserve session-only follow-ups without contradicting
     status evidence.
 
@@ -86,6 +108,12 @@ The JSON result is the primary deterministic handoff:
 - `eligibility` embeds the existing evaluator result unchanged, or is `null`
   when no PR evaluation applied;
 - `actions` and `anomalies` contain stable codes and bounded human messages;
+- `environmentBlocks` lists any `environment_blocked` fragments an owning
+  operation attached when an environment boundary refused a write (Git metadata
+  or KB refresh); it is additive and never changes `outcome`. Report the exact
+  boundary and checkpoint and request only the narrow bounded retry — never a
+  merge, branch deletion, archive, force operation, or broad cleanup. See
+  [`../sd-help/references/environment-blocked-recovery.md`](../sd-help/references/environment-blocked-recovery.md);
 - `status` embeds the complete delegated `sd-status` result, including
   repo-wide open PRs/issues, Trellis inventory, review rounds, F/T/R selectors,
   and next steps; and

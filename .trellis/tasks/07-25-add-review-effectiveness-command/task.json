@@ -1,7 +1,7 @@
 {
   "id": "add-review-effectiveness-command",
   "name": "add-review-effectiveness-command",
-  "title": "Add review effectiveness command",
+  "title": "PARKED: Add review effectiveness command",
   "description": "Add read-only sd-review-effectiveness reporting for paired correctness, marginal value, reliability, latency, and cost.",
   "status": "planning",
   "dev_type": null,

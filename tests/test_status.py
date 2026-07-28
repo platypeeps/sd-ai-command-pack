@@ -48,6 +48,38 @@ class StatusTests(InstallTestCase):
             "status_test_work_loop",
         )
 
+    def load_recovery_module(self):
+        return self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-recovery-artifacts.py",
+            "status_test_recovery",
+        )
+
+    def seed_needs_review_stash(self, root: Path, state_root: Path) -> str:
+        """Create a real stash and record a dead-owner receipt for it.
+
+        The stash is not provably redundant and its owner is not live, so the
+        recovery classifier reports it as ``needs-review`` -- an actionable but
+        conservative state that exercises the status summary and next steps.
+        """
+        recovery = self.load_recovery_module()
+        (root / "README.md").write_text("# Status fixture edit\n", encoding="utf-8")
+        self.run_git(
+            root, "stash", "push", "-m", "sd-ai-command-pack recovery: status test"
+        )
+        oid = self.git_output(root, "rev-parse", "stash@{0}")
+        recovery.register(
+            repo=root,
+            artifact_type="stash",
+            git_identity={"object": oid, "subject": "recovery stash"},
+            created_by="sd-recover",
+            run={"runId": "r-dead", "hostname": "not-this-host-xyz", "pid": 4242},
+            purpose="protect wip",
+            original_head=self.git_output(root, "rev-parse", "HEAD"),
+            expected_outcome="restored",
+            state_root=state_root,
+        )
+        return oid
+
     def make_portable_status_install(self, root: Path) -> Path:
         scripts = root / "scripts"
         scripts.mkdir(parents=True)
@@ -178,6 +210,16 @@ class StatusTests(InstallTestCase):
             if ".git" in relative.parts or not path.is_file():
                 continue
             snapshot[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+        return snapshot
+
+    def recovery_state_snapshot(self, state_root: Path) -> dict[str, str]:
+        snapshot: dict[str, str] = {}
+        for path in sorted(state_root.rglob("*")):
+            if not path.is_file() or path.is_symlink():
+                continue
+            snapshot[path.relative_to(state_root).as_posix()] = hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
         return snapshot
 
     def test_resolve_repo_accepts_file_within_repository(self) -> None:
@@ -1325,6 +1367,130 @@ class StatusTests(InstallTestCase):
 
         self.assertEqual(result["status"], "invalid")
         self.assertEqual(observed, [True])
+
+    def test_summarize_recovery_filters_active_and_bounds_fields(self) -> None:
+        status = self.load_status_module()
+        classified = {
+            "schemaVersion": 1,
+            "repository": {"digest": "d", "label": "repo"},
+            "counts": {
+                "active": 1,
+                "safe-cleanable": 1,
+                "needs-review": 1,
+                "unowned-artifact": 1,
+                "bogus": -3,  # negative counts are dropped
+                7: 2,  # non-string keys are dropped
+                "flag": True,  # booleans are dropped
+            },
+            "receipts": [
+                {
+                    "type": "stash",
+                    "classification": "active",
+                    "reference": "aaaaaaaa",
+                    "detail": "in use",
+                },
+                {
+                    "type": "worktree",
+                    "classification": "safe-cleanable",
+                    "reference": "b" * 400,
+                    "detail": "c" * 400,
+                },
+                "not-a-mapping",
+            ],
+            "unowned": [
+                {"type": "stash", "reference": "dddddddd", "detail": "orphan"},
+                42,
+            ],
+            "corrupt": [{"reference": "broken.json", "reason": "bad json"}],
+        }
+
+        summary = status.summarize_recovery(classified)
+
+        self.assertEqual(summary["status"], "ok")
+        self.assertEqual(
+            summary["counts"],
+            {
+                "active": 1,
+                "safe-cleanable": 1,
+                "needs-review": 1,
+                "unowned-artifact": 1,
+            },
+        )
+        self.assertEqual(summary["total"], 4)
+        classes = [item["classification"] for item in summary["actionable"]]
+        self.assertNotIn("active", classes)
+        self.assertIn("safe-cleanable", classes)
+        self.assertIn("unowned-artifact", classes)
+        self.assertIn("corrupt", classes)
+        cleanable = next(
+            item
+            for item in summary["actionable"]
+            if item["classification"] == "safe-cleanable"
+        )
+        self.assertLessEqual(len(cleanable["reference"]), 200)
+        self.assertLessEqual(len(cleanable["detail"]), 200)
+
+    def test_collect_recovery_reports_invalid_helper_without_traceback(self) -> None:
+        root = self.make_status_repo()
+        status = self.load_status_module()
+        spec = mock.Mock()
+        spec.loader = mock.Mock()
+        spec.loader.exec_module.side_effect = SyntaxError("corrupt recovery helper")
+        with mock.patch.object(
+            status.importlib.util, "spec_from_file_location", return_value=spec
+        ):
+            result = status.collect_recovery(root)
+        self.assertEqual(result["status"], "invalid")
+        self.assertIn("corrupt recovery helper", result["error"])
+
+    def test_local_status_reports_recovery_artifacts_read_only(self) -> None:
+        root = self.make_status_repo()
+        state_root = root.parent / "recovery-state"
+        oid = self.seed_needs_review_stash(root, state_root)
+        env = {"SD_AI_COMMAND_PACK_STATE_HOME": str(state_root)}
+
+        before_repo = self.working_files_snapshot(root)
+        before_state = self.recovery_state_snapshot(state_root)
+
+        machine = self.run_status(root, "--json", extra_env=env)
+        human = self.run_status(root, extra_env=env)
+
+        self.assertEqual(machine.returncode, 0, machine.stdout)
+        report = json.loads(machine.stdout)
+        recovery = report["recoveryArtifacts"]
+        self.assertEqual(recovery["status"], "ok")
+        self.assertEqual(recovery["counts"].get("needs-review"), 1)
+        self.assertGreaterEqual(recovery["total"], 1)
+        references = [item["reference"] for item in recovery["actionable"]]
+        self.assertIn(oid[:12], references)
+        classes = {item["classification"] for item in recovery["actionable"]}
+        self.assertIn("needs-review", classes)
+        self.assertTrue(
+            any("Inspect 1 recovery artifact" in step for step in report["nextSteps"])
+        )
+
+        self.assertEqual(human.returncode, 0, human.stdout)
+        self.assertIn("==> Recovery Artifacts", human.stdout)
+        self.assertIn("needs-review", human.stdout)
+        self.assertIn(oid[:12], human.stdout)
+
+        self.assertEqual(self.working_files_snapshot(root), before_repo)
+        self.assertEqual(self.recovery_state_snapshot(state_root), before_state)
+
+    def test_recovery_section_reports_no_artifacts_on_clean_repo(self) -> None:
+        root = self.make_status_repo()
+        state_root = root.parent / "empty-recovery-state"
+        state_root.mkdir()
+        env = {"SD_AI_COMMAND_PACK_STATE_HOME": str(state_root)}
+
+        machine = self.run_status(root, "--json", extra_env=env)
+        human = self.run_status(root, extra_env=env)
+
+        recovery = json.loads(machine.stdout)["recoveryArtifacts"]
+        self.assertEqual(recovery["status"], "ok")
+        self.assertEqual(recovery["total"], 0)
+        self.assertEqual(recovery["actionable"], [])
+        self.assertIn("no tracked recovery artifacts", human.stdout)
 
     def test_local_status_counts_stashes_without_marking_attention(self) -> None:
         root = self.make_status_repo()

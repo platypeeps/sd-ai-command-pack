@@ -118,6 +118,13 @@ state root only with an absolute path. Otherwise the helper uses the documented
 XDG, Windows local-app-data, or home-state fallback. Never create a tracked
 loop ledger in the target repository.
 
+If the helper reports an `environment_blocked` `user-state` fragment, the
+private state root is unwritable. Report its exact boundary and checkpoint and
+re-run only that bounded step once the state root is writable; never treat the
+block as license to merge, delete a branch, archive, force, or clean broadly.
+See
+[`../sd-help/references/environment-blocked-recovery.md`](../sd-help/references/environment-blocked-recovery.md).
+
 At startup, resume, every phase boundary, and every iteration boundary:
 
 1. Read the helper's status JSON.
@@ -144,8 +151,9 @@ A task is actionable when:
 - status is `planning` or `in_progress`;
 - `prd.md` contains a real goal plus concrete requirements or acceptance
   criteria;
-- no current park note, waiting marker, or unresolved blocking question makes
-  implementation unsafe; and
+- it is not blocked on an external dependency — no `PARKED:` title prefix, no
+  `blocked`/`blockedOn` marker, no current park note, waiting marker, or
+  unresolved blocking question makes implementation unsafe; and
 - missing design artifacts can be responsibly produced from repository
   evidence before implementation.
 
@@ -155,8 +163,18 @@ remaining selector candidates.
 
 Build a bounded temporary JSON candidate list containing task ID, title,
 description, status, priority, created date, artifact readiness, package,
-scope, converged PRD text, related files, and explicit metadata. Do not search
-unrelated source content to manufacture a focus match. Rank it through:
+scope, converged PRD text, related files, and explicit metadata. Preserve each
+task's blocked marker and ordering signal so the helper can machine-read them:
+
+- Blocked-on-external-dependency is one convention across the board and this
+  selector — a `PARKED:` title prefix (carry the `task.json` title verbatim so
+  the prefix survives), an explicit `blocked: true`, or a `blockedOn` string
+  naming the dependency. Add a short `blockedReason`/`blockedOn` for the report.
+- `order` is an optional integer honored within a task's priority band (lower
+  first); the `prd.md` remains the source of ordering nuance.
+
+Do not search unrelated source content to manufacture a focus match. Rank it
+through:
 
 ```bash
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
@@ -164,12 +182,18 @@ bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
   --candidates-file /absolute/path/to/candidates.json --json
 ```
 
-The helper returns ordered candidates and grounded match evidence. Existing
-deterministic tie-breakers remain: `in_progress`, priority `P0` through `P3`,
-artifact readiness, older creation date, then lexical task ID. Report why the
-selected task won and summarize ambiguous, non-matching, parked, and blocked
-candidates. In preferred mode, a focus miss falls back visibly to normal
-ranking. In focus-only mode, it stops without broadening.
+The helper returns ordered candidates and grounded match evidence, and reports
+`actionableCount`. It flags each candidate with `blocked` plus `blockedReason`
+and sorts every blocked task after every actionable one, so a blocked `P0`
+never outranks an actionable `P3`. Existing deterministic tie-breakers remain:
+`in_progress`, priority `P0` through `P3`, the `order` signal, artifact
+readiness, older creation date, then lexical task ID. Select the first
+non-blocked candidate — never a `blocked` one — report why it won, and
+summarize the ambiguous, non-matching, parked, and blocked candidates with the
+reported reason each was skipped. If `actionableCount` is zero, stop with
+`all_remaining_tasks_blocked` rather than selecting a blocked task. In preferred
+mode, a focus miss falls back visibly to normal ranking. In focus-only mode, it
+stops without broadening.
 
 ## One Iteration
 

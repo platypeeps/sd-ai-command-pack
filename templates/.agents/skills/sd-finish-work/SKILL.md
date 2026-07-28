@@ -16,6 +16,19 @@ ask again solely because that bookkeeping will be committed or pushed. This
 does not authorize unrelated or ambiguous files, force pushes, default-branch
 pushes, destructive actions, or bypassing finalization and exact-head gates.
 
+## Completion boundary
+
+This wrapper owns the pre-archive completion boundary: it archives a task only
+after every acceptance criterion is satisfied, and it never performs the
+post-archive handoff. An acceptance criterion is any outcome that must be true
+before Trellis archives the task; every such criterion is checked before
+`task.py archive` marks the task `completed`. Merge, branch deletion,
+default-branch synchronization, superseded-PR closure, and post-merge fleet
+checks are the **Post-archive handoff**, never left as unchecked acceptance
+criteria. See
+[`../sd-help/references/completion-lifecycle.md`](../sd-help/references/completion-lifecycle.md)
+for the shared ownership sequence and authoring examples.
+
 ## Structured decisions
 
 Read [`../sd-help/references/structured-questions.md`](../sd-help/references/structured-questions.md)
@@ -93,7 +106,12 @@ task. Ordinary task archival, journal work, and validation need no confirmation.
    Do not stage the whole workspace or combine unrelated dirty files with this
    commit. If the wrapper script is missing, fall back to
    `add_session.py` and fill the `(Add details)`, `(Add test results)`, and
-   `(see git log)` placeholders manually before pushing.
+   `(see git log)` placeholders manually before pushing. If the recorder reports
+   an `environment_blocked` git-metadata fragment instead, report its exact
+   boundary and checkpoint and re-run only that bounded step once the boundary
+   clears — never widen it into a merge, archive, force operation, or cleanup.
+   See
+   [`../sd-help/references/environment-blocked-recovery.md`](../sd-help/references/environment-blocked-recovery.md).
 7. After the archive and journal commits exist, but before any push, create one
    private temporary receipt file and run the mode-specific final gate across
    the complete local bookkeeping range:

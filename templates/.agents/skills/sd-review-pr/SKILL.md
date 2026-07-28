@@ -22,6 +22,19 @@ reviewer. This does not authorize unrelated or ambiguous files, force pushes,
 default-branch pushes, scope or risk expansion, extra rounds beyond the
 configured limit, destructive actions, or bypassing any gate.
 
+## Completion boundary
+
+Review readiness is pre-archive evidence, not a merge; this skill never performs
+the post-archive handoff. Its standalone finish-work archives at the completion
+boundary once the loop is clean. An acceptance criterion is any outcome that must
+be true before Trellis archives the task; every such criterion is checked before
+`task.py archive` marks the task `completed`. Merge, branch deletion,
+default-branch synchronization, superseded-PR closure, and post-merge fleet
+checks are the **Post-archive handoff**, never left as unchecked acceptance
+criteria. See
+[`../sd-help/references/completion-lifecycle.md`](../sd-help/references/completion-lifecycle.md)
+for the shared ownership sequence and authoring examples.
+
 ## Sandbox-safe tool execution
 
 Run every `gh`, `uv`, `pip`, `ruff`, or `npm` command shown in this workflow

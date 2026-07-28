@@ -420,6 +420,89 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual([item["id"] for item in ranked], ["one"])
         self.assertEqual(ranked[0]["focusMatchKind"], "structured")
 
+    def test_candidate_block_status_reads_one_convention_three_surfaces(self) -> None:
+        module = self.load_module()
+        # Canonical PARKED: title prefix (case/space tolerant), no explicit reason.
+        self.assertEqual(
+            module.candidate_block_status({"title": "parked : Do the thing"}),
+            (True, "parked"),
+        )
+        # PARKED title with an explicit dependency reason.
+        self.assertEqual(
+            module.candidate_block_status(
+                {"title": "PARKED: X", "blockedOn": "se-pack/contract"}
+            ),
+            (True, "se-pack/contract"),
+        )
+        # Explicit structured flag with a human reason.
+        self.assertEqual(
+            module.candidate_block_status(
+                {"title": "Ready-looking", "blocked": True, "blockedReason": "waiting"}
+            ),
+            (True, "waiting"),
+        )
+        # A blockedOn dependency without any prefix still blocks.
+        self.assertEqual(
+            module.candidate_block_status(
+                {"title": "Ready-looking", "blockedOn": "other-repo/task"}
+            ),
+            (True, "other-repo/task"),
+        )
+        # An ordinary actionable task is not blocked.
+        self.assertEqual(
+            module.candidate_block_status({"title": "Harden CI pipeline"}),
+            (False, None),
+        )
+
+    def test_rank_sorts_blocked_last_regardless_of_priority_and_reports_reason(
+        self,
+    ) -> None:
+        module = self.load_module()
+        candidates = [
+            {
+                "id": "blocked-p0",
+                "title": "PARKED: Urgent but blocked",
+                "status": "in_progress",
+                "priority": "P0",
+                "createdAt": "2026-01-01",
+                "blockedOn": "se-pack/contract-stability",
+            },
+            {
+                "id": "ready-p3",
+                "title": "Low priority but ready",
+                "status": "planning",
+                "priority": "P3",
+                "createdAt": "2026-01-02",
+            },
+        ]
+
+        ranked = module.rank_candidates(candidates, module.normalize_focus())
+
+        # A blocked P0 never outranks an actionable P3: the selector's first
+        # pick is always selectable.
+        self.assertEqual([item["id"] for item in ranked], ["ready-p3", "blocked-p0"])
+        self.assertFalse(ranked[0]["blocked"])
+        self.assertIsNone(ranked[0]["blockedReason"])
+        self.assertTrue(ranked[1]["blocked"])
+        self.assertEqual(ranked[1]["blockedReason"], "se-pack/contract-stability")
+
+    def test_rank_order_signal_breaks_ties_within_priority_band(self) -> None:
+        module = self.load_module()
+        candidates = [
+            {"id": "second", "status": "planning", "priority": "P1", "order": 2},
+            {"id": "first", "status": "planning", "priority": "P1", "order": 1},
+            # A higher-priority task dominates any order signal in a lower band.
+            {"id": "top", "status": "planning", "priority": "P0", "order": 99},
+            # Absent/invalid order sorts as 0 (ahead of explicit positive order).
+            {"id": "zero", "status": "planning", "priority": "P1"},
+        ]
+
+        ranked = module.rank_candidates(candidates, module.normalize_focus())
+
+        self.assertEqual(
+            [item["id"] for item in ranked], ["top", "zero", "first", "second"]
+        )
+
     def test_atomic_state_is_private_and_rejects_secret_keys(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -560,6 +643,94 @@ class WorkLoopTests(InstallTestCase):
         )
         self.assertEqual(list(target.parent.glob("*.tmp")), [])
 
+    def test_ensure_private_directory_classifies_mkdir_block_as_user_state(
+        self,
+    ) -> None:
+        module = self.load_module()
+        target = self.make_repo().parent / "state"
+
+        with mock.patch.object(
+            module.Path, "mkdir", side_effect=OSError("read-only file system")
+        ):
+            with self.assertRaises(module.StatePersistenceError) as caught:
+                module.ensure_private_directory(target)
+
+        error = caught.exception
+        # It subclasses OSError, so the atomic-write contract and every existing
+        # OSError handler keep matching it, and it preserves the original text.
+        self.assertIsInstance(error, OSError)
+        self.assertIn("read-only file system", str(error))
+        evidence = error.evidence
+        self.assertEqual(evidence["boundary"], "user-state")
+        self.assertEqual(evidence["checkpoint"], "state-directory")
+        self.assertEqual(evidence["mutationState"], "none")
+        self.assertIs(evidence["retryable"], True)
+        self.assertEqual(evidence["recoveryAction"]["kind"], "skill")
+
+    def test_cli_state_write_block_emits_environment_fragment(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        _state, state_path, _lock_path = self.make_state(module, root, state_root)
+        before = state_path.read_bytes()
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            with mock.patch.object(
+                module.os, "replace", side_effect=OSError("no space left on device")
+            ):
+                result = module.main(
+                    [
+                        "--state-home",
+                        str(state_root),
+                        "heartbeat",
+                        "--repo",
+                        str(root),
+                        "--run-id",
+                        "run-1",
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(result, 2)
+        envelope = json.loads(stdout.getvalue())
+        self.assertEqual(envelope["outcome"], "blocked")
+        self.assertEqual(envelope["schemaVersion"], module.SCHEMA_VERSION)
+        fragment = envelope["environmentBlocked"]
+        self.assertEqual(fragment["boundary"], "user-state")
+        self.assertEqual(fragment["mutationState"], "none")
+        self.assertIs(fragment["retryable"], True)
+        self.assertEqual(fragment["recoveryAction"]["kind"], "skill")
+        # A blocked write is a no-op: the durable ledger is byte-for-byte intact,
+        # so a retry after repair cannot double-apply anything.
+        self.assertEqual(state_path.read_bytes(), before)
+
+    def test_cli_wrong_run_id_stays_a_plain_error_without_a_fragment(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        self.make_state(module, root, state_root)
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "heartbeat",
+                    "--repo",
+                    str(root),
+                    "--run-id",
+                    "run-does-not-match",
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(result, 2)
+        # A logic error is not an environment block: no additive stdout envelope
+        # is emitted, so consumers never misclassify it as retryable.
+        self.assertEqual(stdout.getvalue(), "")
+
     def test_validation_and_persistence_use_the_same_size_limit(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -638,6 +809,99 @@ class WorkLoopTests(InstallTestCase):
 
         module.acquire_lock(lock_path, first, recover_stale=True)
         self.assertEqual(module.read_json(lock_path)["runId"], first["runId"])
+
+    def test_concurrent_stale_recovery_cannot_both_acquire(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        first, _state_path, lock_path = self.make_state(module, root, state_root)
+        stale = module.read_json(lock_path)
+        # Defeat the liveness guard (hostname + live pid) so the ancient
+        # heartbeat alone makes the lock genuinely stale.
+        stale["pid"] = 99999999
+        stale["hostname"] = "different-host"
+        stale["heartbeatAt"] = "2000-01-01T00:00:00Z"
+        module.atomic_write_json(lock_path, stale)
+
+        def other(run_id: str) -> dict:
+            return module.new_state(
+                module.repository_identity(root),
+                mode="backlog",
+                selector="all",
+                focus=module.normalize_focus(),
+                until="merge",
+                run_id=run_id,
+            )
+
+        second = other("run-2")
+        third = other("run-3")
+
+        real_is_stale = module.lock_is_stale
+        trip = {"done": False}
+
+        def racing_is_stale(lock, *, stale_after=module.DEFAULT_STALE_LOCK_SECONDS):
+            result = real_is_stale(lock, stale_after=stale_after)
+            if result and not trip["done"] and lock.get("runId") == first["runId"]:
+                # A competitor fully recovers and acquires in the window between
+                # this recoverer judging the lock stale and deleting it. Plain
+                # unlink-by-path would then delete run-3's fresh lock and let
+                # run-2 acquire too; identity-checked recovery must not.
+                trip["done"] = True
+                module.acquire_lock(lock_path, third, recover_stale=True)
+            return result
+
+        with mock.patch.object(module, "lock_is_stale", racing_is_stale):
+            with self.assertRaisesRegex(
+                module.WorkLoopError, "active work-loop lock owned by run run-3"
+            ):
+                module.acquire_lock(lock_path, second, recover_stale=True)
+
+        self.assertTrue(trip["done"])
+        self.assertEqual(module.read_json(lock_path)["runId"], "run-3")
+        # run-3 is the sole valid owner: it can still heartbeat and release.
+        module.require_lock(lock_path, "run-3")
+        module.release_lock(lock_path, "run-3")
+
+    def test_recover_locked_path_preserves_competitor_lock(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        _first, _state_path, lock_path = self.make_state(module, root, state_root)
+        # A competitor replaced the judged-stale lock with a fresh one under a
+        # new runId before this recoverer reached the delete step.
+        winner = module.read_json(lock_path)
+        winner["runId"] = "winner-run"
+        module.atomic_write_json(lock_path, winner)
+        before = lock_path.read_bytes()
+
+        module._recover_locked_path(
+            lock_path,
+            expected_run_id="stale-run",
+            context="stale work-loop lock",
+        )
+
+        self.assertTrue(lock_path.exists())
+        self.assertEqual(lock_path.read_bytes(), before)
+        self.assertEqual(module.read_json(lock_path)["runId"], "winner-run")
+        siblings = [p.name for p in lock_path.parent.iterdir()]
+        self.assertFalse(any(".recovering-" in name for name in siblings))
+
+    def test_recover_locked_path_removes_matching_stale_lock(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        _first, _state_path, lock_path = self.make_state(module, root, state_root)
+        run_id = module.read_json(lock_path)["runId"]
+
+        module._recover_locked_path(
+            lock_path,
+            expected_run_id=run_id,
+            context="stale work-loop lock",
+        )
+
+        self.assertFalse(lock_path.exists())
+        siblings = [p.name for p in lock_path.parent.iterdir()]
+        self.assertFalse(any(".recovering-" in name for name in siblings))
 
     def test_terminal_lock_diagnostics_distinguish_active_and_stale(self) -> None:
         module = self.load_module()
@@ -2872,7 +3136,10 @@ class WorkLoopTests(InstallTestCase):
             )
 
         self.assertEqual(result, 0)
-        self.assertEqual(json.loads(stdout.getvalue()), {"candidates": [], "count": 0})
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            {"candidates": [], "count": 0, "actionableCount": 0},
+        )
         self.assertEqual(
             calls,
             [((), {"encoding": "utf-8", "errors": "strict"})],

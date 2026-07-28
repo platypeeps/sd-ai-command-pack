@@ -117,6 +117,91 @@ class HousekeepingResultTests(unittest.TestCase):
             ["checks_blocking", "merge_blocked"],
         )
 
+    def test_environment_boundary_anomalies_attach_structured_blocks(self) -> None:
+        from sd_ai_command_pack_lib import validate_environment_blocked_evidence
+
+        result = result_builder.build_result(
+            self.args(
+                status_exit=1,
+                anomaly=[
+                    ["remote_fetch_failed", "git fetch --prune origin failed"],
+                    ["remote_prune_failed", "git fetch --prune origin failed"],
+                    ["local_branch_delete_failed", "git branch -D feature failed"],
+                    ["remote_branch_delete_failed", "git push --delete origin failed"],
+                    ["kb_refresh_failed", "KB refresh exited nonzero"],
+                    ["pull_request_not_merged", "PR is CLOSED, not MERGED"],
+                ],
+            )
+        )
+
+        blocks = result["environmentBlocks"]
+        by_checkpoint = {block["checkpoint"]: block for block in blocks}
+        self.assertEqual(
+            set(by_checkpoint),
+            {
+                "remote-fetch",
+                "remote-prune",
+                "local-branch-delete",
+                "remote-branch-delete",
+                "kb-refresh",
+            },
+        )
+        # The policy anomaly (a repository/PR-state fact) must never be labeled a
+        # retryable environment boundary.
+        self.assertNotIn("pull_request_not_merged", str(blocks))
+
+        self.assertEqual(by_checkpoint["remote-fetch"]["boundary"], "git-metadata")
+        self.assertEqual(
+            by_checkpoint["remote-fetch"]["mutationState"], "partial-recoverable"
+        )
+        self.assertEqual(
+            by_checkpoint["local-branch-delete"]["mutationState"], "none"
+        )
+        self.assertEqual(by_checkpoint["kb-refresh"]["boundary"], "kb-target")
+
+        for block in blocks:
+            # Every block is a genuine composer product and survives consumer-side
+            # validation unchanged; no remote URL or control text leaks into the
+            # durable diagnostic.
+            self.assertTrue(block["retryable"])
+            self.assertEqual(block["recoveryAction"]["kind"], "skill")
+            self.assertNotIn("://", block["diagnostic"])
+            self.assertEqual(validate_environment_blocked_evidence(block), block)
+
+    def test_policy_anomalies_emit_no_environment_block(self) -> None:
+        result = result_builder.build_result(
+            self.args(
+                status_exit=1,
+                anomaly=[
+                    ["remote_not_configured", "git remote get-url origin failed"],
+                    ["default_remote_ref_missing", "remote default ref absent"],
+                    ["working_tree_dirty", "uncommitted changes present"],
+                    ["kb_helper_missing", "KB helper not found"],
+                ],
+            )
+        )
+        self.assertEqual(result["environmentBlocks"], [])
+
+    def test_environment_block_is_additive_and_does_not_alter_outcome(self) -> None:
+        # A clean run carries an empty list; attaching a block never injects a
+        # reason code or flips the outcome the anomaly already determined.
+        clean = self.eligibility("eligible", [])
+        clean_result = result_builder.build_result(
+            self.args(eligibility_input=clean)
+        )
+        self.assertEqual(clean_result["environmentBlocks"], [])
+        self.assertEqual(clean_result["outcome"]["status"], "clean")
+
+        blocked = result_builder.build_result(
+            self.args(
+                status_exit=1,
+                anomaly=[["remote_prune_failed", "git fetch --prune origin failed"]],
+            )
+        )
+        self.assertEqual(blocked["outcome"]["status"], "blocked")
+        self.assertEqual(blocked["outcome"]["reasonCodes"], ["remote_prune_failed"])
+        self.assertEqual(len(blocked["environmentBlocks"]), 1)
+
     def test_indeterminate_and_status_failure_are_distinct(self) -> None:
         path = self.eligibility("indeterminate", ["review_threads_unavailable"])
         indeterminate = result_builder.build_result(
@@ -295,6 +380,60 @@ class HousekeepingResultTests(unittest.TestCase):
             with self.subTest(extra=extra), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit):
                     result_builder.parse_args(base + extra)
+
+    def test_finish_work_head_is_retired_and_verified_head_relocated(self) -> None:
+        """Schema v1 migration: the retired ``invocation.finishWorkHead`` field is
+        absent, and the exact merge head lives only on the verified
+        ``identity.finishWork`` object.
+
+        Decision:
+        .trellis/tasks/07-28-decide-housekeeping-result-schema-compatibility.
+        """
+
+        path = self.eligibility("eligible", [])
+        result = result_builder.build_result(self.args(eligibility_input=path))
+
+        self.assertEqual(result["schemaVersion"], 1)
+        # Absence semantics: no field named finishWorkHead anywhere in the result.
+        self.assertNotIn("finishWorkHead", result["invocation"])
+        self.assertNotIn("finishWorkHead", json.dumps(result))
+        # The verified head is relocated to identity.finishWork, gated on verified.
+        finish_work = result["identity"]["finishWork"]
+        self.assertEqual(finish_work["headOid"], HEAD)
+        self.assertTrue(finish_work["verified"])
+        # invocation carries only a boolean provenance flag, never a head value.
+        self.assertIs(result["invocation"]["finishWorkReceiptProvided"], True)
+
+    def test_missing_eligibility_omits_finish_work_head_without_alias(self) -> None:
+        """Without an eligibility receipt there is no finish-work head to echo; the
+        result still exposes no finishWorkHead alias or fallback."""
+
+        result = result_builder.build_result(self.args())
+
+        self.assertIsNone(result["identity"]["finishWork"])
+        self.assertNotIn("finishWorkHead", result["invocation"])
+        self.assertNotIn("finishWorkHead", json.dumps(result))
+        self.assertIs(result["invocation"]["finishWorkReceiptProvided"], False)
+
+    def test_retired_finish_work_head_cli_is_not_restored(self) -> None:
+        """AC4: the caller-trusted ``--finish-work-head`` input stays retired; the
+        parser rejects it rather than reviving a trust bypass."""
+
+        base = [
+            "--repository",
+            "/repo",
+            "--status-input",
+            str(self.status_path),
+            "--status-exit",
+            "0",
+            "--remote",
+            "origin",
+            "--merge-strategy",
+            "merge",
+        ]
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                result_builder.parse_args(base + ["--finish-work-head", HEAD])
 
 
 if __name__ == "__main__":

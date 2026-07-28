@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-07-27T23:58:44Z",
-  "packVersion": "0.55.5",
-  "payloadDigest": "sha256:1bee739b71e74ac6ff67f2a2982196f11c2d07184b83bc6bb4dce0951879fb62",
+  "validatedAt": "2026-07-28T21:43:31Z",
+  "packVersion": "0.56.0",
+  "payloadDigest": "sha256:d274c05a261ec316c08cf483707caa1ebd97d43cfc8cd46b210f49a5f5a2c10d",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "d787ab18645f979e160ee31d03fef1e750e36785",
+      "baseCommit": "519acb0d6e697294128d23c835eef7893d384341",
       "status": "passed",
       "prepares": [
         [
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "d61dbbb7e09e0f78e876533a9892479de8f999a9",
+      "baseCommit": "da9ebaa6ec0a4a94f74d23c2412762dc1ad12d82",
       "status": "passed",
       "prepares": [
         [
@@ -64,7 +64,7 @@
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
-      "baseCommit": "836993f535356da2ec351189474e4d7f9ebb80cb",
+      "baseCommit": "a267bf1be3e34a8c1d9d3e6da12b93f74086ccef",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "b2ee7b38f802c97d4f32c7bb9e2e4faf938272ec",
+      "baseCommit": "5509e0a74dc553b131d7d291871385bec55eac1e",
       "status": "passed",
       "prepares": [
         [
@@ -149,7 +149,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "af2fd24a2cf77626a822f9c494fd8652c787638e",
+      "baseCommit": "70161cf4256a8bb9e2348287f5da4f52e2eafa48",
       "status": "passed",
       "prepares": [
         [

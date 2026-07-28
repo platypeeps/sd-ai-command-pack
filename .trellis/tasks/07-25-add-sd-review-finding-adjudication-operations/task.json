@@ -1,7 +1,7 @@
 {
   "id": "add-sd-review-finding-adjudication-operations",
   "name": "add-sd-review-finding-adjudication-operations",
-  "title": "Add sd-review finding adjudication operations",
+  "title": "PARKED: Add sd-review finding adjudication operations",
   "description": "Add sd-review findings list, adjudicate, and status operations over the trusted finding-adjudication contract.",
   "status": "planning",
   "dev_type": null,

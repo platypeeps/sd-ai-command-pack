@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import io
+import json
 import stat
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stderr, redirect_stdout
 
 try:
     import install_test_support as _support
@@ -172,6 +175,62 @@ class ScriptLibTests(InstallTestCase):
                 repo=repo,
                 environ={lib.CACHE_ROOT_ENV: str(cache_root)},
             )
+
+    def test_tool_environment_namespace_path_embeds_current_uid(self) -> None:
+        lib = self.load_lib()
+        repo, cache_root = self.cache_fixture()
+        _, cache_paths, namespace = lib.build_tool_environment(
+            repo=repo,
+            environ={lib.CACHE_ROOT_ENV: str(cache_root)},
+        )
+        self.assertTrue(namespace.name.startswith("sd-ai-command-pack-"))
+        if hasattr(os, "getuid"):
+            uid = str(os.getuid())
+            self.assertIn(uid, namespace.name)
+            # Every default per-tool cache (Python bytecode, uv, uv tools, ruff,
+            # ...) inherits the uid-scoped namespace, so no class escapes it.
+            for variable, path in cache_paths.items():
+                with self.subTest(variable=variable):
+                    self.assertIn(uid, str(path))
+
+    def test_ensure_private_directory_rejects_foreign_owned_path(self) -> None:
+        lib = self.load_lib()
+        if not hasattr(lib.os, "getuid"):
+            self.skipTest("POSIX ownership semantics unavailable")
+        _repo, cache_root = self.cache_fixture()
+        planted = cache_root / "sd-ai-command-pack-planted"
+        planted.mkdir(parents=True, mode=0o700)
+        self.addCleanup(planted.chmod, 0o700)
+        foreign_uid = lib.os.getuid() + 1
+        with mock.patch.object(lib.os, "getuid", return_value=foreign_uid):
+            with self.assertRaisesRegex(
+                lib.CacheSetupError, "not owned by the current user"
+            ):
+                lib._ensure_private_directory(planted, label="pack cache namespace")
+
+    def test_tool_environment_rejects_foreign_owned_namespace(self) -> None:
+        lib = self.load_lib()
+        if not hasattr(lib.os, "getuid"):
+            self.skipTest("POSIX ownership semantics unavailable")
+        repo, cache_root = self.cache_fixture()
+        cache_root.mkdir(mode=0o700)
+        # A co-tenant pre-creates the victim's deterministic namespace at 0700.
+        fixed_name = "sd-ai-command-pack-planted-namespace"
+        planted = cache_root / fixed_name
+        planted.mkdir(mode=0o700)
+        self.addCleanup(planted.chmod, 0o700)
+        foreign_uid = lib.os.getuid() + 1
+        with (
+            mock.patch.object(lib, "_cache_namespace_name", return_value=fixed_name),
+            mock.patch.object(lib.os, "getuid", return_value=foreign_uid),
+        ):
+            with self.assertRaisesRegex(
+                lib.CacheSetupError, "not owned by the current user"
+            ):
+                lib.build_tool_environment(
+                    repo=repo,
+                    environ={lib.CACHE_ROOT_ENV: str(cache_root)},
+                )
 
     def test_tool_environment_skips_posix_metadata_checks_on_windows(self) -> None:
         lib = self.load_lib()
@@ -548,6 +607,262 @@ class ScriptLibTests(InstallTestCase):
         )
         with mock.patch("subprocess.run", return_value=failed):
             self.assertEqual(lib.repo_root(fallback_to_cwd=True), install.ROOT.resolve())
+
+    # -- environment-blocked recovery evidence ------------------------------
+
+    def test_environment_evidence_builds_every_boundary(self) -> None:
+        lib = self.load_lib()
+        for boundary in lib.ENVIRONMENT_BOUNDARIES:
+            fragment = lib.build_environment_blocked_evidence(
+                boundary=boundary,
+                operation="probe",
+                checkpoint="pre-mutation",
+                mutation_state="none",
+                retryable=True,
+            )
+            self.assertEqual(fragment["reasonCode"], "environment_blocked")
+            self.assertEqual(fragment["schemaVersion"], 1)
+            self.assertEqual(fragment["boundary"], boundary)
+            self.assertIsNone(fragment["recoveryAction"])
+            # A well-formed fragment validates and normalizes to itself.
+            self.assertEqual(lib.validate_environment_blocked_evidence(fragment), fragment)
+
+    def test_environment_evidence_rejects_unknown_boundary_and_state(self) -> None:
+        lib = self.load_lib()
+        with self.assertRaises(lib.EnvironmentEvidenceError):
+            lib.build_environment_blocked_evidence(
+                boundary="network",
+                operation="op",
+                checkpoint="c",
+                mutation_state="none",
+                retryable=False,
+            )
+        with self.assertRaises(lib.EnvironmentEvidenceError):
+            lib.build_environment_blocked_evidence(
+                boundary="git-metadata",
+                operation="op",
+                checkpoint="c",
+                mutation_state="rolled-back",
+                retryable=False,
+            )
+
+    def test_environment_evidence_retry_requires_known_mutation_state(self) -> None:
+        lib = self.load_lib()
+        with self.assertRaises(lib.EnvironmentEvidenceError):
+            lib.build_environment_blocked_evidence(
+                boundary="user-state",
+                operation="persist-lock",
+                checkpoint="lock-held",
+                mutation_state="unknown",
+                retryable=True,
+            )
+        # Not retryable with an unknown mutation state is allowed.
+        fragment = lib.build_environment_blocked_evidence(
+            boundary="user-state",
+            operation="persist-lock",
+            checkpoint="lock-held",
+            mutation_state="unknown",
+            retryable=False,
+        )
+        self.assertFalse(fragment["retryable"])
+        self.assertEqual(fragment["mutationState"], "unknown")
+
+    def test_environment_evidence_redacts_and_bounds_diagnostic(self) -> None:
+        lib = self.load_lib()
+        secret = (
+            "clone failed for https://user:s3cr3t@example.com/repo.git "
+            "with token ghp_ABCDEFGH012345678 and Bearer aa.bb.cc-DDDD "
+            "line1\nline2\ttabbed"
+        )
+        fragment = lib.build_environment_blocked_evidence(
+            boundary="git-metadata",
+            operation="fetch-prune",
+            checkpoint="pre-fetch",
+            mutation_state="none",
+            retryable=True,
+            diagnostic=secret + " " + ("x" * 900),
+        )
+        diagnostic = fragment["diagnostic"]
+        self.assertNotIn("s3cr3t", diagnostic)
+        self.assertNotIn("ghp_ABCDEFGH012345678", diagnostic)
+        self.assertNotIn("Bearer aa.bb.cc-DDDD", diagnostic)
+        self.assertIn("[redacted]@example.com", diagnostic)
+        self.assertNotIn("\n", diagnostic)
+        self.assertNotIn("\t", diagnostic)
+        self.assertLessEqual(len(diagnostic), lib.ENVIRONMENT_DIAGNOSTIC_LIMIT)
+        self.assertTrue(diagnostic.endswith("…"))
+
+    def test_environment_evidence_renders_paths_and_preserves_plain_urls(self) -> None:
+        lib = self.load_lib()
+        fragment = lib.build_environment_blocked_evidence(
+            boundary="tool-cache",
+            operation="cache-setup",
+            checkpoint="cache-setup",
+            mutation_state="none",
+            retryable=True,
+            diagnostic=(
+                "pack cache namespace is not writable: /Users/alex/secret/ns "
+                "after cloning https://example.com/org/repo.git"
+            ),
+        )
+        diagnostic = fragment["diagnostic"]
+        # Arbitrary raw filesystem paths must be rendered, never leaked verbatim.
+        self.assertNotIn("/Users/alex/secret/ns", diagnostic)
+        self.assertIn("[path]", diagnostic)
+        # Plain (credential-free) remote URLs remain permitted diagnostic context.
+        self.assertIn("https://example.com/org/repo.git", diagnostic)
+
+    def test_environment_evidence_recovery_action_argv_is_bounded_data(self) -> None:
+        lib = self.load_lib()
+        fragment = lib.build_environment_blocked_evidence(
+            boundary="tool-cache",
+            operation="cache-setup",
+            checkpoint="cache-missing",
+            mutation_state="none",
+            retryable=True,
+            recovery_action={
+                "kind": "argv",
+                "argv": ["sd-toolchain", "doctor", "--repo", "."] + ["x"] * 40,
+            },
+        )
+        action = fragment["recoveryAction"]
+        self.assertEqual(action["kind"], "argv")
+        self.assertIsInstance(action["argv"], list)
+        # Token count is capped; the value is a token list, never a shell string.
+        self.assertLessEqual(len(action["argv"]), 32)
+        self.assertEqual(action["argv"][0], "sd-toolchain")
+
+    def test_environment_evidence_recovery_action_rejects_malformed(self) -> None:
+        lib = self.load_lib()
+        for bad in (
+            {"kind": "argv", "argv": []},
+            {"kind": "argv", "argv": ["\x00\x1f"]},
+            {"kind": "skill", "instruction": ""},
+            {"kind": "exec", "argv": ["x"]},
+            "rm -rf /",
+        ):
+            with self.assertRaises(lib.EnvironmentEvidenceError):
+                lib.build_environment_blocked_evidence(
+                    boundary="managed-payload",
+                    operation="install",
+                    checkpoint="pre-write",
+                    mutation_state="none",
+                    retryable=False,
+                    recovery_action=bad,
+                )
+
+    def test_environment_evidence_validator_rejects_and_drops_unknown(self) -> None:
+        lib = self.load_lib()
+        with self.assertRaises(lib.EnvironmentEvidenceError):
+            lib.validate_environment_blocked_evidence("not-a-mapping")
+        with self.assertRaises(lib.EnvironmentEvidenceError):
+            lib.validate_environment_blocked_evidence(
+                {"reasonCode": "other", "schemaVersion": 1}
+            )
+        with self.assertRaises(lib.EnvironmentEvidenceError):
+            lib.validate_environment_blocked_evidence(
+                {
+                    "reasonCode": "environment_blocked",
+                    "schemaVersion": 2,
+                    "boundary": "git-metadata",
+                    "mutationState": "none",
+                    "retryable": False,
+                }
+            )
+        # Unknown extra fields are dropped by re-normalization.
+        normalized = lib.validate_environment_blocked_evidence(
+            {
+                "schemaVersion": 1,
+                "reasonCode": "environment_blocked",
+                "boundary": "kb-target",
+                "operation": "kb-refresh",
+                "retryable": False,
+                "checkpoint": "pre-refresh",
+                "mutationState": "partial-recoverable",
+                "recoveryAction": None,
+                "diagnostic": "linked kb target is not writable",
+                "surprise": "ignored",
+            }
+        )
+        self.assertNotIn("surprise", normalized)
+        self.assertEqual(normalized["boundary"], "kb-target")
+
+    # -- tool-cache boundary: cache-setup classifier and CLI ---------------
+
+    def test_cache_setup_blocked_evidence_is_retryable_tool_cache(self) -> None:
+        lib = self.load_lib()
+        evidence = lib.cache_setup_blocked_evidence(
+            lib.CacheSetupError(
+                "cache setup failed for external tools: "
+                "https://user:s3cr3t@example.com denied"
+            ),
+            operation="record session",
+        )
+        self.assertEqual(evidence["boundary"], "tool-cache")
+        self.assertEqual(evidence["mutationState"], "none")
+        self.assertTrue(evidence["retryable"])
+        self.assertEqual(evidence["recoveryAction"]["kind"], "skill")
+        self.assertIn(lib.CACHE_ROOT_ENV, evidence["recoveryAction"]["instruction"])
+        self.assertNotIn("s3cr3t", evidence["diagnostic"])
+        # A consumer can validate exactly what the owner emitted.
+        self.assertEqual(lib.validate_environment_blocked_evidence(evidence), evidence)
+
+    def test_cache_env_main_json_success_emits_cache_env(self) -> None:
+        lib = self.load_lib()
+        fake_env = {variable: f"/cache/{variable}" for variable in lib.CACHE_ENV_KEYS}
+        stream = io.StringIO()
+        with mock.patch.object(
+            lib, "build_tool_environment", return_value=(fake_env, {}, Path("/ns"))
+        ), redirect_stdout(stream):
+            code = lib._cache_env_main(["cache-env", "--repo", "/repo", "--json"])
+        self.assertEqual(code, 0)
+        payload = json.loads(stream.getvalue())
+        self.assertEqual(payload["outcome"], "ok")
+        self.assertEqual(set(payload["cacheEnv"]), set(lib.CACHE_ENV_KEYS))
+        self.assertNotIn("environmentBlocked", payload)
+
+    def test_cache_env_main_json_failure_emits_validated_fragment(self) -> None:
+        lib = self.load_lib()
+        stream = io.StringIO()
+        with mock.patch.object(
+            lib,
+            "build_tool_environment",
+            side_effect=lib.CacheSetupError(
+                "cache setup failed for external tools: boom"
+            ),
+        ), redirect_stdout(stream):
+            code = lib._cache_env_main(["cache-env", "--repo", "/repo", "--json"])
+        self.assertEqual(code, 2)
+        payload = json.loads(stream.getvalue())
+        self.assertEqual(payload["outcome"], "blocked")
+        fragment = payload["environmentBlocked"]
+        self.assertEqual(fragment["boundary"], "tool-cache")
+        self.assertTrue(fragment["retryable"])
+        # The emitted fragment survives consumer validation unchanged.
+        self.assertEqual(lib.validate_environment_blocked_evidence(fragment), fragment)
+
+    def test_cache_env_main_plaintext_paths_are_unchanged(self) -> None:
+        lib = self.load_lib()
+        fake_env = {variable: f"/cache/{variable}" for variable in lib.CACHE_ENV_KEYS}
+        out = io.StringIO()
+        with mock.patch.object(
+            lib, "build_tool_environment", return_value=(fake_env, {}, Path("/ns"))
+        ), redirect_stdout(out):
+            code = lib._cache_env_main(["cache-env", "--repo", "/repo"])
+        self.assertEqual(code, 0)
+        lines = out.getvalue().splitlines()
+        self.assertEqual(
+            lines,
+            [f"{variable}=/cache/{variable}" for variable in lib.CACHE_ENV_KEYS],
+        )
+        # Failure still goes to stderr as a bounded plaintext error, not JSON.
+        err = io.StringIO()
+        with mock.patch.object(
+            lib, "build_tool_environment", side_effect=lib.CacheSetupError("boom")
+        ), redirect_stderr(err):
+            fail_code = lib._cache_env_main(["cache-env", "--repo", "/repo"])
+        self.assertEqual(fail_code, 2)
+        self.assertTrue(err.getvalue().startswith("error:"))
 
 
 if __name__ == "__main__":

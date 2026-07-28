@@ -133,6 +133,129 @@ class HousekeepingTests(InstallTestCase):
         self.assertEqual(result.returncode, 2, result.stdout)
         self.assertIn("requires a path", result.stdout)
 
+    def _run_receipt_validator(self, receipt_path: str):
+        """Exercise only the extracted validate_finish_work_receipt function.
+
+        Hermetic: no git, gh, network, or KB access — the awk range pulls just
+        the function body, so acceptance never proceeds into side-effecting
+        housekeeping stages.
+        """
+        script = str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh")
+        probe = (
+            f'eval "$(awk \'/^validate_finish_work_receipt\\(\\)/,/^}}/\' {script})";'
+            'validate_finish_work_receipt "$RECEIPT"'
+        )
+        return subprocess.run(
+            [self._bash_path, "-c", probe],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env={**os.environ, "RECEIPT": receipt_path},
+            check=False,
+        )
+
+    def test_finish_work_receipt_accepts_readable_regular_file(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            receipt = Path(temp_dir) / "receipt.json"
+            receipt.write_text("{}\n", encoding="utf-8")
+            result = self._run_receipt_validator(str(receipt))
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(result.stdout, "")
+
+    def test_finish_work_receipt_rejects_missing_path(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            missing = Path(temp_dir) / "absent.json"
+            result = self._run_receipt_validator(str(missing))
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("path does not exist", result.stdout)
+            # Stable diagnostic: the host path is never echoed back.
+            self.assertNotIn(str(missing), result.stdout)
+
+    def test_finish_work_receipt_rejects_directory(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_receipt_validator(temp_dir)
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("not a directory", result.stdout)
+            self.assertNotIn(temp_dir, result.stdout)
+
+    def test_finish_work_receipt_rejects_symlink(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "real.json"
+            target.write_text("{}\n", encoding="utf-8")
+            link = Path(temp_dir) / "link.json"
+            link.symlink_to(target)
+            result = self._run_receipt_validator(str(link))
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("not a symlink", result.stdout)
+
+    def test_finish_work_receipt_rejects_broken_symlink_before_existence(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            link = Path(temp_dir) / "dangling.json"
+            link.symlink_to(Path(temp_dir) / "nowhere.json")
+            result = self._run_receipt_validator(str(link))
+            # Symlink rejection precedes the existence check.
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("not a symlink", result.stdout)
+
+    def test_finish_work_receipt_rejects_non_regular_file(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("mkfifo is not available on this platform")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fifo = Path(temp_dir) / "pipe.json"
+            os.mkfifo(fifo)
+            result = self._run_receipt_validator(str(fifo))
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("must be a regular file", result.stdout)
+
+    def test_finish_work_receipt_rejects_unreadable_file(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("root bypasses filesystem read permissions")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            receipt = Path(temp_dir) / "secret.json"
+            receipt.write_text("{}\n", encoding="utf-8")
+            os.chmod(receipt, 0)
+            try:
+                result = self._run_receipt_validator(str(receipt))
+            finally:
+                os.chmod(receipt, 0o600)
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("is not readable", result.stdout)
+
+    def test_finish_work_receipt_rejected_in_main_before_side_effects(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = subprocess.run(
+                [
+                    self._bash_path,
+                    str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                    "--finish-work-receipt",
+                    temp_dir,
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("not a directory", result.stdout)
+            # Fail-fast: never reaches the branch/KB/network phase.
+            self.assertNotIn("start branch", result.stdout)
+
     def test_housekeeping_default_branch_ignores_gh_null(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
@@ -159,6 +282,95 @@ class HousekeepingTests(InstallTestCase):
         )
         self.assertIn("branch=main", result.stdout)
         self.assertNotIn("branch=null", result.stdout)
+
+    def _run_reconcile_recovery(
+        self,
+        *,
+        summary_line: str,
+        toolchain_exit: int = 0,
+        make_helpers: bool = True,
+        dry_run: int = 0,
+    ) -> subprocess.CompletedProcess:
+        """Drive ``reconcile_recovery_artifacts`` in isolation with a stub toolchain.
+
+        The stub prints ``summary_line`` verbatim (the ``\\x1f``-delimited receipt
+        the recovery helper's ``--format shell`` emits) and exits
+        ``toolchain_exit``, so the probe exercises only the shell adapter's
+        parse-and-classify branches, not the recovery helper or real git.
+        """
+        script = str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")
+        with tempfile.TemporaryDirectory() as script_dir:
+            if make_helpers:
+                (Path(script_dir) / "sd-ai-command-pack-recovery-artifacts.py").write_text(
+                    "# stub helper; the toolchain stub ignores it\n", encoding="utf-8"
+                )
+                (Path(script_dir) / "sd-ai-command-pack-toolchain.sh").write_text(
+                    '#!/usr/bin/env bash\nprintf \'%s\\n\' "$SUMMARY_LINE"\nexit "${TOOLCHAIN_EXIT:-0}"\n',
+                    encoding="utf-8",
+                )
+            probe = (
+                "set -uo pipefail;"
+                f"SCRIPT_DIR={script_dir!r};"
+                f"DRY_RUN={dry_run};"
+                "FIELD_SEPARATOR=$'\\x1f';"
+                "ACTIONS=(); ACTION_CODES=(); ANOMALIES=(); ANOMALY_CODES=();"
+                'add_action() { ACTION_CODES+=("$1"); shift; ACTIONS+=("$*"); };'
+                'add_anomaly() { ANOMALY_CODES+=("$1"); shift; ANOMALIES+=("$*"); };'
+                f"eval \"$(awk '/^reconcile_recovery_artifacts\\(\\)/,/^}}/' {script})\";"
+                "reconcile_recovery_artifacts;"
+                'printf "ACTION_CODES=%s\\n" "${ACTION_CODES[*]-}";'
+                'printf "ANOMALY_CODES=%s\\n" "${ANOMALY_CODES[*]-}";'
+                'printf "ANOMALIES=%s\\n" "${ANOMALIES[*]-}"'
+            )
+            env = dict(
+                os.environ,
+                SUMMARY_LINE=summary_line,
+                TOOLCHAIN_EXIT=str(toolchain_exit),
+            )
+            return subprocess.run(
+                [self._bash_path, "-c", probe],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+                env=env,
+            )
+
+    def test_reconcile_recovery_artifacts_maps_summary_to_actions(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        us = "\x1f"
+
+        # Proven-safe retire with no failures: one retired action, no anomaly.
+        result = self._run_reconcile_recovery(summary_line=f"1{us}0{us}0{us}")
+        self.assertIn("ACTION_CODES=recovery_artifacts_retired", result.stdout)
+        self.assertNotIn("recovery_cleanup", result.stdout)
+        self.assertNotIn("recovery_helper_missing", result.stdout)
+
+        # Dry-run intent is previewed, never claimed as done.
+        result = self._run_reconcile_recovery(summary_line=f"2{us}1{us}0{us}", dry_run=1)
+        self.assertIn("ACTION_CODES=recovery_artifacts_retire_previewed", result.stdout)
+
+        # A failed retire surfaces one bounded-detail anomaly; a conservatively
+        # preserved artifact never becomes an anomaly and nothing is retired.
+        result = self._run_reconcile_recovery(summary_line=f"0{us}1{us}1{us}worktree locked")
+        self.assertIn("recovery_cleanup_incomplete", result.stdout)
+        self.assertIn("worktree locked", result.stdout)
+        self.assertNotIn("recovery_artifacts_retired", result.stdout)
+
+        # Missing helper, malformed receipt, and a non-zero toolchain exit each
+        # fail closed with exactly one distinct anomaly and retire nothing.
+        result = self._run_reconcile_recovery(summary_line="", make_helpers=False)
+        self.assertIn("recovery_helper_missing", result.stdout)
+        self.assertNotIn("recovery_artifacts_retired", result.stdout)
+
+        result = self._run_reconcile_recovery(summary_line="garbage-no-separator")
+        self.assertIn("recovery_cleanup_incomplete", result.stdout)
+        self.assertNotIn("recovery_artifacts_retired", result.stdout)
+
+        result = self._run_reconcile_recovery(summary_line="", toolchain_exit=3)
+        self.assertIn("recovery_cleanup_failed", result.stdout)
+        self.assertNotIn("recovery_artifacts_retired", result.stdout)
 
     def test_review_pr_skill_auto_dispatches_housekeeping_after_merge(self) -> None:
         skill = (
@@ -284,9 +496,9 @@ class HousekeepingTests(InstallTestCase):
 
         refresh_index = script.index("if ! refresh_obsidian_kb; then")
         fetch_index = script.index("fetch_and_prune", refresh_index)
-        merge_index = script.index("maybe_merge_ready_open_pr", refresh_index)
+        route_index = script.index("route_branch_pr_lifecycle", refresh_index)
         self.assertLess(refresh_index, fetch_index)
-        self.assertLess(refresh_index, merge_index)
+        self.assertLess(refresh_index, route_index)
 
     def test_housekeeping_kb_refresh_contract_covers_creation_success_and_failure(
         self,
@@ -617,6 +829,71 @@ class HousekeepingTests(InstallTestCase):
         self.assertIn("pull_request_merged", action_codes)
         self.assertIn("remote_branch_deleted", action_codes)
         self.assertTrue(marker.exists())
+
+    def test_housekeeping_merges_planning_finalization_and_preserves_tasks(
+        self,
+    ) -> None:
+        (
+            repo,
+            remote,
+            stub_bin,
+            base_oid,
+            head_oid,
+        ) = self.make_planning_housekeeping_repo()
+        marker = repo.parent / "merged-pr"
+        self.write_auto_merge_gh_stub(stub_bin, marker)
+        receipt = self.write_planning_finish_work_receipt(repo, base_oid, head_oid)
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(install.ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--finish-work-receipt",
+                str(receipt),
+                "--json",
+            ],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["outcome"]["status"], "clean")
+        self.assertEqual(payload["eligibility"]["status"], "eligible")
+        self.assertEqual(payload["eligibility"]["head"]["startOid"], head_oid)
+        finish_work = payload["identity"]["finishWork"]
+        self.assertEqual(finish_work["headOid"], head_oid)
+        self.assertTrue(finish_work["verified"])
+        self.assertEqual(finish_work["mode"], "planning")
+        # A planning receipt never carries completion evidence.
+        self.assertIsNone(finish_work["completionSubtype"])
+        action_codes = {item["code"] for item in payload["actions"]}
+        self.assertIn("pull_request_merged", action_codes)
+        self.assertTrue(marker.exists())
+
+        # On synchronized main, every planning task is preserved in planning and
+        # nothing was archived by the merge.
+        self.assertEqual(self.git_output(repo, "branch", "--show-current"), "main")
+        for name in (
+            "07-25-planning-preserved",
+            "07-25-planning-alpha",
+            "07-25-planning-beta",
+        ):
+            record = json.loads(
+                (repo / ".trellis/tasks" / name / "task.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(record["status"], "planning", name)
+        self.assertFalse((repo / ".trellis/tasks/archive").exists())
 
     def test_housekeeping_requires_finish_work_receipt_before_auto_merge(self) -> None:
         repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
@@ -1001,7 +1278,7 @@ class HousekeepingTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
-            "PR #6 for feature/cleanup is OPEN, not MERGED; left the branch untouched",
+            "PR #6 for feature/cleanup is open and was not merged; left the branch untouched",
             result.stdout,
         )
         self.assertNotIn("merged PR #6 with merge strategy", result.stdout)
@@ -1010,6 +1287,116 @@ class HousekeepingTests(InstallTestCase):
             self.git_output(repo, "branch", "--show-current"),
             "feature/cleanup",
         )
+
+    def test_housekeeping_closed_pr_reports_not_merged_without_cleanup(
+        self,
+    ) -> None:
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        self.write_pr_lifecycle_gh_stub(stub_bin, head_oid, "CLOSED")
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+            ],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "PR #6 for feature/cleanup is CLOSED, not MERGED; left the branch untouched",
+            result.stdout,
+        )
+        # A closed PR is never merged or eligibility-evaluated, and nothing is
+        # deleted or switched.
+        self.assertNotIn("PR #6 is open, green, comment-clean", result.stdout)
+        self.assertNotIn("confirmed PR #6 merged", result.stdout)
+        self.assertNotIn("deleted local branch feature/cleanup", result.stdout)
+        self.assertEqual(
+            self.git_output(repo, "branch", "--show-current"),
+            "feature/cleanup",
+        )
+
+    def test_housekeeping_unresolvable_pr_leaves_branch_untouched(
+        self,
+    ) -> None:
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        # No PR resolves from gh pr view or the merged pr list fallback.
+        self.write_pr_lifecycle_gh_stub(stub_bin, head_oid, "")
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+            ],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "unable to resolve GitHub PR metadata for feature/cleanup",
+            result.stdout,
+        )
+        self.assertNotIn("confirmed PR #6 merged", result.stdout)
+        self.assertNotIn("deleted local branch feature/cleanup", result.stdout)
+        self.assertEqual(
+            self.git_output(repo, "branch", "--show-current"),
+            "feature/cleanup",
+        )
+
+    def test_housekeeping_json_marks_unknown_pr_state_indeterminate(self) -> None:
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        # An unexpected lifecycle state must fail closed, not be treated as
+        # merged or blocked.
+        self.write_pr_lifecycle_gh_stub(stub_bin, head_oid, "QUEUED")
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(install.ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--json",
+            ],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["outcome"]["status"], "indeterminate")
+        self.assertIn(
+            "pull_request_state_indeterminate", payload["outcome"]["reasonCodes"]
+        )
+        self.assertIsNone(payload["eligibility"])
+        anomaly_codes = {item["code"] for item in payload["anomalies"]}
+        self.assertIn("pull_request_state_indeterminate", anomaly_codes)
+        action_codes = {item["code"] for item in payload["actions"]}
+        self.assertNotIn("pull_request_merge_confirmed", action_codes)
 
     def test_housekeeping_counts_unresolved_review_threads_across_pages(
         self,
@@ -1088,7 +1475,7 @@ class HousekeepingTests(InstallTestCase):
             result.stdout,
         )
         self.assertIn(
-            "PR #6 for feature/cleanup is OPEN, not MERGED",
+            "PR #6 for feature/cleanup is open and was not merged",
             result.stdout,
         )
         self.assertNotIn("merged PR #6 with merge strategy", result.stdout)

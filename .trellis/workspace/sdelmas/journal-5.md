@@ -1852,3 +1852,47 @@ Replayed the reviewed bookkeeping-only CI fast lane onto current main with linea
 ### Next Steps
 
 - Publish and review the linear replacement PR; close PR #270 only after the replacement is green, review-clean, and backed by a valid exact-head completion receipt.
+
+
+## Session 248: Finalize single-merge stabilization campaign for v0.56.0
+
+**Date**: 2026-07-28
+**Task**: Finalize single-merge stabilization campaign for v0.56.0
+**Branch**: `codex/stabilize-self-hosted-delivery-lifecycle`
+
+### Summary
+
+Closed the approved single-merge stabilization effort. Resolved every work-package acceptance criterion honestly (relocating genuine after-merge obligations to Post-Archive Handoff prose), passed the canonical multi-task pre-archive gate (schema v1, pre_archive_valid) across the umbrella and all eleven work packages, then archived them children-first so each task's original program-parent linkage is preserved. R9 tasks (07-28-analyze, 07-28-roll-out, 07-22-streamline, 07-22-validate) stay active. Release metadata and the v0.56.0 candidate ledger are current; next steps are the exact-head completion receipt, push, CI, and one housekeeping merge.
+
+### Main Changes
+
+- Hardened the planning-finalization bundle with file-mode (executable/symlink/submodule) and active-task-closure gates (bundle_unsupported_file_mode, planning_active_task_outside_closure) in review-preflight.mjs and its template mirror
+- Added AC2/AC3 validator tests and a planning-mode housekeeping end-to-end test modeled on the PR #244 dogfood scenario
+- Restamped the v0.56.0 release-candidate ledger; fleet candidate validation passes 8/8 consumers
+- Resolved all task acceptance boxes; converted true post-merge obligations to Post-Archive Handoff prose (umbrella AC6/7/10, planning-only AC9/10, user-scope fleet rollout)
+- Archived the stabilization umbrella plus eleven work packages children-first with a single combined archive commit (22a1156e); parent linkage and R9 active tasks preserved
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b098b629` | feat: harden planning-finalization bundle with file-mode and closure gates |
+| `fe69f4dc` | chore: restamp candidate ledger after planning-finalization hardening |
+| `536e8cca` | chore: resolve acceptance criteria for the stabilization archive set |
+| `22a1156e` | chore: archive stabilization umbrella and 11 work-package tasks |
+
+### Testing
+
+- [OK] make check EXIT:0 (test lint audit full-check)
+- [OK] pre-archive gate: status valid, pre_archive_valid, all 12 task directories, 0 findings
+- [OK] fleet candidate validation: 8/8 consumers pass on v0.56.0
+- [OK] focused finalization battery: 212 tests pass on branch head
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -33,6 +33,18 @@ const MAX_BOOKKEEPING_GIT_PATHSPEC_BYTES = 8 * 1024;
 const MAX_BOOKKEEPING_SUCCESSOR_COMMITS = 50;
 const MAX_BOOKKEEPING_ANCHOR_SEARCH_COMMITS = 100;
 const BOOKKEEPING_SCHEMA_VERSION = 1;
+// Canonical lifecycle headings defined by the completion-versus-housekeeping
+// contract (07-28-clarify-completion-housekeeping-obligations). Matched after
+// case-folding and whitespace collapse; both are level-agnostic ATX headings.
+const CANONICAL_ACCEPTANCE_HEADING = 'acceptance criteria';
+const CANONICAL_POST_ARCHIVE_HEADING = 'post-archive handoff';
+const MAX_BOOKKEEPING_ACCEPTANCE_ITEMS = 500;
+const MAX_BOOKKEEPING_ACCEPTANCE_FINDINGS = 10;
+const ATX_HEADING_RE = /^(#{1,6})[ \t]+(.*\S)[ \t]*$/;
+const ACCEPTANCE_LIST_ITEM_RE = /^[ \t]*[-*][ \t]+(.*)$/;
+const ACCEPTANCE_CHECKBOX_RE = /^\[([ xX])\](.*)$/;
+const POST_ARCHIVE_CHECKBOX_RE = /^[ \t]*[-*][ \t]+\[[ xX]\]/;
+const CODE_FENCE_RE = /^[ \t]{0,3}(`{3,}|~{3,})/;
 const TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review', 'completed']);
 const ACTIVE_TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review']);
 const TRELLIS_TASK_PRIORITIES = new Set(['P0', 'P1', 'P2', 'P3']);
@@ -696,6 +708,9 @@ function validateBookkeepingTaskDirectory(taskDir, options) {
       add('task_prd_empty', prdFile, 'task PRD must contain substantive content');
     }
     validateBookkeepingTextWhitespace(prdFile, prdLoaded.text, add);
+    if (completionReady && prdLoaded.text.trim().length > 0) {
+      validateBookkeepingAcceptanceReadiness(prdFile, prdLoaded.text, add);
+    }
   }
   validateBookkeepingTextWhitespace(taskFile, taskLoaded.text, add);
   validateBookkeepingTaskContexts(taskDir, record, add);
@@ -794,6 +809,176 @@ function validateBookkeepingTextWhitespace(file, text, add) {
   });
 }
 
+function stripBookkeepingLineEnding(line) {
+  return line.endsWith('\r') ? line.slice(0, -1) : line;
+}
+
+function normalizeBookkeepingHeadingText(text) {
+  return text.trim().toLowerCase().replace(/[ \t]+/g, ' ');
+}
+
+// Mark every line that lives inside a fenced code block so Markdown examples of
+// acceptance checkboxes or lifecycle headings (common in tooling PRDs) are not
+// mistaken for the task's own criteria. Fences open and close on ``` or ~~~ of
+// matching kind and at least the opening length.
+function computeBookkeepingCodeFenceMask(lines) {
+  const mask = new Array(lines.length).fill(false);
+  let fence = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = stripBookkeepingLineEnding(lines[index]);
+    const fenceMatch = CODE_FENCE_RE.exec(line);
+    if (fence) {
+      mask[index] = true;
+      if (fenceMatch && fenceMatch[1][0] === fence[0] && fenceMatch[1].length >= fence.length) {
+        fence = null;
+      }
+      continue;
+    }
+    if (fenceMatch) {
+      fence = fenceMatch[1];
+      mask[index] = true;
+    }
+  }
+  return mask;
+}
+
+// Locate the canonical lifecycle sections in a bounded PRD. Each span covers the
+// body lines (start inclusive, end exclusive) between a canonical heading and
+// the next heading of equal-or-higher rank. Deterministic and read-only.
+function collectBookkeepingLifecycleSections(lines, codeMask) {
+  const headings = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (codeMask[index]) continue;
+    const match = ATX_HEADING_RE.exec(stripBookkeepingLineEnding(lines[index]));
+    if (match) {
+      headings.push({
+        index,
+        level: match[1].length,
+        text: normalizeBookkeepingHeadingText(match[2]),
+      });
+    }
+  }
+  const spans = { acceptance: [], postArchive: [] };
+  headings.forEach((heading, position) => {
+    let key = null;
+    if (heading.text === CANONICAL_ACCEPTANCE_HEADING) key = 'acceptance';
+    else if (heading.text === CANONICAL_POST_ARCHIVE_HEADING) key = 'postArchive';
+    if (!key) return;
+    let end = lines.length;
+    for (let next = position + 1; next < headings.length; next += 1) {
+      if (headings[next].level <= heading.level) {
+        end = headings[next].index;
+        break;
+      }
+    }
+    spans[key].push({ start: heading.index + 1, end });
+  });
+  return spans;
+}
+
+// Grade the checkbox list items inside the acceptance-criteria body. Prose
+// bullets, continuation lines, and fenced code are ignored; only checkbox-form
+// items are graded. Bounded so a pathological PRD cannot exhaust memory.
+function scanBookkeepingAcceptanceItems(lines, span, codeMask) {
+  const unchecked = [];
+  const malformed = [];
+  let scanned = 0;
+  for (let index = span.start; index < span.end; index += 1) {
+    if (scanned >= MAX_BOOKKEEPING_ACCEPTANCE_ITEMS) break;
+    if (codeMask[index]) continue;
+    const item = ACCEPTANCE_LIST_ITEM_RE.exec(stripBookkeepingLineEnding(lines[index]));
+    if (!item || item[1].charAt(0) !== '[') continue;
+    scanned += 1;
+    const checkbox = ACCEPTANCE_CHECKBOX_RE.exec(item[1]);
+    if (!checkbox) {
+      malformed.push({ line: index + 1, reason: 'uses invalid acceptance checkbox syntax' });
+      continue;
+    }
+    const marker = checkbox[1];
+    const rest = checkbox[2];
+    if (rest.length > 0 && !/^[ \t]/.test(rest)) {
+      malformed.push({ line: index + 1, reason: 'is missing the space after its checkbox' });
+      continue;
+    }
+    if (marker !== ' ') continue;
+    if (rest.trim().length === 0) {
+      malformed.push({ line: index + 1, reason: 'is an unchecked criterion with no description' });
+    } else {
+      unchecked.push(index + 1);
+    }
+  }
+  return { unchecked, malformed };
+}
+
+// Enforce the completion-versus-housekeeping lifecycle contract at the
+// pre-archive boundary: every required acceptance criterion must be checked
+// before Trellis archives the task, and post-archive obligations must be prose
+// so they are never mistaken for incomplete criteria. Absence of the canonical
+// section is intentionally permissive; lightweight and pre-contract PRDs still
+// pass. Read-only: it never rewrites the PRD or checks a box.
+function validateBookkeepingAcceptanceReadiness(prdFile, text, add) {
+  const lines = text.split('\n');
+  const codeMask = computeBookkeepingCodeFenceMask(lines);
+  const spans = collectBookkeepingLifecycleSections(lines, codeMask);
+
+  if (spans.acceptance.length > 1) {
+    add(
+      'pre_archive_acceptance_malformed',
+      prdFile,
+      `PRD declares ${spans.acceptance.length} "Acceptance Criteria" sections; the completion contract allows exactly one`,
+    );
+  }
+  if (spans.postArchive.length > 1) {
+    add(
+      'pre_archive_acceptance_malformed',
+      prdFile,
+      `PRD declares ${spans.postArchive.length} "Post-archive handoff" sections; the completion contract allows exactly one`,
+    );
+  }
+
+  if (spans.acceptance.length === 1) {
+    const { unchecked, malformed } = scanBookkeepingAcceptanceItems(
+      lines,
+      spans.acceptance[0],
+      codeMask,
+    );
+    for (const offender of malformed.slice(0, MAX_BOOKKEEPING_ACCEPTANCE_FINDINGS)) {
+      add(
+        'pre_archive_acceptance_malformed',
+        prdFile,
+        `acceptance criteria line ${offender.line} ${offender.reason}`,
+      );
+    }
+    if (unchecked.length > 0) {
+      const preview = unchecked.slice(0, MAX_BOOKKEEPING_ACCEPTANCE_FINDINGS).join(', ');
+      add(
+        'pre_archive_acceptance_incomplete',
+        prdFile,
+        `acceptance criteria retain ${unchecked.length} unchecked required item(s) at line(s) ${preview}; every criterion must be satisfied and checked before archive`,
+      );
+    }
+  }
+
+  for (const span of spans.postArchive) {
+    let flagged = 0;
+    for (
+      let index = span.start;
+      index < span.end && flagged < MAX_BOOKKEEPING_ACCEPTANCE_FINDINGS;
+      index += 1
+    ) {
+      if (codeMask[index]) continue;
+      if (POST_ARCHIVE_CHECKBOX_RE.test(stripBookkeepingLineEnding(lines[index]))) {
+        flagged += 1;
+        add(
+          'pre_archive_acceptance_malformed',
+          prdFile,
+          `post-archive handoff line ${index + 1} uses an acceptance checkbox; downstream obligations must be prose bullets, not criteria`,
+        );
+      }
+    }
+  }
+}
+
 function validateBookkeepingFinalBundle(options, evidence, add, runtime = {}) {
   const baseOid = resolveBookkeepingCommit(options.base, 'base', add);
   const headOid = resolveBookkeepingCommit(options.head, 'head', add);
@@ -845,6 +1030,16 @@ function validateBookkeepingFinalBundle(options, evidence, add, runtime = {}) {
   );
   for (const path of unsupported) {
     add('bundle_scope_invalid', path, 'finalization delta contains a non-bookkeeping path');
+  }
+  for (const entry of entries) {
+    if (entry.status.startsWith('D')) continue;
+    if (entry.mode !== '100644') {
+      add(
+        'bundle_unsupported_file_mode',
+        entry.path,
+        `finalization delta introduces unsupported file mode ${entry.mode}; only regular non-executable files are allowed`,
+      );
+    }
   }
   validateBookkeepingDiffWhitespace(baseOid, headOid, add);
   const journalSummary = validateBookkeepingJournalBundle(entries, baseOid, headOid, add);
@@ -1178,7 +1373,7 @@ function resolveBookkeepingCommit(ref, label, add) {
 }
 
 function bookkeepingChangedEntries(baseOid, headOid, add) {
-  const result = runGit(['diff', '--name-status', '-z', '--find-renames', baseOid, headOid, '--']);
+  const result = runGit(['diff', '--raw', '-z', '--find-renames', baseOid, headOid, '--']);
   if (result.status !== 0) {
     add('bundle_diff_unavailable', '', 'Git could not enumerate the finalization delta', 'indeterminate');
     return null;
@@ -1186,7 +1381,18 @@ function bookkeepingChangedEntries(baseOid, headOid, add) {
   const tokens = result.stdout.split('\0');
   const entries = [];
   for (let index = 0; index < tokens.length && tokens[index];) {
-    const status = tokens[index++];
+    // Raw metadata token for a two-endpoint diff:
+    // ":<srcmode> <dstmode> <srcsha> <dstsha> <status>". Capturing the
+    // destination mode lets the bundle validators reject executable, symlink,
+    // and gitlink/submodule entries that name-status alone cannot distinguish.
+    const meta = /^:(\d{6}) (\d{6}) [0-9a-f]+ [0-9a-f]+ ([A-Z]\d*)$/.exec(tokens[index++]);
+    if (!meta) {
+      add('bundle_diff_malformed', '', 'Git returned a malformed raw diff record', 'indeterminate');
+      return null;
+    }
+    const srcMode = meta[1];
+    const mode = meta[2];
+    const status = meta[3];
     if (/^[RC]\d+$/.test(status)) {
       const oldPath = tokens[index++];
       const path = tokens[index++];
@@ -1194,14 +1400,14 @@ function bookkeepingChangedEntries(baseOid, headOid, add) {
         add('bundle_diff_malformed', '', 'Git returned a malformed rename/copy record', 'indeterminate');
         return null;
       }
-      entries.push({ status, oldPath, path });
+      entries.push({ status, oldPath, path, srcMode, mode });
     } else {
       const path = tokens[index++];
       if (!/^[AMDUT]$/.test(status) || !path) {
         add('bundle_diff_malformed', '', 'Git returned an unsupported or malformed path record', 'indeterminate');
         return null;
       }
-      entries.push({ status, oldPath: '', path });
+      entries.push({ status, oldPath: '', path, srcMode, mode });
     }
   }
   return entries;
@@ -1319,11 +1525,16 @@ function validatePlanningBundle(entries, evidence, baseOid, add, options = {}) {
     add('planning_task_change_missing', '', 'planning bundle must include at least one active task artifact change');
   }
   evidence.taskDirectories = [...taskDirs].sort();
+  const changedNames = new Set(
+    evidence.taskDirectories.map((taskDir) => taskDir.slice(taskDir.lastIndexOf('/') + 1)),
+  );
+  const changedRecords = [];
   for (const taskDir of evidence.taskDirectories) {
     const current = options.lifecycleOnly
       ? loadRecoveredPlanningTaskRecord(taskDir, add, options.currentRef)
       : validateBookkeepingTaskDirectory(taskDir, { add, archived: false });
     if (!current) continue;
+    changedRecords.push(current);
     if (current.status !== 'planning' || current.completedAt !== null || current.branch !== null) {
       add('planning_lifecycle_mutation', `${taskDir}/task.json`, 'planning task must keep status planning, completedAt null, and branch null');
     }
@@ -1340,7 +1551,47 @@ function validatePlanningBundle(entries, evidence, baseOid, add, options = {}) {
       add('planning_baseline_invalid', `${taskDir}/task.json`, 'existing task was not a valid planning task at the bundle base');
     }
   }
+  validatePlanningClosureActiveTasks(changedRecords, changedNames, add);
   return evidence.taskDirectories;
+}
+
+// A valid planning finalization preserves only planning tasks. When a changed
+// planning task links (parent/child) to a task outside the changed set that is
+// itself an active in_progress/review task, the finalization would step over
+// in-flight implementation work, so it blocks with a stable reason.
+function validatePlanningClosureActiveTasks(changedRecords, changedNames, add) {
+  const inspected = new Set();
+  for (const record of changedRecords) {
+    if (!isPlainObject(record)) continue;
+    const neighbors = [];
+    if (isTrellisTaskDirectoryName(record.parent)) neighbors.push(record.parent);
+    if (Array.isArray(record.children)) {
+      for (const child of record.children) {
+        if (isTrellisTaskDirectoryName(child)) neighbors.push(child);
+      }
+    }
+    for (const name of neighbors) {
+      if (changedNames.has(name) || inspected.has(name)) continue;
+      inspected.add(name);
+      const located = locateTrellisTaskRecord(name);
+      if (located.error || located.paths.length !== 1) continue;
+      const loaded = loadTrellisTaskMetadataFile(located.paths[0]);
+      if (loaded.status !== 'loaded') continue;
+      let neighbor;
+      try {
+        neighbor = JSON.parse(loaded.text);
+      } catch {
+        continue;
+      }
+      if (isPlainObject(neighbor) && (neighbor.status === 'in_progress' || neighbor.status === 'review')) {
+        add(
+          'planning_active_task_outside_closure',
+          located.paths[0],
+          `linked task ${name} is ${neighbor.status}; planning finalization must not leave an active task outside the changed planning closure`,
+        );
+      }
+    }
+  }
 }
 
 function loadRecoveredPlanningTaskRecord(taskDir, add, ref) {
@@ -1670,7 +1921,7 @@ function bookkeepingRegularPathsAtCommit(commitOid, paths) {
       const separator = record.indexOf('\t');
       if (separator <= 0) continue;
       const metadata = record.slice(0, separator);
-      if (/^100(?:644|755) blob [0-9a-f]{40,64}$/.test(metadata)) {
+      if (/^100644 blob [0-9a-f]{40,64}$/.test(metadata)) {
         regularPaths.add(record.slice(separator + 1));
       }
     }
