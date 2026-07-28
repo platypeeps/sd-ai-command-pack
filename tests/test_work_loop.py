@@ -643,6 +643,94 @@ class WorkLoopTests(InstallTestCase):
         )
         self.assertEqual(list(target.parent.glob("*.tmp")), [])
 
+    def test_ensure_private_directory_classifies_mkdir_block_as_user_state(
+        self,
+    ) -> None:
+        module = self.load_module()
+        target = self.make_repo().parent / "state"
+
+        with mock.patch.object(
+            module.Path, "mkdir", side_effect=OSError("read-only file system")
+        ):
+            with self.assertRaises(module.StatePersistenceError) as caught:
+                module.ensure_private_directory(target)
+
+        error = caught.exception
+        # It subclasses OSError, so the atomic-write contract and every existing
+        # OSError handler keep matching it, and it preserves the original text.
+        self.assertIsInstance(error, OSError)
+        self.assertIn("read-only file system", str(error))
+        evidence = error.evidence
+        self.assertEqual(evidence["boundary"], "user-state")
+        self.assertEqual(evidence["checkpoint"], "state-directory")
+        self.assertEqual(evidence["mutationState"], "none")
+        self.assertIs(evidence["retryable"], True)
+        self.assertEqual(evidence["recoveryAction"]["kind"], "skill")
+
+    def test_cli_state_write_block_emits_environment_fragment(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        _state, state_path, _lock_path = self.make_state(module, root, state_root)
+        before = state_path.read_bytes()
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            with mock.patch.object(
+                module.os, "replace", side_effect=OSError("no space left on device")
+            ):
+                result = module.main(
+                    [
+                        "--state-home",
+                        str(state_root),
+                        "heartbeat",
+                        "--repo",
+                        str(root),
+                        "--run-id",
+                        "run-1",
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(result, 2)
+        envelope = json.loads(stdout.getvalue())
+        self.assertEqual(envelope["outcome"], "blocked")
+        self.assertEqual(envelope["schemaVersion"], module.SCHEMA_VERSION)
+        fragment = envelope["environmentBlocked"]
+        self.assertEqual(fragment["boundary"], "user-state")
+        self.assertEqual(fragment["mutationState"], "none")
+        self.assertIs(fragment["retryable"], True)
+        self.assertEqual(fragment["recoveryAction"]["kind"], "skill")
+        # A blocked write is a no-op: the durable ledger is byte-for-byte intact,
+        # so a retry after repair cannot double-apply anything.
+        self.assertEqual(state_path.read_bytes(), before)
+
+    def test_cli_wrong_run_id_stays_a_plain_error_without_a_fragment(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        self.make_state(module, root, state_root)
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "heartbeat",
+                    "--repo",
+                    str(root),
+                    "--run-id",
+                    "run-does-not-match",
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(result, 2)
+        # A logic error is not an environment block: no additive stdout envelope
+        # is emitted, so consumers never misclassify it as retryable.
+        self.assertEqual(stdout.getvalue(), "")
+
     def test_validation_and_persistence_use_the_same_size_limit(self) -> None:
         module = self.load_module()
         root = self.make_repo()

@@ -25,6 +25,7 @@ sys.dont_write_bytecode = True
 from sd_ai_command_pack_lib import (  # noqa: E402
     CACHE_ROOT_ENV,
     CacheSetupError,
+    build_environment_blocked_evidence,
     build_tool_environment,
 )
 
@@ -132,6 +133,47 @@ CONTEXT_SIGNALS = frozenset(
 
 class WorkLoopError(ValueError):
     """Raised when loop state is invalid or unsafe to mutate."""
+
+
+class StatePersistenceError(OSError):
+    """A user-local state or lock write hit a filesystem or permission boundary.
+
+    Subclasses OSError so the atomic-write contract and every existing OSError
+    handler keep working unchanged; it only carries the structured
+    ``environment_blocked`` evidence the CLI surfaces. Every raise site is a
+    pre-commit directory creation or an atomic-replace write, so a failure never
+    leaves a partial mutation — the prior state is intact (mutationState
+    ``none``) and the operation is safe to retry once the environment is
+    repaired.
+    """
+
+    def __init__(self, evidence: Mapping[str, Any], *, cause: OSError) -> None:
+        super().__init__(str(cause))
+        self.evidence: dict[str, Any] = dict(evidence)
+
+
+def _user_state_blocked(
+    operation: str, checkpoint: str, error: OSError
+) -> StatePersistenceError:
+    """Build a user-state environment block from a caught state-write OSError."""
+
+    evidence = build_environment_blocked_evidence(
+        boundary="user-state",
+        operation=operation,
+        checkpoint=checkpoint,
+        mutation_state="none",
+        retryable=True,
+        recovery_action={
+            "kind": "skill",
+            "instruction": (
+                "Ensure the work-loop state directory is a writable private "
+                f"directory (or set {STATE_HOME_ENV} to one), then retry "
+                f"{operation}."
+            ),
+        },
+        diagnostic=str(error),
+    )
+    return StatePersistenceError(evidence, cause=error)
 
 
 def utc_now() -> str:
@@ -292,7 +334,12 @@ def state_paths(identity: Mapping[str, str], state_root: Path) -> tuple[Path, Pa
 def ensure_private_directory(path: Path) -> None:
     if path.is_symlink():
         raise WorkLoopError(f"state directory must not be a symlink: {path}")
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as error:
+        raise _user_state_blocked(
+            "prepare the work-loop state directory", "state-directory", error
+        ) from error
     if path.is_symlink() or not path.is_dir():
         raise WorkLoopError(f"state directory is unusable: {path}")
     try:
@@ -595,33 +642,42 @@ def atomic_write_json(path: Path, value: Mapping[str, Any]) -> None:
     payload = _json_payload(value)
     if len(payload.encode("utf-8")) > MAX_LEDGER_BYTES:
         raise WorkLoopError(f"refusing to write oversized work-loop state: {path}")
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
-    )
-    temporary = Path(temporary_name)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", errors="strict") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+        )
+        temporary = Path(temporary_name)
         try:
-            path.chmod(0o600)
-        except OSError:
-            # The atomic write succeeded; unsupported chmod must not discard it.
-            pass
-    except Exception:
-        try:
-            os.close(descriptor)
-        except OSError:
-            # Cleanup failures must not hide the original write failure.
-            pass
-        try:
-            temporary.unlink()
-        except OSError:
-            # Cleanup failures must not hide the original write failure.
-            pass
+            with os.fdopen(descriptor, "w", encoding="utf-8", errors="strict") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+            try:
+                path.chmod(0o600)
+            except OSError:
+                # The atomic write succeeded; unsupported chmod must not discard it.
+                pass
+        except Exception:
+            try:
+                os.close(descriptor)
+            except OSError:
+                # Cleanup failures must not hide the original write failure.
+                pass
+            try:
+                temporary.unlink()
+            except OSError:
+                # Cleanup failures must not hide the original write failure.
+                pass
+            raise
+    except StatePersistenceError:
         raise
+    except OSError as error:
+        # Every failure here is a temp-create or atomic-replace fault: the prior
+        # state file is untouched, so the mutation is none and retry is safe.
+        raise _user_state_blocked(
+            "persist work-loop state", "state-file", error
+        ) from error
 
 
 def normalize_focus(
@@ -2776,6 +2832,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         _print(state, as_json=args.json)
         return 0
+    except StatePersistenceError as error:
+        # A user-state write hit a filesystem or permission boundary. Emit the
+        # structured, retryable blocked fragment additively on stdout under
+        # --json; the stderr line and exit code are unchanged for plain callers.
+        if args.json:
+            _print(
+                {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "outcome": "blocked",
+                    "environmentBlocked": dict(error.evidence),
+                },
+                as_json=True,
+            )
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     except (WorkLoopError, OSError, UnicodeError, json.JSONDecodeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
