@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -437,6 +438,192 @@ def repo_root(*, fallback_to_cwd: bool = False) -> Path:
     if toplevel is not None:
         return Path(toplevel).resolve()
     return Path.cwd().resolve()
+
+
+# ---------------------------------------------------------------------------
+# Environment-blocked recovery evidence
+#
+# One additive, self-versioned structured fragment shared by lifecycle mutation
+# owners (session recorder, finish-work, housekeeping, work-loop persistence,
+# knowledge-base refresh, toolchain cache setup). An owner constructs it from
+# its own control flow when it hits a filesystem or authority *boundary* — never
+# by parsing stderr and never for a repository defect — to name the boundary,
+# the last verified checkpoint, whether a narrow retry is safe, and a bounded,
+# secret-safe recovery action. It carries no executable authority: `recoveryAction`
+# is argv-shaped data or a skill-owned instruction, never an interpolated shell
+# string. Consumers validate the fragment and, if they cannot, fall back to the
+# host command's own bounded diagnostic rather than acting on partial evidence.
+#
+# Fragment schema (schemaVersion 1):
+#   schemaVersion : int, fixed 1 (the fragment's own version, independent of any
+#                   host result object; hosts attach it additively and keep their
+#                   own schemaVersion unchanged)
+#   reasonCode    : str, fixed "environment_blocked"
+#   boundary      : one of ENVIRONMENT_BOUNDARIES
+#   operation     : bounded, command-owned operation identifier
+#   retryable     : bool, owner-derived (never inferred by presentation code);
+#                   True is rejected when mutationState is "unknown"
+#   checkpoint    : bounded name of the last lifecycle checkpoint the owner verified
+#   mutationState : one of ENVIRONMENT_MUTATION_STATES
+#   recoveryAction: None, {"kind": "argv", "argv": [token, ...]}, or
+#                   {"kind": "skill", "instruction": text}; all bounded and redacted
+#   diagnostic    : bounded (ENVIRONMENT_DIAGNOSTIC_LIMIT), control-stripped, with
+#                   URL credentials and obvious tokens redacted
+# ---------------------------------------------------------------------------
+
+ENVIRONMENT_BLOCKED_REASON = "environment_blocked"
+ENVIRONMENT_BLOCKED_SCHEMA_VERSION = 1
+ENVIRONMENT_BOUNDARIES = (
+    "git-metadata",
+    "user-state",
+    "tool-cache",
+    "kb-target",
+    "managed-payload",
+)
+ENVIRONMENT_MUTATION_STATES = ("none", "partial-recoverable", "unknown")
+ENVIRONMENT_DIAGNOSTIC_LIMIT = 500
+ENVIRONMENT_RECOVERY_KINDS = ("argv", "skill")
+_ENVIRONMENT_FIELD_LIMIT = 120
+_ENVIRONMENT_RECOVERY_TOKEN_LIMIT = 32
+_ENVIRONMENT_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
+_ENVIRONMENT_URL_CREDENTIAL_RE = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*://)[^/@\s]+@")
+_ENVIRONMENT_SECRET_RE = re.compile(
+    r"(?i)(?:bearer\s+|(?:access[_-]?|api[_-]?)?token[=:]\s*|gh[pousr]_)[A-Za-z0-9._\-]{8,}"
+)
+
+
+class EnvironmentEvidenceError(CommandError):
+    """Raised when environment-blocked recovery evidence is malformed.
+
+    Construction errors are owner-side programming bugs (an unknown boundary or
+    an incoherent retry claim) and must fail closed rather than emit partial
+    evidence; validation errors tell a consumer to fall back to the host
+    command's own bounded diagnostic.
+    """
+
+
+def _redact_environment_text(value: object, *, limit: int) -> str:
+    """Bound and redact free text for the fragment: strip control bytes, remove
+    URL credentials and obvious tokens, collapse whitespace, and truncate."""
+    text = "" if value is None else str(value)
+    text = _ENVIRONMENT_URL_CREDENTIAL_RE.sub(r"\1[redacted]@", text)
+    text = _ENVIRONMENT_SECRET_RE.sub("[redacted]", text)
+    text = _ENVIRONMENT_CONTROL_RE.sub(" ", text)
+    text = " ".join(text.split())
+    if len(text) > limit:
+        text = text[: limit - 1].rstrip() + "…"
+    return text
+
+
+def _normalize_recovery_action(action: object) -> dict[str, object] | None:
+    """Validate and bound a recovery action into argv-shaped or skill-owned data."""
+    if action is None:
+        return None
+    if not isinstance(action, Mapping):
+        raise EnvironmentEvidenceError("recovery action must be a mapping or None")
+    kind = action.get("kind")
+    if kind not in ENVIRONMENT_RECOVERY_KINDS:
+        raise EnvironmentEvidenceError(f"unknown recovery action kind: {kind!r}")
+    if kind == "argv":
+        raw = action.get("argv")
+        if not isinstance(raw, (list, tuple)) or not raw:
+            raise EnvironmentEvidenceError(
+                "argv recovery action requires a non-empty argv list"
+            )
+        tokens = [
+            _redact_environment_text(token, limit=_ENVIRONMENT_FIELD_LIMIT)
+            for token in list(raw)[:_ENVIRONMENT_RECOVERY_TOKEN_LIMIT]
+        ]
+        if any(not token for token in tokens):
+            raise EnvironmentEvidenceError(
+                "argv recovery action tokens must be non-empty after redaction"
+            )
+        return {"kind": "argv", "argv": tokens}
+    instruction = _redact_environment_text(
+        action.get("instruction", ""), limit=ENVIRONMENT_DIAGNOSTIC_LIMIT
+    )
+    if not instruction:
+        raise EnvironmentEvidenceError(
+            "skill recovery action requires a non-empty instruction"
+        )
+    return {"kind": "skill", "instruction": instruction}
+
+
+def build_environment_blocked_evidence(
+    *,
+    boundary: str,
+    operation: str,
+    checkpoint: str,
+    mutation_state: str,
+    retryable: bool,
+    recovery_action: object = None,
+    diagnostic: str = "",
+) -> dict[str, object]:
+    """Construct the additive environment-blocked fragment from owner control flow.
+
+    Raises EnvironmentEvidenceError on an unknown boundary or mutation state, a
+    non-boolean retry flag, a retry advertised over an unknown mutation state, or
+    a malformed recovery action. Owners call this only for a genuine environment
+    or authority boundary; unknown failures keep their existing failure result.
+    """
+    if boundary not in ENVIRONMENT_BOUNDARIES:
+        raise EnvironmentEvidenceError(f"unknown environment boundary: {boundary!r}")
+    if mutation_state not in ENVIRONMENT_MUTATION_STATES:
+        raise EnvironmentEvidenceError(f"unknown mutation state: {mutation_state!r}")
+    if not isinstance(retryable, bool):
+        raise EnvironmentEvidenceError("retryable must be a boolean")
+    if retryable and mutation_state == "unknown":
+        raise EnvironmentEvidenceError(
+            "a retryable block cannot advertise an unknown mutation state"
+        )
+    return {
+        "schemaVersion": ENVIRONMENT_BLOCKED_SCHEMA_VERSION,
+        "reasonCode": ENVIRONMENT_BLOCKED_REASON,
+        "boundary": boundary,
+        "operation": _redact_environment_text(operation, limit=_ENVIRONMENT_FIELD_LIMIT),
+        "retryable": retryable,
+        "checkpoint": _redact_environment_text(
+            checkpoint, limit=_ENVIRONMENT_FIELD_LIMIT
+        ),
+        "mutationState": mutation_state,
+        "recoveryAction": _normalize_recovery_action(recovery_action),
+        "diagnostic": _redact_environment_text(
+            diagnostic, limit=ENVIRONMENT_DIAGNOSTIC_LIMIT
+        ),
+    }
+
+
+def validate_environment_blocked_evidence(fragment: object) -> dict[str, object]:
+    """Validate a fragment as a consumer would and return its normalized form.
+
+    Enforces reasonCode, the supported schemaVersion, bounded enums, and the
+    retry/mutation coherence rule, then re-bounds and re-redacts every field by
+    rebuilding through the composer so unknown extra fields are dropped. Raises
+    EnvironmentEvidenceError when the fragment is unusable; a consumer that
+    catches it must fall back to the host command's own bounded diagnostic
+    rather than act on partial evidence.
+    """
+    if not isinstance(fragment, Mapping):
+        raise EnvironmentEvidenceError("environment-blocked evidence must be a mapping")
+    if fragment.get("reasonCode") != ENVIRONMENT_BLOCKED_REASON:
+        raise EnvironmentEvidenceError("reasonCode must be environment_blocked")
+    if fragment.get("schemaVersion") != ENVIRONMENT_BLOCKED_SCHEMA_VERSION:
+        raise EnvironmentEvidenceError(
+            "unsupported environment-blocked schemaVersion: "
+            f"{fragment.get('schemaVersion')!r}"
+        )
+    retryable = fragment.get("retryable")
+    if not isinstance(retryable, bool):
+        raise EnvironmentEvidenceError("retryable must be a boolean")
+    return build_environment_blocked_evidence(
+        boundary=str(fragment.get("boundary")),
+        operation=str(fragment.get("operation", "")),
+        checkpoint=str(fragment.get("checkpoint", "")),
+        mutation_state=str(fragment.get("mutationState")),
+        retryable=retryable,
+        recovery_action=fragment.get("recoveryAction"),
+        diagnostic=str(fragment.get("diagnostic", "")),
+    )
 
 
 def _cache_env_main(argv: Sequence[str]) -> int:
