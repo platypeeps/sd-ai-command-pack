@@ -11,8 +11,8 @@ local checks/review have completed.
 - Lifecycle activation: d79ba90 — umbrella + all 11 work packages set to
   in_progress and assigned the shared branch; investigation and rollout tasks
   remain planning.
-- Current package: 7 / 11 — 07-25-user-scope-toolchain-caches (not started)
-- Last verified commit: 9eaf2ee2
+- Current package: 8 / 11 — 07-25-fix-work-loop-lock-race (not started)
+- Last verified commit: 715559ab
 - Cumulative matrix: not run
 - Pull request: none
 - Finalization receipt: none
@@ -32,13 +32,42 @@ local checks/review have completed.
 | 4 | `07-28-validate-finish-work-receipt-path` | done | 6f873db | test_housekeeping (39, +8 receipt-path) + generated_parity + pack_drift (56) + ruff + shellcheck green | self-review clean; early fail-fast before side effects, downstream eligibility unchanged |
 | 5 | `07-28-route-housekeeping-by-pr-lifecycle-state` | done | 865d169 | test_housekeeping (42, +3 lifecycle routes) + test_housekeeping_result (15) + pr_eligibility + generated_parity + pack_drift + ruff + mypy + shellcheck green | self-review clean; single resolved identity, sole merge owner preserved, eligibility null on merged route |
 | 6 | `07-28-enforce-pre-archive-acceptance-readiness` | done | 9eaf2ee2 | test_bookkeeping_validator (44, +8) + test_review_preflight + test_sdlc_commands + test_completion_lifecycle + test_generated_parity + test_pack_drift green; ruff clean | self-review clean; completion-ready-gated, read-only, no false positives (handoff prose / non-canonical / fenced boxes) |
-| 7 | `07-25-user-scope-toolchain-caches` | pending | — | — | — |
+| 7 | `07-25-user-scope-toolchain-caches` | done | 715559ab | test_script_lib (27, +3 uid/ownership) + test_generated_parity + test_pack_drift (56) green; ruff clean | self-review clean; security code already shipped by H06, this pins acceptance properties + documents the guarantee, no re-route |
 | 8 | `07-25-fix-work-loop-lock-race` | pending | — | — | — |
 | 9 | `07-25-backlog-selector-blocked-markers` | pending | — | — | — |
 | 10 | `07-24-track-clean-recovery-artifacts` | pending | — | — | — |
 | 11 | `07-28-standardize-environment-blocked-recovery-evidence` | pending | — | — | — |
 
 ## Last checkpoint
+
+Package 7 (`07-25-user-scope-toolchain-caches`) complete at commit `715559ab`.
+Its security defect — a co-tenant pre-creating the toolchain resolver's Python
+bytecode / uv / uv-tool / ruff cache directories and having planted content
+executed under the victim's identity — is already remediated in code by the
+COMPLETED predecessor `07-24-standardize-sandbox-safe-tool-cache-routing` (H06),
+which centralized cache/env routing in `sd_ai_command_pack_lib.py`
+`build_tool_environment` (unchanged in `origin/main`): the private namespace name
+embeds the UID (`_cache_namespace_name`), every cache class is created 0700
+(`_ensure_private_directory` / `_prepare_namespace`), and a pre-existing path not
+owned by the resolving user is rejected. The PRD's cited defect site
+(`configure_cache_defaults` / `prepare_gito_uv_env` / the unqualified
+`${TMPDIR:-/tmp}/sd-ai-command-pack-*` directory) no longer exists; surviving
+matches are `mktemp` random-suffix templates (not pre-creatable named paths).
+Per the PRD reconciliation note this package does not re-route or re-implement;
+it closes the two residual gaps on top of H06: (1) three regression tests pinning
+the acceptance-criteria properties H06 left unpinned — the namespace and every
+default per-tool cache path embed the current UID, `_ensure_private_directory`
+rejects a foreign-owned path (unit branch), and `build_tool_environment` rejects
+a pre-created 0700 namespace owned by a different user end to end (the prior
+suite covered only the `chmod 0o755` permission branch); and (2) an explicit
+fleet-facing security guarantee in `SD_AI_COMMAND_PACK.md` (UID-embedded, 0700,
+foreign-owned rejection, naming the co-tenant plant-and-execute threat) replacing
+text that merely said "per-user". No `sd_ai_command_pack_lib.py` change; no
+consumer touched. Version/changelog/fleet deferred to cumulative integration and
+the post-STOP fleet boundary. Task deliverable recorded in the task
+`validation.md`. Template edited first; root doc mirror byte-identical via
+`make sync` (`conflicts: none`). Checks: `test_script_lib` (27, +3) +
+`test_generated_parity` + `test_pack_drift` (56) green; `ruff` clean.
 
 Package 6 (`07-28-enforce-pre-archive-acceptance-readiness`) complete at commit
 `9eaf2ee2`. Extended the existing read-only `pre-archive` bookkeeping validator
@@ -138,5 +167,5 @@ cumulative integration: `candidate-validation.json` `payloadDigest` (refreshed
 by release preparation), so `make generate` surface-check still reports the
 candidate-ledger digest as stale until then.
 
-Next: implement work package 7,
-`07-25-user-scope-toolchain-caches`.
+Next: implement work package 8,
+`07-25-fix-work-loop-lock-race`.
