@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.55.5 - 2026-07-27
+
+- Classify `.gemini/settings.json` consistently as Trellis-owned across the
+  platform registry and shipped review-scope scanner, matching the JavaScript
+  preflight and preventing consumer review-scope drift.
+
 ## 0.55.4 - 2026-07-27
 
 - Accept a completed task archive move when Git reports a rewritten active PRD
