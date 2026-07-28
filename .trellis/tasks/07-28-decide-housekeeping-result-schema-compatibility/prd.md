@@ -35,15 +35,15 @@ Resolve whether schema-version-1 housekeeping results must retain finishWorkHead
 
 ## Acceptance Criteria
 
-- [ ] The task records an explicit compatibility decision, rationale, schema
+- [x] The task records an explicit compatibility decision, rationale, schema
   behavior, and any bounded deprecation window.
-- [ ] Parent-task requirements and public result documentation contain no
+- [x] Parent-task requirements and public result documentation contain no
   contradictory compatibility statements.
-- [ ] Tests prove either the deprecated alias mapping and absence semantics or
+- [x] Tests prove either the deprecated alias mapping and absence semantics or
   the versioned migration/rejection behavior for old consumers.
-- [ ] Receipt-based exact-head eligibility remains authoritative and the
+- [x] Receipt-based exact-head eligibility remains authoritative and the
   retired `--finish-work-head` CLI is not restored.
-- [ ] Template/root parity, focused result tests, and `make check` pass.
+- [x] Template/root parity, focused result tests, and `make check` pass.
 
 ## Out of Scope
 

@@ -23,9 +23,16 @@ this repo's source; the SE-side task was retired in favor of this one.
 
 ## Acceptance Criteria
 
-- [ ] All cache/tool paths contain the UID; fresh creation is 0700.
-- [ ] Foreign-owned pre-existing path is rejected, not used.
-- [ ] Docs updated; changelog + version; fleet rollout via normal refresh.
+- [x] All cache/tool paths contain the UID; fresh creation is 0700.
+- [x] Foreign-owned pre-existing path is rejected, not used.
+- [x] Docs updated; changelog + version.
+
+## Post-Archive Handoff
+
+- Fleet rollout reaches consumers through the normal `sd-fleet-refresh`
+  path after this stabilization PR merges; it is owned by the separate
+  `07-28-roll-out-stabilized-pack-release-to-fleet` task and does not run
+  from this PR.
 
 ## Reconciliation with prior program work (2026-07-25)
 

@@ -59,18 +59,18 @@ merge-eligibility failure or a second recovery run.
 
 ## Acceptance Criteria
 
-- [ ] An already-merged exact-head PR skips eligibility, cleans local and
+- [x] An already-merged exact-head PR skips eligibility, cleans local and
       remote feature branches in one invocation, and returns a clean result
       with `eligibility: null` when final delegated status is clean.
-- [ ] An open eligible PR still passes exact-head eligibility, merges, refreshes
+- [x] An open eligible PR still passes exact-head eligibility, merges, refreshes
       PR evidence, and cleans safely.
-- [ ] An open blocked PR is neither merged nor deleted and retains the existing
+- [x] An open blocked PR is neither merged nor deleted and retains the existing
       actionable eligibility reason.
-- [ ] Closed-unmerged, missing, ambiguous, malformed, and provider-failure
+- [x] Closed-unmerged, missing, ambiguous, malformed, and provider-failure
       fixtures each fail closed with one stable lifecycle anomaly.
-- [ ] A mismatched or advanced PR head prevents deletion even when another PR
+- [x] A mismatched or advanced PR head prevents deletion even when another PR
       identity reports merged.
-- [ ] Result-schema compatibility tests, housekeeping tests, shell checks,
+- [x] Result-schema compatibility tests, housekeeping tests, shell checks,
       template/root parity, `make sync`, and `make check` pass.
 
 ## Out of Scope

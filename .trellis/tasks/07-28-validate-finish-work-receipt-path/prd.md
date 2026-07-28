@@ -36,16 +36,16 @@ Reject missing, unreadable, non-regular, or unsafe finish-work receipt paths bef
 
 ## Acceptance Criteria
 
-- [ ] A readable regular receipt reaches the existing eligibility evaluator.
-- [ ] Missing, directory, symlink, non-regular, and unreadable fixtures fail
+- [x] A readable regular receipt reaches the existing eligibility evaluator.
+- [x] Missing, directory, symlink, non-regular, and unreadable fixtures fail
   before KB refresh, fetch, merge, or branch cleanup.
-- [ ] Failure diagnostics are stable and bounded, return the documented error
+- [x] Failure diagnostics are stable and bounded, return the documented error
   code, and expose no unsafe raw value.
-- [ ] Replacement or disappearance after the early check still fails in the
+- [x] Replacement or disappearance after the early check still fails in the
   authoritative downstream validator and cannot reach merge.
-- [ ] Existing exact-head receipt, dependency-PR, dry-run, and self-test paths
+- [x] Existing exact-head receipt, dependency-PR, dry-run, and self-test paths
   remain compatible.
-- [ ] Template/root parity, focused housekeeping tests, and `make check` pass.
+- [x] Template/root parity, focused housekeeping tests, and `make check` pass.
 
 ## Out of Scope
 

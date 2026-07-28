@@ -134,42 +134,47 @@ is not sufficient.
 
 ## Acceptance Criteria
 
-- [ ] A fixture matching PR #244—multiple new and modified planning tasks, one
+- [x] A fixture matching PR #244—multiple new and modified planning tasks, one
   preserved current planning task, a journal successor, and no product/runtime
   path—selects `planning`, records exactly one session, produces exact-head
   evidence, merges through housekeeping, and leaves every task and the active
   pointer in `planning` on synchronized `main`.
-- [ ] Planning finalization with no active task succeeds when all other scope
+- [x] Planning finalization with no active task succeeds when all other scope
   and topology evidence is valid; an active task outside the changed planning
   closure blocks with a stable reason.
-- [ ] Source, workflow, config, spec, archive, completed/in-progress task,
+- [x] Source, workflow, config, spec, archive, completed/in-progress task,
   deletion, invalid topology/metadata, executable, symlink, submodule,
   non-linear history, stale head, or malformed receipt fixtures cannot select
   planning mode or reach the merge mutation boundary.
-- [ ] Existing completion fixtures still require pre-archive validation,
+- [x] Existing completion fixtures still require pre-archive validation,
   archive the completed task, record the journal, and emit `completion`
   evidence; no completion case silently downgrades to planning.
-- [ ] Eligibility rejects missing, stale, wrong-repository, wrong-PR,
+- [x] Eligibility rejects missing, stale, wrong-repository, wrong-PR,
   wrong-base, wrong-mode, tampered, or caller-only evidence and re-reads the PR
   head before returning eligible.
-- [ ] Retry fixtures around journal creation, push, review/check settlement,
+- [x] Retry fixtures around journal creation, push, review/check settlement,
   and housekeeping produce no duplicate journal, false archive, second merge,
   or extra successor push.
-- [ ] The public catalog exposes no new finalization command or mode flag, and
+- [x] The public catalog exposes no new finalization command or mode flag, and
   the retired bare finish-work-head attestation has no live option, parser,
   environment reader, help text, or compatibility branch after cutover.
-- [ ] Typed skill/runtime, eligibility, housekeeping, status, and install
+- [x] Typed skill/runtime, eligibility, housekeeping, status, and install
   fixtures cover both modes and every fail-closed boundary; generated parity,
   command-surface drift checks, install audit, `make sync`, and `make check`
   pass.
-- [ ] After the implementation lands, PR #244 or a freshly based equivalent
-  planning-only PR is used as an end-to-end dogfood case; its final receipt,
+
+## Post-Archive Handoff
+
+- PR #244 (or a freshly based equivalent planning-only PR) is exercised as an
+  end-to-end dogfood after the implementation lands; its final receipt,
   CI/review result, merge, task preservation, and cleanup identities are
-  recorded in this task without a force-push or history rewrite unless the user
-  separately authorizes that recovery.
-- [ ] Final program integration includes H09 and proves planning-only
-  finalization composes with the routed-review successor policy and
-  bookkeeping-only CI lane without adding another merge authority.
+  recorded in this task with no force-push or history rewrite unless the user
+  separately authorizes that recovery. Deferred to the post-merge phase by
+  explicit maintainer decision so the stabilization release is not delayed.
+- Final program integration including H09 — proving planning-only finalization
+  composes with the routed-review successor policy and bookkeeping-only CI lane
+  without adding another merge authority — is completed in the broader program
+  integration task after this PR merges, per the same maintainer decision.
 
 ## Out Of Scope
 

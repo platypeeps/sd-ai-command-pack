@@ -53,19 +53,19 @@ merge gates.
 
 ## Acceptance Criteria
 
-- [ ] Canonical lifecycle guidance states that every acceptance criterion
+- [x] Canonical lifecycle guidance states that every acceptance criterion
   required for task completion is satisfied before archive.
-- [ ] Post-archive merge and cleanup obligations have one explicit handoff
+- [x] Post-archive merge and cleanup obligations have one explicit handoff
   representation that cannot be mistaken for incomplete task acceptance
   criteria.
-- [ ] `sd-finish-work`, `sd-housekeeping`, `sd-review-pr`, and `sd-ship` agree on
+- [x] `sd-finish-work`, `sd-housekeeping`, `sd-review-pr`, and `sd-ship` agree on
   the archive/review/merge ownership boundary and retain all current exact-head,
   unresolved-thread, CI, and no-touch gates.
-- [ ] Examples cover completion, planning finalization, and downstream fleet or
+- [x] Examples cover completion, planning finalization, and downstream fleet or
   cleanup follow-through without introducing a second merge authority.
-- [ ] Skill contract tests reject stale guidance that makes post-archive
+- [x] Skill contract tests reject stale guidance that makes post-archive
   housekeeping mutations pre-archive completion criteria.
-- [ ] Templates, root copies, generated adapters, documentation, manifest
+- [x] Templates, root copies, generated adapters, documentation, manifest
   provenance, `make sync`, and `make check` are green.
 
 ## Notes

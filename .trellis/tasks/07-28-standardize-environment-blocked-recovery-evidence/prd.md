@@ -70,20 +70,20 @@ restarting completed work.
 
 ## Acceptance Criteria
 
-- [ ] The shared fragment has a documented schema, bounded enums, compatibility
+- [x] The shared fragment has a documented schema, bounded enums, compatibility
       policy, size limits, and secret/path redaction rules.
-- [ ] Each initial owning operation emits a deterministic blocker only for a
+- [x] Each initial owning operation emits a deterministic blocker only for a
       known boundary and retains its prior failure/exit behavior otherwise.
-- [ ] Fixtures distinguish no-mutation, partial-recoverable, and unknown states
+- [x] Fixtures distinguish no-mutation, partial-recoverable, and unknown states
       and prove the advertised retry resumes from the last verified checkpoint
       without duplicating journal, commit, archive, merge, or cleanup work.
-- [ ] Malformed diagnostics, unknown boundaries, foreign ownership, symlinks,
+- [x] Malformed diagnostics, unknown boundaries, foreign ownership, symlinks,
       replaced paths, missing authority, and concurrent retries fail safely.
-- [ ] No environment-blocked path reaches merge, branch deletion, archive,
+- [x] No environment-blocked path reaches merge, branch deletion, archive,
       force operations, broad cleanup, or automatic privilege escalation.
-- [ ] Skills render a concise boundary, checkpoint, and bounded recovery action
+- [x] Skills render a concise boundary, checkpoint, and bounded recovery action
       consistently across supported platforms.
-- [ ] Focused command and schema tests, template/root parity, install audit,
+- [x] Focused command and schema tests, template/root parity, install audit,
       `make sync`, and `make check` pass.
 
 ## Out of Scope

@@ -31,9 +31,9 @@ likewise carry ordering constraints only as PRD text.
 
 ## Acceptance Criteria
 
-- [ ] Blocked tasks are visibly distinct in `task.py list` output (or the selector's view).
-- [ ] sd-work-backlog demonstrably skips a blocked task and reports the reason.
-- [ ] The 7 review-ops tasks and dependent agent-artifacts children carry the markers.
+- [x] Blocked tasks are visibly distinct in `task.py list` output (or the selector's view).
+- [x] sd-work-backlog demonstrably skips a blocked task and reports the reason.
+- [x] The 7 review-ops tasks and dependent agent-artifacts children carry the markers.
 
 ## Reconciliation with the existing PARKED convention (2026-07-25)
 

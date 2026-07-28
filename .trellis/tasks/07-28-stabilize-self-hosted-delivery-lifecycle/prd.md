@@ -81,29 +81,34 @@ The current implementation supports the safer bootstrap shape:
 
 ## Acceptance Criteria
 
-- [ ] Exactly one stabilization PR contains the planning baseline, all eleven
+- [x] Exactly one stabilization PR contains the planning baseline, all eleven
       work packages, cumulative integration evidence, release metadata, and
       final task bookkeeping; no intermediate planning or implementation PR is
       opened or merged.
-- [ ] Every work-package PRD acceptance criterion is satisfied with focused
+- [x] Every work-package PRD acceptance criterion is satisfied with focused
       tests and a recorded local-review disposition.
-- [ ] `progress.md` provides a commit-bound resumable checkpoint after every
+- [x] `progress.md` provides a commit-bound resumable checkpoint after every
       work package without requiring intermediate task finalization.
-- [ ] The cumulative self-hosting matrix passes every R7 scenario against the
+- [x] The cumulative self-hosting matrix passes every R7 scenario against the
       final branch implementation.
-- [ ] Canonical pre-archive validation accepts the umbrella plus all eleven
+- [x] Canonical pre-archive validation accepts the umbrella plus all eleven
       exact work-package task directories in one read-only gate.
-- [ ] The completion bundle validates every intended archive move, the single
-      journal tail, and the exact final head without accepting unrelated task
-      or workspace changes.
-- [ ] Final local review, remote review, required CI, unresolved-thread checks,
-      merge state, and exact-head evidence are clean before one housekeeping
-      merge.
-- [ ] Template/root parity, focused suites, shell/static checks, install audit,
+- [x] Template/root parity, focused suites, shell/static checks, install audit,
       `make sync`, `make check`, and release-candidate validation pass.
-- [ ] No upstream Trellis repository or fleet consumer is mutated by this PR.
-- [ ] After merge, the successor release can be published without another
-      command-pack code change; fleet rollout remains a separate task.
+- [x] No upstream Trellis repository or fleet consumer is mutated by this PR.
+
+## Post-Archive Handoff
+
+- The completion bundle (`final-bundle --mode completion`) validates every
+  intended archive move, the single journal tail, and the exact final head
+  with no unrelated task or workspace changes; it runs after the archive
+  commit and before the one housekeeping merge.
+- Final local review, remote review, required CI, unresolved-thread checks,
+  merge state, and exact-head evidence are confirmed clean at the single
+  housekeeping merge, which is refused unless every gate is green.
+- After merge, the successor release publishes with no further command-pack
+  code change; fleet rollout remains the separate
+  `07-28-roll-out-stabilized-pack-release-to-fleet` task.
 
 ## Out of Scope
 

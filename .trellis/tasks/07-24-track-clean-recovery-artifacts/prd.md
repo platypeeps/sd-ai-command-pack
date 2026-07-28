@@ -61,18 +61,18 @@ retired so successful workflows do not leave separate cleanup tasks behind.
 
 ## Acceptance Criteria
 
-- [ ] Successful recovery creates, uses, and removes a receipt/artifact pair
+- [x] Successful recovery creates, uses, and removes a receipt/artifact pair
   without leaving a stash, linked worktree, or stale registry entry.
-- [ ] Interrupted fixtures survive restart and produce the same deterministic
+- [x] Interrupted fixtures survive restart and produce the same deterministic
   status classification and recovery guidance.
-- [ ] Clean reachable worktrees and demonstrably redundant stashes can be
+- [x] Clean reachable worktrees and demonstrably redundant stashes can be
   retired; dirty, unique, foreign, mismatched, symlinked, or live-owned
   artifacts are preserved.
-- [ ] Missing artifact, missing receipt, corrupt receipt, replaced path, stale
+- [x] Missing artifact, missing receipt, corrupt receipt, replaced path, stale
   owner, and concurrent cleanup cases fail safely without broad Git mutation.
-- [ ] Status is byte-for-byte read-only and housekeeping touches only the exact
+- [x] Status is byte-for-byte read-only and housekeeping touches only the exact
   validated artifact and receipt.
-- [ ] Focused lifecycle, restart, concurrency, permission, symlink, and
+- [x] Focused lifecycle, restart, concurrency, permission, symlink, and
   destructive-action tests plus `make check` pass.
 
 ## Out Of Scope

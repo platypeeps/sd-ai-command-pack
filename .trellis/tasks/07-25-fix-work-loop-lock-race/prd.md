@@ -23,6 +23,6 @@ favor of this one.
 
 ## Acceptance Criteria
 
-- [ ] Concurrent recovery attempts cannot both acquire (regression test or deterministic
+- [x] Concurrent recovery attempts cannot both acquire (regression test or deterministic
       simulated-race verification).
-- [ ] Existing lock/heartbeat tests stay green; changelog + version per repo rules.
+- [x] Existing lock/heartbeat tests stay green; changelog + version per repo rules.

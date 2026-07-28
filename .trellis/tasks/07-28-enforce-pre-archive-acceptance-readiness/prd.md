@@ -52,23 +52,23 @@ unchecked Markdown checkbox anywhere in a PRD as a completion blocker.
 
 ## Acceptance Criteria
 
-- [ ] A completion-ready task with every required acceptance criterion checked
+- [x] A completion-ready task with every required acceptance criterion checked
   passes `pre-archive` with the existing valid receipt semantics.
-- [ ] An unchecked required pre-archive criterion fails with a stable typed
+- [x] An unchecked required pre-archive criterion fails with a stable typed
   reason before archive and leaves the task, journal, session pointer, and Git
   state unchanged.
-- [ ] A task using the approved post-archive handoff representation passes even
+- [x] A task using the approved post-archive handoff representation passes even
   when its downstream merge or cleanup work has not yet occurred.
-- [ ] Unchecked boxes outside the canonical completion section do not become
+- [x] Unchecked boxes outside the canonical completion section do not become
   accidental blockers unless the lifecycle contract explicitly classifies
   them as completion obligations.
-- [ ] Malformed, duplicated, ambiguous, oversized, symlinked, and invalid-UTF-8
+- [x] Malformed, duplicated, ambiguous, oversized, symlinked, and invalid-UTF-8
   fixtures fail closed with bounded repository-relative diagnostics.
-- [ ] Focused tests cover valid completion, incomplete completion, valid
+- [x] Focused tests cover valid completion, incomplete completion, valid
   post-archive handoff, planning finalization, and the PR #187 regression.
-- [ ] `sd-finish-work` still invokes `pre-archive` before `task.py archive`, and
+- [x] `sd-finish-work` still invokes `pre-archive` before `task.py archive`, and
   no failure path mutates or publishes task state.
-- [ ] Template/root parity, installer and generated-surface checks,
+- [x] Template/root parity, installer and generated-surface checks,
   `make sync`, and `make check` pass.
 
 ## Notes

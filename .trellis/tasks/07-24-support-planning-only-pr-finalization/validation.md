@@ -57,3 +57,26 @@ exercised separately in packages 1–2 and again in cumulative integration.
 
 No code change is required for this package; its deliverable is the integration
 proof recorded here.
+
+## As-built reconciliation (2026-07-28 archive)
+
+- AC7 (no restored bare attestation): the retired `--finish-work-head` exact-head
+  attestation is fully gone — no live option, parser, environment reader, help
+  text, or compatibility branch — and is asserted absent by
+  `test_housekeeping_result.py::test_retired_finish_work_head_cli_is_not_restored`
+  and siblings. The retained `finishWorkRequired` field is a distinct *computed*
+  mode discriminator (`not dependency_mode`: local-branch requires `true`,
+  dependency-PR requires `false`); it carries no head and asserts no trust, so
+  keeping it is not a restoration of the retired attestation. `design.md`'s
+  "Compatibility And Cutover" removal list predates the receipt refactor and is
+  stale where it lists `finishWorkRequired`; exact-head trust now lives in the
+  independently revalidated `finishWorkReceipt`.
+- AC6 (retry idempotence): proven by composed fixtures rather than one dedicated
+  case — `test_record_session` holds the journal count at one across a retried
+  recording, and housekeeping MERGED-state routing skips eligibility, re-merge,
+  and successor re-push (`test_housekeeping` merged-cleanup cases), together
+  covering "no duplicate journal, false archive, second merge, or extra push."
+- AC9 (live planning-only dogfood) and AC10 (H09 composition) are deferred to the
+  post-merge phase by explicit maintainer decision so the stabilization release
+  is not delayed; both are carried as prose in this task's `## Post-Archive
+  Handoff` for after-merge follow-through.
