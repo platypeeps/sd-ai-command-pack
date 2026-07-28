@@ -331,6 +331,254 @@ class RecoveryArtifactTests(InstallTestCase):
         )
         self.assertEqual(code, 2)
 
+    # -- destructive cleanup: helpers ------------------------------------
+
+    def supersede_stash(self, root: Path) -> str:
+        """Land the stashed change as a commit so the stash is provably redundant.
+
+        Returns the superseding commit oid whose tree equals ``stash@{0}``'s.
+        """
+        self.run_git(root, "stash", "apply")
+        self.run_git(root, "commit", "-am", "land recovered work")
+        return self.head(root)
+
+    def stash_oids(self, root: Path) -> set[str]:
+        out = self.git_output(root, "stash", "list", "--format=%H")
+        return set(out.split()) if out else set()
+
+    def worktree_paths(self, root: Path) -> set[str]:
+        out = self.git_output(root, "worktree", "list", "--porcelain")
+        return {
+            str(Path(line[len("worktree ") :]).resolve())
+            for line in out.splitlines()
+            if line.startswith("worktree ")
+        }
+
+    def write_lock(self, root: Path, *, hostname: str, pid: int) -> Path:
+        directory = self.receipt_dir(root)
+        directory.mkdir(parents=True, exist_ok=True)
+        lock = directory / self.mod.CLEANUP_LOCK_NAME
+        lock.write_text(
+            json.dumps({"host": hostname, "pid": pid, "token": "external", "createdAt": "2026-01-01T00:00:00Z"}),
+            encoding="utf-8",
+        )
+        return lock
+
+    def cleanup(self, root: Path, **kwargs):
+        return self.mod.cleanup_repository(root, state_root=self.state_root, **kwargs)
+
+    def redundant_stash_receipt(self, root: Path, *, live_owner: bool = False):
+        oid = self.make_stash(root, "sd-ai-command-pack recovery: wip")
+        superseded = self.supersede_stash(root)
+        receipt = self.register_stash(
+            root, oid, live_owner=live_owner, cleanup_predicate={"supersededBy": superseded}
+        )
+        return oid, receipt
+
+    # -- destructive cleanup: stashes ------------------------------------
+
+    def test_cleanup_owner_drops_redundant_stash(self) -> None:
+        root = self.make_repo()
+        oid, receipt = self.redundant_stash_receipt(root)
+        rid = receipt["artifactId"]
+
+        report = self.cleanup(root, mode="owner", artifact_id=rid)
+
+        self.assertEqual(report["actions"][0]["action"], "dropped-stash")
+        self.assertNotIn(oid, self.stash_oids(root))
+        self.assertFalse((self.receipt_dir(root) / f"{rid}.json").exists())
+
+    def test_cleanup_preserves_unique_stash(self) -> None:
+        root = self.make_repo()
+        oid = self.make_stash(root, "sd-ai-command-pack recovery: wip")
+        receipt = self.register_stash(root, oid, live_owner=False)
+        rid = receipt["artifactId"]
+
+        report = self.cleanup(root, mode="owner", artifact_id=rid)
+
+        self.assertEqual(report["actions"][0]["action"], "skipped")
+        self.assertEqual(report["actions"][0]["classification"], "needs-review")
+        self.assertIn(oid, self.stash_oids(root))
+        self.assertTrue((self.receipt_dir(root) / f"{rid}.json").exists())
+
+    def test_cleanup_preserves_live_owner_stash(self) -> None:
+        root = self.make_repo()
+        oid, receipt = self.redundant_stash_receipt(root, live_owner=True)
+        rid = receipt["artifactId"]
+
+        report = self.cleanup(root, mode="owner", artifact_id=rid)
+
+        self.assertEqual(report["actions"][0]["classification"], "active")
+        self.assertIn(oid, self.stash_oids(root))
+        self.assertTrue((self.receipt_dir(root) / f"{rid}.json").exists())
+
+    def test_cleanup_drops_exact_stash_after_concurrent_renumber(self) -> None:
+        # A second stash pushes the recorded one from stash@{0} to stash@{1};
+        # cleanup must resolve by exact object identity and drop only that one.
+        root = self.make_repo()
+        oid, receipt = self.redundant_stash_receipt(root)
+        (root / "file.txt").write_text("unrelated\n", encoding="utf-8")
+        self.run_git(root, "stash", "push", "-m", "unrelated user stash")
+        other = self.git_output(root, "rev-parse", "stash@{0}")
+        self.assertNotEqual(other, oid)
+
+        report = self.cleanup(root, mode="owner", artifact_id=receipt["artifactId"])
+
+        self.assertEqual(report["actions"][0]["action"], "dropped-stash")
+        self.assertNotIn(oid, self.stash_oids(root))
+        self.assertIn(other, self.stash_oids(root))
+
+    # -- destructive cleanup: worktrees ----------------------------------
+
+    def test_cleanup_removes_clean_reachable_worktree(self) -> None:
+        root = self.make_repo()
+        wt = self.add_worktree(root, "wt-clean")
+        receipt = self.register_worktree(root, wt, live_owner=False)
+        rid = receipt["artifactId"]
+
+        report = self.cleanup(root, mode="housekeeping")
+
+        self.assertEqual(report["actions"][0]["action"], "removed-worktree")
+        self.assertNotIn(str(wt.resolve()), self.worktree_paths(root))
+        self.assertFalse(wt.exists())
+        self.assertFalse((self.receipt_dir(root) / f"{rid}.json").exists())
+
+    def test_cleanup_preserves_dirty_worktree(self) -> None:
+        root = self.make_repo()
+        wt = self.add_worktree(root, "wt-dirty", dirty=True)
+        receipt = self.register_worktree(root, wt, live_owner=False)
+        rid = receipt["artifactId"]
+
+        report = self.cleanup(root, mode="housekeeping")
+
+        self.assertEqual(report["actions"][0]["classification"], "needs-review")
+        self.assertIn(str(wt.resolve()), self.worktree_paths(root))
+        self.assertTrue((self.receipt_dir(root) / f"{rid}.json").exists())
+
+    def test_cleanup_leaves_replaced_path_untouched(self) -> None:
+        # The registered worktree is unlinked and a plain directory replaces it.
+        # Housekeeping must never delete the replacement (it is not a worktree).
+        root = self.make_repo()
+        wt = self.add_worktree(root, "wt-replaced")
+        receipt = self.register_worktree(root, wt, live_owner=False)
+        rid = receipt["artifactId"]
+        self.run_git(root, "worktree", "remove", str(wt))
+        wt.mkdir(parents=True, exist_ok=True)
+        (wt / "keep.txt").write_text("not a worktree\n", encoding="utf-8")
+
+        report = self.cleanup(root, mode="housekeeping")
+
+        self.assertEqual(report["actions"][0]["classification"], "missing-artifact")
+        self.assertTrue((wt / "keep.txt").exists())
+        # Housekeeping preserves the stale receipt for a read-only status decision.
+        self.assertTrue((self.receipt_dir(root) / f"{rid}.json").exists())
+
+    # -- destructive cleanup: reconciliation modes -----------------------
+
+    def test_cleanup_owner_prunes_stale_receipt(self) -> None:
+        root = self.make_repo()
+        oid = self.make_stash(root, "sd-ai-command-pack recovery: wip")
+        receipt = self.register_stash(root, oid, live_owner=False)
+        rid = receipt["artifactId"]
+        self.run_git(root, "stash", "drop", "stash@{0}")  # artifact gone out-of-band
+
+        report = self.cleanup(root, mode="owner", artifact_id=rid)
+
+        self.assertEqual(report["actions"][0]["action"], "pruned-receipt")
+        self.assertFalse((self.receipt_dir(root) / f"{rid}.json").exists())
+
+    def test_cleanup_housekeeping_keeps_stale_receipt(self) -> None:
+        root = self.make_repo()
+        oid = self.make_stash(root, "sd-ai-command-pack recovery: wip")
+        receipt = self.register_stash(root, oid, live_owner=False)
+        rid = receipt["artifactId"]
+        self.run_git(root, "stash", "drop", "stash@{0}")
+
+        report = self.cleanup(root, mode="housekeeping")
+
+        self.assertEqual(report["actions"][0]["classification"], "missing-artifact")
+        self.assertEqual(report["actions"][0]["action"], "skipped")
+        self.assertTrue((self.receipt_dir(root) / f"{rid}.json").exists())
+
+    def test_cleanup_dry_run_mutates_nothing(self) -> None:
+        root = self.make_repo()
+        oid, receipt = self.redundant_stash_receipt(root)
+        before_repo = self.repo_snapshot(root)
+        before_state = self.state_snapshot()
+
+        report = self.cleanup(root, mode="housekeeping", dry_run=True)
+
+        self.assertEqual(report["actions"][0]["action"], "would-drop-stash")
+        self.assertTrue(report["dryRun"])
+        self.assertIn(oid, self.stash_oids(root))
+        self.assertEqual(self.repo_snapshot(root), before_repo)
+        self.assertEqual(self.state_snapshot(), before_state)
+
+    def test_cleanup_persists_across_module_reload(self) -> None:
+        # A fresh module instance (a restart) still retires the recorded artifact.
+        root = self.make_repo()
+        oid, receipt = self.redundant_stash_receipt(root)
+        reloaded = self.load_module_from_path(MODULE_PATH, "sd_ai_command_pack_recovery_artifacts_reloaded")
+
+        report = reloaded.cleanup_repository(
+            root, mode="owner", artifact_id=receipt["artifactId"], state_root=self.state_root
+        )
+
+        self.assertEqual(report["actions"][0]["action"], "dropped-stash")
+        self.assertNotIn(oid, self.stash_oids(root))
+
+    # -- destructive cleanup: locking ------------------------------------
+
+    def test_cleanup_skips_when_lock_held_by_live_owner(self) -> None:
+        root = self.make_repo()
+        oid, receipt = self.redundant_stash_receipt(root)
+        self.write_lock(root, hostname=socket.gethostname(), pid=os.getpid())  # alive
+
+        with self.assertRaises(self.mod.RecoveryError):
+            self.cleanup(root, mode="owner", artifact_id=receipt["artifactId"])
+
+        self.assertIn(oid, self.stash_oids(root))  # nothing destroyed
+        self.assertTrue((self.receipt_dir(root) / f"{receipt['artifactId']}.json").exists())
+
+    def test_cleanup_reclaims_stale_same_host_lock(self) -> None:
+        root = self.make_repo()
+        oid, receipt = self.redundant_stash_receipt(root)
+        lock = self.write_lock(root, hostname=socket.gethostname(), pid=2147483646)  # dead pid
+
+        report = self.cleanup(root, mode="owner", artifact_id=receipt["artifactId"])
+
+        self.assertEqual(report["actions"][0]["action"], "dropped-stash")
+        self.assertNotIn(oid, self.stash_oids(root))
+        self.assertFalse(lock.exists())  # released after reclaim
+
+    def test_cleanup_respects_foreign_host_lock(self) -> None:
+        root = self.make_repo()
+        oid, receipt = self.redundant_stash_receipt(root)
+        self.write_lock(root, hostname="other-host-xyz", pid=1)  # fresh mtime, not stale
+
+        with self.assertRaises(self.mod.RecoveryError):
+            self.cleanup(root, mode="owner", artifact_id=receipt["artifactId"])
+
+        self.assertIn(oid, self.stash_oids(root))
+
+    def test_cleanup_ignores_symlinked_receipt(self) -> None:
+        root = self.make_repo()
+        oid, receipt = self.redundant_stash_receipt(root)
+        directory = self.receipt_dir(root)
+        symlink = directory / "00000000dead.json"
+        symlink.symlink_to(directory / f"{receipt['artifactId']}.json")
+
+        report = self.cleanup(root, mode="housekeeping")
+
+        # The real receipt is retired; the symlink is never followed or acted on.
+        self.assertNotIn(oid, self.stash_oids(root))
+        self.assertNotIn("00000000dead.json", {a.get("reference") for a in report["actions"]})
+
+    def test_cleanup_rejects_unknown_mode(self) -> None:
+        root = self.make_repo()
+        with self.assertRaises(self.mod.RecoveryError):
+            self.cleanup(root, mode="wipe-everything")
+
 
 if __name__ == "__main__":
     unittest.main()

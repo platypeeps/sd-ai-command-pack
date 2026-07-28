@@ -9,13 +9,15 @@ recovery artifact a versioned, user-local, private receipt the moment it is
 created, so status can classify leftovers read-only and housekeeping can retire
 only the artifacts whose exact identity and no-loss predicate are proven.
 
-Two concerns are deliberately split:
+Three concerns are deliberately split:
 
-* ``register`` and ``classify`` (this file) never delete a Git artifact. Register
-  records a receipt atomically; classify reconciles receipts against Git and the
-  owner ledger read-only.
-* The destructive owner/housekeeping cleanup paths live behind their own proof
-  gates and lock (added alongside their destructive-boundary tests).
+* ``register`` never deletes a Git artifact: it records a receipt atomically.
+* ``classify`` reconciles receipts against Git and the owner ledger read-only,
+  so ``sd-status`` can call it without any risk of mutation.
+* ``cleanup`` is the only Git-mutating path. It runs under a short-lived
+  exclusive lock, re-reads the receipt and Git identity at the deletion
+  boundary, re-proves that no unique work can be lost, and only then drops the
+  exact recorded stash object or removes the exact registered worktree.
 
 The receipt never embeds an uncontrolled raw repository path, a remote URL, or a
 raw filesystem error; repository identity is a digest and diagnostics are
@@ -914,6 +916,322 @@ def stash_cleanup_proof(repo: Path, receipt: Mapping[str, Any], *, stashes: Mapp
 
 
 # ---------------------------------------------------------------------------
+# Destructive cleanup (proof-gated and locked; the only Git-mutating path)
+# ---------------------------------------------------------------------------
+
+CLEANUP_LOCK_NAME = ".cleanup.lock"
+MODE_OWNER = "owner"
+MODE_HOUSEKEEPING = "housekeeping"
+CLEANUP_MODES = (MODE_OWNER, MODE_HOUSEKEEPING)
+
+
+class _CleanupLock:
+    """Short-lived exclusive lock guarding the deletion boundary.
+
+    Created with ``O_CREAT | O_EXCL`` so only one holder exists at a time. A
+    lock left by a dead same-host owner, or older than ``stale_seconds``, is
+    reclaimed once; a lock held by a live owner is respected and cleanup is
+    skipped (raised, not fatal — the caller reports it and preserves state).
+    """
+
+    def __init__(self, directory: Path, *, stale_seconds: int) -> None:
+        self._directory = directory
+        self._path = directory / CLEANUP_LOCK_NAME
+        self._stale_seconds = max(0, int(stale_seconds))
+        self._fd: int | None = None
+        self._token = ""
+
+    def _payload(self) -> bytes:
+        self._token = uuid.uuid4().hex
+        body = {
+            "host": socket.gethostname(),
+            "pid": os.getpid(),
+            "token": self._token,
+            "createdAt": iso_utc(now_utc()),
+        }
+        return json.dumps(body, sort_keys=True).encode("utf-8")
+
+    def _try_create(self) -> bool:
+        try:
+            fd = os.open(self._path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            return False
+        except OSError as error:
+            raise RecoveryError(f"cannot create cleanup lock: {error.strerror or 'unavailable'}") from error
+        try:
+            os.write(fd, self._payload())
+            os.fsync(fd)
+        except OSError:
+            pass
+        self._fd = fd
+        return True
+
+    def _existing_owner(self) -> dict[str, Any] | None:
+        try:
+            raw = self._path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def _is_stale(self) -> bool:
+        owner = self._existing_owner()
+        if owner is None:
+            return True  # vanished between the failed create and this read
+        host = owner.get("host")
+        if host == socket.gethostname() and not _process_alive(owner.get("pid")):
+            return True
+        try:
+            age = now_utc().timestamp() - self._path.stat().st_mtime
+        except OSError:
+            return True
+        return age > self._stale_seconds
+
+    def acquire(self) -> None:
+        ensure_private_directory(self._directory)
+        for _ in range(6):
+            if self._try_create():
+                return
+            if not self._is_stale():
+                raise RecoveryError("cleanup lock is held by a live owner; skipped")
+            try:
+                self._path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                raise RecoveryError(f"cannot reclaim stale cleanup lock: {error.strerror or 'busy'}") from error
+        raise RecoveryError("could not acquire cleanup lock")
+
+    def release(self) -> None:
+        if self._fd is not None:
+            try:
+                os.close(self._fd)
+            except OSError:
+                pass
+            self._fd = None
+        owner = self._existing_owner()
+        if self._token and owner is not None and owner.get("token") == self._token:
+            try:
+                self._path.unlink()
+            except OSError:
+                pass
+
+    def __enter__(self) -> "_CleanupLock":
+        self.acquire()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.release()
+
+
+def _delete_receipt(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise RecoveryError(f"cannot remove receipt {path.name}: {error.strerror or 'unremovable'}") from error
+
+
+def _run_destructive(repo: Path, args: list[str], *, context: str) -> tuple[bool, str]:
+    """Run one Git-mutating command, converting every failure to bounded text."""
+
+    try:
+        result = run_git(args, cwd=repo, check=False, context=context)
+    except CommandError as error:
+        return False, _bounded(str(error), 200)
+    if result.returncode != 0:
+        return False, _bounded(result.stderr, 200) or f"git exited with status {result.returncode}"
+    return True, ""
+
+
+def _retire_stash(
+    repo: Path,
+    receipt: Mapping[str, Any],
+    receipt_path: Path,
+    *,
+    dry_run: bool,
+    allow_stale_prune: bool,
+) -> dict[str, Any]:
+    oid = str(receipt.get("git", {}).get("object", ""))
+    result: dict[str, Any] = {
+        "artifactId": receipt["artifactId"],
+        "type": ARTIFACT_STASH,
+        "reference": _bounded(oid[:12], MAX_REFERENCE),
+    }
+    stashes = {entry["oid"]: entry for entry in stash_entries(repo)}
+    if oid not in stashes:
+        if allow_stale_prune and not dry_run:
+            _delete_receipt(receipt_path)
+            return {**result, "action": "pruned-receipt", "classification": CLASS_MISSING_ARTIFACT,
+                    "detail": "artifact already gone; stale receipt removed"}
+        return {**result, "action": "skipped", "classification": CLASS_MISSING_ARTIFACT,
+                "detail": "artifact already gone; receipt preserved"}
+    if _owner_live(receipt):
+        return {**result, "action": "skipped", "classification": CLASS_ACTIVE,
+                "detail": "owning run is still live; preserved"}
+    proof = stash_cleanup_proof(repo, receipt, stashes=stashes)
+    if not proof["safe"]:
+        return {**result, "action": "skipped", "classification": CLASS_NEEDS_REVIEW, "detail": proof["detail"]}
+    ref = str(stashes[oid].get("ref", ""))
+    # A concurrent stash push/pop renumbers stash@{N}; re-verify the ref still
+    # resolves to the exact recorded object immediately before dropping it.
+    current = git_stdout(["rev-parse", "--verify", "--quiet", ref], cwd=repo, context="verify stash ref")
+    if not ref or current != oid:
+        return {**result, "action": "skipped", "classification": CLASS_NEEDS_REVIEW,
+                "detail": "stash ref no longer resolves to the recorded object; preserved"}
+    if dry_run:
+        return {**result, "action": "would-drop-stash", "classification": CLASS_SAFE_CLEANABLE, "detail": proof["detail"]}
+    ok, detail = _run_destructive(repo, ["stash", "drop", ref], context="drop redundant recovery stash")
+    if not ok:
+        return {**result, "action": "failed", "classification": CLASS_NEEDS_REVIEW, "detail": detail}
+    if oid in {entry["oid"] for entry in stash_entries(repo)}:
+        return {**result, "action": "failed", "classification": CLASS_NEEDS_REVIEW,
+                "detail": "stash object still present after drop; receipt preserved"}
+    _delete_receipt(receipt_path)
+    return {**result, "action": "dropped-stash", "classification": CLASS_SAFE_CLEANABLE, "detail": proof["detail"]}
+
+
+def _retire_worktree(
+    repo: Path,
+    receipt: Mapping[str, Any],
+    receipt_path: Path,
+    *,
+    digest: str,
+    state_root: Path,
+    dry_run: bool,
+    allow_stale_prune: bool,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {"artifactId": receipt["artifactId"], "type": ARTIFACT_WORKTREE}
+    try:
+        path = validate_worktree_containment(receipt, digest=digest, state_root=state_root)
+    except RecoveryError as error:
+        return {**result, "action": "skipped", "classification": CLASS_NEEDS_REVIEW,
+                "reference": _bounded(receipt["artifactId"], MAX_REFERENCE), "detail": _bounded(str(error), 200)}
+    result["reference"] = _bounded(path.name, MAX_REFERENCE)
+    resolved = str(path.resolve(strict=False))
+    linked = {str(Path(e.get("path", "")).resolve(strict=False)) for e in worktree_entries(repo) if e.get("path")}
+    if resolved not in linked:
+        if allow_stale_prune and not dry_run:
+            _delete_receipt(receipt_path)
+            return {**result, "action": "pruned-receipt", "classification": CLASS_MISSING_ARTIFACT,
+                    "detail": "artifact already gone; stale receipt removed"}
+        return {**result, "action": "skipped", "classification": CLASS_MISSING_ARTIFACT,
+                "detail": "artifact already gone; receipt preserved"}
+    if _owner_live(receipt):
+        return {**result, "action": "skipped", "classification": CLASS_ACTIVE,
+                "detail": "owning run is still live; preserved"}
+    proof = worktree_cleanup_proof(repo, receipt, path)
+    if not proof["safe"]:
+        return {**result, "action": "skipped", "classification": CLASS_NEEDS_REVIEW, "detail": proof["detail"]}
+    if dry_run:
+        return {**result, "action": "would-remove-worktree", "classification": CLASS_SAFE_CLEANABLE, "detail": proof["detail"]}
+    # No ``--force``: git itself refuses to remove a dirty or locked worktree,
+    # which is a second independent guard behind the clean/unlocked proof above.
+    ok, detail = _run_destructive(repo, ["worktree", "remove", str(path)], context="remove clean recovery worktree")
+    if not ok:
+        return {**result, "action": "failed", "classification": CLASS_NEEDS_REVIEW, "detail": detail}
+    after = {str(Path(e.get("path", "")).resolve(strict=False)) for e in worktree_entries(repo) if e.get("path")}
+    if resolved in after:
+        return {**result, "action": "failed", "classification": CLASS_NEEDS_REVIEW,
+                "detail": "worktree still linked after removal; receipt preserved"}
+    _delete_receipt(receipt_path)
+    return {**result, "action": "removed-worktree", "classification": CLASS_SAFE_CLEANABLE, "detail": proof["detail"]}
+
+
+def _select_targets(directory: Path, *, mode: str, artifact_id: str | None) -> list[Path]:
+    if mode == MODE_OWNER:
+        if not artifact_id or not ARTIFACT_ID_RE.match(artifact_id):
+            raise RecoveryError("owner cleanup requires a valid artifact id")
+        candidate = directory / f"{artifact_id}.json"
+        if candidate.is_symlink() or not candidate.is_file():
+            return []
+        return [candidate]
+    targets: list[Path] = []
+    count = 0
+    for entry in sorted(directory.glob("*.json")):
+        if entry.is_symlink() or not entry.is_file():
+            continue
+        count += 1
+        if count > MAX_RECEIPTS:
+            break
+        targets.append(entry)
+    return targets
+
+
+def _retire_path(
+    repo: Path,
+    receipt_path: Path,
+    *,
+    digest: str,
+    state_root: Path,
+    mode: str,
+    dry_run: bool,
+) -> dict[str, Any]:
+    try:
+        receipt = read_json(receipt_path)
+        validate_receipt(receipt)
+    except RecoveryError as error:
+        return {"reference": _bounded(receipt_path.name, MAX_REFERENCE), "action": "skipped",
+                "classification": "corrupt", "detail": _bounded(str(error), 200)}
+    allow_stale_prune = mode == MODE_OWNER
+    if receipt["type"] == ARTIFACT_STASH:
+        return _retire_stash(repo, receipt, receipt_path, dry_run=dry_run, allow_stale_prune=allow_stale_prune)
+    return _retire_worktree(repo, receipt, receipt_path, digest=digest, state_root=state_root,
+                            dry_run=dry_run, allow_stale_prune=allow_stale_prune)
+
+
+def cleanup_repository(
+    repo: Path,
+    *,
+    mode: str,
+    artifact_id: str | None = None,
+    state_root: Path | None = None,
+    stale_lock_seconds: int = DEFAULT_STALE_LOCK_SECONDS,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Retire proven-safe artifacts under an exclusive lock.
+
+    ``owner`` mode targets exactly one artifact (the creating run's ``finally``
+    path) and prunes its own stale receipt; ``housekeeping`` mode sweeps every
+    receipt but destroys only ``safe-cleanable`` artifacts, leaving missing,
+    needs-review, unowned, and corrupt entries for a read-only status decision.
+    Every destructive step re-reads the receipt and Git identity at the
+    boundary and re-proves no-loss before acting (R6/R7).
+    """
+
+    if mode not in CLEANUP_MODES:
+        raise RecoveryError(f"unsupported cleanup mode: {_bounded(mode, 40)}")
+    if mode == MODE_OWNER and not artifact_id:
+        raise RecoveryError("owner cleanup requires an artifact id")
+    identity = repository_identity(repo)
+    digest = identity["digest"]
+    state = resolve_state_root() if state_root is None else state_root
+    directory = receipts_dir(digest, state)
+
+    actions: list[dict[str, Any]] = []
+    if directory.is_dir():
+        with _CleanupLock(directory, stale_seconds=stale_lock_seconds):
+            for receipt_path in _select_targets(directory, mode=mode, artifact_id=artifact_id):
+                actions.append(_retire_path(repo, receipt_path, digest=digest, state_root=state, mode=mode, dry_run=dry_run))
+
+    counts: dict[str, int] = {}
+    for item in actions:
+        counts[item["action"]] = counts.get(item["action"], 0) + 1
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "repository": {"digest": digest, "label": identity["label"]},
+        "mode": mode,
+        "dryRun": bool(dry_run),
+        "actions": actions,
+        "counts": counts,
+    }
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -969,6 +1287,22 @@ def _cmd_classify(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_cleanup(args: argparse.Namespace) -> int:
+    repo = Path(args.repo).resolve()
+    report = cleanup_repository(
+        repo,
+        mode=args.mode,
+        artifact_id=args.artifact_id,
+        state_root=_state_root_arg(args.state_home),
+        stale_lock_seconds=args.stale_lock_seconds,
+        dry_run=args.dry_run,
+    )
+    _print(report)
+    # A sweep that safely preserved everything is still a success; only hard
+    # errors (raised RecoveryError/CommandError) map to a non-zero exit.
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Track and reconcile pack-created recovery artifacts.")
     parser.add_argument("--state-home", help="absolute user-local state directory")
@@ -997,6 +1331,14 @@ def build_parser() -> argparse.ArgumentParser:
     classify_parser = sub.add_parser("classify", help="reconcile receipts against Git (read-only)")
     classify_parser.add_argument("--repo", required=True)
     classify_parser.set_defaults(func=_cmd_classify)
+
+    cleanup_parser = sub.add_parser("cleanup", help="retire proven-safe artifacts (destructive, locked)")
+    cleanup_parser.add_argument("--repo", required=True)
+    cleanup_parser.add_argument("--mode", required=True, choices=CLEANUP_MODES)
+    cleanup_parser.add_argument("--artifact-id", help="required in owner mode: the exact artifact to retire")
+    cleanup_parser.add_argument("--stale-lock-seconds", type=int, default=DEFAULT_STALE_LOCK_SECONDS)
+    cleanup_parser.add_argument("--dry-run", action="store_true", help="prove and report without deleting anything")
+    cleanup_parser.set_defaults(func=_cmd_cleanup)
 
     return parser
 
