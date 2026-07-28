@@ -639,6 +639,99 @@ class WorkLoopTests(InstallTestCase):
         module.acquire_lock(lock_path, first, recover_stale=True)
         self.assertEqual(module.read_json(lock_path)["runId"], first["runId"])
 
+    def test_concurrent_stale_recovery_cannot_both_acquire(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        first, _state_path, lock_path = self.make_state(module, root, state_root)
+        stale = module.read_json(lock_path)
+        # Defeat the liveness guard (hostname + live pid) so the ancient
+        # heartbeat alone makes the lock genuinely stale.
+        stale["pid"] = 99999999
+        stale["hostname"] = "different-host"
+        stale["heartbeatAt"] = "2000-01-01T00:00:00Z"
+        module.atomic_write_json(lock_path, stale)
+
+        def other(run_id: str) -> dict:
+            return module.new_state(
+                module.repository_identity(root),
+                mode="backlog",
+                selector="all",
+                focus=module.normalize_focus(),
+                until="merge",
+                run_id=run_id,
+            )
+
+        second = other("run-2")
+        third = other("run-3")
+
+        real_is_stale = module.lock_is_stale
+        trip = {"done": False}
+
+        def racing_is_stale(lock, *, stale_after=module.DEFAULT_STALE_LOCK_SECONDS):
+            result = real_is_stale(lock, stale_after=stale_after)
+            if result and not trip["done"] and lock.get("runId") == first["runId"]:
+                # A competitor fully recovers and acquires in the window between
+                # this recoverer judging the lock stale and deleting it. Plain
+                # unlink-by-path would then delete run-3's fresh lock and let
+                # run-2 acquire too; identity-checked recovery must not.
+                trip["done"] = True
+                module.acquire_lock(lock_path, third, recover_stale=True)
+            return result
+
+        with mock.patch.object(module, "lock_is_stale", racing_is_stale):
+            with self.assertRaisesRegex(
+                module.WorkLoopError, "active work-loop lock owned by run run-3"
+            ):
+                module.acquire_lock(lock_path, second, recover_stale=True)
+
+        self.assertTrue(trip["done"])
+        self.assertEqual(module.read_json(lock_path)["runId"], "run-3")
+        # run-3 is the sole valid owner: it can still heartbeat and release.
+        module.require_lock(lock_path, "run-3")
+        module.release_lock(lock_path, "run-3")
+
+    def test_recover_locked_path_preserves_competitor_lock(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        _first, _state_path, lock_path = self.make_state(module, root, state_root)
+        # A competitor replaced the judged-stale lock with a fresh one under a
+        # new runId before this recoverer reached the delete step.
+        winner = module.read_json(lock_path)
+        winner["runId"] = "winner-run"
+        module.atomic_write_json(lock_path, winner)
+        before = lock_path.read_bytes()
+
+        module._recover_locked_path(
+            lock_path,
+            expected_run_id="stale-run",
+            context="stale work-loop lock",
+        )
+
+        self.assertTrue(lock_path.exists())
+        self.assertEqual(lock_path.read_bytes(), before)
+        self.assertEqual(module.read_json(lock_path)["runId"], "winner-run")
+        siblings = [p.name for p in lock_path.parent.iterdir()]
+        self.assertFalse(any(".recovering-" in name for name in siblings))
+
+    def test_recover_locked_path_removes_matching_stale_lock(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        _first, _state_path, lock_path = self.make_state(module, root, state_root)
+        run_id = module.read_json(lock_path)["runId"]
+
+        module._recover_locked_path(
+            lock_path,
+            expected_run_id=run_id,
+            context="stale work-loop lock",
+        )
+
+        self.assertFalse(lock_path.exists())
+        siblings = [p.name for p in lock_path.parent.iterdir()]
+        self.assertFalse(any(".recovering-" in name for name in siblings))
+
     def test_terminal_lock_diagnostics_distinguish_active_and_stale(self) -> None:
         module = self.load_module()
         root = self.make_repo()

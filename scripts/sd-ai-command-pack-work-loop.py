@@ -909,6 +909,63 @@ def lock_is_stale(
     return True
 
 
+def _recover_locked_path(
+    lock_path: Path,
+    *,
+    expected_run_id: str | None,
+    context: str,
+) -> None:
+    """Delete a lock previously judged stale or unreadable, verifying identity
+    at delete time.
+
+    A plain ``unlink`` by path races a concurrent recoverer: once one process
+    removes the stale lock and creates its own, a second recoverer's ``unlink``
+    would delete that fresh lock and let both runs proceed. Instead, atomically
+    rename the lock aside under a private name and delete it only while its
+    identity still matches what was judged — ``runId`` for a stale lock, or
+    unreadable for a malformed one. If a competitor already replaced the lock,
+    restore what was moved without clobbering the newer lock so the caller
+    re-observes it on the next attempt rather than recreating over it.
+    """
+    aside = lock_path.with_name(f"{lock_path.name}.recovering-{uuid.uuid4().hex}")
+    try:
+        os.rename(lock_path, aside)
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise WorkLoopError(f"cannot recover {context}: {error}") from error
+    try:
+        moved = read_json(aside)
+        validate_lock(moved)
+    except WorkLoopError:
+        matches = expected_run_id is None
+    else:
+        matches = expected_run_id is not None and moved.get("runId") == expected_run_id
+    if matches:
+        try:
+            aside.unlink()
+        except OSError as error:
+            raise WorkLoopError(f"cannot recover {context}: {error}") from error
+        return
+    restore_error: OSError | None = None
+    try:
+        os.link(aside, lock_path)
+    except FileExistsError:
+        pass
+    except OSError as error:
+        restore_error = error
+    try:
+        aside.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        restore_error = restore_error or error
+    if restore_error is not None:
+        raise WorkLoopError(
+            f"cannot recover {context}: {restore_error}"
+        ) from restore_error
+
+
 def acquire_lock(
     lock_path: Path,
     state: Mapping[str, Any],
@@ -956,12 +1013,11 @@ def acquire_lock(
                         "work-loop lock is unreadable or malformed; inspect it or retry with "
                         "--recover-stale-lock"
                     ) from error
-                try:
-                    lock_path.unlink()
-                except OSError as unlink_error:
-                    raise WorkLoopError(
-                        f"cannot recover unreadable work-loop lock: {unlink_error}"
-                    ) from unlink_error
+                _recover_locked_path(
+                    lock_path,
+                    expected_run_id=None,
+                    context="unreadable work-loop lock",
+                )
                 continue
             if current.get("runId") == state["runId"]:
                 current["heartbeatAt"] = utc_now()
@@ -975,12 +1031,11 @@ def acquire_lock(
                     f"repository has {article} {state_label} work-loop lock owned by "
                     f"run {current.get('runId')}; reconcile before recovery"
                 ) from None
-            try:
-                lock_path.unlink()
-            except OSError as error:
-                raise WorkLoopError(
-                    f"cannot recover stale work-loop lock: {error}"
-                ) from error
+            _recover_locked_path(
+                lock_path,
+                expected_run_id=current.get("runId"),
+                context="stale work-loop lock",
+            )
             continue
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             stream.write(_json_payload(payload))
@@ -1049,12 +1104,11 @@ def acquire_terminal_lock(
                     "repository has a stale terminal reconciliation lock; "
                     "retry with --recover-stale-lock"
                 ) from None
-            try:
-                lock_path.unlink()
-            except OSError as error:
-                raise WorkLoopError(
-                    f"cannot recover stale terminal reconciliation lock: {error}"
-                ) from error
+            _recover_locked_path(
+                lock_path,
+                expected_run_id=current.get("runId"),
+                context="stale terminal reconciliation lock",
+            )
             continue
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             stream.write(_json_payload(payload))
