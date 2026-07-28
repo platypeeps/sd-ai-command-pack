@@ -579,6 +579,225 @@ class RecoveryArtifactTests(InstallTestCase):
         with self.assertRaises(self.mod.RecoveryError):
             self.cleanup(root, mode="wipe-everything")
 
+    # -- pure helpers: validation, resolution, and proofs ----------------
+
+    def _valid_stash_receipt(self) -> dict:
+        return {
+            "schemaVersion": self.mod.SCHEMA_VERSION,
+            "artifactId": "abcd1234",
+            "type": "stash",
+            "repository": {"digest": "d" * 64, "label": "repo"},
+            "git": {"object": "abcdef1234", "subject": "s"},
+            "originalHead": "abcdef1234",
+        }
+
+    def _valid_worktree_receipt(self) -> dict:
+        return {
+            "schemaVersion": self.mod.SCHEMA_VERSION,
+            "artifactId": "abcd1234",
+            "type": "worktree",
+            "repository": {"digest": "d" * 64, "label": "repo"},
+            "git": {"path": "/some/where", "head": "abcdef1234"},
+            "originalHead": "abcdef1234",
+        }
+
+    def test_validate_receipt_accepts_valid_and_rejects_malformed(self) -> None:
+        m = self.mod
+        m.validate_receipt(self._valid_stash_receipt())  # no raise
+        m.validate_receipt(self._valid_worktree_receipt())  # no raise
+        stash_cases = [
+            {"schemaVersion": 2},
+            {"artifactId": "xyz"},
+            {"artifactId": 123},
+            {"type": "bomb"},
+            {"repository": {"label": "x"}},
+            {"repository": "nope"},
+            {"git": "nope"},
+            {"originalHead": "zz"},
+            {"originalHead": 5},
+            {"git": {"object": "nothex", "subject": "s"}},
+            {"secretToken": "leak"},
+        ]
+        for override in stash_cases:
+            receipt = self._valid_stash_receipt()
+            receipt.update(override)
+            with self.subTest(override=override), self.assertRaises(m.RecoveryError):
+                m.validate_receipt(receipt)
+        worktree_cases = [
+            {"git": {"head": "abcdef1234"}},  # no path
+            {"git": {"path": "/x", "head": "zz"}},  # bad head
+        ]
+        for override in worktree_cases:
+            receipt = self._valid_worktree_receipt()
+            receipt.update(override)
+            with self.subTest(override=override), self.assertRaises(m.RecoveryError):
+                m.validate_receipt(receipt)
+
+    def test_validate_worktree_containment_rejects_unsafe_paths(self) -> None:
+        root = self.make_repo()
+        m = self.mod
+        digest = m.repository_identity(root)["digest"]
+        base = m.worktree_base(digest, self.state_root)
+        base.mkdir(parents=True, exist_ok=True)
+        # A receipt with no path is rejected outright.
+        with self.assertRaises(m.RecoveryError):
+            m.validate_worktree_containment({"git": {}}, digest=digest, state_root=self.state_root)
+        # A path outside the pack recovery base escapes containment.
+        outside = Path(tempfile.mkdtemp(dir=self._tmp.name, prefix="escape-"))
+        with self.assertRaises(m.RecoveryError):
+            m.validate_worktree_containment(
+                {"git": {"path": str(outside)}}, digest=digest, state_root=self.state_root
+            )
+        # A symlink that resolves inside the base is still refused.
+        target = base / "real"
+        target.mkdir()
+        link = base / "link"
+        link.symlink_to(target)
+        with self.assertRaises(m.RecoveryError):
+            m.validate_worktree_containment(
+                {"git": {"path": str(link)}}, digest=digest, state_root=self.state_root
+            )
+
+    def test_parse_utc_covers_all_branches(self) -> None:
+        m = self.mod
+        self.assertIsNone(m.parse_utc(None))
+        self.assertIsNone(m.parse_utc(123))
+        self.assertIsNone(m.parse_utc("   "))
+        self.assertIsNone(m.parse_utc("not-a-timestamp"))
+        self.assertEqual(m.parse_utc("2026-07-28T12:00:00Z").utcoffset().total_seconds(), 0)
+        self.assertEqual(m.parse_utc("2026-07-28T12:00:00").utcoffset().total_seconds(), 0)
+        self.assertEqual(m.parse_utc("2026-07-28T12:00:00+02:00").hour, 10)  # normalized to UTC
+
+    def test_resolve_state_root_covers_platform_branches(self) -> None:
+        m = self.mod
+        env_key = m.STATE_HOME_ENV
+        # Explicit absolute override wins and is returned as-is.
+        self.assertEqual(m.resolve_state_root(environ={env_key: "/abs/state"}), Path("/abs/state"))
+        # A relative override is rejected.
+        with self.assertRaises(m.RecoveryError):
+            m.resolve_state_root(environ={env_key: "rel/state"})
+        # An absolute XDG_STATE_HOME gains the product subdirectory.
+        self.assertEqual(
+            m.resolve_state_root(environ={"XDG_STATE_HOME": "/xdg"}, home=Path("/home/u"), os_name="posix"),
+            Path("/xdg/sd-ai-command-pack"),
+        )
+        # A relative XDG value is ignored and the home default is used.
+        self.assertEqual(
+            m.resolve_state_root(environ={"XDG_STATE_HOME": "rel"}, home=Path("/home/u"), os_name="posix"),
+            Path("/home/u/.local/state/sd-ai-command-pack"),
+        )
+        # Windows uses LOCALAPPDATA when it is absolute.
+        self.assertEqual(
+            m.resolve_state_root(environ={"LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"}, os_name="nt"),
+            Path("C:/Users/u/AppData/Local/sd-ai-command-pack/state"),
+        )
+        # A relative LOCALAPPDATA is ignored and the home default is used.
+        self.assertEqual(
+            m.resolve_state_root(environ={"LOCALAPPDATA": "rel"}, home=Path("/home/u"), os_name="nt"),
+            Path("/home/u/.local/state/sd-ai-command-pack"),
+        )
+        # POSIX default location.
+        self.assertEqual(
+            m.resolve_state_root(environ={}, home=Path("/home/u"), os_name="posix"),
+            Path("/home/u/.local/state/sd-ai-command-pack"),
+        )
+        # A non-absolute home directory is rejected.
+        with self.assertRaises(m.RecoveryError):
+            m.resolve_state_root(environ={}, home=Path("rel-home"), os_name="posix")
+
+    def test_ensure_private_directory_rejects_symlink(self) -> None:
+        target = Path(tempfile.mkdtemp(dir=self._tmp.name, prefix="pd-"))
+        link = Path(self._tmp.name) / "pd-link"
+        link.symlink_to(target)
+        with self.assertRaises(self.mod.RecoveryError):
+            self.mod.ensure_private_directory(link)
+
+    def test_reject_secret_keys_recurses_into_lists(self) -> None:
+        with self.assertRaises(self.mod.RecoveryError):
+            self.mod._reject_secret_keys({"items": [{"nested": {"password": "x"}}]})
+        # A list with no secret-like keys is accepted.
+        self.mod._reject_secret_keys({"items": [{"ok": 1}, "plain"]})
+
+    def test_worktree_proof_flags_missing_path(self) -> None:
+        root = self.make_repo()
+        receipt = {"git": {"head": self.head(root)}, "cleanupPredicate": {}}
+        proof = self.mod.worktree_cleanup_proof(root, receipt, Path(self._tmp.name) / "gone-wt")
+        self.assertFalse(proof["safe"])
+        self.assertIn("missing", proof["detail"])
+
+    def test_stash_proof_flags_absent_and_unique(self) -> None:
+        root = self.make_repo()
+        absent = self.mod.stash_cleanup_proof(
+            root, {"git": {"object": "abcdef1234"}, "cleanupPredicate": {}}, stashes={}
+        )
+        self.assertFalse(absent["safe"])
+        self.assertIn("no longer present", absent["detail"])
+        # A present stash with unique content is preserve-only.
+        oid = self.make_stash(root, "sd-ai-command-pack recovery: unique")
+        present = self.mod.stash_cleanup_proof(
+            root, {"git": {"object": oid}, "cleanupPredicate": {}}, stashes={oid: {"ref": "stash@{0}"}}
+        )
+        self.assertFalse(present["safe"])
+        self.assertIn("not provably redundant", present["detail"])
+
+    # -- CLI: worktree registration, predicates, and cleanup -------------
+
+    def test_cli_register_worktree_then_classify(self) -> None:
+        root = self.make_repo()
+        wt = self.add_worktree(root, "cli-wt")
+        head = self.git_output(wt, "rev-parse", "HEAD")
+        code, out = self._cli(
+            "--state-home", str(self.state_root),
+            "register", "--repo", str(root), "--type", "worktree",
+            "--worktree-path", str(wt), "--head", head,
+            "--created-by", "sd-recover", "--run-id", "r-wt",
+            "--purpose", "isolated repair", "--original-head", self.head(root),
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["type"], "worktree")
+
+        code, out = self._cli("--state-home", str(self.state_root), "classify", "--repo", str(root))
+        self.assertEqual(code, 0)
+        report = json.loads(out)
+        self.assertEqual([r["type"] for r in report["receipts"]], ["worktree"])
+
+    def test_cli_register_stash_with_predicate_flags(self) -> None:
+        root = self.make_repo()
+        oid = self.make_stash(root, "sd-ai-command-pack recovery: guard")
+        superseding = self.head(root)
+        code, out = self._cli(
+            "--state-home", str(self.state_root),
+            "register", "--repo", str(root), "--type", "stash",
+            "--object", oid, "--created-by", "sd-recover", "--run-id", "r-pred",
+            "--purpose", "wip", "--original-head", self.head(root),
+            "--superseded-by", superseding, "--retain-commit",
+        )
+        self.assertEqual(code, 0)
+        rid = json.loads(out)["registered"]
+        stored = json.loads((self.receipt_dir(root) / f"{rid}.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored["cleanupPredicate"]["supersededBy"], superseding)
+        self.assertTrue(stored["cleanupPredicate"]["retainCommit"])
+
+    def test_cli_cleanup_dry_run_reports_without_deleting(self) -> None:
+        root = self.make_repo()
+        oid, _ = self.redundant_stash_receipt(root)
+        code, out = self._cli(
+            "--state-home", str(self.state_root),
+            "cleanup", "--repo", str(root), "--mode", "housekeeping", "--dry-run",
+        )
+        self.assertEqual(code, 0)
+        report = json.loads(out)
+        self.assertTrue(report["dryRun"])
+        self.assertIn(oid, self.stash_oids(root))  # nothing deleted
+
+    def test_cli_cleanup_owner_requires_artifact_id(self) -> None:
+        root = self.make_repo()
+        code, _ = self._cli(
+            "--state-home", str(self.state_root),
+            "cleanup", "--repo", str(root), "--mode", "owner",
+        )
+        self.assertEqual(code, 2)  # RecoveryError -> exit 2
+
 
 if __name__ == "__main__":
     unittest.main()
