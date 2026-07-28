@@ -133,6 +133,129 @@ class HousekeepingTests(InstallTestCase):
         self.assertEqual(result.returncode, 2, result.stdout)
         self.assertIn("requires a path", result.stdout)
 
+    def _run_receipt_validator(self, receipt_path: str):
+        """Exercise only the extracted validate_finish_work_receipt function.
+
+        Hermetic: no git, gh, network, or KB access — the awk range pulls just
+        the function body, so acceptance never proceeds into side-effecting
+        housekeeping stages.
+        """
+        script = str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh")
+        probe = (
+            f'eval "$(awk \'/^validate_finish_work_receipt\\(\\)/,/^}}/\' {script})";'
+            'validate_finish_work_receipt "$RECEIPT"'
+        )
+        return subprocess.run(
+            [self._bash_path, "-c", probe],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env={**os.environ, "RECEIPT": receipt_path},
+            check=False,
+        )
+
+    def test_finish_work_receipt_accepts_readable_regular_file(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            receipt = Path(temp_dir) / "receipt.json"
+            receipt.write_text("{}\n", encoding="utf-8")
+            result = self._run_receipt_validator(str(receipt))
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(result.stdout, "")
+
+    def test_finish_work_receipt_rejects_missing_path(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            missing = Path(temp_dir) / "absent.json"
+            result = self._run_receipt_validator(str(missing))
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("path does not exist", result.stdout)
+            # Stable diagnostic: the host path is never echoed back.
+            self.assertNotIn(str(missing), result.stdout)
+
+    def test_finish_work_receipt_rejects_directory(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_receipt_validator(temp_dir)
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("not a directory", result.stdout)
+            self.assertNotIn(temp_dir, result.stdout)
+
+    def test_finish_work_receipt_rejects_symlink(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "real.json"
+            target.write_text("{}\n", encoding="utf-8")
+            link = Path(temp_dir) / "link.json"
+            link.symlink_to(target)
+            result = self._run_receipt_validator(str(link))
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("not a symlink", result.stdout)
+
+    def test_finish_work_receipt_rejects_broken_symlink_before_existence(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            link = Path(temp_dir) / "dangling.json"
+            link.symlink_to(Path(temp_dir) / "nowhere.json")
+            result = self._run_receipt_validator(str(link))
+            # Symlink rejection precedes the existence check.
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("not a symlink", result.stdout)
+
+    def test_finish_work_receipt_rejects_non_regular_file(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("mkfifo is not available on this platform")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fifo = Path(temp_dir) / "pipe.json"
+            os.mkfifo(fifo)
+            result = self._run_receipt_validator(str(fifo))
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("must be a regular file", result.stdout)
+
+    def test_finish_work_receipt_rejects_unreadable_file(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("root bypasses filesystem read permissions")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            receipt = Path(temp_dir) / "secret.json"
+            receipt.write_text("{}\n", encoding="utf-8")
+            os.chmod(receipt, 0)
+            try:
+                result = self._run_receipt_validator(str(receipt))
+            finally:
+                os.chmod(receipt, 0o600)
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("is not readable", result.stdout)
+
+    def test_finish_work_receipt_rejected_in_main_before_side_effects(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = subprocess.run(
+                [
+                    self._bash_path,
+                    str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                    "--finish-work-receipt",
+                    temp_dir,
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("not a directory", result.stdout)
+            # Fail-fast: never reaches the branch/KB/network phase.
+            self.assertNotIn("start branch", result.stdout)
+
     def test_housekeeping_default_branch_ignores_gh_null(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")

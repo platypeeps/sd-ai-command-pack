@@ -43,6 +43,8 @@ Options:
   --finish-work-receipt <path>
                          Supply the retained schema-version-1 JSON receipt from
                          SD finish-work for independent exact-head validation.
+                         Must be an existing readable regular file; directories,
+                         symlinks, and other non-regular paths are rejected.
   --dependency-pr <number> Internal sd-update-deps mode: evaluate and merge one
                            dependency PR without Trellis finish-work evidence.
   --merge-strategy <name> Merge strategy for ready open PRs: merge, squash, or rebase. Defaults to merge.
@@ -1169,6 +1171,35 @@ run_self_test() {
   return 0
 }
 
+# Validate a supplied --finish-work-receipt path before any KB refresh, network
+# access, Git mutation, or merge-eligibility work. Require an existing readable
+# regular file; reject symlinks, missing paths, directories, and other
+# non-regular files. Diagnostics are stable and never echo the path, so no
+# host-specific or receipt-derived material leaks to stderr.
+validate_finish_work_receipt() {
+  local path="$1"
+  if [ -L "$path" ]; then
+    printf 'error: --finish-work-receipt must be a regular file, not a symlink\n' >&2
+    exit 2
+  fi
+  if [ ! -e "$path" ]; then
+    printf 'error: --finish-work-receipt path does not exist\n' >&2
+    exit 2
+  fi
+  if [ -d "$path" ]; then
+    printf 'error: --finish-work-receipt must be a regular file, not a directory\n' >&2
+    exit 2
+  fi
+  if [ ! -f "$path" ]; then
+    printf 'error: --finish-work-receipt must be a regular file\n' >&2
+    exit 2
+  fi
+  if [ ! -r "$path" ]; then
+    printf 'error: --finish-work-receipt file is not readable\n' >&2
+    exit 2
+  fi
+}
+
 main() {
   local repo_root
 
@@ -1186,6 +1217,11 @@ main() {
     exit 2
   fi
   cd "$repo_root"
+
+  if [ -n "$FINISH_WORK_RECEIPT" ]; then
+    validate_finish_work_receipt "$FINISH_WORK_RECEIPT"
+  fi
+
   prepare_tool_cache_env || exit 5
 
   if [ "$JSON_OUTPUT" -eq 1 ]; then
