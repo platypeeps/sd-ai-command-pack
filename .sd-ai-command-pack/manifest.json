@@ -226,6 +226,13 @@
     {
       "platform": "shared",
       "kind": "script",
+      "source": "templates/scripts/sd-ai-command-pack-recovery-artifacts.py",
+      "target": "scripts/sd-ai-command-pack-recovery-artifacts.py",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "script",
       "source": "templates/scripts/sd-ai-command-pack-work-loop.py",
       "target": "scripts/sd-ai-command-pack-work-loop.py",
       "install": "always"
