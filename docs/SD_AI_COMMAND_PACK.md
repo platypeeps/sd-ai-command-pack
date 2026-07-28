@@ -277,7 +277,14 @@ it. Use a separate request to execute the recommendation.
    recorder remains in the path. Every acceptance criterion is satisfied before
    archive; merge and cleanup are the task's `Post-archive handoff`, never
    unchecked acceptance criteria. The shared boundary and authoring examples live
-   in `sd-help/references/completion-lifecycle.md`.
+   in `sd-help/references/completion-lifecycle.md`. The read-only `pre-archive`
+   bookkeeping validator enforces this: a task whose canonical `Acceptance
+   Criteria` section still has an unchecked required item fails closed with a
+   stable `pre_archive_acceptance_incomplete` reason before Trellis mutates
+   anything, and malformed, duplicated, or checkbox-shaped handoff structures
+   fail with `pre_archive_acceptance_malformed`. Prose `Post-archive handoff`
+   bullets and unchecked boxes outside the canonical section are never mistaken
+   for incomplete criteria.
 17. After the PR merges, run the housekeeping command to get back to the default
    branch, prune/delete the merged development stream, and see the condensed
    clean-state/anomaly report.

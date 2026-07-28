@@ -33,6 +33,18 @@ const MAX_BOOKKEEPING_GIT_PATHSPEC_BYTES = 8 * 1024;
 const MAX_BOOKKEEPING_SUCCESSOR_COMMITS = 50;
 const MAX_BOOKKEEPING_ANCHOR_SEARCH_COMMITS = 100;
 const BOOKKEEPING_SCHEMA_VERSION = 1;
+// Canonical lifecycle headings defined by the completion-versus-housekeeping
+// contract (07-28-clarify-completion-housekeeping-obligations). Matched after
+// case-folding and whitespace collapse; both are level-agnostic ATX headings.
+const CANONICAL_ACCEPTANCE_HEADING = 'acceptance criteria';
+const CANONICAL_POST_ARCHIVE_HEADING = 'post-archive handoff';
+const MAX_BOOKKEEPING_ACCEPTANCE_ITEMS = 500;
+const MAX_BOOKKEEPING_ACCEPTANCE_FINDINGS = 10;
+const ATX_HEADING_RE = /^(#{1,6})[ \t]+(.*\S)[ \t]*$/;
+const ACCEPTANCE_LIST_ITEM_RE = /^[ \t]*[-*][ \t]+(.*)$/;
+const ACCEPTANCE_CHECKBOX_RE = /^\[([ xX])\](.*)$/;
+const POST_ARCHIVE_CHECKBOX_RE = /^[ \t]*[-*][ \t]+\[[ xX]\]/;
+const CODE_FENCE_RE = /^[ \t]{0,3}(`{3,}|~{3,})/;
 const TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review', 'completed']);
 const ACTIVE_TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review']);
 const TRELLIS_TASK_PRIORITIES = new Set(['P0', 'P1', 'P2', 'P3']);
@@ -696,6 +708,9 @@ function validateBookkeepingTaskDirectory(taskDir, options) {
       add('task_prd_empty', prdFile, 'task PRD must contain substantive content');
     }
     validateBookkeepingTextWhitespace(prdFile, prdLoaded.text, add);
+    if (completionReady && prdLoaded.text.trim().length > 0) {
+      validateBookkeepingAcceptanceReadiness(prdFile, prdLoaded.text, add);
+    }
   }
   validateBookkeepingTextWhitespace(taskFile, taskLoaded.text, add);
   validateBookkeepingTaskContexts(taskDir, record, add);
@@ -792,6 +807,176 @@ function validateBookkeepingTextWhitespace(file, text, add) {
       add('bookkeeping_whitespace_invalid', file, `line ${index + 1} has trailing whitespace`);
     }
   });
+}
+
+function stripBookkeepingLineEnding(line) {
+  return line.endsWith('\r') ? line.slice(0, -1) : line;
+}
+
+function normalizeBookkeepingHeadingText(text) {
+  return text.trim().toLowerCase().replace(/[ \t]+/g, ' ');
+}
+
+// Mark every line that lives inside a fenced code block so Markdown examples of
+// acceptance checkboxes or lifecycle headings (common in tooling PRDs) are not
+// mistaken for the task's own criteria. Fences open and close on ``` or ~~~ of
+// matching kind and at least the opening length.
+function computeBookkeepingCodeFenceMask(lines) {
+  const mask = new Array(lines.length).fill(false);
+  let fence = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = stripBookkeepingLineEnding(lines[index]);
+    const fenceMatch = CODE_FENCE_RE.exec(line);
+    if (fence) {
+      mask[index] = true;
+      if (fenceMatch && fenceMatch[1][0] === fence[0] && fenceMatch[1].length >= fence.length) {
+        fence = null;
+      }
+      continue;
+    }
+    if (fenceMatch) {
+      fence = fenceMatch[1];
+      mask[index] = true;
+    }
+  }
+  return mask;
+}
+
+// Locate the canonical lifecycle sections in a bounded PRD. Each span covers the
+// body lines (start inclusive, end exclusive) between a canonical heading and
+// the next heading of equal-or-higher rank. Deterministic and read-only.
+function collectBookkeepingLifecycleSections(lines, codeMask) {
+  const headings = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (codeMask[index]) continue;
+    const match = ATX_HEADING_RE.exec(stripBookkeepingLineEnding(lines[index]));
+    if (match) {
+      headings.push({
+        index,
+        level: match[1].length,
+        text: normalizeBookkeepingHeadingText(match[2]),
+      });
+    }
+  }
+  const spans = { acceptance: [], postArchive: [] };
+  headings.forEach((heading, position) => {
+    let key = null;
+    if (heading.text === CANONICAL_ACCEPTANCE_HEADING) key = 'acceptance';
+    else if (heading.text === CANONICAL_POST_ARCHIVE_HEADING) key = 'postArchive';
+    if (!key) return;
+    let end = lines.length;
+    for (let next = position + 1; next < headings.length; next += 1) {
+      if (headings[next].level <= heading.level) {
+        end = headings[next].index;
+        break;
+      }
+    }
+    spans[key].push({ start: heading.index + 1, end });
+  });
+  return spans;
+}
+
+// Grade the checkbox list items inside the acceptance-criteria body. Prose
+// bullets, continuation lines, and fenced code are ignored; only checkbox-form
+// items are graded. Bounded so a pathological PRD cannot exhaust memory.
+function scanBookkeepingAcceptanceItems(lines, span, codeMask) {
+  const unchecked = [];
+  const malformed = [];
+  let scanned = 0;
+  for (let index = span.start; index < span.end; index += 1) {
+    if (scanned >= MAX_BOOKKEEPING_ACCEPTANCE_ITEMS) break;
+    if (codeMask[index]) continue;
+    const item = ACCEPTANCE_LIST_ITEM_RE.exec(stripBookkeepingLineEnding(lines[index]));
+    if (!item || item[1].charAt(0) !== '[') continue;
+    scanned += 1;
+    const checkbox = ACCEPTANCE_CHECKBOX_RE.exec(item[1]);
+    if (!checkbox) {
+      malformed.push({ line: index + 1, reason: 'uses invalid acceptance checkbox syntax' });
+      continue;
+    }
+    const marker = checkbox[1];
+    const rest = checkbox[2];
+    if (rest.length > 0 && !/^[ \t]/.test(rest)) {
+      malformed.push({ line: index + 1, reason: 'is missing the space after its checkbox' });
+      continue;
+    }
+    if (marker !== ' ') continue;
+    if (rest.trim().length === 0) {
+      malformed.push({ line: index + 1, reason: 'is an unchecked criterion with no description' });
+    } else {
+      unchecked.push(index + 1);
+    }
+  }
+  return { unchecked, malformed };
+}
+
+// Enforce the completion-versus-housekeeping lifecycle contract at the
+// pre-archive boundary: every required acceptance criterion must be checked
+// before Trellis archives the task, and post-archive obligations must be prose
+// so they are never mistaken for incomplete criteria. Absence of the canonical
+// section is intentionally permissive; lightweight and pre-contract PRDs still
+// pass. Read-only: it never rewrites the PRD or checks a box.
+function validateBookkeepingAcceptanceReadiness(prdFile, text, add) {
+  const lines = text.split('\n');
+  const codeMask = computeBookkeepingCodeFenceMask(lines);
+  const spans = collectBookkeepingLifecycleSections(lines, codeMask);
+
+  if (spans.acceptance.length > 1) {
+    add(
+      'pre_archive_acceptance_malformed',
+      prdFile,
+      `PRD declares ${spans.acceptance.length} "Acceptance Criteria" sections; the completion contract allows exactly one`,
+    );
+  }
+  if (spans.postArchive.length > 1) {
+    add(
+      'pre_archive_acceptance_malformed',
+      prdFile,
+      `PRD declares ${spans.postArchive.length} "Post-archive handoff" sections; the completion contract allows exactly one`,
+    );
+  }
+
+  if (spans.acceptance.length === 1) {
+    const { unchecked, malformed } = scanBookkeepingAcceptanceItems(
+      lines,
+      spans.acceptance[0],
+      codeMask,
+    );
+    for (const offender of malformed.slice(0, MAX_BOOKKEEPING_ACCEPTANCE_FINDINGS)) {
+      add(
+        'pre_archive_acceptance_malformed',
+        prdFile,
+        `acceptance criteria line ${offender.line} ${offender.reason}`,
+      );
+    }
+    if (unchecked.length > 0) {
+      const preview = unchecked.slice(0, MAX_BOOKKEEPING_ACCEPTANCE_FINDINGS).join(', ');
+      add(
+        'pre_archive_acceptance_incomplete',
+        prdFile,
+        `acceptance criteria retain ${unchecked.length} unchecked required item(s) at line(s) ${preview}; every criterion must be satisfied and checked before archive`,
+      );
+    }
+  }
+
+  for (const span of spans.postArchive) {
+    let flagged = 0;
+    for (
+      let index = span.start;
+      index < span.end && flagged < MAX_BOOKKEEPING_ACCEPTANCE_FINDINGS;
+      index += 1
+    ) {
+      if (codeMask[index]) continue;
+      if (POST_ARCHIVE_CHECKBOX_RE.test(stripBookkeepingLineEnding(lines[index]))) {
+        flagged += 1;
+        add(
+          'pre_archive_acceptance_malformed',
+          prdFile,
+          `post-archive handoff line ${index + 1} uses an acceptance checkbox; downstream obligations must be prose bullets, not criteria`,
+        );
+      }
+    }
+  }
 }
 
 function validateBookkeepingFinalBundle(options, evidence, add, runtime = {}) {
