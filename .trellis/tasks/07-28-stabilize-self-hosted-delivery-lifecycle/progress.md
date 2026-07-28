@@ -11,8 +11,8 @@ local checks/review have completed.
 - Lifecycle activation: d79ba90 — umbrella + all 11 work packages set to
   in_progress and assigned the shared branch; investigation and rollout tasks
   remain planning.
-- Current package: 2 / 11 — 07-28-decide-housekeeping-result-schema-compatibility (not started)
-- Last verified commit: 2616735
+- Current package: 3 / 11 — 07-24-support-planning-only-pr-finalization (not started)
+- Last verified commit: 78b7b05
 - Cumulative matrix: not run
 - Pull request: none
 - Finalization receipt: none
@@ -27,7 +27,7 @@ local checks/review have completed.
 | Order | Task | State | Commit | Focused checks | Local review |
 | ---: | --- | --- | --- | --- | --- |
 | 1 | `07-28-clarify-completion-housekeeping-obligations` | done | 2616735 | unittest (completion_lifecycle 9, sdlc_commands, help_command, surface_generation, generated_parity, pack_drift, install) + ruff + mypy green | self-review clean; candidate-ledger digest deferred to cumulative integration |
-| 2 | `07-28-decide-housekeeping-result-schema-compatibility` | pending | — | — | — |
+| 2 | `07-28-decide-housekeeping-result-schema-compatibility` | done | 78b7b05 | test_housekeeping_result (15, +3 migration) + generated_parity + pack_drift + ruff + mypy green | self-review clean; explicit no-alias migration, reconciled with parent R6 |
 | 3 | `07-24-support-planning-only-pr-finalization` | pending | — | — | — |
 | 4 | `07-28-validate-finish-work-receipt-path` | pending | — | — | — |
 | 5 | `07-28-route-housekeeping-by-pr-lifecycle-state` | pending | — | — | — |
@@ -39,6 +39,17 @@ local checks/review have completed.
 | 11 | `07-28-standardize-environment-blocked-recovery-evidence` | pending | — | — | — |
 
 ## Last checkpoint
+
+Package 2 (`07-28-decide-housekeeping-result-schema-compatibility`) complete at
+commit `78b7b05`. Consumer inventory proved no shipped/documented/tested consumer
+reads `invocation.finishWorkHead`; decided an explicit documented in-major
+migration (schema stays 1, no alias, no deprecation window), consistent with
+parent task 07-24 R6. Recorded the decision in the task `decision.md`, documented
+the retirement + verified replacement in the result composer docstring
+(template + byte-identical root), and pinned it with 3 new tests (absence with
+and without a receipt, verified head relocated to `identity.finishWork.headOid`,
+restored `--finish-work-head` rejected). Checks: `test_housekeeping_result` (15),
+`test_generated_parity` + `test_pack_drift` (56), ruff, mypy all green.
 
 Package 1 (`07-28-clarify-completion-housekeeping-obligations`) complete at
 commit `2616735`. Added the shared `sd-help/references/completion-lifecycle.md`
@@ -56,5 +67,5 @@ cumulative integration: `candidate-validation.json` `payloadDigest` (refreshed
 by release preparation), so `make generate` surface-check still reports the
 candidate-ledger digest as stale until then.
 
-Next: implement work package 2,
-`07-28-decide-housekeeping-result-schema-compatibility`.
+Next: implement work package 3,
+`07-24-support-planning-only-pr-finalization`.
