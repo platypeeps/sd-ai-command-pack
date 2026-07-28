@@ -1733,3 +1733,42 @@ Added make release-prep to generate and self-sync surfaces, refresh the spec KB,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 245: Recover preserved Trellis task drafts
+
+**Date**: 2026-07-27
+**Task**: Recover preserved Trellis task drafts
+**Branch**: `codex/recover-preserved-task-drafts`
+
+### Summary
+
+Recovered the durable planning work from the preserved stash, removed obsolete drafts, and published a clean reviewed planning-only pull request.
+
+### Main Changes
+
+- Recovered the fleet PR audit-scope task and consolidated the upstream Trellis read-fallback findings into one parked task.
+- Discarded superseded or invalid drafts and removed generated _example rows from the recovered task context files.
+- Published PR #268 with generated-scope metadata and completed one clean Copilot review round.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9749002` | chore(task): recover preserved task drafts |
+| `a2345db` | fix(task): remove generated context scaffolds |
+
+### Testing
+
+- [OK] Both recovered Trellis task directories validated with zero context entries.
+- [OK] Publication preflight passed with zero failures; the two-task advisory was dispositioned as one stash-recovery outcome.
+- [OK] sd-check passed 8 of 8 checks with a clean state guard; GitHub CI passed 7 checks with 2 intentional skips.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
