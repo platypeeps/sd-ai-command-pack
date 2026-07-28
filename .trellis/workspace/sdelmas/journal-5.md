@@ -1813,3 +1813,42 @@ Prepared and reviewed the sd-ai-command-pack 0.55.5 Gemini settings classifier p
 ### Next Steps
 
 - None - task complete
+
+
+## Session 247: Republish bookkeeping CI fast lane on linear history
+
+**Date**: 2026-07-27
+**Task**: Republish bookkeeping CI fast lane on linear history
+**Branch**: `codex/republish-bookkeeping-ci-fast-lane-linear`
+
+### Summary
+
+Replayed the reviewed bookkeeping-only CI fast lane onto current main with linear history, preserved exact functional content, and completed both Trellis tasks.
+
+### Main Changes
+
+- Replayed nine functional files byte-for-byte from reviewed PR #270 head 3d1a827 without its merge or obsolete bookkeeping history.
+- Bound and archived both the original fast-lane task and the linear-recovery task in one completion range.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b16d9e69869d7715185372cff7d041cc85fe1f85` | feat: republish bookkeeping CI fast lane linearly |
+| `6d0d4532bab7c26c51a15b4d256654c39fa3573b` | chore: bind recovery tasks to linear branch |
+
+### Testing
+
+- [OK] 31 focused classifier, workflow, generated-parity, and release-ledger tests passed.
+- [OK] actionlint v1.7.7 passed for .github/workflows/tests.yml.
+- [OK] make check passed, including unit coverage, Ruff, mypy, Zizmor, review preflight, install audit, KB freshness, and shipped-surface closure.
+- [OK] Exact-head sd-check passed 8/8 at 6d0d453 with an unchanged state guard.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Publish and review the linear replacement PR; close PR #270 only after the replacement is green, review-clean, and backed by a valid exact-head completion receipt.
