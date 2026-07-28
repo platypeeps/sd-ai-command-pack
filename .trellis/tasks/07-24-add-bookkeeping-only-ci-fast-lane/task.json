@@ -3,7 +3,7 @@
   "name": "add-bookkeeping-only-ci-fast-lane",
   "title": "Add a bookkeeping-only CI fast lane",
   "description": "Reduce redundant CI cost and merge latency for exact-head finish-work task/archive/journal successors without weakening branch protection, metadata validation, or fail-closed full-CI behavior.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -31,6 +31,6 @@
     "tests/test_review_preflight.py",
     "tests/test_generated_parity.py"
   ],
-  "notes": "Planning is complete pending user review and captures the observed PR #243 duplicate full-CI cycle. Implementation is not started and must preserve exact-head CI, review, and housekeeping gates.",
+  "notes": "Implemented the prior-head classifier, canonical bookkeeping validation lane, mode-strict CI Result aggregate, full-only auto-tag guard, contributor/spec contract, and focused classifier/workflow tests. The reviewed PR #270 head was green and review-clean, but its exact-head finish-work receipt rejected a merge commit in successor history. The validated functional content is being republished byte-identically from current main on the linear recovery branch without rewriting PR #270.",
   "meta": {}
 }

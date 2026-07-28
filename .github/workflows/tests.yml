@@ -5,8 +5,6 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - ".trellis/workspace/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,7 +14,249 @@ permissions:
   contents: read
 
 jobs:
+  ci-scope:
+    name: CI scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+    outputs:
+      mode: ${{ steps.classify.outputs.mode }}
+      reason: ${{ steps.classify.outputs.reason }}
+      before_sha: ${{ steps.classify.outputs.before_sha }}
+      after_sha: ${{ steps.classify.outputs.after_sha }}
+      validation_mode: ${{ steps.classify.outputs.validation_mode }}
+      evidence_run_id: ${{ steps.classify.outputs.evidence_run_id }}
+      evidence_check_run_id: ${{ steps.classify.outputs.evidence_check_run_id }}
+      evidence_scope: ${{ steps.classify.outputs.evidence_scope }}
+
+    steps:
+      - name: Check out exact event head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Classify exact-head CI scope
+        id: classify
+        env:
+          AFTER_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BEFORE_SHA: ${{ github.event.before || '' }}
+          EVENT_ACTION: ${{ github.event.action || '' }}
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          PROTECTED_REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          result_file="$RUNNER_TEMP/bookkeeping-ci-scope.json"
+          classifier_file="$RUNNER_TEMP/bookkeeping-ci-scope.py"
+          runs_file="$RUNNER_TEMP/bookkeeping-ci-runs.json"
+          checks_file="$RUNNER_TEMP/bookkeeping-ci-checks.json"
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            evidence_scope="pull_request:${PR_NUMBER:-unknown}"
+          else
+            evidence_scope="ref:${PROTECTED_REF:-unknown}"
+          fi
+
+          write_full_result() {
+            local reason="$1"
+            jq -cn \
+              --arg before "$BEFORE_SHA" \
+              --arg after "$AFTER_SHA" \
+              --arg reason "$reason" \
+              --arg scope "$evidence_scope" \
+              '{
+                schemaVersion: 1,
+                kind: "bookkeeping-ci-scope",
+                mode: "full",
+                reasonCode: $reason,
+                beforeSha: (if ($before | test("^[0-9a-f]{40}$")) then $before else null end),
+                afterSha: (if ($after | test("^[0-9a-f]{40}$")) then $after else null end),
+                evidenceRunId: null,
+                evidenceCheckRunId: null,
+                evidenceScope: $scope,
+                validationMode: "none",
+                commitCount: 0,
+                changedPaths: [],
+                disallowedPaths: []
+              }' >"$result_file"
+          }
+
+          publish_result() {
+            jq -e \
+              --arg before "$BEFORE_SHA" \
+              --arg after "$AFTER_SHA" \
+              '.schemaVersion == 1
+               and .kind == "bookkeeping-ci-scope"
+               and (.mode == "full" or .mode == "bookkeeping")
+               and ((.reasonCode | type) == "string")
+               and (.reasonCode | test("^[a-z0-9_]{1,80}$"))
+               and (.validationMode == "none" or .validationMode == "planning" or .validationMode == "completion")
+               and ((.evidenceScope | type) == "string")
+               and (.evidenceScope | test("^[A-Za-z0-9_:/.-]{1,160}$"))
+               and (if .mode == "bookkeeping" then .beforeSha == $before and .afterSha == $after else true end)
+               and (.evidenceRunId == null or (((.evidenceRunId | type) == "number") and .evidenceRunId > 0 and .evidenceRunId == (.evidenceRunId | floor)))
+               and (.evidenceCheckRunId == null or (((.evidenceCheckRunId | type) == "number") and .evidenceCheckRunId > 0 and .evidenceCheckRunId == (.evidenceCheckRunId | floor)))' \
+              "$result_file" >/dev/null
+            {
+              printf 'mode=%s\n' "$(jq -r '.mode' "$result_file")"
+              printf 'reason=%s\n' "$(jq -r '.reasonCode' "$result_file")"
+              printf 'before_sha=%s\n' "$(jq -r '.beforeSha // ""' "$result_file")"
+              printf 'after_sha=%s\n' "$(jq -r '.afterSha // ""' "$result_file")"
+              printf 'validation_mode=%s\n' "$(jq -r '.validationMode' "$result_file")"
+              printf 'evidence_run_id=%s\n' "$(jq -r '.evidenceRunId // ""' "$result_file")"
+              printf 'evidence_check_run_id=%s\n' "$(jq -r '.evidenceCheckRunId // ""' "$result_file")"
+              printf 'evidence_scope=%s\n' "$(jq -r '.evidenceScope' "$result_file")"
+            } >>"$GITHUB_OUTPUT"
+          }
+
+          select_full() {
+            write_full_result "$1"
+            publish_result
+            exit 0
+          }
+
+          write_full_result "bootstrap_full"
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$EVENT_ACTION" != "synchronize" ]; then
+            select_full "pull_request_action_not_synchronize"
+          fi
+          if [ "$EVENT_NAME" != "pull_request" ] && [ "$EVENT_NAME" != "push" ]; then
+            select_full "event_not_supported"
+          fi
+          if ! [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] || ! [[ "$AFTER_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            select_full "event_commit_identity_invalid"
+          fi
+
+          if ! classifier_record="$(git ls-tree "$BEFORE_SHA" -- .github/scripts/bookkeeping_ci_scope.py 2>/dev/null)"; then
+            select_full "prior_classifier_unavailable"
+          fi
+          if [ -z "$classifier_record" ]; then
+            select_full "prior_classifier_missing"
+          fi
+          read -r classifier_mode classifier_type _ classifier_path <<<"$classifier_record"
+          if [ "$classifier_mode" != "100644" ] || [ "$classifier_type" != "blob" ] || [ "$classifier_path" != ".github/scripts/bookkeeping_ci_scope.py" ]; then
+            select_full "prior_classifier_unsafe"
+          fi
+          if ! git show "$BEFORE_SHA:.github/scripts/bookkeeping_ci_scope.py" >"$classifier_file"; then
+            select_full "prior_classifier_unavailable"
+          fi
+          if ! PYTHONPYCACHEPREFIX="$RUNNER_TEMP/python-cache" python3 -m py_compile "$classifier_file"; then
+            select_full "prior_classifier_invalid"
+          fi
+
+          evidence_available=1
+          if ! gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/tests.yml/runs?head_sha=${BEFORE_SHA}&status=completed&per_page=20" \
+            >"$runs_file"; then
+            evidence_available=0
+            printf '%s\n' '{"workflow_runs":[]}' >"$runs_file"
+          fi
+          if ! gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/commits/${BEFORE_SHA}/check-runs?per_page=100" \
+            >"$checks_file"; then
+            evidence_available=0
+            printf '%s\n' '{"check_runs":[]}' >"$checks_file"
+          fi
+
+          classifier_args=(
+            --repo .
+            --event-name "$EVENT_NAME"
+            --event-action "$EVENT_ACTION"
+            --before-sha "$BEFORE_SHA"
+            --after-sha "$AFTER_SHA"
+            --protected-ref "$PROTECTED_REF"
+            --runs-json "$runs_file"
+            --checks-json "$checks_file"
+          )
+          if [ -n "$PR_NUMBER" ]; then
+            classifier_args+=(--pr-number "$PR_NUMBER")
+          fi
+          if [ "$evidence_available" -eq 1 ]; then
+            classifier_args+=(--evidence-available)
+          else
+            classifier_args+=(--no-evidence-available)
+          fi
+          python3 "$classifier_file" "${classifier_args[@]}" >"$result_file"
+          publish_result
+
+      - name: Validate bookkeeping head
+        id: bookkeeping-validation
+        if: steps.classify.outputs.mode == 'bookkeeping'
+        env:
+          AFTER_SHA: ${{ steps.classify.outputs.after_sha }}
+          BEFORE_SHA: ${{ steps.classify.outputs.before_sha }}
+          VALIDATION_MODE: ${{ steps.classify.outputs.validation_mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check "$BEFORE_SHA" "$AFTER_SHA" -- .trellis/tasks .trellis/workspace
+          SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF="$BEFORE_SHA" \
+            node scripts/sd-ai-command-pack-review-preflight.mjs
+
+          case "$VALIDATION_MODE" in
+            none)
+              ;;
+            completion|planning)
+              receipt="$RUNNER_TEMP/bookkeeping-final-bundle.json"
+              node scripts/sd-ai-command-pack-review-preflight.mjs \
+                final-bundle --mode "$VALIDATION_MODE" \
+                --base "$BEFORE_SHA" --head "$AFTER_SHA" --json >"$receipt"
+              jq -e \
+                --arg mode "$VALIDATION_MODE" \
+                --arg head "$AFTER_SHA" \
+                '.schemaVersion == 1
+                 and .status == "valid"
+                 and .mode == $mode
+                 and .evidence.headOid == $head
+                 and .reasonCodes == [($mode + "_bundle_valid")]' \
+                "$receipt" >/dev/null
+              ;;
+            *)
+              printf '%s\n' "Unrecognized bookkeeping validation mode." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Summarize CI scope
+        if: always()
+        env:
+          AFTER_SHA: ${{ steps.classify.outputs.after_sha }}
+          BEFORE_SHA: ${{ steps.classify.outputs.before_sha }}
+          EVIDENCE_CHECK_RUN_ID: ${{ steps.classify.outputs.evidence_check_run_id }}
+          EVIDENCE_RUN_ID: ${{ steps.classify.outputs.evidence_run_id }}
+          EVIDENCE_SCOPE: ${{ steps.classify.outputs.evidence_scope }}
+          MODE: ${{ steps.classify.outputs.mode }}
+          REASON: ${{ steps.classify.outputs.reason }}
+          VALIDATION_MODE: ${{ steps.classify.outputs.validation_mode }}
+          VALIDATION_OUTCOME: ${{ steps.bookkeeping-validation.outcome }}
+        shell: bash
+        run: |
+          {
+            printf '%s\n' "## CI scope"
+            printf '%s\n' "- Mode: ${MODE:-unknown}"
+            printf '%s\n' "- Reason: ${REASON:-unavailable}"
+            printf '%s\n' "- Heads: ${BEFORE_SHA:-unavailable} -> ${AFTER_SHA:-unavailable}"
+            printf '%s\n' "- Prior evidence: ${EVIDENCE_SCOPE:-none}; run ${EVIDENCE_RUN_ID:-none}; check ${EVIDENCE_CHECK_RUN_ID:-none}"
+            printf '%s\n' "- Bookkeeping validation: ${VALIDATION_MODE:-none} (${VALIDATION_OUTCOME:-not-run})"
+            if [ "${MODE:-}" = "bookkeeping" ] && [ "${VALIDATION_OUTCOME:-}" = "success" ]; then
+              printf '%s\n' "- Expensive jobs avoided: unittest matrix, lint, security, release payload"
+            else
+              printf '%s\n' "- Full CI selected; no cost savings claimed."
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
   unittest:
+    needs: ci-scope
+    if: needs.ci-scope.outputs.mode == 'full'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -73,6 +313,8 @@ jobs:
         run: bash .github/scripts/check-shipped-script-coverage.sh
 
   lint:
+    needs: ci-scope
+    if: needs.ci-scope.outputs.mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -93,14 +335,14 @@ jobs:
         run: python3 -m pip install -r requirements-dev.txt
 
       - name: Ruff (pack Python)
-        run: python3 -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py
+        run: python3 -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py
 
       # Mirrors the Makefile lint target's mypy scope: installer/, the
       # install.py facade, and shipped scripts/*.py. templates/scripts/
       # twins stay excluded (byte-identical mirrors; duplicate script
       # names would collide in one mypy run).
       - name: Mypy (pack Python)
-        run: python3 -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py
+        run: python3 -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py
 
       - name: Review preflight JavaScript syntax
         run: |
@@ -111,6 +353,8 @@ jobs:
         run: bash .github/scripts/check-opencode-js.sh
 
   security:
+    needs: ci-scope
+    if: needs.ci-scope.outputs.mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -148,7 +392,8 @@ jobs:
 
   release-payload-gate:
     name: Release payload gate
-    if: github.event_name == 'pull_request'
+    needs: ci-scope
+    if: needs.ci-scope.outputs.mode == 'full' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -219,31 +464,37 @@ jobs:
     name: CI Result
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [unittest, lint, security, release-payload-gate, main-push-scope]
+    needs: [ci-scope, unittest, lint, security, release-payload-gate, main-push-scope]
     if: always()
+    outputs:
+      mode: ${{ steps.evaluate.outputs.mode }}
 
     steps:
+      - name: Check out exact event head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
       - name: Evaluate required lanes
+        id: evaluate
         env:
+          CI_SCOPE_MODE: ${{ needs.ci-scope.outputs.mode }}
+          CI_SCOPE_REASON: ${{ needs.ci-scope.outputs.reason }}
+          CI_SCOPE_RESULT: ${{ needs.ci-scope.result }}
+          EVENT_NAME: ${{ github.event_name }}
           UNITTEST_RESULT: ${{ needs.unittest.result }}
           LINT_RESULT: ${{ needs.lint.result }}
           SECURITY_RESULT: ${{ needs.security.result }}
           RELEASE_PAYLOAD_GATE_RESULT: ${{ needs.release-payload-gate.result }}
           MAIN_PUSH_SCOPE_RESULT: ${{ needs.main-push-scope.result }}
         run: |
-          echo "unittest=$UNITTEST_RESULT lint=$LINT_RESULT security=$SECURITY_RESULT release_payload_gate=$RELEASE_PAYLOAD_GATE_RESULT main_push_scope=$MAIN_PUSH_SCOPE_RESULT"
-          if [ "$UNITTEST_RESULT" != "success" ] || [ "$LINT_RESULT" != "success" ] || [ "$SECURITY_RESULT" != "success" ]; then
-            echo "A required lane did not succeed."
-            exit 1
-          fi
-          if [ "$RELEASE_PAYLOAD_GATE_RESULT" != "success" ] && [ "$RELEASE_PAYLOAD_GATE_RESULT" != "skipped" ]; then
-            echo "The release payload gate failed."
-            exit 1
-          fi
-          if [ "$MAIN_PUSH_SCOPE_RESULT" != "success" ] && [ "$MAIN_PUSH_SCOPE_RESULT" != "skipped" ]; then
-            echo "The direct-main push scope backstop failed."
-            exit 1
-          fi
+          bash .github/scripts/check-ci-result.sh \
+            "$EVENT_NAME" "$CI_SCOPE_RESULT" "$CI_SCOPE_MODE" \
+            "$UNITTEST_RESULT" "$LINT_RESULT" "$SECURITY_RESULT" \
+            "$RELEASE_PAYLOAD_GATE_RESULT" "$MAIN_PUSH_SCOPE_RESULT"
+          printf 'mode=%s\n' "$CI_SCOPE_MODE" >>"$GITHUB_OUTPUT"
+          printf 'CI mode: %s (%s)\n' "$CI_SCOPE_MODE" "$CI_SCOPE_REASON" >>"$GITHUB_STEP_SUMMARY"
 
   auto-tag-release:
     name: Auto-tag release
@@ -255,7 +506,7 @@ jobs:
     # PR-only, so it is skipped on every main push, and implicit success()
     # then silently skips this job (v0.13.2-v0.14.0 shipped untagged before
     # this guard). ci-result (if: always()) already validates every lane.
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci-result.result == 'success' }}
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci-result.result == 'success' && needs.ci-result.outputs.mode == 'full' }}
     permissions:
       contents: write
 

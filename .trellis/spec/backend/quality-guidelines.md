@@ -1575,6 +1575,122 @@ Wrong: python3 -m coverage report ...
 Correct: PYTHON_BIN=.venv/bin/python bash .github/scripts/check-shipped-script-coverage.sh
 ```
 
+## Bookkeeping-only CI Fast-lane Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing `.github/workflows/tests.yml`,
+`.github/scripts/bookkeeping_ci_scope.py`,
+`.github/scripts/check-ci-result.sh`, or finish-work bookkeeping validation
+that affects exact-head CI.
+
+### 2. Signatures
+
+- Scope helper: `bookkeeping_ci_scope.py --event-name pull_request|push
+  --before-sha SHA --after-sha SHA --runs-json PATH --checks-json PATH`
+- Aggregate helper: `check-ci-result.sh EVENT SCOPE_RESULT MODE UNIT LINT
+  SECURITY RELEASE MAIN_PUSH`
+- Required branch-protection context: `CI Result`
+- Scope result is one compact JSON document with this schema-version-1 shape:
+
+  ```json
+  {
+    "schemaVersion": 1,
+    "kind": "bookkeeping-ci-scope",
+    "mode": "bookkeeping",
+    "reasonCode": "verified_bookkeeping_successor",
+    "beforeSha": "<40-char commit>",
+    "afterSha": "<40-char commit>",
+    "evidenceRunId": 123,
+    "evidenceCheckRunId": 456,
+    "evidenceScope": "pull_request:243",
+    "validationMode": "completion",
+    "commitCount": 2,
+    "changedPaths": [".trellis/tasks/archive/2026-07/example/task.json"],
+    "disallowedPaths": []
+  }
+  ```
+
+  `mode` is `full` or `bookkeeping`; `validationMode` is `none`, `planning`,
+  or `completion`. Evidence ids are positive integers only when a prior success
+  was accepted. Invalid or ineligible paths are bounded in
+  `disallowedPaths`; all emitted paths and diagnostics remain bounded.
+
+### 3. Contracts
+
+- Run a scope job for every pull-request head and `main` push; do not replace
+  exact-head CI with `paths-ignore`.
+- Start from `full`. Select `bookkeeping` only for a pull-request synchronize
+  event or protected-main push whose event-supplied prior head is available,
+  is an ancestor through at most 100 single-parent commits, and has a completed
+  successful `Tests` workflow plus GitHub Actions `CI Result` for the same
+  pull request or protected ref.
+- Materialize the classifier from the exact prior head. An absent, invalid, or
+  unsafe prior classifier selects full CI; do not execute a changed
+  checkout-owned helper to decide whether that change is safe.
+- Inspect the full prior-to-current delta with NUL-delimited, no-rename Git
+  output. Bookkeeping paths are limited to `.trellis/tasks/**` and
+  `.trellis/workspace/**`; only regular non-executable file additions,
+  modifications, and deletions are eligible. Reject merges, non-ancestors,
+  symlinks, gitlinks, executable modes, control characters, path escapes,
+  missing objects, mixed paths, and oversized histories.
+- After eligibility is proven, run `git diff --check`, the canonical generic
+  review preflight, and the canonical completion or planning `final-bundle`
+  mode when archive or workspace changes require it. Invalid current-head
+  bookkeeping fails the scope job; it never falls back to successful full CI.
+- Full mode runs unit, lint, security, and the event-appropriate release/main
+  lane. Bookkeeping mode requires those expensive lanes to be skipped while
+  retaining the main-push scope guard on direct `main` pushes.
+- The `CI Result` helper accepts only the explicit event/mode outcome matrix.
+  Failed, cancelled, unexpectedly skipped, or unexpectedly successful lanes
+  fail closed. Auto-tagging requires a successful full-mode aggregate.
+- Summaries identify mode, stable reason, exact heads, prior run/check
+  evidence, validator mode/outcome, and avoided work. Never claim savings for
+  a full run.
+
+### 4. Validation & Error Matrix
+
+- First/opened PR head, unsupported event, missing prior classifier, missing or
+  ambiguous Actions evidence, API failure, or safe-but-ineligible history ->
+  successful `full` scope decision.
+- Internal classifier failure or malformed classifier JSON -> failed scope job
+  and failed `CI Result`.
+- Verified eligible history plus malformed task, archive, topology, journal,
+  placeholder, or whitespace state -> failed bookkeeping validation and failed
+  `CI Result`.
+- Legal full/bookkeeping result matrix -> successful exact-head `CI Result`;
+  any other result combination -> failed `CI Result`.
+
+### 5. Good / Base / Bad Cases
+
+- Good: a green PR head receives one linear archive-and-journal successor; the
+  successor validates in bookkeeping mode and expensive lanes are skipped.
+- Base: a code or workflow change selects full CI and preserves the existing
+  matrix, coverage, security, release-payload, and main-push behavior.
+- Bad: a task-only path filter reports success without validating task JSON,
+  or an older green check is treated as the current head's required result.
+
+### 6. Tests Required
+
+- PR and direct-main positives for journal, task metadata, archive, combined,
+  multi-commit, and chained-bookkeeping successors.
+- Mixed/source paths, unsafe tree modes, merge/non-ancestor/head mismatch,
+  malformed identity/object/evidence, wrong PR/ref, failed/cancelled prior
+  checks, API failure, and aggregate result-matrix negatives.
+- Workflow structure assertions for exact-head checkout, prior-head helper,
+  permissions, canonical validators, expensive-lane conditions, required
+  aggregate name, and full-only auto-tagging.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: paths-ignore: [.trellis/**]
+Correct: emit a new exact-head CI Result after bounded bookkeeping validation
+
+Wrong: run the current branch's classifier, then decide the workflow edit was safe
+Correct: run the green prior head's classifier and default to full when unavailable
+```
+
 ## Required Patterns
 
 - Use `pathlib.Path` for filesystem work.
