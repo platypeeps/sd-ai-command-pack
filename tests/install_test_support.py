@@ -774,6 +774,47 @@ class InstallTestCase(unittest.TestCase):
         )
         (stub_bin / "gh").chmod(0o755)
 
+    def write_pr_lifecycle_gh_stub(
+        self, stub_bin: Path, head_oid: str, state: str
+    ) -> None:
+        """Write a gh stub that reports a fixed PR lifecycle ``state``.
+
+        ``state`` is emitted verbatim as the PR ``state`` field for
+        ``gh pr view`` (already reduced to the FIELD_SEPARATOR-joined identity
+        the script's ``--jq`` would produce). A non-``MERGED`` state carries an
+        empty ``mergedAt``. An empty ``state`` makes both ``gh pr view`` and the
+        merged ``gh pr list`` fallback return nothing, so the branch has no
+        resolvable PR. ``repo view`` and the ``issue``/``pr list`` status probes
+        always answer so the downstream status collector never sees an
+        unexpected invocation.
+        """
+        if state:
+            merged_at = "2026-06-27T17:00:00Z" if state == "MERGED" else ""
+            view_body = (
+                f"  printf '6\\037{state}\\037{merged_at}\\037"
+                f"https://example.test/pr/6\\037feature/cleanup\\037{head_oid}\\n'\n"
+            )
+        else:
+            view_body = "  exit 0\n"
+        (stub_bin / "gh").write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "if [ \"${1:-}\" = pr ] && [ \"${2:-}\" = view ]; then\n"
+            + view_body
+            + "elif [ \"${1:-}\" = pr ] && [ \"${2:-}\" = list ]; then\n"
+            "  exit 0\n"
+            "elif [ \"${1:-}\" = issue ] && [ \"${2:-}\" = list ]; then\n"
+            "  exit 0\n"
+            "elif [ \"${1:-}\" = repo ] && [ \"${2:-}\" = view ]; then\n"
+            "  printf 'main\\n'\n"
+            "else\n"
+            "  printf 'unexpected gh invocation: %s\\n' \"$*\" >&2\n"
+            "  exit 1\n"
+            "fi\n",
+            encoding="utf-8",
+        )
+        (stub_bin / "gh").chmod(0o755)
+
     def write_auto_merge_gh_stub(
         self,
         stub_bin: Path,

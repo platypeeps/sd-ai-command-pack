@@ -407,9 +407,9 @@ class HousekeepingTests(InstallTestCase):
 
         refresh_index = script.index("if ! refresh_obsidian_kb; then")
         fetch_index = script.index("fetch_and_prune", refresh_index)
-        merge_index = script.index("maybe_merge_ready_open_pr", refresh_index)
+        route_index = script.index("route_branch_pr_lifecycle", refresh_index)
         self.assertLess(refresh_index, fetch_index)
-        self.assertLess(refresh_index, merge_index)
+        self.assertLess(refresh_index, route_index)
 
     def test_housekeeping_kb_refresh_contract_covers_creation_success_and_failure(
         self,
@@ -1124,7 +1124,7 @@ class HousekeepingTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
-            "PR #6 for feature/cleanup is OPEN, not MERGED; left the branch untouched",
+            "PR #6 for feature/cleanup is open and was not merged; left the branch untouched",
             result.stdout,
         )
         self.assertNotIn("merged PR #6 with merge strategy", result.stdout)
@@ -1133,6 +1133,116 @@ class HousekeepingTests(InstallTestCase):
             self.git_output(repo, "branch", "--show-current"),
             "feature/cleanup",
         )
+
+    def test_housekeeping_closed_pr_reports_not_merged_without_cleanup(
+        self,
+    ) -> None:
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        self.write_pr_lifecycle_gh_stub(stub_bin, head_oid, "CLOSED")
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+            ],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "PR #6 for feature/cleanup is CLOSED, not MERGED; left the branch untouched",
+            result.stdout,
+        )
+        # A closed PR is never merged or eligibility-evaluated, and nothing is
+        # deleted or switched.
+        self.assertNotIn("PR #6 is open, green, comment-clean", result.stdout)
+        self.assertNotIn("confirmed PR #6 merged", result.stdout)
+        self.assertNotIn("deleted local branch feature/cleanup", result.stdout)
+        self.assertEqual(
+            self.git_output(repo, "branch", "--show-current"),
+            "feature/cleanup",
+        )
+
+    def test_housekeeping_unresolvable_pr_leaves_branch_untouched(
+        self,
+    ) -> None:
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        # No PR resolves from gh pr view or the merged pr list fallback.
+        self.write_pr_lifecycle_gh_stub(stub_bin, head_oid, "")
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+            ],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "unable to resolve GitHub PR metadata for feature/cleanup",
+            result.stdout,
+        )
+        self.assertNotIn("confirmed PR #6 merged", result.stdout)
+        self.assertNotIn("deleted local branch feature/cleanup", result.stdout)
+        self.assertEqual(
+            self.git_output(repo, "branch", "--show-current"),
+            "feature/cleanup",
+        )
+
+    def test_housekeeping_json_marks_unknown_pr_state_indeterminate(self) -> None:
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        # An unexpected lifecycle state must fail closed, not be treated as
+        # merged or blocked.
+        self.write_pr_lifecycle_gh_stub(stub_bin, head_oid, "QUEUED")
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(install.ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--json",
+            ],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["outcome"]["status"], "indeterminate")
+        self.assertIn(
+            "pull_request_state_indeterminate", payload["outcome"]["reasonCodes"]
+        )
+        self.assertIsNone(payload["eligibility"])
+        anomaly_codes = {item["code"] for item in payload["anomalies"]}
+        self.assertIn("pull_request_state_indeterminate", anomaly_codes)
+        action_codes = {item["code"] for item in payload["actions"]}
+        self.assertNotIn("pull_request_merge_confirmed", action_codes)
 
     def test_housekeeping_counts_unresolved_review_threads_across_pages(
         self,
@@ -1211,7 +1321,7 @@ class HousekeepingTests(InstallTestCase):
             result.stdout,
         )
         self.assertIn(
-            "PR #6 for feature/cleanup is OPEN, not MERGED",
+            "PR #6 for feature/cleanup is open and was not merged",
             result.stdout,
         )
         self.assertNotIn("merged PR #6 with merge strategy", result.stdout)

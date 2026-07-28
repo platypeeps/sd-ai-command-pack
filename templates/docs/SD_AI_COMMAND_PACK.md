@@ -1087,12 +1087,18 @@ leaves an open PR unmerged. The script then checks a strict auto-merge gate:
   cancelled, or timed out). Classifier-skipped checks do not block.
 - there are no unresolved review threads
 
-When that is true, it merges the PR and then performs normal cleanup. If that gate is
-not satisfied, it behaves as a post-merge cleanup command: fetch/prune
-`origin`, confirm the current feature branch's PR is merged and the local branch
-head matches that PR before deleting it, switch to the default branch,
-fast-forward from `origin`, and delete the merged local and remote branch. The
-script then invokes the installed `sd-status` collector in strict mode, passing
+The script resolves one bounded PR identity and lifecycle state for the current
+branch before choosing work, then routes on that state so housekeeping stays the
+sole owner of the merge-then-cleanup transition. An **open** PR must pass the
+gate above to merge; after the attempt the script re-resolves the PR and cleans
+up only if the merge actually landed, otherwise it records one anomaly and
+leaves the open branch untouched. A **merged** PR skips the eligibility gate and
+is cleaned up directly from the already-resolved identity: after fetch/prune of
+`origin`, confirm the local branch head matches the merged PR before deleting
+it, switch to the default branch, fast-forward from `origin`, and delete the
+merged local and remote branch. A **closed** (unmerged) PR, or an indeterminate
+lifecycle state, stops with a single bounded anomaly and no merge, switch, or
+delete. The script then invokes the installed `sd-status` collector in strict mode, passing
 the default/source branches, remote-branch policy, cleanup anomalies, and a
 `refreshed` label after a successful fetch/prune. That shared collector owns the
 final Git verification, pack/Trellis versions, relevant PR/review count,

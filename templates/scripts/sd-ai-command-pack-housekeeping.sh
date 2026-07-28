@@ -796,44 +796,25 @@ maybe_merge_ready_open_pr() {
   merge_ready_open_pr "$pr_number" "$eligible_head" || return 0
 }
 
-cleanup_current_branch_if_merged() {
+# Perform exact-head cleanup for a branch whose PR the caller has already
+# resolved and routed as MERGED. This helper trusts that routing and never
+# re-evaluates merge eligibility or the PR lifecycle state; it re-verifies only
+# the head identities that guard the destructive Git operations. The caller
+# supplies the resolved PR identity so the working tree is inspected exactly
+# once per run.
+cleanup_merged_branch() {
   local branch="$1"
-  local pr_data
-  local pr_number
-  local pr_state
-  local pr_merged_at
-  local pr_url
-  local pr_head
-  local pr_head_oid
+  local pr_number="$2"
+  local pr_merged_at="$3"
+  local pr_url="$4"
+  local pr_head="$5"
+  local pr_head_oid="$6"
   local local_head_oid
   local ls_remote_output
   local remote_head_oid
 
-  if [ -z "$branch" ]; then
-    add_anomaly detached_head "detached HEAD; skipped branch cleanup"
-    return 0
-  fi
-  if [ -z "$DEFAULT_BRANCH" ] || [ "$branch" = "$DEFAULT_BRANCH" ]; then
-    return 0
-  fi
   if ! working_tree_is_clean; then
     add_anomaly working_tree_dirty "working tree has uncommitted changes; skipped switching and branch deletion"
-    return 0
-  fi
-  if ! have gh; then
-    add_anomaly github_cli_missing "gh not found; cannot confirm whether $branch has a merged PR"
-    return 0
-  fi
-
-  pr_data="$(view_pr_for_branch "$branch")"
-  if [ -z "$pr_data" ]; then
-    add_anomaly pull_request_unavailable "unable to resolve GitHub PR metadata for $branch; no PR was found or gh failed, so the branch was left untouched"
-    return 0
-  fi
-
-  IFS="$FIELD_SEPARATOR" read -r pr_number pr_state pr_merged_at pr_url pr_head pr_head_oid <<<"$pr_data"
-  if [ "$pr_state" != "MERGED" ]; then
-    add_anomaly pull_request_not_merged "PR #$pr_number for $branch is $pr_state, not MERGED; left the branch untouched"
     return 0
   fi
   if [ "$pr_head" != "$branch" ]; then
@@ -922,6 +903,78 @@ cleanup_current_branch_if_merged() {
   else
     add_anomaly remote_branch_unavailable "failed to check whether remote branch $REMOTE/$branch exists"
   fi
+}
+
+# Resolve one bounded PR identity and lifecycle state for the current feature
+# branch, then route on that state so housekeeping stays the sole owner of the
+# merge-then-cleanup transition:
+#   - OPEN: keep the exact-head eligibility gate (merge only when eligible),
+#     then re-resolve the PR and clean up only if the merge actually landed; if
+#     it did not land and nothing else already explained why, record a single
+#     open-PR anomaly and leave the branch untouched.
+#   - MERGED: skip eligibility entirely and clean up using the already-resolved
+#     identity.
+#   - CLOSED: stop with one pull_request_not_merged anomaly; no merge or delete.
+#   - indeterminate: stop with one bounded identity/state anomaly (fail closed).
+route_branch_pr_lifecycle() {
+  local branch="$1"
+  local pr_data
+  local pr_number
+  local pr_state
+  local pr_merged_at
+  local pr_url
+  local pr_head
+  local pr_head_oid
+  local anomalies_before
+
+  if [ -z "$branch" ]; then
+    add_anomaly detached_head "detached HEAD; skipped branch cleanup"
+    return 0
+  fi
+  if [ -z "$DEFAULT_BRANCH" ] || [ "$branch" = "$DEFAULT_BRANCH" ]; then
+    return 0
+  fi
+  if ! have gh; then
+    add_anomaly github_cli_missing "gh not found; cannot confirm whether $branch has a merged PR"
+    return 0
+  fi
+
+  pr_data="$(view_pr_for_branch "$branch")"
+  if [ -z "$pr_data" ]; then
+    add_anomaly pull_request_unavailable "unable to resolve GitHub PR metadata for $branch; no PR was found or gh failed, so the branch was left untouched"
+    return 0
+  fi
+  IFS="$FIELD_SEPARATOR" read -r pr_number pr_state pr_merged_at pr_url pr_head pr_head_oid <<<"$pr_data"
+
+  case "$pr_state" in
+    OPEN)
+      anomalies_before=${#ANOMALIES[@]}
+      maybe_merge_ready_open_pr "$branch"
+      # Bind cleanup to what actually happened: re-resolve the PR so a merge
+      # that did not land (blocked gate, dry run, --no-auto-merge, push
+      # rejection) leaves the branch untouched.
+      pr_data="$(view_pr_for_branch "$branch")"
+      if [ -z "$pr_data" ]; then
+        add_anomaly pull_request_unavailable "unable to re-resolve GitHub PR metadata for $branch after the merge attempt; left the branch untouched"
+        return 0
+      fi
+      IFS="$FIELD_SEPARATOR" read -r pr_number pr_state pr_merged_at pr_url pr_head pr_head_oid <<<"$pr_data"
+      if [ "$pr_state" = "MERGED" ]; then
+        cleanup_merged_branch "$branch" "$pr_number" "$pr_merged_at" "$pr_url" "$pr_head" "$pr_head_oid"
+      elif [ "${#ANOMALIES[@]}" -eq "$anomalies_before" ]; then
+        add_anomaly pull_request_open "PR #$pr_number for $branch is open and was not merged; left the branch untouched"
+      fi
+      ;;
+    MERGED)
+      cleanup_merged_branch "$branch" "$pr_number" "$pr_merged_at" "$pr_url" "$pr_head" "$pr_head_oid"
+      ;;
+    CLOSED)
+      add_anomaly pull_request_not_merged "PR #$pr_number for $branch is CLOSED, not MERGED; left the branch untouched"
+      ;;
+    *)
+      add_anomaly pull_request_state_indeterminate "PR #$pr_number for $branch has an indeterminate lifecycle state (${pr_state:-empty}); left the branch untouched"
+      ;;
+  esac
 }
 
 emit_json_result() {
@@ -1260,8 +1313,7 @@ main() {
   elif [ "$START_BRANCH" = "$DEFAULT_BRANCH" ]; then
     fast_forward_default_branch
   else
-    maybe_merge_ready_open_pr "$START_BRANCH"
-    cleanup_current_branch_if_merged "$START_BRANCH"
+    route_branch_pr_lifecycle "$START_BRANCH"
   fi
 
   run_status_report

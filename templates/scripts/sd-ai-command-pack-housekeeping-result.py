@@ -41,6 +41,7 @@ INDETERMINATE_ANOMALY_CODES = frozenset(
     {
         "default_branch_unavailable",
         "github_repository_unavailable",
+        "pull_request_state_indeterminate",
         "pull_request_unavailable",
         "remote_branch_unavailable",
         "status_unavailable",
