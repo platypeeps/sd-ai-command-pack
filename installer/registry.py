@@ -220,6 +220,7 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".gemini/commands/trellis/",
             ".gemini/hooks/",
             ".gemini/agents/trellis-*.md",
+            ".gemini/settings.json",
         ),
     ),
     "github": PlatformInfo(

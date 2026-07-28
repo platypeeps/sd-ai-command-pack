@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Defines the platform registry, template source-of-truth, generated mirror, and release-version contracts for this fix."}
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Defines cross-platform adapter parity and review-scope classification expectations."}
