@@ -420,6 +420,89 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual([item["id"] for item in ranked], ["one"])
         self.assertEqual(ranked[0]["focusMatchKind"], "structured")
 
+    def test_candidate_block_status_reads_one_convention_three_surfaces(self) -> None:
+        module = self.load_module()
+        # Canonical PARKED: title prefix (case/space tolerant), no explicit reason.
+        self.assertEqual(
+            module.candidate_block_status({"title": "parked : Do the thing"}),
+            (True, "parked"),
+        )
+        # PARKED title with an explicit dependency reason.
+        self.assertEqual(
+            module.candidate_block_status(
+                {"title": "PARKED: X", "blockedOn": "se-pack/contract"}
+            ),
+            (True, "se-pack/contract"),
+        )
+        # Explicit structured flag with a human reason.
+        self.assertEqual(
+            module.candidate_block_status(
+                {"title": "Ready-looking", "blocked": True, "blockedReason": "waiting"}
+            ),
+            (True, "waiting"),
+        )
+        # A blockedOn dependency without any prefix still blocks.
+        self.assertEqual(
+            module.candidate_block_status(
+                {"title": "Ready-looking", "blockedOn": "other-repo/task"}
+            ),
+            (True, "other-repo/task"),
+        )
+        # An ordinary actionable task is not blocked.
+        self.assertEqual(
+            module.candidate_block_status({"title": "Harden CI pipeline"}),
+            (False, None),
+        )
+
+    def test_rank_sorts_blocked_last_regardless_of_priority_and_reports_reason(
+        self,
+    ) -> None:
+        module = self.load_module()
+        candidates = [
+            {
+                "id": "blocked-p0",
+                "title": "PARKED: Urgent but blocked",
+                "status": "in_progress",
+                "priority": "P0",
+                "createdAt": "2026-01-01",
+                "blockedOn": "se-pack/contract-stability",
+            },
+            {
+                "id": "ready-p3",
+                "title": "Low priority but ready",
+                "status": "planning",
+                "priority": "P3",
+                "createdAt": "2026-01-02",
+            },
+        ]
+
+        ranked = module.rank_candidates(candidates, module.normalize_focus())
+
+        # A blocked P0 never outranks an actionable P3: the selector's first
+        # pick is always selectable.
+        self.assertEqual([item["id"] for item in ranked], ["ready-p3", "blocked-p0"])
+        self.assertFalse(ranked[0]["blocked"])
+        self.assertIsNone(ranked[0]["blockedReason"])
+        self.assertTrue(ranked[1]["blocked"])
+        self.assertEqual(ranked[1]["blockedReason"], "se-pack/contract-stability")
+
+    def test_rank_order_signal_breaks_ties_within_priority_band(self) -> None:
+        module = self.load_module()
+        candidates = [
+            {"id": "second", "status": "planning", "priority": "P1", "order": 2},
+            {"id": "first", "status": "planning", "priority": "P1", "order": 1},
+            # A higher-priority task dominates any order signal in a lower band.
+            {"id": "top", "status": "planning", "priority": "P0", "order": 99},
+            # Absent/invalid order sorts as 0 (ahead of explicit positive order).
+            {"id": "zero", "status": "planning", "priority": "P1"},
+        ]
+
+        ranked = module.rank_candidates(candidates, module.normalize_focus())
+
+        self.assertEqual(
+            [item["id"] for item in ranked], ["top", "zero", "first", "second"]
+        )
+
     def test_atomic_state_is_private_and_rejects_secret_keys(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -2965,7 +3048,10 @@ class WorkLoopTests(InstallTestCase):
             )
 
         self.assertEqual(result, 0)
-        self.assertEqual(json.loads(stdout.getvalue()), {"candidates": [], "count": 0})
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            {"candidates": [], "count": 0, "actionableCount": 0},
+        )
         self.assertEqual(
             calls,
             [((), {"encoding": "utf-8", "errors": "strict"})],

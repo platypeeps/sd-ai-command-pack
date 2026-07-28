@@ -1,7 +1,7 @@
 {
   "id": "add-sd-review-configuration-operations",
   "name": "add-sd-review-configuration-operations",
-  "title": "Add sd-review configuration operations",
+  "title": "PARKED: Add sd-review configuration operations",
   "description": "Add sd-review config init, validate, render, explain, diff, and migrate over repository-owned compiler contracts.",
   "status": "planning",
   "dev_type": null,

@@ -359,6 +359,17 @@ asks to stop. Task-local pre-mutation blockers can be parked; contradictory or
 dirty repository-wide state stops safely. Unavoidable user input gets one
 recommended question and a wait of up to 15 minutes when supported.
 
+A task blocked on an external dependency is machine-visible through one shared
+convention: a `PARKED:` title prefix (the same marker the status board reads),
+an explicit `blocked`/`blockedOn` field, or a park note. The `rank` helper flags
+each candidate `blocked` with a reason, reports `actionableCount`, and sorts
+every blocked task after every actionable one, so a blocked `P0` never outranks
+an actionable `P3`; the controller selects the first non-blocked candidate and
+reports the rest with the reason each was skipped. An optional integer `order`
+field breaks ties within a priority band while the `prd.md` keeps the ordering
+nuance. When no actionable task remains, the loop stops with
+`all_remaining_tasks_blocked` instead of picking a blocked one.
+
 Lifecycle phases and mutable evidence are separate contracts. `transition`
 advances a phase, while the helper's `evidence` subcommand records verified
 same-phase commit, PR, review-fix, finish-work, and merge facts atomically.

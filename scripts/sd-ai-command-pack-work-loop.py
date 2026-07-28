@@ -38,6 +38,10 @@ STATE_HOME_ENV = "SD_AI_COMMAND_PACK_STATE_HOME"
 FOCUS_FIELDS = frozenset({"priority", "package", "task", "status", "scope"})
 FOCUS_PREFIX_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):(.*)$", re.DOTALL)
 WORD_RE = re.compile(r"[A-Za-z0-9_.-]+")
+# Canonical machine-visible "blocked on an external dependency" marker: a
+# ``PARKED:`` title prefix (shared with sd-ai-command-pack-status.py so the
+# board and the selector read one convention, not a parallel one).
+PARKED_PREFIX_RE = re.compile(r"^PARKED\s*:\s*", re.IGNORECASE)
 COMMIT_RE = re.compile(r"[0-9a-f]{40,64}")
 SECRET_KEY_RE = re.compile(
     r"(?:token|secret|password|credential|api[_-]?key)", re.IGNORECASE
@@ -734,6 +738,48 @@ def focus_match(
     return False, []
 
 
+def candidate_block_status(
+    candidate: Mapping[str, Any],
+) -> tuple[bool, str | None]:
+    """Report whether a candidate is blocked on an external dependency and why.
+
+    One convention, three surfaces: an explicit ``blocked`` flag, a
+    ``blockedOn`` dependency string, or the canonical ``PARKED:`` title prefix
+    already carried by the board and matched by the status helper. A blocked
+    candidate is never selectable; the returned reason lets the selector report
+    why it was skipped instead of silently dropping it.
+    """
+    reason = candidate.get("blockedReason") or candidate.get("blockedOn")
+    reason_text = reason.strip() if isinstance(reason, str) and reason.strip() else None
+    if candidate.get("blocked") is True:
+        return True, reason_text or "blocked"
+    title = candidate.get("title")
+    if isinstance(title, str) and PARKED_PREFIX_RE.match(title.strip()):
+        return True, reason_text or "parked"
+    if reason_text is not None and isinstance(reason, str) and candidate.get("blockedOn"):
+        return True, reason_text
+    return False, None
+
+
+def candidate_order(candidate: Mapping[str, Any]) -> int:
+    """Explicit ordering signal honored within a priority band (lower first).
+
+    Non-integer or absent values sort as ``0`` so the field is a pure,
+    deterministic tie-break refinement; PRD prose remains the source of nuance.
+    """
+    value = candidate.get("order")
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return int(value.strip())
+        except ValueError:
+            return 0
+    return 0
+
+
 def base_candidate_key(candidate: Mapping[str, Any]) -> tuple[Any, ...]:
     status_order = {"in_progress": 0, "planning": 1}
     priority_order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
@@ -741,6 +787,7 @@ def base_candidate_key(candidate: Mapping[str, Any]) -> tuple[Any, ...]:
     return (
         status_order.get(str(candidate.get("status")), 9),
         priority_order.get(str(candidate.get("priority")), 9),
+        candidate_order(candidate),
         0 if artifacts_complete else 1,
         str(candidate.get("createdAt") or "9999-99-99"),
         str(candidate.get("id") or candidate.get("task") or "").casefold(),
@@ -771,14 +818,18 @@ def rank_candidates(
                 break
         if focus.get("mode") == "only" and band is None:
             continue
+        blocked, blocked_reason = candidate_block_status(candidate)
         item = dict(candidate)
         item["focusMatch"] = band is not None
         item["focusBand"] = band
         item["focusEvidence"] = evidence
         item["focusMatchKind"] = match_kind
+        item["blocked"] = blocked
+        item["blockedReason"] = blocked_reason
         ranked.append(item)
     ranked.sort(
         key=lambda item: (
+            1 if item["blocked"] else 0,
             item["focusBand"] if item["focusBand"] is not None else len(selectors) + 1,
             0 if item["focusMatchKind"] == "structured" else 1,
             base_candidate_key(item),
@@ -2528,7 +2579,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not isinstance(payload, list):
                 raise WorkLoopError("candidate file must contain a JSON array")
             ranked = rank_candidates(payload, state["focus"])
-            output = {"count": len(ranked), "candidates": ranked}
+            actionable = sum(1 for item in ranked if not item["blocked"])
+            output = {
+                "count": len(ranked),
+                "actionableCount": actionable,
+                "candidates": ranked,
+            }
             _print(output, as_json=args.json)
             return 0
 

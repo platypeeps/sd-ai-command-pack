@@ -1,7 +1,7 @@
 {
   "id": "generalize-review-learnings-across-reviewers",
   "name": "generalize-review-learnings-across-reviewers",
-  "title": "Generalize review learnings across reviewers",
+  "title": "PARKED: Generalize review learnings across reviewers",
   "description": "Make sd-review-learnings consume reviewer-neutral, disposition-aware evidence without ranking reviewers or owning adjudication.",
   "status": "planning",
   "dev_type": null,
