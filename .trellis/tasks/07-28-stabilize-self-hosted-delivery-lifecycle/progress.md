@@ -11,8 +11,8 @@ local checks/review have completed.
 - Lifecycle activation: d79ba90 — umbrella + all 11 work packages set to
   in_progress and assigned the shared branch; investigation and rollout tasks
   remain planning.
-- Current package: 9 / 11 — 07-25-backlog-selector-blocked-markers (not started)
-- Last verified commit: 18739c75
+- Current package: 10 / 11 — 07-24-track-clean-recovery-artifacts (not started)
+- Last verified commit: b233db10
 - Cumulative matrix: not run
 - Pull request: none
 - Finalization receipt: none
@@ -34,11 +34,50 @@ local checks/review have completed.
 | 6 | `07-28-enforce-pre-archive-acceptance-readiness` | done | 9eaf2ee2 | test_bookkeeping_validator (44, +8) + test_review_preflight + test_sdlc_commands + test_completion_lifecycle + test_generated_parity + test_pack_drift green; ruff clean | self-review clean; completion-ready-gated, read-only, no false positives (handoff prose / non-canonical / fenced boxes) |
 | 7 | `07-25-user-scope-toolchain-caches` | done | 715559ab | test_script_lib (27, +3 uid/ownership) + test_generated_parity + test_pack_drift (56) green; ruff clean | self-review clean; security code already shipped by H06, this pins acceptance properties + documents the guarantee, no re-route |
 | 8 | `07-25-fix-work-loop-lock-race` | done | 18739c75 | test_work_loop (78, +3 concurrent-recovery/helper) + test_generated_parity + test_pack_drift (56) green; ruff + mypy clean | self-review clean; identity-checked rename-aside recovery, error strings + `--recover-stale-lock` flow unchanged, no consumer touched |
-| 9 | `07-25-backlog-selector-blocked-markers` | pending | — | — | — |
+| 9 | `07-25-backlog-selector-blocked-markers` | done | b233db10 | test_work_loop (81, +3 block-status/rank-order + envelope update) + test_generated_parity + test_pack_drift (56) green; ruff + mypy clean on both work-loop copies | self-review clean; formalized existing PARKED convention (no parallel one), Trellis-core task.py not forked, selector view provides AC1 machine-visible distinction |
 | 10 | `07-24-track-clean-recovery-artifacts` | pending | — | — | — |
 | 11 | `07-28-standardize-environment-blocked-recovery-evidence` | pending | — | — | — |
 
 ## Last checkpoint
+
+Package 9 (`07-25-backlog-selector-blocked-markers`) complete at commit
+`b233db10`. Formalized the already-present `PARKED:` title convention as the one
+machine-visible "blocked on an external dependency" marker read by both the pack
+status board (`sd-ai-command-pack-status.py` compiles the same
+`PARKED_PREFIX_RE`) and the work-backlog selector, rather than inventing a
+parallel field (R1 + the PRD reconciliation note). In the work-loop script:
+`PARKED_PREFIX_RE`; `candidate_block_status`, which reads three compatible
+surfaces (`blocked: true`, a `PARKED:` title prefix, or a `blockedOn`/
+`blockedReason` string) and returns the most specific reason; and
+`candidate_order`, a lightweight integer ordering signal. `rank_candidates` now
+annotates every ranked item with `blocked`/`blockedReason`, sorts blocked
+strictly after actionable (a blocked P0 never outranks an actionable P3), and
+breaks ties inside a priority band by `order`; the `rank` CLI envelope gains
+`actionableCount` so the selector can stop with `all_remaining_tasks_blocked`
+when nothing is actionable. `sd-work-backlog/SKILL.md` and
+`SD_AI_COMMAND_PACK.md` document the marker, the blocked-last ranking,
+`actionableCount`, and the ordering signal. R4 migration: the 7 routed-review/
+learnings tasks carry the `PARKED:` title prefix, and the two agent-artifacts
+children with a hard sibling dependency — `07-25-worker-agents` (blockedOn
+`07-25-agent-artifact-kind`) and `07-25-dispatch-rollout` (blockedOn
+`07-25-fix-ci-dispatch`) — carry `PARKED:` plus a `blockedOn` naming the sibling;
+the other two children are the blockers themselves and stay unmarked (the
+`agent-artifact-kind` registry note is cross-*program* SE-pack coordination, not
+an in-repo block). Per R5 the vendored Trellis-core `task.py` is not forked (its
+`list` prints the directory name with only a `<- current` marker), so AC1's
+"visibly distinct" is satisfied by the selector's view (the `rank` output flags
+`blocked`, reports `blockedReason`, and sorts blocked last) while the pack board
+reads the same convention. Package 9's own `design.md`/`implement.md` are
+intentionally empty and only `task.json` titles/`blockedOn`, scripts, tests, and
+docs changed — no active-task `prd.md`/`design.md`/`implement.md` was created or
+materially updated, so the planning adversarial-review rule does not fire.
+Template edited first; root mirrors (`work-loop.py`, `sd-work-backlog/SKILL.md`,
+`SD_AI_COMMAND_PACK.md`) byte-identical via `make sync` (`conflicts: none`); no
+consumer touched. Version/changelog/fleet deferred to cumulative integration and
+the post-STOP fleet boundary. Checks: `test_work_loop` (81, +3 block-status/
+rank-order regressions plus the empty-envelope `actionableCount` update) +
+`test_generated_parity` + `test_pack_drift` (56) green; `ruff` + `mypy` clean on
+both work-loop copies.
 
 Package 8 (`07-25-fix-work-loop-lock-race`) complete at commit `18739c75`. Two
 processes recovering the same stale work-loop lock could both acquire it: the
@@ -197,5 +236,5 @@ cumulative integration: `candidate-validation.json` `payloadDigest` (refreshed
 by release preparation), so `make generate` surface-check still reports the
 candidate-ledger digest as stale until then.
 
-Next: implement work package 9,
-`07-25-backlog-selector-blocked-markers`.
+Next: implement work package 10,
+`07-24-track-clean-recovery-artifacts`.
