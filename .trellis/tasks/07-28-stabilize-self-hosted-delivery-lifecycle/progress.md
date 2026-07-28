@@ -11,9 +11,9 @@ local checks/review have completed.
 - Lifecycle activation: d79ba90 — umbrella + all 11 work packages set to
   in_progress and assigned the shared branch; investigation and rollout tasks
   remain planning.
-- Current package: 11 / 11 — 07-28-standardize-environment-blocked-recovery-evidence (not started)
-- Last verified commit: 1aa2359d
-- Cumulative matrix: not run
+- Current package: 11 / 11 — 07-28-standardize-environment-blocked-recovery-evidence (complete)
+- Last verified commit: 6682f8e9
+- Cumulative matrix: not run (all 11 packages done; next is umbrella cumulative integration)
 - Pull request: none
 - Finalization receipt: none
 - Pre-start separation: resolved. Unrelated task
@@ -36,9 +36,68 @@ local checks/review have completed.
 | 8 | `07-25-fix-work-loop-lock-race` | done | 18739c75 | test_work_loop (78, +3 concurrent-recovery/helper) + test_generated_parity + test_pack_drift (56) green; ruff + mypy clean | self-review clean; identity-checked rename-aside recovery, error strings + `--recover-stale-lock` flow unchanged, no consumer touched |
 | 9 | `07-25-backlog-selector-blocked-markers` | done | b233db10 | test_work_loop (81, +3 block-status/rank-order + envelope update) + test_generated_parity + test_pack_drift (56) green; ruff + mypy clean on both work-loop copies | self-review clean; formalized existing PARKED convention (no parallel one), Trellis-core task.py not forked, selector view provides AC1 machine-visible distinction |
 | 10 | `07-24-track-clean-recovery-artifacts` | done | 1aa2359d | recovery+housekeeping suites (90) + test_generated_parity + test_pack_drift (56) + test_install_audit (59) + surface generation/drift (28) green; ruff + mypy (35 files) + shellcheck + housekeeping self-test clean; only deferred `provenance.candidate-stale` remains for release prep | self-review clean; pre-existing registry/classify/cleanup integrated (not forked); housekeeping is the sole general cleanup owner, creating workflow owns success-path cleanup, ambiguous/unique defaults to preserve, sd-status stays read-only; new shared reference fanned out via manifest, both copies byte-identical; no consumer touched |
-| 11 | `07-28-standardize-environment-blocked-recovery-evidence` | pending | — | — | — |
+| 11 | `07-28-standardize-environment-blocked-recovery-evidence` | done | e0e9e4f9..6682f8e9 (8) | test_script_lib (composer + tool-cache) + test_work_loop + test_record_session + test_update_spec_kb + test_housekeeping_result + test_generated_parity + test_pack_drift = 242 green; ruff + mypy (35 files) clean | self-review clean; six R4 boundaries integrated owner-side only (no stderr classifier), managed-payload reserved as enum with no producer, additive schemaVersion-1 fragment, skills-render + handoff to 07-22 as research/ file (07-22 not edited) |
 
 ## Last checkpoint
+
+Package 11 (`07-28-standardize-environment-blocked-recovery-evidence`) complete
+across eight staged commits `e0e9e4f9..6682f8e9`: `e0e9e4f9` (shared composer +
+validator), `18966e9f` (tool-cache), `749f457a` (work-loop user-state),
+`9e446497` (record-session git-metadata), `98751eb3` (update-spec-kb kb-target),
+`965439fa` (housekeeping `environmentBlocks`), `7bc8cd40` (skills-render), and
+`6682f8e9` (doc note). The contract (R1/R3) is one reusable `environment_blocked`
+fragment (schemaVersion 1) in `sd_ai_command_pack_lib.py`:
+`build_environment_blocked_evidence` + `validate_environment_blocked_evidence`,
+bounded `boundary`/`mutationState`/`recoveryAction` enums, a redacted secret-safe
+`diagnostic`, and `retryable` rejected whenever `mutationState` is `unknown`. Six
+R4 owning operations emit it strictly from their own control flow — never from
+parsed stderr, so a repository defect can never be mislabeled a permission issue:
+tool-cache (shared-lib cache setup `--json`), user-state (work-loop private-dir
+create + CLI state write), git-metadata (record-session post-append commit;
+housekeeping fetch/prune and merged-branch delete), and kb-target (update-spec-kb
+refresh = `partial-recoverable`, inspect = `none`; housekeeping KB refresh). Each
+preserves its prior exit and fail-closed behavior (R4); an unknown failure keeps
+its existing command-owned result rather than being guessed into the contract
+(R2/R5). The fragment is additive (R7): it rides each command's existing result
+object without changing that object's own schemaVersion or exit, and an
+unsupported consumer ignores it and keeps its prior bounded diagnostic.
+
+Scope decision — `managed-payload`: PRD R4 names exactly six owners and none is a
+managed-payload producer; the only natural producers are `install.py` managed
+writes (which run in consumers, outside this single-merge boundary) and the
+recovery-artifact lifecycle (owned by Package 10, `07-24-track-clean-recovery-
+artifacts`). So `managed-payload` ships as a reserved enum boundary (R2 support)
+with no producer wired here, consistent with contract-first "reconcile ownership;
+do not duplicate their underlying fixes"; this consciously supersedes
+`implement.md` step 5's "then managed payload writes." Skills-render (R6, step 7):
+a new shared reference `sd-help/references/environment-blocked-recovery.md`
+encodes the narrow-authority rules — report the exact boundary and checkpoint,
+request only the narrow retry, treat `recoveryAction` as data not permission,
+honor `mutationState`, and never let a block authorize a merge, branch deletion,
+archive, force operation, or broad cleanup — registered in
+`SHARED_SKILL_REFERENCES` and fanned out to 22 IDE namespaces by
+`generate-command-surfaces.py`; `sd-housekeeping` (the additive `environmentBlocks`
+array), `sd-finish-work` (recorder git-metadata), `sd-update-spec` (kb-target),
+and `sd-work-backlog` (work-loop user-state) point at it, and
+`SD_AI_COMMAND_PACK.md` documents the array (step 8). Step 9 handoff: the
+environment-blocked and idempotent-retry scenarios are recorded as EB/IR/IC/FS
+rows citing landed tests in Package 11's own
+`research/workflow-program-handoff.md` for
+`07-22-validate-sd-workflow-program-integration` to consume; 07-22 is
+planning-status and outside this umbrella, so its artifacts were not edited — the
+scenarios are fed in as a child-owned handoff, matching 07-22's "reference, do not
+reimplement a child's behavior" design. The planning adversarial-review rule does
+not fire: this window created or materially updated no active-task
+`prd.md`/`design.md`/`implement.md` (Package 11's planning artifacts were authored
+and reviewed at activation `d79ba90`; the handoff is a new `research/` file), and
+the edits are lib/scripts/tests/skills/docs/handoff only. Templates edited first;
+root mirrors byte-identical via `make sync` (`conflicts: none`); no consumer
+touched. Version/changelog/fleet and the candidate-ledger `payloadDigest` restamp
+stay deferred to cumulative integration and the post-STOP fleet boundary; the lone
+`provenance.candidate-stale` surface finding is that expected deferral. Checks:
+`test_script_lib` (composer + tool-cache) + `test_work_loop` + `test_record_session`
++ `test_update_spec_kb` + `test_housekeeping_result` + `test_generated_parity` +
+`test_pack_drift` = 242 green; `ruff` + `mypy` (35 files) clean.
 
 Package 10 (`07-24-track-clean-recovery-artifacts`) complete at commit
 `1aa2359d`, the final of five staged subsystem commits: `5c90234c`
@@ -285,5 +344,12 @@ cumulative integration: `candidate-validation.json` `payloadDigest` (refreshed
 by release preparation), so `make generate` surface-check still reports the
 candidate-ledger digest as stale until then.
 
-Next: implement work package 10,
-`07-24-track-clean-recovery-artifacts`.
+Next: all 11 work packages are done. Begin umbrella cumulative integration —
+R7 stability matrix, template/root sync + install audit + `make check`, release
+preparation (including the candidate-ledger `payloadDigest` restamp via fleet
+candidate validation), and cumulative adversarial review — then publish one PR,
+resolve exact-head remote review + CI, run one multi-task pre-archive gate,
+archive the umbrella and all 11 packages, record one journal entry and one
+completion receipt, merge once via sd-housekeeping, verify clean synchronized
+main, and publish the stabilized successor release. STOP before fleet rollout
+(`07-28-roll-out-stabilized-pack-release-to-fleet`) and touch no consumer.
