@@ -6,10 +6,12 @@ local checks/review have completed.
 
 ## Campaign
 
-- Branch: not started
-- Planning baseline: not committed
-- Current package: none
-- Last verified commit: none
+- Branch: codex/stabilize-self-hosted-delivery-lifecycle (from clean main 0f3323b)
+- Planning baseline: 6b8a8f8 (first bounded commit; planning + handoff surface)
+- Lifecycle activation: umbrella + all 11 work packages set to in_progress and
+  assigned the shared branch; investigation and rollout tasks remain planning.
+- Current package: 1 / 11 — 07-28-clarify-completion-housekeeping-obligations (not started)
+- Last verified commit: 6b8a8f8
 - Cumulative matrix: not run
 - Pull request: none
 - Finalization receipt: none
@@ -37,6 +39,10 @@ local checks/review have completed.
 
 ## Last checkpoint
 
-Not started. The unrelated planning task is preserved separately. Review and
-approve the PRD, design, and implementation plan before creating the shared
-feature branch or changing task lifecycle state.
+Lifecycle activated. Branch `codex/stabilize-self-hosted-delivery-lifecycle`
+created from clean `main` (`0f3323b`); planning baseline committed at `6b8a8f8`.
+Umbrella is the active session task; all eleven work packages are `in_progress`
+on the shared branch. Investigation and rollout tasks remain `planning`.
+
+Next: implement work package 1,
+`07-28-clarify-completion-housekeeping-obligations`.
