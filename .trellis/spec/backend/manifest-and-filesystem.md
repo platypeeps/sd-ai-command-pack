@@ -842,6 +842,30 @@ tasks, workflow, scripts, and shared runtime files remain trackable. Keep
 `--local-only` installs on `.git/info/exclude`; local-only mode must not modify
 tracked `.gitignore`.
 
+### Platform Runtime-Classifier Parity
+
+1. **Scope / Trigger**: apply this contract whenever a platform's
+   `PlatformInfo.trellis_local_only` entries change or a shipped review-scope
+   classifier is added or edited.
+2. **Signatures**: `PLATFORM_REGISTRY[platform].trellis_local_only` is the
+   canonical tuple; `is_trellis_runtime_path()` in the shipped shell scanner
+   and the copied-runtime path set in the JavaScript preflight are consumers.
+3. **Contracts**: every exact registry file and every directory/glob-equivalent
+   registry entry must be recognized by each shipped runtime classifier. Keep
+   templates authoritative and regenerate root mirrors with `make sync`.
+4. **Validation & Error Matrix**: a registry path absent from a classifier is a
+   test failure; a template/root mismatch is a shipped-surface failure; an
+   invalid platform key or unsafe path remains an installer validation error.
+5. **Good / Base / Bad Cases**: adding `.gemini/settings.json` to the registry,
+   shell scanner, and JavaScript classifier is good; an unchanged registry and
+   classifiers is the base case; updating only one consumer is invalid drift.
+6. **Tests Required**: registry-coverage tests must assert representative exact
+   settings files and iterate every `trellis_local_only` entry against shipped
+   scanners; template-twin checks must compare generated root mirrors.
+7. **Wrong vs Correct**: wrong: hand-edit the root scanner or add a path only
+   to the registry. Correct: update the registry and canonical template,
+   regenerate mirrors, then pass registry coverage and shipped-surface checks.
+
 ### Review Tool Config And Ignore Hygiene
 
 1. Scope and trigger: use this contract whenever adding or changing

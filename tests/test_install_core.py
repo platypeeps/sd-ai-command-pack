@@ -2094,6 +2094,10 @@ class InstallCoreTests(InstallTestCase):
             file.platform for file in files if file.platform != "shared"
         }
 
+        self.assertIn(
+            ".gemini/settings.json",
+            install.PLATFORM_REGISTRY["gemini"].trellis_local_only,
+        )
         for platform, info in sorted(install.PLATFORM_REGISTRY.items()):
             directory = info.directory
             self.assertIn(
