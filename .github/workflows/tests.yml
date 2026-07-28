@@ -470,6 +470,12 @@ jobs:
       mode: ${{ steps.evaluate.outputs.mode }}
 
     steps:
+      - name: Check out exact event head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
       - name: Evaluate required lanes
         id: evaluate
         env:

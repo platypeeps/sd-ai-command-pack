@@ -355,8 +355,13 @@ class ReleaseLedgerTests(InstallTestCase):
 
         aggregate = workflow["jobs"]["ci-result"]
         self.assertIn("release-payload-gate", aggregate["needs"])
-        aggregate_run = aggregate["steps"][0]["run"]
-        self.assertIn("RELEASE_PAYLOAD_GATE_RESULT", aggregate["steps"][0]["env"])
+        checkout_step = aggregate["steps"][0]
+        self.assertEqual(
+            checkout_step["with"]["ref"],
+            "${{ github.event.pull_request.head.sha || github.sha }}",
+        )
+        aggregate_run = aggregate["steps"][1]["run"]
+        self.assertIn("RELEASE_PAYLOAD_GATE_RESULT", aggregate["steps"][1]["env"])
         self.assertIn(".github/scripts/check-ci-result.sh", aggregate_run)
 
 

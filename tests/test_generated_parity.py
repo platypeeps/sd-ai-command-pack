@@ -1180,7 +1180,7 @@ class GeneratedParityTests(InstallTestCase):
         )
         self.assertEqual(
             workflow.count("actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"),
-            7,
+            8,
         )
         self.assertEqual(
             workflow.count(

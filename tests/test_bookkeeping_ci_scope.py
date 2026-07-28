@@ -566,7 +566,13 @@ class BookkeepingWorkflowContractTests(unittest.TestCase):
         aggregate = jobs["ci-result"]
         self.assertIn("ci-scope", aggregate["needs"])
         self.assertEqual(aggregate["outputs"]["mode"], "${{ steps.evaluate.outputs.mode }}")
-        self.assertIn(".github/scripts/check-ci-result.sh", aggregate["steps"][0]["run"])
+        checkout = aggregate["steps"][0]
+        self.assertEqual(
+            checkout["with"]["ref"],
+            "${{ github.event.pull_request.head.sha || github.sha }}",
+        )
+        self.assertEqual(checkout["with"]["persist-credentials"], "false")
+        self.assertIn(".github/scripts/check-ci-result.sh", aggregate["steps"][1]["run"])
         self.assertIn(
             "needs.ci-result.outputs.mode == 'full'",
             jobs["auto-tag-release"]["if"],
