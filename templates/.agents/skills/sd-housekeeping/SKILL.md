@@ -84,9 +84,18 @@ for the shared ownership sequence and authoring examples.
 8. Switch to and fast-forward the default branch, then delete only the proven
    merged local branch and, unless retained, its exact remote branch. Prune
    resulting stale refs.
-9. Let the executable invoke the installed `sd-status --json` collector in
-   strict mode. Do not run a parallel final-state or inventory collector.
-10. Interpret the schema-version-1 housekeeping result and give the concise
+9. Reconcile pack recovery artifacts once through the installed
+   recovery-artifacts helper in housekeeping mode, after branch and merge work
+   and before the status report; skip it in dependency-PR mode. Retire only
+   proven-safe stashes and worktrees and preserve every `needs-review`,
+   ambiguous, missing, or foreign artifact. Surface each retired artifact as an
+   action and each refused or failed retire as an anomaly; never prune receipts
+   and never force a removal. See
+   [`../sd-help/references/recovery-artifacts.md`](../sd-help/references/recovery-artifacts.md)
+   for the shared ownership lifecycle.
+10. Let the executable invoke the installed `sd-status --json` collector in
+    strict mode. Do not run a parallel final-state or inventory collector.
+11. Interpret the schema-version-1 housekeeping result and give the concise
     final report below. Preserve session-only follow-ups without contradicting
     status evidence.
 

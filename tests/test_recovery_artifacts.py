@@ -790,6 +790,19 @@ class RecoveryArtifactTests(InstallTestCase):
         self.assertTrue(report["dryRun"])
         self.assertIn(oid, self.stash_oids(root))  # nothing deleted
 
+        # The shell format proves the same safe artifact as a retire intent on a
+        # single unit-separated line, still without deleting anything.
+        code, out = self._cli(
+            "--state-home", str(self.state_root),
+            "cleanup", "--repo", str(root), "--mode", "housekeeping", "--dry-run",
+            "--format", "shell",
+        )
+        self.assertEqual(code, 0)
+        retired, preserved, failed, detail = out.strip("\n").split("\x1f")
+        self.assertEqual((retired, failed, detail), ("1", "0", ""))
+        self.assertEqual(preserved, "0")
+        self.assertIn(oid, self.stash_oids(root))  # still nothing deleted
+
     def test_cli_cleanup_owner_requires_artifact_id(self) -> None:
         root = self.make_repo()
         code, _ = self._cli(
@@ -797,6 +810,30 @@ class RecoveryArtifactTests(InstallTestCase):
             "cleanup", "--repo", str(root), "--mode", "owner",
         )
         self.assertEqual(code, 2)  # RecoveryError -> exit 2
+
+    def test_cleanup_shell_summary_counts_every_action_class(self) -> None:
+        # Drive every branch of the shell renderer deterministically: a real and
+        # a dry-run retire both count as retired; a skipped receipt and an
+        # unknown future label both count as preserved (never silently dropped);
+        # a non-mapping entry is ignored; only the first failure detail is kept.
+        report = {
+            "actions": [
+                {"action": "dropped-stash"},
+                {"action": "would-remove-worktree"},
+                {"action": "skipped", "classification": "needs-review"},
+                {"action": "some-future-label"},
+                "not-a-mapping",
+                {"action": "failed", "detail": "worktree remove refused: locked"},
+                {"action": "failed", "detail": "second failure ignored"},
+            ]
+        }
+        line = self.mod.cleanup_shell_summary(report)
+        self.assertNotIn("\n", line)
+        retired, preserved, failed, detail = line.split("\x1f")
+        self.assertEqual(retired, "2")
+        self.assertEqual(preserved, "2")
+        self.assertEqual(failed, "2")
+        self.assertEqual(detail, "worktree remove refused: locked")
 
 
 if __name__ == "__main__":

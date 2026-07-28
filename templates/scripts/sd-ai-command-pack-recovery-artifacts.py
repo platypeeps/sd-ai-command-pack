@@ -1240,6 +1240,47 @@ def _print(value: Mapping[str, Any]) -> None:
     print(json.dumps(value, indent=2, sort_keys=True))
 
 
+# Unit separator between fields on the ``cleanup --format shell`` summary line.
+# ``_bounded`` strips every code point below 0x20, so a bounded field can never
+# contain it (or a newline) and split the single-line record the shell reads.
+SHELL_FIELD_SEPARATOR = "\x1f"
+
+# Destructive successes, plus the dry-run ``would-*`` intents that prove the same
+# artifact is safe to retire. Counted as "retired" on the shell summary line.
+_RETIRE_ACTIONS = frozenset(
+    {"dropped-stash", "removed-worktree", "would-drop-stash", "would-remove-worktree"}
+)
+
+
+def cleanup_shell_summary(report: Mapping[str, Any]) -> str:
+    """Render one ``\\x1f``-delimited line the housekeeping shell parses.
+
+    Fields, in order: retired count, preserved count, failed count, and the
+    first failure detail. ``retired`` counts destructive successes (or, under
+    ``--dry-run``, the proven ``would-*`` intents); ``preserved`` counts every
+    conservatively kept receipt; ``failed`` counts destructive attempts that
+    errored. The counts are the contract the shell branches on, so any unknown
+    future action label is treated as preserved rather than silently dropped.
+    """
+
+    retired = preserved = failed = 0
+    first_failure = ""
+    for item in report.get("actions", []):
+        if not isinstance(item, Mapping):
+            continue
+        action = item.get("action", "")
+        if action in _RETIRE_ACTIONS:
+            retired += 1
+        elif action == "failed":
+            failed += 1
+            if not first_failure:
+                first_failure = _bounded(item.get("detail", ""), MAX_REFERENCE)
+        else:
+            preserved += 1
+    fields = (str(retired), str(preserved), str(failed), first_failure)
+    return SHELL_FIELD_SEPARATOR.join(fields)
+
+
 def _state_root_arg(value: str | None) -> Path | None:
     if value is None:
         return None
@@ -1297,7 +1338,10 @@ def _cmd_cleanup(args: argparse.Namespace) -> int:
         stale_lock_seconds=args.stale_lock_seconds,
         dry_run=args.dry_run,
     )
-    _print(report)
+    if args.format == "shell":
+        print(cleanup_shell_summary(report))
+    else:
+        _print(report)
     # A sweep that safely preserved everything is still a success; only hard
     # errors (raised RecoveryError/CommandError) map to a non-zero exit.
     return 0
@@ -1338,6 +1382,12 @@ def build_parser() -> argparse.ArgumentParser:
     cleanup_parser.add_argument("--artifact-id", help="required in owner mode: the exact artifact to retire")
     cleanup_parser.add_argument("--stale-lock-seconds", type=int, default=DEFAULT_STALE_LOCK_SECONDS)
     cleanup_parser.add_argument("--dry-run", action="store_true", help="prove and report without deleting anything")
+    cleanup_parser.add_argument(
+        "--format",
+        choices=("json", "shell"),
+        default="json",
+        help="json (default, pretty report) or shell (one \\x1f-delimited summary line for callers)",
+    )
     cleanup_parser.set_defaults(func=_cmd_cleanup)
 
     return parser

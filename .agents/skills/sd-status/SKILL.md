@@ -59,8 +59,14 @@ reinterpret them as shell text.
    Git stash count, cached upstream divergence, default/local/remote branches,
    installed pack and Trellis versions, relevant PR, open PRs/issues, current
    and queued Trellis work, completed tasks stranded outside the Trellis
-   archive, the user-local autonomous work-loop state, anomalies, selectable
-   follow-ups, every unarchived task, and numbered next steps. Follow-ups also
+   archive, the user-local autonomous work-loop state, pack recovery-artifact
+   classifications, anomalies, selectable follow-ups, every unarchived task, and
+   numbered next steps. Recovery artifacts are reported read-only: preserve the
+   collector's `active`, `safe-cleanable`, `needs-review`, `missing-artifact`,
+   and `unowned-artifact` classifications and never create, repair, or delete a
+   receipt or Git artifact. See
+   [`../sd-help/references/recovery-artifacts.md`](../sd-help/references/recovery-artifacts.md)
+   for the shared ownership lifecycle. Follow-ups also
    include task-like items from bounded roadmap sources when no unarchived
    Trellis task represents them. Loop state includes run ID, mode,
    selector/focus, iteration, phase, task, PR, counters, heartbeat, context

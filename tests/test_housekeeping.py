@@ -283,6 +283,95 @@ class HousekeepingTests(InstallTestCase):
         self.assertIn("branch=main", result.stdout)
         self.assertNotIn("branch=null", result.stdout)
 
+    def _run_reconcile_recovery(
+        self,
+        *,
+        summary_line: str,
+        toolchain_exit: int = 0,
+        make_helpers: bool = True,
+        dry_run: int = 0,
+    ) -> subprocess.CompletedProcess:
+        """Drive ``reconcile_recovery_artifacts`` in isolation with a stub toolchain.
+
+        The stub prints ``summary_line`` verbatim (the ``\\x1f``-delimited receipt
+        the recovery helper's ``--format shell`` emits) and exits
+        ``toolchain_exit``, so the probe exercises only the shell adapter's
+        parse-and-classify branches, not the recovery helper or real git.
+        """
+        script = str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")
+        with tempfile.TemporaryDirectory() as script_dir:
+            if make_helpers:
+                (Path(script_dir) / "sd-ai-command-pack-recovery-artifacts.py").write_text(
+                    "# stub helper; the toolchain stub ignores it\n", encoding="utf-8"
+                )
+                (Path(script_dir) / "sd-ai-command-pack-toolchain.sh").write_text(
+                    '#!/usr/bin/env bash\nprintf \'%s\\n\' "$SUMMARY_LINE"\nexit "${TOOLCHAIN_EXIT:-0}"\n',
+                    encoding="utf-8",
+                )
+            probe = (
+                "set -uo pipefail;"
+                f"SCRIPT_DIR={script_dir!r};"
+                f"DRY_RUN={dry_run};"
+                "FIELD_SEPARATOR=$'\\x1f';"
+                "ACTIONS=(); ACTION_CODES=(); ANOMALIES=(); ANOMALY_CODES=();"
+                'add_action() { ACTION_CODES+=("$1"); shift; ACTIONS+=("$*"); };'
+                'add_anomaly() { ANOMALY_CODES+=("$1"); shift; ANOMALIES+=("$*"); };'
+                f"eval \"$(awk '/^reconcile_recovery_artifacts\\(\\)/,/^}}/' {script})\";"
+                "reconcile_recovery_artifacts;"
+                'printf "ACTION_CODES=%s\\n" "${ACTION_CODES[*]-}";'
+                'printf "ANOMALY_CODES=%s\\n" "${ANOMALY_CODES[*]-}";'
+                'printf "ANOMALIES=%s\\n" "${ANOMALIES[*]-}"'
+            )
+            env = dict(
+                os.environ,
+                SUMMARY_LINE=summary_line,
+                TOOLCHAIN_EXIT=str(toolchain_exit),
+            )
+            return subprocess.run(
+                [self._bash_path, "-c", probe],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+                env=env,
+            )
+
+    def test_reconcile_recovery_artifacts_maps_summary_to_actions(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        us = "\x1f"
+
+        # Proven-safe retire with no failures: one retired action, no anomaly.
+        result = self._run_reconcile_recovery(summary_line=f"1{us}0{us}0{us}")
+        self.assertIn("ACTION_CODES=recovery_artifacts_retired", result.stdout)
+        self.assertNotIn("recovery_cleanup", result.stdout)
+        self.assertNotIn("recovery_helper_missing", result.stdout)
+
+        # Dry-run intent is previewed, never claimed as done.
+        result = self._run_reconcile_recovery(summary_line=f"2{us}1{us}0{us}", dry_run=1)
+        self.assertIn("ACTION_CODES=recovery_artifacts_retire_previewed", result.stdout)
+
+        # A failed retire surfaces one bounded-detail anomaly; a conservatively
+        # preserved artifact never becomes an anomaly and nothing is retired.
+        result = self._run_reconcile_recovery(summary_line=f"0{us}1{us}1{us}worktree locked")
+        self.assertIn("recovery_cleanup_incomplete", result.stdout)
+        self.assertIn("worktree locked", result.stdout)
+        self.assertNotIn("recovery_artifacts_retired", result.stdout)
+
+        # Missing helper, malformed receipt, and a non-zero toolchain exit each
+        # fail closed with exactly one distinct anomaly and retire nothing.
+        result = self._run_reconcile_recovery(summary_line="", make_helpers=False)
+        self.assertIn("recovery_helper_missing", result.stdout)
+        self.assertNotIn("recovery_artifacts_retired", result.stdout)
+
+        result = self._run_reconcile_recovery(summary_line="garbage-no-separator")
+        self.assertIn("recovery_cleanup_incomplete", result.stdout)
+        self.assertNotIn("recovery_artifacts_retired", result.stdout)
+
+        result = self._run_reconcile_recovery(summary_line="", toolchain_exit=3)
+        self.assertIn("recovery_cleanup_failed", result.stdout)
+        self.assertNotIn("recovery_artifacts_retired", result.stdout)
+
     def test_review_pr_skill_auto_dispatches_housekeeping_after_merge(self) -> None:
         skill = (
             install.ROOT

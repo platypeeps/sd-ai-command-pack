@@ -977,6 +977,71 @@ route_branch_pr_lifecycle() {
   esac
 }
 
+# Retire proven-safe pack-created recovery artifacts (redundant stashes, clean
+# reachable worktrees) left by this stream, then let the read-only status report
+# classify whatever was conservatively preserved. Housekeeping is the only
+# general cleanup owner; the destructive proof gate (exact receipt match, dead
+# owner, proven cleanup predicate, no-unique-work reachability) lives in the
+# recovery helper, so a dirty, unique, foreign, mismatched, or live-owned
+# artifact is always preserved for a status decision, never forced away. A
+# missing helper or a sweep error is surfaced as one anomaly and never aborts
+# end-of-stream housekeeping.
+reconcile_recovery_artifacts() {
+  local helper="$SCRIPT_DIR/sd-ai-command-pack-recovery-artifacts.py"
+  local toolchain="$SCRIPT_DIR/sd-ai-command-pack-toolchain.sh"
+  local -a args
+  local output
+  local status
+  local retired preserved failed detail
+
+  if [ ! -r "$helper" ] || [ ! -r "$toolchain" ]; then
+    add_anomaly recovery_helper_missing "recovery-artifact reconciler is unavailable; skipped recovery cleanup and left any artifacts for a later status decision"
+    return 0
+  fi
+
+  args=(cleanup --repo . --mode housekeeping --format shell)
+  if [ "$DRY_RUN" -eq 1 ]; then
+    args+=(--dry-run)
+  fi
+
+  if output="$(bash "$toolchain" run-python -- "$helper" "${args[@]}")"; then
+    status=0
+  else
+    status=$?
+  fi
+  if [ "$status" -ne 0 ]; then
+    add_anomaly recovery_cleanup_failed "recovery-artifact cleanup exited $status; left recovery artifacts untouched for a later status decision"
+    return 0
+  fi
+
+  # The shell format emits exactly one unit-separated summary line; take the
+  # last line defensively and require the delimiter before trusting it.
+  output="${output##*$'\n'}"
+  case "$output" in
+    *"$FIELD_SEPARATOR"*) ;;
+    *)
+      add_anomaly recovery_cleanup_incomplete "recovery-artifact cleanup returned no summary receipt; left recovery artifacts untouched for a later status decision"
+      return 0
+      ;;
+  esac
+  IFS="$FIELD_SEPARATOR" read -r retired preserved failed detail <<<"$output"
+  if ! [[ "$retired" =~ ^[0-9]+$ ]] || ! [[ "$preserved" =~ ^[0-9]+$ ]] || ! [[ "$failed" =~ ^[0-9]+$ ]]; then
+    add_anomaly recovery_cleanup_incomplete "recovery-artifact cleanup returned a malformed summary receipt; left recovery artifacts untouched for a later status decision"
+    return 0
+  fi
+
+  if [ "$retired" -gt 0 ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      add_action recovery_artifacts_retire_previewed "would retire $retired proven-safe recovery artifact(s); preserved $preserved for status review"
+    else
+      add_action recovery_artifacts_retired "retired $retired proven-safe recovery artifact(s); preserved $preserved for status review"
+    fi
+  fi
+  if [ "$failed" -gt 0 ]; then
+    add_anomaly recovery_cleanup_incomplete "${detail:-recovery-artifact cleanup could not retire $failed artifact(s)}; left them for a later status decision"
+  fi
+}
+
 emit_json_result() {
   local status_file="$1"
   local status_exit="$2"
@@ -1310,10 +1375,17 @@ main() {
   if [ -n "$DEPENDENCY_PR" ]; then
     maybe_merge_ready_dependency_pr "$DEPENDENCY_PR"
     fast_forward_default_branch
-  elif [ "$START_BRANCH" = "$DEFAULT_BRANCH" ]; then
-    fast_forward_default_branch
   else
-    route_branch_pr_lifecycle "$START_BRANCH"
+    if [ "$START_BRANCH" = "$DEFAULT_BRANCH" ]; then
+      fast_forward_default_branch
+    else
+      route_branch_pr_lifecycle "$START_BRANCH"
+    fi
+    # Reconcile leftover recovery artifacts after the branch/merge work so the
+    # status report below reflects the post-sweep state. Skipped in the narrow
+    # dependency-PR mode, which merges one deps PR on the clean default branch
+    # and owns no recovery artifacts (mirrors its Obsidian KB-refresh skip).
+    reconcile_recovery_artifacts
   fi
 
   run_status_report

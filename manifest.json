@@ -765,6 +765,83 @@
     {
       "platform": "shared",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/recovery-artifacts.md",
+      "target": ".agents/skills/sd-help/references/recovery-artifacts.md",
+      "install": "always"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/recovery-artifacts.md",
+      "target": ".agent/skills/sd-help/references/recovery-artifacts.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/recovery-artifacts.md",
+      "target": ".codebuddy/skills/sd-help/references/recovery-artifacts.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/recovery-artifacts.md",
+      "target": ".devin/skills/sd-help/references/recovery-artifacts.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/recovery-artifacts.md",
+      "target": ".factory/skills/sd-help/references/recovery-artifacts.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/recovery-artifacts.md",
+      "target": ".kilocode/skills/sd-help/references/recovery-artifacts.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/recovery-artifacts.md",
+      "target": ".kiro/skills/sd-help/references/recovery-artifacts.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/recovery-artifacts.md",
+      "target": ".pi/skills/sd-help/references/recovery-artifacts.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/recovery-artifacts.md",
+      "target": ".qoder/skills/sd-help/references/recovery-artifacts.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/recovery-artifacts.md",
+      "target": ".reasonix/skills/sd-help/references/recovery-artifacts.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/recovery-artifacts.md",
+      "target": ".trae/skills/sd-help/references/recovery-artifacts.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-help/references/structured-questions.md",
       "target": ".agents/skills/sd-help/references/structured-questions.md",
       "install": "always"

@@ -560,7 +560,8 @@ branch, staged/unstaged/untracked counts, Git stash count, upstream ahead/behind
 and local/remote branches, installed SD pack and Trellis versions, relevant PR,
 open PRs/issues, current/in-progress/planned Trellis work, completed tasks
 stranded outside the Trellis archive, user-local autonomous loop state,
-anomalies, complete selectable F-prefixed follow-ups and T-prefixed unarchived
+pack recovery-artifact classifications, anomalies, complete selectable
+F-prefixed follow-ups and T-prefixed unarchived
 tasks, and numbered next steps. Task-like items in bounded roadmap sources are
 reported as source-backed F-prefixed follow-ups only when no unarchived Trellis
 task represents them. Sources are limited to roadmap/backlog/TODO/program-design
@@ -583,6 +584,27 @@ positional path selects another checkout, so
 not fetch and label ref-derived values `cached`. Relevant-PR review totals use
 GitHub's GraphQL `reviews.totalCount`, so repositories with more than one REST
 page of review events are reported accurately without fetching every review.
+
+`scripts/sd-ai-command-pack-recovery-artifacts.py` owns the lifecycle of
+pack-created Git recovery artifacts — the stashes and worktrees a workflow makes
+to protect uncommitted work before a risky operation. Each artifact carries a
+versioned, user-local, owner-only receipt keyed by repository identity and a
+unique artifact ID; cleanup acts only through receipts, so an artifact with no
+receipt is never touched. A creating workflow `register`s the receipt atomically
+the instant after the artifact exists and, on the success path, retires its own
+artifact and receipt in a `finally` through `cleanup --mode owner --artifact-id`;
+an interruption preserves both for recovery. `sd-status` classifies every
+artifact read-only as `active`, `safe-cleanable`, `needs-review`,
+`missing-artifact`, or `unowned-artifact`, and moves nothing. `sd-housekeeping`
+is the sole general cleanup owner: `cleanup --mode housekeeping` retires only a
+stash proven redundant or superseded at its exact object, or a worktree clean at
+its exact registered path with a matching common directory, no lock, and a
+reachable or retained head, and preserves every ambiguous, `needs-review`,
+missing, or foreign artifact. Housekeeping surfaces retired artifacts as actions
+and refused or failed retires as anomalies, never prunes receipts, and never
+forces a removal. The receipt JSON is bounded and exposes no secrets, remote
+URLs, or raw filesystem errors. The shared ownership lifecycle is documented in
+`.agents/skills/sd-help/references/recovery-artifacts.md`.
 
 The optional positional `fleet` mode works from any installed checkout. It
 resolves the canonical fleet manifest from `--fleet-manifest`,
