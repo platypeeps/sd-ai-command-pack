@@ -1772,3 +1772,36 @@ Recovered the durable planning work from the preserved stash, removed obsolete d
 ### Next Steps
 
 - None - task complete
+
+
+## Session 246: Add bookkeeping-only CI fast lane
+
+**Date**: 2026-07-27
+**Task**: Add bookkeeping-only CI fast lane
+**Branch**: `codex/add-bookkeeping-only-ci-fast-lane`
+
+### Summary
+
+Implemented a fail-closed exact-head bookkeeping CI mode with prior-head evidence, canonical Trellis validation, strict aggregate handling, full-only auto-tagging, focused tests, and executable documentation. Validated with the complete make check gate and refreshed the linked Obsidian KB.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `400be02` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
