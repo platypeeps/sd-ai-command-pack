@@ -488,6 +488,12 @@ _ENVIRONMENT_FIELD_LIMIT = 120
 _ENVIRONMENT_RECOVERY_TOKEN_LIMIT = 32
 _ENVIRONMENT_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
 _ENVIRONMENT_URL_CREDENTIAL_RE = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*://)[^/@\s]+@")
+# Controlled path rendering: an absolute POSIX filesystem path token — a "/" that
+# begins a path segment and is not part of a scheme://host/path URL, whose
+# internal slashes are always preceded by an alphanumeric, ":" or "/". Plain
+# remote URLs are permitted diagnostic context (design permits "remote URLs with
+# credentials" removal only), so the negative lookbehind deliberately spares them.
+_ENVIRONMENT_FS_PATH_RE = re.compile(r"(?<![A-Za-z0-9:/])/[^\s'\"]+")
 _ENVIRONMENT_SECRET_RE = re.compile(
     r"(?i)(?:bearer\s+|(?:access[_-]?|api[_-]?)?token[=:]\s*|gh[pousr]_)[A-Za-z0-9._\-]{8,}"
 )
@@ -505,10 +511,13 @@ class EnvironmentEvidenceError(CommandError):
 
 def _redact_environment_text(value: object, *, limit: int) -> str:
     """Bound and redact free text for the fragment: strip control bytes, remove
-    URL credentials and obvious tokens, collapse whitespace, and truncate."""
+    URL credentials, obvious tokens, and arbitrary absolute filesystem paths
+    (rendered as ``[path]``), collapse whitespace, and truncate. Plain remote
+    URLs without credentials are preserved as diagnostic context."""
     text = "" if value is None else str(value)
     text = _ENVIRONMENT_URL_CREDENTIAL_RE.sub(r"\1[redacted]@", text)
     text = _ENVIRONMENT_SECRET_RE.sub("[redacted]", text)
+    text = _ENVIRONMENT_FS_PATH_RE.sub("[path]", text)
     text = _ENVIRONMENT_CONTROL_RE.sub(" ", text)
     text = " ".join(text.split())
     if len(text) > limit:
@@ -607,7 +616,9 @@ def validate_environment_blocked_evidence(fragment: object) -> dict[str, object]
     if not isinstance(fragment, Mapping):
         raise EnvironmentEvidenceError("environment-blocked evidence must be a mapping")
     if fragment.get("reasonCode") != ENVIRONMENT_BLOCKED_REASON:
-        raise EnvironmentEvidenceError("reasonCode must be environment_blocked")
+        raise EnvironmentEvidenceError(
+            f"reasonCode must be {ENVIRONMENT_BLOCKED_REASON}"
+        )
     if fragment.get("schemaVersion") != ENVIRONMENT_BLOCKED_SCHEMA_VERSION:
         raise EnvironmentEvidenceError(
             "unsupported environment-blocked schemaVersion: "

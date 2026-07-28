@@ -692,6 +692,26 @@ class ScriptLibTests(InstallTestCase):
         self.assertLessEqual(len(diagnostic), lib.ENVIRONMENT_DIAGNOSTIC_LIMIT)
         self.assertTrue(diagnostic.endswith("…"))
 
+    def test_environment_evidence_renders_paths_and_preserves_plain_urls(self) -> None:
+        lib = self.load_lib()
+        fragment = lib.build_environment_blocked_evidence(
+            boundary="tool-cache",
+            operation="cache-setup",
+            checkpoint="cache-setup",
+            mutation_state="none",
+            retryable=True,
+            diagnostic=(
+                "pack cache namespace is not writable: /Users/alex/secret/ns "
+                "after cloning https://example.com/org/repo.git"
+            ),
+        )
+        diagnostic = fragment["diagnostic"]
+        # Arbitrary raw filesystem paths must be rendered, never leaked verbatim.
+        self.assertNotIn("/Users/alex/secret/ns", diagnostic)
+        self.assertIn("[path]", diagnostic)
+        # Plain (credential-free) remote URLs remain permitted diagnostic context.
+        self.assertIn("https://example.com/org/repo.git", diagnostic)
+
     def test_environment_evidence_recovery_action_argv_is_bounded_data(self) -> None:
         lib = self.load_lib()
         fragment = lib.build_environment_blocked_evidence(

@@ -30,7 +30,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from sd_ai_command_pack_lib import build_environment_blocked_evidence
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from sd_ai_command_pack_lib import build_environment_blocked_evidence  # noqa: E402
 
 SCHEMA_VERSION = 1
 STATUS_SCHEMA_VERSION = 2
