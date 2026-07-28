@@ -102,6 +102,7 @@ jobs:
                and ((.evidenceScope | type) == "string")
                and (.evidenceScope | test("^[A-Za-z0-9_:/.-]{1,160}$"))
                and (if .mode == "bookkeeping" then .beforeSha == $before and .afterSha == $after else true end)
+               and (if .mode == "bookkeeping" then .evidenceRunId != null and .evidenceCheckRunId != null else true end)
                and (.evidenceRunId == null or (((.evidenceRunId | type) == "number") and .evidenceRunId > 0 and .evidenceRunId == (.evidenceRunId | floor)))
                and (.evidenceCheckRunId == null or (((.evidenceCheckRunId | type) == "number") and .evidenceCheckRunId > 0 and .evidenceCheckRunId == (.evidenceCheckRunId | floor)))' \
               "$result_file" >/dev/null

@@ -540,6 +540,10 @@ class BookkeepingWorkflowContractTests(unittest.TestCase):
         self.assertIn('git show "$BEFORE_SHA:.github/scripts/bookkeeping_ci_scope.py"', classify)
         self.assertIn("actions/workflows/tests.yml/runs?head_sha=${BEFORE_SHA}", classify)
         self.assertIn("commits/${BEFORE_SHA}/check-runs", classify)
+        self.assertIn(
+            'if .mode == "bookkeeping" then .evidenceRunId != null and .evidenceCheckRunId != null else true end',
+            classify,
+        )
         self.assertIn('write_full_result "bootstrap_full"', classify)
         self.assertNotIn("pull_request_target", self.text)
 
