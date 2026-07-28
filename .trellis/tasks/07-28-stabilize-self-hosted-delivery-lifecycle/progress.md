@@ -8,10 +8,11 @@ local checks/review have completed.
 
 - Branch: codex/stabilize-self-hosted-delivery-lifecycle (from clean main 0f3323b)
 - Planning baseline: 6b8a8f8 (first bounded commit; planning + handoff surface)
-- Lifecycle activation: umbrella + all 11 work packages set to in_progress and
-  assigned the shared branch; investigation and rollout tasks remain planning.
-- Current package: 1 / 11 — 07-28-clarify-completion-housekeeping-obligations (not started)
-- Last verified commit: 6b8a8f8
+- Lifecycle activation: d79ba90 — umbrella + all 11 work packages set to
+  in_progress and assigned the shared branch; investigation and rollout tasks
+  remain planning.
+- Current package: 2 / 11 — 07-28-decide-housekeeping-result-schema-compatibility (not started)
+- Last verified commit: 2616735
 - Cumulative matrix: not run
 - Pull request: none
 - Finalization receipt: none
@@ -25,7 +26,7 @@ local checks/review have completed.
 
 | Order | Task | State | Commit | Focused checks | Local review |
 | ---: | --- | --- | --- | --- | --- |
-| 1 | `07-28-clarify-completion-housekeeping-obligations` | pending | — | — | — |
+| 1 | `07-28-clarify-completion-housekeeping-obligations` | done | 2616735 | unittest (completion_lifecycle 9, sdlc_commands, help_command, surface_generation, generated_parity, pack_drift, install) + ruff + mypy green | self-review clean; candidate-ledger digest deferred to cumulative integration |
 | 2 | `07-28-decide-housekeeping-result-schema-compatibility` | pending | — | — | — |
 | 3 | `07-24-support-planning-only-pr-finalization` | pending | — | — | — |
 | 4 | `07-28-validate-finish-work-receipt-path` | pending | — | — | — |
@@ -39,10 +40,21 @@ local checks/review have completed.
 
 ## Last checkpoint
 
-Lifecycle activated. Branch `codex/stabilize-self-hosted-delivery-lifecycle`
-created from clean `main` (`0f3323b`); planning baseline committed at `6b8a8f8`.
-Umbrella is the active session task; all eleven work packages are `in_progress`
-on the shared branch. Investigation and rollout tasks remain `planning`.
+Package 1 (`07-28-clarify-completion-housekeeping-obligations`) complete at
+commit `2616735`. Added the shared `sd-help/references/completion-lifecycle.md`
+contract (registered in `SHARED_SKILL_REFERENCES`), a matching
+`## Completion boundary` section in sd-finish-work, sd-housekeeping,
+sd-review-pr, and sd-ship, an installed-guide pointer, and
+`tests/test_completion_lifecycle.py` (9 tests). Regenerated command surfaces,
+both manifests, and root mirrors via `make generate` + `make sync`.
 
-Next: implement work package 1,
-`07-28-clarify-completion-housekeeping-obligations`.
+Checks: `unittest` on completion_lifecycle (9) + sdlc_commands + help_command +
+surface_generation + generated_parity + pack_drift + install all green; ruff
+and mypy clean. Local review: self-review of the 16-file diff, scope matches the
+intended set, no second merge authority introduced. Deferred, by design, to
+cumulative integration: `candidate-validation.json` `payloadDigest` (refreshed
+by release preparation), so `make generate` surface-check still reports the
+candidate-ledger digest as stale until then.
+
+Next: implement work package 2,
+`07-28-decide-housekeeping-result-schema-compatibility`.
