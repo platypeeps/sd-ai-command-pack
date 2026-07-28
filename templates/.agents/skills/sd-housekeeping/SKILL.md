@@ -44,6 +44,19 @@ does not authorize unrelated or ambiguous files, force pushes, default-branch
 pushes, destructive cleanup, or bypassing finish-work, review, exact-head,
 eligibility, merge, or deletion gates.
 
+## Completion boundary
+
+This skill owns the **Post-archive handoff** — merge, branch deletion,
+default-branch synchronization, superseded-PR closure, and post-merge fleet
+checks — behind its exact-head eligibility, merge, and deletion gates, which it
+never relaxes. An acceptance criterion is any outcome that must be true before
+Trellis archives the task; every such criterion is checked before `task.py
+archive` marks the task `completed`. Merge, branch deletion, default-branch
+synchronization, superseded-PR closure, and post-merge fleet checks are the
+**Post-archive handoff**, never left as unchecked acceptance criteria. See
+[`../sd-help/references/completion-lifecycle.md`](../sd-help/references/completion-lifecycle.md)
+for the shared ownership sequence and authoring examples.
+
 ## Task List
 
 1. Verify repository, branch, and working-tree scope.

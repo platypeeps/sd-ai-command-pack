@@ -274,7 +274,10 @@ it. Use a separate request to execute the recommendation.
    the Trellis finish-work skill's quality gate, archive, journal, and commit
    reminder behavior. Lifecycle commands must chain through `sd-finish-work`
    rather than invoking Trellis directly so the pack's concrete session
-   recorder remains in the path.
+   recorder remains in the path. Every acceptance criterion is satisfied before
+   archive; merge and cleanup are the task's `Post-archive handoff`, never
+   unchecked acceptance criteria. The shared boundary and authoring examples live
+   in `sd-help/references/completion-lifecycle.md`.
 17. After the PR merges, run the housekeeping command to get back to the default
    branch, prune/delete the merged development stream, and see the condensed
    clean-state/anomaly report.

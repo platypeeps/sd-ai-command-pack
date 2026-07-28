@@ -16,6 +16,19 @@ ask again solely because that bookkeeping will be committed or pushed. This
 does not authorize unrelated or ambiguous files, force pushes, default-branch
 pushes, destructive actions, or bypassing finalization and exact-head gates.
 
+## Completion boundary
+
+This wrapper owns the pre-archive completion boundary: it archives a task only
+after every acceptance criterion is satisfied, and it never performs the
+post-archive handoff. An acceptance criterion is any outcome that must be true
+before Trellis archives the task; every such criterion is checked before
+`task.py archive` marks the task `completed`. Merge, branch deletion,
+default-branch synchronization, superseded-PR closure, and post-merge fleet
+checks are the **Post-archive handoff**, never left as unchecked acceptance
+criteria. See
+[`../sd-help/references/completion-lifecycle.md`](../sd-help/references/completion-lifecycle.md)
+for the shared ownership sequence and authoring examples.
+
 ## Structured decisions
 
 Read [`../sd-help/references/structured-questions.md`](../sd-help/references/structured-questions.md)

@@ -604,6 +604,83 @@
     {
       "platform": "shared",
       "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/completion-lifecycle.md",
+      "target": ".agents/skills/sd-help/references/completion-lifecycle.md",
+      "install": "always"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/completion-lifecycle.md",
+      "target": ".agent/skills/sd-help/references/completion-lifecycle.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/completion-lifecycle.md",
+      "target": ".codebuddy/skills/sd-help/references/completion-lifecycle.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/completion-lifecycle.md",
+      "target": ".devin/skills/sd-help/references/completion-lifecycle.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/completion-lifecycle.md",
+      "target": ".factory/skills/sd-help/references/completion-lifecycle.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/completion-lifecycle.md",
+      "target": ".kilocode/skills/sd-help/references/completion-lifecycle.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/completion-lifecycle.md",
+      "target": ".kiro/skills/sd-help/references/completion-lifecycle.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/completion-lifecycle.md",
+      "target": ".pi/skills/sd-help/references/completion-lifecycle.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/completion-lifecycle.md",
+      "target": ".qoder/skills/sd-help/references/completion-lifecycle.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/completion-lifecycle.md",
+      "target": ".reasonix/skills/sd-help/references/completion-lifecycle.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/completion-lifecycle.md",
+      "target": ".trae/skills/sd-help/references/completion-lifecycle.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
       "source": "templates/.agents/skills/sd-help/references/examples.md",
       "target": ".agents/skills/sd-help/references/examples.md",
       "install": "always"
