@@ -14,7 +14,9 @@ manifest.json  vs  .sd-ai-command-pack/manifest.json   IDENTICAL, 163,553 bytes
 Tracked mirror files by root: `.github` 113, `.agents` 99, `.opencode` 77,
 `.claude` 77, `.gemini` 31, `.sd-ai-command-pack` 2.
 
-Machinery actually measured — **173,615 bytes, not the ~210 KB the PRD states**:
+Machinery actually measured — **173,615 bytes, not the ~210 KB the originating
+audit estimated**. The PRD Goal states this measured figure; the PRD Notes
+record the audit estimate as provenance:
 
 | file | bytes |
 |---|---|
