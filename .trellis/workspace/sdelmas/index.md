@@ -7,8 +7,8 @@
 ## Current Status
 
 <!-- @@@auto:current-status -->
-- **Active File**: `journal-5.md`
-- **Total Sessions**: 250
+- **Active File**: `journal-6.md`
+- **Total Sessions**: 251
 - **Last Active**: 2026-07-29
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~2011 | Active |
+| `journal-6.md` | ~52 | Active |
+| `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
 | `journal-2.md` | ~1992 | Archived |
@@ -33,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 251 | 2026-07-29 | Recover the 2026-07-29 finalization residue and plan the validator delta-scoping fix | `35e74c17`, `acc836dc`, `f92221e5`, `1bb1bc92`, `7a5542a6`, `d21afe83`, `5641f0eb`, `3ff2ff5f` | `plan/workflow-instability-evidence` |
 | 250 | 2026-07-29 | Harden review and audit workflow contracts (PR #274) | `a2aef156`, `e9e4619b`, `d298d4c2`, `a2216127`, `3ca12cd2`, `9b1369d5`, `16b6ebe2` | `improve/review-workflow-hygiene` |
 | 249 | 2026-07-28 | Plan the 2026-07-28 audit follow-up backlog and converge PR #273 review | `0ff58e88`, `a984b597`, `9867e7f0`, `9930a4b5`, `7fde6218`, `5fc11c2f` | `plan/audit-2026-07-28-followup-artifacts` |
 | 248 | 2026-07-28 | Finalize single-merge stabilization campaign for v0.56.0 | `b098b629`, `fe69f4dc`, `536e8cca`, `22a1156e` | `codex/stabilize-self-hosted-delivery-lifecycle` |
