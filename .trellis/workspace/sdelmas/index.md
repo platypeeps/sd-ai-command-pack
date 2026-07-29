@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 251
+- **Total Sessions**: 252
 - **Last Active**: 2026-07-29
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~57 | Active |
+| `journal-6.md` | ~92 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 252 | 2026-07-29 | Exempt untouched planning scaffolds from both review-preflight seed-row lanes (v0.56.2) | `0ff54ffe`, `5ef0b8c9`, `2013ed46` | `claude/trusting-turing-d2ec3f` |
 | 251 | 2026-07-29 | Recover the 2026-07-29 finalization residue and plan the validator delta-scoping fix | `35e74c17`, `acc836dc`, `f92221e5`, `1bb1bc92`, `7a5542a6`, `d21afe83`, `5641f0eb`, `3ff2ff5f` | `plan/workflow-instability-evidence` |
 | 250 | 2026-07-29 | Harden review and audit workflow contracts (PR #274) | `a2aef156`, `e9e4619b`, `d298d4c2`, `a2216127`, `3ca12cd2`, `9b1369d5`, `16b6ebe2` | `improve/review-workflow-hygiene` |
 | 249 | 2026-07-28 | Plan the 2026-07-28 audit follow-up backlog and converge PR #273 review | `0ff58e88`, `a984b597`, `9867e7f0`, `9930a4b5`, `7fde6218`, `5fc11c2f` | `plan/audit-2026-07-28-followup-artifacts` |

@@ -55,3 +55,38 @@ No task was archived this session. `07-28-analyze-recurring-trellis-workflow-ins
 
 - Write `design.md` and `implement.md` for `07-29-scope-final-bundle-validator-to-delta`; its own notes require both before `task.py start`, and adversarial review round 2 left three questions for design to answer: the four-group reason-code classification, whether the non-blocking signal field is schema-1-additive or needs a coordinated version bump, and the maintenance-branch path allowlist.
 - Fix the `git gc`/`copytree` race in `tests/install_test_support.py` that intermittently fails `unittest (macos-latest, 3.13)`; the template repo is copied while a detached post-push `gc --auto` prunes its loose-object fanout dirs.
+
+
+## Session 252: Exempt untouched planning scaffolds from both review-preflight seed-row lanes (v0.56.2)
+
+**Date**: 2026-07-29
+**Task**: Exempt untouched planning scaffolds from both review-preflight seed-row lanes (v0.56.2)
+**Branch**: `claude/trusting-turing-d2ec3f`
+
+### Summary
+
+task.py create seeds implement.jsonl/check.jsonl with a generated _example row, and both of the pack's own seed-row enforcement lanes failed on exactly that row, so creating a Trellis task put the repo into a failing gate state. Hit live in rwbp-coordinator during the v0.56.1 fleet rollout. Fixed entirely pack-side: .trellis/scripts/** is vendored Trellis runtime with no manifest.json entry, so the scaffold text is not the pack's to change. Exempted a non-archived planning task's untouched scaffold in checkTrellisTaskContextManifests (diff-scoped review gate) and validateBookkeepingTaskContexts (bookkeeping validator, task_context_seed). The predicate is shape-based, not value-based: a lone row parsing to a plain object whose only key is _example. Deliberately does not pin Trellis's _SEED_EXAMPLE string, which Trellis owns and revises across versions; pinning it would re-break task creation on the next Trellis upgrade with a worse recovery path. Two Codex adversarial-review rounds produced six concerns, all addressed. Round 2 caught that my own affected-population correction was wrong: _has_subagent_platform short-circuits on the first _SUBAGENT_CONFIG_DIRS match, so a .claude repo is seeded regardless of Codex dispatch mode. Spec contract recorded in adapter-guidelines.md with an exempt/fail matrix. Copilot found one real defect the change introduced, a doc claim that symlinked context files are skipped, true only of the diff-scoped gate; the bookkeeping validator reports task_context_invalid. Fixed and thread resolved. PR #276 green, no unresolved threads.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0ff54ffe` | (see git log) |
+| `5ef0b8c9` | (see git log) |
+| `2013ed46` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
