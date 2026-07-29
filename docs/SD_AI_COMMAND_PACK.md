@@ -794,8 +794,10 @@ it on identical terms, so neither lane fails a freshly created task. The match
 is on that shape, not on Trellis's exact seed text, which Trellis owns and
 changes across versions. A scaffold row that survives alongside authored rows,
 carries extra keys, or appears in any non-planning or archived task still
-fails; grounded planning manifests pass, while untouched legacy archives and
-symlinked context files are skipped.
+fails; grounded planning manifests pass, while untouched legacy archives are
+skipped. The two lanes diverge on unsafe artifacts: the diff-scoped gate skips
+a symlinked context file, while the bookkeeping validator reports it as
+`task_context_invalid` rather than skipping it.
 Grounded rows may reference only `.trellis/spec/**` or
 `.trellis/tasks/**/research/**`. Journal history is append-only: newly
 added/current sessions remain editable, but an older session must be restored
