@@ -45,10 +45,17 @@
    `outcome: {status, reasonCodes}`" reproduces the collision, because that is
    already the `classify_outcome` shape at `:258`.
 
-7. **Update the shipped skill prose in the same commit.**
-   `.agents/skills/sd-housekeeping/SKILL.md:75`, `:113`, `:120`, `:121`, `:130`
-   name the key path and enumerate the enum values for an agent to follow, and
-   each is 11 files after `make sync`. Also `docs/SD_AI_COMMAND_PACK.md:1154`.
+7. **Update the shipped skill prose in the same commit — in `templates/**`, not
+   the generated root mirrors.**
+   `templates/.agents/skills/sd-housekeeping/SKILL.md:75`, `:113`, `:120`,
+   `:121`, `:130` name the key path and enumerate the enum values for an agent
+   to follow. Also `templates/docs/SD_AI_COMMAND_PACK.md:1154`.
+
+   `make sync` runs `install.py . --force`, which regenerates the root copies
+   from `templates/` and fans the skill out to 11 files. The root copies at
+   `.agents/skills/sd-housekeeping/SKILL.md` and `docs/SD_AI_COMMAND_PACK.md`
+   are byte-identical mirrors today, so editing them directly is overwritten on
+   the next sync and trips the parity gates.
 
    **Gate:** payload and prose agree at every commit. A dual-emit window protects
    code consumers, which fail loudly on a missing key; an agent reading stale
