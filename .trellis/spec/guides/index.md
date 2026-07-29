@@ -65,6 +65,17 @@ These guides help you **ask the right questions before coding**.
 
 **Verification rule**: Every CRITICAL/WARNING finding must be verified against the actual code before prioritizing. Budget ~35% false-positive rate for AI reviews.
 
+### When a Reviewer Reports Nothing
+
+Over-claiming is the well-known failure. Under-claiming is the one that ends a review loop early:
+
+- [ ] Review body says "no new comments" → Search the body for a collapsed `<details>` block disclosing withheld entries, typically titled `Comments suppressed due to low confidence (N)`. Match the intent, not that exact string; the wording can change. Copilot hides observations there; they never become inline comments or threads, so a loop reading only thread state never sees them.
+- [ ] Suppressed entry looks weak → Low confidence is the reviewer's confidence in **its own scoring**, not evidence the observation is wrong. Verify each one against the code like any inline comment. On PR #273, 3 of 4 suppressed entries were real defects.
+- [ ] Review body claims full coverage ("reviewed N out of N changed files") → Compare the review event's `commit_id` to the recorded head. A review can be submitted against an earlier commit while a newer one is already head; N is counted against the commit it actually read, so the claim is true and the head is still unreviewed.
+- [ ] Round looks clean → It is clean only when the body reports no new comments **and** no suppressed entry survives verification **and** `commit_id` equals the head.
+
+Enforcement lives in `templates/.agents/skills/sd-review-pr/SKILL.md` steps 4 and 5.
+
 ---
 
 ## Pre-Modification Rule (CRITICAL)
@@ -77,6 +88,8 @@ grep -r "value_to_change" .
 ```
 
 This single habit prevents most "forgot to update X" bugs.
+
+**This applies to prose artifacts, not just code.** A measurement, count, size, path, or identifier usually appears in more than one of `prd.md`, `design.md`, `implement.md`, and `task.json`, and one artifact often cites what another "states". Correcting the figure in one place leaves the others asserting the old value, and correcting a cited artifact can invalidate the citation itself. Grep the whole task directory; the stale copy is the one you did not think to open.
 
 ---
 

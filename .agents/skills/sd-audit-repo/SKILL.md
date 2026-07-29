@@ -250,6 +250,13 @@ clause, and `why:`/`fix:` capped at two lines — never paragraph blobs.
   entry when updating the ledger.
 - Leave committing the ledger update to the user's normal commit flow, and
   report the ledger path as a changed file.
+- Report that the ledger and report belong in their own commit, separate from
+  any `.trellis/tasks/**` planning artifacts written in the same session. The
+  bookkeeping validator admits only `.trellis/tasks/` and `.trellis/workspace/`
+  paths into a finalization delta, and its journal-only planning recovery
+  additionally requires every journaled work commit to be task-only. A commit
+  that mixes `.trellis/audit/**` with task artifacts therefore cannot be
+  journaled or finalized, and the mix cannot be undone once published.
 
 ## Safety rules
 
