@@ -785,9 +785,17 @@ The authored-source threshold excludes installed pack/Trellis mirrors, Trellis
 task and workspace records, and known generated reports. A separate warning calls
 out changes spanning more than one Trellis task directory. The task-context
 check inspects `implement.jsonl` and `check.jsonl`; a changed non-planning
-`task.json` also checks both sibling files. Changed planning manifests that
-still contain generated scaffolds fail; grounded planning manifests pass,
-while untouched legacy archives and symlinked context files are skipped.
+`task.json` also checks both sibling files. A planning task's untouched
+generated scaffold — a single row parsing to an object whose sole key is
+`_example`, the shape `task.py create` writes — is exempt, so creating a task
+never fails the gate; the scaffold must be replaced or emptied before the task
+leaves planning. The bookkeeping validator's `task_context_seed` check exempts
+it on identical terms, so neither lane fails a freshly created task. The match
+is on that shape, not on Trellis's exact seed text, which Trellis owns and
+changes across versions. A scaffold row that survives alongside authored rows,
+carries extra keys, or appears in any non-planning or archived task still
+fails; grounded planning manifests pass, while untouched legacy archives and
+symlinked context files are skipped.
 Grounded rows may reference only `.trellis/spec/**` or
 `.trellis/tasks/**/research/**`. Journal history is append-only: newly
 added/current sessions remain editable, but an older session must be restored

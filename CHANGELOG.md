@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.56.2 - 2026-07-29
+
+- Exempt a planning task's untouched context scaffold from both review-preflight
+  seed-row lanes — the diff-scoped task-context gate and the bookkeeping
+  validator that emits `task_context_seed`. `task.py create` writes
+  `implement.jsonl` and `check.jsonl` with a generated `_example` seed row,
+  which both lanes failed on immediately, so creating a task put the repo into a
+  failing state until the author blanked or rewrote both files by hand. This
+  affected pack-installed repositories where task creation actually seeds those
+  manifests; Trellis skips seeding when no sub-agent platform is configured. The
+  exemption is deliberately narrow: a single row that parses to an object whose
+  sole key is `_example`, in a non-archived task whose `task.json` status is
+  `planning`. It matches on that shape rather than on Trellis's exact seed text,
+  which is Trellis-owned and changes across versions — pinning it would re-break
+  task creation on the next Trellis upgrade. A seed row that survives beside
+  authored rows, carries extra keys, or appears in any non-planning or archived
+  task still fails, so the curation requirement at `task.py start` is unchanged.
+
 ## 0.56.1 - 2026-07-29
 
 - Treat a remote review body that reports no new comments as clean only after
