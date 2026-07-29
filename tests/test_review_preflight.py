@@ -78,6 +78,7 @@ import {
   findTrellisTaskContextIssues,
   findTrellisTaskContextSeedRows,
   isBoundaryRiskReviewPath,
+  isPristineTrellisTaskContextScaffold,
   isSourceReviewPath,
   isTrellisTaskContextReference,
   maskGeneratedDocumentationPathProvenance,
@@ -459,6 +460,20 @@ assert.deepEqual(findTrellisTaskContextSeedRows('check.jsonl', [
   '{"nested":{"_example":"not a seed row"}}',
   'malformed',
 ].join('\\n')), [{ file: 'check.jsonl', line: 2 }]);
+assert.equal(isPristineTrellisTaskContextScaffold('{"_example":"replace me"}\\n'), true);
+assert.equal(isPristineTrellisTaskContextScaffold('\\n{"_example":"replace me"}\\n\\n'), true);
+assert.equal(isPristineTrellisTaskContextScaffold(''), false);
+assert.equal(isPristineTrellisTaskContextScaffold('{"_example":"x","file":"src/a.py"}\\n'), false);
+assert.equal(isPristineTrellisTaskContextScaffold([
+  '{"_example":"replace me"}',
+  '{"file":".trellis/spec/backend/index.md","reason":"real"}',
+].join('\\n')), false);
+assert.equal(isPristineTrellisTaskContextScaffold('{"nested":{"_example":"x"}}\\n'), false);
+assert.equal(isPristineTrellisTaskContextScaffold('malformed\\n'), false);
+assert.equal(isPristineTrellisTaskContextScaffold('["_example"]\\n'), false);
+assert.equal(isPristineTrellisTaskContextScaffold('null\\n'), false);
+assert.equal(isPristineTrellisTaskContextScaffold('"_example"\\n'), false);
+assert.equal(isPristineTrellisTaskContextScaffold('{}\\n'), false);
 assert.equal(isTrellisTaskContextReference('.trellis/spec'), true);
 assert.equal(isTrellisTaskContextReference('.trellis/spec/'), true);
 assert.equal(isTrellisTaskContextReference('.trellis/spec/backend/index.md'), true);
@@ -2472,15 +2487,13 @@ assert.deepEqual(
         (task / "check.jsonl").write_text(seed, encoding="utf-8")
 
         result = self.run_review_preflight(node, root)
-        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
-            ".trellis/tasks/07-17-demo/implement.jsonl:1 still contains",
+            "2 untouched planning scaffold(s) are exempt until the task leaves planning",
             result.stdout,
         )
-        self.assertIn(
-            ".trellis/tasks/07-17-demo/check.jsonl:1 still contains",
-            result.stdout,
-        )
+        self.assertNotIn(".trellis/tasks/07-17-demo/implement.jsonl:1", result.stdout)
+        self.assertNotIn(".trellis/tasks/07-17-demo/check.jsonl:1", result.stdout)
 
         context = '{"file":".trellis/spec/backend/index.md","reason":"grounded"}\n'
         (task / "implement.jsonl").write_text(context, encoding="utf-8")
@@ -2556,6 +2569,68 @@ assert.deepEqual(
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
             "checked 2 changed Trellis task context file(s)",
+            result.stdout,
+        )
+
+    def test_review_preflight_exempts_only_untouched_planning_scaffolds(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        task = root / ".trellis/tasks/07-29-scaffold"
+        task.mkdir(parents=True)
+        (task / "task.json").write_text(
+            json.dumps(self.trellis_task_record("scaffold")) + "\n",
+            encoding="utf-8",
+        )
+        seed = '{"_example":"replace me"}\n'
+        context = '{"file":".trellis/spec/backend/index.md","reason":"grounded"}\n'
+        implement = task / "implement.jsonl"
+        check = task / "check.jsonl"
+        implement.write_text(seed, encoding="utf-8")
+        check.write_text(seed, encoding="utf-8")
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        implement.write_text(seed + context, encoding="utf-8")
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            ".trellis/tasks/07-29-scaffold/implement.jsonl:1 still contains",
+            result.stdout,
+        )
+        self.assertNotIn(".trellis/tasks/07-29-scaffold/check.jsonl:1", result.stdout)
+
+        implement.write_text(
+            '{"_example":"replace me","file":"src/app.py"}\n', encoding="utf-8"
+        )
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            ".trellis/tasks/07-29-scaffold/implement.jsonl:1 still contains",
+            result.stdout,
+        )
+
+        implement.write_text(seed, encoding="utf-8")
+        archived = root / ".trellis/tasks/archive/2026-07/07-29-archived-scaffold"
+        archived.mkdir(parents=True)
+        (archived / "task.json").write_text(
+            json.dumps(self.trellis_task_record("archived-scaffold")) + "\n",
+            encoding="utf-8",
+        )
+        (archived / "implement.jsonl").write_text(seed, encoding="utf-8")
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "archive/2026-07/07-29-archived-scaffold/implement.jsonl:1 still contains",
             result.stdout,
         )
 

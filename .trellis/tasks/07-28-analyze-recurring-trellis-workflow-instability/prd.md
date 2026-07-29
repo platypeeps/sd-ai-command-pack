@@ -165,6 +165,36 @@ were correct — commit `0ff58e88` mixed `.trellis/audit/ledger.md` and
 contract already prevents recurrence; it cannot repair an already-published
 commit, which is why #273 could not be finalized after the fact.
 
+## Post-Completion Residue — v0.56.1 fleet rollout
+
+Same terms as the sections above: history, not a work queue. No acceptance
+criteria are added and this task is not reopened.
+
+The v0.56.1 rollout to `platypeeps/rwbp-coordinator` failed its `local-checks`
+stage twice and exhausted the lane's retry budget. The proximate cause was the
+pack's own task-context gate failing on the scaffold Trellis had just written:
+`task.py create` seeds `implement.jsonl` and `check.jsonl` with a generated
+`_example` row, and `checkTrellisTaskContextManifests` failed those rows the
+moment they appeared in the diff. A second, independent lane —
+`validateBookkeepingTaskContexts`, which emits `task_context_seed` — failed the
+same rows. A pack-installed repo entered a failing gate state on task creation
+until the author blanked both files by hand. Trellis seeds those manifests only
+when `_has_subagent_platform` succeeds (`task_store.py:146`, `:346`), so repos
+with no sub-agent platform configured were never affected.
+
+The inconsistency was internal to the gate, not a Trellis defect. A changed
+`task.json` only pulled in its sibling manifests when status was **not**
+`planning`, and an unchanged planning scaffold was never inspected — but a
+newly created one was failed unconditionally.
+
+Disposition (2026-07-29): **owned by
+`07-29-exempt-planning-scaffold-preflight`**, which exempts the untouched
+planning scaffold and leaves the curation requirement at `task.py start`
+unchanged. The scaffold's own instruction text lives in Trellis-owned
+`.trellis/scripts/common/task_store.py` and is out of pack scope; it still omits
+the `.trellis/spec/**` and `.trellis/tasks/**/research/**` root restriction that
+the gate enforces.
+
 ## Notes
 
 - Findings: `research/recent-trellis-workflow-instability.md`.
@@ -174,6 +204,7 @@ commit, which is why #273 could not be finalized after the fact.
   - `07-28-route-housekeeping-by-pr-lifecycle-state`
   - `07-28-standardize-environment-blocked-recovery-evidence`
   - `07-28-roll-out-stabilized-pack-release-to-fleet`
+  - `07-29-exempt-planning-scaffold-preflight`
 - Accepted upstream Trellis planning tasks:
   - `07-28-harden-add-session-retry-convergence`
   - `07-28-restore-install-safe-opencode-mem-reader`

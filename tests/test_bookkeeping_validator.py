@@ -330,6 +330,19 @@ class BookkeepingValidatorTests(InstallTestCase):
         payload = json.loads(result.stdout)
         self.assertIn("task_lifecycle_not_completion_ready", payload["reasonCodes"])
         self.assertIn("task_topology_not_reciprocal", payload["reasonCodes"])
+        self.assertNotIn("task_context_seed", payload["reasonCodes"])
+
+        (child / "implement.jsonl").write_text(
+            '{"_example":{"file":"src/example.py"}}\n'
+            '{"file":".trellis/spec/backend/index.md","reason":"grounded"}\n',
+            encoding="utf-8",
+        )
+        result = self.run_validator(root, "pre-archive", "--task-dir", task_dir)
+        payload = json.loads(result.stdout)
+        self.assertIn("task_context_seed", payload["reasonCodes"])
+        (child / "implement.jsonl").write_text(
+            '{"_example":{"file":"src/example.py"}}\n', encoding="utf-8"
+        )
 
         child_record["status"] = "in_progress"
         child_record["branch"] = "codex/child-fixture"

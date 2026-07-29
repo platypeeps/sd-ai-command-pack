@@ -20,7 +20,8 @@
   "subtasks": [],
   "children": [
     "07-28-roll-out-stabilized-pack-release-to-fleet",
-    "07-28-stabilize-self-hosted-delivery-lifecycle"
+    "07-28-stabilize-self-hosted-delivery-lifecycle",
+    "07-29-exempt-planning-scaffold-preflight"
   ],
   "parent": null,
   "relatedFiles": [],
