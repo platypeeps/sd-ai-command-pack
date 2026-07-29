@@ -1306,9 +1306,48 @@ After update-spec and intended-path classification, `sd-create-pr` must run
 `scripts/sd-ai-command-pack-review-preflight.mjs` on the complete branch plus
 working-tree diff before its first `git add` or any push. A missing helper or
 nonzero preflight stops publication; the later `sd-review-pr` gate is not a
-substitute for catching known task metadata, generated context scaffolds, or
+substitute for catching known task metadata, stale context scaffolds, or
 non-spec/non-research context references before they reach GitHub. Tests must
 pin the preflight before staging and preserve fail-closed diagnostics.
+
+> **Warning**: "stale scaffold" excludes a planning task's untouched one. Both
+> seed-row lanes — the diff-scoped task-context gate and the bookkeeping
+> validator's `task_context_seed` — deliberately exempt it, so a planning-mode
+> PR can carry `_example` rows to GitHub and that is not a gate defect. The
+> curation point is `task.py start`, not publication. Do not add a
+> publication-time scaffold check to close this; it would re-break task
+> creation, which is the defect the exemption exists to fix.
+
+### Contract: planning scaffold exemption in the seed-row lanes
+
+**What**: A task context manifest (`implement.jsonl` / `check.jsonl`) is exempt
+from the seed-row check only when every condition holds. Anything else fails.
+
+| Condition | Exempt | Fails |
+|---|---|---|
+| File body | exactly one non-blank row parsing to a plain object whose sole key is `_example` | extra keys, extra rows, arrays, scalars, `{}`, malformed JSON |
+| Owning `task.json` | parses, `"status": "planning"` | any other status, unparseable, missing, symlinked |
+| Task directory | active | archived |
+
+**Why shape, not value**: the predicate never compares the row against Trellis's
+`_SEED_EXAMPLE` text (`.trellis/scripts/common/task_store.py:139`). That string
+is Trellis-owned and revised across versions; pinning it would make pack gates
+fail on the next Trellis upgrade, reproducing the original defect with a worse
+recovery path — consumers would have to wait for a pack release. The accepted
+residual is that a hand-edited `_example`-only row is also exempt while the task
+is in `planning`. It still carries no `file` key and still fails once the status
+changes.
+
+**Both lanes or neither**: `checkTrellisTaskContextManifests` and
+`validateBookkeepingTaskContexts` enforce seed rows independently. Changing one
+without the other leaves task creation failing through the survivor — that was
+the actual v0.56.1 regression. Tests must assert both lanes, each way.
+
+**Related**: `07-29-scope-final-bundle-validator-to-delta` covers the separate
+whole-directory scoping defect in `validatePlanningBundle`. This exemption
+removes the `task_context_seed` share of those spurious findings for
+planning-status tasks; it does not remove `task_metadata_invalid` or the scoping
+defect itself, so that task's scope is unchanged.
 
 ### SD Create-PR Composite Delegation Contract
 
