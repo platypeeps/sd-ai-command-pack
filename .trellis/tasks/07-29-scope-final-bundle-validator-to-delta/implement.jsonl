@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Canonical review-preflight CLI contract, mode gating, typed result shape, and the templates/root mirror parity rule the fix must preserve."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Owns the final-bundle and journal-only planning finalization recovery contract, including the existing planningSubtype precedent this fix must extend rather than contradict."}

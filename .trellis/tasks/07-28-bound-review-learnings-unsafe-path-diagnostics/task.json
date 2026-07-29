@@ -1,0 +1,29 @@
+{
+  "id": "bound-review-learnings-unsafe-path-diagnostics",
+  "name": "bound-review-learnings-unsafe-path-diagnostics",
+  "title": "Bound review-learnings unsafe-path diagnostics",
+  "description": "Convert unsafe planning changed-path inputs from an uncaught ValueError into a bounded phase-specific diagnostic with focused regression coverage.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-07-28",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "templates/scripts/sd-ai-command-pack-review-learnings.py",
+    "tests/test_review_learnings.py"
+  ],
+  "notes": "Evidence: platypeeps/people-profiles PR #3 review-learnings dry-run raised an uncaught ValueError for unsafe planning changed-path input.",
+  "meta": {}
+}

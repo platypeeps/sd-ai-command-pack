@@ -124,6 +124,47 @@ the ledger. No `tracked (needs owner)` or `tracked (needs decision)` entry
 remains. This task stays as it is — the residue record above is history, not a
 work queue.
 
+## Post-Completion Residue — 2026-07-29
+
+Recorded on the same terms as the 2026-07-28 section above: history, not a work
+queue. No acceptance criteria are added and this task is not reopened.
+
+Both PRs merged on 2026-07-29 — #273 (`5fc11c2f`) and #274 (`16b6ebe2`) — were
+merged by hand because `sd-finish-work` could produce no receipt, so
+`sd-housekeeping` never reached its merge gate. Both were green on their exact
+heads: #273 with zero unresolved review threads, #274 with a clean Copilot round.
+
+The two failures differ, and the distinction matters. #274's was purely a
+validator defect — no mode admitted the branch. #273's was not: 2 of its 27
+findings correctly flagged its own delta, so no valid receipt existed for it under
+any validator. The whole-directory defect contributed 25 spurious findings on
+files it never touched, which buried the real failure rather than creating it.
+
+- **Whole-directory validation.** `final-bundle --mode planning` on #273 returned
+  27 findings, of which **25 were in files the PR never modified** — 20
+  `task_context_seed` (`_example` scaffold rows) and 5 `task_metadata_invalid`
+  (empty `task.json` descriptions). `validatePlanningBundle`
+  (`scripts/sd-ai-command-pack-review-preflight.mjs:1505`) derives task
+  directories from the delta at `:1513-1517` but then validates each directory's
+  entire current content at `:1532-1535`. Editing one `prd.md` inherits every
+  stale artifact its neighbours accumulated.
+- **No mode for a repo-maintenance branch.** `:523` admits only `completion` and
+  `planning`. #274 changed skills, scripts, and the release payload, archiving no
+  task and touching no active task artifact, so it satisfied neither: `completion`
+  gave `completion_archive_move_missing` (`:1462`) and `planning` gave
+  `planning_recovery_commit_scope_invalid`.
+
+Disposition (2026-07-29): both are **owned by
+`07-29-scope-final-bundle-validator-to-delta`**, created for them. That task
+records the mode question as an open design decision rather than presuming a
+fix, and explicitly keeps `bundle_scope_invalid` blocking.
+
+The third failure on #273 needs no owner. Its 2 `bundle_scope_invalid` findings
+were correct — commit `0ff58e88` mixed `.trellis/audit/ledger.md` and
+`report-2026-07-28.md` into a delta of 152 task files. The v0.56.1 `sd-audit-repo`
+contract already prevents recurrence; it cannot repair an already-published
+commit, which is why #273 could not be finalized after the fact.
+
 ## Notes
 
 - Findings: `research/recent-trellis-workflow-instability.md`.
