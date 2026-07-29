@@ -35,6 +35,95 @@ Review recent Trellis-backed sessions across repositories, identify recurring st
 - [x] A durable research report records evidence, conclusions, and the
       recommended implementation order.
 
+## Post-Completion Audit Residue — 2026-07-28
+
+This task's acceptance criteria above are all satisfied and the remediation work
+carried by its accepted child tasks merged in v0.56.0. Its own record is **not**
+closed: `task.json` still reads `"status": "planning"` with `"completedAt": null`,
+and `handoff.md:5-8` states that no implementation task was started here. Closing
+that lifecycle gap is a separate housekeeping decision and is not done by this
+section.
+
+The 2026-07-28 repo audit (`.trellis/audit/report-2026-07-28.md`) named this task
+as the nominal owner of three findings that the delivered work does not cover.
+They are recorded here as residue, not as reopened scope — none is a regression
+of what this task delivered — and recording them is **not** the same as assigning
+them. All three were dispositioned on 2026-07-28; see each entry.
+
+- **A-069** (P2 · S · Plausible · security) — the environment-blocked diagnostic
+  redactor misses most common secret shapes. `sd_ai_command_pack_lib.py:497`
+  `_ENVIRONMENT_SECRET_RE` covers only bearer, token, and `gh[pousr]_`, while
+  `sd-ai-command-pack-fleet-timing.py:28` already covers `github_pat_`,
+  `xox[baprs]-`, `sk-`, PEM, and key-value forms. The weak redactor feeds every
+  environment-blocked fragment (`work-loop.py:160`) into agent-visible reports
+  (`docs/SD_AI_COMMAND_PACK.md:1154`), and `tests/test_script_lib.py:670` asserts
+  only the three shapes already caught. A fine-grained PAT passes through
+  verbatim. Confirmed exposure is the `--json` housekeeping result's
+  `environmentBlocks` array, the `outcome: blocked` fragments printed by
+  `work-loop.py:2844`, `update-spec-kb.py:1542`, and `record-session.py:292`,
+  and whatever agent or log consumes them; a repo-wide search found **no**
+  GitHub/PR publication path for these fragments, so do not claim PR visibility
+  without one. Work package B required bounded diagnostic text, not redactor
+  consolidation, so this was never in scope here. Disposition (2026-07-28):
+  **owned by `07-28-consolidate-secret-redactors`** R1-R4. Note the fix as
+  originally written is half right — the two sites cannot share a *redactor*,
+  only a *pattern set*: `sd_ai_command_pack_lib.py:519` substitutes `[redacted]`
+  while `sd-ai-command-pack-fleet-timing.py:172` raises `FleetTimingError`, and
+  neither policy is safe at the other's call site.
+- **A-077** (P2 · M · Plausible · design) — `outcome` and `status` mean
+  structurally different things across sibling scripts. Note the premise limit:
+  these are *distinct* payloads that embed or sit beside one another, not one
+  payload assembled from four producers, so the fix is envelope/key
+  standardization plus a compatibility plan, not a forced merge of four domain
+  vocabularies into one enum. The divergence itself is real:
+  `housekeeping-result.py:358` uses `status` for a whole sd-status document
+  beside `outcome`, while `classify_outcome()` at `:258` returns
+  `{"status": enum, …}`; `work-loop.py:2844` emits a bare-string outcome;
+  `pr-eligibility.py:1257` reads the enum out of `result["status"]`; and
+  `review-local.py:58` carries a six-value vocabulary disagreeing with
+  housekeeping's four. Work package A fixed housekeeping only and its remediation
+  child is archived. Disposition (2026-07-28): **owned by
+  `07-28-unify-outcome-status-vocabulary`**, whose R6 makes the consumer
+  inventory a blocking prerequisite. That task rejects the audit's candidate fix
+  — a top-level `outcome: {status, reasonCodes}` reproduces the collision, since
+  it nests an enum named `status` while `status` also names the embedded
+  document — and counts five verdict vocabularies rather than two.
+- **A-099** (P3 · M · Plausible · bloat) — **contradicts this task's own
+  design and needs a decision, not an implementation.** The audit finds the
+  `environment_blocked` evidence schema has no machine consumer: the composer,
+  validator, and tables span ~226 of the lib's 705 lines
+  (`sd_ai_command_pack_lib.py:444`), the only reader of the discriminating fields
+  is the lib's own validator (`:618`), `validate_environment_blocked_evidence`
+  (`:606`) has no caller outside tests, `cache_setup_blocked_evidence` (`:641`)
+  is reachable only via `--json`, the production caller uses plain mode and
+  discards stderr (`toolchain.sh:417`), and `retryable`/`mutationState` semantics
+  are decided in prose
+  (`.agents/skills/sd-help/references/environment-blocked-recovery.md:19`).
+  But this task's work package B deliberately mandates those five fields and
+  states that skills interpret the structured blocker — agent-prose
+  interpretation is the design, not an oversight. So "remove the fields you just
+  added" cannot be a requirement on this task. The open question is whether the
+  schema's intended consumer is an agent (in which case A-099 is rebutted and the
+  ledger entry should say so) or a program (in which case one programmatic
+  consumer honoring `retryable` and `mutationState` is owed). That is a product
+  decision for the pack owner.
+  Decided 2026-07-28: **the intended consumer is an agent, so A-099 is rebutted**
+  and the ledger records it as such. The residual is narrower and real —
+  `sd_ai_command_pack_lib.py:606` has no non-test caller and the
+  `sd_ai_command_pack_lib.py:641` `--json` path is unreachable because
+  `toolchain.sh:417-418` passes no `--json` and discards stderr — and is owned by
+  `07-28-consolidate-secret-redactors` R5, which wires the flag through rather
+  than deleting the validator.
+
+No acceptance criteria are added above: this task's stated criteria are met and
+silently reopening it would misrepresent that. As of 2026-07-28 all three items
+are dispositioned elsewhere: A-069 and the A-099 residual to
+`07-28-consolidate-secret-redactors`, A-077 to
+`07-28-unify-outcome-status-vocabulary`, and A-099's headline claim rebutted in
+the ledger. No `tracked (needs owner)` or `tracked (needs decision)` entry
+remains. This task stays as it is — the residue record above is history, not a
+work queue.
+
 ## Notes
 
 - Findings: `research/recent-trellis-workflow-instability.md`.

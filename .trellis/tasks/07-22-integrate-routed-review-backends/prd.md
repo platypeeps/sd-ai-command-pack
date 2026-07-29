@@ -260,6 +260,64 @@ resolution, CI, and the final report.
   generated templates, tests, and documentation are deleted rather than
   disabled, deprecated, or retained for speculative rollback.
 
+Added 2026-07-28 — audit findings this task owned but did not cover. (Note: the
+numbering above contains two `R30` entries and an out-of-order `R29`; new
+requirements continue from R35 and do not renumber existing references.)
+
+- R36 (A-056): Any `.sd-ai-command-pack/` configuration file that a shipped
+  script reads must be install-audit-clean before its stanza ships — present in
+  `LOCAL_ALLOWED_PACK_FILES` (`scripts/sd-ai-command-pack-install-audit.py:78`)
+  or covered by a managed gitignore pattern (`installer/registry.py:1759`) — with
+  a test asserting that every `.sd-ai-command-pack/` path constant read by a
+  shipped script has a declared tracked/ignored disposition. The constant is not
+  always named `CONFIG_PATH`: `scripts/sd-ai-command-pack-pr-body-scope.py:69`
+  uses `DEFAULT_CONFIG_PATH` and `:70` `INSTALLED_TARGETS_FILE`, so a
+  `CONFIG_PATH`-only assertion re-opens the same hole. Drive it from one registry
+  of shipped pack-configuration paths rather than a name convention. R5 and R23 mandate `review.json` today while the allowlist holds
+  only check.json, pr-body-scope.json, and review-preflight.json; because
+  collection walks the filesystem (`install-audit.py:558`), an untracked
+  `review.json` is still collected, fails at `:668`, and exits 1 at `:1021`. That
+  breaks three gates at once, since `templates/scripts/sd-ai-command-pack-check.py:917`
+  registers `pack.install-audit` as an `sd-check` gate. The immediate `review.json`
+  fix is owned by `07-28-allowlist-review-json-install-audit`, which now carries
+  only that instance. **This requirement owns the invariant** (decided
+  2026-07-28): the registry of shipped pack-configuration paths and the test that
+  enforces a declared disposition for each are built once, here.
+- R37 (A-068): R5's "validated argument arrays, not shell strings" is not
+  satisfied by a name-based guard. `review-local.py:400` checks executable names
+  and `-c`, so `["/usr/bin/env","sh","-c",…]` and `["python3","-m",…]` pass;
+  `:473` reads provider argv from the repo's own `review.json` and `:1666`
+  executes it via `shutil.which` plus `Popen(cwd=repo)` with no confirmation gate
+  and no provider allowlist at `:2131`. Because this tool reviews untrusted
+  checkouts, checkout-plus-review runs attacker-chosen commands. Resolve it one
+  of two ways and state which: pin argv[0] to a resolved allowlist, or document
+  the adapter as full local code execution behind an explicit operator opt-in.
+  Either way the acknowledgement must bind to the thing that can change under the
+  operator — repository identity, the resolved configuration digest, the provider
+  id, and the exact argv — and must be invalidated the moment any of those
+  differ. A blanket "operator enabled local execution" flag is not sufficient:
+  the attacker input is the checkout's own `review.json`, so an acknowledgement
+  that survives a config change grants execution to content the operator never
+  saw. A partial guard that makes the surface look bounded is not an acceptable
+  third option.
+- R38 (A-051): Give the routed-receipt validation real coverage.
+  `scripts/sd-ai-command-pack-review.py:1055` `_decode_receipt_check` has all
+  eight `raise ReviewError` paths in the coverage missing list, and the
+  validation body at `:1116` is reached by no test; review.py sits at the floor
+  table's joint-lowest value (70, tied with check.py and review-local.py) at 73%
+  actual (`.github/scripts/check-shipped-script-coverage.sh:51`). Add a table-driven
+  malformed-receipt test through the decoder, and delete the branches unreachable
+  from real payloads rather than testing them — untested defensive code and dead
+  code are indistinguishable, which is the specific failure this task's receipt
+  machinery cannot afford.
+- R39 (A-082): Resolve the `routedReview` field this task is named as the owner
+  of. `scripts/sd-ai-command-pack-pr-eligibility.py:750`, `:922`, and `:1241`
+  emit an identical deferred literal naming this task, and no consumer exists
+  anywhere. Either the routed lifecycle populates it as part of this work, or it
+  is removed from the published eligibility schema and the deferral survives as a
+  code comment. A field that can never take a second value is a comment, not a
+  contract, and it goes stale the moment this task is renamed or archived.
+
 ## Acceptance Criteria
 
 - [ ] Clean installs expose exactly the approved new check/review skills and
@@ -342,6 +400,24 @@ resolution, CI, and the final report.
 - [ ] One end-to-end user journey proves the same scope, provider, finding,
   failure, head, and merge semantics across direct `sd-review`, `sd-ship`, and
   `sd-work-backlog` composition without duplicate provider or polling work.
+- [ ] A consumer fixture containing every `.sd-ai-command-pack/` file this task
+  introduces passes `install-audit` with exit 0, and a test fails if any
+  `.sd-ai-command-pack/` path constant in any shipped script — whatever its
+  identifier — lacks a declared tracked/ignored disposition.
+- [ ] Adapter-argv fixtures prove the chosen R37 disposition: an allowlist build
+  rejects `/usr/bin/env sh -c`, `python3 -m`, and any unresolved argv[0]; an
+  opt-in build refuses to execute when the acknowledgement was recorded against a
+  different repository, configuration digest, provider id, or argv, and refuses
+  again after the fixture mutates `review.json` post-acknowledgement. Neither
+  build relies on executable-name matching alone.
+- [ ] The supported receipt schema and the production entrypoints that reach
+  `_decode_receipt_check` are enumerated in `design.md`; malformed-receipt
+  fixtures reach every `raise` path retained as reachable from those
+  entrypoints; and every `raise` path not reachable from them is deleted rather
+  than covered.
+- [ ] `routedReview` is either populated by the routed lifecycle with at least
+  two distinct observed values under test, or absent from the published schema
+  and from all three producers.
 
 ## Out Of Scope
 

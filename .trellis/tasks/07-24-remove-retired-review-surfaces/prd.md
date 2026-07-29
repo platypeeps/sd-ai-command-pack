@@ -28,6 +28,11 @@ executable through an alias, wrapper, fallback, or dormant mode.
 - Provenance-aware uninstall metadata may name retired paths solely to remove
   verified installed copies. Historical archived Trellis records may retain
   evidence. Neither is a callable compatibility surface.
+- Coordinates with `07-28-retire-transitional-review-surfaces`, which owns the
+  schedule half: pre-registering `RetiredCommandSurface` rows with an explicit
+  `removed_version`, the transitional catalog status, and the interim fixes that
+  apply while the predecessor still ships. That task names the version; this task
+  executes the deletion against it.
 
 ## Requirements
 
@@ -56,6 +61,40 @@ executable through an alias, wrapper, fallback, or dormant mode.
 - R7: Verify all public callers use only `sd-check`, `sd-review`, `sd-create-pr`,
   `sd-ship`, and `sd-housekeeping` according to their orthogonal authority.
 
+Added 2026-07-28 — audit findings this task owned but did not cover:
+
+- R8 (A-045): Bind R4's registration to the `removed_version` pre-registered by
+  `07-28-retire-transitional-review-surfaces`. Do not mint a second version.
+  `installer/registry.py:1244-1271` shows every existing `RetiredCommandSurface`
+  row carries a `removed_version` and none of the four transitional surfaces do,
+  so until that row exists this task has no schedule to execute against and the
+  removal cannot be verified as the one that was announced.
+- R9 (A-059): Relocate — do not merely delete — the fleet recheck procedure
+  embedded at `templates/.agents/skills/sd-review-pr/SKILL.md:196`. It invokes
+  `fleet-review-classify.py`, which `scripts/sd-ai-command-pack-install-audit.py:115`
+  marks source-only, so those ~22 lines are unreachable in all 11 shipped platform
+  copies of the skill (`manifest.json` maps this one source to 11
+  `*/skills/sd-review-pr/SKILL.md` targets). Deleting the skill removes the dead copies but loses the procedure: move
+  it into the source-only `sd-fleet-refresh` skill first, then delete.
+- R10 (A-043): Enumerate the environment-variable families R2 removes and delete
+  the lanes they gate in the same change. `Makefile:92` hard-disables the AI
+  review lanes with `PRISM=0 GITO=0`, which makes roughly a quarter of
+  `scripts/sd-ai-command-pack-full-check.sh` unreachable in this repo's own
+  canonical gate: the prism lane at `:296` (~125 lines), the CI-classification
+  block at `:935` whose resolver at `:923` targets a `scripts/classify-ci-changes.sh`
+  with zero commits in `git log --all`, the package-script block at `:1038` with
+  no root package.json, and the legacy `check-review-preflight.mjs` fallback at
+  `:978`. Remove
+  the `PRISM=0 GITO=0` disabling at the same time so no gate keeps passing by
+  never running.
+- R11 (A-102, A-114): These two findings die with the script and skill this task
+  deletes. Record that explicitly rather than leaving them to be rediscovered —
+  the gito filter argv overflow at `full-check.sh:231/:256/:261/:454` (measured at
+  142,524 joined bytes, past Linux `MAX_ARG_STRLEN`) and the stale
+  `sd-full-check/SKILL.md:32,:104` contract are resolved by deletion, not by a
+  fix here. If the removal slips past the announced `removed_version`, their
+  interim fixes belong to `07-28-retire-transitional-review-surfaces`, not here.
+
 ## Acceptance Criteria
 
 - [ ] Fresh installs and help/catalog discovery expose no retired command or
@@ -72,11 +111,21 @@ executable through an alias, wrapper, fallback, or dormant mode.
   branches and tests were deleted rather than skipped or disabled.
 - [ ] Focused retirement/upgrade tests, all generated parity checks, candidate
   fleet validation, `make sync`, and `make check` pass.
+- [ ] Every retired surface's registry row carries the same `removed_version`
+  that was pre-registered before deletion; no row is created without one.
+- [ ] The fleet recheck procedure is reachable from the source-only
+  `sd-fleet-refresh` skill after the shipped `sd-review-pr` skill is gone.
+- [ ] No `PRISM`/`GITO`/full-check environment key survives in the Makefile, in
+  any script, or in any generated mirror, and no lane remains that only passes
+  because it never executes.
 
 ## Out Of Scope
 
 - Backward-compatible aliases, deprecation windows, forwarding scripts, dormant
-  readers, or dual old/new operation.
+  readers, or dual old/new operation. Pre-registering a `RetiredCommandSurface`
+  row with a `removed_version` is not a deprecation window: it is the existing
+  provenance-aware retirement register R4 already requires, and it keeps the
+  predecessor no longer working, only announced.
 - Deleting historical archived task evidence or the minimal installer removal
   metadata needed for safe cleanup.
 - Merging the command-pack and router repositories.
@@ -85,3 +134,25 @@ executable through an alias, wrapper, fallback, or dormant mode.
 
 - Rollback is release-level reinstall, not legacy code retained in the new
   release.
+- 2026-07-28 audit source: `.trellis/audit/report-2026-07-28.md`. This task was
+  the nominal owner of five findings — A-045, A-114, A-102, A-059, A-043 — and
+  covered none of them, because R1-R7 describe deletion with no removal version,
+  no pre-registered retirement rows, no schedule, and no interim behavior. R8-R11
+  close that gap; the schedule itself lives in
+  `07-28-retire-transitional-review-surfaces`.
+- A-059's substance survives deletion: the fleet recheck procedure is real work
+  shipped to the wrong audience, so R9 relocates it rather than treating deletion
+  as the fix.
+- **Scale corrected 2026-07-28.** Confirmed Evidence says "79 review/full-check
+  manifest targets"; measured 105 entries across `manifest.json`'s 754 files, of
+  which 92 are the four `sd-`-prefixed families (23 each). Recount before sizing.
+- **Unrecorded consequence, found 2026-07-28.** `Makefile:94` is
+  `check: test lint audit full-check`, and R1 deletes the script that target
+  runs. Every acceptance criterion here says "`make check` passes", so the
+  replacement composition must be decided before the first deletion commit.
+  `design.md` carries the two options.
+- **R10 is not separable from R1.** `Makefile:92` hard-disables the prism and gito
+  lanes with `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0` /
+  `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0`. Removing that disabling without
+  deleting the lanes enables code that has never executed in this repo's gate.
+- Planning complete 2026-07-28: `design.md` and `implement.md` added.

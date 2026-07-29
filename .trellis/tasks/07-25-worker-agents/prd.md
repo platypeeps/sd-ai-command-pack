@@ -43,4 +43,49 @@ descriptions with installable, tool-restricted definitions on supporting platfor
 
 ## Notes
 
-- Complex task: needs `design.md` + `implement.md` before start.
+- Complex task. Planning complete 2026-07-28: `design.md` and `implement.md` added.
+- **The Goal's premise — "ENFORCED tool restriction is the point" — holds on some wave-1
+  platforms and not others.** Measured 2026-07-28 from the shipped Trellis agents, which
+  are the parent design's named working reference:
+
+  | platform | restriction expression |
+  |---|---|
+  | claude | `tools: Read, Write, Edit, Bash, Glob, Grep` (comma string) |
+  | codex | `sandbox_mode = "workspace-write"` + `[features]` toggles |
+  | opencode | `permission: {read: allow, write: allow, …}` map |
+  | github | `tools:` YAML sequence (`- read`, `- edit`, `- execute`, `- search`) |
+  | gemini | **no `tools:` field in any of the three shipped agents** |
+
+  Read-only renders five different ways, and on gemini it cannot be rendered at all — the
+  same platform parent `design.md` §1.5 flags as running subagents *without per-tool
+  confirmation*. AC2's "documented limitation where it cannot" is therefore the headline
+  for one of three wave-1 platforms, not a footnote. Split the claim: **identity** (agent
+  exists, named, dispatchable) holds everywhere; **enforcement** holds on
+  claude/codex/opencode/github and not on gemini. Put the split in install/status output.
+- **R3 understates the refuter's invocation pattern.** `sd-audit-repo/SKILL.md:70-74`:
+  `standard` runs one refuter over P0/P1; `exhaustive` covers P0–P2, uses **2-of-3 refuter
+  votes for P0**, and **loops correctness and security until a pass finds nothing new**. The
+  agent must be stateless and safe to run three times concurrently on one finding; a body
+  written as "the" refuter produces correlated votes, which defeats voting.
+- **R5's rationale is wrong; keep the requirement, replace the reason.** Measured: 15
+  charters, 60,787 bytes total, largest 4,781 bytes — a single charter is six times under
+  Copilot's 30,000-char cap, so the cap does not justify runtime-read for one charter. The
+  real reason is that sd-audit-reviewer is **charter-agnostic**: one definition serves all
+  15, selected per dispatch by `scripts/sd-ai-command-pack-audit-route.py`. Inlining means
+  15 agent definitions and a router that names agents instead of charters.
+- **R2's ID rule already exists.** `SKILL.md:154`: "Finding IDs (`A-NNN`) are assigned by
+  the orchestrator at ledger-write time, never by reviewers." Likewise the finding schema
+  (`SKILL.md:142-149`) and "only the orchestrator writes" (`:171`). The agent bodies
+  reproduce these verbatim, which makes them a **two-copy contract** — add a drift test
+  comparing the schema block in the agent body against the skill body.
+- **No agent may spawn sub-agents.** A reviewer that spawns reviewers breaks
+  one-agent-per-charter accounting; a refuter that spawns refuters corrupts the 2-of-3
+  vote. Codex already does this structurally in this checkout (`[features] multi_agent =
+  false`, with the shipped comment that the spawn tools "are not registered in the
+  sub-agent's tool list at all").
+- **R6 is a reference, not a rewrite.** `SKILL.md:158-172` already carries the dispatch
+  protocol including the capability-first inline fallback, so "behavior without them
+  unchanged" needs one sentence per skill and no restructuring.
+- Commit order is **sd-audit-refuter → sd-audit-reviewer → sd-ci-triager → R6 sentences**,
+  not the listing order: smallest contract first, and the triager waits on
+  `07-25-fix-ci-dispatch` being reviewed since it copies that task's result contract.

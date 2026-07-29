@@ -113,3 +113,8 @@ does not duplicate that completed foundation.
 
 - This planning parent was created from `se-review-skills` snapshot
   `8f5f11d25e3d193ac18576319c99d1552349f41888e26b7f7e239b0a2ea3126a`.
+- Planning classification, 2026-07-28: coordination parent — PRD-only, deliberately.
+  No `design.md` or `implement.md`. G01-G04 are designed and executed in the three
+  implementation children; this task owns only the finding-to-child map and the
+  cross-child acceptance criteria above. `07-24-align-status-selector-contract` (G01)
+  received its own `design.md` and `implement.md` on 2026-07-28.

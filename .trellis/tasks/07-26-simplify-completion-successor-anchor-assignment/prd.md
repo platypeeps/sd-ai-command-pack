@@ -22,3 +22,8 @@ Follow up on rwbp-coordinator PR #177 code-quality feedback by removing the redu
 
 - Origin: GitHub Code Quality finding on `platypeeps/rwbp-coordinator` PR #177, discussion `discussion_r3652753600`.
 - Fleet severity disposition: `continue-with-follow-ups` under the `style` contract family; this is not a v0.54.0 blocker.
+- Lightweight task; PRD-only is appropriate. Classified 2026-07-28: removing one redundant
+  null guard in one template, syncing the mirror, and keeping an existing regression test
+  green. Behavior-preserving by requirement, so there is no contract, migration, or
+  rollback shape to design; the only sequencing constraint (ship after v0.54.0) is already
+  a requirement above.

@@ -41,4 +41,44 @@ result, so the parent context stops absorbing every job's full log output.
 
 ## Notes
 
-- Lightweight-to-medium; PRD + short design note likely sufficient.
+- ~~Lightweight-to-medium; PRD + short design note likely sufficient.~~ **Revised
+  2026-07-28.** This is the gating pilot whose pattern `07-25-dispatch-rollout` copies
+  into three commands and `07-25-worker-agents` turns into a named agent. Both
+  `design.md` and `implement.md` are authored, kept tight.
+- **R3 as written diverges from the template R1 names.** Verified 2026-07-28:
+  `templates/.agents/skills/sd-audit-repo/SKILL.md` contains **zero** occurrences of
+  "trust", "untrusted", or "indeterminate" — its dispatch protocol restates the Active
+  task prefix, not trust. The checkout-trust block is **generator-injected** by
+  `.github/scripts/generate-command-surfaces.py:179-184` (`CHECKOUT_TRUST_POLICY_MARKER`)
+  keyed off `CommandInfo.executes_checkout_code` / `trusted_static_only`
+  (`installer/registry.py:726`, `:728`), which is why it appears at
+  `.claude/commands/sd/fix-ci.md:27` and in no authored source. Writing trust prose into
+  `SKILL.md` creates a second hand-maintained copy of a generator-owned classifier. R3 is
+  satisfied instead by one sentence carrying the command's *already-resolved* state into
+  each dispatch prompt, with workers barred from reclassifying.
+- **"Canonical body" is ambiguous; the section goes in the skill body.** There are two
+  hand-authored files per command: `.github/command-sources/sd-fix-ci.md` (16 lines,
+  routing only) and `templates/.agents/skills/sd-fix-ci/SKILL.md` (157 lines, the
+  workflow). The reference puts `## Dispatch protocol` in the skill body
+  (`sd-audit-repo/SKILL.md:156`). The command source stays 16 lines.
+- **The goal depends on a log-fetch change the requirements do not mention.**
+  `SKILL.md:73` uses `gh run view <run-id> --log-failed`, which returns *every* failing
+  job's log in one call. A parent that runs it and splits the blob has already absorbed
+  everything, so "the parent context stops absorbing every job's full log output" is not
+  met. Per-job fetch is required and is supported (`gh run view -j <job-id> --log-failed`).
+  Costs to accept: `gh`'s help warns the per-job path falls back to API fetches that are
+  "slower and more resource-intensive" and fails if more than 25 job logs are missing; and
+  every `gh` call routes through the toolchain wrapper (`SKILL.md:27-33`), so N workers
+  means N cache setups. No acceptance criterion currently catches a dispatch section
+  layered over a whole-run log fetch.
+- **Run-level evidence must be resolved once by the parent.** `stale-baseline` depends on
+  "the branch is behind the default branch" (`SKILL.md:87`) and the report carries the
+  PR-head/local-HEAD note (`SKILL.md:68-70`) — both are run properties. N workers deriving
+  them independently can disagree inside one report.
+- **The rerun budget cannot be delegated.** `max-reruns=N` (default 1, `SKILL.md:113`) is a
+  shared counter; a worker able to call `gh run rerun` makes the bound unenforceable. R2's
+  read-only worker rule is what holds this together.
+- **Fan-out is unbounded.** `max-reruns` bounds reruns, not workers, and nothing caps the
+  number of failing jobs. `sd-test-gaps` has `max-gaps` and `sd-fleet-refresh` has waves;
+  sd-fix-ci is the one command in the rollout with no natural bound, so the decision is
+  owed here.

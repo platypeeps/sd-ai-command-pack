@@ -23,11 +23,47 @@ task optimizes. This task is the tactical fix for current pain only:
 
 ## Requirements
 
-- `scripts/sd-ai-command-pack-review-learnings.py` (~:1174-1193): batch via GraphQL field
-  aliases or a single search query; preserve parsed output, timeouts, per-batch errors.
+- `scripts/sd-ai-command-pack-review-learnings.py`: batch the per-PR loop at `:2043` via
+  GraphQL field aliases or a single search query; preserve parsed output, timeouts, and
+  per-batch errors. (The PRD originally cited `~:1174-1193`, which is `_signal_category`,
+  a pure string classifier that makes no network call — see Notes.)
+- **Aliased batching widens the failure domain from one PR to the whole batch, so the
+  partial-failure contract is a requirement, not an implementation detail.** GraphQL
+  returns `200` with a partial `data` plus an `errors` array; `_run_gh_json` (`:1908-1909`)
+  only decodes JSON and would treat that as success. Specify, before coding:
+  - a batch response carrying `errors` yields per-PR outcomes, not one blanket failure —
+    PRs with present data are used, PRs whose alias resolved to `null` are marked failed
+    and are individually retried or reported;
+  - the `truncated` flag currently computed per PR at `:2073-2074` stays per PR under
+    batching;
+  - output ordering is the input PR order, not GraphQL alias order;
+  - a batch size that keeps the query inside GitHub's node/cost limits, stated as a number
+    with the reasoning, so a large fleet does not fail wholesale on cost.
+- Keep the existing pagination: the PR-list query at `:1938-1964` already pages 100 at a
+  time through `endCursor` (`:1963`, `:2003`) and is not what this task changes.
 
 ## Acceptance Criteria
 
 - [ ] A run over N PRs makes at most ceil(N/batch) gh calls; identical learnings output on
       a fixture window.
 - [ ] Changelog + version; note in the generalization task that the collection code moved.
+
+## Notes
+
+- Lightweight task; PRD-only is appropriate. Classified 2026-07-28: the task's own
+  standing instruction is to keep the diff small enough to discard when
+  `07-25-generalize-review-learnings-across-reviewers` deletes this code path. Writing a
+  `design.md` for a change that is explicitly disposable — and may be marked superseded
+  before it starts — is the wrong artifact. Re-check the supersession question above
+  first; if the generalization is landing, close this task instead of planning it.
+- **The cited line range is wrong.** `~:1174-1193` in
+  `scripts/sd-ai-command-pack-review-learnings.py` is `_signal_category`, a pure string
+  classifier with no network call. The real per-PR fan-out is the `for pr in prs:` loop at
+  `:2043`, which calls `_run_gh_json` at `:2048` with a `pullRequest(number:$number)`
+  query (`:2020`) — one `gh` subprocess per PR. That is the site to batch.
+- **The PR-list query is already batched; do not "fix" it.** The separate query at
+  `:1938-1964` pages 100 pull requests per request through `endCursor` (`:1963`, `:2003`).
+  Only the per-PR review-thread query is one-at-a-time.
+- Per-PR truncation is currently reported through the `truncated` flag set at `:2073-2074`
+  when a PR's `reviewThreads` has `hasNextPage`. Aliased batching must keep that per-PR,
+  not collapse it to one flag for the whole batch.

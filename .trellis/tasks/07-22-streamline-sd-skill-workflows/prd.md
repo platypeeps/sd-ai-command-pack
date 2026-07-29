@@ -199,6 +199,12 @@ merge eligibility without mutating the PR.
 - After the integration child publishes its closure record, record each child
   PR or commit and any accepted follow-up, archive completed children, and
   close this parent only when R9 and all acceptance criteria hold.
+- Planning classification, 2026-07-28: coordination parent — PRD-only, deliberately.
+  No `design.md` or `implement.md`. This task has no direct implementation scope (see
+  the Goal and Out Of Scope), so a design doc would have to invent boundaries and
+  contracts it does not own, and an implementation checklist would contradict "never
+  start this parent". Technical design and execution order live in each owning child.
+  If this parent is ever granted separately approved direct scope, reclassify then.
 
 ## Acceptance Criteria
 

@@ -37,3 +37,8 @@ Clarify fleet rollout PR guidance so pack-owned receipt and provenance coverage 
 - Originating evidence: the deferred documentation finding in loadsmith PR
   #171, where rollout continued after the consumer PR description was
   clarified and the addressed review thread was resolved.
+- Lightweight task; PRD-only is appropriate. Classified 2026-07-28: the deliverable is
+  generated rollout-PR guidance wording plus a fixture proving the wording holds when
+  previously ignored Trellis-owned adapters become tracked. The ownership boundary that
+  would otherwise need designing is already fixed by the last requirement — Trellis-owned
+  files do not enter pack manifest or provenance — so no new contract is being defined.
