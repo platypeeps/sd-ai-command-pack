@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.56.1 - 2026-07-29
+
+- Treat a remote review body that reports no new comments as clean only after
+  parsing it for a collapsed low-confidence block. Copilot withholds
+  observations it scored as low confidence and discloses them only inside that
+  block, so they never become inline comments or review threads and a loop
+  reading only thread state never sees them. Each disclosed entry is now
+  classified with the same rules as an inline comment, and the round is clean
+  only when none survives verification.
+- Compare every review event's `commit_id` to the recorded head before counting
+  a review round. A reviewer can submit against an earlier commit while a newer
+  one is already the head, and its body still reports full coverage because the
+  file count is taken against the commit it actually read.
+- Require the audit ledger and report to be committed separately from any
+  `.trellis/tasks/**` planning artifacts written in the same session. The
+  bookkeeping validator admits only task and workspace paths into a
+  finalization delta, so a commit mixing `.trellis/audit/**` with task
+  artifacts can be neither journaled nor finalized, and the mix cannot be
+  undone once published.
+- Extend the planning adversarial review to check a task's artifacts against
+  each other, not only against the repository. A value repeated across
+  `prd.md`, `design.md`, `implement.md`, and `task.json` is enumerated by
+  search rather than by reading the artifacts in sequence, and any
+  cross-artifact citation is confirmed to still describe what its target says.
+
 ## 0.56.0 - 2026-07-28
 
 - Add a typed, additive `environment_blocked` recovery contract. When an
