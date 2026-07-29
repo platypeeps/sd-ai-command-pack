@@ -2,7 +2,7 @@
 
 ## Goal
 
-Remove the 2.0 MB of committed generated mirrors that duplicate their `templates/` sources, and retire the ~210 KB of drift machinery that exists only to prove the copies still match.
+Remove the 2.0 MB of committed generated mirrors that duplicate their `templates/` sources, and retire the 173,615 bytes of drift machinery that exists only to prove the copies still match.
 
 ## Requirements
 
@@ -27,5 +27,5 @@ Remove the 2.0 MB of committed generated mirrors that duplicate their `templates
 - Largest single complexity win identified by the 2026-07-28 audit.
 - **Blocking sequencing constraint, found 2026-07-28.** `07-28-regenerate-fleet-refresh-adapters` must land first. The four source-only fleet-refresh adapters live in the dev tree with **no manifest entry** (`generate-command-surfaces.py:881` excludes source-only commands; `installer/removal.py:272` skips them in source checkouts), so `install.py . --force` does not regenerate them. Gitignoring the mirror roots before that task lands deletes the only copy.
 - **The mirrors are this repo's own dogfood install**, not inert duplicates. `.claude/`, `.agents/`, `.gemini/`, `.opencode/` are the live agent surface the repo uses on itself, so ignoring them turns a zero-step clone into a one-step clone whose failure mode is silent — an agent operating with no pack skills rather than an error. `design.md` carries the bootstrap options.
-- **Machinery figure corrected 2026-07-28:** measured 173,615 bytes across the four modules, not the ~210 KB stated above.
+- **Machinery figure corrected 2026-07-28:** the originating audit said ~210 KB; the measured total is 173,615 bytes, which is the sum of the four modules listed in R3 (94,825 + 25,841 + 29,730 + 23,219). The Goal states the measured figure.
 - Created from the 2026-07-28 repo audit with explicit user consent via the `audit.followups` decision. Planning complete 2026-07-28: `design.md` and `implement.md` added.
