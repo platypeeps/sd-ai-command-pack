@@ -1896,3 +1896,116 @@ Closed the approved single-merge stabilization effort. Resolved every work-packa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 249: Plan the 2026-07-28 audit follow-up backlog and converge PR #273 review
+
+**Date**: 2026-07-28
+**Task**: Plan the 2026-07-28 audit follow-up backlog and converge PR #273 review
+**Branch**: `plan/audit-2026-07-28-followup-artifacts` (deleted after merge)
+
+### Summary
+
+Authored planning artifacts for the 2026-07-28 repository audit follow-up backlog, opened PR #273, and drove the remote review loop to convergence over four Copilot rounds. No task was started; the branch was planning-only. Merged manually at 5fc11c2f after the finish-work bookkeeping validator returned invalid.
+
+### Main Changes
+
+- Added planning artifacts (prd.md, design.md, implement.md, task.json) for the audit follow-up backlog across 154 changed files.
+- Cleared review-preflight failures in the new task artifacts before opening the PR.
+- Review round 1: corrected a bare check.py citation to scripts/sd-ai-command-pack-check.py, and retargeted an implementation step from generated root mirrors to their templates/ sources.
+- Review round 2: corrected the frozen-adapter count in task.json from three to four, and replaced a stale ~210 KB machinery estimate with the measured 173,615 bytes.
+- Review round 3: fixed design.md, which still asserted the PRD stated ~210 KB after round 2 moved that estimate into the PRD Notes as provenance.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0ff58e88` | plan: add planning artifacts for the 2026-07-28 audit follow-up backlog |
+| `a984b597` | chore: clear review preflight failures in the new task artifacts |
+| `9867e7f0` | fix: address review feedback round 1 |
+| `9930a4b5` | fix: address review feedback round 2 |
+| `7fde6218` | fix: address review feedback round 3 |
+
+Merged manually as `5fc11c2f` on 2026-07-29. The local branch also carried a
+`chore: record journal` commit that was never pushed; this entry is its replay.
+
+### Testing
+
+- [OK] Typed sd-check 8/8 passed, exit 0, state guard passed on head 7fde6218
+- [OK] CI run 30425935870 on head_sha 7fde621892c4d60682ba3c62c32179f0a90e69fa concluded success
+- [OK] Copilot round 4 on the exact head generated no new comments and no suppressed findings
+- [OK] Both review threads resolved; review comment count stable at 4 across a settle boundary
+- [FAIL] finish-work `final-bundle --mode planning` returned `status=invalid` with 27
+  findings: 2 `bundle_scope_invalid` (`.trellis/audit/ledger.md`,
+  `.trellis/audit/report-2026-07-28.md` in the finalization delta), 20
+  `task_context_seed`, 5 `task_metadata_invalid`. 25 of the 27 were pre-existing
+  and untouched by this PR — the validator scans whole task directories that
+  appear in the delta, not just changed files. No receipt was obtainable, so
+  housekeeping could not auto-merge.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 250: Harden review and audit workflow contracts (PR #274)
+
+**Date**: 2026-07-29
+**Task**: Harden review and audit workflow contracts (PR #274)
+**Branch**: `improve/review-workflow-hygiene` (deleted after merge)
+
+### Summary
+
+Turned four retrospective lessons from the PR #273 review cycle into enforced pack contracts: detect reviewer-suppressed low-confidence findings, verify each review event against the exact head, keep audit ledger commits separate from task artifacts, and extend the planning adversarial review to cross-artifact drift. Converged three Copilot review rounds and cut v0.56.1 to satisfy the release payload gate. Merged at 16b6ebe2; tag v0.56.1 published.
+
+### Main Changes
+
+- sd-review-pr now parses every review body for a collapsed low-confidence block and classifies each disclosed entry like an inline comment; a round is clean only when none survives verification.
+- sd-review-pr now compares each review event's commit_id to the recorded head before counting a round, so a review submitted against an earlier commit cannot be credited as coverage of the head.
+- sd-audit-repo now requires the audit ledger and report in their own commit, separate from .trellis/tasks/** artifacts, because the bookkeeping validator admits only task and workspace paths into a finalization delta.
+- planning-adversarial-review.md now checks a task's artifacts against each other, enumerating repeated values by search and confirming cross-artifact citations still describe what their target says.
+- Cut v0.56.1 (manifest, CHANGELOG, command catalog, dogfood mirror, fleet ledger) to satisfy the release payload gate for the changed templates/** payload.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a2aef156` | docs: harden review and audit workflow contracts |
+| `e9e4619b` | chore: restamp candidate ledger after review workflow contract changes |
+| `d298d4c2` | docs: capture reviewer under-claim checks in thinking guides |
+| `a2216127` | docs: fix cross-artifact drift found in review round 1 |
+| `3ca12cd2` | chore: restamp candidate ledger after review round 1 fixes |
+| `9b1369d5` | release: cut sd-ai-command-pack v0.56.1 |
+
+Merged as `16b6ebe2` on 2026-07-29; `auto-tag-release` published tag `v0.56.1`.
+The local branch also carried a `chore: record journal` commit that was never
+pushed; this entry is its replay.
+
+### Testing
+
+- [OK] make lint, make audit, make test all exit 0
+- [OK] run_pack_source_drift_gates GATE_EXIT=0: version gate 0.56.0 -> 0.56.1, changelog heading matched, candidate ledger valid
+- [OK] prepare-release.py: 8/8 fleet consumers passed, shipped-surface closure clean
+- [OK] review-preflight.mjs: 0 failures, 1 known PR-body advisory warning
+- [OK] sd-check 8/8 with stateGuard passed at head 9b1369d5
+- [OK] PR #274 CI: all checks pass including Release payload gate
+- [OK] Copilot review round 3 on exact head 9b1369d5: 13/13 files, no new comments, no suppressed low-confidence block
+- [FAIL] finish-work `final-bundle` rejected in both modes: `--mode completion`
+  gave `completion_archive_move_missing` (the branch archives no task) and
+  `--mode planning` gave `planning_recovery_commit_scope_invalid` (every work
+  commit touches paths outside an active task directory). A repo-maintenance
+  branch fits neither mode, so finish-work fails closed on complete work.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
