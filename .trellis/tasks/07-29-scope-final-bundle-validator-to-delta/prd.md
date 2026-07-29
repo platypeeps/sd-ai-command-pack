@@ -55,6 +55,39 @@ stale artifact its neighbours accumulated.
 requires at least one active task artifact change (`:1525`). A branch that
 changes skills, scripts, specs, or cuts a release satisfies neither.
 
+**3. `journal-only-recovery` cannot prove a session that repaired the journal.**
+Observed directly on this branch on 2026-07-29. The CI bookkeeping fast lane
+re-validates *each push increment* rather than the branch, using the previous
+head as its base. A push that carries only a journal entry and its sibling index
+therefore lands in `validateJournalOnlyPlanningRecovery` (`:1763`), which proves
+every commit the session's `Git Commits` table references. That proof admits
+task-only commits: `:1876-1888` rejects any path outside
+`.trellis/tasks/<dd-dd-name>/`, and `:1866-1874` rejects deletes, renames, and
+copies. Recording session 251 failed because that session's own work included
+two journal-repair commits (`acc836dc`, `d21afe83`, both touching
+`.trellis/workspace/`) and one that cleared a stale `branch` field
+(`f92221e5`, yielding `planning_lifecycle_mutation` and
+`planning_baseline_invalid` against the task as it stood at that commit's
+parent). The same range validates cleanly as an ordinary planning bundle
+against the branch's merge-base, so the defect is the per-increment framing plus
+the task-only commit filter, not the session content.
+
+The consequence is structural, not cosmetic: any session that repairs
+bookkeeping — exactly the sessions this pack most wants recorded — cannot be
+journaled in its own isolated push. A fix must either let the recovery subtype
+admit workspace paths for commits the session itself declares, or stop
+validating push increments as standalone bundles.
+
+Two adjacent sharp edges surfaced while diagnosing this and belong in the same
+review:
+
+- The `Status` heading is a machine-read marker, not prose. `:4248` requires a
+  line matching `**Completed**` exactly, and `:1678` silently skips any session
+  without it — a session with an accurate but non-matching status is dropped
+  with no diagnostic naming the marker.
+- `:1653` requires the sibling `index.md` in the same delta as any journal
+  change, so a journal-only correction cannot be pushed alone.
+
 ## Requirements
 
 - Scope the fix to the whole `validateBookkeepingTaskDirectory` family, not to the
