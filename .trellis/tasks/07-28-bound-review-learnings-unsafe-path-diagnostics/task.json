@@ -22,7 +22,6 @@
   "parent": null,
   "relatedFiles": [
     "templates/scripts/sd-ai-command-pack-review-learnings.py",
-    "scripts/sd-ai-command-pack-review-learnings.py",
     "tests/test_review_learnings.py"
   ],
   "notes": "Evidence: platypeeps/people-profiles PR #3 review-learnings dry-run raised an uncaught ValueError for unsafe planning changed-path input.",
