@@ -2,7 +2,7 @@
   "id": "consolidate-ci-fast-lane-trust-stack",
   "name": "consolidate-ci-fast-lane-trust-stack",
   "title": "Consolidate or retire the bookkeeping CI fast-lane trust stack",
-  "description": "",
+  "description": "Collapse or retire the layered bookkeeping CI fast-lane trust machinery, which now costs more to reason about than the checks it skips.",
   "status": "planning",
   "dev_type": null,
   "scope": null,

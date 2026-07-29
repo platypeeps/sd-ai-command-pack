@@ -2,7 +2,7 @@
   "id": "split-payload-behavior-digest",
   "name": "split-payload-behavior-digest",
   "title": "Split behavior and content payload digests",
-  "description": "",
+  "description": "Split the candidate payload digest into behavior and content digests so a documentation edit stops forcing a mid-cycle ledger restamp.",
   "status": "planning",
   "dev_type": null,
   "scope": null,

@@ -2,17 +2,17 @@
 
 ## Goal
 
-Make the documented `.sd-ai-command-pack/review.json` configuration file pass the shipped install audit, so a consumer that follows the shipped docs does not turn sd-full-check, sd-check, and sd-review red.
+Make the documented `review.json` configuration file under `.sd-ai-command-pack/` pass the shipped install audit, so a consumer that follows the shipped docs does not turn sd-full-check, sd-check, and sd-review red. The file is consumer-side and is deliberately absent from this repository.
 
 ## Requirements
 
 - `LOCAL_ALLOWED_PACK_FILES` in `scripts/sd-ai-command-pack-install-audit.py:78` must include `review.json`.
-- A focused test must assert that a consumer fixture carrying `.sd-ai-command-pack/review.json` passes the install audit, and fails if the allowlist entry is removed.
+- A focused test must assert that a consumer fixture carrying a `review.json` file under `.sd-ai-command-pack/` passes the install audit, and fails if the allowlist entry is removed.
 - Mirror the change to `templates/` and run `make sync`.
 
 ## Acceptance Criteria
 
-- [ ] A consumer fixture containing `.sd-ai-command-pack/review.json` passes `install-audit` with exit 0.
+- [ ] A consumer fixture containing a `review.json` file under `.sd-ai-command-pack/` passes `install-audit` with exit 0.
 - [ ] The new test fails if `review.json` is removed from the allowlist.
 - [ ] `make check` passes.
 

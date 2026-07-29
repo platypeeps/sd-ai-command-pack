@@ -2,7 +2,7 @@
   "id": "measure-unmeasured-runtime-surface",
   "name": "measure-unmeasured-runtime-surface",
   "title": "Measure coverage for the unmeasured shipped runtime surface",
-  "description": "",
+  "description": "Bring the shipped runtime surface under coverage measurement: .github/scripts/*.py is absent from .coveragerc and the MJS helpers are only syntax-checked.",
   "status": "planning",
   "dev_type": null,
   "scope": null,

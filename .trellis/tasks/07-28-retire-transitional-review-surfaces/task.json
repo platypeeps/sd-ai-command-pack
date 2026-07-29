@@ -2,7 +2,7 @@
   "id": "retire-transitional-review-surfaces",
   "name": "retire-transitional-review-surfaces",
   "title": "Name a removal version for the transitional review surfaces",
-  "description": "",
+  "description": "Assign a concrete removal version to the transitional review surfaces so they leave the pack instead of accumulating.",
   "status": "planning",
   "dev_type": null,
   "scope": null,

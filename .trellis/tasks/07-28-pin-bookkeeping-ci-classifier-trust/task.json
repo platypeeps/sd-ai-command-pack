@@ -2,7 +2,7 @@
   "id": "pin-bookkeeping-ci-classifier-trust",
   "name": "pin-bookkeeping-ci-classifier-trust",
   "title": "Pin the bookkeeping CI classifier against the PR base",
-  "description": "",
+  "description": "Pin the bookkeeping CI classifier to the pull request base so a branch cannot influence its own trust classification.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
