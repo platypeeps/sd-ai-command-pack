@@ -26,6 +26,17 @@ the commitments in `prd.md` and `design.md`. Verify claims against repository
 code, specs, and task context rather than accepting either review lane at face
 value.
 
+Also check the task's artifacts against each other, not only against the
+repository. A measurement, count, size, path, or identifier usually appears in
+more than one of `prd.md`, `design.md`, `implement.md`, and `task.json`, and one
+artifact often cites what another "states". Correcting a figure in one place
+leaves the others asserting the old value, and correcting the cited artifact can
+invalidate the citation itself. Enumerate every occurrence of each such value
+across the task directory, confirm they agree, and confirm any cross-artifact
+citation still describes what its target actually says. Prefer a repo-wide
+search over reading the artifacts in sequence: the stale copy is the one you did
+not think to open.
+
 On Claude Code, capability-check the optional native Codex lane with both
 `command -v codex` and `codex exec --help`. When both succeed, launch one
 review-only `codex exec` command in a separate background Bash task before
