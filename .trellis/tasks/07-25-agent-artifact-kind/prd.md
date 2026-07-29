@@ -47,7 +47,54 @@ natively supports agent files (~10 of 17).
 
 ## Notes
 
-- Complex task: needs `design.md` + `implement.md` before start.
+- Complex task. Planning complete 2026-07-28: `design.md` and `implement.md` added.
+- **The 17-platform support matrix is not settled — three sources contradict each other on
+  11 of 17 platforms.** Verified 2026-07-28:
+
+  | source | supporters |
+  |---|---|
+  | parent `design.md` §1.2 | claude, gemini, github, opencode, cursor, kiro, droid, codebuddy, antigravity, codex (TOML) |
+  | registry `trellis_local_only` agent globs | claude, codebuddy, codex, cursor, gemini, kiro, pi, qoder, trae, zcode |
+  | files on disk in this checkout | claude, codex, gemini, opencode, github |
+
+  R1 lists `none (devin, trae, qoder, zcode, pi, reasonix, shared)` while the registry
+  reserves agent paths for trae, qoder, zcode, and pi (`installer/registry.py:405`, `:357`,
+  `:431`, `:331`); the parent design lists github/opencode/droid/antigravity as supporters
+  while none has a registry agent glob — yet `.github/agents/` and `.opencode/agents/` each
+  hold three real files. Only **claude, codex, gemini** appear in all three columns, which
+  is what the design adopts as wave 1 (R6). The registry column is a Trellis-side path
+  reservation, not a capability claim.
+- **The registry field should be modeled on `command_kind` + `command_target_pattern`
+  (`registry.py:25-26`), not on `structured_question_tool` as R1 states.** The latter is a
+  runtime tool name set on 2 of 18 rows carrying no target path, so a second field would be
+  needed anyway; the former already expresses dialect + target and already gates on None in
+  both consumers (`registry.py:448`, `.github/scripts/generate-command-surfaces.py:713`).
+- **R2's manifest work is smaller than it reads, and its gitignore clause is a non-event.**
+  Kind branching exists at exactly two sites in `installer/` — the validation gate
+  (`manifest.py:113`) and a `MANAGED_BLOCK_KIND` special case (`provenance.py:101`) — so
+  install/status/remove/audit/check are kind-agnostic. But the kind is hardcoded in **three**
+  places, one a byte-identical shipped mirror: `installer/manifest.py:31`,
+  `scripts/sd-ai-command-pack-surface-check.py:253`, and
+  `templates/scripts/sd-ai-command-pack-surface-check.py:253`. Separately, the
+  gitignore/local-only order-tuple invariant (`tests/test_install_core.py:2016-2027`) only
+  fires for platforms carrying `local_gitignore_patterns` or `trellis_local_only`; a
+  capability field touches neither, and agent paths must **not** be added to
+  `trellis_local_only` (every entry must appear verbatim in `review-scope.sh`,
+  `tests/test_install_core.py:2111`) or pack agents stop being pack-managed.
+- **R4's `sd-` prefix is mechanical, not cosmetic.** Every platform's Trellis agent glob is
+  name-scoped (`.claude/agents/trellis-*.md`, `.codex/agents/trellis-*.toml`). A pack agent
+  named `trellis-*` enters the Trellis-local carve-out and survives removal. The generator
+  should reject non-`sd-` names. R4 also omits a wrinkle: **zcode has two agent
+  directories** (`registry.py:431-432`), which a single target-pattern string cannot express.
+- **R5 rests on a name collision.** `sd-check`'s `kind` is `builtin | prerequisite | check`
+  (`scripts/sd-ai-command-pack-check.py:880`, `:1004`, `:1022`) — the check-*result* kind,
+  unrelated to `KNOWN_MANIFEST_KINDS`. There is no typed artifact-kind contract in sd-check
+  to extend; R5 is satisfied by confirming `--audit`/`--status` enumerate rows generically.
+- **`SKILL_FANOUT_PLATFORMS` (`registry.py:456`) is not a capability list** and must not be
+  reused as one — it is the skills-only complement of the bespoke-adapter set and contains
+  none of claude/codex/gemini.
+- Shipping with zero agent sources and zero rows is a valid end state; the capability gate
+  is testable before any agent exists. Commits 1 and 2 are inert by construction.
 
 ## Cross-program coordination (2026-07-25 review)
 

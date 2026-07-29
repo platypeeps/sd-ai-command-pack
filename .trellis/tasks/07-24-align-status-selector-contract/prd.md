@@ -64,6 +64,42 @@ preserving untracked roadmap-file items as `F-*` follow-ups.
 ## Notes
 
 - Historical archived Trellis artifacts are evidence, not live command surface.
+- Complex task. Planning complete 2026-07-28: `design.md` and `implement.md` added.
+- **All three Confirmed Evidence citations are wrong.** Verified 2026-07-28: the
+  `F-*`/`T-*` definitions are at `sd-status/SKILL.md:74-89` (not `:68-81`); the retired
+  token is at `sd-status/SKILL.md:140` (not `:134-138`); and
+  `sd-housekeeping/SKILL.md:75-77` is the `sd-ai-command-pack-pr-eligibility.py` receipt
+  contract (`status`, `reasonCodes`, `checks`, `reviewThreads`, `finishWork`,
+  `gh pr merge --match-head-commit`), not a selector claim — the real mention is
+  `sd-housekeeping/SKILL.md:118`, about 43 lines away. Implementing from the third
+  citation edits an unrelated working contract.
+- **AC1 is already satisfied; it is a verification, not a deliverable.**
+  `select_items(items, prefix=...)` (`scripts/sd-ai-command-pack-status.py:478-481`) is the
+  sole producer of `selectionId` and is called exactly three times — `prefix="T"` at `:559`,
+  `prefix="F"` at `:1715` and `:2295`. Grep for the retired prefix across `scripts/`,
+  `installer/`, `tests/`, and `.github/scripts/` returns nothing.
+  `07-23-status-untracked-roadmap-items` finished the code half; only wording survived.
+- **R1 overstates the surface by a wide margin.** A repo-wide sweep across
+  `*.md`/`*.py`/`*.sh`/`*.mjs`/`*.toml`/`*.json` finds exactly four live hits:
+  `templates/.agents/skills/sd-status/SKILL.md:140`,
+  `templates/.agents/skills/sd-housekeeping/SKILL.md:118`, and their two byte-identical
+  root mirrors. No command, prompt, guide, generated adapter, doc, or test expectation
+  carries it. Every other hit is under `.trellis/` — two archived tasks, the journal, and
+  three active PRDs (this one, the parent, and `07-22-streamline-sd-skill-workflows:70`)
+  that describe the removal rather than current behavior.
+- **R3 and R5 collide as written.** Satisfying R3 by stating that the retired selector is
+  unsupported puts it back on a live surface, which R5's own drift test must then flag.
+  Resolution: reject generically — the skill enumerates `F-*` and `T-*` and treats anything
+  else as unresolved input, never naming the retired prefix. This also covers AC4's
+  stale-snapshot half (`F-9` against a three-row report), which no current wording handles.
+- **R5's test must be an allowlist over the shipped surface, not an exclusion list.** A
+  repo-wide grep minus exclusions would have to exempt three active task PRDs today and
+  would break the next time anyone documents this history. Scanning only `templates/`, the
+  root mirrors, `docs/`, and generated adapters — never `.trellis/` — is correct by
+  construction.
+- **Undeclared coordination with `07-28-stop-committing-generated-mirrors`.** That task
+  deletes the two mirror files. If it lands first this task edits two files instead of
+  four, so the drift test must not hardcode mirror paths.
 
 ## Reconciliation note (2026-07-25)
 

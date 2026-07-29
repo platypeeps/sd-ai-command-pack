@@ -67,3 +67,44 @@ noninteractive parking.
 ## Notes
 
 - No compatibility-only question ID or host-specific skill fork is permitted.
+- Complex task. Planning complete 2026-07-28: `design.md` and `implement.md` added.
+- **Both Confirmed Evidence citations are wrong.** Verified 2026-07-28:
+  `SKILL.md:241-243` is the finding-severity gate's `fleet-finding-classify.py`
+  invocation, and `controller-recovery.md:99-105` is the pack-blocker recovery
+  transition. The real sites are `SKILL.md:110-112` (`operator-decision` in the receipt
+  result vocabulary), `SKILL.md:282-288` (the ask / do-not-ask rule), and
+  `controller-recovery.md:150-156` (the `## Operator Decisions` section). The third
+  evidence bullet — no `interaction_decisions` entry on `sd-fleet-refresh` — is accurate
+  and is the entire gap.
+- **R2–R5 are already written; this is registry work only.** R2 at `SKILL.md:282-288`,
+  R3 at `controller-recovery.md:152-155`, R4's park behavior at
+  `controller-recovery.md:155-156`, R5 at `SKILL.md:280-281`. Rewriting them creates a
+  second copy of a contract that already reads correctly.
+- **The validator forces static options — `option_source` would be a safety regression.**
+  `installer/registry.py:1136-1142` rejects dynamic options unless `multi_select=True` and
+  the source string contains the literal substring `"independent"`. R2 specifies "mutually
+  exclusive policy choices", which is single-select. R3's runtime binding to campaign /
+  consumer / head / PR is prompt evidence (already required at
+  `controller-recovery.md:154-155`), not option identity.
+- **Other validator constraints that shape the entry** (`registry.py:1096-1135`, `:516-520`):
+  2–3 options (matches R3's "at most three"); exactly one recommended option and it must be
+  **first** (`if recommended != [0]`), so R3's "lowest-risk park option is recommended" also
+  fixes its position; `noninteractive="park"` is a valid value matching R4 exactly, with
+  `work-backlog.blocked-disposition` (`registry.py:579`) as the sibling that already pairs
+  `park` with category `blocked-run-disposition`; and `INTERACTION_HEADER_MAX_LENGTH = 12`,
+  so "Fleet policy" sits exactly at the limit.
+- **Registration and binding cannot be split across commits.** `registry.py:1146` errors on
+  an unknown decision id and `:1152` errors on an unreferenced one, both raising
+  `RuntimeError("invalid interaction registry: …")` at import. There is no intermediate
+  green state.
+- **AC2 is blocked by an undeclared dependency on `07-28-regenerate-fleet-refresh-adapters`.**
+  `sd-fleet-refresh` is the sole member of `SOURCE_ONLY_COMMAND_NAMES`
+  (`registry.py:1176`) and its adapters are frozen. Measured: `.claude/commands/sd/audit-repo.md`
+  contains `AskUserQuestion` once (its `audit.followups` decision regenerates), while
+  `.claude/commands/sd/fleet-refresh.md` (mtime Jul 18) and
+  `templates/.commands/sd-fleet-refresh.md` (mtime Jul 23) contain it zero times. Registering
+  the decision will not reach the Claude surface AC2 names until the adapters unfreeze. Do
+  not hand-edit the frozen adapter to make AC2 pass.
+- `fleet-refresh.operator-policy` matches the established `<command-short>.<slug>` ID
+  convention used by all seven existing decisions, so R1's preferred ID is the conventional
+  one.

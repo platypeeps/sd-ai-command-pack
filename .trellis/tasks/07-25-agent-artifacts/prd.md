@@ -78,7 +78,16 @@ Cross-child acceptance (parent integration review, run when all children archive
 ## Notes
 
 - Keep `prd.md` focused on requirements, constraints, and acceptance criteria.
-- Complex task: `design.md` and `implement.md` required before `task.py start`.
+- ~~Complex task: `design.md` and `implement.md` required before `task.py start`.~~
+  **Superseded 2026-07-28.** That line is boilerplate and contradicts this PRD's
+  own header, which states the parent "has no direct implementation work and must
+  not be started; start children instead." `design.md` §2 corroborates it: every
+  item of open design work is distributed to the four children in the Task map.
+  A parent that must not be started cannot have an execution checklist, so
+  **no `implement.md` is authored for this task**. Planning artifacts here are
+  `prd.md` (binding R1-R7) and `design.md` (binding §1 constraints); execution
+  planning lives in the children. The parent's remaining work is the cross-child
+  integration review listed above, run when all four children archive.
 
 ## Cross-program coordination (2026-07-25 review; additive — does not alter R1-R7)
 

@@ -49,6 +49,33 @@ housekeeping remains the sole merge mutation owner.
   overlapping composition. Internal typed context may narrow an explicit parent
   workflow but cannot become a second public interface.
 
+Added 2026-07-28 — the interim, before retirement lands:
+
+- R7: Repoint `sd-ship` Stage 2 at `sd-review scope=pr` as soon as the successor
+  contract is stable, without waiting for the predecessor to be deleted.
+  `.agents/skills/sd-ship/SKILL.md:129` currently calls `sd-review-pr`, so the
+  main delivery path runs the predecessor and none of `sd-review`'s guarantees
+  apply — even though `.agents/skills/sd-review/SKILL.md:14` declares the
+  successor self-contained.
+
+  This is **not** a one-line reference edit. `SKILL.md:133-136` branches Stage 2
+  on `defer-finish-work`: `until=review` lets the predecessor's Step 8 finish the
+  Trellis work, while `until=merge` defers it to Stage 3. `sd-review` has no
+  equivalent argument and `.agents/skills/sd-review/SKILL.md:73` forbids it from
+  archiving Trellis work at all. So the repoint owes a design for where
+  finish-work, review-learning, and the Stage 3 transition land under each
+  `until=` value before the reference changes.
+
+  Ownership: **this task owns the repoint** (decided 2026-07-28).
+  `07-28-retire-transitional-review-surfaces` has dropped its duplicate claim and
+  now depends on R7 landing. Gated on R2's ordering, not on
+  `07-24-remove-retired-review-surfaces`.
+- R8: While both lifecycles ship, the shipped guidance must name one current
+  path. `docs/SD_AI_COMMAND_PACK.md:194` interleaves successor and transitional
+  steps across 18 steps with no decision point, so a reader cannot tell which
+  lifecycle they are in. Either present the successor loop only, or add an
+  explicit decision point that routes to one lifecycle.
+
 ## Acceptance Criteria
 
 - [ ] `sd-create-pr` fixtures prove publication stops after the PR exists and no
@@ -63,6 +90,10 @@ housekeeping remains the sole merge mutation owner.
   argument that preserves the prior overlap.
 - [ ] Focused publishing/shipping tests, generated parity, install audit,
   `make sync`, and `make check` pass.
+- [ ] No shipped skill, adapter, or doc routes the primary delivery path through
+  `sd-review-pr` while `sd-review` is the declared successor.
+- [ ] The recommended review loop in the shipped guide describes exactly one
+  lifecycle, or routes through an explicit decision point.
 
 ## Out Of Scope
 
@@ -73,3 +104,26 @@ housekeeping remains the sole merge mutation owner.
 
 - The command names must communicate their authority: create publishes, review
   reviews, ship ships, and housekeeping merges/cleans.
+- 2026-07-28 audit source: `.trellis/audit/report-2026-07-28.md` — finding A-045
+  (P2 · L · Plausible · architecture). This task was tracked-stale against it:
+  R1-R6 describe the correct end state but every one of them is contingent on
+  retirement landing, so nothing here changed the interim behavior A-045
+  measures. R7/R8 are that interim.
+- Removal-version scheduling and the transitional catalog status for the same
+  finding are owned by `07-28-retire-transitional-review-surfaces`. Coordinate
+  with it rather than duplicating; this task owns only the composition half.
+- **R7 gap measured 2026-07-28.** `grep -n "review-learning"
+  .agents/skills/sd-review/SKILL.md` returns nothing — the successor has no
+  review-learning pass, yet `sd-ship/SKILL.md:131-132` states Stage 2 owns "the
+  one read-only, PR-scoped post-cycle review-learning pass; no other ship stage
+  repeats it". The repoint must name a new owner for it or drop it by decision.
+- **The two `until=` values differ in difficulty.** `until=merge` is nearly
+  mechanical because Stage 4 already runs finish-work (`sd-ship/SKILL.md:145`).
+  `until=review` has no home for finish-work under the successor at all.
+  `design.md` carries the three options.
+- **R3 and R4 both land on Stage 3 and must land together.**
+  `sd-ship/SKILL.md:138-142` calls `sd-watch-pr` with `no-merge` specifically to
+  suppress its automatic housekeeping handoff. R3 deletes that surface and R4
+  deletes the inversion it relies on; either order alone leaves a broken
+  intermediate state.
+- Planning complete 2026-07-28: `design.md` and `implement.md` added.

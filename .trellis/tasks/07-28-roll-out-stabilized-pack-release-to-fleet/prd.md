@@ -45,6 +45,18 @@ behavior is not distributed before its fixes are available.
 - If the pack itself blocks an otherwise clean integration, stop the campaign,
   create a pack-owned corrective task/release, and resume through the
   controller's documented corrective-release path.
+- Do not assume the candidate-validation gate binds the whole payload digest.
+  `07-28-split-payload-behavior-digest` (audit finding A-057) splits
+  `payload_digest` into a behavior digest and an informational content digest and
+  makes `validate_candidate_ledger` gate on behavior only. This rollout consumes
+  the candidate ledger as a precondition, so read the digest semantics in force
+  at execution time rather than the current whole-payload ones. That split is not
+  a release blocker for this campaign, and until it ships the current gate stands
+  unchanged: `scripts/sd_ai_command_pack_fleet_lib.py:728` `validate_candidate_ledger`
+  rejects **any** `payloadDigest` mismatch, including a documentation-only
+  restamp. Do not treat a restamped ledger as still-valid evidence on the theory
+  that the change was informational — revalidate against the current whole-payload
+  digest. Once A-057 ships, read the digest semantics then in force instead.
 
 ## Acceptance Criteria
 
@@ -83,3 +95,9 @@ behavior is not distributed before its fixes are available.
   an evidence-backed absolute release requirement.
 - This is operational rollout work, not authorization to change consumer
   product code or publish an upstream Trellis change.
+- 2026-07-28 audit: this task was tracked-stale against finding A-057
+  (P2 · M · Plausible · consumer-impact) because it consumes the candidate
+  ledger as a precondition without splitting the digest. A-057 now has a
+  dedicated owner, `07-28-split-payload-behavior-digest`, so this task carries a
+  cross-reference and a semantics caveat rather than duplicated scope. Source:
+  `.trellis/audit/report-2026-07-28.md`.
