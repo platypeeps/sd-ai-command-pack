@@ -47,7 +47,7 @@ Replayed the two journal sessions lost to the manual merges of PRs #273 and #274
 
 ### Status
 
-[OK] **Session complete — both tasks remain in planning**
+[OK] **Completed**
 
 No task was archived this session. `07-28-analyze-recurring-trellis-workflow-instability` is still `planning` with one of two acceptance criteria met, and `07-29-scope-final-bundle-validator-to-delta` was created but not started.
 
