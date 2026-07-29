@@ -69,7 +69,7 @@ These guides help you **ask the right questions before coding**.
 
 Over-claiming is the well-known failure. Under-claiming is the one that ends a review loop early:
 
-- [ ] Review body says "no new comments" → Search the body for a collapsed `<details><summary>Comments suppressed due to low confidence (N)</summary>` block. Copilot hides observations there; they never become inline comments or threads, so a loop reading only thread state never sees them.
+- [ ] Review body says "no new comments" → Search the body for a collapsed `<details>` block disclosing withheld entries, typically titled `Comments suppressed due to low confidence (N)`. Match the intent, not that exact string; the wording can change. Copilot hides observations there; they never become inline comments or threads, so a loop reading only thread state never sees them.
 - [ ] Suppressed entry looks weak → Low confidence is the reviewer's confidence in **its own scoring**, not evidence the observation is wrong. Verify each one against the code like any inline comment. On PR #273, 3 of 4 suppressed entries were real defects.
 - [ ] Review body claims full coverage ("reviewed N out of N changed files") → Compare the review event's `commit_id` to the recorded head. A review can be submitted against an earlier commit while a newer one is already head; N is counted against the commit it actually read, so the claim is true and the head is still unreviewed.
 - [ ] Round looks clean → It is clean only when the body reports no new comments **and** no suppressed entry survives verification **and** `commit_id` equals the head.

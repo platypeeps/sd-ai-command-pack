@@ -33,9 +33,10 @@ artifact often cites what another "states". Correcting a figure in one place
 leaves the others asserting the old value, and correcting the cited artifact can
 invalidate the citation itself. Enumerate every occurrence of each such value
 across the task directory, confirm they agree, and confirm any cross-artifact
-citation still describes what its target actually says. Prefer a repo-wide
-search over reading the artifacts in sequence: the stale copy is the one you did
-not think to open.
+citation still describes what its target actually says. Search for each value
+instead of reading the artifacts in sequence: the stale copy is the one you did
+not think to open. Widen the search past the task directory only when the value
+is also cited outside it, such as in a spec, report, or ledger.
 
 On Claude Code, capability-check the optional native Codex lane with both
 `command -v codex` and `codex exec --help`. When both succeed, launch one
