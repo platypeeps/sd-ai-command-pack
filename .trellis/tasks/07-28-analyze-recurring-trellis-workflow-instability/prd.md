@@ -131,10 +131,14 @@ queue. No acceptance criteria are added and this task is not reopened.
 
 Both PRs merged on 2026-07-29 — #273 (`5fc11c2f`) and #274 (`16b6ebe2`) — were
 merged by hand because `sd-finish-work` could produce no receipt, so
-`sd-housekeeping` never reached its merge gate. In both cases the failure was in
-the finalization validator, not in the change under review: #273 was green with
-zero unresolved review threads, and #274 was green with a clean Copilot round on
-its exact head.
+`sd-housekeeping` never reached its merge gate. Both were green on their exact
+heads: #273 with zero unresolved review threads, #274 with a clean Copilot round.
+
+The two failures differ, and the distinction matters. #274's was purely a
+validator defect — no mode admitted the branch. #273's was not: 2 of its 27
+findings correctly flagged its own delta, so no valid receipt existed for it under
+any validator. The whole-directory defect contributed 25 spurious findings on
+files it never touched, which buried the real failure rather than creating it.
 
 - **Whole-directory validation.** `final-bundle --mode planning` on #273 returned
   27 findings, of which **25 were in files the PR never modified** — 20

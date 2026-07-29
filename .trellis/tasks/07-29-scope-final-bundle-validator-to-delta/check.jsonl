@@ -1,3 +1,2 @@
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "Finalization findings are deterministic diagnostics; narrowing scope must not turn a blocking gate into a silent pass."}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Regression coverage bar for the focused tests each acceptance criterion requires in tests/test_review_preflight.py."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "The typed result crosses into sd-finish-work and sd-housekeeping; adding a mode or a finding disposition field changes a consumed payload."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Owns the final-bundle contract and the regression coverage bar the acceptance criteria must meet in tests/test_bookkeeping_validator.py, where final-bundle coverage lives."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Mistake 4 (:74, every consumer parses the same payload) is exactly the receipt-contract risk here, and the post-template-modification checklist (:152) governs the templates/root mirror parity this change must preserve."}
