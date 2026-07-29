@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Canonical review-preflight CLI contract, mode gating, typed result shape, and the templates/root mirror parity rule the fix must preserve."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Active task directory layout and manifest rules that validateBookkeepingTaskDirectory enforces when it walks a directory off disk."}
