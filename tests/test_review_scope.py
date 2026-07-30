@@ -411,6 +411,72 @@ class ReviewScopeTests(InstallTestCase):
         self.assertNotIn("sd-ai-command-pack-scope-advisory:", result.stdout)
         self.assertNotIn("warning:", result.stdout)
 
+    def write_gh_raw_stub(self, root: Path, payload: str) -> Path:
+        """Install a `gh` stub whose `pr view` output is not valid JSON."""
+        stub_bin = root.parent / f"{root.name}-bin"
+        stub_bin.mkdir(exist_ok=True)
+        (stub_bin / "gh").write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            'if [ "${1:-}" = pr ] && [ "${2:-}" = view ]; then\n'
+            f"  printf '%s\\n' {_sh_single_quote(payload)}\n"
+            "else\n"
+            "  exit 1\n"
+            "fi\n",
+            encoding="utf-8",
+        )
+        (stub_bin / "gh").chmod(0o755)
+        return stub_bin
+
+    def test_review_scope_fails_named_when_the_pr_body_cannot_be_parsed(self) -> None:
+        """A crashing parser used to abort through `set -e` with no `error:` line.
+
+        This is the one enforcing-mode behavior change in the resolver split, so
+        it needs its own case: the exit status is the same 1 it always was, and
+        only the presence of a named message distinguishes the new behavior from
+        the old.
+        """
+        root = self.make_scoped_advisory_repo()
+        stub_bin = self.write_gh_raw_stub(root, "not json at all")
+
+        result = subprocess.run(
+            ["bash", "scripts/sd-ai-command-pack-review-scope.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK_GH": "required",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "could not parse the PR body returned by gh",
+            result.stdout,
+        )
+
+    def test_review_scope_advisory_warns_when_the_pr_body_cannot_be_parsed(
+        self,
+    ) -> None:
+        """The same malformed body must never fail the advisory."""
+        root = self.make_scoped_advisory_repo()
+        stub_bin = self.write_gh_raw_stub(root, "not json at all")
+
+        result = self.run_advisory_scope(
+            root, PATH=f"{stub_bin}{os.pathsep}{os.environ['PATH']}"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("sd-ai-command-pack-scope-advisory:", result.stdout)
+        # No body was resolved, so claiming one "does not include" the section
+        # would be a statement the script cannot support.
+        self.assertIn("the PR body must include", result.stdout)
+        self.assertNotIn("could not parse", result.stdout)
+
     def test_review_scope_off_suppresses_advisory(self) -> None:
         root = self.make_repo()
         self.assertEqual(self.run_install(root).returncode, 0)
