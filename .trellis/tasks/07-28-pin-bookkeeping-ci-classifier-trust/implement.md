@@ -159,10 +159,41 @@
       locates the guard *by* that conditional, so a guard moved outside it fails the
       test rather than passing quietly.
 
-    Settle it post-merge on the first bookkeeping-only push to `main`: the `CI scope`
-    job must report `mode: bookkeeping`. If it reports `full` with
-    `prior_classifier_*`, the guard leaked out of the `pull_request` branch and this
-    change must be reverted.
+    **The review gate below says "confirmed unchanged before merge", which the two
+    facts above do not satisfy — they are an argument, not a measurement.** Closed
+    2026-07-29 by executing the guard directly: the block is extracted verbatim from
+    `.github/workflows/tests.yml` between the comment and the `git show`, `select_full`
+    is stubbed to print and exit 9, and the block is sourced under varied inputs.
+
+    | `EVENT_NAME` | `BASE_SHA` | classifier blob | result |
+    | --- | --- | --- | --- |
+    | `push` | empty | bogus | no `select_full`, exit 0 |
+    | `pull_request` | empty | bogus | `prior_classifier_identity_unavailable` |
+    | `pull_request` | `main` | identical | no `select_full`, exit 0 |
+    | `pull_request` | `main` | divergent | `prior_classifier_not_base_identical` |
+
+    Rows 2 and 4 are the positive controls, and they matter: row 1 alone would also
+    be produced by a harness that never calls `select_full` at all. Row 2 differs
+    from row 1 only in `EVENT_NAME` and does fire, so row 1's silence is the
+    conditional working rather than the harness being inert. Row 4's divergent blob
+    was synthesized as a dangling tree — `git hash-object -w`, then `read-tree` /
+    `update-index` / `write-tree` under a temporary `GIT_INDEX_FILE` — so no branch,
+    commit or push was involved and the repository index was never touched.
+
+    Scope of the claim: this proves the guard block is inert on `push`. It does not
+    exercise the whole classify step end-to-end on a real default-branch push, which
+    still only happens after merge. Settle that on the first bookkeeping-only push to
+    `main`: `CI scope` must report `mode: bookkeeping`. A `full` with a
+    `prior_classifier_*` reason means the guard leaked and this must be reverted.
+
+    Related, and checked while doing this: the guard tests `BASE_SHA` for emptiness
+    but not `BEFORE_SHA`, which is deliberate. `tests.yml:135` already rejects any
+    `BEFORE_SHA` that is not 40 hex characters and selects
+    `event_commit_identity_invalid`, and it runs before the guard at `:149`.
+    `BASE_SHA` has no upstream shape gate, so it needs its own. The hazard is real
+    either way — during this session an empty prefix was passed to
+    `git rev-parse ":path"` by accident twice and returned `0afbb094`, the index
+    blob, exit 0, exactly as the comment in the guard warns.
 
 ### Step 3 — R3 moved out of this task
 
@@ -372,7 +403,10 @@ proves the attack no longer succeeds.
 - No new workflow **step** — the guard is inline (step 7).
 - `push`-path behavior is confirmed unchanged before merge (step 10). The guard
   is `pull_request`-only by design; a regression here is a self-inflicted outage
-  on `main`.
+  on `main`. **Met 2026-07-29 by executing the extracted guard block under
+  `EVENT_NAME=push` with positive controls, since the live `push` event is not
+  reachable before merge — see step 10 for the matrix and the limits of the
+  claim.**
 - R3 is no longer in this task (split 2026-07-29 to
   `07-29-resolve-evidence-run-id-through-api`), so nothing downstream can stall
   the P0. An earlier version of this list said "Step 3 does not block step 1".
