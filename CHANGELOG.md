@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.56.6 - 2026-07-30
+
+- Allowlist the documented `.sd-ai-command-pack/review.json` configuration file
+  in the shipped install audit. `sd-review` declares the path and the pack docs
+  describe it as supported, but `LOCAL_ALLOWED_PACK_FILES` never admitted it, so
+  a consumer that created the file exactly as documented failed `install-audit`
+  — and with it the `pack.install-audit` gate in sd-check, sd-full-check, and
+  sd-review — with a hard error. The audit collector walks the filesystem, so
+  the failure hit tracked and untracked copies alike, and no managed gitignore
+  pattern covers the path. A fixture-backed test now locks the entry in place:
+  it installs the pack into a consumer fixture, writes the documented
+  configuration file, and asserts the audit passes; removing the allowlist
+  entry fails the test. Audit finding A-056.
+
 ## 0.56.5 - 2026-07-30
 
 - Silence the pre-PR tooling/generated scope advisory once the PR body already
