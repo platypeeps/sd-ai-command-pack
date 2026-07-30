@@ -161,7 +161,8 @@ approval is met. Two caveats stand:
 
 ## C-N-1 — Same-version record change is not reversible (round 2, Codex)
 
-- Severity: high. **Unresolved. Blocks implementation.**
+- Severity: high. Blocked implementation until the operator decision below;
+  **addressed**.
 - Evidence: verified. `SCHEMA_VERSION = 1` (`:30`). `_normalize_state`
   (`:257-259`, `:341-345`) runs before validation and therefore only gives
   forward compatibility — a new controller reading old rows. Nothing makes the
