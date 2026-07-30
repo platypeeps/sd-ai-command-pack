@@ -147,8 +147,8 @@ class FleetControllerTests(InstallTestCase):
     ):
         """Burn the lane's remaining automatic attempts at its current stage."""
         action = None
-        while state["lanes"][0]["result"] is None:
-            action = controller.issue_next(state)[0]
+        while self.lane_for(state, consumer)["result"] is None:
+            action = self.issued_action_for(controller, state, consumer)
             controller.record_result(
                 state,
                 action_id=action["actionId"],
@@ -157,8 +157,26 @@ class FleetControllerTests(InstallTestCase):
                 result="retryable-failure",
                 reason_code=reason_code,
             )
-        self.assertEqual(state["lanes"][0]["result"], "retry-exhausted")
+        self.assertEqual(self.lane_for(state, consumer)["result"], "retry-exhausted")
         return action
+
+    def lane_for(self, state, consumer):
+        """Return the lane owned by consumer, independent of lane ordering."""
+        for lane in state["lanes"]:
+            if lane["name"] == consumer:
+                return lane
+        self.fail(f"no lane named {consumer!r}")
+
+    def issued_action_for(self, controller, state, consumer):
+        """Issue the next actions and return the one owned by consumer."""
+        issued = controller.issue_next(state)
+        for action in issued:
+            if action["consumer"] == consumer:
+                return action
+        self.fail(
+            f"no issued action for {consumer!r}; issued "
+            f"{[action['consumer'] for action in issued]!r}"
+        )
 
     def run_cli(self, controller, *arguments):
         stdout = io.StringIO()
