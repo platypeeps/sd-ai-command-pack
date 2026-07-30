@@ -165,8 +165,17 @@ decision is made and step 1 implements it rather than re-deciding it.
 
 ## Rollout
 
-7. Merge through the normal exact-head lifecycle.
+7. Merge through the normal exact-head lifecycle. The version bump itself now
+   rides in this step's PR, not step 8: the release payload gate defines shipped
+   payload as all of `templates/**`, so the source-only `sd-fleet-refresh` edits
+   in step 6 make a same-PR `manifest.json` bump mandatory. That PR therefore
+   carries `0.56.3`, its CHANGELOG entry, the regenerated version-bearing command
+   surfaces, and a refreshed exact-payload candidate ledger. Recorded 2026-07-29
+   after CI failed the gate on the first push.
 8. Publish the corrective release and update the fleet manifest to that version.
+   The bump landed in step 7, so what remains here is the tag — pushed
+   automatically by the `Auto-tag release` job on merge to `main` — and the fleet
+   manifest edit. Do not bump the version a second time.
 9. Return to `07-28-roll-out-stabilized-pack-release-to-fleet` and **abandon**
    campaign `v0-56-1-20260729T173059Z` deliberately, then plan a fresh campaign on
    the corrective release. Operator decision, 2026-07-29.
