@@ -78,6 +78,22 @@ journaled in its own isolated push. A fix must either let the recovery subtype
 admit workspace paths for commits the session itself declares, or stop
 validating push increments as standalone bundles.
 
+**Scope decision (2026-07-30, adversarial planning review):** root cause 3 is
+split out to the follow-up task
+`.trellis/tasks/07-30-recover-bookkeeping-repair-sessions/`. Two review rounds
+failed to produce a sound no-re-audit justification for admitting
+`.trellis/workspace/**` paths in cited commits — an initial pull-request push
+receives no per-increment bookkeeping validation
+(`.github/scripts/bookkeeping_ci_scope.py` classifies non-`synchronize`
+pull-request events as full CI, and the `Validate bookkeeping head` step is
+gated on `mode == 'bookkeeping'`), so cited workspace mutations could go
+entirely unaudited. The session-251 shape additionally needs a
+direction-of-repair rule for commits like `f92221e5` whose parent lifecycle
+state was already dirty. This task therefore fixes root causes 1 and 2 only:
+the recovery subtype's cited-commit scope widens to repo-maintenance paths,
+while `.trellis/workspace/**` cited commits and dirty-parent task repairs
+remain rejected until the follow-up lands.
+
 Two adjacent sharp edges surfaced while diagnosing this and belong in the same
 review:
 
@@ -114,10 +130,11 @@ review:
   3. **Completion-only** — gated on `completionReady` (`:697`):
      `task_lifecycle_not_completion_ready`, `task_branch_invalid`. These never
      fire in `planning` mode and were never part of the #273 failure.
-  4. **Relationship** — `validateBookkeepingTopology` (`:743`) emits four codes,
+  4. **Relationship** — `validateBookkeepingTopology` (`:743`) emits six codes,
      not the one this PRD previously named: `task_topology_base_invalid`,
      `task_topology_not_reciprocal`, `task_topology_prd_missing_child`,
-     `task_topology_unverifiable`. These span two task directories, so "is the
+     `task_topology_unverifiable`, `task_topology_missing`,
+     `task_topology_ambiguous`. These span two task directories, so "is the
      file in the delta" has more than one answer. `design.md` must say which end
      of the link governs.
 - Report a **group 1** finding only when that file is present in the base..head

@@ -152,25 +152,45 @@ task. Ordinary task archival, journal work, and validation need no confirmation.
      --json >"$FINISH_WORK_RECEIPT"
    ```
 
+   The captured base is the last work commit — the parent of the first
+   finalization (archive/journal) commit — not the merge-base with the
+   default branch. On a branch whose only commits are bookkeeping the two
+   coincide; passing the merge-base instead widens the range to include the
+   work commits and fails with `bundle_scope_invalid` for every work path.
+
    Require schema version 1, `status: valid`, the expected mode-specific valid
    reason code, and an `evidence.headOid` equal to the current full HEAD OID.
    In `planning` mode, when the exact captured range contains only one newly
    completed journal session and its sibling index, the helper may
-   automatically prove the session's already-published, single-parent,
-   task-only work commits. A successful result remains
-   `planning_bundle_valid` and identifies
+   automatically prove the session's already-published, single-parent work
+   commits. A successful result remains `planning_bundle_valid` and identifies
    `evidence.planningSubtype: journal-only-recovery`; callers never select a
-   third mode, widen the captured base, or reinterpret a failed result. This
-   subtype verifies task-only scope and planning lifecycle state without
-   retroactively applying current publication-quality content checks to work
-   that predates the captured base. Normal task-plus-journal planning bundles
-   retain their complete validation.
+   third mode, widen the captured base, or reinterpret a failed result. Cited
+   commits may change active-task directories, which keep the current per-path
+   and planning lifecycle rules, and ordinary repository paths, which are
+   allowed as maintenance work including deletes and renames; the task
+   archive, malformed task-namespace paths, and `.trellis/workspace/**` paths
+   remain forbidden. The subtype does not retroactively apply current
+   publication-quality content checks to work that predates the captured
+   base, and it is the intended flow for a maintenance branch: the work
+   commits carry the repository changes, finalization records a journal
+   session citing them, and the receipt is `--mode planning` over the
+   journal-plus-index delta. Normal task-plus-journal planning bundles retain
+   their complete validation.
    In completion mode, a base equal to the current head may automatically
    recover one bounded adjacent archive/journal tail and prove every later
    first-parent commit as a `post-archive-review-successor`. The successor
    range may change code, tests, specs, and generated payloads, but never task,
    workspace, or finalization evidence. This remains ordinary `completion`
    mode and creates no duplicate journal or bookkeeping commit.
+
+   A valid result may carry a non-empty `advisories` array: defects in task
+   files the bundle did not touch, demoted from blocking findings because
+   they sit outside the change delta. Advisories are informational and never
+   block validation or downstream eligibility; when more accumulate than the
+   result retains, `evidence.advisoriesDropped` reports how many were
+   discarded past the cap. Fixing the debt they name belongs to a follow-up
+   session, not the current finalization.
 
    Retain the private file path and exact JSON result as the finalization
    handoff for `sd-review-pr`, `sd-ship`, and `sd-housekeeping`. The

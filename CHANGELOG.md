@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.56.7 - 2026-07-30
+
+- Scope the finalization bundle validator to the change delta. The final-bundle
+  gate previously validated every changed task directory wholesale, so a defect
+  in an untouched sibling file — a stale `task.json` description, a leftover
+  scaffold row — blocked finalization of work that never touched that file
+  (PR #273 failed on 25 such findings). Defects anchored to files inside the
+  bundle delta still block; defects anchored to untouched files are demoted to
+  a new non-blocking `advisories` array in the result document (capped at 25
+  entries, overflow reported via `evidence.advisoriesDropped`, same path and
+  message truncation as findings). Topology findings follow the anchor rule:
+  a broken link blocks when the anchoring `task.json` is in the delta and
+  advises when it is not, including the two sites that report the neighbor's
+  path. The `pre-archive` command and historical completion replay keep their
+  strict whole-directory behavior, and the housekeeping receipt loader
+  tolerates the new fields.
+- Widen journal-only planning recovery to ordinary repository maintenance
+  commits. Cited-commit paths now partition five ways: active-task paths keep
+  the current per-path and lifecycle rules; ordinary repository paths are
+  allowed, including deletes and renames; the task archive, malformed
+  task-namespace paths, and `.trellis/workspace/**` paths remain forbidden.
+  `planning_recovery_task_change_missing` now fires only when the cited
+  commits collectively change no allowed path, so a maintenance branch can
+  finalize with a journal session citing its repository-only work commits.
+- Document the finalization receipt contract in `sd-finish-work`: the captured
+  base is the last work commit (not the merge-base with the default branch),
+  the maintenance-branch planning flow, the widened recovery scope, and the
+  advisory semantics.
+
 ## 0.56.6 - 2026-07-30
 
 - Allowlist the documented `.sd-ai-command-pack/review.json` configuration file

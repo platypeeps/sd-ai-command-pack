@@ -25,6 +25,7 @@ const MAX_TRELLIS_TASK_LINKS = 100;
 const MAX_TRELLIS_TASK_REFERENCE_LENGTH = 255;
 const MAX_TRELLIS_PRIORITY_RATIONALE_LENGTH = 1000;
 const MAX_BOOKKEEPING_FINDINGS = 100;
+const MAX_BOOKKEEPING_ADVISORIES = 25;
 const MAX_BOOKKEEPING_CHANGED_PATHS = 500;
 const MAX_BOOKKEEPING_RECOVERY_COMMITS = 100;
 // Stay well below Windows' roughly 32 KiB process command-line ceiling after
@@ -538,6 +539,8 @@ export function runBookkeepingValidator(options = {}) {
   config = defaultConfig();
   readTextCache.clear();
   const findings = [];
+  const advisories = [];
+  let advisoriesDropped = 0;
   const evidence = {
     baseOid: null,
     headOid: null,
@@ -551,6 +554,17 @@ export function runBookkeepingValidator(options = {}) {
       path: boundedBookkeepingText(path || '', 300),
       message: boundedBookkeepingText(message, 500),
       disposition,
+    });
+  };
+  const addAdvisory = (reasonCode, path, message) => {
+    if (advisories.length >= MAX_BOOKKEEPING_ADVISORIES) {
+      advisoriesDropped += 1;
+      return;
+    }
+    advisories.push({
+      reasonCode,
+      path: boundedBookkeepingText(path || '', 300),
+      message: boundedBookkeepingText(message, 500),
     });
   };
 
@@ -570,7 +584,7 @@ export function runBookkeepingValidator(options = {}) {
         });
       }
     } else if (options.command === 'final-bundle') {
-      validateBookkeepingFinalBundle(options, evidence, add);
+      validateBookkeepingFinalBundle(options, evidence, add, {}, addAdvisory);
     } else {
       add('validator_command_invalid', '', 'command must be pre-archive or final-bundle');
     }
@@ -583,6 +597,9 @@ export function runBookkeepingValidator(options = {}) {
     );
   }
 
+  if (advisoriesDropped > 0) {
+    evidence.advisoriesDropped = advisoriesDropped;
+  }
   const invalid = findings.some((finding) => finding.disposition === 'invalid');
   const status = invalid
     ? 'invalid'
@@ -603,6 +620,7 @@ export function runBookkeepingValidator(options = {}) {
       : [...new Set(findings.map((finding) => finding.reasonCode))].sort(),
     evidence,
     findings,
+    advisories,
   };
 }
 
@@ -638,11 +656,31 @@ function printBookkeepingResult(result) {
       console.log(`FAIL ${finding.reasonCode}${location} ${finding.message}`);
     }
   }
-  console.log(`\nBookkeeping validator: ${result.status} (${result.findings.length} finding(s)).`);
+  const advisories = result.advisories || [];
+  for (const advisory of advisories) {
+    const location = advisory.path ? ` ${advisory.path}:` : '';
+    console.log(`ADVISORY ${advisory.reasonCode}${location} ${advisory.message}`);
+  }
+  const dropped = result.evidence?.advisoriesDropped || 0;
+  const advisorySuffix = advisories.length > 0 || dropped > 0
+    ? `, ${advisories.length} advisory(ies)${dropped > 0 ? `, ${dropped} dropped over cap` : ''}`
+    : '';
+  console.log(`\nBookkeeping validator: ${result.status} (${result.findings.length} finding(s)${advisorySuffix}).`);
 }
 
 function validateBookkeepingTaskDirectory(taskDir, options) {
-  const { add, archived, completionReady = false } = options;
+  const { add, archived, completionReady = false, addAdvisory = null, deltaPaths = null } = options;
+  // Delta scoping: a defect anchored to a file inside the bundle delta blocks;
+  // one anchored to an untouched file demotes to an advisory. Without a delta
+  // set (pre-archive) or an advisory sink (historical replay), everything
+  // blocks as before.
+  const addScoped = (reasonCode, path, message, anchorPath = path) => {
+    if (!deltaPaths || !addAdvisory || deltaPaths.has(anchorPath)) {
+      add(reasonCode, path, message);
+      return;
+    }
+    addAdvisory(reasonCode, path, message);
+  };
   const expected = archived
     ? /^\.trellis\/tasks\/archive\/\d{4}-\d{2}\/\d{2}-\d{2}-[A-Za-z0-9][A-Za-z0-9._-]*$/
     : /^\.trellis\/tasks\/\d{2}-\d{2}-[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -677,10 +715,10 @@ function validateBookkeepingTaskDirectory(taskDir, options) {
   const taskLoaded = loadTrellisTaskMetadataFile(taskFile);
   const prdLoaded = loadTrellisTaskPrdFile(prdFile);
   if (taskLoaded.status !== 'loaded') {
-    add('task_artifact_invalid', taskFile, taskLoaded.message);
+    addScoped('task_artifact_invalid', taskFile, taskLoaded.message);
   }
   if (prdLoaded.status !== 'loaded') {
-    add('task_prd_invalid', prdFile, prdLoaded.message);
+    addScoped('task_prd_invalid', prdFile, prdLoaded.message);
   }
   if (taskLoaded.status !== 'loaded') return null;
 
@@ -688,11 +726,11 @@ function validateBookkeepingTaskDirectory(taskDir, options) {
   try {
     record = JSON.parse(taskLoaded.text);
   } catch (error) {
-    add('task_json_invalid', taskFile, `task metadata is not valid JSON: ${thrownValueMessage(error)}`);
+    addScoped('task_json_invalid', taskFile, `task metadata is not valid JSON: ${thrownValueMessage(error)}`);
     return null;
   }
   for (const issue of validateTrellisBookkeepingMetadata(record, taskDir, archived)) {
-    add('task_metadata_invalid', taskFile, `field ${issue}`);
+    addScoped('task_metadata_invalid', taskFile, `field ${issue}`);
   }
   if (completionReady && !['in_progress', 'review'].includes(record.status)) {
     add('task_lifecycle_not_completion_ready', taskFile, 'status must be in_progress or review before archive');
@@ -701,20 +739,20 @@ function validateBookkeepingTaskDirectory(taskDir, options) {
     add('task_branch_invalid', taskFile, 'completion-ready task must have a non-empty feature branch');
   }
   if (archived && record.status !== 'completed') {
-    add('task_lifecycle_incomplete', taskFile, 'archived task status must be completed');
+    addScoped('task_lifecycle_incomplete', taskFile, 'archived task status must be completed');
   }
   if (prdLoaded.status === 'loaded') {
     if (prdLoaded.text.trim().length === 0) {
-      add('task_prd_empty', prdFile, 'task PRD must contain substantive content');
+      addScoped('task_prd_empty', prdFile, 'task PRD must contain substantive content');
     }
-    validateBookkeepingTextWhitespace(prdFile, prdLoaded.text, add);
+    validateBookkeepingTextWhitespace(prdFile, prdLoaded.text, addScoped);
     if (completionReady && prdLoaded.text.trim().length > 0) {
       validateBookkeepingAcceptanceReadiness(prdFile, prdLoaded.text, add);
     }
   }
-  validateBookkeepingTextWhitespace(taskFile, taskLoaded.text, add);
-  validateBookkeepingTaskContexts(taskDir, record, archived, add);
-  validateBookkeepingTopology(taskFile, taskDir, record, add);
+  validateBookkeepingTextWhitespace(taskFile, taskLoaded.text, addScoped);
+  validateBookkeepingTaskContexts(taskDir, record, archived, addScoped);
+  validateBookkeepingTopology(taskFile, taskDir, record, addScoped);
   return record;
 }
 
@@ -767,13 +805,15 @@ function validateBookkeepingTopology(taskFile, taskDir, record, add) {
     }
     const loaded = loadTrellisTaskMetadataFile(located.paths[0]);
     if (loaded.status !== 'loaded') {
-      add('task_topology_unverifiable', located.paths[0], loaded.message);
+      // Reported at the neighbor's path, but scope-anchored to this task's own
+      // task.json — the link under validation lives there.
+      add('task_topology_unverifiable', located.paths[0], loaded.message, taskFile);
       return null;
     }
     try {
       return JSON.parse(loaded.text);
     } catch (error) {
-      add('task_topology_unverifiable', located.paths[0], `linked task JSON is invalid: ${thrownValueMessage(error)}`);
+      add('task_topology_unverifiable', located.paths[0], `linked task JSON is invalid: ${thrownValueMessage(error)}`, taskFile);
       return null;
     }
   };
@@ -987,7 +1027,7 @@ function validateBookkeepingAcceptanceReadiness(prdFile, text, add) {
   }
 }
 
-function validateBookkeepingFinalBundle(options, evidence, add, runtime = {}) {
+function validateBookkeepingFinalBundle(options, evidence, add, runtime = {}, addAdvisory = null) {
   const baseOid = resolveBookkeepingCommit(options.base, 'base', add);
   const headOid = resolveBookkeepingCommit(options.head, 'head', add);
   evidence.baseOid = baseOid;
@@ -1033,6 +1073,7 @@ function validateBookkeepingFinalBundle(options, evidence, add, runtime = {}) {
     return;
   }
 
+  const deltaPaths = new Set(paths);
   const unsupported = paths.filter(
     (path) => !path.startsWith('.trellis/tasks/') && !path.startsWith('.trellis/workspace/'),
   );
@@ -1053,11 +1094,11 @@ function validateBookkeepingFinalBundle(options, evidence, add, runtime = {}) {
   const journalSummary = validateBookkeepingJournalBundle(entries, baseOid, headOid, add);
   evidence.journalSessions = bookkeepingJournalSessionEvidence(journalSummary);
   if (options.mode === 'completion') {
-    validateCompletionBundle(entries, evidence, baseOid, add);
+    validateCompletionBundle(entries, evidence, baseOid, add, { addAdvisory, deltaPaths });
   } else {
     const taskEntries = bookkeepingTaskEntries(entries);
     if (taskEntries.length > 0) {
-      validatePlanningBundle(entries, evidence, baseOid, add);
+      validatePlanningBundle(entries, evidence, baseOid, add, { addAdvisory, deltaPaths });
     } else {
       validateJournalOnlyPlanningRecovery(entries, journalSummary, evidence, baseOid, add);
     }
@@ -1434,7 +1475,7 @@ function validateBookkeepingDiffWhitespace(baseOid, headOid, add) {
   }
 }
 
-function validateCompletionBundle(entries, evidence, baseOid, add) {
+function validateCompletionBundle(entries, evidence, baseOid, add, options = {}) {
   const taskEntries = entries.filter((entry) =>
     entry.path.startsWith('.trellis/tasks/') || entry.oldPath.startsWith('.trellis/tasks/'));
   const mappings = [];
@@ -1485,6 +1526,8 @@ function validateCompletionBundle(entries, evidence, baseOid, add) {
     const archived = validateBookkeepingTaskDirectory(mapping.archiveDir, {
       add,
       archived: true,
+      addAdvisory: options.addAdvisory ?? null,
+      deltaPaths: options.deltaPaths ?? null,
     });
     if (!source || !archived) continue;
     for (const issue of validateTrellisBookkeepingMetadata(source, mapping.sourceDir, false)) {
@@ -1556,7 +1599,12 @@ function validatePlanningBundle(entries, evidence, baseOid, add, options = {}) {
   for (const taskDir of evidence.taskDirectories) {
     const current = options.lifecycleOnly
       ? loadRecoveredPlanningTaskRecord(taskDir, add, options.currentRef)
-      : validateBookkeepingTaskDirectory(taskDir, { add, archived: false });
+      : validateBookkeepingTaskDirectory(taskDir, {
+          add,
+          archived: false,
+          addAdvisory: options.addAdvisory ?? null,
+          deltaPaths: options.deltaPaths ?? null,
+        });
     if (!current) continue;
     changedRecords.push(current);
     if (current.status !== 'planning' || current.completedAt !== null || current.branch !== null) {
@@ -1840,6 +1888,7 @@ function validateJournalOnlyPlanningRecovery(entries, journalSummary, evidence, 
   }
 
   const recoveredTaskDirs = new Set();
+  let allowedPathChanges = 0;
   for (const commit of uniqueCommits) {
     const published = runGit(['merge-base', '--is-ancestor', commit.oid, baseOid]);
     if (published.status !== 0) {
@@ -1887,51 +1936,91 @@ function validateJournalOnlyPlanningRecovery(entries, journalSummary, evidence, 
     }
     const regularPaths = bookkeepingRegularPathsAtCommit(commit.oid, commitPaths);
 
+    // Cited-commit paths partition five ways: the task archive, malformed
+    // task-namespace paths, and workspace paths block; active-task paths keep
+    // the current per-path and lifecycle rules; every other repository path is
+    // allowed as ordinary maintenance work, including deletes and renames.
+    const taskRelatedEntries = [];
     for (const entry of commitEntries) {
+      const entryPaths = [entry.oldPath, entry.path].filter(Boolean);
+      const taskRelated = entryPaths.some((path) => path.startsWith('.trellis/tasks/'));
+      if (taskRelated) taskRelatedEntries.push(entry);
       const invalidOperation =
         entry.status.startsWith('D') || entry.status.startsWith('R') || entry.status.startsWith('C');
-      if (invalidOperation) {
+      if (taskRelated && invalidOperation) {
         add(
           'planning_recovery_commit_scope_invalid',
           entry.oldPath || entry.path,
           `commit ${commit.hash} deletes, renames, or copies a task artifact`,
         );
       }
-      for (const path of [entry.oldPath, entry.path].filter(Boolean)) {
-        const match = /^(\.trellis\/tasks\/\d{2}-\d{2}-[A-Za-z0-9][A-Za-z0-9._-]*)\/(.+)$/.exec(path);
-        if (!match || /[\0\r\n]/.test(path)) {
+      for (const path of entryPaths) {
+        if (/[\0\r\n]/.test(path)) {
           add(
             'planning_recovery_commit_scope_invalid',
             path,
-            `commit ${commit.hash} changes a path outside an active task directory`,
+            `commit ${commit.hash} changes a path with unsupported control characters`,
           );
           continue;
         }
-        if (!invalidOperation && path === entry.path && !regularPaths.has(path)) {
+        if (path.startsWith('.trellis/tasks/archive/')) {
           add(
             'planning_recovery_commit_scope_invalid',
             path,
-            `commit ${commit.hash} does not leave a regular task artifact at this path`,
+            `commit ${commit.hash} mutates the task archive`,
           );
+          continue;
         }
+        if (path.startsWith('.trellis/tasks/')) {
+          const match = /^(\.trellis\/tasks\/\d{2}-\d{2}-[A-Za-z0-9][A-Za-z0-9._-]*)\/(.+)$/.exec(path);
+          if (!match) {
+            add(
+              'planning_recovery_commit_scope_invalid',
+              path,
+              `commit ${commit.hash} changes a malformed task-namespace path`,
+            );
+            continue;
+          }
+          if (!invalidOperation && path === entry.path && !regularPaths.has(path)) {
+            add(
+              'planning_recovery_commit_scope_invalid',
+              path,
+              `commit ${commit.hash} does not leave a regular task artifact at this path`,
+            );
+            continue;
+          }
+          allowedPathChanges += 1;
+          continue;
+        }
+        if (path.startsWith('.trellis/workspace/')) {
+          add(
+            'planning_recovery_commit_scope_invalid',
+            path,
+            `commit ${commit.hash} changes a workspace path, which journal-only recovery does not support`,
+          );
+          continue;
+        }
+        allowedPathChanges += 1;
       }
     }
 
-    const commitEvidence = { taskDirectories: [] };
-    for (const taskDir of validatePlanningBundle(
-      commitEntries,
-      commitEvidence,
-      parentFields[1],
-      add,
-      { lifecycleOnly: true, currentRef: commit.oid },
-    )) {
-      recoveredTaskDirs.add(taskDir);
+    if (taskRelatedEntries.length > 0) {
+      const commitEvidence = { taskDirectories: [] };
+      for (const taskDir of validatePlanningBundle(
+        taskRelatedEntries,
+        commitEvidence,
+        parentFields[1],
+        add,
+        { lifecycleOnly: true, currentRef: commit.oid },
+      )) {
+        recoveredTaskDirs.add(taskDir);
+      }
     }
   }
 
   evidence.taskDirectories = [...recoveredTaskDirs].sort();
-  if (evidence.taskDirectories.length === 0) {
-    add('planning_recovery_task_change_missing', '', 'journal-only planning recovery proves no active task change');
+  if (allowedPathChanges === 0) {
+    add('planning_recovery_task_change_missing', '', 'journal-only planning recovery cites no active-task or repository change');
   }
 }
 

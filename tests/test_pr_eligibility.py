@@ -615,6 +615,37 @@ class PrEligibilityTests(unittest.TestCase):
         with self.assertRaisesRegex(eligibility.EligibilityInputError, "regular file"):
             eligibility.load_finish_work_receipt(link)
 
+    def test_finish_work_receipt_tolerates_advisory_fields(self) -> None:
+        planning = finish_work_receipt()
+        planning["mode"] = "planning"
+        planning["reasonCodes"] = ["planning_bundle_valid"]
+        planning["evidence"].pop("completionSubtype")
+        planning["evidence"]["advisoriesDropped"] = 3
+        planning["advisories"] = [
+            {
+                "reasonCode": "task_metadata_invalid",
+                "path": ".trellis/tasks/07-25-fixture/task.json",
+                "message": "field description must be a non-empty string",
+            }
+        ]
+        validated = eligibility.validate_finish_work_receipt(planning)
+        self.assertEqual(validated["mode"], "planning")
+        self.assertEqual(validated["reasonCodes"], ["planning_bundle_valid"])
+
+    def test_finish_work_receipt_accepts_maintenance_recovery_shape(self) -> None:
+        planning = finish_work_receipt()
+        planning["mode"] = "planning"
+        planning["reasonCodes"] = ["planning_bundle_valid"]
+        planning["evidence"].pop("completionSubtype")
+        planning["evidence"]["planningSubtype"] = "journal-only-recovery"
+        planning["evidence"]["taskDirectories"] = []
+        planning["advisories"] = []
+        validated = eligibility.validate_finish_work_receipt(planning)
+        self.assertEqual(
+            validated["evidence"]["planningSubtype"], "journal-only-recovery"
+        )
+        self.assertEqual(validated["evidence"]["taskDirectories"], [])
+
     def test_parse_helpers_fail_closed_and_classify_status_contexts(self) -> None:
         with self.assertRaisesRegex(eligibility.EligibilityInputError, "unavailable"):
             eligibility.parse_json_object(eligibility.CommandResult(1, ""), "fixture")

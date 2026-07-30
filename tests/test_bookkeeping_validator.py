@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import importlib.util
+import sys
+
 try:
     import install_test_support as _support
 except ModuleNotFoundError as exc:
@@ -14,6 +17,30 @@ subprocess = _support.subprocess
 Path = _support.Path
 PACK_ROOT = _support.PACK_ROOT
 InstallTestCase = _support.InstallTestCase
+
+_ELIGIBILITY_SCRIPT = PACK_ROOT / "scripts/sd-ai-command-pack-pr-eligibility.py"
+_eligibility_module = None
+
+
+def eligibility_module():
+    """Load the eligibility script once so receipt-consumption tests can call it."""
+    global _eligibility_module
+    if _eligibility_module is None:
+        spec = importlib.util.spec_from_file_location(
+            "sd_ai_command_pack_pr_eligibility_for_bookkeeping_tests",
+            _ELIGIBILITY_SCRIPT,
+        )
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"cannot load {_ELIGIBILITY_SCRIPT}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        sys.path.insert(0, str(_ELIGIBILITY_SCRIPT.parent))
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.path.pop(0)
+        _eligibility_module = module
+    return _eligibility_module
 
 
 class BookkeepingValidatorTests(InstallTestCase):
@@ -1520,44 +1547,6 @@ class BookkeepingValidatorTests(InstallTestCase):
         self.assertNotIn("bundle base", current_finding["message"])
         self.assertNotIn("bundle base", parent_finding["message"])
 
-    def test_journal_only_recovery_rejects_non_task_commit_scopes(self) -> None:
-        fixtures = (
-            ("src/app.py", "production code"),
-            (".trellis/spec/backend/example.md", "specification"),
-            (".sd-ai-command-pack/review.json", "configuration"),
-            (".trellis/workspace/other/note.md", "workspace history"),
-        )
-        for path, content in fixtures:
-            with self.subTest(path=path):
-                root = self.make_validator_repo()
-                artifact = root / path
-                artifact.parent.mkdir(parents=True, exist_ok=True)
-                artifact.write_text(content + "\n", encoding="utf-8")
-                self.run_git(root, "add", path)
-                self.run_git(root, "commit", "-m", "record non-task fixture")
-                work_commit = self.git_output(root, "rev-parse", "HEAD")
-                base = work_commit
-                self.write_session(root, work_commit)
-                self.run_git(root, "add", ".trellis/workspace/dev")
-                self.run_git(root, "commit", "-m", "record recovery journal")
-                head = self.git_output(root, "rev-parse", "HEAD")
-
-                result = self.run_validator(
-                    root,
-                    "final-bundle",
-                    "--mode",
-                    "planning",
-                    "--base",
-                    base,
-                    "--head",
-                    head,
-                )
-
-                self.assertEqual(result.returncode, 1, result.stdout)
-                reason_codes = json.loads(result.stdout)["reasonCodes"]
-                self.assertIn("planning_recovery_commit_scope_invalid", reason_codes)
-                self.assertIn("planning_recovery_task_change_missing", reason_codes)
-
     def test_journal_only_recovery_rejects_merge_commit(self) -> None:
         root = self.make_validator_repo()
         self.run_git(root, "switch", "-c", "fixture-side")
@@ -2254,3 +2243,493 @@ class BookkeepingValidatorTests(InstallTestCase):
         self.assertNotIn(
             "planning_active_task_outside_closure", payload["reasonCodes"]
         )
+
+    def commit_planning_journal(self, root: Path, work_commit: str) -> str:
+        self.write_session(root, work_commit)
+        self.run_git(root, "add", ".trellis/workspace/dev")
+        self.run_git(root, "commit", "-m", "record planning journal")
+        return self.git_output(root, "rev-parse", "HEAD")
+
+    def run_planning_bundle(
+        self, root: Path, base: str, head: str
+    ) -> subprocess.CompletedProcess[str]:
+        return self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "planning",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+    def test_planning_bundle_scopes_untouched_sibling_defects_to_advisories(
+        self,
+    ) -> None:
+        root = self.make_validator_repo()
+        name = "advisory-fixture"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name,
+                status="planning",
+                branch=None,
+                completed_at=None,
+                description=" ",
+            ),
+        )
+        (task / "check.jsonl").write_text(
+            '{"_example":{"file":"src/example.py"}}\n'
+            '{"file":".trellis/spec/backend/index.md","reason":"grounded"}\n',
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "seed defective sibling artifacts")
+        base = self.git_output(root, "rev-parse", "HEAD")
+
+        (task / "prd.md").write_text(
+            "# Fixture\n\nDelta-scoped planning refinement.\n", encoding="utf-8"
+        )
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "refine prd only")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        head = self.commit_planning_journal(root, work_commit)
+
+        result = self.run_planning_bundle(root, base, head)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "valid")
+        self.assertEqual(payload["reasonCodes"], ["planning_bundle_valid"])
+        self.assertEqual(payload["findings"], [])
+        advisory_codes = {item["reasonCode"] for item in payload["advisories"]}
+        self.assertIn("task_metadata_invalid", advisory_codes)
+        self.assertIn("task_context_seed", advisory_codes)
+        receipt_path = root / "receipt.json"
+        receipt_path.write_text(result.stdout, encoding="utf-8")
+        loaded = eligibility_module().load_finish_work_receipt(receipt_path)
+        self.assertEqual(loaded["mode"], "planning")
+
+    def test_planning_bundle_group_one_producers_delta_scope(self) -> None:
+        grounded_row = '{"file":".trellis/spec/backend/index.md","reason":"grounded"}\n'
+        cases = (
+            ("task_prd_empty", "prd.md", "", "check.jsonl", grounded_row),
+            (
+                "task_context_malformed",
+                "implement.jsonl",
+                '{"file":\n',
+                "prd.md",
+                "# Fixture\n\nDelta refinement.\n",
+            ),
+            (
+                "bookkeeping_whitespace_invalid",
+                "prd.md",
+                "# Fixture\n\ntrailing \n",
+                "check.jsonl",
+                grounded_row,
+            ),
+        )
+        for reason_code, seed_name, seed_content, delta_name, delta_content in cases:
+            with self.subTest(reason_code=reason_code):
+                root = self.make_validator_repo()
+                name = f"scope-{reason_code.replace('_', '-')}"
+                task_dir = f".trellis/tasks/07-25-{name}"
+                task = self.write_task(
+                    root,
+                    task_dir,
+                    self.task_record(
+                        name,
+                        status="planning",
+                        branch=None,
+                        completed_at=None,
+                    ),
+                )
+                (task / seed_name).write_text(seed_content, encoding="utf-8")
+                self.run_git(root, "add", ".trellis/tasks")
+                self.run_git(root, "commit", "-m", "seed sibling defect")
+                base = self.git_output(root, "rev-parse", "HEAD")
+
+                (task / delta_name).write_text(delta_content, encoding="utf-8")
+                self.run_git(root, "add", task_dir)
+                self.run_git(root, "commit", "-m", "touch unrelated artifact")
+                work_commit = self.git_output(root, "rev-parse", "HEAD")
+                head = self.commit_planning_journal(root, work_commit)
+
+                result = self.run_planning_bundle(root, base, head)
+
+                self.assertEqual(result.returncode, 0, result.stdout)
+                payload = json.loads(result.stdout)
+                self.assertEqual(payload["status"], "valid")
+                self.assertEqual(
+                    payload["reasonCodes"], ["planning_bundle_valid"]
+                )
+                advisory_codes = {
+                    item["reasonCode"] for item in payload["advisories"]
+                }
+                self.assertIn(reason_code, advisory_codes)
+
+    def test_planning_bundle_blocks_delta_contained_defects(self) -> None:
+        cases = (
+            (
+                "task_metadata_invalid",
+                "task.json",
+                None,
+            ),
+            (
+                "task_context_seed",
+                "check.jsonl",
+                '{"_example":{"file":"src/example.py"}}\n'
+                '{"file":".trellis/spec/backend/index.md","reason":"grounded"}\n',
+            ),
+        )
+        for reason_code, delta_name, delta_content in cases:
+            with self.subTest(reason_code=reason_code):
+                root = self.make_validator_repo()
+                name = f"block-{reason_code.replace('_', '-')}"
+                task_dir = f".trellis/tasks/07-25-{name}"
+                task = self.write_task(
+                    root,
+                    task_dir,
+                    self.task_record(
+                        name,
+                        status="planning",
+                        branch=None,
+                        completed_at=None,
+                    ),
+                )
+                self.run_git(root, "add", ".trellis/tasks")
+                self.run_git(root, "commit", "-m", "seed clean planning task")
+                base = self.git_output(root, "rev-parse", "HEAD")
+
+                if delta_name == "task.json":
+                    record = self.task_record(
+                        name,
+                        status="planning",
+                        branch=None,
+                        completed_at=None,
+                        description=" ",
+                    )
+                    (task / "task.json").write_text(
+                        json.dumps(record, indent=2) + "\n", encoding="utf-8"
+                    )
+                else:
+                    (task / delta_name).write_text(
+                        delta_content, encoding="utf-8"
+                    )
+                self.run_git(root, "add", task_dir)
+                self.run_git(root, "commit", "-m", "introduce delta defect")
+                work_commit = self.git_output(root, "rev-parse", "HEAD")
+                head = self.commit_planning_journal(root, work_commit)
+
+                result = self.run_planning_bundle(root, base, head)
+
+                self.assertEqual(result.returncode, 1, result.stdout)
+                payload = json.loads(result.stdout)
+                self.assertEqual(payload["status"], "invalid")
+                self.assertIn(reason_code, payload["reasonCodes"])
+
+    def test_planning_bundle_topology_findings_follow_anchor(self) -> None:
+        parent_name = "topology-parent"
+        child_name = "topology-child"
+        parent_dir = f".trellis/tasks/07-25-{parent_name}"
+        child_dir = f".trellis/tasks/07-25-{child_name}"
+
+        with self.subTest(scenario="anchor-in-delta-blocks"):
+            root = self.make_validator_repo()
+            self.write_task(
+                root,
+                parent_dir,
+                self.task_record(
+                    parent_name, status="planning", branch=None, completed_at=None
+                ),
+            )
+            self.write_task(
+                root,
+                child_dir,
+                self.task_record(
+                    child_name, status="planning", branch=None, completed_at=None
+                ),
+            )
+            self.run_git(root, "add", ".trellis/tasks")
+            self.run_git(root, "commit", "-m", "seed unlinked tasks")
+            base = self.git_output(root, "rev-parse", "HEAD")
+
+            child = self.task_record(
+                child_name, status="planning", branch=None, completed_at=None
+            )
+            child["parent"] = f"07-25-{parent_name}"
+            (root / child_dir / "task.json").write_text(
+                json.dumps(child, indent=2) + "\n", encoding="utf-8"
+            )
+            self.run_git(root, "add", child_dir)
+            self.run_git(root, "commit", "-m", "link child without reciprocity")
+            work_commit = self.git_output(root, "rev-parse", "HEAD")
+            head = self.commit_planning_journal(root, work_commit)
+
+            result = self.run_planning_bundle(root, base, head)
+
+            self.assertEqual(result.returncode, 1, result.stdout)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "invalid")
+            self.assertIn("task_topology_not_reciprocal", payload["reasonCodes"])
+            self.assertEqual(payload.get("advisories"), [])
+
+        with self.subTest(scenario="anchor-outside-delta-advises"):
+            root = self.make_validator_repo()
+            self.write_task(
+                root,
+                parent_dir,
+                self.task_record(
+                    parent_name, status="planning", branch=None, completed_at=None
+                ),
+            )
+            broken_child = self.task_record(
+                child_name, status="planning", branch=None, completed_at=None
+            )
+            broken_child["parent"] = f"07-25-{parent_name}"
+            self.write_task(root, child_dir, broken_child)
+            self.run_git(root, "add", ".trellis/tasks")
+            self.run_git(root, "commit", "-m", "seed broken link")
+            base = self.git_output(root, "rev-parse", "HEAD")
+
+            (root / child_dir / "prd.md").write_text(
+                "# Fixture\n\nDelta-scoped prd refinement.\n", encoding="utf-8"
+            )
+            self.run_git(root, "add", child_dir)
+            self.run_git(root, "commit", "-m", "refine child prd only")
+            work_commit = self.git_output(root, "rev-parse", "HEAD")
+            head = self.commit_planning_journal(root, work_commit)
+
+            result = self.run_planning_bundle(root, base, head)
+
+            self.assertEqual(result.returncode, 0, result.stdout)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "valid")
+            self.assertEqual(payload["reasonCodes"], ["planning_bundle_valid"])
+            advisory_codes = {
+                item["reasonCode"] for item in payload["advisories"]
+            }
+            self.assertIn("task_topology_not_reciprocal", advisory_codes)
+
+        with self.subTest(scenario="neighbor-path-anchor-in-delta-blocks"):
+            root = self.make_validator_repo()
+            neighbor_name = "topology-neighbor"
+            neighbor_dir = f".trellis/tasks/07-25-{neighbor_name}"
+            neighbor = self.write_task(
+                root,
+                neighbor_dir,
+                self.task_record(
+                    neighbor_name, status="planning", branch=None, completed_at=None
+                ),
+            )
+            (neighbor / "task.json").write_text("not json\n", encoding="utf-8")
+            seeded_child = self.task_record(
+                child_name, status="planning", branch=None, completed_at=None
+            )
+            seeded_child["parent"] = f"07-25-{neighbor_name}"
+            self.write_task(root, child_dir, seeded_child)
+            self.run_git(root, "add", ".trellis/tasks")
+            self.run_git(root, "commit", "-m", "seed unparseable neighbor")
+            base = self.git_output(root, "rev-parse", "HEAD")
+
+            tweaked = self.task_record(
+                child_name,
+                status="planning",
+                branch=None,
+                completed_at=None,
+                description="A refined bounded fixture task.",
+            )
+            tweaked["parent"] = f"07-25-{neighbor_name}"
+            (root / child_dir / "task.json").write_text(
+                json.dumps(tweaked, indent=2) + "\n", encoding="utf-8"
+            )
+            self.run_git(root, "add", child_dir)
+            self.run_git(root, "commit", "-m", "tweak child metadata")
+            work_commit = self.git_output(root, "rev-parse", "HEAD")
+            head = self.commit_planning_journal(root, work_commit)
+
+            result = self.run_planning_bundle(root, base, head)
+
+            self.assertEqual(result.returncode, 1, result.stdout)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "invalid")
+            self.assertIn("task_topology_unverifiable", payload["reasonCodes"])
+            unverifiable = next(
+                item
+                for item in payload["findings"]
+                if item["reasonCode"] == "task_topology_unverifiable"
+            )
+            self.assertEqual(unverifiable["path"], f"{neighbor_dir}/task.json")
+            self.assertEqual(payload.get("advisories"), [])
+
+    def test_journal_only_recovery_accepts_repo_maintenance_commits(self) -> None:
+        root = self.make_validator_repo()
+        scripts = root / "scripts"
+        (scripts / "tool.sh").write_text("echo tool\n", encoding="utf-8")
+        (scripts / "legacy.sh").write_text("echo legacy\n", encoding="utf-8")
+        (scripts / "dead.sh").write_text("echo dead\n", encoding="utf-8")
+        self.run_git(root, "add", "scripts")
+        self.run_git(root, "commit", "-m", "seed maintenance fixtures")
+
+        (scripts / "tool.sh").write_text("echo tool v2\n", encoding="utf-8")
+        self.run_git(root, "mv", "scripts/legacy.sh", "scripts/renamed.sh")
+        (scripts / "dead.sh").unlink()
+        self.run_git(root, "add", "-A", "scripts")
+        self.run_git(root, "commit", "-m", "maintain repo scripts")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        base = work_commit
+        head = self.commit_planning_journal(root, work_commit)
+
+        result = self.run_planning_bundle(root, base, head)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "valid")
+        self.assertEqual(payload["reasonCodes"], ["planning_bundle_valid"])
+        self.assertEqual(
+            payload["evidence"]["planningSubtype"], "journal-only-recovery"
+        )
+        self.assertEqual(payload["evidence"]["taskDirectories"], [])
+        self.assertEqual(payload.get("advisories"), [])
+        receipt_path = root / "receipt.json"
+        receipt_path.write_text(result.stdout, encoding="utf-8")
+        loaded = eligibility_module().load_finish_work_receipt(receipt_path)
+        self.assertEqual(loaded["mode"], "planning")
+
+    def test_journal_only_recovery_still_rejects_workspace_cited_commit(
+        self,
+    ) -> None:
+        root = self.make_validator_repo()
+        note = root / ".trellis/workspace/other/note.md"
+        note.parent.mkdir(parents=True)
+        note.write_text("workspace history\n", encoding="utf-8")
+        self.run_git(root, "add", ".trellis/workspace/other")
+        self.run_git(root, "commit", "-m", "record workspace fixture")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        base = work_commit
+        head = self.commit_planning_journal(root, work_commit)
+
+        result = self.run_planning_bundle(root, base, head)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "invalid")
+        self.assertIn(
+            "planning_recovery_commit_scope_invalid", payload["reasonCodes"]
+        )
+
+    def test_journal_only_recovery_rejects_archive_and_malformed_namespace_paths(
+        self,
+    ) -> None:
+        fixtures = (
+            ".trellis/tasks/archive/2026-07/07-25-old-fixture/notes.md",
+            ".trellis/tasks/not-a-task/file.md",
+        )
+        for path in fixtures:
+            with self.subTest(path=path):
+                root = self.make_validator_repo()
+                artifact = root / path
+                artifact.parent.mkdir(parents=True)
+                artifact.write_text("fixture content\n", encoding="utf-8")
+                self.run_git(root, "add", path)
+                self.run_git(root, "commit", "-m", "record namespace fixture")
+                work_commit = self.git_output(root, "rev-parse", "HEAD")
+                base = work_commit
+                head = self.commit_planning_journal(root, work_commit)
+
+                result = self.run_planning_bundle(root, base, head)
+
+                self.assertEqual(result.returncode, 1, result.stdout)
+                reason_codes = json.loads(result.stdout)["reasonCodes"]
+                self.assertIn(
+                    "planning_recovery_commit_scope_invalid", reason_codes
+                )
+                self.assertIn(
+                    "planning_recovery_task_change_missing", reason_codes
+                )
+
+    def test_planning_bundle_rejects_audit_path_in_delta(self) -> None:
+        root = self.make_validator_repo()
+        name = "audit-scope-fixture"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name, status="planning", branch=None, completed_at=None
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "plan fixture work")
+        base_parent = self.git_output(root, "rev-parse", "HEAD~1")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        self.write_session(root, work_commit)
+        ledger = root / ".trellis/audit/ledger.md"
+        ledger.parent.mkdir(parents=True)
+        ledger.write_text("# Audit\n", encoding="utf-8")
+        self.run_git(root, "add", ".trellis/workspace/dev", ".trellis/audit")
+        self.run_git(root, "commit", "-m", "record journal with audit ledger")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_planning_bundle(root, base_parent, head)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "invalid")
+        self.assertIn("bundle_scope_invalid", payload["reasonCodes"])
+
+    def test_planning_bundle_caps_advisories_and_reports_dropped(self) -> None:
+        root = self.make_validator_repo()
+        tasks = []
+        for index in range(14):
+            name = f"cap-fixture-{index:02d}"
+            task_dir = f".trellis/tasks/07-25-{name}"
+            task = self.write_task(
+                root,
+                task_dir,
+                self.task_record(
+                    name,
+                    status="planning",
+                    branch=None,
+                    completed_at=None,
+                    description=" ",
+                ),
+            )
+            (task / "check.jsonl").write_text(
+                '{"_example":{"file":"src/example.py"}}\n'
+                '{"file":".trellis/spec/backend/index.md","reason":"grounded"}\n',
+                encoding="utf-8",
+            )
+            tasks.append(task)
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "seed advisory overflow fixtures")
+        base = self.git_output(root, "rev-parse", "HEAD")
+
+        for task in tasks:
+            (task / "prd.md").write_text(
+                "# Fixture\n\nDelta-scoped prd refresh.\n", encoding="utf-8"
+            )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "refresh every prd")
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        head = self.commit_planning_journal(root, work_commit)
+
+        result = self.run_planning_bundle(root, base, head)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "valid")
+        self.assertEqual(payload["reasonCodes"], ["planning_bundle_valid"])
+        self.assertEqual(len(payload["advisories"]), 25)
+        self.assertEqual(payload["evidence"]["advisoriesDropped"], 3)
+        self.assertLess(len(result.stdout.encode("utf-8")), 64 * 1024)
+        receipt_path = root / "receipt.json"
+        receipt_path.write_text(result.stdout, encoding="utf-8")
+        module = eligibility_module()
+        validated = module.validate_finish_work_receipt(
+            module.load_request(receipt_path)
+        )
+        self.assertEqual(validated["mode"], "planning")
