@@ -259,7 +259,7 @@ review:
 - This task is **not** a licence to weaken finalization. Every gate that fired on
   a path the branch actually changed fired correctly.
 - Recorded as residue in
-  `.trellis/tasks/07-28-analyze-recurring-trellis-workflow-instability/prd.md`
+  `.trellis/tasks/archive/2026-07/07-28-analyze-recurring-trellis-workflow-instability/prd.md`
   (Post-Completion Residue — 2026-07-29); that task's own criteria are met and it
   is not reopened by this work.
 - Complex enough to need `design.md` and `implement.md` before `task.py start` —
