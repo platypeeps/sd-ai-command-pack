@@ -27,8 +27,9 @@ if str(SCRIPT_DIR) not in sys.path:
 
 import sd_ai_command_pack_fleet_lib as fleet_lib  # noqa: E402
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 REPORT_SCHEMA_VERSION = 1
+MAX_EXHAUSTION_RECOVERIES = 2
 MAX_STATE_BYTES = 1024 * 1024
 LOCK_STALE_SECONDS = 300
 SAFE_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
@@ -74,6 +75,32 @@ RESULTS = frozenset(
     }
 )
 REASON_REQUIRED = RESULTS - {"passed", "at-target"}
+RECOVERY_KINDS = frozenset({"pack-blocker", "retry-exhausted"})
+PACK_BLOCKER_RECOVERY_FIELDS = {
+    "consumer",
+    "correctiveRelease",
+    "fromActionId",
+    "fromAttempt",
+    "fromBlocker",
+    "fromHead",
+    "fromPrNumber",
+    "fromStage",
+    "kind",
+    "recordedAt",
+    "toAttempt",
+    "toStage",
+}
+EXHAUSTION_RECOVERY_FIELDS = {
+    "consumer",
+    "fromActionId",
+    "fromAttempt",
+    "fromBlocker",
+    "fromStage",
+    "kind",
+    "recordedAt",
+    "toAttempt",
+    "toStage",
+}
 TERMINAL_RESULTS = frozenset(
     {
         "at-target",
@@ -339,6 +366,22 @@ def _strict_fields(value: Mapping[str, Any], fields: set[str], label: str) -> No
 
 
 def _normalize_state(state: dict[str, Any]) -> dict[str, Any]:
+    if state.get("schemaVersion") == 1:
+        # One-way migration to schema 2: recovery rows became a tagged union on
+        # "kind", and every row written at schema 1 was a pack-blocker recovery.
+        # The copies below keep the caller's mapping and its nested rows intact.
+        state = dict(state)
+        if "recoveries" not in state:
+            state["recoveries"] = []
+        elif isinstance(state["recoveries"], list):
+            state["recoveries"] = [
+                {**recovery, "kind": "pack-blocker"}
+                if isinstance(recovery, dict) and "kind" not in recovery
+                else recovery
+                for recovery in state["recoveries"]
+            ]
+        state["schemaVersion"] = 2
+        return state
     if state.get("schemaVersion") == SCHEMA_VERSION and "recoveries" not in state:
         state = dict(state)
         state["recoveries"] = []
@@ -559,36 +602,35 @@ def validate_lane(value: object, label: str) -> None:
 def validate_recovery(value: object, label: str) -> None:
     if not isinstance(value, dict):
         raise FleetControllerError(f"{label} must be an object")
+    kind = value.get("kind")
+    if kind not in RECOVERY_KINDS:
+        raise FleetControllerError(f"{label} kind is invalid")
     _strict_fields(
         value,
-        {
-            "consumer",
-            "correctiveRelease",
-            "fromActionId",
-            "fromAttempt",
-            "fromBlocker",
-            "fromHead",
-            "fromPrNumber",
-            "fromStage",
-            "recordedAt",
-            "toAttempt",
-            "toStage",
-        },
+        PACK_BLOCKER_RECOVERY_FIELDS
+        if kind == "pack-blocker"
+        else EXHAUSTION_RECOVERY_FIELDS,
         label,
     )
     safe_token(value["consumer"], f"{label} consumer")
-    safe_token(value["correctiveRelease"], f"{label} correctiveRelease")
     safe_token(value["fromActionId"], f"{label} fromActionId")
     _integer(value["fromAttempt"], f"{label} fromAttempt", 1)
     safe_token(value["fromBlocker"], f"{label} fromBlocker")
-    full_sha(value["fromHead"], f"{label} fromHead")
-    _integer(value["fromPrNumber"], f"{label} fromPrNumber", 1)
-    if value["fromStage"] != "merge":
-        raise FleetControllerError(f"{label} fromStage must be merge")
     utc_timestamp(value["recordedAt"], f"{label} recordedAt")
     _integer(value["toAttempt"], f"{label} toAttempt", 1)
-    if value["toStage"] != "pr-publication":
-        raise FleetControllerError(f"{label} toStage must be pr-publication")
+    if kind == "pack-blocker":
+        safe_token(value["correctiveRelease"], f"{label} correctiveRelease")
+        full_sha(value["fromHead"], f"{label} fromHead")
+        _integer(value["fromPrNumber"], f"{label} fromPrNumber", 1)
+        if value["fromStage"] != "merge":
+            raise FleetControllerError(f"{label} fromStage must be merge")
+        if value["toStage"] != "pr-publication":
+            raise FleetControllerError(f"{label} toStage must be pr-publication")
+        return
+    if value["fromStage"] not in STAGE_INDEX:
+        raise FleetControllerError(f"{label} fromStage is invalid")
+    if value["toStage"] != value["fromStage"]:
+        raise FleetControllerError(f"{label} toStage must match fromStage")
 
 
 def validate_state(state: Mapping[str, Any]) -> None:
@@ -1248,7 +1290,8 @@ def recover_pack_blocker(
         (
             item
             for item in state["recoveries"]
-            if item["consumer"] == consumer
+            if item["kind"] == "pack-blocker"
+            and item["consumer"] == consumer
             and item["fromActionId"] == blocker_receipt["actionId"]
         ),
         None,
@@ -1293,6 +1336,7 @@ def recover_pack_blocker(
         "fromHead": lane["head"],
         "fromPrNumber": lane["prNumber"],
         "fromStage": lane["stage"],
+        "kind": "pack-blocker",
         "recordedAt": utc_now(),
         "toAttempt": to_attempt,
         "toStage": "pr-publication",
@@ -1303,6 +1347,98 @@ def recover_pack_blocker(
     lane["packBlocker"] = False
     lane["result"] = None
     lane["stage"] = "pr-publication"
+    lane["status"] = "waiting"
+    state["updatedAt"] = utc_now()
+    _refresh_campaign_status(state)
+    validate_state(state)
+    return recovery, True
+
+
+def recover_retry_exhausted(
+    state: dict[str, Any],
+    *,
+    consumer: str,
+    exhausted_action_id: str,
+    release: str,
+) -> tuple[dict[str, Any], bool]:
+    consumer = safe_token(consumer, "consumer")
+    exhausted_action_id = safe_token(exhausted_action_id, "exhausted action ID")
+    # Deliberately compared against the campaign target rather than the current
+    # pack manifest: this transition has no corrective release, so a manifest
+    # comparison would make every campaign unrecoverable as soon as the
+    # installed pack moved past that campaign's release.
+    if release != state["release"]:
+        raise FleetControllerError(
+            "exhaustion recovery release does not match campaign release"
+        )
+    try:
+        lane = next(item for item in state["lanes"] if item["name"] == consumer)
+    except StopIteration:
+        raise FleetControllerError("consumer is outside the campaign") from None
+    existing = next(
+        (
+            item
+            for item in state["recoveries"]
+            if item["kind"] == "retry-exhausted"
+            and item["consumer"] == consumer
+            and item["fromActionId"] == exhausted_action_id
+        ),
+        None,
+    )
+    if existing is not None:
+        return existing, False
+    if lane["status"] != "terminal" or lane["result"] != "retry-exhausted":
+        raise FleetControllerError(
+            "exhaustion recovery requires a terminal retry-exhausted lane"
+        )
+    if not lane["receipts"]:
+        raise FleetControllerError("consumer has no exhaustion receipt to recover")
+    exhaustion_receipt = lane["receipts"][-1]
+    if exhaustion_receipt["actionId"] != exhausted_action_id:
+        raise FleetControllerError(
+            "exhausted action is not the lane's latest receipt"
+        )
+    if (
+        exhaustion_receipt["stage"] != lane["stage"]
+        or exhaustion_receipt["result"] != "retryable-failure"
+        or exhaustion_receipt["reasonCode"] != lane["blocker"]
+    ):
+        raise FleetControllerError(
+            "exhaustion recovery receipt does not match the lane"
+        )
+    if exhaustion_receipt["attempt"] != lane["attempt"]:
+        raise FleetControllerError(
+            "exhaustion recovery receipt attempt does not match the lane attempt"
+        )
+    stage = lane["stage"]
+    granted = sum(
+        1
+        for item in state["recoveries"]
+        if item["kind"] == "retry-exhausted"
+        and item["consumer"] == consumer
+        and item["fromStage"] == stage
+    )
+    if granted >= MAX_EXHAUSTION_RECOVERIES:
+        raise FleetControllerError(
+            "exhaustion recovery limit is reached for this consumer and stage"
+        )
+    to_attempt = _next_stage_attempt(lane, stage)
+    recovery = {
+        "consumer": consumer,
+        "fromActionId": exhausted_action_id,
+        "fromAttempt": exhaustion_receipt["attempt"],
+        "fromBlocker": lane["blocker"],
+        "fromStage": stage,
+        "kind": "retry-exhausted",
+        "recordedAt": utc_now(),
+        "toAttempt": to_attempt,
+        "toStage": stage,
+    }
+    state["recoveries"].append(recovery)
+    lane["attempt"] = to_attempt
+    lane["blocker"] = None
+    lane["packBlocker"] = False
+    lane["result"] = None
     lane["status"] = "waiting"
     state["updatedAt"] = utc_now()
     _refresh_campaign_status(state)
@@ -1650,6 +1786,8 @@ def build_parser() -> argparse.ArgumentParser:
     resume.add_argument("--retry-consumer")
     resume.add_argument("--recover-consumer")
     resume.add_argument("--corrective-release")
+    resume.add_argument("--recover-exhausted-consumer")
+    resume.add_argument("--exhausted-action")
     resume.add_argument("--resolve-action")
     resume.add_argument("--release")
     resume.add_argument("--consumer")
@@ -1721,11 +1859,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.command == "resume"
             and args.retry_consumer is None
             and args.recover_consumer is None
+            and args.recover_exhausted_consumer is None
             and args.resolve_action is None
         ):
             if args.corrective_release is not None:
                 raise FleetControllerError(
                     "corrective-release requires recover-consumer"
+                )
+            if args.exhausted_action is not None:
+                raise FleetControllerError(
+                    "exhausted-action requires recover-exhausted-consumer"
                 )
             _render(resume_report(store.load()), args.json)
             return 0
@@ -1782,6 +1925,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     for item in (
                         args.retry_consumer,
                         args.recover_consumer,
+                        args.recover_exhausted_consumer,
                         args.resolve_action,
                     )
                 )
@@ -1794,12 +1938,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                         raise FleetControllerError(
                             "corrective-release is valid only with recover-consumer"
                         )
+                    if args.exhausted_action is not None:
+                        raise FleetControllerError(
+                            "exhausted-action is valid only with recover-exhausted-consumer"
+                        )
                     retry_consumer(state, args.retry_consumer)
                     resume_receipt = None
                 elif args.recover_consumer is not None:
                     if args.corrective_release is None:
                         raise FleetControllerError(
                             "recover-consumer requires corrective-release"
+                        )
+                    if args.exhausted_action is not None:
+                        raise FleetControllerError(
+                            "exhausted-action is valid only with recover-exhausted-consumer"
                         )
                     recovery, changed = recover_pack_blocker(
                         state,
@@ -1808,10 +1960,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                         actual_release=_pack_release(args.repo / "manifest.json"),
                     )
                     resume_receipt = None
+                elif args.recover_exhausted_consumer is not None:
+                    if args.corrective_release is not None:
+                        raise FleetControllerError(
+                            "corrective-release is valid only with recover-consumer"
+                        )
+                    if args.exhausted_action is None:
+                        raise FleetControllerError(
+                            "recover-exhausted-consumer requires exhausted-action"
+                        )
+                    if args.release is None:
+                        raise FleetControllerError(
+                            "recover-exhausted-consumer requires release"
+                        )
+                    recovery, changed = recover_retry_exhausted(
+                        state,
+                        consumer=args.recover_exhausted_consumer,
+                        exhausted_action_id=args.exhausted_action,
+                        release=args.release,
+                    )
+                    resume_receipt = None
                 else:
                     if args.corrective_release is not None:
                         raise FleetControllerError(
                             "corrective-release is valid only with recover-consumer"
+                        )
+                    if args.exhausted_action is not None:
+                        raise FleetControllerError(
+                            "exhausted-action is valid only with recover-exhausted-consumer"
                         )
                     if args.release is None or args.result is None:
                         raise FleetControllerError(

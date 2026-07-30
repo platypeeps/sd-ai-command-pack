@@ -1336,14 +1336,19 @@ identity, order, concurrency, attempts, receipts, blockers, and next actions.
 
 - `scripts/sd-ai-command-pack-fleet-controller.py` is source-only and supports
   `plan`, `next`, `record`, `status`, `resume`, and `validate` with JSON output.
-- Schema version 1 binds campaign, immutable pack release, source repository,
+- Schema version 2 binds campaign, immutable pack release, source repository,
   fleet-manifest digest, selected checkout identities, no-merge mode, preflight,
-  ordered lanes, attempts, exact heads/PRs, blockers, actions, and receipts.
+  ordered lanes, attempts, exact heads/PRs, blockers, actions, receipts, and
+  kind-tagged recovery rows. Loading migrates schema-version-1 state forward.
 - `next` atomically issues action IDs derived from campaign, release, consumer,
   stage, and attempt. `record` accepts only the matching current action.
 - `resume --recover-consumer NAME --corrective-release VERSION` is the sole
   transition from a terminal merge-stage pack blocker into a new
   `pr-publication` attempt after the named corrective release is current.
+- `resume --recover-exhausted-consumer NAME --exhausted-action ID --release
+  VERSION` is the sole transition from a terminal `retry-exhausted` lane into a
+  new attempt at the stage that exhausted. `--release` names the campaign's own
+  target version, not the current `manifest.json` version.
 
 ### 3. Contracts
 
@@ -1377,10 +1382,15 @@ identity, order, concurrency, attempts, receipts, blockers, and next actions.
   one dedicated consumer Trellis task with substantive release, ownership,
   validation, and completion criteria. A conflicting active task or dirty
   Trellis state stops the lane before installer mutation.
-- Schema-version-1 state may omit `recoveries`; loading normalizes that legacy
-  shape to an empty list. Each recovery row binds the consumer, blocking head
-  and PR, corrective release, source action, and destination publication
-  attempt. Historical receipts remain immutable.
+- Loading migrates schema-version-1 state: an absent `recoveries` key becomes an
+  empty list, every untagged recovery row gains `kind: "pack-blocker"`, and the
+  caller's mapping and rows are left unmutated. Every recovery row binds a
+  `kind`, the consumer, the source action with its attempt and blocker, and the
+  destination stage and attempt. A `pack-blocker` row additionally binds the
+  blocking head, the PR, and the corrective release, and moves `merge` to
+  `pr-publication`; a `retry-exhausted` row carries none of those three and its
+  destination stage equals its source stage. Historical receipts remain
+  immutable under both kinds.
 - A recovered lane starts a new publication epoch. Head equality is required
   within each epoch, while a later publication receipt may establish the new
   exact head used by its review, eligibility, merge, and post-merge receipts.
@@ -1404,14 +1414,25 @@ identity, order, concurrency, attempts, receipts, blockers, and next actions.
   mismatched old head -> exit `2` without state replacement.
 - Identical `plan` or receipt replay -> successful no-op.
 - Retryable failure -> one new attempt; exhaustion parks with a stable reason.
+  That park is reversible only through explicit `resume
+  --recover-exhausted-consumer`, which grants one operator-authorized attempt at
+  the stage that exhausted, is bounded to two recoveries per consumer and stage,
+  and never widens the two automatic attempts.
 - Ambiguous result or issued action on resume -> reconciliation; never repeat
   install, PR publication, review dispatch, or merge blindly.
 - Verified pack blocker -> stop starts and hold unsettled merges.
 - Recovery with the campaign release, an unreleased or non-current corrective
   version, a nonterminal lane, a non-merge blocker, mismatched head/PR, or a
   non-pack-blocker result -> exit `2` without changing campaign state.
+- Exhaustion recovery with a release other than the campaign release, an
+  out-of-scope consumer, a lane that is not terminal `retry-exhausted`, an action
+  that is not the lane's latest receipt, a receipt whose stage, attempt, or
+  reason code disagrees with the lane, or a consumer and stage that already hold
+  two recoveries -> exit `2` without changing campaign state. Replaying the same
+  exhausted action returns the existing record and changes nothing.
 - Recovery selectors combined with ownership retry or issued-action
-  reconciliation selectors -> usage error before state mutation.
+  reconciliation selectors -> usage error before state mutation. Each recovery
+  mode also rejects the other mode's evidence flag.
 
 ### 5. Good / Base / Bad Cases
 
@@ -1419,8 +1440,9 @@ identity, order, concurrency, attempts, receipts, blockers, and next actions.
   proves the PR/head, records the original receipt, and advances to review.
 - Base: preflight passes, sequential canaries settle, two wave lanes issue,
   ready PRs merge in manifest order, and the receipt report completes.
-- Base: an existing schema-version-1 campaign has no `recoveries` key and loads
-  as an empty recovery history without rewriting state.
+- Base: an existing schema-version-1 campaign has no `recoveries` key, loads as
+  an empty recovery history at schema version 2, and leaves its state file
+  byte-for-byte unchanged until the next mutating command writes it.
 - Good: a corrective release is current, the exact terminal blocker matches,
   and recovery creates publication attempt two while retaining every attempt-
   one receipt and blocker.
@@ -1445,6 +1467,11 @@ identity, order, concurrency, attempts, receipts, blockers, and next actions.
   terminal-blocker preconditions, mutually exclusive resume modes, idempotent
   source actions, collision-free stage attempts, and multiple exact-head
   publication epochs.
+- Exhaustion recovery covers schema-version-1 migration with its read-only
+  no-mutation boundary, per-kind recovery-row validation, release comparison
+  against the campaign target rather than the current manifest, refusal for every
+  other terminal result, attempt numbering across repeated recoveries, the
+  per-stage cap, receipt immutability, and all three `resume` dispatch sites.
 - Skill/docs/parity tests prove the controller remains source-only, public
   adapters expose no campaign/state controls, rare recovery is conditionally
   loaded, and prompt text no longer owns the lane/timing state machines.

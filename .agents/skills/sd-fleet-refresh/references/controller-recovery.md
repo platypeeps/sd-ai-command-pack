@@ -32,9 +32,36 @@ checkout, branch, PR, receipts, and controller state for diagnosis.
 ## Retryable And Ownership Stops
 
 `retryable-failure` receives one new attempt only through the controller. After
-attempt exhaustion, create or reuse a scoped task and leave the lane parked.
-Do not relabel product, review, policy, or compatibility failure as
-infrastructure failure.
+attempt exhaustion, create or reuse a scoped task and park the lane while the
+cause is fixed. Do not relabel product, review, policy, or compatibility
+failure as infrastructure failure.
+
+Parking is not permanent. Once the cause is fixed and the fix is proven by the
+consumer's own documented gate, reopen only that lane at the stage that
+exhausted:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-controller.py resume \
+  --repo <absolute-source-root> --campaign <campaign-id> \
+  --recover-exhausted-consumer <name> --exhausted-action <action-id> \
+  --release <campaign-target-version> --json
+```
+
+`--exhausted-action` is the action ID of the attempt that exhausted, and
+`--release` is the campaign's own target version, not the current
+`manifest.json` version. The transition is valid only for a terminal
+`retry-exhausted` lane whose latest receipt is that action's
+`retryable-failure` at the lane's stage, attempt, and reason code. It grants
+one operator-authorized attempt at the same stage, bounded to two recoveries
+per consumer and stage, and it never resumes from `checkout-validation`,
+touches `receipts`, or loosens the two automatic attempts. Replaying the same
+`--exhausted-action` returns the existing recovery record and changes nothing.
+
+Every recovery is recorded append-only in `recoveries` as a `retry-exhausted`
+row, distinct from the `pack-blocker` rows written by `--recover-consumer`.
+Exhausting the recovery bound, or a lane whose failure is not genuinely
+infrastructure, is a corrective-campaign case, not another recovery.
 
 An `ownership-skip` is terminal for the current attempt. After the recorded
 owner clears and the checkout is verifiably clean, explicitly reopen only that
