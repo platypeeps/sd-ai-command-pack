@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import os
 import re
+import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
@@ -175,16 +177,82 @@ def _ignored(relative: PurePosixPath) -> bool:
     ) or text.startswith(IGNORED_PREFIXES)
 
 
+def _nested_checkout(path: Path) -> bool:
+    """Return whether a directory carries its own git entry.
+
+    Nested clones record a ``.git`` directory and linked worktrees record a
+    ``.git`` file; neither belongs to this repository's shipped surface.
+    """
+
+    return os.path.lexists(path / ".git")
+
+
+def _git_excluded(root: Path) -> frozenset[str]:
+    """Collect the paths git excludes.
+
+    A single ``ls-files`` call honours ``.gitignore``, ``.git/info/exclude``,
+    and the global excludes file. It marks directories with a trailing slash,
+    which this function strips so the result matches plain relative paths.
+
+    The result is empty whenever that inventory cannot be trusted: the root is
+    not a checkout, git is unavailable, or the call fails or times out. Callers
+    then fall back to the static ignore rules and the nested-checkout probe.
+    """
+
+    if not os.path.lexists(root / ".git"):
+        return frozenset()
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "ls-files",
+                "-z",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "--directory",
+            ],
+            cwd=root,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return frozenset()
+    if result.returncode != 0:
+        return frozenset()
+    return frozenset(
+        value.decode("utf-8", "replace").rstrip("/")
+        for value in result.stdout.split(b"\0")
+        if value
+    )
+
+
 def _text_paths(root: Path) -> list[Path]:
+    excluded = _git_excluded(root)
     paths: list[Path] = []
-    for path in root.rglob("*"):
-        if path.is_symlink() or not path.is_file():
-            continue
-        relative = PurePosixPath(path.relative_to(root).as_posix())
-        if _ignored(relative):
-            continue
-        if path.suffix in TEXT_SUFFIXES or path.name in TEXT_FILENAMES:
-            paths.append(path)
+    for current, directories, files in os.walk(root):
+        base = Path(current)
+        kept: list[str] = []
+        for name in directories:
+            child = base / name
+            relative = PurePosixPath(child.relative_to(root).as_posix())
+            if child.is_symlink() or _ignored(relative):
+                continue
+            if relative.as_posix() in excluded or _nested_checkout(child):
+                continue
+            kept.append(name)
+        directories[:] = kept
+        for name in files:
+            path = base / name
+            if path.is_symlink() or not path.is_file():
+                continue
+            relative = PurePosixPath(path.relative_to(root).as_posix())
+            if _ignored(relative) or relative.as_posix() in excluded:
+                continue
+            if path.suffix in TEXT_SUFFIXES or path.name in TEXT_FILENAMES:
+                paths.append(path)
     return sorted(paths)
 
 

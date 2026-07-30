@@ -80,6 +80,41 @@ class SurfaceClosureTests(unittest.TestCase):
         self.assertEqual(payload["findingCount"], 0)
         self.assertGreater(payload["graph"]["nodeCount"], 500)
 
+    def test_nested_ignored_checkout_leaves_the_closure_clean(self) -> None:
+        # The closure report inherits its file walk from the shared linter, so
+        # load that module exactly as the checker does and point it at an
+        # isolated root rather than mutating the live checkout.
+        linter = self.checker._load_source_module(
+            PACK_ROOT, ".github/scripts/check-command-surface-drift.py", "closure_lint"
+        )
+        # Built from the registry so this file never carries the literal itself.
+        retired = next(
+            identifier
+            for retirement in registry.RETIRED_COMMAND_SURFACES
+            for identifier in retirement.identifiers
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.write_manifest(root, [])
+            nested = root / ".claude/worktrees/scratch"
+            (nested / "docs").mkdir(parents=True)
+            (nested / ".git").write_text(
+                "gitdir: /elsewhere/.git/worktrees/scratch\n", encoding="utf-8"
+            )
+            (nested / "docs/notes.md").write_text(
+                f"# notes\nRetired {retired} lived here.\n", encoding="utf-8"
+            )
+
+            report = linter.lint_repository(
+                root,
+                commands=(),
+                retirements=registry.RETIRED_COMMAND_SURFACES,
+                allowances=(),
+                source_only=frozenset(),
+            )
+
+            self.assertEqual(report.findings, ())
+
     def test_manifest_schema_rejects_unknown_wrong_types_and_duplicates(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
