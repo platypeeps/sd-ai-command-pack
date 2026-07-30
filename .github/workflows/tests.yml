@@ -44,6 +44,7 @@ jobs:
         id: classify
         env:
           AFTER_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BEFORE_SHA: ${{ github.event.before || '' }}
           EVENT_ACTION: ${{ github.event.action || '' }}
           EVENT_NAME: ${{ github.event_name }}
@@ -145,6 +146,27 @@ jobs:
           if [ "$classifier_mode" != "100644" ] || [ "$classifier_type" != "blob" ] || [ "$classifier_path" != ".github/scripts/bookkeeping_ci_scope.py" ]; then
             select_full "prior_classifier_unsafe"
           fi
+          # On a pull_request, BEFORE_SHA is the PR's own previous head and is
+          # author-controlled, so the blob below is only trusted when it is
+          # identical to the base branch's. Identity must be positively
+          # established: an absent or unresolvable base fails closed too.
+          # BASE_SHA must stay non-empty-checked -- "git rev-parse ':path'" with
+          # an empty prefix is a valid index lookup that exits 0.
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if [ -z "$BASE_SHA" ]; then
+              select_full "prior_classifier_identity_unavailable"
+            fi
+            if ! before_blob="$(git rev-parse "$BEFORE_SHA:.github/scripts/bookkeeping_ci_scope.py" 2>/dev/null)"; then
+              select_full "prior_classifier_identity_unavailable"
+            fi
+            if ! base_blob="$(git rev-parse "$BASE_SHA:.github/scripts/bookkeeping_ci_scope.py" 2>/dev/null)"; then
+              select_full "prior_classifier_identity_unavailable"
+            fi
+            if [ "$before_blob" != "$base_blob" ]; then
+              select_full "prior_classifier_not_base_identical"
+            fi
+          fi
+
           if ! git show "$BEFORE_SHA:.github/scripts/bookkeeping_ci_scope.py" >"$classifier_file"; then
             select_full "prior_classifier_unavailable"
           fi

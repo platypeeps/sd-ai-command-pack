@@ -137,3 +137,50 @@ Gave the fleet controller an explicit, evidence-gated recovery transition for te
 ### Next Steps
 
 - None - task complete
+
+
+## Session 254: A-038 (P0): pin the bookkeeping CI classifier against the PR base
+
+**Date**: 2026-07-30
+**Task**: A-038 (P0): pin the bookkeeping CI classifier against the PR base
+**Branch**: `fix/pin-bookkeeping-ci-classifier-trust`
+
+### Summary
+
+Closed a branch-protection bypass in the bookkeeping CI fast lane. tests.yml read the classifier blob out of $BEFORE_SHA and executed it; on a pull_request synchronize event that sha is the PR's own previous head, so a PR author could push a tampered classifier, let concurrency cancel that commit's own run, then push a payload commit whose scope was decided by their own code. Added a pull_request-only blob-identity guard that requires the $BEFORE_SHA classifier blob to be identical to the base branch's before the blob is executed, anchored on github.event.pull_request.base.sha (not PROTECTED_REF, which is refs/pull/<n>/merge and therefore author content). Absent, unresolvable, and divergent bases all fail closed to mode: full with distinct reason codes.
+
+### Main Changes
+
+- Added the identity guard at .github/workflows/tests.yml:149-169, immediately before the git show that executes the classifier
+- Added BASE_SHA: ${{ github.event.pull_request.base.sha }} at tests.yml:47 as the trusted anchor
+- Kept an explicit non-empty check on BASE_SHA: git rev-parse ':path' with an empty prefix is a valid index lookup that exits 0, and unlike BEFORE_SHA there is no upstream 40-hex shape gate for it
+- Split requirement 3 (evidenceRunId API resolution) out to 07-29-resolve-evidence-run-id-through-api; it is not on A-038's attack path and was underspecified
+- No change to .github/scripts/check-ci-result.sh or bookkeeping_ci_scope.py was needed; requirement 4 is satisfied structurally because an identity failure routes through select_full
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a94957eb` | docs(task): split evidenceRunId validation out of A-038 hardening |
+| `d95c23f3` | fix(ci): pin the bookkeeping classifier to the pull request base |
+| `8d0f488a` | docs(task): correct the changelog step and drop personal paths |
+| `a51abbec` | docs(task): record the AC1 rehearsal evidence |
+| `4e4aaf07` | docs(task): close the push-path review gate with a measurement |
+| `0b17d702` | docs(task): record the live negative control for the fast lane |
+| `c3b6e7f8` | docs(task): tick the acceptance criteria with their evidence |
+
+### Testing
+
+- [OK] AC1 proven live, not by inspection: rehearsal PR #278 run 30515960389 job 90785786135 selected mode: full, reason: prior_classifier_not_base_identical on a synchronize event whose BEFORE_SHA was the tamper commit
+- [OK] Live negative control on PR #279 head 4e4aaf07 (run 30535866807, job 90848907337) selected mode: bookkeeping, reason: verified_bookkeeping_successor, so the guard discriminates rather than always selecting full
+- [PARTIAL] The push path is not observable before merge. Measured offline instead by executing the extracted guard block under EVENT_NAME=push with two positive controls proving the harness was live; the construction argument is recorded in implement.md step 10 with its scope limits stated
+- [OK] make check exit 0 on the final head, re-run after each task-record edit and preceded by make sync per CONTRIBUTING.md:108-111, which regenerated nothing
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- After merge, confirm the first bookkeeping-only push to main reports mode: bookkeeping. A full with a prior_classifier_* reason means the guard leaked to the push path and the change must be reverted
