@@ -184,3 +184,51 @@ Closed a branch-protection bypass in the bookkeeping CI fast lane. tests.yml rea
 ### Next Steps
 
 - After merge, confirm the first bookkeeping-only push to main reports mode: bookkeeping. A full with a prior_classifier_* reason means the guard leaked to the push path and the change must be reverted
+
+
+## Session 255: Resolve the branch-field deadlock between the finalization gates
+
+**Date**: 2026-07-30
+**Task**: Resolve the branch-field deadlock between the finalization gates
+**Branch**: `fix/resolve-branch-field-finalization-deadlock`
+
+### Summary
+
+A completion-ready task whose task.json branch is null had no sanctioned exit from finish-work: the pre-archive gate rejected the null branch, but the documented repair landed inside the archive commit, which the completion-bundle gate then read as a changed field. Fixed both halves — step 4 now records a missing branch before capturing the finalization base, and the completion-bundle archive-identity comparison tolerates a null to non-null branch transition. Specs, acceptance criteria, and a new ordering contract test ship with it as 0.56.4.
+
+### Main Changes
+
+- Moved the branch preparation in sd-finish-work step 4 above the finalization base capture, so task.py set-branch and its scoped branch-metadata commit land before the archive range opens. The preparation is scoped to the completion path only; the planning finalization boundary and the no-active-task successor path skip it, and it stops rather than guessing on a detached HEAD or when the recorded value equals base_branch.
+- Relaxed the completion-bundle archive-identity comparison in review-preflight.mjs to accept a null to non-null branch transition, using === null so an absent branch key stays distinct from an explicit null. This is the recovery half: a task that already reached finalization unprepared can still finalize.
+- Documented both rules in the specs — the completion-mode archive-identity tolerance in quality-guidelines, and the branch preparation ordering, its detached-HEAD and base_branch stops, and the extended error matrix in the wrapper-preserving lifecycle chaining scenario in adapter-guidelines.
+- Added tests/test_finish_work_branch_preparation.py, four assertions against both shipped copies of the skill. The ordering assertion compares string indices rather than presence, so moving the preparation below the base capture fails it; the others pin the stops, the skipped paths, and the refusal to repair a failed gate by mutating the task.
+- Ticked all six acceptance criteria with evidence, prepared release 0.56.4 with a matching CHANGELOG heading and an all-pass fleet candidate ledger, and fixed implement.jsonl, which referenced a path outside the allowed roots and blocked make release-prep.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ae832216` | plan: resolve the branch-field finalization deadlock |
+| `d85e48ed` | fix: resolve the branch-field deadlock between the finalization gates |
+| `02921b58` | docs(spec): record the branch preparation ordering and archive-identity rule |
+| `f9543da3` | docs(task): tick the acceptance criteria with their evidence |
+| `9425eb18` | chore(release): prepare 0.56.4 |
+| `07952aee` | test(finish-work): pin the branch preparation ordering in both twins |
+
+### Testing
+
+- [OK] make check: EXIT=0, 1378 tests across shards, 0 FAIL, 0 ERROR; review preflight 0 failures, 1 advisory warning
+- [OK] sd-check --json: status passed, exitCode 0, stateGuard passed with beforeDigest == afterDigest and changed: []
+- [OK] tests/test_finish_work_branch_preparation.py standalone: Ran 4 tests in 0.002s, OK
+- [OK] ordering assertion proven sensitive: real order prep<cap True (2651 < 4390); mutated order prep<cap False (4330 > 4277)
+- [OK] pre-archive gate: schemaVersion 1, status valid, pre_archive_valid, exit 0
+- [OK] PR #280 CI: all 7 executed checks pass including CI Result; Copilot review round 1 of 5 returned no comments and zero review threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
