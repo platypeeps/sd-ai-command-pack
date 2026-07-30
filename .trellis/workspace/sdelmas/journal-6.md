@@ -346,3 +346,38 @@ Reviewed all 65 unarchived Trellis tasks for priority and applicability. Raised 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 259: Allowlist shipped review.json in install audit (T-1, v0.56.6)
+
+**Date**: 2026-07-30
+**Task**: Allowlist shipped review.json in install audit (T-1, v0.56.6)
+**Branch**: `fix/allowlist-review-json-install-audit`
+
+### Summary
+
+Implemented Trellis task 07-28-allowlist-review-json-install-audit: added .sd-ai-command-pack/review.json to LOCAL_ALLOWED_PACK_FILES in the install audit (template source + synced mirror), locked it with a fixture-backed test verified by mutation, bumped the pack to 0.56.6 with CHANGELOG entry per the release payload gate, and retargeted a stale archived-task reference in 07-29-scope-final-bundle-validator-to-delta/prd.md that blocked full-check repo-wide. Shipped as PR #286: CI fully green, Copilot review clean with zero threads.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `46ee5de8` | (see git log) |
+| `6750f8de` | (see git log) |
+| `29cfcbb1` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
