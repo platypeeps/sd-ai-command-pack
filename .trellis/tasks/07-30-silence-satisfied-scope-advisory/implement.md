@@ -74,7 +74,7 @@
        candidate ledger is not a `make check` input — `full-check.sh` never reads
        `docs/fleet/candidate-validation.json` — so there is no ordering deadlock
        between the two gates.
-13. [ ] After the PR exists and its body carries the scope section, re-run the
+13. [x] After the PR exists and its body carries the scope section, re-run the
        preflight and record the warning count. This is the only live proof of
        the resolved-body path and the only way to close the last acceptance
        criterion; the local pre-PR run cannot reach it, because no PR exists
@@ -157,8 +157,26 @@ Both halves ran and passed.
   `release version gate: shipped payload changed; manifest version 0.56.4 ->
   0.56.5` and `candidate ledger: valid for the current pack payload and fleet`.
 
-Step 13 remains open: it needs a PR to exist, so the resolved-body path is
-proven here only against a stub, not against live `gh`.
+### Step 13, live
+
+PR #281 opened with the scope section in its body. Re-running
+`node scripts/sd-ai-command-pack-review-preflight.mjs` against real `gh`:
+
+- Advisory line count is `0` — grep for `tooling/generated scope section` and
+  `sd-ai-command-pack-scope-advisory` returns nothing.
+- Forcing an unsatisfying body over the same live PR
+  (`SD_AI_COMMAND_PACK_SCOPE_PR_BODY="unrelated body"`) fires the
+  `unsatisfied:provided` wording: "but the PR body does not include a recognized
+  tooling/generated scope section ... Add it to the PR body."
+
+That pair is the live proof of the resolved-body path; the pre-PR run of the
+same branch, recorded during `make release-prep`, carried the advisory as
+"Add it before opening the PR."
+
+The step's stated expectation of `0 warning(s)` was wrong about the total. The
+advisory warning is gone, but the run reports `0 failure(s), 2 warning(s)` — a
+boundary-risk regression-matrix reminder and a two-task-directory notice, both
+independent of this change and both present before it.
 
 ## Review gates
 
