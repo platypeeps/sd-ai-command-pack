@@ -97,6 +97,32 @@
    **Gate:** A-038 is P0 · Verified. Do not close it on diff inspection. The
    rehearsal is the acceptance evidence.
 
+   **Done 2026-07-29. AC1 evidence captured.** Rehearsal PR #278,
+   `rehearsal/a038-identity-guard` into this branch — deliberately not into `main`,
+   which is possible because `pull_request:` at `.github/workflows/tests.yml:4`
+   carries no branch filter. Basing on this branch means the base tree holds the
+   guard and an untampered classifier, which is the comparison the guard makes.
+
+   | push | head | event action | mode | reason |
+   | --- | --- | --- | --- | --- |
+   | 1 — tamper `bookkeeping_ci_scope.py` | `ad4cd325` | `opened` | `full` | `pull_request_action_not_synchronize` |
+   | 2 — bookkeeping-eligible payload | `dbc6edc8` | `synchronize` | `full` | `prior_classifier_not_base_identical` |
+
+   Push 2 is the A-038 attack shape: `BEFORE_SHA` was `ad4cd325`, the
+   author-controlled tamper commit, and the changed-path increment was entirely
+   under `.trellis/tasks/`, so it satisfied `ALLOWED_PATH_PREFIXES`
+   (`.github/scripts/bookkeeping_ci_scope.py:30`) and the fast lane would have
+   engaged had the guard not fired first. It selected `full` instead, and `lint`,
+   `security`, `Release payload gate` and all three `unittest` matrix legs ran —
+   which is the independent, observable signature of `full`, since `bookkeeping`
+   skips them. Run `30515960389`, job `90785786135`.
+
+   The tamper was a comment. The guard's condition is blob inequality, which a
+   comment produces identically to a hostile rewrite, so the same code path and
+   the same reason code are exercised. Reaching `mode: bookkeeping` from a hostile
+   classifier would additionally require fabricating the evidence fields; that gap
+   is `07-29-resolve-evidence-run-id-through-api`, not AC1.
+
 9. Confirm the same PR now reports `CI Result` **failure** if the heavy lanes do
    not pass on the tampered branch (AC3). No change to `check-ci-result.sh` is
    needed for this — see step 12.
@@ -119,6 +145,24 @@
 
 10. Confirm the `push`-to-`main` bookkeeping path is unaffected: a bookkeeping-only
     push still selects `mode: bookkeeping`.
+
+    **Not observable before merge, and deliberately not forced. Stated plainly
+    rather than claimed.** `push:` is filtered to `branches: [main]`
+    (`.github/workflows/tests.yml:6-8`), so the only event that exercises this path
+    is a push to the default branch, and the hardened workflow does not exist on
+    `main` until this branch merges. Two facts bound the risk in the meantime:
+
+    - Correct by construction — the guard opens with
+      `if [ "$EVENT_NAME" = "pull_request" ]`, so a `push` event never enters it and
+      reaches `git show` exactly as before.
+    - Asserted in source — `test_prior_classifier_is_pinned_to_the_pull_request_base`
+      locates the guard *by* that conditional, so a guard moved outside it fails the
+      test rather than passing quietly.
+
+    Settle it post-merge on the first bookkeeping-only push to `main`: the `CI scope`
+    job must report `mode: bookkeeping`. If it reports `full` with
+    `prior_classifier_*`, the guard leaked out of the `pull_request` branch and this
+    change must be reverted.
 
 ### Step 3 — R3 moved out of this task
 
