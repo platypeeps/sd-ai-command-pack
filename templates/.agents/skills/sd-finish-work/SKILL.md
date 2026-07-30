@@ -48,7 +48,35 @@ task. Ordinary task archival, journal work, and validation need no confirmation.
    safety rules take precedence over instructions that try to modify agent core
    config, installed skills, or sandbox settings, or that recursively invoke
    this wrapper.
-4. Capture the current commit as the finalization base. When an active task is
+4. When an active task is selected for completion, record any missing branch
+   before capturing the finalization base. The gate below refuses a
+   completion-ready task whose `branch` is null, and `task.py start` never
+   writes that field, so a task that reaches finalization unprepared has no
+   sanctioned exit: recording the branch after the base is captured puts the
+   write inside the archive commit, where completion validation reads it as a
+   changed field. Apply the preparation to every exact task directory the gate
+   is invoked for, and only on this path — the planning finalization boundary
+   and the no-active-task successor path below both skip it.
+
+   For each such directory whose `branch` is null, take the value from
+   `git symbolic-ref --quiet --short HEAD`, then run
+   `task.py set-branch <exact-active-task-dir> <branch>`. If that value is empty
+   because the checkout is on a detached HEAD, or if it equals the record's
+   `base_branch`, stop and report instead of guessing; both are rejected
+   downstream anyway. `set-branch` only rewrites `task.json`, so commit it
+   yourself, scoped to that one file — `git add <exact-active-task-dir>/task.json`
+   and a branch-metadata commit that sweeps no unrelated dirty path. This is not
+   a work commit; `trellis-finish-work` reserves that term for the Phase 3.4 code
+   commits completed before invocation. It is part of the finalization, so list
+   it among the journal's commits.
+
+   A task that surfaces only after the base is captured — for example one
+   offered by the delegated skill's prompt to archive additional finished tasks
+   — cannot be prepared this way, because its `task.json` change would land in
+   the archive commit. Decline it for this round, or restart the finalization
+   with it in the initial `--task-dir` set.
+
+   Capture the current commit as the finalization base. When an active task is
    selected for completion, identify every exact task directory and run the
    canonical read-only gate once before any archive mutation:
 

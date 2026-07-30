@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.56.4 - 2026-07-30
+
+- Resolve a deadlock between two finalization gates over `task.json`'s `branch`
+  field. The pre-archive gate refuses a completion-ready task whose `branch` is
+  null, but `task.py start` never writes that field, so every task is born in
+  the refused state. Recording the branch where `sd-finish-work` step 4 puts the
+  operator — after the finalization base is captured — lands the write inside
+  the archive commit, which the completion bundle gate then rejects with
+  `completion_archive_identity_changed` because an archive move may change only
+  `status` and `completedAt`. A compliant run had no exit at all: the step's own
+  stop clause forbids repairing an `invalid` pre-archive result by mutating the
+  task.
+- `sd-finish-work` step 4 now records a missing branch *before* capturing the
+  finalization base, for every task directory the gate is invoked for. It takes
+  the value from `git symbolic-ref --quiet --short HEAD`, stops rather than
+  guessing on a detached HEAD or a value equal to `base_branch`, and commits
+  only that `task.json` as a branch-metadata commit — not a work commit, which
+  `trellis-finish-work` reserves for pre-invocation code commits. A task that
+  surfaces only after the base is captured cannot be prepared this way and is
+  declined for the round, or the finalization restarts with it included.
+- The completion bundle gate tolerates exactly one branch transition across an
+  archive move, `null` to a non-empty string, so a run already past base capture
+  can still finalize. A rewrite, an erasure, and a key absent from the source
+  record all stay rejected, as does any change to any other field. The reason
+  code had no regression coverage in either direction before this change.
+
 ## 0.56.3 - 2026-07-29
 
 - Add an explicit fleet-controller recovery transition for `retry-exhausted`

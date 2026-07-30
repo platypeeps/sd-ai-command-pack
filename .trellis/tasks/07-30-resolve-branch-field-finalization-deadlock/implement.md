@@ -19,7 +19,7 @@ Write the tests first — the design's central claim is that the current
 validator rejects a legitimate bundle, and that claim is only worth anything if
 a test demonstrates it before the fix exists.
 
-- [ ] **1. Red test: the deadlock case.**
+- [x] **1. Red test: the deadlock case.**
       In `tests/test_bookkeeping_validator.py`, add
       `test_completion_bundle_allows_branch_recorded_during_archive`, modelled
       on `test_valid_completion_archive_and_journal_bundle` (`:613-662`).
@@ -29,7 +29,7 @@ a test demonstrates it before the fix exists.
       alongside `status` and `completedAt`.
       Assert `returncode == 0`, `status == "valid"`,
       `reasonCodes == ["completion_bundle_valid"]`.
-- [ ] **2. Confirm it fails for the stated reason.**
+- [x] **2. Confirm it fails for the stated reason.**
       Run it against the unmodified validator. It must fail with
       `completion_archive_identity_changed`, not with a fixture error. A test
       that fails because the fixture is malformed proves nothing.
@@ -38,7 +38,7 @@ a test demonstrates it before the fix exists.
       bash scripts/sd-ai-command-pack-toolchain.sh run-python -- -m unittest tests.test_bookkeeping_validator.BookkeepingValidatorTests.test_completion_bundle_allows_branch_recorded_during_archive -v
       ```
 
-- [ ] **3. Guard tests: the cases that must stay blocked.**
+- [x] **3. Guard tests: the cases that must stay blocked.**
       Add three more, all asserting `status == "invalid"` and
       `completion_archive_identity_changed` in `reasonCodes`:
       - `test_completion_bundle_rejects_branch_rewritten_during_archive` —
@@ -54,7 +54,7 @@ a test demonstrates it before the fix exists.
       These three pass against the current validator. They exist to fail if
       step 5 overreaches into an unconditional strip or a broader one, so run
       them before and after.
-- [ ] **3b. Guard test: the absent-key case stays blocked.**
+- [x] **3b. Guard test: the absent-key case stays blocked.**
       `test_completion_bundle_rejects_branch_added_to_keyless_record` — build
       the active record, then `del record["branch"]` before writing it; archive
       with `branch="codex/a"`. Assert `invalid` /
@@ -63,19 +63,19 @@ a test demonstrates it before the fix exists.
       This pins the `=== null` versus `== null` distinction. `== null` also
       matches `undefined`, so it is the exact "simplification" a later editor
       would reach for, and nothing else in the suite would catch it.
-- [ ] **4. Guard test: `branch: null` survives as an archived state (AC 4).**
+- [x] **4. Guard test: `branch: null` survives as an archived state (AC 4).**
       `test_completion_bundle_allows_null_branch_through_archive` — active and
       archived both `branch=None`, otherwise a pure move. Assert `valid` /
       `completion_bundle_valid`. The existing `:613` template uses a non-null
       branch on both sides, so the null-to-null path is untested today and AC 4
       would otherwise rest on an unexercised claim.
-- [ ] **5. Apply the validator fix to the template.**
+- [x] **5. Apply the validator fix to the template.**
       Edit `templates/scripts/sd-ai-command-pack-review-preflight.mjs` at
       `:1496-1504` per the shape in `design.md`. `templates/` is source of
       truth — do not touch the root copy by hand. The condition tests
       `sourceRecord.branch === null`, not `== null`: the absent-key case is
       deliberately excluded (Decision 2).
-- [ ] **5b. Apply the ordering instruction to the skill template.**
+- [x] **5b. Apply the ordering instruction to the skill template.**
       Edit `templates/.agents/skills/sd-finish-work/SKILL.md` step 4
       (`:51-72` in the generated copy). Add the instruction that when the
       selected task's `branch` is null, it is recorded with `task.py set-branch`
@@ -132,7 +132,7 @@ a test demonstrates it before the fix exists.
 
       This step is what delivers AC 3. Without it the validator change only
       helps a run that has already deviated from step 4.
-- [ ] **6. Regenerate the mirror.**
+- [x] **6. Regenerate the mirror.**
 
       ```bash
       make sync
@@ -147,7 +147,7 @@ a test demonstrates it before the fix exists.
       Expected output: nothing (`diff -q` is silent when identical). There is
       no third copy — the skill exists only under `.agents/` and
       `templates/.agents/`; `.claude/skills/sd-finish-work/` does not exist.
-- [ ] **7. Green the new tests, and check nothing else moved.**
+- [x] **7. Green the new tests, and check nothing else moved.**
 
       ```bash
       bash scripts/sd-ai-command-pack-toolchain.sh run-python -- -m unittest tests.test_bookkeeping_validator -v
@@ -156,11 +156,38 @@ a test demonstrates it before the fix exists.
       All six new tests pass; the existing 12 completion-mode tests
       (`:613`, `:710`, `:795`, `:821`, `:849`, `:890`, `:931`, `:952`, `:981`,
       `:1007`, `:1036`, `:1066`) stay green.
+- [x] **7b. Release payload gate — unplanned, recorded after the fact.**
+      Both edited files are under `templates/**`, which
+      `CONTRIBUTING.md:98-99` defines as shipped payload, so the change
+      requires a same-PR `manifest.json` bump and a matching top `CHANGELOG.md`
+      heading. This plan did not anticipate it. Precedent is explicit:
+      `archive/2026-07/07-29-recover-retry-exhausted-fleet-lanes/implement.md:168-174`
+      records the same discovery on 2026-07-29 after CI failed the gate.
+
+      Bumped to `0.56.4` with a CHANGELOG entry, then `make generate` to refresh
+      the version-bearing command surfaces and `make sync` to remirror them.
 - [ ] **8. Full check.**
 
       ```bash
       make check
       ```
+
+      **Currently blocked on one permitted finding, by design.** `make check`
+      fails with exactly one failure — `test_live_surface_is_clean_and_json_is_versioned`
+      — whose sole finding is `provenance.candidate-stale` on
+      `docs/fleet/candidate-validation.json`: the ledger still pins pack
+      `0.56.3` and the pre-change payload digest.
+      `.trellis/spec/backend/manifest-and-filesystem.md:72-74` permits exactly
+      this one finding at this path with relation `requires-release-evidence`,
+      and names fleet validation as its resolution.
+
+      The closer is `make release-prep`, which regenerates surfaces, refreshes
+      the exact-payload ledger against the eight consumers in
+      `docs/fleet/consumers.json` using disposable clones, and then runs
+      `make check`. Run it **last**: `CONTRIBUTING.md:96-97` warns that later
+      generation or sync changes invalidate the validator's evidence, so it
+      belongs immediately before the PR push, and again if review feedback
+      changes payload.
 
       `make sync` in step 6 already satisfies the `CONTRIBUTING.md:108-111`
       ordering requirement; re-run it if any task artifact changed after that

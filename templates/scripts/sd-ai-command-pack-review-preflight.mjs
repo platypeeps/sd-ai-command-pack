@@ -1497,10 +1497,26 @@ function validateCompletionBundle(entries, evidence, baseOid, add) {
       const copy = { ...record };
       delete copy.status;
       delete copy.completedAt;
-      return stableJson(copy);
+      return copy;
     };
-    if (stripLifecycle(source) !== stripLifecycle(archived)) {
-      add('completion_archive_identity_changed', `${mapping.archiveDir}/task.json`, 'archive move changed fields other than status and completedAt');
+    const sourceRecord = stripLifecycle(source);
+    const archivedRecord = stripLifecycle(archived);
+    // The pre-archive gate requires a completion-ready task to carry a
+    // non-empty branch. An operator who satisfies it after the finalization
+    // base is captured lands that write inside the archive commit, where this
+    // comparison would otherwise read it as smuggled content. Tolerate exactly
+    // that transition -- a rewrite or an erasure still fails, and an absent key
+    // is a distinct state that stays blocked.
+    const branchNewlyRecorded =
+      sourceRecord.branch === null
+      && typeof archivedRecord.branch === 'string'
+      && archivedRecord.branch.trim().length > 0;
+    if (branchNewlyRecorded) {
+      delete sourceRecord.branch;
+      delete archivedRecord.branch;
+    }
+    if (stableJson(sourceRecord) !== stableJson(archivedRecord)) {
+      add('completion_archive_identity_changed', `${mapping.archiveDir}/task.json`, 'archive move changed fields other than status, completedAt, and a newly recorded branch');
     }
   }
 }

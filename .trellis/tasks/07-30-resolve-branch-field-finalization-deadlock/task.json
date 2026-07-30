@@ -3,7 +3,7 @@
   "name": "resolve-branch-field-finalization-deadlock",
   "title": "Resolve the branch-field deadlock between the pre-archive and completion bundle gates",
   "description": "Stop a task that reaches finish-work with a null branch field from being unfinalizable: the pre-archive gate demands a non-empty branch while the completion bundle gate rejects the resulting archive-move diff.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
