@@ -547,6 +547,69 @@ class BookkeepingWorkflowContractTests(unittest.TestCase):
         self.assertIn('write_full_result "bootstrap_full"', classify)
         self.assertNotIn("pull_request_target", self.text)
 
+    def test_prior_classifier_is_pinned_to_the_pull_request_base(self) -> None:
+        classify_step = self.workflow["jobs"]["ci-scope"]["steps"][1]
+        classify = classify_step["run"]
+
+        # The base sha must be wired in. Without it the guard compares
+        # $BEFORE_SHA's blob against the checked-out index -- "git rev-parse
+        # ':path'" with an empty prefix resolves and exits 0 -- so the ordering
+        # assertion below would still pass while nothing was actually pinned.
+        self.assertEqual(
+            classify_step["env"]["BASE_SHA"],
+            "${{ github.event.pull_request.base.sha }}",
+        )
+
+        show_index = classify.index(
+            'git show "$BEFORE_SHA:.github/scripts/bookkeeping_ci_scope.py"'
+        )
+        guard_start = classify.index(
+            'if [ "$EVENT_NAME" = "pull_request" ]',
+            classify.index('select_full "prior_classifier_unsafe"'),
+        )
+        self.assertLess(guard_start, show_index)
+        guard = classify[guard_start:show_index]
+
+        # Identity is established before the author-controlled blob is written
+        # to disk and executed.
+        self.assertLess(
+            classify.index('git rev-parse "$BASE_SHA:'),
+            show_index,
+        )
+
+        # An empty base sha is rejected explicitly, before the first rev-parse.
+        # Either polarity is acceptable.
+        emptiness = [
+            guard.index(check)
+            for check in ('[ -z "$BASE_SHA" ]', '[ -n "$BASE_SHA" ]')
+            if check in guard
+        ]
+        self.assertTrue(emptiness, "guard must test BASE_SHA for emptiness")
+        self.assertLess(min(emptiness), guard.index('git rev-parse "$BASE_SHA:'))
+
+        # Every failure path falls back to full mode. Exact counts, not floors:
+        # a floor of two would pass a guard that dropped the emptiness check.
+        self.assertEqual(
+            guard.count('select_full "prior_classifier_identity_unavailable"'), 3
+        )
+        self.assertEqual(
+            guard.count('select_full "prior_classifier_not_base_identical"'), 1
+        )
+
+        # Neither lookup may be advisory: each must be the condition of a
+        # branch, so a failure reaches one of the calls counted above.
+        lookups = [
+            line.strip()
+            for line in guard.splitlines()
+            if 'git rev-parse "' in line
+        ]
+        self.assertEqual(len(lookups), 2)
+        for line in lookups:
+            self.assertTrue(
+                line.startswith("if ! ") and line.endswith("; then"),
+                f"classifier rev-parse must gate a branch: {line}",
+            )
+
     def test_expensive_lanes_run_only_in_full_mode(self) -> None:
         jobs = self.workflow["jobs"]
         for name in ("unittest", "lint", "security", "release-payload-gate"):
