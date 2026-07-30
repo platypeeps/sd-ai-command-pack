@@ -4,10 +4,12 @@ import contextlib
 import importlib.util
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from installer import registry
 
@@ -145,6 +147,92 @@ class CommandSurfaceDriftTests(unittest.TestCase):
             self.assertFalse(
                 any(finding.path.startswith(".build/") for finding in report.findings)
             )
+
+    def retirement_fixture(self) -> registry.RetiredCommandSurface:
+        return registry.RetiredCommandSurface(
+            id="old-command",
+            identifiers=("sd-old",),
+            installed_targets=(),
+            removed_version="1.0.0",
+            owner_task="fixture",
+        )
+
+    def test_nested_checkout_is_not_a_live_surface(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            command = self.make_repo(root)
+            nested = root / ".claude/worktrees/scratch"
+            (nested / "docs").mkdir(parents=True)
+            (nested / ".git").write_text(
+                "gitdir: /elsewhere/.git/worktrees/scratch\n", encoding="utf-8"
+            )
+            (nested / "docs/notes.md").write_text(
+                "# notes\nsd-old lived here.\n", encoding="utf-8"
+            )
+
+            report = self.lint(root, command, retirements=(self.retirement_fixture(),))
+
+            self.assertEqual(report.findings, ())
+
+    def test_git_ignored_directory_is_not_a_live_surface(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            command = self.make_repo(root)
+            subprocess.run(
+                ["git", "init", "-b", "main"],
+                cwd=root,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            (root / ".gitignore").write_text("scratch/\n", encoding="utf-8")
+            scratch = root / "scratch"
+            scratch.mkdir()
+            (scratch / "notes.md").write_text("sd-old lived here.\n", encoding="utf-8")
+
+            report = self.lint(root, command, retirements=(self.retirement_fixture(),))
+
+            self.assertEqual(report.findings, ())
+
+    def test_exclusion_lookup_survives_a_missing_or_failing_git(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+
+            # Base case: no checkout, so git is never consulted.
+            with mock.patch.object(
+                self.linter.subprocess, "run", side_effect=AssertionError("git ran")
+            ):
+                self.assertEqual(self.linter._git_excluded(root), frozenset())
+
+            (root / ".git").write_text("gitdir: /elsewhere\n", encoding="utf-8")
+            failures = (
+                OSError("git is not installed"),
+                subprocess.TimeoutExpired(cmd="git", timeout=60),
+            )
+            for failure in failures:
+                with mock.patch.object(
+                    self.linter.subprocess, "run", side_effect=failure
+                ):
+                    self.assertEqual(self.linter._git_excluded(root), frozenset())
+
+            nonzero = subprocess.CompletedProcess(args=["git"], returncode=128, stdout=b"")
+            with mock.patch.object(
+                self.linter.subprocess, "run", return_value=nonzero
+            ):
+                self.assertEqual(self.linter._git_excluded(root), frozenset())
+
+    def test_symlinked_content_outside_the_root_is_not_scanned(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, tempfile.TemporaryDirectory() as outside_dir:
+            root = Path(temp_dir)
+            command = self.make_repo(root)
+            outside = Path(outside_dir)
+            (outside / "notes.md").write_text("sd-old lived here.\n", encoding="utf-8")
+            (root / "linked-tree").symlink_to(outside, target_is_directory=True)
+            (root / "linked-file.md").symlink_to(outside / "notes.md")
+
+            report = self.lint(root, command, retirements=(self.retirement_fixture(),))
+
+            self.assertEqual(report.findings, ())
 
     def test_reasoned_historical_allowance_suppresses_match(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

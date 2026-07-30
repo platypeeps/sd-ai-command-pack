@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -79,6 +80,47 @@ class SurfaceClosureTests(unittest.TestCase):
         self.assertEqual(payload["status"], "clean")
         self.assertEqual(payload["findingCount"], 0)
         self.assertGreater(payload["graph"]["nodeCount"], 500)
+
+    def test_nested_ignored_checkout_leaves_the_closure_clean(self) -> None:
+        # Built from the registry so this file never carries the literal itself.
+        retired = next(
+            identifier
+            for retirement in registry.RETIRED_COMMAND_SURFACES
+            for identifier in retirement.identifiers
+        )
+        worktrees = PACK_ROOT / ".claude/worktrees"
+        nested = worktrees / "surface-closure-fixture"
+        if nested.exists():
+            self.skipTest(f"fixture path is already occupied: {nested}")
+        created_parent = not worktrees.exists()
+        (nested / "docs").mkdir(parents=True)
+        try:
+            (nested / ".git").write_text(
+                "gitdir: /elsewhere/.git/worktrees/surface-closure-fixture\n",
+                encoding="utf-8",
+            )
+            (nested / "docs/notes.md").write_text(
+                f"# notes\nRetired {retired} lived here.\n", encoding="utf-8"
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), "--json", "--base-ref", "HEAD"],
+                cwd=PACK_ROOT,
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=120,
+            )
+        finally:
+            shutil.rmtree(nested)
+            if created_parent:
+                worktrees.rmdir()
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "clean")
+        self.assertEqual(payload["findingCount"], 0)
 
     def test_manifest_schema_rejects_unknown_wrong_types_and_duplicates(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
