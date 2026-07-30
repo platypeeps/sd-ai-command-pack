@@ -324,17 +324,20 @@ Reviewed all 65 unarchived Trellis tasks for priority and applicability. Raised 
 
 ### Main Changes
 
-- Detailed change bullets were not supplied; see the summary above.
+- Raised three mispositioned task priorities in `.trellis/tasks/*/task.json` (PR #284, merge `e7cdb4fb`).
+- Archived `07-28-roll-out-stabilized-pack-release-to-fleet` to `archive/2026-07/` per maintainer direction (PR #285).
+- Left unselected review recommendations (demotes, PARKED markers, sequencing notes) unapplied by explicit choice.
 
 ### Git Commits
 
 | Hash | Message |
 |------|---------|
-| `ae79f89b` | (see git log) |
+| `ae79f89b` | chore(task): raise priorities for three mispositioned backlog tasks |
 
 ### Testing
 
-- Validation was not recorded for this session.
+- Diff inspection: PR #284 touched exactly three files, one `"priority"` line each; JSON re-read confirmed P1/P2/P1.
+- CI green on both heads after one macOS fixture-race rerun; Copilot reviews on #284 and #285 produced zero threads.
 
 ### Status
 
