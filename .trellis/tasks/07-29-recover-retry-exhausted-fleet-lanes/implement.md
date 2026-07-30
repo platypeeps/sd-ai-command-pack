@@ -17,11 +17,26 @@ decision is made and step 1 implements it rather than re-deciding it.
    key sets, per `design.md`. The `pack-blocker` arm keeps every existing rule
    including `fromStage == "merge"` and `toStage == "pr-publication"`; the
    `retry-exhausted` arm requires `fromStage in LANE_STAGES` and
-   `toStage == fromStage`. Extend `_normalize_state` (`:341`) to backfill
-   `kind: "pack-blocker"` on any recovery row lacking it, alongside the existing
-   `recoveries: []` backfill. Add `kind` to the record `recover_pack_blocker`
+   `toStage == fromStage`. Add `kind` to the record `recover_pack_blocker`
    constructs at `:1287-1299` — `:1300` is the only append site in the file.
-   Do not bump `SCHEMA_VERSION`.
+
+   Set `SCHEMA_VERSION = 2` (`:30`) and add a v1 migration arm to
+   `_normalize_state` (`:341`) that backfills `recoveries: []` when absent,
+   backfills `kind: "pack-blocker"` on every recovery row lacking it, and sets
+   `schemaVersion = 2`. This is the operator decision on `C-N-1`; the bump is
+   intended, not a stop condition. Two specifics:
+
+   - The existing backfill branch is gated on
+     `state.get("schemaVersion") == SCHEMA_VERSION`, which no longer matches a v1
+     state once the constant is `2`. The v1 arm must do the `recoveries` backfill
+     itself; do not assume the existing branch runs after it.
+   - The function shallow-copies with `dict(state)`. Copy the `recoveries` list
+     and each row before adding `kind`, or the caller's nested objects are
+     mutated in place.
+
+   Leave `:835` alone — it already writes `SCHEMA_VERSION`, so new campaigns
+   pick up `2` with no edit. Do not add a write-back migration path; migration is
+   load-time and persists through the existing atomic write at `:286`.
 
    Also make both idempotency lookups kind-aware. `recover_pack_blocker`'s
    lookup at `:1247-1254` filters only on `(consumer, fromActionId)` and then
@@ -38,6 +53,17 @@ decision is made and step 1 implements it rather than re-deciding it.
    `last_receipt["attempt"] == lane["attempt"]` precondition with its own
    message. Do not add an `issuedAction` precondition — `validate_lane`
    (`:539-543`) already makes that state unloadable.
+
+   Validate `--release` against `state["release"]`, following
+   `resolve_reconciliation` (`:1326-1327`) and the receipt path (`:1133-1134`).
+   Do **not** copy `recover_pack_blocker`'s release handling: it compares against
+   `actual_release`, the current pack manifest version (`:1236`), because a
+   corrective release is definitionally a *different* version. This transition has
+   no corrective release, and a manifest comparison here would make any campaign
+   unrecoverable the moment the installed pack moved past that campaign's target
+   — including the paused `v0-56-1-20260729T173059Z`, whose recovery is the reason
+   the task exists. Add a test pinning this: recovery succeeds with
+   `--release <campaign release>` while the pack manifest reports a later version.
 3. Implement the recovery cap as its own precondition with its own message:
    `MAX_EXHAUSTION_RECOVERIES = 2`, counting only records with
    `kind == "retry-exhausted"` matching `consumer` and the lane's stage,
@@ -109,6 +135,21 @@ decision is made and step 1 implements it rather than re-deciding it.
     `retry-exhausted` rather than granting a fourth attempt;
   - a second recovery of the same stage yields `attempt == 4`;
   - the third distinct exhaustion is refused by the cap.
+- Migration tests:
+  - a `schemaVersion: 1` state with no `recoveries` key loads, migrates, and
+    validates, and reports `schemaVersion: 2`;
+  - a `schemaVersion: 1` state whose recovery rows lack `kind` migrates with
+    every row tagged `pack-blocker`;
+  - `_normalize_state` does not mutate the input mapping or its nested recovery
+    rows;
+  - a read-only command (`validate`, `status`) against a v1 state file leaves the
+    file byte-for-byte unchanged on disk while reporting the migrated view;
+  - the first mutating command against a v1 state persists `schemaVersion: 2`;
+  - a `schemaVersion: 3` state is refused at `:615` with
+    `campaign schemaVersion must be 2`;
+  - a v2 state read by the pre-change validator is refused on the version check
+    — asserted as the documented one-way rollback boundary, not as a supported
+    path.
 - Record-compatibility tests:
   - a state file whose recovery rows predate `kind` loads, normalizes, and
     validates;
@@ -127,20 +168,32 @@ decision is made and step 1 implements it rather than re-deciding it.
 7. Merge through the normal exact-head lifecycle.
 8. Publish the corrective release and update the fleet manifest to that version.
 9. Return to `07-28-roll-out-stabilized-pack-release-to-fleet` and resolve
-   campaign `v0-56-1-20260729T173059Z` under that task's protocol: the campaign
-   targets `0.56.1`, so recovering it on a controller shipped in a later version
-   requires reading the released controller's own rules first. If the released
-   transition cannot act on a `0.56.1` campaign, consciously abandon that
-   campaign and replan on the corrective version, where `rwbp-coordinator` will
-   report `at-target` only if its work has by then been merged — otherwise it
-   re-enters as an ordinary lane from its existing branch.
+   campaign `v0-56-1-20260729T173059Z` under that task's protocol. Recovering it
+   on a later controller is expected to work, and the two reasons are independent:
+   its `schemaVersion: 1` migrates on load (step 1), and `--release 0.56.1`
+   matches `state["release"]` because the release precondition compares against
+   the campaign, not the pack manifest (step 2). Confirm both against the released
+   controller before acting rather than trusting this note.
+
+   Recovering it is also the act that commits it to schema `2`, one-way. If it
+   turns out not to be recoverable, abandon that campaign consciously and replan
+   on the corrective version, where `rwbp-coordinator` reports `at-target` only if
+   its work has by then been merged — otherwise it re-enters as an ordinary lane
+   from its existing branch.
 
 ## Stop conditions
 
-- The `kind` discriminator turns out to require a `SCHEMA_VERSION` bump after
-  all — stop and re-plan, because a bump changes campaign compatibility for
-  every existing campaign. The design's `_normalize_state` backfill is what
-  avoids the bump; if that backfill cannot be made to work, the condition fires.
+- The v1 migration arm cannot make an existing campaign load and validate at
+  version `2` — stop. The bump is only acceptable because migration is
+  automatic; a bump that requires operators to hand-edit state files is a
+  different, larger change.
+- Migration turns out to need a write-back pass or a lock upgrade to be correct,
+  rather than working purely load-time before `validate_state` — stop, because
+  that puts a migration inside the locking protocol.
 - Implementing the transition requires changing the retry gate at `:1097` after
   all — stop, because the design explicitly chose not to touch it.
 - Any test requires weakening an existing refusal to pass.
+
+The earlier stop condition on the `SCHEMA_VERSION` bump is retired. The bump is
+now the chosen path, decided by the operator on `C-N-1` and recorded in
+`design.md` "Rollback" and `research/planning-adversarial-review.md`.

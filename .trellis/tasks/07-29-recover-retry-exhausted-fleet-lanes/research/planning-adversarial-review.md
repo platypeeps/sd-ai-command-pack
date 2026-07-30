@@ -27,9 +27,12 @@ concern was adopted on the reviewer's assertion alone.
   `implement.md` step 1. Tagged union on a `kind` discriminator with two exact
   key sets; `_normalize_state` (`:341-345`) backfills `kind: "pack-blocker"` on
   pre-existing rows using the precedent it already sets for `recoveries: []`.
-  No `SCHEMA_VERSION` bump, so `implement.md`'s stop condition does not fire.
   The original design sentence claiming `recoveries` was already heterogeneous
   was wrong and has been removed.
+- Follow-on: this remediation's "no `SCHEMA_VERSION` bump" claim was itself
+  overturned. Round 2 raised `C-N-1`, showing the same-version record change is
+  irreversible, and the operator resolved it by bumping to `2` with a load-time
+  migration. See `C-N-1` below for the final compatibility position.
 
 ## C-2 — Recovery cap under-specified
 
@@ -128,8 +131,23 @@ defects. Host round 2 raised C-9 independently. All citations below were
 re-verified before acceptance.
 
 Per contract section 4, no third automatic round runs. C-7 repeated after
-remediation and C-N-1 is a genuine fork, so this stops before implementation
-approval.
+remediation and C-N-1 was a genuine fork, so the review stopped and escalated
+C-N-1 to the operator instead of deciding it.
+
+# Resolution, 2026-07-29
+
+The operator resolved `C-N-1` by choosing the `SCHEMA_VERSION` bump with
+migration. Implementing that decision surfaced two further host findings, `C-11`
+and `C-12`, both recorded below and both addressed.
+
+No `C-*` concern remains unresolved, so section 3's bar for implementation
+approval is met. Two caveats stand:
+
+- The `C-7` (round 2), `C-N-2`, `C-9`, `C-10`, `C-11`, and `C-12` remediations
+  have not been through any review lane. Section 4 forbids a third automatic
+  round, so they rest on host verification against source only.
+- Implementation approval is not `task.py start`. That still needs an explicit
+  per-task go-ahead from the operator.
 
 ## C-N-1 — Same-version record change is not reversible (round 2, Codex)
 
@@ -142,13 +160,29 @@ approval.
   campaign that used the transition fails, not merely the recovery path. The
   design's original rollback claim that the record "simply becomes inert" was
   false.
-- Disposition: **unresolved — needs operator judgment.** The false claim is
-  removed and `design.md` "Rollback" now states the fork: bump `SCHEMA_VERSION`
-  and migrate (clean rollback failure, but fires the declared stop condition and
-  changes compatibility for every existing campaign including the paused
-  `v0-56-1-20260729T173059Z`), or keep version 1 and document the one-way
-  constraint (paused campaign stays readable, rollback stops being real). A
-  separate top-level state key was considered and rejected: the old validator
+- Disposition: **addressed by operator decision, 2026-07-29.** Escalated under
+  contract section 4 with three options. The operator chose **bump
+  `SCHEMA_VERSION` to 2 and migrate**, on the grounds that a rollback then fails
+  on `campaign schemaVersion must be 1` — a version check naming the real cause —
+  instead of on an unknown-field error pointing at a recovery row, and that the
+  paused `v0-56-1-20260729T173059Z` stays recoverable rather than being discarded.
+  The rejected alternatives were keeping version 1 with a documented one-way
+  constraint, and bumping without migration and abandoning the paused campaign.
+
+  Recorded in `design.md` ("Recovery record", "Compatibility", "Rollback"),
+  `prd.md` (one requirement, two acceptance criteria), and `implement.md`
+  (step 1, migration test list, rewritten stop conditions). Migration is
+  load-time in `_normalize_state` before `validate_state` (`:258-259`), so no
+  operator action is needed and no write-back pass enters the locking protocol.
+  Migrating a campaign is one-way and `design.md` "Rollback" says so explicitly
+  instead of promising a clean revert.
+
+  The earlier stop condition in `implement.md` — "the `kind` discriminator turns
+  out to require a `SCHEMA_VERSION` bump after all" — is retired, because the bump
+  is now the chosen path rather than a surprise. It is replaced by two conditions
+  that fire if the *migration* cannot be made to work purely load-time.
+
+  A separate top-level state key was considered and rejected: an old validator
   rejects an unknown top-level key identically, so it carries the same rollback
   cost while splitting one invariant across two lists.
 
@@ -209,6 +243,42 @@ approval.
   but the failure mode is an uncaught exception in a recovery path.
 - Disposition: **addressed** in `implement.md` step 1 (both lookups filter on
   `kind`) with a regression test added to the record-compatibility list.
+
+## C-11 — Migration would be skipped by the existing backfill gate (host)
+
+- Severity: medium. Found while implementing the `C-N-1` decision, so it could
+  not exist in either review round.
+- Lane: host.
+- Evidence: verified at `:342`. The existing `recoveries: []` backfill is gated on
+  `state.get("schemaVersion") == SCHEMA_VERSION`. Once the constant is `2`, that
+  gate stops matching a `schemaVersion: 1` state, so a v1 state would receive
+  neither the `recoveries` backfill nor the `kind` tagging unless the new v1 arm
+  performs both itself. Separately, `_normalize_state` shallow-copies with
+  `dict(state)` (`:343`), so tagging rows in place would mutate the caller's
+  nested objects.
+- Disposition: **addressed** in `design.md` ("Recovery record") and
+  `implement.md` step 1, both of which now require the v1 arm to carry the
+  `recoveries` backfill and to copy the list and rows before tagging, plus a
+  no-input-mutation test in the migration list.
+
+## C-12 — Mirroring `recover_pack_blocker` would compare release to the manifest (host)
+
+- Severity: high. Would make the paused campaign unrecoverable.
+- Lane: host.
+- Evidence: verified. `implement.md` step 2 directs the new function to mirror
+  `recover_pack_blocker`'s structure, and that function validates its release
+  against `actual_release`, the current pack manifest version (`:1236`), because a
+  corrective release is definitionally a different version. This transition has no
+  corrective release. Copying that comparison would refuse recovery of any
+  campaign whose target is not the installed pack version — exactly the state of
+  `v0-56-1-20260729T173059Z`, which targets `0.56.1` while the manifest has moved
+  to `0.56.2`. The correct precedents are `resolve_reconciliation` (`:1326-1327`)
+  and the receipt path (`:1133-1134`), which both compare against
+  `state["release"]`.
+- Disposition: **addressed** in `implement.md` step 2, which now names the trap
+  and requires a test where recovery succeeds at the campaign release while the
+  manifest reports a later version. `design.md`'s transition contract already said
+  "validated against the campaign release" and needed no change.
 
 ## C-8 — Does the campaign actually leave `blocked`? (host, verified claim)
 

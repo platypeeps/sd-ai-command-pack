@@ -78,6 +78,11 @@ so parking is permanent in practice.
   its own documented handling.
 - Bound repeated use so a lane cannot be recovered indefinitely into an
   unbounded retry loop.
+- Carry the recovery-record shape change as an explicit schema version bump with
+  an automatic load-time migration, so an existing campaign keeps working without
+  operator intervention and a controller rollback fails on a version check that
+  names the real cause. Migrating a campaign is one-way and must be documented as
+  such; no downgrade path is in scope.
 - Update the shipped skill and its recovery reference to document the new
   transition and to correct the "leave the lane parked" text, which currently
   describes a permanent stop.
@@ -121,6 +126,12 @@ so parking is permanent in practice.
       `lane["receipts"]` is not written at all, and the recovery is recorded as
       its own row in `state["recoveries"]`.
 - [ ] `controller validate` reports `valid` before and after the transition.
+- [ ] A campaign state file written at the previous schema version loads,
+      migrates, and validates with no operator action, and a read-only command
+      against it leaves the file unchanged on disk.
+- [ ] A state file at the new schema version is refused by the previous
+      controller on the schema version check, and the one-way nature of migration
+      is documented rather than implied.
 - [ ] Focused tests cover the accepted path, each refusal path, and the receipt
       preservation guarantee.
 - [ ] `sd-fleet-refresh` SKILL.md and `references/controller-recovery.md` are

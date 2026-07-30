@@ -133,8 +133,9 @@ key, and `:586-587` hard-requires `fromStage == "merge"`. `validate_state`
 `fromStage: "local-checks"`, is rejected outright, which would break the
 "`validate` reports `valid` before and after" acceptance criterion.
 
-**Decision: tagged union on a `kind` discriminator, with no schema version
-bump.**
+**Decision: tagged union on a `kind` discriminator, with `SCHEMA_VERSION` bumped
+to `2` and a load-time migration.** The version bump is an operator decision on
+`C-N-1`, recorded in `research/planning-adversarial-review.md`.
 
 `validate_recovery` becomes a dispatch on `kind`:
 
@@ -155,13 +156,35 @@ fields. The retry-exhausted arm carries no `correctiveRelease`, `fromHead`, or
 `fromPrNumber` because no corrective release, PR, or head is involved.
 
 Records persisted before this change have no `kind`, and `_strict_fields` would
-reject them as missing it. `_normalize_state` (`:341-345`) already establishes
-the fix: it backfills `recoveries: []` for states written at the *current*
-`SCHEMA_VERSION` before validation runs. The same function backfills
-`kind: "pack-blocker"` on any recovery row lacking it — correct by
-construction, since pack-blocker recovery is the only kind that could have
-written a row before now. No schema version bump is required, so
-`implement.md`'s stop condition on that point does not fire.
+reject them as missing it. `_normalize_state` (`:341-345`) is where the fix goes,
+because it already runs before validation (`:258-259`) and already establishes
+the precedent of backfilling `recoveries: []`. It gains a v1 migration arm:
+
+```
+schemaVersion == 1:
+  backfill recoveries: []            when absent
+  backfill kind: "pack-blocker"      on every recovery row lacking it
+  set schemaVersion = 2
+```
+
+Backfilling `kind: "pack-blocker"` is correct by construction, since pack-blocker
+recovery is the only kind that could have written a row before now.
+
+Two mechanics matter here and are easy to get wrong:
+
+- The **existing** backfill at `:342` is gated on
+  `state.get("schemaVersion") == SCHEMA_VERSION`. Once `SCHEMA_VERSION` is `2`
+  that gate stops matching a v1 state, so the v1 arm must carry the `recoveries`
+  backfill itself rather than relying on the existing branch to run afterwards.
+- `_normalize_state` currently shallow-copies with `dict(state)`. Adding `kind`
+  to rows means copying the `recoveries` list and each row it touches, or the
+  function mutates the caller's nested objects in place.
+
+Migration is load-time and in-memory. A read-only command (`status`, `validate`)
+normalizes a v1 campaign to v2 and reports on it without writing; the migrated
+`schemaVersion: 2` persists only when a mutating command reaches the atomic
+write at `:286`. That is the behavior that keeps the paused
+`v0-56-1-20260729T173059Z` inspectable before anyone commits to migrating it.
 
 The `(consumer, fromActionId)` global uniqueness rule at `:717` is unchanged and
 applies across both kinds. Action IDs derive from campaign, release, consumer,
@@ -204,10 +227,12 @@ campaign's audit trail honest about the fact that the stage did fail twice.
   value, or stage list changes.
 - `validate_recovery` gains a `kind` dispatch and the pack-blocker arm gains one
   required key. Forward compatibility holds: the pack-blocker arm keeps every
-  rule it has today, and `_normalize_state` supplies `kind` for rows written
-  before the change, so a new controller reads every existing campaign.
-- Backward compatibility does **not** hold, and whether to bump
-  `SCHEMA_VERSION` is an open decision — see "Rollback" below.
+  rule it has today, and the `_normalize_state` v1 arm supplies `kind` for rows
+  written before the change, so a new controller reads every existing campaign.
+- `SCHEMA_VERSION` moves from `1` to `2`. New campaigns are written at `2`
+  (`:835`). Existing v1 campaigns migrate on load and are rewritten at `2` by
+  the first mutating command.
+- Backward compatibility does **not** hold, by decision — see "Rollback" below.
 - Campaigns created before this change recover normally, since the transition
   reads only fields that already exist on the lane.
 
@@ -233,32 +258,36 @@ the `:1406` change would leave the repository internally contradictory.
 
 ## Rollback
 
-**This section carries an unresolved decision. See `C-N-1` in
-`research/planning-adversarial-review.md`. Implementation is blocked on it.**
+An earlier draft claimed a rolled-back controller would find the new record
+"simply inert". That was false. `_normalize_state` gives *one-way* compatibility
+only: a new controller reads old rows because normalization runs before
+validation (`:258-259`), but nothing makes an old validator accept a row carrying
+`kind`. `_strict_fields` (`:331-338`) rejects unknown keys, so a rollback breaks
+**every** `load()` of a campaign that used this transition, not just the recovery
+path.
 
-The earlier claim here — that a rolled-back controller would find the new record
-"simply inert" — is false and has been removed. `_normalize_state` gives
-*one-way* compatibility only: a new controller reads old rows because
-normalization runs before validation (`:257-259`), but nothing makes the old
-schema-1 validator accept a row carrying `kind`. `_strict_fields` (`:331-338`)
-rejects unknown keys, so after a rollback **every** `load()` of a campaign that
-used this transition fails, not just the recovery path.
+**Migrating a campaign to schema 2 is therefore one-way. Rolling the controller
+back does not roll a migrated campaign back.** The bump makes that fact legible
+rather than avoidable.
 
-`SCHEMA_VERSION` is `1` (`:30`). Storing a new row shape at the same version is
-an irreversible same-version evolution. Two honest options, and they differ in
-what the corrective release means for the eight-lane campaign currently paused:
+Rollback of the code is a plain revert. Its effect depends on campaign state:
 
-- **Bump `SCHEMA_VERSION` and migrate.** Rollback fails cleanly and legibly on a
-  version check instead of on a confusing unknown-field error. Cost: it changes
-  campaign compatibility for every existing campaign, which is precisely the
-  declared stop condition in `implement.md` — including
-  `v0-56-1-20260729T173059Z`, whose recovery is the reason this task exists.
-- **Keep version 1 and state the one-way constraint.** No migration and the
-  paused campaign stays readable, but rollback is no longer a real option for
-  any campaign that has used the transition, and this section must say so
-  instead of promising a clean revert.
+- A campaign never loaded by the new controller is untouched and still at
+  version `1`. The reverted controller reads it normally.
+- A campaign migrated and then written by the new controller is at version `2`.
+  The reverted controller refuses it at `:615` with
+  `campaign schemaVersion must be 1` — a precise, actionable error naming the
+  real cause. This is the reason the bump was chosen over keeping version `1`,
+  where the same revert would instead produce an unknown-field error from
+  `_strict_fields` that points at a recovery row rather than at the version skew.
+- There is no downgrade path. A campaign that must survive a controller rollback
+  has to be recreated on the reverted version, or the rollback deferred.
 
-A third shape — a separate top-level state key instead of a tagged union — does
-not avoid the problem. The old validator would reject the unknown top-level key
-the same way, so its rollback cost is identical while it also splits one
-invariant across two lists.
+The paused `v0-56-1-20260729T173059Z` is readable but not yet migrated, because
+migration only persists on a mutating command. Recovering it on the corrective
+release is the act that commits it to version `2`. That is a deliberate,
+operator-visible step, not a side effect of inspecting it.
+
+A third shape — a separate top-level state key instead of a tagged union — was
+rejected. An old validator rejects an unknown top-level key identically, so its
+rollback cost is the same while it also splits one invariant across two lists.
