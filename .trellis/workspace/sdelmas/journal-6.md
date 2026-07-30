@@ -310,3 +310,36 @@ Merged PR #281 (v0.56.5 scope advisory fix) through sd-housekeeping after recove
 ### Next Steps
 
 - None - task complete
+
+
+## Session 258: Backlog grooming: priority raises and fleet rollout archive
+
+**Date**: 2026-07-30
+**Task**: Backlog grooming: priority raises and fleet rollout archive
+**Branch**: `chore/archive-fleet-rollout-task`
+
+### Summary
+
+Reviewed all 65 unarchived Trellis tasks for priority and applicability. Raised 07-29-scope-final-bundle-validator-to-delta to P1 (three hand-merges bypassed the receipt gate), 07-28-consolidate-ci-fast-lane-trust-stack to P2 (owns the A-038 branch-protection bypass), and 07-24-simplify-review-shipping-composition to P1 (blocked a P1, priority inversion) — merged as PR #284 (e7cdb4fb). Archived 07-28-roll-out-stabilized-pack-release-to-fleet per maintainer direction: fleet rollouts are decided on demand, not tracked as standing work (PR #285). Diagnosed the macOS unittest failure on PR #284 as a shared-fixture shutil copy race in test_housekeeping_auto_merges_green_comment_clean_pr_then_cleans_up; rerun passed.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ae79f89b` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 257
+- **Total Sessions**: 258
 - **Last Active**: 2026-07-30
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~302 | Active |
+| `journal-6.md` | ~345 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 258 | 2026-07-30 | Backlog grooming: priority raises and fleet rollout archive | `ae79f89b` | `chore/archive-fleet-rollout-task` |
 | 257 | 2026-07-30 | Close out v0.56.5 delivery and archive the Trellis instability analysis | `d15f0eb6` | `chore/archive-analyze-trellis-instability` |
 | 256 | 2026-07-30 | Silence the scope advisory once the PR body satisfies it | `4937be42`, `dc92d8b5`, `55759506`, `d7ee985c`, `1f9ccedc` | `fix/silence-satisfied-scope-advisory` |
 | 255 | 2026-07-30 | Resolve the branch-field deadlock between the finalization gates | `ae832216`, `d85e48ed`, `02921b58`, `f9543da3`, `9425eb18`, `07952aee` | `fix/resolve-branch-field-finalization-deadlock` |
