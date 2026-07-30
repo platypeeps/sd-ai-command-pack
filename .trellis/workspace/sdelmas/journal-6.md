@@ -269,3 +269,34 @@ Advisory mode of the tooling/generated PR-body scope check warned on every branc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 257: Close out v0.56.5 delivery and archive the Trellis instability analysis
+
+**Date**: 2026-07-30
+**Task**: Close out v0.56.5 delivery and archive the Trellis instability analysis
+**Branch**: `chore/archive-analyze-trellis-instability`
+
+### Summary
+
+Merged PR #281 (v0.56.5 scope advisory fix) through sd-housekeeping after recovering the finish-work receipt that was generated out of order. Cleaned two stray Claude worktrees and their branches, which had been contaminating the shipped-surface closure walk; PR #282 landed the durable fix so the walk now skips git-ignored paths. Archived 07-28-analyze-recurring-trellis-workflow-instability, whose six acceptance criteria were long satisfied but whose task.json still read status planning, orphaning its one remaining in-progress child by design.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
