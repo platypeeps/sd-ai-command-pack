@@ -14,10 +14,10 @@ Stop the bookkeeping fast lane from deciding CI scope by executing classifier co
 
 ## Acceptance Criteria
 
-- [ ] A test or CI rehearsal demonstrates that a PR whose first push modifies `bookkeeping_ci_scope.py` and whose second push carries payload changes selects `mode: full`.
+- [x] A test or CI rehearsal demonstrates that a PR whose first push modifies `bookkeeping_ci_scope.py` and whose second push carries payload changes selects `mode: full`. **Met 2026-07-29 by live rehearsal**, PR #278, run `30515960389`, job `90785786135`: `mode: full`, `reason: prior_classifier_not_base_identical` on a `synchronize` event whose `BEFORE_SHA` was the tamper commit and whose increment was bookkeeping-eligible. Full record in `implement.md` step 8. The complementary negative control is in step 10 — a base-identical prior classifier still reaches `mode: bookkeeping` — so the guard discriminates rather than always selecting `full`.
 - ~~The `evidenceRunId` path rejects a fabricated run ID.~~ Moved with requirement 3 to `07-29-resolve-evidence-run-id-through-api`.
-- [ ] "CI Result" reports failure (not success) for the skipped-lane shape above.
-- [ ] `make check` passes.
+- [x] "CI Result" reports failure (not success) for the skipped-lane shape above. **Met on the existing assertion, not a staged live run** — `tests/test_bookkeeping_ci_scope.py:508` already asserts exit 1 for `("pull_request", "success", "full", "skipped", ...)`, which is this shape exactly. Note the literal wording describes a state the fixed workflow can no longer reach: an identity failure selects `full`, and the heavy lanes then run. Reasoning recorded in `implement.md` steps 9 and 12; no change to `check-ci-result.sh` was needed or made.
+- [x] `make check` passes. Exit 0 on the final head; re-run after each task-record edit, preceded by `make sync` per `CONTRIBUTING.md:108-111`, which regenerated nothing on every run.
 
 ## Notes
 
