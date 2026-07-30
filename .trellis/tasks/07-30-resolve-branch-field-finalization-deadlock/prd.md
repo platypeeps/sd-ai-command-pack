@@ -120,22 +120,46 @@ The pack-side surface is the validator and the two skills.
 
 ## Acceptance Criteria
 
-- [ ] A completion bundle whose archive move changes `branch` from `null` to a
+- [x] A completion bundle whose archive move changes `branch` from `null` to a
       non-empty string, and is otherwise a pure move, reaches `status: valid`
       with `completion_bundle_valid`, asserted by a regression test that fails
       against the current validator.
-- [ ] An archive move that changes any other field — or that rewrites a
+      Evidence: `test_completion_bundle_allows_branch_recorded_during_archive`
+      failed against the unmodified validator with
+      `completion_archive_identity_changed`, and passes after the fix.
+- [x] An archive move that changes any other field — or that rewrites a
       non-null `branch` to a different non-null value, if `design.md` chose the
       asymmetric rule — still fails with
       `completion_archive_identity_changed`, asserted by a regression test.
-- [ ] A task whose `branch` is null at the moment `sd-finish-work` runs reaches
+      Evidence: four guard tests — rewrite, erasure, unrelated `title` change,
+      and addition to a record whose `branch` key is absent — all reject, both
+      before and after the fix.
+- [x] A task whose `branch` is null at the moment `sd-finish-work` runs reaches
       a valid receipt without a hand-authored correction commit against an
       archived artifact. State in the test or the skill which of the two
       resolutions above delivers this.
-- [ ] `branch: null` still validates as an archived state.
-- [ ] `templates/` and the root mirror remain byte-identical after `make sync`
+      Evidence: the **skill** delivers it. `sd-finish-work` step 4 now records
+      the branch before capturing the finalization base, so the pre-archive
+      gate is never reached with a null branch. Note the limit honestly: this
+      task's own branch was recorded by hand at planning time, before the
+      instruction existed, so its finalization run demonstrates the outcome
+      rather than the instruction's automation. The first task to exercise the
+      instruction end to end will be the next one finalized.
+- [x] `branch: null` still validates as an archived state.
+      Evidence: `test_completion_bundle_allows_null_branch_through_archive`
+      passes; `:2545` is unchanged.
+- [x] `templates/` and the root mirror remain byte-identical after `make sync`
       for every file touched.
+      Evidence: `diff -q` is silent for both pairs —
+      `sd-ai-command-pack-review-preflight.mjs` and
+      `sd-finish-work/SKILL.md`.
 - [ ] `make check` passes.
+      Blocked on exactly one finding, by design: `provenance.candidate-stale`
+      on `docs/fleet/candidate-validation.json`, which still pins pack `0.56.3`
+      and the pre-change payload digest. Both edited files are shipped payload,
+      so this change carries the `0.56.4` bump and its CHANGELOG entry; the
+      ledger is refreshed by `make release-prep` immediately before the PR
+      push. Everything else in `make check` is green.
 
 ## Notes
 
