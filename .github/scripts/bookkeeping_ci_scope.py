@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Classify whether an exact CI head is a verified bookkeeping successor."""
 
+# REHEARSAL ARTIFACT -- A-038 AC1. This comment exists only to make this file's
+# blob differ from the base branch's, which is the condition the identity guard
+# in .github/workflows/tests.yml tests. Delete this branch after the rehearsal.
+
 from __future__ import annotations
 
 import argparse
