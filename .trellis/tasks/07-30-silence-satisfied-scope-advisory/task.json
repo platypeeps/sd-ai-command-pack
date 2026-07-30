@@ -3,7 +3,7 @@
   "name": "silence-satisfied-scope-advisory",
   "title": "Silence the scope advisory once the PR body already satisfies it",
   "description": "The review-scope advisory mode returns before check_pr_body_scope resolves a PR body, so it warns on every tooling/generated branch regardless of whether the PR body already carries the required scope section.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
