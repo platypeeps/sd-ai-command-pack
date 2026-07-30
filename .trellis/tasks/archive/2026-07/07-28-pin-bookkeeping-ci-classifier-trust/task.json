@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-07-28",
   "completedAt": "2026-07-30",
-  "branch": "fix/pin-bookkeeping-ci-classifier-trust",
+  "branch": null,
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
