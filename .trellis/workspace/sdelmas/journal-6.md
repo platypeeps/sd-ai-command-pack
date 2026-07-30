@@ -310,3 +310,39 @@ Merged PR #281 (v0.56.5 scope advisory fix) through sd-housekeeping after recove
 ### Next Steps
 
 - None - task complete
+
+
+## Session 258: Backlog grooming: priority raises and fleet rollout archive
+
+**Date**: 2026-07-30
+**Task**: Backlog grooming: priority raises and fleet rollout archive
+**Branch**: `chore/archive-fleet-rollout-task`
+
+### Summary
+
+Reviewed all 65 unarchived Trellis tasks for priority and applicability. Raised 07-29-scope-final-bundle-validator-to-delta to P1 (three hand-merges bypassed the receipt gate), 07-28-consolidate-ci-fast-lane-trust-stack to P2 (owns the A-038 branch-protection bypass), and 07-24-simplify-review-shipping-composition to P1 (blocked a P1, priority inversion) — merged as PR #284 (e7cdb4fb). Archived 07-28-roll-out-stabilized-pack-release-to-fleet per maintainer direction: fleet rollouts are decided on demand, not tracked as standing work (PR #285). Diagnosed the macOS unittest failure on PR #284 as a shared-fixture shutil copy race in test_housekeeping_auto_merges_green_comment_clean_pr_then_cleans_up; rerun passed.
+
+### Main Changes
+
+- Raised three mispositioned task priorities in `.trellis/tasks/*/task.json` (PR #284, merge `e7cdb4fb`).
+- Archived `07-28-roll-out-stabilized-pack-release-to-fleet` to `archive/2026-07/` per maintainer direction (PR #285).
+- Left unselected review recommendations (demotes, PARKED markers, sequencing notes) unapplied by explicit choice.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ae79f89b` | chore(task): raise priorities for three mispositioned backlog tasks |
+
+### Testing
+
+- Diff inspection: PR #284 touched exactly three files, one `"priority"` line each; JSON re-read confirmed P1/P2/P1.
+- CI green on both heads after one macOS fixture-race rerun; Copilot reviews on #284 and #285 produced zero threads.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
