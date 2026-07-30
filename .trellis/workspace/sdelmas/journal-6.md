@@ -90,3 +90,50 @@ task.py create seeds implement.jsonl/check.jsonl with a generated _example row, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 253: Add a fleet-controller recovery transition for retry-exhausted lanes
+
+**Date**: 2026-07-29
+**Task**: Add a fleet-controller recovery transition for retry-exhausted lanes
+**Branch**: `chore/record-retry-exhausted-recovery-planning`
+
+### Summary
+
+Gave the fleet controller an explicit, evidence-gated recovery transition for terminal retry-exhausted lanes, bumped the campaign state schema to 2 with an automatic load-time migration, and published the change as release 0.56.3.
+
+### Main Changes
+
+- resume --recover-exhausted-consumer NAME --exhausted-action ID --release VERSION grants one operator-authorized attempt at the stage that exhausted, bounded to two recoveries per consumer and stage, validated against the campaign's own target release rather than the current manifest version.
+- Campaign state schema bumped to version 2 with a read-only load-time migration: absent 'recoveries' becomes an empty list and untagged rows gain kind 'pack-blocker'. Recovery rows are now a tagged union on 'kind', validated per arm, and both idempotency lookups filter on kind so a pack-blocker recovery can never dereference an exhaustion row.
+- Corrected the permanent-park wording in the shipped sd-fleet-refresh skill and its controller-recovery reference, regenerated the .agents and .claude mirrors, and made the repository's own controller contract kind-aware in two places.
+- Released 0.56.3: the release payload gate defines shipped payload as all of templates/**, so the source-only skill edits required a same-PR manifest bump, CHANGELOG entry, regenerated version-bearing surfaces, and a refreshed exact-payload candidate ledger.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c96df89b` | docs(task): record retry-exhausted lane recovery planning |
+| `33df6776` | docs(task): resolve C-N-1 with a schema bump and load-time migration |
+| `92b2af3d` | docs(task): abandon paused campaign and start recovery task |
+| `212a38d9` | feat(fleet): recover retry-exhausted lanes through the controller |
+| `4da788c1` | docs(task): mark C-N-1 addressed in the review ledger |
+| `50693f5f` | chore(release): prepare 0.56.3 |
+| `77a8cb68` | test(fleet): select the exhausted lane and action by consumer |
+| `08f3e407` | docs(task): record that the version bump rides in the merge PR |
+
+### Testing
+
+- [OK] tests.test_fleet_controller: Ran 44 tests, OK
+- [OK] PR #277 CI on 08f3e407: 8 checks pass, 2 skipping, Release payload gate pass
+- [OK] full-fleet candidate validation at 0.56.3: all 8 consumers passed
+- [NOTE] local make check reports 2 of 1367 failures, both caused by the untracked stale worktree .claude/worktrees/quizzical-newton-ac691f; both linters run clean on a worktree-free snapshot and CI is unaffected
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
