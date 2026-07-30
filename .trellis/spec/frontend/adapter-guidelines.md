@@ -1844,6 +1844,11 @@ around the delegated lifecycle.
 - Assert post-archive recovery remains an automatic `completion` subtype,
   hands one private receipt through review/ship/housekeeping, and contains no
   compatibility head-attestation option.
+- Assert both shipped copies of the finish-work skill place the branch
+  preparation before the finalization base capture, by index rather than by
+  presence, so moving it below the capture fails. Assert the same copies keep
+  the detached-HEAD/`base_branch` stop, the skipped planning and successor
+  paths, and the refusal to repair a failed gate by mutating the task.
 
 ### 7. Wrong vs Correct
 
