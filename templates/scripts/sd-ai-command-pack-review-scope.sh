@@ -177,9 +177,10 @@ github_pr_body_mentions_scope() {
 #
 # It must never exit. `fail` calls `exit 1` and the script runs under `set -e`,
 # so every subprocess here is guarded and neither `fail` nor `warn` is called.
-# Callers still capture with `|| true` and treat an empty result as
-# `unknown:resolver_error`, so a future edit that breaks that rule degrades to a
-# named state instead of an unexplained abort.
+# Callers reach it only through `resolve_pr_body_scope_state_or_unknown`, which
+# captures with `|| true` and rewrites an empty result to `unknown:resolver_error`,
+# so a future edit that breaks either rule degrades to a named state instead of an
+# unexplained abort.
 resolve_pr_body_scope_state() {
   # A supplied body that already satisfies the check is positive evidence, and
   # positive evidence outranks every reason to give up below — including a
@@ -238,6 +239,22 @@ resolve_pr_body_scope_state() {
   fi
 }
 
+# The only supported way to call the resolver. It is contracted to print a token
+# and never exit, but a future edit could break either half, and an empty capture
+# would then reach a caller's default arm as an unexplained state. Normalizing in
+# one place keeps both callers on the named token the contract promises, and
+# keeps them from drifting apart.
+resolve_pr_body_scope_state_or_unknown() {
+  local state
+  state="$(resolve_pr_body_scope_state || true)"
+
+  if [ -z "$state" ]; then
+    state='unknown:resolver_error'
+  fi
+
+  printf '%s\n' "$state"
+}
+
 check_pr_body_scope() {
   local scoped_count="$1"
 
@@ -246,7 +263,7 @@ check_pr_body_scope() {
   fi
 
   local state
-  state="$(resolve_pr_body_scope_state || true)"
+  state="$(resolve_pr_body_scope_state_or_unknown)"
 
   case "$state" in
     satisfied)
@@ -284,6 +301,11 @@ check_pr_body_scope() {
       ;;
     unknown:parse_error)
       fail "tooling/generated scope check could not parse the PR body returned by gh"
+      ;;
+    unknown:resolver_error)
+      # Only reachable if the resolver stops printing a token. Named separately
+      # from `*)` so the failure says which half of the contract broke.
+      fail "tooling/generated scope check resolver returned no PR body state"
       ;;
     *)
       fail "tooling/generated scope check could not determine the PR body state"
@@ -358,7 +380,7 @@ main() {
     # enforcing-mode concept, and a fatal advisory would break the contract with
     # the review preflight, which treats this script as non-fatal.
     local advisory_state
-    advisory_state="$(resolve_pr_body_scope_state || true)"
+    advisory_state="$(resolve_pr_body_scope_state_or_unknown)"
 
     # Silence is the whole point: a body that already carries the section has
     # nothing left to remind anyone about.
