@@ -1873,10 +1873,13 @@ of bypassing the cache contract.
   way the enforcing check does — `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` first, then
   `gh pr view` — and warn only when that body does not already name the required
   scope section, or when no body can be resolved. A body that already satisfies
-  the requirement produces no output. The advisory never fails, and it resolves
-  nothing on a branch with no tooling/generated change, so `gh` is not contacted
-  there; it is also skipped whenever `SD_AI_COMMAND_PACK_SCOPE_CHECK_GH` is
-  disabled, in which case an unresolvable body still warns. The shared review
+  the requirement emits no advisory warning and no
+  `sd-ai-command-pack-scope-advisory:` marker; the classifier's own `info:` lines
+  listing the scope categories and changed files are unaffected and still print.
+  The advisory never fails, and it resolves nothing on a branch with no
+  tooling/generated change, so `gh` is not contacted there; it is also skipped
+  whenever `SD_AI_COMMAND_PACK_SCOPE_CHECK_GH` is disabled, in which case an
+  unresolvable body still warns. The shared review
   preflight (`sd-ai-command-pack-review-preflight.mjs`, which the local pre-PR
   gate runs) invokes this automatically, so the reminder to add a
   `Tooling/generated scope:` section still arrives before the PR exists — while
