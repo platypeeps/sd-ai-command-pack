@@ -1869,12 +1869,21 @@ of bypassing the cache contract.
 - `SD_AI_COMMAND_PACK_SCOPE_CHECK=0`: skip tooling/generated file scope checks
   (`off`/`disabled` also work, and disable the early advisory below too).
 - `SD_AI_COMMAND_PACK_SCOPE_CHECK=advisory`: classify the working/branch diff
-  and, when a tooling/generated file is present, warn naming the required PR
-  scope section without contacting `gh` or a PR. The shared review preflight
-  (`sd-ai-command-pack-review-preflight.mjs`, which the local pre-PR gate runs)
-  invokes this automatically, so the reminder to add a
-  `Tooling/generated scope:` section arrives before the PR exists — while the
-  full-check hard-fail with a PR present is unchanged.
+  and, when a tooling/generated file is present, resolve the PR body the same
+  way the enforcing check does — `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` first, then
+  `gh pr view` — and warn only when that body does not already name the required
+  scope section, or when no body can be resolved. A body that already satisfies
+  the requirement emits no advisory warning and no
+  `sd-ai-command-pack-scope-advisory:` marker; the classifier's own `info:` lines
+  listing the scope categories and changed files are unaffected and still print.
+  The advisory never fails, and it resolves nothing on a branch with no
+  tooling/generated change, so `gh` is not contacted there; it is also skipped
+  whenever `SD_AI_COMMAND_PACK_SCOPE_CHECK_GH` is disabled, in which case an
+  unresolvable body still warns. The shared review
+  preflight (`sd-ai-command-pack-review-preflight.mjs`, which the local pre-PR
+  gate runs) invokes this automatically, so the reminder to add a
+  `Tooling/generated scope:` section still arrives before the PR exists — while
+  the full-check hard-fail with a PR present is unchanged.
 - `SD_AI_COMMAND_PACK_TARGETS_FILE`: explicit installed-targets file for the
   review-scope check. Defaults to `.sd-ai-command-pack/installed-targets.txt`.
 - `SD_AI_COMMAND_PACK_SCOPE_CHECK_GH=required`: fail when `gh` cannot resolve the

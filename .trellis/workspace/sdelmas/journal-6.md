@@ -232,3 +232,40 @@ A completion-ready task whose task.json branch is null had no sanctioned exit fr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 256: Silence the scope advisory once the PR body satisfies it
+
+**Date**: 2026-07-30
+**Task**: Silence the scope advisory once the PR body satisfies it
+**Branch**: `fix/silence-satisfied-scope-advisory`
+
+### Summary
+
+Advisory mode of the tooling/generated PR-body scope check warned on every branch touching a tooling/generated file, returning before the PR body was ever consulted, so a correct PR body could not clear it. Split PR-body resolution into a state-token resolver, mapped enforcing mode over the tokens without behavior change, and gave advisory mode a three-way branch that is silent on a satisfying body. Bounded the preflight's advisory subprocess with a 10s timeout. Copilot review across three rounds surfaced two real defects, both fixed: the documented unknown:resolver_error token was never produced or mapped, and the docs claimed a satisfying body produces no output when the classifier still prints its info lines. Shipped as 0.56.5.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4937be42` | (see git log) |
+| `dc92d8b5` | (see git log) |
+| `55759506` | (see git log) |
+| `d7ee985c` | (see git log) |
+| `1f9ccedc` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

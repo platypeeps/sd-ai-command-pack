@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.56.5 - 2026-07-30
+
+- Silence the pre-PR tooling/generated scope advisory once the PR body already
+  carries the required section. Advisory mode previously warned on every branch
+  that touched a tooling/generated file and returned before the PR body was ever
+  consulted, so a correctly written PR body could not stop the warning and every
+  local `make check` on such a branch reported one warning that no action could
+  clear. Advisory mode now resolves the body through the same path the enforcing
+  check uses — `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` first, then `gh pr view` — and
+  warns only when the resolved body lacks the section or when no body can be
+  resolved. The pre-PR reminder is unchanged when no PR exists yet, the advisory
+  still never fails, and it resolves nothing on a branch with no
+  tooling/generated change, so no `gh` call is added to the common case. The
+  enforcing full-check path is unchanged except that a PR body parser that
+  crashes is now a named failure instead of an unlabeled abort, and a resolver
+  that returns no state at all is reported as such rather than as an
+  indeterminate one.
+
 ## 0.56.4 - 2026-07-30
 
 - Resolve a deadlock between two finalization gates over `task.json`'s `branch`

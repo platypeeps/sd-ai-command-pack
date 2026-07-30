@@ -3464,10 +3464,12 @@ function checkDiffSize() {
 }
 
 function checkScopeAdvisory() {
-  // Author-time soft signal: shell out to the pack's scope classifier in
-  // advisory mode so the required PR-body scope section is named before any
-  // PR exists. All file-classification and heading policy lives in the bash
-  // script; this only surfaces its warning and never fails the preflight.
+  // Soft signal: shell out to the pack's scope classifier in advisory mode so
+  // the required PR-body scope section is named while it can still be added.
+  // The script resolves the PR body when it can, so this stays silent once the
+  // body already carries the section and still fires before a PR exists. All
+  // file-classification and heading policy lives in the bash script; this only
+  // surfaces its warning and never fails the preflight.
   const ambient = process.env.SD_AI_COMMAND_PACK_SCOPE_CHECK;
   if (ambient && /^(0|false|FALSE|no|NO|skip|none|off|OFF|disabled|DISABLED)$/.test(ambient)) {
     return;
@@ -3480,10 +3482,16 @@ function checkScopeAdvisory() {
     cwd: rootDir,
     encoding: 'utf8',
     maxBuffer: GIT_MAX_BUFFER_BYTES,
+    // The script may call `gh pr view`, and this whole path is synchronous down
+    // to `make check`. Non-fatal is not enough on its own: without a bound, a
+    // stalled gh would stall the gate no matter how its exit status is treated.
+    timeout: 10_000,
+    killSignal: 'SIGKILL',
     env: { ...process.env, SD_AI_COMMAND_PACK_SCOPE_CHECK: 'advisory' },
   });
   if (result.error) {
-    // Advisory only: a missing bash or spawn failure must not fail the gate.
+    // Advisory only: a missing bash, a spawn failure, or an expired timeout
+    // must not fail the gate. Node sets result.error on timeout expiry.
     return;
   }
   const output = `${result.stdout || ''}${result.stderr || ''}`;

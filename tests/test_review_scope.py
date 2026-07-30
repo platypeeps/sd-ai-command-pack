@@ -29,6 +29,11 @@ SECRET_MARKER_PATTERNS = _support.SECRET_MARKER_PATTERNS
 InstallTestCase = _support.InstallTestCase
 
 
+def _sh_single_quote(value: str) -> str:
+    """Quote a value for a POSIX shell single-quoted context."""
+    return "'" + str(value).replace("'", "'\\''") + "'"
+
+
 class ReviewScopeTests(InstallTestCase):
     """Tests for PR-body scope, Prism/Gito config, and PR review skill behavior."""
 
@@ -198,21 +203,279 @@ class ReviewScopeTests(InstallTestCase):
         result = subprocess.run(
             ["bash", "scripts/sd-ai-command-pack-review-scope.sh"],
             cwd=root,
-            env={**os.environ, "SD_AI_COMMAND_PACK_SCOPE_CHECK": "advisory"},
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK": "advisory",
+                # Pinned so the advisory resolves to unknown:gh_disabled instead
+                # of shelling out to the developer's real gh from a temp repo.
+                # Both unknown states emit this same pre-PR wording.
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK_GH": "0",
+            },
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=False,
         )
 
-        # Advisory mode never fails and never needs a PR/gh; it just names the
-        # section the eventual PR body must carry.
+        # Advisory mode never fails; with no evidence about a PR body it names
+        # the section the eventual PR body must carry.
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("the PR body must include", result.stdout)
         self.assertIn("Tooling/generated scope:", result.stdout)
         # Stable machine marker consumed by the preflight; pinned so it cannot
         # drift out from under the mjs matcher.
         self.assertIn("sd-ai-command-pack-scope-advisory:", result.stdout)
+
+    def write_gh_pr_body_stub(self, root: Path, body: str) -> Path:
+        """Install a `gh` stub answering `pr view` with a fixed body.
+
+        Returns the directory to prepend to PATH. Advisory cases that must
+        exercise the shipped resolved-body path cannot use
+        SD_AI_COMMAND_PACK_SCOPE_PR_BODY, which short-circuits above gh.
+        """
+        stub_bin = root.parent / f"{root.name}-bin"
+        stub_bin.mkdir(exist_ok=True)
+        payload = json.dumps(
+            {"title": "Change", "body": body, "url": "https://example.test/pr/1"}
+        )
+        (stub_bin / "gh").write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            'if [ "${1:-}" = pr ] && [ "${2:-}" = view ]; then\n'
+            f"  printf '%s\\n' {_sh_single_quote(payload)}\n"
+            "else\n"
+            "  exit 1\n"
+            "fi\n",
+            encoding="utf-8",
+        )
+        (stub_bin / "gh").chmod(0o755)
+        return stub_bin
+
+    def run_advisory_scope(
+        self, root: Path, **env: str
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", "scripts/sd-ai-command-pack-review-scope.sh"],
+            cwd=root,
+            env={**os.environ, "SD_AI_COMMAND_PACK_SCOPE_CHECK": "advisory", **env},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+    def commit_installed_repo(self, root: Path) -> None:
+        """Commit the install so HEAD resolves.
+
+        `make_repo` only runs `git init`, and the script warns about an
+        unresolvable HEAD. Cases that assert the advisory emitted no warning at
+        all need that unrelated warning gone, not merely tolerated.
+        """
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "install command pack")
+
+    def make_scoped_advisory_repo(self) -> Path:
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.commit_installed_repo(root)
+        (root / "docs").mkdir(exist_ok=True)
+        (root / "docs" / "repomix-map.md").write_text(
+            "# map\n\nregenerated\n", encoding="utf-8"
+        )
+        return root
+
+    def test_review_scope_advisory_is_silent_when_provided_body_satisfies(self) -> None:
+        root = self.make_scoped_advisory_repo()
+
+        result = self.run_advisory_scope(
+            root,
+            SD_AI_COMMAND_PACK_SCOPE_PR_BODY=(
+                "Tooling/generated scope: regenerated the repository map."
+            ),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("sd-ai-command-pack-scope-advisory:", result.stdout)
+        self.assertNotIn("warning:", result.stdout)
+
+    def test_review_scope_advisory_warns_pr_exists_when_provided_body_lacks_section(
+        self,
+    ) -> None:
+        root = self.make_scoped_advisory_repo()
+
+        result = self.run_advisory_scope(
+            root, SD_AI_COMMAND_PACK_SCOPE_PR_BODY="Unrelated body text."
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("sd-ai-command-pack-scope-advisory:", result.stdout)
+        # "Add it before opening the PR" is wrong once a body exists.
+        self.assertIn("does not include", result.stdout)
+        self.assertNotIn("before opening the PR", result.stdout)
+
+    def test_review_scope_advisory_warns_when_gh_is_disabled(self) -> None:
+        root = self.make_scoped_advisory_repo()
+
+        result = self.run_advisory_scope(root, SD_AI_COMMAND_PACK_SCOPE_CHECK_GH="0")
+
+        # Absence of evidence is not evidence the body is fine.
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("sd-ai-command-pack-scope-advisory:", result.stdout)
+        self.assertIn("the PR body must include", result.stdout)
+
+    def test_review_scope_advisory_is_silent_when_resolved_body_satisfies(self) -> None:
+        """The shipped path: body resolved from gh, not supplied by env."""
+        root = self.make_scoped_advisory_repo()
+        stub_bin = self.write_gh_pr_body_stub(
+            root, "Tooling/generated scope: regenerated the repository map."
+        )
+
+        result = self.run_advisory_scope(
+            root, PATH=f"{stub_bin}{os.pathsep}{os.environ['PATH']}"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("sd-ai-command-pack-scope-advisory:", result.stdout)
+        self.assertNotIn("warning:", result.stdout)
+
+    def test_review_scope_advisory_warns_when_resolved_body_lacks_section(self) -> None:
+        root = self.make_scoped_advisory_repo()
+        stub_bin = self.write_gh_pr_body_stub(root, "Fixes a product bug.")
+
+        result = self.run_advisory_scope(
+            root, PATH=f"{stub_bin}{os.pathsep}{os.environ['PATH']}"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("sd-ai-command-pack-scope-advisory:", result.stdout)
+        self.assertIn("does not include", result.stdout)
+        self.assertNotIn("before opening the PR", result.stdout)
+
+    def test_review_scope_advisory_never_calls_gh_without_a_scoped_change(self) -> None:
+        """The zero-scope early return is the whole cost bound of this feature.
+
+        Asserting empty output alone would not catch a helper call hoisted above
+        the early return: output stays empty while every branch in the repo
+        starts paying a gh round-trip inside `make check`.
+        """
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.commit_installed_repo(root)
+
+        sentinel = root.parent / f"{root.name}-gh-was-called"
+        stub_bin = root.parent / f"{root.name}-bin"
+        stub_bin.mkdir(exist_ok=True)
+        (stub_bin / "gh").write_text(
+            "#!/usr/bin/env bash\n"
+            f"touch {_sh_single_quote(str(sentinel))}\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        (stub_bin / "gh").chmod(0o755)
+
+        (root / "product.txt").write_text("not a tooling file\n", encoding="utf-8")
+
+        result = self.run_advisory_scope(
+            root, PATH=f"{stub_bin}{os.pathsep}{os.environ['PATH']}"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("sd-ai-command-pack-scope-advisory:", result.stdout)
+        self.assertFalse(
+            sentinel.exists(),
+            "gh was invoked on a branch with no tooling/generated change",
+        )
+
+    def test_review_scope_advisory_prefers_satisfying_body_over_disabled_gh(
+        self,
+    ) -> None:
+        """Positive evidence outranks every reason the resolver has to give up.
+
+        Cases 1 and 3 each hold one half of this combination and neither holds
+        both, so this is the only proof that a matching supplied body is
+        evaluated above the gh-disabled short-circuit.
+        """
+        root = self.make_scoped_advisory_repo()
+
+        result = self.run_advisory_scope(
+            root,
+            SD_AI_COMMAND_PACK_SCOPE_CHECK_GH="0",
+            SD_AI_COMMAND_PACK_SCOPE_PR_BODY=(
+                "Tooling/generated scope: regenerated the repository map."
+            ),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("sd-ai-command-pack-scope-advisory:", result.stdout)
+        self.assertNotIn("warning:", result.stdout)
+
+    def write_gh_raw_stub(self, root: Path, payload: str) -> Path:
+        """Install a `gh` stub whose `pr view` output is not valid JSON."""
+        stub_bin = root.parent / f"{root.name}-bin"
+        stub_bin.mkdir(exist_ok=True)
+        (stub_bin / "gh").write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            'if [ "${1:-}" = pr ] && [ "${2:-}" = view ]; then\n'
+            f"  printf '%s\\n' {_sh_single_quote(payload)}\n"
+            "else\n"
+            "  exit 1\n"
+            "fi\n",
+            encoding="utf-8",
+        )
+        (stub_bin / "gh").chmod(0o755)
+        return stub_bin
+
+    def test_review_scope_fails_named_when_the_pr_body_cannot_be_parsed(self) -> None:
+        """A crashing parser used to abort through `set -e` with no `error:` line.
+
+        This is the one enforcing-mode behavior change in the resolver split, so
+        it needs its own case: the exit status is the same 1 it always was, and
+        only the presence of a named message distinguishes the new behavior from
+        the old.
+        """
+        root = self.make_scoped_advisory_repo()
+        stub_bin = self.write_gh_raw_stub(root, "not json at all")
+
+        result = subprocess.run(
+            ["bash", "scripts/sd-ai-command-pack-review-scope.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK_GH": "required",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "could not parse the PR body returned by gh",
+            result.stdout,
+        )
+
+    def test_review_scope_advisory_warns_when_the_pr_body_cannot_be_parsed(
+        self,
+    ) -> None:
+        """The same malformed body must never fail the advisory."""
+        root = self.make_scoped_advisory_repo()
+        stub_bin = self.write_gh_raw_stub(root, "not json at all")
+
+        result = self.run_advisory_scope(
+            root, PATH=f"{stub_bin}{os.pathsep}{os.environ['PATH']}"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("sd-ai-command-pack-scope-advisory:", result.stdout)
+        # No body was resolved, so claiming one "does not include" the section
+        # would be a statement the script cannot support.
+        self.assertIn("the PR body must include", result.stdout)
+        self.assertNotIn("could not parse", result.stdout)
 
     def test_review_scope_off_suppresses_advisory(self) -> None:
         root = self.make_repo()

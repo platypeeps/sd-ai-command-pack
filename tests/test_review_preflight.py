@@ -32,6 +32,27 @@ InstallTestCase = _support.InstallTestCase
 class ReviewPreflightTests(InstallTestCase):
     """Tests for review preflight, archived-task, and branch push guards."""
 
+    def setUp(self) -> None:
+        super().setUp()
+        # The preflight runs the scope classifier in advisory mode on every
+        # invocation, and every test here has a scoped change: run_install
+        # writes .sd-ai-command-pack/manifest.json, which the classifier treats
+        # as a tooling/generated path. Without this pin the advisory would
+        # resolve the PR body through the developer's real gh, from a temp repo,
+        # roughly ninety times per run.
+        #
+        # Pinned here rather than at each call site because almost none of them
+        # pass an env= at all, and a per-site fix has nothing stopping the next
+        # test from reintroducing the leak. No assertion changes: in advisory
+        # mode unknown:gh_disabled and unknown:no_pr emit identical wording, and
+        # unknown:no_pr is what a temp repo produces today. Cases that need gh
+        # reachable override the key in their own env dict.
+        patcher = mock.patch.dict(
+            os.environ, {"SD_AI_COMMAND_PACK_SCOPE_CHECK_GH": "0"}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     @staticmethod
     def trellis_task_record(
         name: str,
@@ -772,6 +793,76 @@ assert.deepEqual(
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("the PR body must include", result.stdout)
         self.assertIn("Tooling/generated scope:", result.stdout)
+
+    def test_review_preflight_reports_no_warning_when_pr_body_satisfies_scope(
+        self,
+    ) -> None:
+        """End-to-end proof of the outcome this behavior exists for.
+
+        The script-level tests prove the advisory marker is absent from the
+        script's output; only this one proves checkScopeAdvisory consequently
+        emits no warning, so a correct branch actually reaches 0 warning(s).
+        """
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        # Commit the install first. Left untracked it is an 88-file, 48k-line
+        # diff, and the size warnings it triggers would make "0 warning(s)"
+        # unreachable no matter how the scope advisory behaved.
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "install command pack")
+        (root / "docs").mkdir(exist_ok=True)
+        (root / "docs" / "repomix-map.md").write_text(
+            "# map\n\nregenerated\n", encoding="utf-8"
+        )
+
+        stub_bin = root.parent / f"{root.name}-bin"
+        stub_bin.mkdir(exist_ok=True)
+        payload = json.dumps(
+            {
+                "title": "Change",
+                "body": "Tooling/generated scope: regenerated the repository map.",
+                "url": "https://example.test/pr/1",
+            }
+        )
+        quoted = "'" + payload.replace("'", "'\\''") + "'"
+        (stub_bin / "gh").write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            'if [ "${1:-}" = pr ] && [ "${2:-}" = view ]; then\n'
+            f"  printf '%s\\n' {quoted}\n"
+            "else\n"
+            "  exit 1\n"
+            "fi\n",
+            encoding="utf-8",
+        )
+        (stub_bin / "gh").chmod(0o755)
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                # Override the suite-wide pin: this case needs gh reachable so
+                # the stub answers, which is the path that ships.
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK_GH": "auto",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("the PR body must include", result.stdout)
+        self.assertNotIn("sd-ai-command-pack-scope-advisory:", result.stdout)
+        self.assertIn("0 warning(s)", result.stdout)
 
     def test_review_preflight_advises_first_review_risks_and_review_scope(self) -> None:
         node = shutil.which("node")
