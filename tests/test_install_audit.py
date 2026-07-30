@@ -1476,6 +1476,37 @@ class InstallAuditTests(InstallTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertNotIn("check.json", result.stdout)
 
+    def test_install_audit_allows_repository_owned_review_configuration(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        review_config = root / ".sd-ai-command-pack/review.json"
+        review_config.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "remoteIntegration": {"requirement": "optional"},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("review.json", result.stdout)
+
     def test_install_audit_fails_for_unlisted_tracked_pack_files(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
