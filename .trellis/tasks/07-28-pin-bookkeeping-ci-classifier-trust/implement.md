@@ -18,20 +18,59 @@
    `$classifier_file` and never executed.
 
    ```bash
-   before_blob="$(git rev-parse "$BEFORE_SHA:.github/scripts/bookkeeping_ci_scope.py" 2>/dev/null)" \
-     || select_full "prior_classifier_identity_unavailable"
-   base_blob="$(git rev-parse "$BASE_SHA:.github/scripts/bookkeeping_ci_scope.py" 2>/dev/null)" \
-     || select_full "prior_classifier_identity_unavailable"
-   [ "$before_blob" = "$base_blob" ] || select_full "prior_classifier_not_base_identical"
+   if [ "$EVENT_NAME" = "pull_request" ]; then
+     if [ -z "$BASE_SHA" ]; then
+       select_full "prior_classifier_identity_unavailable"
+     fi
+     if ! before_blob="$(git rev-parse "$BEFORE_SHA:.github/scripts/bookkeeping_ci_scope.py" 2>/dev/null)"; then
+       select_full "prior_classifier_identity_unavailable"
+     fi
+     if ! base_blob="$(git rev-parse "$BASE_SHA:.github/scripts/bookkeeping_ci_scope.py" 2>/dev/null)"; then
+       select_full "prior_classifier_identity_unavailable"
+     fi
+     if [ "$before_blob" != "$base_blob" ]; then
+       select_full "prior_classifier_not_base_identical"
+     fi
+   fi
    ```
+
+   This is byte-identical to the snippet in `design.md`. Both were written in the
+   postfix `cmd || select_full` form in an earlier draft and converted to the
+   `if ! …; then select_full …; fi` block form 2026-07-29. Either works —
+   `select_full` ends in `exit 0` (`tests.yml:121-125`), so the short-circuit is
+   genuine — but all eight existing call sites (`:129`, `:132`, `:135`, `:139`,
+   `:142`, `:146`, `:149`, `:152`) use the block form, and the Validation
+   assertions below are written against behavior rather than either syntax.
 
    **Gate:** ordering. The guard must precede the `git show`. See Validation —
    there is an offline test for this.
 
-3. Scope it to `pull_request`. For `push` to `main`, `github.event.before` is the
-   previous protected-branch tip, which already passed `CI Result`; there is no
-   base sha and no threat. Guard with the event name rather than letting an empty
-   `BASE_SHA` produce a spurious full-mode selection on every main push.
+   **Gate: the empty-`BASE_SHA` check is load-bearing and must not be dropped as
+   redundant.** Measured 2026-07-29 — an empty `BASE_SHA` does *not* make
+   `git rev-parse` fail:
+
+   ```
+   BASE_SHA=""; git rev-parse "$BASE_SHA:.github/scripts/bookkeeping_ci_scope.py"
+     → 0afbb094ab36fcd865c5a1d954bfd78736e846de   exit=0
+   git rev-parse "HEAD:.github/scripts/bookkeeping_ci_scope.py"
+     → 0afbb094ab36fcd865c5a1d954bfd78736e846de   (identical)
+   ```
+
+   `:path` with an empty prefix is a valid **index** lookup. Without the emptiness
+   check the guard silently compares `$BEFORE_SHA`'s blob against the checked-out
+   index — a comparison with no base commit behind it, exit 0, no diagnostic, and
+   `select_full` never reached. That is precisely the "guard looks applied and is
+   not" failure `design.md` names under Risk.
+
+3. The event guard in step 2's snippet is what scopes this to `pull_request`, and
+   it is not optional. For `push` to `main`, `github.event.before` is the previous
+   protected-branch tip, which already passed `CI Result`; there is no base sha and
+   no threat.
+
+   An earlier draft of this step justified the scoping by saying an empty
+   `BASE_SHA` would "produce a spurious full-mode selection on every main push."
+   That was wrong in the more dangerous direction — per the measurement above it
+   produces no selection at all, just a meaningless comparison against the index.
 
 4. Resolution failure selects full — it does not `exit 1`. An unfetched or
    unresolvable base must make CI slow, not broken. (Contrast `tests.yml:412`'s
@@ -45,7 +84,7 @@
    specific codes.
 
 7. **Keep the guard inside the existing classify step.** Do not add a new
-   workflow step. `tests/test_bookkeeping_ci_scope.py:559` indexes
+   workflow step. `tests/test_bookkeeping_ci_scope.py:560` indexes
    `jobs["ci-scope"]["steps"][2]` for `bookkeeping-validation`; inserting a step
    shifts that index and breaks a passing test for no reason.
 
@@ -62,24 +101,45 @@
    not pass on the tampered branch (AC3). No change to `check-ci-result.sh` is
    needed for this — see step 12.
 
+   **AC3's automated evidence already exists; cite it rather than staging a live
+   skipped-lane run.** Verified 2026-07-29 —
+   `tests/test_bookkeeping_ci_scope.py:505`
+   (`test_rejects_failures_skips_and_impossible_combinations`) asserts exit 1 for
+
+   ```python
+   ("pull_request", "success", "full", "skipped", "success", "success", "success", "skipped")
+   ```
+
+   at `:508` — a `pull_request`, `mode=full`, heavy lane skipped. That is the AC3
+   shape exactly. Note the literal PRD wording ("heavy lanes skipped under a
+   classifier that failed the identity check") describes a state the fixed workflow
+   cannot reach at all, because an identity failure selects `full` and the heavy
+   lanes then run; see step 12. So AC3 closes on this existing unit assertion plus
+   step 12's rationale, and a live rehearsal is required only for AC1.
+
 10. Confirm the `push`-to-`main` bookkeeping path is unaffected: a bookkeeping-only
     push still selects `mode: bookkeeping`.
 
-### Step 3 — R3, separate commit, does not gate step 1
+### Step 3 — R3 moved out of this task
 
-11. Resolve `evidenceRunId` through the API rather than accepting any positive
-    integer: `gh api repos/${GITHUB_REPOSITORY}/actions/runs/<id>` and require
-    `head_sha == BEFORE_SHA`. The step is already `gh`-authenticated
-    (`tests.yml:155-170`).
+11. **R3 is no longer in scope here.** Split to
+    `.trellis/tasks/07-29-resolve-evidence-run-id-through-api/` on 2026-07-29 by
+    maintainer decision, recorded as concern C-14 in this task's planning
+    adversarial review.
 
-    Scope note, measured: `evidenceRunId`'s only non-test consumer is a `printf`
-    into `$GITHUB_STEP_SUMMARY` at `tests.yml:252`. Nothing gates on it. The jq
-    clause at `:105-106` is a shape check plus a "must claim evidence" check that
-    a tampered classifier satisfies by emitting `1`. This is worth doing and is
-    **not** on A-038's attack path — do not let it delay step 1.
+    The reason it moved: R3 as drafted here required only
+    `head_sha == BEFORE_SHA`, which is weaker than
+    `.trellis/spec/backend/quality-guidelines.md:1623-1626` demands and weaker than
+    the trusted classifier already enforces at
+    `.github/scripts/bookkeeping_ci_scope.py:290-292` and `:318-320`. And the test
+    group the plan named cannot reach the workflow block it would live in
+    (`tests/test_bookkeeping_ci_scope.py:158` calls the Python classifier, not the
+    inline `gh api` block). Deciding widen-vs-narrow needs its own planning pass;
+    the new task carries the full evidence and the open decision.
 
-    `tests/test_bookkeeping_ci_scope.py:544` asserts the current jq text; update
-    it with the change.
+    Nothing in step 1 depends on it. `evidenceRunId` is not on A-038's attack path
+    and nothing reads `needs.ci-scope.outputs.evidence_run_id`, so this task's P0
+    ships complete without R3.
 
 ### Step 4 — R4
 
@@ -97,24 +157,134 @@
 
 ### Step 5
 
-13. Changelog + version.
+13. **Changelog entry only. No version bump, no mirror regeneration.**
+
+    The file set this step must check is the set this plan actually edits:
+
+    | Path | Edited by |
+    | --- | --- |
+    | `.github/workflows/tests.yml` | steps 1–2 (R1/R2) |
+    | `tests/test_bookkeeping_ci_scope.py` | step 9 and Validation |
+    | `CHANGELOG.md` | this step |
+
+    `.github/scripts/bookkeeping_ci_scope.py` and
+    `.github/scripts/check-ci-result.sh` are **read but not edited** — R5 forbids
+    touching the former and step 12 declines the latter. An earlier draft of this
+    step checked those two instead of the test and the changelog, which is the
+    wrong evidence for the wrong claim. Re-measured 2026-07-29 against the real
+    set:
+
+    ```
+    jq '..|strings|select(test("workflows/tests\\.yml|test_bookkeeping_ci_scope|CHANGELOG"))' manifest.json
+      → empty            exit 0
+    ls templates/.github/workflows/tests.yml \
+       templates/tests/test_bookkeeping_ci_scope.py \
+       templates/CHANGELOG.md
+      → No such file or directory (all three)
+    ```
+
+    None of the three is in the shipped payload and none has a `templates/` twin,
+    so `make check`'s release version gate reports no shipped payload change, no
+    `templates/` mirror needs regenerating, and this task does not gate or
+    reshuffle the 0.56.3 fleet rollout. An earlier draft of this step said
+    "Changelog + version"; a version bump here would be a release with no payload
+    behind it.
+
+    **`make sync` is still required — an earlier draft of this step said
+    "nothing needs `make sync`" and that was wrong.** `CONTRIBUTING.md:108-111`:
+    run `make sync` "After changing shipped payload, **and before full-check
+    after README, docs, spec, or task edits**". This task edits
+    `.trellis/tasks/**`, so the second clause applies even though the first does
+    not. `make sync` is `install.py . --force` plus
+    `scripts/sd-ai-command-pack-update-spec-kb.py` (`Makefile`, `sync` target);
+    it does **not** touch `.obsidian-kb`. Run it before `make check`, not after.
+
+    Confirm at implementation time by reading the gate's own words in the
+    `make check` output — `release version gate: no shipped payload changes
+    detected` and `release changelog gate: manifest version unchanged` — rather
+    than re-deriving it. If either line differs, the edit set grew beyond this
+    plan and step 13 is wrong, not the gate.
+
+    **`make check` writes outside this repository. Accepted by the maintainer
+    2026-07-29 — expected behavior, run it normally.**
+    `scripts/sd-ai-command-pack-full-check.sh` runs an Obsidian KB freshness check
+    and, when it reports stale, refreshes the output automatically (`:530` check,
+    `:557-561` refresh). In this checkout `.obsidian-kb` is a symlink:
+
+    ```
+    .obsidian-kb -> /Users/sven/Documents/sdelmas-llm-wiki/raw/sd-ai-command-pack
+    ```
+
+    The auto-refresh is gated on the path being git-ignored, and it is
+    (`git check-ignore -q -- .obsidian-kb` exits 0), so the write path is live,
+    not hypothetical. AC4 is "`make check` passes", so satisfying AC4 means
+    running a command that may write into `~/Documents/sdelmas-llm-wiki/`.
+
+    This is a standing property of `make check` in this checkout rather than a
+    defect introduced by this task, and it applies to every task in this repo.
+    Recorded here because this task's acceptance criteria depend on it. Raised by
+    the Codex lane as C-13b, put to the maintainer, and accepted: run `make check`
+    normally and let the refresh happen. No `--check`-only workaround, no symlink
+    relocation.
 
 ## Validation
 
 Decisive offline check — the guard exists and precedes the execution path. The
 workflow-contract suite already parses `tests.yml` and asserts on the classify
-step's text (`tests/test_bookkeeping_ci_scope.py:520-548`), so extend
+step's text (`tests/test_bookkeeping_ci_scope.py:525-548`, in the
+`BookkeepingWorkflowContractTests` class that opens at `:520`), so extend
 `test_scope_job_is_read_only_prior_head_and_exact_event_head` with an ordering
 assertion:
 
 ```bash
-python3 -m pytest tests/test_bookkeeping_ci_scope.py -q
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- -m unittest tests.test_bookkeeping_ci_scope
 ```
 
-The assertion to add: `classify.index('git rev-parse "$BASE_SHA:')` is less than
-`classify.index('git show "$BEFORE_SHA:')`. This is the only automated check that
-catches "guard added, but after the `git show`" — the highest-probability defect
-in this change.
+This repo has no pytest — `.github/scripts/run-tests.sh:114` shards the suite as
+`coverage run --parallel-mode -m unittest tests.<module>`. An earlier draft of
+this section gave a `python3 -m pytest tests/test_bookkeeping_ci_scope.py -q`
+command that cannot run here. Baseline before the change: `Ran 21 tests`, `OK`.
+
+**One ordering assertion is not enough.** The Codex lane raised this 2026-07-29
+and it is correct: a dead or advisory `rev-parse` line placed above the `git show`
+satisfies an index-comparison test while execution still reaches the
+attacker-controlled `git show` (`tests.yml:148`) and `python3 "$classifier_file"`
+(`tests.yml:189`). The existing contract test is substring-based the same way
+(`tests/test_bookkeeping_ci_scope.py:538`). Assert all five:
+
+1. **Ordering** — `classify.index('git rev-parse "$BASE_SHA:')` <
+   `classify.index('git show "$BEFORE_SHA:')`.
+2. **`BASE_SHA` is wired in** — the classify step's `env` block contains
+   `BASE_SHA: ${{ github.event.pull_request.base.sha }}`. Without this the guard
+   compares against the index (see step 2's measurement) and the ordering
+   assertion still passes.
+3. **Emptiness check present** — the classify text tests `BASE_SHA` for emptiness
+   before the first `git rev-parse "$BASE_SHA:`. Match **either** polarity:
+   `[ -z "$BASE_SHA" ]` or `[ -n "$BASE_SHA" ]`. An earlier draft of this
+   assertion demanded the literal `[ -n "$BASE_SHA" ]` while step 2's snippet
+   used `[ -z "$BASE_SHA" ]` — the plan contradicted itself, and a correct
+   implementation would have failed its own planned test. The snippet is the
+   authority; this assertion follows it.
+4. **Every failure path reaches `select_full`** — assert on *behavior*, not on
+   either syntax. The guard block contains exactly **three** occurrences of
+   `select_full "prior_classifier_identity_unavailable"` — empty base, `BEFORE_SHA`
+   lookup, `BASE_SHA` lookup — and exactly one
+   `select_full "prior_classifier_not_base_identical"`. Assert the exact counts,
+   not "at least two": three is what the snippet produces, and a floor of two
+   would pass a block that dropped the emptiness guard, which is the exact defect
+   C-1 identified. Also assert that no `git rev-parse` of the classifier path
+   appears in the block outside a construct reaching one of those calls. An
+   earlier draft required the literal `|| select_full` postfix, which would have
+   failed a correct implementation in the `if ! …; then select_full …; fi` block
+   form that all eight existing call sites use. Assert on the guard block, not on
+   the file as a whole.
+5. **`pull_request`-scoped** — the guard block sits inside an
+   `if [ "$EVENT_NAME" = "pull_request" ]` conditional.
+
+Honest limit: all five are still text assertions over a YAML `run:` block. They
+prove the guard is present, wired, ordered, and fail-closed in source. They cannot
+prove it executes on the live event. Only AC1's rehearsal does that, which is why
+step 8 is mandatory and not substitutable by this suite.
 
 Reason codes are valid under the publish gate:
 
@@ -141,7 +311,9 @@ proves the attack no longer succeeds.
 - `push`-path behavior is confirmed unchanged before merge (step 10). The guard
   is `pull_request`-only by design; a regression here is a self-inflicted outage
   on `main`.
-- Step 3 does not block step 1. If R3 stalls, ship step 1.
+- R3 is no longer in this task (split 2026-07-29 to
+  `07-29-resolve-evidence-run-id-through-api`), so nothing downstream can stall
+  the P0. An earlier version of this list said "Step 3 does not block step 1".
 - R5: no existing fail-closed reason removed or loosened. Diff the guard list
   before and after.
 

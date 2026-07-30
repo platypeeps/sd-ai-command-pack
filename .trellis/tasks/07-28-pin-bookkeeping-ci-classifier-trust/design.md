@@ -3,7 +3,7 @@
 ## Scope boundary
 
 The `ci-scope` job's `Classify exact-head CI scope` step
-(`.github/workflows/tests.yml:42-190`) and the acceptance table it feeds
+(`.github/workflows/tests.yml:43-190`) and the acceptance table it feeds
 (`.github/scripts/check-ci-result.sh`). Not the classifier's own logic —
 `bookkeeping_ci_scope.py`'s fail-closed reasons are explicitly out of bounds per
 R5. Not the retain-or-retire question; `07-28-consolidate-ci-fast-lane-trust-stack`
@@ -27,8 +27,8 @@ Confirmed line by line:
   author's program decides the mode.
 - `tests.yml:9-11` — `cancel-in-progress` for `pull_request`, so the tamper
   commit's own run is cancelled and never lints or tests the tampered file.
-- `tests.yml:463` — `CI Result`, the single required context, then reports on
-  whatever the author's classifier selected.
+- `tests.yml:464-465` — `CI Result`, the single required context (`:464` job key,
+  `:465` display name), then reports on whatever the author's classifier selected.
 
 Nothing between `:138` and `:189` establishes **identity**. That is the entire
 defect and the entire fix.
@@ -68,18 +68,55 @@ with no threat behind it.
 ## The fix shape: fail-closed through the existing idiom
 
 The step already has one fail-closed vocabulary — `select_full "<reason_code>"`,
-used by all six existing guards at `:132`, `:135`, `:137`, `:139`, `:141`, `:147`,
-`:149`, `:152`. The identity check joins it:
+used by all **eight** existing pre-execution guards, at `:129`, `:132`, `:135`,
+`:139`, `:142`, `:146`, `:149`, `:152`. (Re-measured 2026-07-29: an earlier draft
+said "six" while listing eight anchors, four of which pointed at the guard's `if`
+line rather than its `select_full` call.) The identity check joins it:
 
 ```
-before_blob="$(git rev-parse "$BEFORE_SHA:.github/scripts/bookkeeping_ci_scope.py")"
-base_blob="$(git rev-parse "$BASE_SHA:.github/scripts/bookkeeping_ci_scope.py")"
-[ "$before_blob" = "$base_blob" ] || select_full "prior_classifier_not_base_identical"
+if [ "$EVENT_NAME" = "pull_request" ]; then
+  if [ -z "$BASE_SHA" ]; then
+    select_full "prior_classifier_identity_unavailable"
+  fi
+  if ! before_blob="$(git rev-parse "$BEFORE_SHA:.github/scripts/bookkeeping_ci_scope.py" 2>/dev/null)"; then
+    select_full "prior_classifier_identity_unavailable"
+  fi
+  if ! base_blob="$(git rev-parse "$BASE_SHA:.github/scripts/bookkeeping_ci_scope.py" 2>/dev/null)"; then
+    select_full "prior_classifier_identity_unavailable"
+  fi
+  if [ "$before_blob" != "$base_blob" ]; then
+    select_full "prior_classifier_not_base_identical"
+  fi
+fi
 ```
 
 Placed **before** `:148`'s `git show`, so a mismatching blob is never written to
-`$classifier_file` and never executed. Three conditions collapse to the same
-`select_full`: base sha unresolvable, blob missing on either side, blobs differ.
+`$classifier_file` and never executed.
+
+Three parts of that snippet are load-bearing and an earlier draft of this section
+had none of them. Corrected 2026-07-29 after the review lanes flagged it; the
+draft showed two bare assignments and one comparison.
+
+- **`EVENT_NAME` scoping.** Push events have no base sha and no threat (see the
+  section above). Without the conditional the guard would fail every push.
+- **`[ -z "$BASE_SHA" ]` first.** `git rev-parse ":<path>"` with an empty prefix
+  is a valid *index* lookup that exits 0 and returns the working-tree blob.
+  Measured in this repo: with `BASE_SHA=""` the lookup returned
+  `0afbb094ab36fcd865c5a1d954bfd78736e846de`, identical to
+  `HEAD:.github/scripts/bookkeeping_ci_scope.py`. So an unset base does not fail
+  the lookup — it makes the comparison compare the attacker's blob against
+  itself and pass. Nothing downstream would notice.
+- **`if ! …; then select_full` on both lookups.** The step runs under
+  `set -euo pipefail` (`tests.yml:55`), so a bare assignment from a failing
+  command substitution aborts the step instead of selecting full. The `if !`
+  block form matches all eight existing call sites; the postfix
+  `|| select_full` form is equivalent because `select_full` exits, but the
+  block form is what this file already reads like.
+
+Two reason codes, not one: `prior_classifier_identity_unavailable` covers an
+absent base sha and a missing blob on either side,
+`prior_classifier_not_base_identical` covers a resolvable mismatch. Keeping them
+distinct is what makes the step summary say which of the two happened.
 Resolution failure must select full, not hard-fail — a hard `exit 1` here turns
 an unfetched base into a broken required context rather than a slow one.
 
@@ -117,16 +154,62 @@ with a `pull_request` whose reason code is one of the identity-failure codes —
 which requires passing the reason, not a boolean, and is still a second copy of
 the same decision. Recorded as considered and declined.
 
-## R3 protects a display field
+## R3 moved out — why, and what the measurement was worth
 
-Measured 2026-07-28: `evidenceRunId` has **exactly one** non-test consumer.
+**R3 left this task on 2026-07-29** for
+`07-29-resolve-evidence-run-id-through-api`, by maintainer decision after the
+planning adversarial review raised it as C-14. The measurements below are kept
+because they are what justified the split, and because the new task's PRD cites
+them.
+
+The drafted fix — resolve the ID via `repos/.../actions/runs/<id>` and require
+`head_sha == BEFORE_SHA` — was **weaker than the contract it was meant to
+enforce**. `.trellis/spec/backend/quality-guidelines.md:1623-1626` requires the
+prior head to have a completed successful `Tests` workflow plus a GitHub Actions
+`CI Result` for the same head. A `head_sha` match alone accepts a failed run, or a
+run of an unrelated workflow, on that SHA — and the trusted Python classifier
+already checks more, at `.github/scripts/bookkeeping_ci_scope.py:290-292`
+(`name == "Tests"`, `path`, `head_sha`) and `:318-320` (`name == "CI Result"`,
+`head_sha`). Shipping the draft would have replaced a positive-integer check with
+something weaker than what already runs.
+
+Compounding it, the test group the plan named cannot reach the code:
+`BookkeepingCiScopeTests.classify` calls `bookkeeping_ci_scope.classify` directly
+(`tests/test_bookkeeping_ci_scope.py:158`), which is the Python classifier, not the
+workflow's inline `gh api` block. Deciding whether to widen the inline check or
+narrow the requirement needs its own planning pass. It does not belong inside a P0.
+
+### The measurement that made the split safe
+
+Re-measured 2026-07-29. An earlier draft of this section claimed `evidenceRunId`
+had **exactly one** non-test consumer, a `printf` at `tests.yml:252`. Both halves
+were wrong. The full consumer set:
 
 ```
-tests.yml:252  printf '%s\n' "- Prior evidence: ${EVIDENCE_SCOPE:-none}; run ${EVIDENCE_RUN_ID:-none}; …"
+tests.yml:115   printf 'evidence_run_id=%s\n' "$(jq -r '.evidenceRunId // ""' "$result_file")"   # $GITHUB_OUTPUT
+tests.yml:31    evidence_run_id: ${{ steps.classify.outputs.evidence_run_id }}                    # ci-scope JOB OUTPUT
+tests.yml:236   EVIDENCE_RUN_ID: ${{ steps.classify.outputs.evidence_run_id }}                    # Summarize step env
+tests.yml:249   printf '%s\n' "- Prior evidence: … run ${EVIDENCE_RUN_ID:-none}; …"               # $GITHUB_STEP_SUMMARY
 ```
 
-A `printf` into `$GITHUB_STEP_SUMMARY`. Nothing gates on it. `bookkeeping_ci_scope.py:74`
-produces it; no workflow step, script, or job condition reads it back.
+`tests.yml:252` is a different line (`- Expensive jobs avoided: …`).
+`bookkeeping_ci_scope.py:74` produces the value.
+
+The load-bearing conclusion survives: no job or step reads
+`needs.ci-scope.outputs.evidence_run_id`, so nothing gates on it and this task's
+P0 ships complete without R3. But it is a **published job output**, not a
+step-local printf, so the blast radius of a bogus value is wider than the earlier
+framing implied and a future consumer could gate on it. That is why the split-out
+task is real work rather than a shelf item.
+
+**Implementation hazard, carried to the new task.** From the Codex lane
+2026-07-29: a full-mode result legitimately carries `evidenceRunId: null`
+(`tests.yml:82`), and the step runs under `set -euo pipefail` (`tests.yml:55`). An
+unconditional `gh api` lookup would therefore fail every full-mode run — turning a
+hardening change into an outage on the common path. The lookup must be conditional
+on a non-null ID, and lookup failure must route through `select_full`, not
+`exit 1`. `07-29-resolve-evidence-run-id-through-api/prd.md` carries this as a
+requirement.
 
 The jq clause at `:105-106` does two different things and only one of them is an
 evidence check:
@@ -137,14 +220,15 @@ evidence check:
 - `.evidenceRunId > 0 and .evidenceRunId == (.evidenceRunId | floor)` — a shape
   check on a number.
 
-So R3 as stated is accurate about the weakness and wrong about its severity: it
-is a shape check presented as an evidence check, guarding a summary line. It is
-**not on A-038's attack path**, and once R1 lands the classifier is trusted code
-whose evidence fields derive from the trusted `gh api` calls at `:155-170`.
+So R3 as originally stated was accurate about the weakness and wrong about its
+severity: it is a shape check presented as an evidence check, guarding a summary
+line. It is **not on A-038's attack path**, and once R1 lands the classifier is
+trusted code whose evidence fields derive from the trusted `gh api` calls at
+`:155-170` (the two calls are at `:156` and `:163`).
 
-Implement it — resolving the ID via `repos/.../actions/runs/<id>` and requiring
-`head_sha == BEFORE_SHA` is a few lines in an already-`gh`-authenticated step —
-but **it must not gate or delay R1**. R1 is the P0. Separate commits.
+That severity reading is exactly why it could be split without weakening this
+task: R1 does not depend on it, nothing gates on the field, and A-038 stays closed
+either way.
 
 ## Compatibility
 
@@ -161,11 +245,14 @@ the guard does not apply there. Confirm the push path is untouched.
 
 ## Rollout and rollback
 
-Three commits, in strict priority order:
+Two commits after the 2026-07-29 split, in strict priority order:
 
 1. **R1/R2** — `BASE_SHA` into the `ci-scope` job env, identity check before
-   `:148`, new reason codes. This is the P0. Ships alone.
-2. **R3** — `evidenceRunId` API resolution. Independent, lower value.
+   `:148`, new reason codes. This is the P0 and now the whole substance of this
+   task.
+2. ~~**R3** — `evidenceRunId` API resolution.~~ Moved to
+   `07-29-resolve-evidence-run-id-through-api`. An earlier version of this section
+   planned three commits.
 3. **R4** — nothing to do if the recommendation above holds; otherwise the
    `check-ci-result.sh` change, with its own rationale recorded.
 
