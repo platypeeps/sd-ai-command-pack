@@ -157,7 +157,26 @@
 
 ### Step 5
 
-13. **Changelog entry only. No version bump, no mirror regeneration.**
+13. **No changelog entry, no version bump, no mirror regeneration.**
+
+    **Corrected at implementation time 2026-07-29 — this step previously said
+    "Changelog entry only", and that was wrong.** `CHANGELOG.md` documents the
+    shipped pack payload the fleet consumes, and the measurement below proves
+    none of this task's edits are in that payload. There is also no valid place
+    to put an entry. The repository has no `Unreleased` convention, and
+    introducing one is actively harmful:
+    `scripts/sd-ai-command-pack-full-check.sh:774-781` takes the **first** `## `
+    line as the release heading, so an `## Unreleased` section would fail the
+    changelog gate on the next real version bump. Appending to
+    `## 0.56.3 - 2026-07-29` instead would misstate a released version that is
+    currently mid-rollout to the fleet.
+
+    Repo precedent agrees. Of the last eight commits touching
+    `.github/workflows/tests.yml`, seven carried no changelog entry — including
+    `e85f2550` ("fix: require prior evidence for bookkeeping CI"), the
+    immediately prior hardening of this same classifier lane. The one that did,
+    `b5a27635`, also bumped `manifest.json` and edited `templates/scripts/`, so
+    its entry documents that payload change rather than the workflow.
 
     The file set this step must check is the set this plan actually edits:
 
@@ -165,7 +184,6 @@
     | --- | --- |
     | `.github/workflows/tests.yml` | steps 1–2 (R1/R2) |
     | `tests/test_bookkeeping_ci_scope.py` | step 9 and Validation |
-    | `CHANGELOG.md` | this step |
 
     `.github/scripts/bookkeeping_ci_scope.py` and
     `.github/scripts/check-ci-result.sh` are **read but not edited** — R5 forbids
@@ -212,7 +230,7 @@
     `:557-561` refresh). In this checkout `.obsidian-kb` is a symlink:
 
     ```
-    .obsidian-kb -> /Users/sven/Documents/sdelmas-llm-wiki/raw/sd-ai-command-pack
+    .obsidian-kb -> ~/Documents/<obsidian-vault>/raw/sd-ai-command-pack
     ```
 
     The auto-refresh is gated on the path being git-ignored, and it is

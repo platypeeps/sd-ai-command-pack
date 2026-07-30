@@ -95,5 +95,5 @@ updated with any change to the publish gate.
 - `make check` may write outside the repository: full-check auto-refreshes the
   Obsidian KB (`scripts/sd-ai-command-pack-full-check.sh:557-561`) and
   `.obsidian-kb` is a symlink to
-  `/Users/sven/Documents/sdelmas-llm-wiki/raw/sd-ai-command-pack`. Accepted by the
+  `~/Documents/<obsidian-vault>/raw/sd-ai-command-pack`. Accepted by the
   maintainer 2026-07-29 as expected behavior in this checkout.
