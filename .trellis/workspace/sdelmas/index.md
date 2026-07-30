@@ -34,7 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 257 | 2026-07-30 | Close out v0.56.5 delivery and archive the Trellis instability analysis | - | `chore/archive-analyze-trellis-instability` |
+| 257 | 2026-07-30 | Close out v0.56.5 delivery and archive the Trellis instability analysis | `d15f0eb6` | `chore/archive-analyze-trellis-instability` |
 | 256 | 2026-07-30 | Silence the scope advisory once the PR body satisfies it | `4937be42`, `dc92d8b5`, `55759506`, `d7ee985c`, `1f9ccedc` | `fix/silence-satisfied-scope-advisory` |
 | 255 | 2026-07-30 | Resolve the branch-field deadlock between the finalization gates | `ae832216`, `d85e48ed`, `02921b58`, `f9543da3`, `9425eb18`, `07952aee` | `fix/resolve-branch-field-finalization-deadlock` |
 | 254 | 2026-07-30 | A-038 (P0): pin the bookkeeping CI classifier against the PR base | `a94957eb`, `d95c23f3`, `8d0f488a`, `a51abbec`, `4e4aaf07`, `0b17d702`, `c3b6e7f8` | `fix/pin-bookkeeping-ci-classifier-trust` |
