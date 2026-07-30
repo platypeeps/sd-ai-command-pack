@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 254
+- **Total Sessions**: 255
 - **Last Active**: 2026-07-30
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~183 | Active |
+| `journal-6.md` | ~229 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 255 | 2026-07-30 | Resolve the branch-field deadlock between the finalization gates | `ae832216`, `d85e48ed`, `02921b58`, `f9543da3`, `9425eb18`, `07952aee` | `fix/resolve-branch-field-finalization-deadlock` |
 | 254 | 2026-07-30 | A-038 (P0): pin the bookkeeping CI classifier against the PR base | `a94957eb`, `d95c23f3`, `8d0f488a`, `a51abbec`, `4e4aaf07`, `0b17d702`, `c3b6e7f8` | `fix/pin-bookkeeping-ci-classifier-trust` |
 | 253 | 2026-07-29 | Add a fleet-controller recovery transition for retry-exhausted lanes | `c96df89b`, `33df6776`, `92b2af3d`, `212a38d9`, `4da788c1`, `50693f5f`, `77a8cb68`, `08f3e407` | `chore/record-retry-exhausted-recovery-planning` |
 | 252 | 2026-07-29 | Exempt untouched planning scaffolds from both review-preflight seed-row lanes (v0.56.2) | `0ff54ffe`, `5ef0b8c9`, `2013ed46` | `claude/trusting-turing-d2ec3f` |

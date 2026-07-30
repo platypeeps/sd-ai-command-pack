@@ -1758,6 +1758,18 @@ around the delegated lifecycle.
 - The wrapper retains ownership of pack-specific validation and journal
   recording while the Trellis skill retains archive and session-finalization
   policy.
+- When an active task is selected for completion, the wrapper records a missing
+  `branch` before it captures the finalization base, for every task directory
+  the pre-archive gate is invoked for. The value comes from the checked-out
+  branch and is committed alone, scoped to that `task.json`; a detached HEAD or
+  a value equal to the record's `base_branch` stops the run rather than
+  guessing. The commit is finalization metadata listed among the journal's
+  commits, not a work commit, which stays reserved for code commits completed
+  before invocation. The planning boundary and the no-active-task successor
+  path both skip this preparation. A task that surfaces only after the base is
+  captured cannot be prepared, because its record change would land inside the
+  archive commit; decline it for the round or restart the finalization with it
+  in the initial gate scope.
 - A planning final range with no task entries may select the validator's
   internal `journal-only-recovery` subtype only from exact journal and Git
   evidence. The wrapper still supplies `mode: planning`; it never exposes a
@@ -1800,6 +1812,13 @@ around the delegated lifecycle.
 - Missing, stale, invalid, forged, or unavailable completion receipt -> stop
   before GitHub collection or merge according to the eligibility evaluator's
   typed reason; never fall back to caller attestation.
+- Detached HEAD, or a checked-out branch equal to the record's `base_branch`,
+  while preparing a missing task `branch` -> stop and report before the base is
+  captured; never infer a branch name or continue into the pre-archive gate.
+- A pre-archive gate result of `invalid` -> stop with its reason codes and
+  paths. The preparation above exists so the null-branch case never reaches
+  this point; it does not license repairing a failed result by mutating the
+  task.
 
 ### 5. Good / Base / Bad Cases
 
@@ -1825,6 +1844,11 @@ around the delegated lifecycle.
 - Assert post-archive recovery remains an automatic `completion` subtype,
   hands one private receipt through review/ship/housekeeping, and contains no
   compatibility head-attestation option.
+- Assert both shipped copies of the finish-work skill place the branch
+  preparation before the finalization base capture, by index rather than by
+  presence, so moving it below the capture fails. Assert the same copies keep
+  the detached-HEAD/`base_branch` stop, the skipped planning and successor
+  paths, and the refusal to repair a failed gate by mutating the task.
 
 ### 7. Wrong vs Correct
 

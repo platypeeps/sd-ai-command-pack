@@ -528,6 +528,14 @@ that exercise the generic JavaScript review preflight.
   `.trellis/tasks/` children. A record with `status: completed` fails with the
   Trellis archive command; the `archive/` subtree, non-completed records,
   nested paths, and symlinks remain outside the scan.
+- Completion-bundle archive identity compares the source record at the base
+  against the archived record at head with `status` and `completedAt` removed,
+  structurally rather than bytewise. The move may additionally record a
+  `branch` that was explicitly `null` at the base as a non-empty string, since
+  the pre-archive gate requires one and a task prepared late lands that write
+  inside the archive commit. Every other transition of that field — a rewrite,
+  an erasure, or an addition to a record whose `branch` key is absent rather
+  than null — and every change to any other field remain identity violations.
 
 ### 4. Validation & Error Matrix
 

@@ -661,6 +661,134 @@ class BookkeepingValidatorTests(InstallTestCase):
         self.assertEqual(payload["reasonCodes"], ["completion_bundle_valid"])
         self.assertNotIn(str(root), result.stdout)
 
+    def run_completion_branch_bundle(
+        self,
+        *,
+        source_branch: str | None,
+        drop_source_branch: bool = False,
+        archived_updates: dict[str, object] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        """Archive one task and validate the completion bundle.
+
+        The move changes ``status`` and ``completedAt``; ``archived_updates``
+        adds whatever else the caller wants inside the archive commit.
+        """
+        root = self.make_validator_repo()
+        name = "branch-transition"
+        record = self.task_record(
+            name,
+            status="in_progress",
+            branch=source_branch,
+            completed_at=None,
+        )
+        if drop_source_branch:
+            del record["branch"]
+        active = self.write_task(root, f".trellis/tasks/07-25-{name}", record)
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "fixture work")
+        base = self.git_output(root, "rev-parse", "HEAD")
+
+        archive = root / f".trellis/tasks/archive/2026-07/07-25-{name}"
+        archive.parent.mkdir(parents=True)
+        active.rename(archive)
+        archived = json.loads((archive / "task.json").read_text(encoding="utf-8"))
+        archived["status"] = "completed"
+        archived["completedAt"] = "2026-07-25"
+        archived.update(archived_updates or {})
+        (archive / "task.json").write_text(
+            json.dumps(archived, indent=2) + "\n", encoding="utf-8"
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "archive fixture")
+        self.write_session(root, base)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record fixture journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        return self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+    def assert_archive_identity_rejected(
+        self, result: subprocess.CompletedProcess[str]
+    ) -> None:
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "invalid", result.stdout)
+        self.assertIn(
+            "completion_archive_identity_changed",
+            payload["reasonCodes"],
+            result.stdout,
+        )
+
+    def test_completion_bundle_allows_branch_recorded_during_archive(self) -> None:
+        # The pre-archive gate demands a non-empty branch, so an operator who
+        # satisfies it after the finalization base is captured lands the write
+        # inside the archive commit. That must not read as smuggled content.
+        result = self.run_completion_branch_bundle(
+            source_branch=None,
+            archived_updates={"branch": "codex/completion-fixture"},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "valid", result.stdout)
+        self.assertEqual(payload["reasonCodes"], ["completion_bundle_valid"])
+
+    def test_completion_bundle_rejects_branch_rewritten_during_archive(self) -> None:
+        self.assert_archive_identity_rejected(
+            self.run_completion_branch_bundle(
+                source_branch="codex/a",
+                archived_updates={"branch": "codex/b"},
+            )
+        )
+
+    def test_completion_bundle_rejects_branch_erased_during_archive(self) -> None:
+        self.assert_archive_identity_rejected(
+            self.run_completion_branch_bundle(
+                source_branch="codex/a",
+                archived_updates={"branch": None},
+            )
+        )
+
+    def test_completion_bundle_rejects_unrelated_field_change_during_archive(
+        self,
+    ) -> None:
+        self.assert_archive_identity_rejected(
+            self.run_completion_branch_bundle(
+                source_branch="codex/a",
+                archived_updates={"title": "Rewritten during the archive move"},
+            )
+        )
+
+    def test_completion_bundle_rejects_branch_added_to_keyless_record(self) -> None:
+        # An absent key is a distinct state from an explicit null, and only the
+        # latter is the deadlock this tolerance exists for. Pins `=== null`
+        # against a later simplification to `== null`, which also matches
+        # `undefined`.
+        self.assert_archive_identity_rejected(
+            self.run_completion_branch_bundle(
+                source_branch=None,
+                drop_source_branch=True,
+                archived_updates={"branch": "codex/a"},
+            )
+        )
+
+    def test_completion_bundle_allows_null_branch_through_archive(self) -> None:
+        result = self.run_completion_branch_bundle(source_branch=None)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "valid", result.stdout)
+        self.assertEqual(payload["reasonCodes"], ["completion_bundle_valid"])
+
     def make_post_archive_successor_repo(
         self, *, prehistory_commits: int = 0, corrupt_archive: bool = False
     ) -> tuple[Path, str, str]:
