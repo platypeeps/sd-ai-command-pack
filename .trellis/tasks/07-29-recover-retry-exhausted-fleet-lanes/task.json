@@ -3,7 +3,7 @@
   "name": "recover-retry-exhausted-fleet-lanes",
   "title": "Add a fleet-controller recovery transition for retry-exhausted lanes",
   "description": "Give the fleet controller a safe, evidence-gated way to continue a lane whose per-stage retry budget was exhausted after the cause was fixed",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

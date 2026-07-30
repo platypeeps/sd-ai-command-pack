@@ -167,19 +167,30 @@ decision is made and step 1 implements it rather than re-deciding it.
 
 7. Merge through the normal exact-head lifecycle.
 8. Publish the corrective release and update the fleet manifest to that version.
-9. Return to `07-28-roll-out-stabilized-pack-release-to-fleet` and resolve
-   campaign `v0-56-1-20260729T173059Z` under that task's protocol. Recovering it
-   on a later controller is expected to work, and the two reasons are independent:
-   its `schemaVersion: 1` migrates on load (step 1), and `--release 0.56.1`
-   matches `state["release"]` because the release precondition compares against
-   the campaign, not the pack manifest (step 2). Confirm both against the released
-   controller before acting rather than trusting this note.
+9. Return to `07-28-roll-out-stabilized-pack-release-to-fleet` and **abandon**
+   campaign `v0-56-1-20260729T173059Z` deliberately, then plan a fresh campaign on
+   the corrective release. Operator decision, 2026-07-29.
 
-   Recovering it is also the act that commits it to schema `2`, one-way. If it
-   turns out not to be recoverable, abandon that campaign consciously and replan
-   on the corrective version, where `rwbp-coordinator` reports `at-target` only if
-   its work has by then been merged — otherwise it re-enters as an ordinary lane
-   from its existing branch.
+   Rationale: the campaign targets `0.56.1`, `manifest.json` is already at
+   `0.56.2`, and this task publishes `0.56.3`. Recovering it would roll a
+   two-versions-stale pack to eight consumers and would commit its state file to
+   schema `2` one-way for no benefit. The transition's value is the permanent fix
+   for a defect that recurs on every future campaign, not the rescue of this one.
+
+   `rwbp-coordinator` re-enters the fresh campaign as an ordinary lane from its
+   existing branch `chore/sd-ai-command-pack-0.56.1`, reporting `at-target` only
+   if its work has merged by then. Do not clean, reset, or force that checkout;
+   its uncommitted managed work is legitimate.
+
+   Recording, not acting: abandonment is a state transition under the rollout
+   task's own protocol, so perform it there rather than by editing controller
+   state by hand.
+
+   Note for the record: this weakens one of the three arguments made for the
+   schema bump in `C-N-1` — "the paused campaign stays recoverable" — since it is
+   now being abandoned. The bump's primary justification is unaffected: a rollback
+   fails on a version check naming the cause instead of an unknown-field error
+   pointing at a recovery row.
 
 ## Stop conditions
 

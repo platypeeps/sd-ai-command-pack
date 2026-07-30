@@ -140,6 +140,16 @@ The operator resolved `C-N-1` by choosing the `SCHEMA_VERSION` bump with
 migration. Implementing that decision surfaced two further host findings, `C-11`
 and `C-12`, both recorded below and both addressed.
 
+A second operator decision the same day set `implement.md` step 9 to **abandon**
+campaign `v0-56-1-20260729T173059Z` and replan on the corrective release, rather
+than recover it. Evidence: the campaign targets `0.56.1`, `manifest.json` is at
+`0.56.2`, and this task publishes `0.56.3`, so recovery would roll a
+two-versions-stale pack to eight consumers. This weakens one of the three
+arguments recorded for `C-N-1`'s bump — that the paused campaign stays
+recoverable — and the `C-N-1` entry says so rather than leaving the stale
+rationale standing. The bump's primary justification, a legible rollback failure,
+is unaffected.
+
 No `C-*` concern remains unresolved, so section 3's bar for implementation
 approval is met. Two caveats stand:
 
@@ -168,6 +178,13 @@ approval is met. Two caveats stand:
   paused `v0-56-1-20260729T173059Z` stays recoverable rather than being discarded.
   The rejected alternatives were keeping version 1 with a documented one-way
   constraint, and bumping without migration and abandoning the paused campaign.
+
+  **Correction to this rationale.** The second ground no longer holds: a later
+  decision the same day abandons that campaign anyway, because it targets `0.56.1`
+  while `manifest.json` is at `0.56.2` and this task publishes `0.56.3`. The
+  decision itself stands on the first ground alone — a rollback that fails on a
+  version check rather than an unknown-field error. Noted here so the stale
+  argument is not cited later as if it still applied.
 
   Recorded in `design.md` ("Recovery record", "Compatibility", "Rollback"),
   `prd.md` (one requirement, two acceptance criteria), and `implement.md`
