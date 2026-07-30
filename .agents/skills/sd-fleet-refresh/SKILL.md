@@ -119,6 +119,12 @@ Repeating an identical receipt is a no-op. A conflicting receipt, wrong
 release or consumer, skipped stage, duplicate action, changed fleet manifest,
 or invalid concurrent start is rejected. Never edit controller state manually.
 
+A stage gets two automatic attempts; a second `retryable-failure` parks the
+lane as terminal `retry-exhausted`. That park is reversible only by the
+operator, only after the cause is fixed and proven, and only through
+`resume --recover-exhausted-consumer`; see
+`references/controller-recovery.md`. The automatic budget itself never widens.
+
 ## Action ownership
 
 The controller returns the stage; this map selects its existing action owner
@@ -229,8 +235,8 @@ timing failure pauses new mutation until the last valid record is reconciled.
 5. After interruption or when no action is returned but work is not complete,
    run controller `resume` and do not replay an issued side effect. Load
    `references/controller-recovery.md` only when reconciliation, a blocked
-   campaign, invalid state, an ownership retry, or a corrective release is
-   actually present.
+   campaign, invalid state, an ownership retry, an exhausted retry budget, or a
+   corrective release is actually present.
 6. Run controller `validate` and `status`, complete timing, and render the final
    report from receipts. Do not reconstruct a lane history from chat.
 

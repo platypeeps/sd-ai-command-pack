@@ -137,6 +137,47 @@ class FleetControllerTests(InstallTestCase):
         )
         return action
 
+    def exhaust_lane(
+        self,
+        controller,
+        state,
+        *,
+        consumer,
+        reason_code="temporary-network",
+    ):
+        """Burn the lane's remaining automatic attempts at its current stage."""
+        action = None
+        while self.lane_for(state, consumer)["result"] is None:
+            action = self.issued_action_for(controller, state, consumer)
+            controller.record_result(
+                state,
+                action_id=action["actionId"],
+                release="0.37.0",
+                consumer=consumer,
+                result="retryable-failure",
+                reason_code=reason_code,
+            )
+        self.assertEqual(self.lane_for(state, consumer)["result"], "retry-exhausted")
+        return action
+
+    def lane_for(self, state, consumer):
+        """Return the lane owned by consumer, independent of lane ordering."""
+        for lane in state["lanes"]:
+            if lane["name"] == consumer:
+                return lane
+        self.fail(f"no lane named {consumer!r}")
+
+    def issued_action_for(self, controller, state, consumer):
+        """Issue the next actions and return the one owned by consumer."""
+        issued = controller.issue_next(state)
+        for action in issued:
+            if action["consumer"] == consumer:
+                return action
+        self.fail(
+            f"no issued action for {consumer!r}; issued "
+            f"{[action['consumer'] for action in issued]!r}"
+        )
+
     def run_cli(self, controller, *arguments):
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -1556,6 +1597,563 @@ class FleetControllerTests(InstallTestCase):
         )
         self.assertEqual((status, output), (2, None))
         self.assertIn("only one recovery mode", error)
+
+    def test_exhaustion_recovery_resumes_the_lane_at_the_exhausted_stage(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(controller)
+        self.pass_preflight(controller, state)
+        while state["lanes"][0]["stage"] != "local-checks":
+            self.pass_lane_action(controller, state)
+        exhausted = self.exhaust_lane(controller, state, consumer="canary-a")
+        self.assertEqual(state["status"], "blocked")
+        receipts = copy.deepcopy(state["lanes"][0]["receipts"])
+
+        recovery, changed = controller.recover_retry_exhausted(
+            state,
+            consumer="canary-a",
+            exhausted_action_id=exhausted["actionId"],
+            release="0.37.0",
+        )
+
+        self.assertTrue(changed)
+        lane = state["lanes"][0]
+        self.assertEqual(
+            (lane["status"], lane["result"], lane["stage"], lane["attempt"]),
+            ("waiting", None, "local-checks", 3),
+        )
+        self.assertIsNone(lane["blocker"])
+        self.assertFalse(lane["packBlocker"])
+        self.assertEqual(lane["receipts"], receipts)
+        self.assertEqual(state["status"], "active")
+        self.assertEqual(
+            recovery,
+            {
+                "consumer": "canary-a",
+                "fromActionId": exhausted["actionId"],
+                "fromAttempt": 2,
+                "fromBlocker": "temporary-network",
+                "fromStage": "local-checks",
+                "kind": "retry-exhausted",
+                "recordedAt": recovery["recordedAt"],
+                "toAttempt": 3,
+                "toStage": "local-checks",
+            },
+        )
+        self.assertEqual(state["recoveries"], [recovery])
+
+        issued = controller.issue_next(state)
+
+        self.assertIn(
+            ("canary-a", "local-checks", 3),
+            [(item["consumer"], item["stage"], item["attempt"]) for item in issued],
+        )
+
+    def test_exhaustion_recovery_refuses_mismatched_evidence(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(controller)
+        self.pass_preflight(controller, state)
+        exhausted = self.exhaust_lane(controller, state, consumer="canary-a")
+        lane = state["lanes"][0]
+
+        def recover(**overrides):
+            arguments = {
+                "consumer": "canary-a",
+                "exhausted_action_id": exhausted["actionId"],
+                "release": "0.37.0",
+            }
+            arguments.update(overrides)
+            return controller.recover_retry_exhausted(state, **arguments)
+
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "release does not match campaign release"
+        ):
+            recover(release="0.38.0")
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "consumer is outside the campaign"
+        ):
+            recover(consumer="not-a-consumer")
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "terminal retry-exhausted lane"
+        ):
+            recover(consumer="canary-b")
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "not the lane's latest receipt"
+        ):
+            recover(exhausted_action_id="some-other-action")
+
+        lane["blocker"] = "a-different-reason"
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "receipt does not match the lane"
+        ):
+            recover()
+        lane["blocker"] = "temporary-network"
+
+        lane["attempt"] = 5
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "attempt does not match the lane attempt"
+        ):
+            recover()
+        lane["attempt"] = 2
+
+        self.assertEqual(state["recoveries"], [])
+
+    def test_exhaustion_recovery_refuses_every_other_terminal_result(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(controller)
+        self.pass_preflight(controller, state)
+        exhausted = self.exhaust_lane(controller, state, consumer="canary-a")
+        lane = state["lanes"][0]
+        others = controller.TERMINAL_RESULTS - {"retry-exhausted"}
+        self.assertEqual(len(others), 8)
+
+        for result in sorted(others):
+            lane["result"] = result
+            with self.assertRaisesRegex(
+                controller.FleetControllerError, "terminal retry-exhausted lane"
+            ):
+                controller.recover_retry_exhausted(
+                    state,
+                    consumer="canary-a",
+                    exhausted_action_id=exhausted["actionId"],
+                    release="0.37.0",
+                )
+
+        self.assertEqual(state["recoveries"], [])
+
+    def test_exhaustion_recovery_is_idempotent_and_capped_per_stage(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(controller)
+        self.pass_preflight(controller, state)
+        while state["lanes"][0]["stage"] != "local-checks":
+            self.pass_lane_action(controller, state)
+
+        def recover(action_id):
+            return controller.recover_retry_exhausted(
+                state,
+                consumer="canary-a",
+                exhausted_action_id=action_id,
+                release="0.37.0",
+            )
+
+        def exhaust_again():
+            action = next(
+                item
+                for item in controller.issue_next(state)
+                if item["consumer"] == "canary-a"
+            )
+            controller.record_result(
+                state,
+                action_id=action["actionId"],
+                release="0.37.0",
+                consumer="canary-a",
+                result="retryable-failure",
+                reason_code="temporary-network",
+            )
+            self.assertEqual(state["lanes"][0]["result"], "retry-exhausted")
+            return action
+
+        first_exhausted = self.exhaust_lane(controller, state, consumer="canary-a")
+        first, changed = recover(first_exhausted["actionId"])
+        self.assertTrue(changed)
+        self.assertEqual(recover(first_exhausted["actionId"]), (first, False))
+        self.assertEqual(state["recoveries"], [first])
+
+        # One further automatic attempt is granted, not two: the recovered lane
+        # re-terminates on the next retryable failure.
+        second_exhausted = exhaust_again()
+        self.assertEqual(second_exhausted["attempt"], 3)
+        self.assertEqual(state["lanes"][0]["attempt"], 3)
+
+        second, changed = recover(second_exhausted["actionId"])
+        self.assertTrue(changed)
+        self.assertEqual(second["toAttempt"], 4)
+        self.assertEqual(state["lanes"][0]["attempt"], 4)
+
+        third_exhausted = exhaust_again()
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "limit is reached"
+        ):
+            recover(third_exhausted["actionId"])
+        # A replay still returns its record once the cap is full.
+        self.assertEqual(recover(first_exhausted["actionId"]), (first, False))
+        self.assertEqual(state["recoveries"], [first, second])
+
+    def test_cli_exhaustion_recovery_requires_its_own_selector_and_evidence(
+        self,
+    ) -> None:
+        controller = self.load_controller()
+        root, _fleet, _manifest, state = self.state(controller)
+        self.pass_preflight(controller, state)
+        exhausted = self.exhaust_lane(controller, state, consumer="canary-a")
+        state_home = root.parent / f"{root.name}-exhaustion-state"
+        store = controller.CampaignStore(root, "campaign-1", state_home)
+        with store.locked():
+            store.write(state)
+        common = (
+            "--repo",
+            str(root),
+            "--campaign",
+            "campaign-1",
+            "--state-home",
+            str(state_home),
+            "--json",
+        )
+        selector = (
+            "--recover-exhausted-consumer",
+            "canary-a",
+            "--exhausted-action",
+            exhausted["actionId"],
+        )
+
+        status, output, error = self.run_cli(controller, "resume", *common)
+        self.assertEqual((status, error), (0, ""))
+        self.assertNotIn("recovery", output)
+
+        status, output, error = self.run_cli(
+            controller, "resume", *common, "--exhausted-action", exhausted["actionId"]
+        )
+        self.assertEqual((status, output), (2, None))
+        self.assertIn("exhausted-action requires recover-exhausted-consumer", error)
+
+        status, output, error = self.run_cli(
+            controller, "resume", *common, "--recover-exhausted-consumer", "canary-a"
+        )
+        self.assertEqual((status, output), (2, None))
+        self.assertIn("requires exhausted-action", error)
+
+        status, output, error = self.run_cli(controller, "resume", *common, *selector)
+        self.assertEqual((status, output), (2, None))
+        self.assertIn("requires release", error)
+
+        status, output, error = self.run_cli(
+            controller,
+            "resume",
+            *common,
+            *selector,
+            "--release",
+            "0.37.0",
+            "--corrective-release",
+            "0.38.0",
+        )
+        self.assertEqual((status, output), (2, None))
+        self.assertIn("corrective-release is valid only with recover-consumer", error)
+
+        status, output, error = self.run_cli(
+            controller,
+            "resume",
+            *common,
+            *selector,
+            "--release",
+            "0.37.0",
+            "--retry-consumer",
+            "canary-a",
+        )
+        self.assertEqual((status, output), (2, None))
+        self.assertIn("only one recovery mode", error)
+
+        foreign = store.directory / "campaign-2.json"
+        foreign.write_bytes(store.state_path.read_bytes())
+        status, output, error = self.run_cli(
+            controller,
+            "resume",
+            "--repo",
+            str(root),
+            "--campaign",
+            "campaign-2",
+            "--state-home",
+            str(state_home),
+            "--json",
+            *selector,
+            "--release",
+            "0.37.0",
+        )
+        self.assertEqual((status, output), (2, None))
+        self.assertIn("campaign identity does not match", error)
+
+        status, output, error = self.run_cli(
+            controller, "resume", *common, *selector, "--release", "0.37.0"
+        )
+        self.assertEqual((status, error), (0, ""))
+        self.assertTrue(output["changed"])
+        self.assertEqual(output["recovery"]["kind"], "retry-exhausted")
+        self.assertEqual(output["recovery"]["fromStage"], "checkout-validation")
+        self.assertEqual(output["recoveries"], [output["recovery"]])
+        persisted = json.loads(store.state_path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["schemaVersion"], 2)
+        self.assertEqual(persisted["lanes"][0]["status"], "waiting")
+        self.assertIsNone(persisted["lanes"][0]["result"])
+
+    def test_exhaustion_recovery_ignores_the_current_pack_manifest_version(
+        self,
+    ) -> None:
+        controller = self.load_controller()
+        root, _fleet, manifest, state = self.state(controller)
+        self.pass_preflight(controller, state)
+        exhausted = self.exhaust_lane(controller, state, consumer="canary-a")
+        state_home = root.parent / f"{root.name}-stale-manifest-state"
+        store = controller.CampaignStore(root, "campaign-1", state_home)
+        with store.locked():
+            store.write(state)
+        # The pack moves on while the campaign stays bound to its own release.
+        manifest.write_text(json.dumps({"version": "0.39.0"}), encoding="utf-8")
+        (root / "manifest.json").write_text(
+            json.dumps({"version": "0.39.0"}), encoding="utf-8"
+        )
+
+        status, output, error = self.run_cli(
+            controller,
+            "resume",
+            "--repo",
+            str(root),
+            "--campaign",
+            "campaign-1",
+            "--state-home",
+            str(state_home),
+            "--json",
+            "--recover-exhausted-consumer",
+            "canary-a",
+            "--exhausted-action",
+            exhausted["actionId"],
+            "--release",
+            "0.37.0",
+        )
+
+        self.assertEqual((status, error), (0, ""))
+        self.assertTrue(output["changed"])
+        self.assertEqual(output["recovery"]["kind"], "retry-exhausted")
+
+    def test_schema_one_recovery_rows_migrate_to_the_tagged_union(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(controller)
+        legacy = copy.deepcopy(state)
+        legacy["schemaVersion"] = 1
+        legacy["recoveries"] = [
+            {
+                "consumer": "canary-a",
+                "correctiveRelease": "0.38.0",
+                "fromActionId": "an-earlier-merge-action",
+                "fromAttempt": 1,
+                "fromBlocker": "taskless-finish-work-invalid",
+                "fromHead": HEAD,
+                "fromPrNumber": 17,
+                "fromStage": "merge",
+                "recordedAt": "2026-07-29T00:00:00Z",
+                "toAttempt": 2,
+                "toStage": "pr-publication",
+            }
+        ]
+        source = copy.deepcopy(legacy)
+
+        normalized = controller._normalize_state(legacy)
+
+        self.assertEqual(normalized["schemaVersion"], 2)
+        self.assertEqual(normalized["recoveries"][0]["kind"], "pack-blocker")
+        controller.validate_state(normalized)
+        # Neither the mapping nor its nested recovery rows are mutated in place.
+        self.assertEqual(legacy, source)
+
+        legacy.pop("recoveries")
+        normalized = controller._normalize_state(legacy)
+
+        self.assertEqual(normalized["recoveries"], [])
+        self.assertEqual(normalized["schemaVersion"], 2)
+        controller.validate_state(normalized)
+        self.assertEqual(legacy["schemaVersion"], 1)
+
+    def test_schema_one_state_file_migrates_only_on_a_mutating_command(self) -> None:
+        controller = self.load_controller()
+        root, _fleet, _manifest, state = self.state(controller)
+        self.pass_preflight(controller, state)
+        state_home = root.parent / f"{root.name}-migration-state"
+        store = controller.CampaignStore(root, "campaign-1", state_home)
+        with store.locked():
+            store.write(state)
+
+        def rewrite(payload):
+            store.state_path.write_text(
+                json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            os.chmod(store.state_path, 0o600)
+
+        legacy = json.loads(store.state_path.read_text(encoding="utf-8"))
+        legacy["schemaVersion"] = 1
+        rewrite(legacy)
+        before = store.state_path.read_bytes()
+        common = (
+            "--repo",
+            str(root),
+            "--campaign",
+            "campaign-1",
+            "--state-home",
+            str(state_home),
+            "--json",
+        )
+
+        status, output, error = self.run_cli(controller, "validate", *common)
+        self.assertEqual((status, error), (0, ""))
+        self.assertEqual(output["status"], "valid")
+        status, output, error = self.run_cli(controller, "status", *common)
+        self.assertEqual((status, error), (0, ""))
+        self.assertEqual(store.state_path.read_bytes(), before)
+
+        status, _output, error = self.run_cli(controller, "next", *common)
+        self.assertEqual((status, error), (0, ""))
+        persisted = json.loads(store.state_path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["schemaVersion"], 2)
+
+        persisted["schemaVersion"] = 3
+        rewrite(persisted)
+        status, output, error = self.run_cli(controller, "validate", *common)
+        self.assertEqual((status, output), (2, None))
+        self.assertIn("campaign schemaVersion must be 2", error)
+
+    def test_schema_two_state_is_refused_by_a_schema_one_validator(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(controller)
+        self.assertEqual(state["schemaVersion"], 2)
+
+        # Migration is one-way. A rolled-back controller fails on the version
+        # check, which names the cause, rather than on an unknown recovery field.
+        with mock.patch.object(controller, "SCHEMA_VERSION", 1):
+            with self.assertRaisesRegex(
+                controller.FleetControllerError, "campaign schemaVersion must be 1"
+            ):
+                controller.validate_state(state)
+
+    def test_recovery_rows_are_validated_per_kind(self) -> None:
+        controller = self.load_controller()
+        exhaustion = {
+            "consumer": "canary-a",
+            "fromActionId": "an-exhausted-action",
+            "fromAttempt": 2,
+            "fromBlocker": "temporary-network",
+            "fromStage": "local-checks",
+            "kind": "retry-exhausted",
+            "recordedAt": "2026-07-29T00:00:00Z",
+            "toAttempt": 3,
+            "toStage": "local-checks",
+        }
+        pack_blocker = {
+            "consumer": "canary-a",
+            "correctiveRelease": "0.38.0",
+            "fromActionId": "a-merge-action",
+            "fromAttempt": 1,
+            "fromBlocker": "taskless-finish-work-invalid",
+            "fromHead": HEAD,
+            "fromPrNumber": 17,
+            "fromStage": "merge",
+            "kind": "pack-blocker",
+            "recordedAt": "2026-07-29T00:00:00Z",
+            "toAttempt": 2,
+            "toStage": "pr-publication",
+        }
+        controller.validate_recovery(exhaustion, "recoveries[0]")
+        controller.validate_recovery(pack_blocker, "recoveries[1]")
+
+        for field, value in (
+            ("correctiveRelease", "0.38.0"),
+            ("fromHead", HEAD),
+            ("fromPrNumber", 17),
+        ):
+            with self.assertRaisesRegex(
+                controller.FleetControllerError, f"unknown field: {field}"
+            ):
+                controller.validate_recovery(
+                    {**exhaustion, field: value}, "recoveries[0]"
+                )
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "toStage must match fromStage"
+        ):
+            controller.validate_recovery(
+                {**exhaustion, "toStage": "review"}, "recoveries[0]"
+            )
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "fromStage is invalid"
+        ):
+            controller.validate_recovery(
+                {**exhaustion, "fromStage": "not-a-stage", "toStage": "not-a-stage"},
+                "recoveries[0]",
+            )
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "fromStage must be merge"
+        ):
+            controller.validate_recovery(
+                {**pack_blocker, "fromStage": "review"}, "recoveries[1]"
+            )
+        for kind in ("both", None):
+            with self.assertRaisesRegex(
+                controller.FleetControllerError, "kind is invalid"
+            ):
+                controller.validate_recovery({**exhaustion, "kind": kind}, "recoveries[0]")
+        untagged = {key: value for key, value in exhaustion.items() if key != "kind"}
+        with self.assertRaisesRegex(controller.FleetControllerError, "kind is invalid"):
+            controller.validate_recovery(untagged, "recoveries[0]")
+
+    def test_pack_blocker_recovery_scans_past_exhaustion_rows(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("wave-a",)
+        )
+        self.block_lane_at_merge(controller, state)
+        state["recoveries"].append(
+            {
+                "consumer": "wave-a",
+                "fromActionId": "an-earlier-exhausted-action",
+                "fromAttempt": 2,
+                "fromBlocker": "temporary-network",
+                "fromStage": "local-checks",
+                "kind": "retry-exhausted",
+                "recordedAt": "2026-07-29T00:00:00Z",
+                "toAttempt": 3,
+                "toStage": "local-checks",
+            }
+        )
+
+        recovery, changed = controller.recover_pack_blocker(
+            state,
+            consumer="wave-a",
+            corrective_release="0.38.0",
+            actual_release="0.38.0",
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(recovery["kind"], "pack-blocker")
+        self.assertEqual(
+            [item["kind"] for item in state["recoveries"]],
+            ["retry-exhausted", "pack-blocker"],
+        )
+
+    def test_pack_blocker_recovery_never_dereferences_an_exhaustion_row(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("wave-a",)
+        )
+        blocker = self.block_lane_at_merge(controller, state)
+        state["recoveries"].append(
+            {
+                "consumer": "wave-a",
+                "fromActionId": blocker["actionId"],
+                "fromAttempt": blocker["attempt"],
+                "fromBlocker": "temporary-network",
+                "fromStage": "local-checks",
+                "kind": "retry-exhausted",
+                "recordedAt": "2026-07-29T00:00:00Z",
+                "toAttempt": 3,
+                "toStage": "local-checks",
+            }
+        )
+
+        # Before the lookup became kind-aware this raised a bare
+        # KeyError('correctiveRelease') instead of a typed controller error.
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "unique source actions"
+        ):
+            controller.recover_pack_blocker(
+                state,
+                consumer="wave-a",
+                corrective_release="0.38.0",
+                actual_release="0.38.0",
+            )
 
 
 if __name__ == "__main__":

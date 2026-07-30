@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.56.3 - 2026-07-29
+
+- Add an explicit fleet-controller recovery transition for `retry-exhausted`
+  lanes. A lane's retry budget is per stage, so a consumer whose infrastructure
+  failure consumed both automatic attempts became permanently terminal: nothing
+  short of a new campaign could reopen it, and because a `retry-exhausted` lane
+  reads as a failed observation it also tripped the canary health stop for every
+  other consumer in the campaign. `resume --recover-exhausted-consumer NAME
+  --exhausted-action ID --release VERSION` now grants one operator-authorized
+  attempt at the stage that exhausted, bounded to two recoveries per consumer
+  and stage. It validates that the lane is terminal `retry-exhausted`, that the
+  named action is the lane's latest receipt, and that the receipt's stage,
+  attempt, and reason code all agree with the lane; `--release` is compared
+  against the campaign's own target version rather than the current
+  `manifest.json` version, so a campaign on an older release stays recoverable.
+  Replaying the same exhausted action returns the existing record and changes
+  nothing.
+- Bump the campaign state schema to version 2 and migrate version-1 state on
+  load: an absent `recoveries` key becomes an empty list and every untagged
+  recovery row gains `kind: "pack-blocker"`. Recovery rows are now a tagged
+  union on `kind`, so exhaustion recoveries and pack-blocker recoveries are
+  validated against their own field sets instead of one shared shape, and the
+  pack-blocker idempotency lookup filters on `kind` rather than assuming every
+  row carries a blocking head. Migration is read-only — loading a version-1
+  campaign to report on it leaves the state file byte-for-byte unchanged until
+  the next mutating command writes it. Historical `receipts` remain immutable
+  under both recovery kinds.
+
 ## 0.56.2 - 2026-07-29
 
 - Exempt a planning task's untouched context scaffold from both review-preflight
