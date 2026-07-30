@@ -153,13 +153,15 @@ The pack-side surface is the validator and the two skills.
       Evidence: `diff -q` is silent for both pairs —
       `sd-ai-command-pack-review-preflight.mjs` and
       `sd-finish-work/SKILL.md`.
-- [ ] `make check` passes.
-      Blocked on exactly one finding, by design: `provenance.candidate-stale`
-      on `docs/fleet/candidate-validation.json`, which still pins pack `0.56.3`
-      and the pre-change payload digest. Both edited files are shipped payload,
-      so this change carries the `0.56.4` bump and its CHANGELOG entry; the
-      ledger is refreshed by `make release-prep` immediately before the PR
-      push. Everything else in `make check` is green.
+- [x] `make check` passes.
+      Evidence: `make release-prep` exits 0, ending in `make check`. Both edited
+      files are shipped payload, so the change carries the `0.56.4` bump, its
+      CHANGELOG entry, and a candidate ledger refreshed across the eight fleet
+      consumers to payload digest
+      `sha256:771821351df0cc70946bd7abdec5828a85988a7cda5e5a10399f7773783c252c`.
+      One warning remains and is a PR-body requirement, not a check failure: the
+      branch changes generated files, so the body must carry a
+      `Tooling/generated scope:` section.
 
 ## Notes
 
