@@ -186,6 +186,24 @@
     `main`: `CI scope` must report `mode: bookkeeping`. A `full` with a
     `prior_classifier_*` reason means the guard leaked and this must be reverted.
 
+    **Live negative control — the fast lane still works.** Step 10's underlying worry
+    is that the guard turns every run into `full` and quietly retires the fast lane.
+    That is now disproven on real GitHub Actions, on the hardened workflow itself.
+    PR #279 head `4e4aaf07` is a `synchronize` whose increment is entirely under
+    `.trellis/tasks/` and whose `BEFORE_SHA` `a51abbec` carries a base-identical
+    classifier and a green `CI Result`. The guard passed through and the classifier
+    selected `mode: bookkeeping`, `reason: verified_bookkeeping_successor`,
+    `validationOutcome: success`; `lint`, `security`, `unittest` and
+    `Release payload gate` all skipped and `CI Result` passed. Run `30535866807`,
+    job `90848907337`.
+
+    Together with AC1 this is the discrimination result, not just a fail-closed one:
+    identical blob passes and takes the fast lane, tampered blob selects `full`. A
+    guard that always chose `full` would satisfy AC1 and fail here.
+
+    It does not close step 10 as written — that names the `push`-to-`main` lane, and
+    this is the `pull_request` lane. It closes the risk step 10 exists to catch.
+
     Related, and checked while doing this: the guard tests `BASE_SHA` for emptiness
     but not `BEFORE_SHA`, which is deliberate. `tests.yml:135` already rejects any
     `BEFORE_SHA` that is not 40 hex characters and selects
