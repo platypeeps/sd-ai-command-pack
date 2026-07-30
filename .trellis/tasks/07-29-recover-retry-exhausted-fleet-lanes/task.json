@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-07-29",
   "completedAt": null,
-  "branch": null,
+  "branch": "chore/record-retry-exhausted-recovery-planning",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,

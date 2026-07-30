@@ -105,42 +105,42 @@ so parking is permanent in practice.
 
 ## Acceptance Criteria
 
-- [ ] A terminal `retry-exhausted` lane can be returned to a runnable state
+- [x] A terminal `retry-exhausted` lane can be returned to a runnable state
       through one explicit `resume` transition, and `next` then issues an action
       for that lane at the stage that exhausted.
-- [ ] The transition is refused, with a distinct message, when the consumer,
+- [x] The transition is refused, with a distinct message, when the consumer,
       release, or exhausted action ID does not match recorded state, or when the
       supplied action's attempt is not the lane's recorded exhausted attempt.
       Campaign identity is covered by the pre-existing `CampaignStore.load`
       refusal and is asserted against that message rather than a new one.
-- [ ] The transition is refused for every terminal result other than
+- [x] The transition is refused for every terminal result other than
       `retry-exhausted`: `at-target`, `merged`, `pr-open`, `product-failure`,
       `review-finding`, `ownership-skip`, `permanent-incompatibility`, and
       `operator-decision`.
-- [ ] Repeated recovery of the same lane is bounded at two per consumer and
+- [x] Repeated recovery of the same lane is bounded at two per consumer and
       stage, the bound counts only retry-exhaustion recoveries, and an idempotent
       replay still succeeds once the bound is full.
-- [ ] A recovered lane resumes at attempt 3 for that stage, and one further
+- [x] A recovered lane resumes at attempt 3 for that stage, and one further
       `retryable-failure` re-terminates it immediately as `retry-exhausted`.
-- [ ] Every pre-existing receipt survives the transition byte-for-byte,
+- [x] Every pre-existing receipt survives the transition byte-for-byte,
       `lane["receipts"]` is not written at all, and the recovery is recorded as
       its own row in `state["recoveries"]`.
-- [ ] `controller validate` reports `valid` before and after the transition.
-- [ ] A campaign state file written at the previous schema version loads,
+- [x] `controller validate` reports `valid` before and after the transition.
+- [x] A campaign state file written at the previous schema version loads,
       migrates, and validates with no operator action, and a read-only command
       against it leaves the file unchanged on disk.
-- [ ] A state file at the new schema version is refused by the previous
+- [x] A state file at the new schema version is refused by the previous
       controller on the schema version check, and the one-way nature of migration
       is documented rather than implied.
-- [ ] Focused tests cover the accepted path, each refusal path, and the receipt
+- [x] Focused tests cover the accepted path, each refusal path, and the receipt
       preservation guarantee.
-- [ ] `sd-fleet-refresh` SKILL.md and `references/controller-recovery.md` are
+- [x] `sd-fleet-refresh` SKILL.md and `references/controller-recovery.md` are
       updated in `templates/**` and the generated mirrors regenerated, with the
       inaccurate permanent-park wording corrected.
-- [ ] `.trellis/spec/backend/manifest-and-filesystem.md` describes the new
+- [x] `.trellis/spec/backend/manifest-and-filesystem.md` describes the new
       transition and no longer states that exhaustion parks the lane
       permanently.
-- [ ] The full self-hosting check passes on the change.
+- [x] The full self-hosting check passes on the change.
 
 ## Completion
 
