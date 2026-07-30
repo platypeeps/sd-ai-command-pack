@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 258
+- **Total Sessions**: 259
 - **Last Active**: 2026-07-30
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~345 | Active |
+| `journal-6.md` | ~383 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 259 | 2026-07-30 | Allowlist shipped review.json in install audit (T-1, v0.56.6) | `46ee5de8`, `6750f8de`, `29cfcbb1` | `fix/allowlist-review-json-install-audit` |
 | 258 | 2026-07-30 | Backlog grooming: priority raises and fleet rollout archive | `ae79f89b` | `chore/archive-fleet-rollout-task` |
 | 257 | 2026-07-30 | Close out v0.56.5 delivery and archive the Trellis instability analysis | `d15f0eb6` | `chore/archive-analyze-trellis-instability` |
 | 256 | 2026-07-30 | Silence the scope advisory once the PR body satisfies it | `4937be42`, `dc92d8b5`, `55759506`, `d7ee985c`, `1f9ccedc` | `fix/silence-satisfied-scope-advisory` |

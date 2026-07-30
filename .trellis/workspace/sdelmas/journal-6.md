@@ -346,3 +346,44 @@ Reviewed all 65 unarchived Trellis tasks for priority and applicability. Raised 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 259: Allowlist shipped review.json in install audit (T-1, v0.56.6)
+
+**Date**: 2026-07-30
+**Task**: Allowlist shipped review.json in install audit (T-1, v0.56.6)
+**Branch**: `fix/allowlist-review-json-install-audit`
+
+### Summary
+
+Implemented Trellis task 07-28-allowlist-review-json-install-audit: added .sd-ai-command-pack/review.json to LOCAL_ALLOWED_PACK_FILES in the install audit (template source + synced mirror), locked it with a fixture-backed test verified by mutation, bumped the pack to 0.56.6 with CHANGELOG entry per the release payload gate, and retargeted a stale archived-task reference in 07-29-scope-final-bundle-validator-to-delta/prd.md that blocked full-check repo-wide. Shipped as PR #286: CI fully green, Copilot review clean with zero threads.
+
+### Main Changes
+
+- Added `.sd-ai-command-pack/review.json` to `LOCAL_ALLOWED_PACK_FILES` in `templates/scripts/sd-ai-command-pack-install-audit.py` (source of truth) and synced the `scripts/` mirror via `make sync` (audit finding A-056).
+- Added `test_install_audit_allows_repository_owned_review_configuration` in `tests/test_install_audit.py`: installs the pack into a consumer fixture, writes the documented review.json, asserts install-audit exits 0 without flagging the file.
+- Bumped `manifest.json` to 0.56.6 with a CHANGELOG entry; `make release-prep` regenerated the command catalogs, dogfood install receipt, and fleet candidate ledger.
+- Retargeted the `07-28-analyze-recurring-trellis-workflow-instability` reference in `.trellis/tasks/07-29-scope-final-bundle-validator-to-delta/prd.md` to its archive path — pre-existing debt from PR #283 that failed the repo-wide documentation path check on every full-check run.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `46ee5de8` | fix(audit): allowlist the shipped review.json in the install audit |
+| `6750f8de` | chore(task): activate allowlist task and retarget archived prd reference |
+| `29cfcbb1` | chore(release): prepare 0.56.6 |
+
+### Testing
+
+- `python -m unittest tests.test_install_audit -k review_configuration -k check_configuration` — Ran 2 tests, OK.
+- Mutation check: removed the allowlist entry, new test FAILED (failures=1); restored via `make sync`.
+- `make release-prep` — "Full check complete", exit 0.
+- PR #286 CI: unittest on ubuntu 3.10/3.13 and macOS 3.13, lint, security, release payload gate — all SUCCESS; Copilot review COMMENTED with zero threads.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

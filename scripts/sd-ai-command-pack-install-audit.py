@@ -79,6 +79,7 @@ LOCAL_ALLOWED_PACK_FILES = {
     ".sd-ai-command-pack/check.json",
     ".sd-ai-command-pack/pr-body-scope.json",
     ".sd-ai-command-pack/review-preflight.json",
+    ".sd-ai-command-pack/review.json",
 }
 
 SOURCE_ONLY_ALLOWED_PACK_FILES = {
