@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify the completion-mode contract at :1108-1182 still holds: schema version 1, mode completion, completion_bundle_valid, and eligibility's exact-document replay at :1149-1152 unaffected by the relaxed identity comparison."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Verify generated mirror parity (:308, :378, :855) for both edited pairs after `make sync`: review-preflight.mjs and sd-finish-work/SKILL.md."}
