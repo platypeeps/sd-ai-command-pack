@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -82,45 +81,39 @@ class SurfaceClosureTests(unittest.TestCase):
         self.assertGreater(payload["graph"]["nodeCount"], 500)
 
     def test_nested_ignored_checkout_leaves_the_closure_clean(self) -> None:
+        # The closure report inherits its file walk from the shared linter, so
+        # load that module exactly as the checker does and point it at an
+        # isolated root rather than mutating the live checkout.
+        linter = self.checker._load_source_module(
+            PACK_ROOT, ".github/scripts/check-command-surface-drift.py", "closure_lint"
+        )
         # Built from the registry so this file never carries the literal itself.
         retired = next(
             identifier
             for retirement in registry.RETIRED_COMMAND_SURFACES
             for identifier in retirement.identifiers
         )
-        worktrees = PACK_ROOT / ".claude/worktrees"
-        nested = worktrees / "surface-closure-fixture"
-        if nested.exists():
-            self.skipTest(f"fixture path is already occupied: {nested}")
-        created_parent = not worktrees.exists()
-        (nested / "docs").mkdir(parents=True)
-        try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.write_manifest(root, [])
+            nested = root / ".claude/worktrees/scratch"
+            (nested / "docs").mkdir(parents=True)
             (nested / ".git").write_text(
-                "gitdir: /elsewhere/.git/worktrees/surface-closure-fixture\n",
-                encoding="utf-8",
+                "gitdir: /elsewhere/.git/worktrees/scratch\n", encoding="utf-8"
             )
             (nested / "docs/notes.md").write_text(
                 f"# notes\nRetired {retired} lived here.\n", encoding="utf-8"
             )
 
-            result = subprocess.run(
-                [sys.executable, str(SCRIPT), "--json", "--base-ref", "HEAD"],
-                cwd=PACK_ROOT,
-                check=False,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                timeout=120,
+            report = linter.lint_repository(
+                root,
+                commands=(),
+                retirements=registry.RETIRED_COMMAND_SURFACES,
+                allowances=(),
+                source_only=frozenset(),
             )
-        finally:
-            shutil.rmtree(nested)
-            if created_parent:
-                worktrees.rmdir()
 
-        self.assertEqual(result.returncode, 0, result.stdout)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "clean")
-        self.assertEqual(payload["findingCount"], 0)
+            self.assertEqual(report.findings, ())
 
     def test_manifest_schema_rejects_unknown_wrong_types_and_duplicates(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

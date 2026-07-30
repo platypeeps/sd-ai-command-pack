@@ -178,7 +178,7 @@ def _ignored(relative: PurePosixPath) -> bool:
 
 
 def _nested_checkout(path: Path) -> bool:
-    """Report a directory that carries its own git entry.
+    """Return whether a directory carries its own git entry.
 
     Nested clones record a ``.git`` directory and linked worktrees record a
     ``.git`` file; neither belongs to this repository's shipped surface.
@@ -188,11 +188,15 @@ def _nested_checkout(path: Path) -> bool:
 
 
 def _git_excluded(root: Path) -> frozenset[str]:
-    """Collect the paths git excludes, empty when the root is not a checkout.
+    """Collect the paths git excludes.
 
     A single ``ls-files`` call honours ``.gitignore``, ``.git/info/exclude``,
-    and the global excludes file. Directories arrive with a trailing slash,
-    which callers strip before matching.
+    and the global excludes file. It marks directories with a trailing slash,
+    which this function strips so the result matches plain relative paths.
+
+    The result is empty whenever that inventory cannot be trusted: the root is
+    not a checkout, git is unavailable, or the call fails or times out. Callers
+    then fall back to the static ignore rules and the nested-checkout probe.
     """
 
     if not os.path.lexists(root / ".git"):
