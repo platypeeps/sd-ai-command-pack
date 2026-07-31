@@ -429,3 +429,37 @@ Implemented Trellis task 07-29-scope-final-bundle-validator-to-delta: findings a
 ### Next Steps
 
 - None - task complete
+
+
+## Session 261: Repair follow-up task PRD reference after 07-29 archive
+
+**Date**: 2026-07-30
+**Task**: Repair follow-up task PRD reference after 07-29 archive
+**Branch**: `fix/scope-final-bundle-validator-to-delta`
+
+### Summary
+
+The archive of 07-29-scope-final-bundle-validator-to-delta moved its prd.md under .trellis/tasks/archive/2026-07/, leaving a dangling path reference in the follow-up task 07-30-recover-bookkeeping-repair-sessions PRD that failed the CI scope reference check on PR #287. Retargeted the reference to the archive path.
+
+### Main Changes
+
+- Pointed the 07-30-recover-bookkeeping-repair-sessions PRD root-cause reference at the archived 07-29 task path
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fca7ef70` | chore(task): point follow-up PRD at archived 07-29 task path |
+
+### Testing
+
+- [OK] repo-wide grep for the old active path: only historical journal prose remains
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
