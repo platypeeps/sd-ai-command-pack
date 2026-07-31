@@ -41,18 +41,26 @@ preserving untracked roadmap-file items as `F-*` follow-ups.
 
 ## Acceptance Criteria
 
-- [ ] Local status human and JSON output expose only Follow-ups (`F-*`) and Tasks
-  (`T-*`); no Roadmap collection or `R-*` selector exists.
-- [ ] Housekeeping relays the same F/T inventory without describing or accepting
-  a removed category.
-- [ ] Untracked roadmap-file tasks still appear as deduplicated `F-*` follow-ups
-  with path/line evidence.
-- [ ] A later `R-1` request returns a precise unsupported/stale-snapshot result
-  and performs no mutation.
-- [ ] Live-surface drift validation finds no obsolete F/T/R wording; archived
-  task history may retain historical evidence.
-- [ ] Focused status/housekeeping tests, template/root parity, `make sync`, and
-  `make check` pass.
+- [x] Local status human and JSON output expose only Follow-ups (`F-*`) and Tasks
+  (`T-*`); no Roadmap collection or `R-*` selector exists. Verified, not built:
+  `select_items` emits `prefix="T"` once and `prefix="F"` twice, no diff to
+  `scripts/sd-ai-command-pack-status.py`.
+- [x] Housekeeping relays the same F/T inventory without describing or accepting
+  a removed category (`sd-housekeeping/SKILL.md:118` now reads `F/T selectors`).
+- [x] Untracked roadmap-file tasks still appear as deduplicated `F-*` follow-ups
+  with path/line evidence. Unchanged behavior; regression-guarded by
+  `tests/test_status.py` (47 tests OK).
+- [x] A later `R-1` request returns a precise unsupported/stale-snapshot result
+  and performs no mutation. Wording landed as a generic rejection (any selector
+  that is not an `F-*`/`T-*` row of the snapshot is unresolved input, no
+  action); the behavioral half is skill prose executed by a host model and is
+  not machine-verifiable — the greps prove the instruction is present and
+  unambiguous, not that a host follows it.
+- [x] Live-surface drift validation finds no obsolete F/T/R wording; archived
+  task history may retain historical evidence
+  (`tests/test_selector_contract_drift.py`, allowlist over shipped roots).
+- [x] Focused status/housekeeping tests, template/root parity, `make sync`, and
+  `make check` pass (release-prep gate; evidence in session journal).
 
 ## Out Of Scope
 

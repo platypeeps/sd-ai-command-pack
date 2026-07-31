@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 271
+- **Total Sessions**: 272
 - **Last Active**: 2026-07-31
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~834 | Active |
+| `journal-6.md` | ~875 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 272 | 2026-07-31 | Align status and housekeeping selector contracts to F/T | `b690b9eb`, `1ac22f79` | `fix/align-status-selector-contract` |
 | 271 | 2026-07-31 | Declare and pin build dependency toolchain (A-108/109/110) | `05ab4f61`, `26ae2976`, `bf2e5aae`, `49d633af`, `af8f96eb` | `fix/declare-pin-build-dependencies` |
 | 270 | 2026-07-31 | Document remaining shipped scripts and gate doc coverage (A-115, PR #297) | `6efe757c`, `14d6c75c`, `a595f670`, `dfef55df` | `fix/document-remaining-shipped-scripts` |
 | 269 | 2026-07-31 | Harden KB prune with trailing provenance marker (PR #296) | `bc6611b9`, `24c3b612` | `fix/harden-kb-prune-marker-check` |

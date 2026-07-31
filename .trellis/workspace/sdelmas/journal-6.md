@@ -839,3 +839,44 @@ Single-sourced the Python floor in pyproject.toml [project].requires-python with
 ### Next Steps
 
 - None - task complete
+
+
+## Session 272: Align status and housekeeping selector contracts to F/T
+
+**Date**: 2026-07-31
+**Task**: Align status and housekeeping selector contracts to F/T
+**Branch**: `fix/align-status-selector-contract`
+
+### Summary
+
+Closed review finding 1.1.1: removed retired F/T/R selector wording from sd-status and sd-housekeeping skills, added generic non-F/T selector rejection covering stale-snapshot input, and added an allowlist drift test over the shipped surface. Version 0.59.1. PR #299, 2 Copilot rounds (round-1 comment-clarity finding complied), CI green after one unrelated macOS housekeeping-fixture flake.
+
+### Main Changes
+
+- `templates/.agents/skills/sd-status/SKILL.md:140`: report-local selector wording `F/T/R` → `F/T`, plus a new generic rejection sentence — any selector that is not an `F-*` or `T-*` row of the current snapshot is unresolved input with no action taken (covers both retired-prefix and stale-snapshot requests without naming the removed category).
+- `templates/.agents/skills/sd-housekeeping/SKILL.md:118`: delegated-result contract relays `F/T selectors` (was `F/T/R selectors`).
+- `tests/test_selector_contract_drift.py` (new): allowlist drift guard over shipped roots (`templates/`, `docs/`, generated adapters and root mirrors, existence-guarded) for retired `F/T/R`, `R-*`, `R-<n>`, and standalone `Roadmap` heading wording; `.trellis/` out of scope by construction. Round-1 Copilot feedback tightened the pattern comment.
+- Mirrors regenerated via `make sync`; release bookkeeping for 0.59.1 (`manifest.json`, dogfood manifest, `CHANGELOG.md`, command-catalog restamp, `docs/fleet/candidate-validation.json`).
+- No change to `scripts/sd-ai-command-pack-status.py` — `select_items` already emits only `prefix="T"`/`prefix="F"` (AC1 verified, not built).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b690b9eb` | fix: align status and housekeeping selector contracts to F/T |
+| `1ac22f79` | docs: clarify which Roadmap wording the drift guard bans |
+
+### Testing
+
+- `make release-prep` exit 0 on b690b9eb (surface generation, self-sync, payload version gate 0.59.0 → 0.59.1, fleet candidate validation, full check).
+- `tests/test_selector_contract_drift.py` 2 tests OK (correctly failed on the stale mirror before `make sync`); `tests/test_status.py` 47 tests OK; ruff clean on 1ac22f79.
+- Validation greps: retired wording 0 hits across live surfaces; `.trellis/` history paths unchanged; no diff to `scripts/sd-ai-command-pack-status.py`.
+- PR #299 CI SUCCESS on 1ac22f79 (round-1 run had one unrelated macOS housekeeping-fixture copytree flake; passed on retry). Copilot round 2: "reviewed 13 out of 13 changed files … generated no new comments"; 0 unresolved threads. sd-check `check.status` passed (attempt it9-sdcheck-1ac22f79-a).
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

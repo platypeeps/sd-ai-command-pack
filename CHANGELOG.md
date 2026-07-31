@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.59.1 - 2026-07-31
+
+- Align the status and housekeeping selector contracts (review finding 1.1.1).
+  `sd-status` and `sd-housekeeping` now describe only the shipped `F-*`
+  follow-up and `T-*` task selectors — the retired `F/T/R` wording is gone —
+  and a selector that does not resolve to an `F-*` or `T-*` row of the current
+  snapshot is reported as unresolved input with no action taken. A new drift
+  test scans the shipped surface (templates, docs, generated adapters and
+  mirrors) so the retired selector contract cannot reappear; `.trellis/` task
+  history stays out of scope by construction.
+
 ## 0.59.0 - 2026-07-31
 
 - Declare and pin the build dependency toolchain (audit A-108/A-109/A-110).
