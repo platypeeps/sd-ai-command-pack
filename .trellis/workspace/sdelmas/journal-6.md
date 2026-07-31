@@ -921,3 +921,60 @@ Pre-registered removed_version=0.62.0 for sd-full-check, sd-review-local, sd-rev
 ### Next Steps
 
 - Push finish-work commits and hand off to sd-housekeeping to merge PR #300
+
+
+## Session 274: PR #291 review loop: ship-receipt validation hardening (rounds 4-9)
+
+**Date**: 2026-07-31
+**Task**: PR #291 review loop: ship-receipt validation hardening (rounds 4-9)
+**Branch**: `fix/add-ship-result-receipt`
+
+### Summary
+
+Gave sd-ship's merge handoff a schema-v1 receipt the work loop validates independently (recomputing outcome against git/PR instead of trusting the payload), then drove PR #291 through 9 rounds of Copilot review to a clean pass: fixed PR-URL and task compaction-limit mismatches against transition_state's stable-field normalization, a state-mutation-ordering bug, bool coercion accepted as pr_number and schemaVersion, a blank pr_url silently bypassing the evidence contradiction check, and documented the receipt's prUrl canonical-form requirement. Round 9 returned 0 new and 0 suppressed comments.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `01ca5adc` | (see git log) |
+| `9e65cfb9` | (see git log) |
+| `e7ab9c8c` | (see git log) |
+| `85260377` | (see git log) |
+| `b282daf9` | (see git log) |
+| `3c86d72b` | (see git log) |
+| `b3a43760` | (see git log) |
+| `0cb8f666` | (see git log) |
+| `4d656f50` | (see git log) |
+| `76bdd98c` | (see git log) |
+| `7ebffc75` | (see git log) |
+| `04c90f81` | (see git log) |
+| `695457f0` | (see git log) |
+| `16e94172` | (see git log) |
+| `c2075414` | (see git log) |
+| `b0cffa1d` | (see git log) |
+| `bc3b7c56` | (see git log) |
+| `f66c358f` | (see git log) |
+| `b752def8` | (see git log) |
+| `506297e3` | (see git log) |
+| `64d033ae` | (see git log) |
+| `8e993984` | (see git log) |
+| `ed76ca15` | (see git log) |
+| `2ae8c306` | (see git log) |
+| `bf700b23` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
