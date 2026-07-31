@@ -70,10 +70,45 @@ CURRENT_FIELD_ORDER = (
     "prNumber",
     "prUrl",
     "lastShippedSha",
+    "mergeState",
+    "finishWorkState",
+    "housekeepingState",
+    "anomalies",
 )
 CURRENT_FIELDS = frozenset(CURRENT_FIELD_ORDER)
+# The four ship-outcome fields are transient per-iteration facts: they are
+# written by the validated receipt path, survive same-iteration transitions
+# like every non-stable field, and reset with the rest of `current` at the
+# complete -> inventory boundary. None belong in STABLE_CURRENT_FIELDS (a
+# re-ship after a blocked attempt must be able to replace them) or in
+# TRANSITION_CURRENT_FIELDS (they are repo/PR facts, owned by evidence).
 STABLE_CURRENT_FIELDS = ("task", "baseBranch")
 TRANSITION_CURRENT_FIELDS = frozenset(STABLE_CURRENT_FIELDS)
+MERGE_STATES = ("merged", "open", "closed", "blocked")
+FINISH_WORK_STATES = ("completed", "blocked", "not-run")
+HOUSEKEEPING_STATES = ("healthy", "attention", "blocked")
+SHIP_RECEIPT_KIND = "sd-ship-merge-result"
+SHIP_RECEIPT_SCHEMA_VERSION = 1
+# Every receipt rejection carries exactly one of these codes as its error
+# prefix, in the same typed-reason style as RECOVERY_REFERENCE_BY_REASON.
+# They are command failures, not loop states, so they carry no recovery
+# reference.
+SHIP_RECEIPT_REASON_CODES = (
+    "ship_receipt_unreadable",
+    "ship_receipt_malformed",
+    "ship_receipt_version_unsupported",
+    "ship_receipt_run_mismatch",
+    "ship_receipt_iteration_mismatch",
+    "ship_receipt_task_mismatch",
+    "ship_receipt_pr_mismatch",
+    "ship_receipt_merge_unverified",
+)
+SHIP_RECEIPT_OUTCOME_BY_MERGE_STATE = {
+    "merged": "completed",
+    "open": "blocked",
+    "blocked": "blocked",
+    "closed": "failed",
+}
 ACTIVE_EVIDENCE_PHASES = frozenset(
     {"selected", "planning", "implementing", "validating", "shipping", "followups"}
 )
@@ -399,6 +434,17 @@ def _normalized_pr_url(value: object) -> str | None:
     return urlunsplit((split.scheme.casefold(), netloc, path, "", ""))
 
 
+def _comparable_pr_url(value: str | None) -> str | None:
+    """Canonicalize a pull request URL for equivalence comparison.
+
+    Falls back to the raw text when it does not parse as a well-formed URL,
+    so malformed input still compares (and mismatches) exactly as before.
+    """
+    if value is None:
+        return None
+    return _normalized_pr_url(value) or value
+
+
 def _valid_pr_record(value: object) -> bool:
     if not isinstance(value, dict) or set(value) != {
         "prNumber",
@@ -558,6 +604,13 @@ def validate_state(state: Mapping[str, Any]) -> None:
         )
     ):
         raise WorkLoopError("work-loop current state is malformed")
+    for field, allowed in (
+        ("mergeState", MERGE_STATES),
+        ("finishWorkState", FINISH_WORK_STATES),
+        ("housekeepingState", HOUSEKEEPING_STATES),
+    ):
+        if current.get(field) is not None and current[field] not in allowed:
+            raise WorkLoopError("work-loop current state is malformed")
     counters = state.get("counters")
     if (
         not isinstance(counters, dict)
@@ -919,15 +972,7 @@ def new_state(
         "updatedAt": now,
         "heartbeatAt": now,
         "contextHealth": {"level": "green", "epoch": 0, "reasons": []},
-        "current": {
-            "task": None,
-            "branch": None,
-            "head": None,
-            "baseBranch": None,
-            "prNumber": None,
-            "prUrl": None,
-            "lastShippedSha": None,
-        },
+        "current": {key: None for key in CURRENT_FIELD_ORDER},
         "counters": {
             "completed": 0,
             "parked": 0,
@@ -1253,6 +1298,15 @@ def acquire_terminal_lock(
         return operation_id
 
 
+def upgrade_state(state: dict[str, Any]) -> dict[str, Any]:
+    """Fill current-state fields added after a persisted ledger was written."""
+    current = state.get("current")
+    if isinstance(current, dict):
+        for key in CURRENT_FIELD_ORDER:
+            current.setdefault(key, None)
+    return state
+
+
 def load_state_for_repo(
     repo: Path,
     *,
@@ -1262,7 +1316,7 @@ def load_state_for_repo(
     identity = repository_identity(repo)
     root = state_root or resolve_state_root(environ=environ)
     state_path, lock_path = state_paths(identity, root)
-    state = read_json(state_path)
+    state = upgrade_state(read_json(state_path))
     validate_state(state)
     if state["repository"]["digest"] != identity["digest"]:
         raise WorkLoopError(
@@ -1565,7 +1619,7 @@ def reconcile_terminal_state(
         operation_lock_path, state, recover_stale=recover_stale
     )
     try:
-        state = read_json(state_path)
+        state = upgrade_state(read_json(state_path))
         validate_state(state)
         if state["repository"]["digest"] != identity["digest"]:
             raise WorkLoopError(
@@ -1801,6 +1855,15 @@ def validated_evidence(
         observed = candidate.get(key)
         if remembered is not None and observed != remembered:
             raise WorkLoopError(f"cannot replace stable current-state field: {key}")
+
+    for key, allowed in (
+        ("mergeState", MERGE_STATES),
+        ("finishWorkState", FINISH_WORK_STATES),
+        ("housekeepingState", HOUSEKEEPING_STATES),
+    ):
+        value = candidate.get(key)
+        if value is not None and value not in allowed:
+            raise WorkLoopError(f"{key} evidence must be one of: {', '.join(allowed)}")
 
     remembered_pr = current.get("prNumber")
     if remembered_pr is not None and candidate.get("prNumber") != remembered_pr:
@@ -2154,6 +2217,46 @@ def record_result(
         raise WorkLoopError(f"unknown iteration outcome: {outcome}")
     if review_rounds < 0 or ci_retries < 0:
         raise WorkLoopError("review rounds and CI retries must be non-negative")
+    if pr_number is not None and (
+        isinstance(pr_number, bool) or pr_number < 1
+    ):
+        raise WorkLoopError(
+            "iteration result pull request number must be a positive integer"
+        )
+    recorded_pr = state["current"].get("prNumber")
+    recorded_url = state["current"].get("prUrl")
+    if pr_url is None:
+        normalized_url = None
+    else:
+        # Same default limit as the evidence path stores current.prUrl with;
+        # a tighter limit here truncates long URLs into a false contradiction.
+        normalized_url = compact_text(pr_url)
+        if not normalized_url:
+            raise WorkLoopError(
+                "iteration result pull request URL must not be blank when supplied"
+            )
+    if pr_number is not None and recorded_pr is not None and pr_number != recorded_pr:
+        raise WorkLoopError(
+            "iteration result pull request number contradicts recorded evidence"
+        )
+    if (
+        normalized_url is not None
+        and recorded_url is not None
+        and _comparable_pr_url(normalized_url) != _comparable_pr_url(recorded_url)
+    ):
+        raise WorkLoopError(
+            "iteration result pull request URL contradicts recorded evidence"
+        )
+    if outcome == "completed" and pr_number is not None and recorded_pr is None:
+        raise WorkLoopError(
+            "completed iteration with a pull request requires recorded"
+            " pull request evidence"
+        )
+    # Let transition_state apply its own default-limit compaction, the same
+    # normalization the stable current.task field was originally stored
+    # with; a tighter limit here truncates a long task into a false
+    # "cannot replace stable current-state field" contradiction.
+    transition_state(state, "complete", updates={"task": task})
     state["counters"][counter_key] += 1
     state["counters"]["reviewRounds"] += review_rounds
     state["counters"]["ciRetries"] += ci_retries
@@ -2164,7 +2267,7 @@ def record_result(
         "task": compact_text(task, limit=160),
         "outcome": outcome,
         "prNumber": pr_number,
-        "prUrl": compact_text(pr_url, limit=240) if pr_url else None,
+        "prUrl": normalized_url,
         "reviewRounds": review_rounds,
         "ciRetries": ci_retries,
         "completedAt": utc_now(),
@@ -2176,8 +2279,168 @@ def record_result(
     state["followups"] = (
         state["followups"] + [compact_text(item) for item in followups]
     )[-MAX_NOTES:]
-    state["phase"] = "complete"
-    state["current"]["task"] = compact_text(task, limit=160)
+
+
+def _ship_receipt_error(code: str, detail: str) -> WorkLoopError:
+    if code not in SHIP_RECEIPT_REASON_CODES:
+        raise WorkLoopError(f"unknown ship receipt reason code: {code}")
+    return WorkLoopError(f"{code}: {detail}")
+
+
+def load_ship_receipt(path: Path) -> dict[str, Any]:
+    """Parse and shape-check a schema-v1 ship result receipt, failing closed."""
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise _ship_receipt_error(
+            "ship_receipt_unreadable", f"cannot read {path}: {error}"
+        ) from error
+    try:
+        receipt = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise _ship_receipt_error(
+            "ship_receipt_malformed", f"receipt is not valid JSON: {error}"
+        ) from error
+    if not isinstance(receipt, dict):
+        raise _ship_receipt_error(
+            "ship_receipt_malformed", "receipt must be a JSON object"
+        )
+    schema_version = receipt.get("schemaVersion")
+    if (
+        isinstance(schema_version, bool)
+        or schema_version != SHIP_RECEIPT_SCHEMA_VERSION
+        or receipt.get("kind") != SHIP_RECEIPT_KIND
+    ):
+        raise _ship_receipt_error(
+            "ship_receipt_version_unsupported",
+            f"expected schemaVersion {SHIP_RECEIPT_SCHEMA_VERSION} and kind"
+            f" {SHIP_RECEIPT_KIND}, found"
+            f" {schema_version!r}/{receipt.get('kind')!r}",
+        )
+
+    def malformed(detail: str) -> WorkLoopError:
+        return _ship_receipt_error("ship_receipt_malformed", detail)
+
+    for key in ("runId", "task", "finalBranch", "finalHead"):
+        value = receipt.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise malformed(f"{key} must be a non-empty string")
+    pr_url = receipt.get("prUrl")
+    if not isinstance(pr_url, str) or _normalized_pr_url(pr_url) != pr_url:
+        raise malformed("prUrl must be a canonical http(s) pull request URL")
+    for key, minimum in (("iteration", 1), ("prNumber", 1)):
+        value = receipt.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+            raise malformed(f"{key} must be an integer >= {minimum}")
+    for key in ("reviewRounds", "ciRetries"):
+        value = receipt.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise malformed(f"{key} must be a non-negative integer")
+    for key, allowed in (
+        ("mergeState", MERGE_STATES),
+        ("finishWork", FINISH_WORK_STATES),
+        ("housekeeping", HOUSEKEEPING_STATES),
+    ):
+        if receipt.get(key) not in allowed:
+            raise malformed(f"{key} must be one of: {', '.join(allowed)}")
+    anomalies = receipt.get("anomalies")
+    if not isinstance(anomalies, list) or any(
+        not isinstance(item, str) or not item.strip() for item in anomalies
+    ):
+        raise malformed("anomalies must be a list of non-empty strings")
+    if receipt["mergeState"] == "merged" and (
+        receipt["finalBranch"] == "unknown" or receipt["finalHead"] == "unknown"
+    ):
+        raise malformed(
+            "a merged receipt requires a known final branch and final head"
+        )
+    return receipt
+
+
+def record_result_from_receipt(
+    state: dict[str, Any],
+    *,
+    task: str,
+    receipt: Mapping[str, Any],
+    repo: Path,
+    decisions: Sequence[str],
+    followups: Sequence[str],
+) -> None:
+    """Record an iteration result from a receipt after recomputing its claims."""
+    if receipt["runId"] != state["runId"]:
+        raise _ship_receipt_error(
+            "ship_receipt_run_mismatch",
+            f"receipt belongs to run {receipt['runId']}, not {state['runId']}",
+        )
+    if receipt["iteration"] != state["iteration"]:
+        raise _ship_receipt_error(
+            "ship_receipt_iteration_mismatch",
+            f"receipt covers iteration {receipt['iteration']},"
+            f" ledger is at {state['iteration']}",
+        )
+    # Default-limit compaction here too, matching the stable current.task
+    # normalization below so an equal-content long task never false-mismatches.
+    receipt_task = compact_text(receipt["task"])
+    if receipt_task != compact_text(task):
+        raise _ship_receipt_error(
+            "ship_receipt_task_mismatch",
+            "receipt task does not match the task being recorded",
+        )
+    current = state["current"]
+    recorded_task = current.get("task")
+    if recorded_task is not None and receipt_task != recorded_task:
+        raise _ship_receipt_error(
+            "ship_receipt_task_mismatch",
+            "receipt task does not match the selected task",
+        )
+    receipt_url = compact_text(receipt["prUrl"])
+    if current.get("prNumber") != receipt["prNumber"] or _comparable_pr_url(
+        current.get("prUrl")
+    ) != _comparable_pr_url(receipt_url):
+        raise _ship_receipt_error(
+            "ship_receipt_pr_mismatch",
+            "receipt pull request does not match the recorded evidence",
+        )
+    merge_state = receipt["mergeState"]
+    if merge_state == "merged":
+        base_branch = current.get("baseBranch")
+        if base_branch is None or receipt["finalBranch"] != base_branch:
+            raise _ship_receipt_error(
+                "ship_receipt_merge_unverified",
+                "receipt final branch does not match the recorded base branch",
+            )
+        final_head = _resolved_commit(repo, receipt["finalHead"])
+        if final_head is None:
+            raise _ship_receipt_error(
+                "ship_receipt_merge_unverified",
+                f"receipt final head is not a local commit: {receipt['finalHead']}",
+            )
+        base_tip = _branch_commit(repo, base_branch)
+        if base_tip is None or not _is_ancestor(repo, final_head, base_tip):
+            raise _ship_receipt_error(
+                "ship_receipt_merge_unverified",
+                "receipt final head is not reachable from the base branch",
+            )
+    # Receipt fields name stage outcomes (finishWork, housekeeping); the
+    # ledger's current fields carry the -State suffix shared by the other
+    # transient snapshot fields. The ledger stores only bounded compact
+    # strings; the full anomaly list stays in the ship report and journal.
+    current["mergeState"] = merge_state
+    current["finishWorkState"] = receipt["finishWork"]
+    current["housekeepingState"] = receipt["housekeeping"]
+    joined_anomalies = "; ".join(item.strip() for item in receipt["anomalies"])
+    current["anomalies"] = compact_text(joined_anomalies) if joined_anomalies else None
+    record_result(
+        state,
+        task=task,
+        outcome=SHIP_RECEIPT_OUTCOME_BY_MERGE_STATE[merge_state],
+        pr_number=receipt["prNumber"],
+        pr_url=receipt_url,
+        review_rounds=receipt["reviewRounds"],
+        ci_retries=receipt["ciRetries"],
+        decisions=decisions,
+        followups=followups,
+    )
 
 
 def recovery_directive(reason_code: str) -> dict[str, str | None]:
@@ -2292,7 +2555,7 @@ def status_snapshot(
                     terminal_lock, terminal_lock_error
                 ),
             }
-        state = read_json(state_path)
+        state = upgrade_state(read_json(state_path))
         validate_state(state)
         if state["repository"]["digest"] != identity["digest"]:
             raise WorkLoopError("repository identity does not match loop state")
@@ -2528,12 +2791,16 @@ def build_parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--outcome",
         choices=("completed", "parked", "blocked", "skipped", "failed"),
-        required=True,
     )
     result.add_argument("--pr-number", type=int)
     result.add_argument("--pr-url")
-    result.add_argument("--review-rounds", type=int, default=0)
-    result.add_argument("--ci-retries", type=int, default=0)
+    result.add_argument("--review-rounds", type=int)
+    result.add_argument("--ci-retries", type=int)
+    result.add_argument(
+        "--from-receipt",
+        type=Path,
+        help="record from a validated schema-v1 ship result receipt",
+    )
     result.add_argument("--decision", action="append", default=[])
     result.add_argument("--follow-up", action="append", default=[])
     result.add_argument("--json", action="store_true")
@@ -2590,7 +2857,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.bare_focus is not None or args.focus or args.focus_only
             )
             if state_path.is_file():
-                state = read_json(state_path)
+                state = upgrade_state(read_json(state_path))
                 validate_state(state)
                 if state["repository"]["digest"] != identity["digest"]:
                     raise WorkLoopError(
@@ -2725,22 +2992,58 @@ def main(argv: Sequence[str] | None = None) -> int:
                 state_root=state_root,
             )
         elif args.command == "result":
-            state = mutate_state(
-                args.repo,
-                args.run_id,
-                lambda item: record_result(
-                    item,
-                    task=args.task,
-                    outcome=args.outcome,
-                    pr_number=args.pr_number,
-                    pr_url=args.pr_url,
-                    review_rounds=args.review_rounds,
-                    ci_retries=args.ci_retries,
-                    decisions=args.decision,
-                    followups=args.follow_up,
-                ),
-                state_root=state_root,
-            )
+            if args.from_receipt is not None:
+                supplied = [
+                    flag
+                    for flag, value in (
+                        ("--outcome", args.outcome),
+                        ("--pr-number", args.pr_number),
+                        ("--pr-url", args.pr_url),
+                        ("--review-rounds", args.review_rounds),
+                        ("--ci-retries", args.ci_retries),
+                    )
+                    if value is not None
+                ]
+                if supplied:
+                    raise WorkLoopError(
+                        "--from-receipt supplies these values; remove"
+                        f" {', '.join(supplied)}"
+                    )
+                receipt = load_ship_receipt(args.from_receipt)
+                state = mutate_state(
+                    args.repo,
+                    args.run_id,
+                    lambda item: record_result_from_receipt(
+                        item,
+                        task=args.task,
+                        receipt=receipt,
+                        repo=args.repo,
+                        decisions=args.decision,
+                        followups=args.follow_up,
+                    ),
+                    state_root=state_root,
+                )
+            else:
+                if args.outcome is None:
+                    raise WorkLoopError(
+                        "result requires --outcome unless --from-receipt is given"
+                    )
+                state = mutate_state(
+                    args.repo,
+                    args.run_id,
+                    lambda item: record_result(
+                        item,
+                        task=args.task,
+                        outcome=args.outcome,
+                        pr_number=args.pr_number,
+                        pr_url=args.pr_url,
+                        review_rounds=args.review_rounds or 0,
+                        ci_retries=args.ci_retries or 0,
+                        decisions=args.decision,
+                        followups=args.follow_up,
+                    ),
+                    state_root=state_root,
+                )
         elif args.command == "focus":
             if args.clear and (args.prefer or args.only):
                 raise WorkLoopError("--clear cannot be combined with focus expressions")

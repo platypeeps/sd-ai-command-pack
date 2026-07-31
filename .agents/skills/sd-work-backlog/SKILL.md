@@ -271,11 +271,30 @@ report the helper diagnostics and the exact command above as recovery. This
 does not repeat housekeeping's earlier post-finish refresh: it owns only task
 documentation created after the nested ship returned.
 
-Record the compact iteration result through the helper, including PR,
-review-round and CI-retry counts, decisions, and follow-up pointers. Verify the
-repository is back on the synchronized default branch with a clean tree, then
-transition `complete -> inventory` and re-inventory live state. A clean nested
-housekeeping report is a return value, not a reason to end the parent loop.
+Record the compact iteration result through the helper from the schema-v1
+receipt file whose absolute path the nested ship reported on its
+`SD_SHIP_MERGE_RESULT_RECEIPT:` line, adding decisions and follow-up pointers:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-work-loop.py result --repo . \
+  --run-id "<run-id>" --task "<task>" \
+  --from-receipt "<receipt path from SD_SHIP_MERGE_RESULT_RECEIPT>"
+```
+
+The helper independently revalidates the receipt against the ledger and Git
+before recording; `--from-receipt` supplies the outcome, PR, review-round, and
+CI-retry values, so do not pass those flags alongside it. After the helper
+accepts the receipt, delete the receipt file, verify the repository is back on
+the synchronized default branch with a clean tree, then transition
+`complete -> inventory` and re-inventory live state. If the nested ship
+returned without a readable receipt path, or the helper rejects the receipt
+with a `ship_receipt_*` reason, do not reconstruct the typed result from the
+free-text `SD_SHIP_MERGE_RESULT` block: record the iteration with
+`--outcome blocked` plus a `--decision` naming the reported reason, reconcile
+ledger and live state against Git and GitHub, and classify the blocker through
+the blockers section before continuing. A clean nested housekeeping report is
+a return value, not a reason to end the parent loop.
 
 ## Blockers, Parking, And Operator Input
 

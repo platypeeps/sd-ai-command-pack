@@ -246,21 +246,68 @@ controller using values from the authoritative stage reports:
 SD_SHIP_MERGE_RESULT
 run-id: <run ID>
 iteration: <number>
+task: <task identifier>
 pr: <number and URL>
 merge-state: <merged|open|closed|blocked>
 finish-work: <completed|blocked|not-run>
 housekeeping: <healthy|attention|blocked>
 review-rounds: <non-negative count|unavailable>
+ci-retries: <non-negative count|unavailable>
 final-branch: <branch|unknown>
 final-head: <SHA|unknown>
 anomalies: <none|compact list>
 END_SD_SHIP_MERGE_RESULT
 ```
 
+Alongside the free-text block, materialize the same values as a schema-v1
+JSON receipt in a private temporary file (`mktemp`) and report its absolute
+path on a separate line directly after the block:
+
+```text
+SD_SHIP_MERGE_RESULT_RECEIPT: <absolute path>
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "sd-ship-merge-result",
+  "runId": "<run ID>",
+  "iteration": <number>,
+  "task": "<task identifier>",
+  "prNumber": <number>,
+  "prUrl": "<pull request URL>",
+  "mergeState": "<merged|open|closed|blocked>",
+  "finishWork": "<completed|blocked|not-run>",
+  "housekeeping": "<healthy|attention|blocked>",
+  "reviewRounds": <non-negative count>,
+  "ciRetries": <non-negative count>,
+  "finalBranch": "<branch|unknown>",
+  "finalHead": "<full SHA|unknown>",
+  "anomalies": ["<compact entry>"]
+}
+```
+
+Every field is required; `iteration`, `prNumber`, `reviewRounds`, and
+`ciRetries` are JSON numbers, `anomalies` is a JSON array that may be empty,
+and the remaining fields are strings. `prUrl` must already be canonical —
+lowercase scheme and host, no userinfo, query, or fragment, and no trailing
+slash on the path — or the receipt is rejected as malformed. Fill values
+only from the authoritative stage reports, never from memory. `finalBranch`
+and `finalHead` may be `unknown` only when `mergeState` is not `merged`.
+When the free-text `review-rounds` or `ci-retries` value is `unavailable`,
+write `0` for the matching JSON field — the free-text line keeps
+`unavailable` — and add an anomaly entry saying so. When any other required
+value — numeric or string — has no authoritative source and no documented
+placeholder above, do not write a receipt; report the missing value as an
+anomaly and treat the nested result as blocked.
+
 Missing or contradictory required values make the nested result blocked. The
-outer controller reconciles the result with Git, Trellis, GitHub, and the
-ledger before recording the iteration; sd-ship must not claim that the parent
-loop is complete.
+free-text block stays display-only for operators; the controller records the
+iteration only through the receipt, which the work loop independently
+recomputes against Git and the recorded pull-request evidence before
+accepting. The outer controller reconciles the result with Git, Trellis,
+GitHub, and the ledger before recording the iteration; sd-ship must not claim
+that the parent loop is complete.
 
 ## Final report
 

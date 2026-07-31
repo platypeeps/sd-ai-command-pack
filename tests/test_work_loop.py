@@ -606,6 +606,25 @@ class WorkLoopTests(InstallTestCase):
                     ):
                         module.validate_state(candidate)
 
+        enum_cases = {
+            "mergeState": module.MERGE_STATES,
+            "finishWorkState": module.FINISH_WORK_STATES,
+            "housekeepingState": module.HOUSEKEEPING_STATES,
+        }
+        for field, allowed in enum_cases.items():
+            candidate = dict(state)
+            candidate["current"] = dict(state["current"])
+            candidate["current"][field] = "surprise"
+            with self.subTest(field=field, value="surprise"):
+                with self.assertRaisesRegex(
+                    module.WorkLoopError, "current state is malformed"
+                ):
+                    module.validate_state(candidate)
+            for value in allowed:
+                candidate["current"][field] = value
+                with self.subTest(field=field, value=value):
+                    module.validate_state(candidate)
+
     def test_atomic_write_preserves_prior_state_when_replace_fails(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -1633,12 +1652,15 @@ class WorkLoopTests(InstallTestCase):
         for index in range(module.MAX_HISTORY + 3):
             state["phase"] = "followups"
             state["iteration"] = index + 1
+            state["current"]["task"] = f"task-{index}"
+            state["current"]["prNumber"] = 100 + index
+            state["current"]["prUrl"] = f"https://example.test/pull/{100 + index}"
             module.record_result(
                 state,
                 task=f"task-{index}",
                 outcome="completed",
                 pr_number=100 + index,
-                pr_url=f"https://example.test/pr/{index}",
+                pr_url=f"https://example.test/pull/{100 + index}",
                 review_rounds=2,
                 ci_retries=1,
                 decisions=[f"decision {index}"],
@@ -1652,6 +1674,232 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(
             state["counters"]["reviewRounds"], 2 * (module.MAX_HISTORY + 3)
         )
+
+    def test_result_accepts_long_pr_url_matching_recorded_evidence(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        long_url = "https://example.test/" + "a" * 230 + "/pull/42"
+        self.assertGreater(len(long_url), 240)
+        state["phase"] = "followups"
+        state["current"]["task"] = "task-1"
+        state["current"]["prNumber"] = 42
+        state["current"]["prUrl"] = module.compact_text(long_url)
+        module.record_result(
+            state,
+            task="task-1",
+            outcome="completed",
+            pr_number=42,
+            pr_url=long_url,
+            review_rounds=1,
+            ci_retries=0,
+            decisions=[],
+            followups=[],
+        )
+        self.assertEqual(state["iterations"][-1]["prUrl"], long_url)
+
+    def test_result_accepts_long_task_matching_recorded_evidence(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        long_task = "task " + "a" * 230
+        self.assertGreater(len(long_task), 160)
+        state["phase"] = "followups"
+        state["current"]["task"] = module.compact_text(long_task)
+        module.record_result(
+            state,
+            task=long_task,
+            outcome="completed",
+            pr_number=None,
+            pr_url=None,
+            review_rounds=1,
+            ci_retries=0,
+            decisions=[],
+            followups=[],
+        )
+        self.assertEqual(state["phase"], "complete")
+
+    def test_result_accepts_case_and_slash_equivalent_pr_url(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        state["phase"] = "followups"
+        state["current"]["task"] = "task-1"
+        state["current"]["prNumber"] = 42
+        state["current"]["prUrl"] = "https://Example.test/pull/42/"
+        module.record_result(
+            state,
+            task="task-1",
+            outcome="completed",
+            pr_number=42,
+            pr_url="https://example.test/pull/42",
+            review_rounds=1,
+            ci_retries=0,
+            decisions=[],
+            followups=[],
+        )
+        self.assertEqual(state["phase"], "complete")
+        self.assertEqual(
+            state["iterations"][-1]["prUrl"], "https://example.test/pull/42"
+        )
+
+    def test_result_missing_pr_evidence_leaves_counters_unmutated(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        state["phase"] = "followups"
+        state["current"]["task"] = "task-1"
+        state["current"]["prNumber"] = None
+        state["current"]["prUrl"] = None
+        counters_before = dict(state["counters"])
+        with self.assertRaisesRegex(module.WorkLoopError, "recorded"):
+            module.record_result(
+                state,
+                task="task-1",
+                outcome="completed",
+                pr_number=42,
+                pr_url="https://example.test/pull/42",
+                review_rounds=2,
+                ci_retries=1,
+                decisions=[],
+                followups=[],
+            )
+        self.assertEqual(state["counters"], counters_before)
+        self.assertEqual(state["iterations"], [])
+        self.assertEqual(state["phase"], "followups")
+
+    def test_result_illegal_transition_leaves_state_unmutated(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        state["phase"] = "planning"
+        state["current"]["task"] = "task-1"
+        counters_before = dict(state["counters"])
+        with self.assertRaisesRegex(module.WorkLoopError, "illegal work-loop transition"):
+            module.record_result(
+                state,
+                task="task-1",
+                outcome="parked",
+                pr_number=None,
+                pr_url=None,
+                review_rounds=1,
+                ci_retries=1,
+                decisions=["a decision"],
+                followups=["a follow-up"],
+            )
+        self.assertEqual(state["counters"], counters_before)
+        self.assertEqual(state["iterations"], [])
+        self.assertEqual(state["decisions"], [])
+        self.assertEqual(state["followups"], [])
+        self.assertEqual(state["phase"], "planning")
+
+    def test_result_rejects_negative_counters_and_non_positive_pr(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        base = dict(
+            task="task-1",
+            outcome="parked",
+            pr_url=None,
+            decisions=[],
+            followups=[],
+        )
+        for review_rounds, ci_retries in ((-1, 0), (0, -1)):
+            with self.subTest(review_rounds=review_rounds, ci_retries=ci_retries):
+                with self.assertRaisesRegex(module.WorkLoopError, "non-negative"):
+                    module.record_result(
+                        state,
+                        pr_number=None,
+                        review_rounds=review_rounds,
+                        ci_retries=ci_retries,
+                        **base,
+                    )
+        for pr_number in (0, -7, True):
+            with self.subTest(pr_number=pr_number):
+                with self.assertRaisesRegex(
+                    module.WorkLoopError, "positive integer"
+                ):
+                    module.record_result(
+                        state,
+                        pr_number=pr_number,
+                        review_rounds=0,
+                        ci_retries=0,
+                        **base,
+                    )
+
+    def test_result_rejects_blank_pr_url(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        state["phase"] = "followups"
+        state["current"]["task"] = "task-1"
+        state["current"]["prNumber"] = 42
+        state["current"]["prUrl"] = "https://example.test/pull/42"
+        for blank_url in ("", "   "):
+            with self.subTest(pr_url=blank_url):
+                with self.assertRaisesRegex(module.WorkLoopError, "must not be blank"):
+                    module.record_result(
+                        state,
+                        task="task-1",
+                        outcome="completed",
+                        pr_number=42,
+                        pr_url=blank_url,
+                        review_rounds=0,
+                        ci_retries=0,
+                        decisions=[],
+                        followups=[],
+                    )
+        self.assertEqual(state["iterations"], [])
+        self.assertEqual(state["phase"], "followups")
 
     def test_evidence_tracks_publish_review_finish_and_squash_merge(self) -> None:
         module = self.load_module()
@@ -3213,12 +3461,14 @@ class WorkLoopTests(InstallTestCase):
             module.transition_state(state, "validating")
             module.transition_state(state, "shipping")
             module.transition_state(state, "followups")
+            state["current"]["prNumber"] = 100 + index
+            state["current"]["prUrl"] = f"https://example.test/pull/{100 + index}"
             module.record_result(
                 state,
                 task=f"task-{index + 1}",
                 outcome="completed",
                 pr_number=100 + index,
-                pr_url=f"https://example.test/pr/{100 + index}",
+                pr_url=f"https://example.test/pull/{100 + index}",
                 review_rounds=1,
                 ci_retries=0,
                 decisions=[f"selected task-{index + 1}"],
@@ -3233,6 +3483,333 @@ class WorkLoopTests(InstallTestCase):
             [result["task"] for result in state["iterations"]],
             ["task-1", "task-2"],
         )
+
+    def make_ship_receipt(self, state: dict, **overrides: object) -> dict:
+        receipt: dict = {
+            "schemaVersion": 1,
+            "kind": "sd-ship-merge-result",
+            "runId": state["runId"],
+            "iteration": state["iteration"],
+            "task": "task-one",
+            "prNumber": 7,
+            "prUrl": "https://example.test/pull/7",
+            "mergeState": "merged",
+            "finishWork": "completed",
+            "housekeeping": "healthy",
+            "reviewRounds": 2,
+            "ciRetries": 1,
+            "finalBranch": "main",
+            "finalHead": "unknown",
+            "anomalies": [],
+        }
+        receipt.update(overrides)
+        return receipt
+
+    def make_receipt_followups_state(self, module, root: Path) -> tuple[dict, str]:
+        state, _initial = self.make_shipping_state(module, root)
+        module.update_evidence(
+            state,
+            {"prNumber": 7, "prUrl": "https://example.test/pull/7"},
+            repo=root,
+        )
+        self.run_git(root, "switch", "main")
+        self.run_git(
+            root, "merge", "--no-ff", "codex/task-one", "-m", "merge task-one"
+        )
+        merged_head = module.run_git(root, "rev-parse", "HEAD")
+        self.assertIsNotNone(merged_head)
+        module.transition_state(state, "followups")
+        return state, merged_head
+
+    def test_receipt_result_records_verified_merge_and_counters(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, merged_head = self.make_receipt_followups_state(module, root)
+        receipt_path = root.parent / "receipt.json"
+        receipt_path.write_text(
+            json.dumps(self.make_ship_receipt(state, finalHead=merged_head)),
+            encoding="utf-8",
+        )
+        receipt = module.load_ship_receipt(receipt_path)
+        module.record_result_from_receipt(
+            state,
+            task="task-one",
+            receipt=receipt,
+            repo=root,
+            decisions=["shipped"],
+            followups=[],
+        )
+        self.assertEqual(state["phase"], "complete")
+        self.assertEqual(state["counters"]["completed"], 1)
+        self.assertEqual(state["counters"]["mergedPrs"], 1)
+        self.assertEqual(state["counters"]["reviewRounds"], 2)
+        self.assertEqual(state["counters"]["ciRetries"], 1)
+        self.assertEqual(state["current"]["mergeState"], "merged")
+        self.assertEqual(state["current"]["finishWorkState"], "completed")
+        self.assertEqual(state["current"]["housekeepingState"], "healthy")
+        self.assertIsNone(state["current"]["anomalies"])
+        self.assertEqual(state["iterations"][-1]["outcome"], "completed")
+        self.assertEqual(
+            state["iterations"][-1]["prUrl"], "https://example.test/pull/7"
+        )
+
+    def test_receipt_result_accepts_case_and_slash_equivalent_recorded_pr_url(
+        self,
+    ) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, merged_head = self.make_receipt_followups_state(module, root)
+        state["current"]["prUrl"] = "https://Example.test/pull/7/"
+        receipt_path = root.parent / "receipt.json"
+        receipt_path.write_text(
+            json.dumps(self.make_ship_receipt(state, finalHead=merged_head)),
+            encoding="utf-8",
+        )
+        receipt = module.load_ship_receipt(receipt_path)
+        module.record_result_from_receipt(
+            state,
+            task="task-one",
+            receipt=receipt,
+            repo=root,
+            decisions=["shipped"],
+            followups=[],
+        )
+        self.assertEqual(state["phase"], "complete")
+        self.assertEqual(
+            state["iterations"][-1]["prUrl"], "https://example.test/pull/7"
+        )
+
+    def test_receipt_result_accepts_long_task_matching_recorded_evidence(
+        self,
+    ) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, merged_head = self.make_receipt_followups_state(module, root)
+        long_task = "task " + "a" * 230
+        self.assertGreater(len(long_task), 160)
+        state["current"]["task"] = module.compact_text(long_task)
+        receipt_path = root.parent / "receipt.json"
+        receipt_path.write_text(
+            json.dumps(
+                self.make_ship_receipt(state, finalHead=merged_head, task=long_task)
+            ),
+            encoding="utf-8",
+        )
+        receipt = module.load_ship_receipt(receipt_path)
+        module.record_result_from_receipt(
+            state,
+            task=long_task,
+            receipt=receipt,
+            repo=root,
+            decisions=["shipped"],
+            followups=[],
+        )
+        self.assertEqual(state["phase"], "complete")
+
+    def test_receipt_result_records_blocked_merge_without_merged_pr(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _merged_head = self.make_receipt_followups_state(module, root)
+        receipt = self.make_ship_receipt(
+            state,
+            mergeState="blocked",
+            finishWork="not-run",
+            housekeeping="blocked",
+            finalBranch="unknown",
+            finalHead="unknown",
+            anomalies=["housekeeping gate refused the merge"],
+        )
+        module.record_result_from_receipt(
+            state,
+            task="task-one",
+            receipt=receipt,
+            repo=root,
+            decisions=[],
+            followups=[],
+        )
+        self.assertEqual(state["phase"], "complete")
+        self.assertEqual(state["counters"]["blocked"], 1)
+        self.assertEqual(state["counters"]["mergedPrs"], 0)
+        self.assertEqual(state["current"]["mergeState"], "blocked")
+        self.assertEqual(
+            state["current"]["anomalies"], "housekeeping gate refused the merge"
+        )
+        self.assertEqual(state["iterations"][-1]["outcome"], "blocked")
+
+    def test_receipt_result_rejects_identity_mismatches(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, merged_head = self.make_receipt_followups_state(module, root)
+        cases = (
+            ({"runId": "other-run"}, "ship_receipt_run_mismatch"),
+            ({"iteration": state["iteration"] + 1}, "ship_receipt_iteration_mismatch"),
+            ({"task": "task-two"}, "ship_receipt_task_mismatch"),
+            ({"prNumber": 8}, "ship_receipt_pr_mismatch"),
+            (
+                {"prUrl": "https://example.test/pull/8"},
+                "ship_receipt_pr_mismatch",
+            ),
+        )
+        for overrides, code in cases:
+            with self.subTest(overrides=overrides):
+                receipt = self.make_ship_receipt(
+                    state, finalHead=merged_head, **overrides
+                )
+                with self.assertRaisesRegex(module.WorkLoopError, code):
+                    module.record_result_from_receipt(
+                        state,
+                        task="task-one",
+                        receipt=receipt,
+                        repo=root,
+                        decisions=[],
+                        followups=[],
+                    )
+        self.assertEqual(state["phase"], "followups")
+        self.assertEqual(state["counters"]["completed"], 0)
+        self.assertEqual(state["counters"]["mergedPrs"], 0)
+
+    def test_receipt_result_rejects_unverified_merge_claims(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, _merged_head = self.make_receipt_followups_state(module, root)
+        unmerged_head = self.commit_file(
+            module, root, "unrelated.txt", "drift\n", "unrelated main commit"
+        )
+        self.run_git(root, "switch", "codex/task-one")
+        stray_head = self.commit_file(
+            module, root, "stray.txt", "stray\n", "stray feature commit"
+        )
+        cases = (
+            {"finalBranch": "codex/task-one", "finalHead": unmerged_head},
+            {"finalHead": "0" * 40},
+            {"finalHead": stray_head},
+        )
+        for overrides in cases:
+            with self.subTest(overrides=overrides):
+                receipt = self.make_ship_receipt(state, **overrides)
+                with self.assertRaisesRegex(
+                    module.WorkLoopError, "ship_receipt_merge_unverified"
+                ):
+                    module.record_result_from_receipt(
+                        state,
+                        task="task-one",
+                        receipt=receipt,
+                        repo=root,
+                        decisions=[],
+                        followups=[],
+                    )
+        self.assertEqual(state["counters"]["mergedPrs"], 0)
+
+    def test_receipt_loader_rejects_malformed_and_unsupported_payloads(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, merged_head = self.make_receipt_followups_state(module, root)
+        receipt_path = root.parent / "receipt.json"
+
+        def write_receipt(payload: object) -> None:
+            text = payload if isinstance(payload, str) else json.dumps(payload)
+            receipt_path.write_text(text, encoding="utf-8")
+
+        write_receipt("{not json")
+        with self.assertRaisesRegex(module.WorkLoopError, "ship_receipt_malformed"):
+            module.load_ship_receipt(receipt_path)
+        write_receipt(["not", "an", "object"])
+        with self.assertRaisesRegex(module.WorkLoopError, "ship_receipt_malformed"):
+            module.load_ship_receipt(receipt_path)
+        with self.assertRaisesRegex(
+            module.WorkLoopError, "ship_receipt_unreadable"
+        ):
+            module.load_ship_receipt(root.parent / "missing-receipt.json")
+        base = self.make_ship_receipt(state, finalHead=merged_head)
+        for overrides in (
+            {"schemaVersion": 2},
+            {"schemaVersion": True},
+            {"kind": "sd-ship-other"},
+        ):
+            with self.subTest(overrides=overrides):
+                write_receipt({**base, **overrides})
+                with self.assertRaisesRegex(
+                    module.WorkLoopError, "ship_receipt_version_unsupported"
+                ):
+                    module.load_ship_receipt(receipt_path)
+        for overrides in (
+            {"mergeState": "landed"},
+            {"finishWork": "done"},
+            {"housekeeping": "fine"},
+            {"reviewRounds": -1},
+            {"ciRetries": True},
+            {"prNumber": 0},
+            {"iteration": "one"},
+            {"runId": ""},
+            {"anomalies": "none"},
+            {"anomalies": [""]},
+            {"finalHead": "unknown"},
+            {"finalBranch": "unknown"},
+            {"prUrl": "not-a-url"},
+            {"prUrl": "https://example.test/pull/7/"},
+        ):
+            with self.subTest(overrides=overrides):
+                write_receipt({**base, **overrides})
+                with self.assertRaisesRegex(
+                    module.WorkLoopError, "ship_receipt_malformed"
+                ):
+                    module.load_ship_receipt(receipt_path)
+
+    def test_receipt_cli_rejects_conflicting_flags_and_records_from_file(
+        self,
+    ) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, merged_head = self.make_receipt_followups_state(module, root)
+        state_path, lock_path = module.state_paths(
+            module.repository_identity(root), state_root
+        )
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        module.acquire_lock(lock_path, state)
+        module.atomic_write_json(state_path, state)
+        receipt_path = root.parent / "receipt.json"
+        receipt_path.write_text(
+            json.dumps(self.make_ship_receipt(state, finalHead=merged_head)),
+            encoding="utf-8",
+        )
+        common = [
+            "--state-home",
+            str(state_root),
+            "result",
+            "--repo",
+            str(root),
+            "--run-id",
+            state["runId"],
+            "--task",
+            "task-one",
+            "--from-receipt",
+            str(receipt_path),
+        ]
+
+        def run_main(arguments: list[str]) -> tuple[int, str, str]:
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with (
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                code = module.main(arguments)
+            return code, stdout.getvalue(), stderr.getvalue()
+
+        conflicted, _stdout, stderr_text = run_main(
+            [*common, "--outcome", "completed", "--json"]
+        )
+        self.assertEqual(conflicted, 2)
+        self.assertIn("--from-receipt supplies these values", stderr_text)
+
+        recorded, stdout_text, _stderr_text = run_main([*common, "--json"])
+        self.assertEqual(recorded, 0, stdout_text)
+        payload = json.loads(stdout_text)
+        self.assertEqual(payload["phase"], "complete")
+        self.assertEqual(payload["counters"]["completed"], 1)
+        self.assertEqual(payload["counters"]["mergedPrs"], 1)
+        self.assertEqual(payload["current"]["mergeState"], "merged")
 
     def test_rank_candidate_file_pins_strict_utf8_decoding(self) -> None:
         module = self.load_module()
@@ -3386,6 +3963,35 @@ class WorkLoopTests(InstallTestCase):
         )
         self.assertEqual(shipped["current"]["prNumber"], 42)
         invoke("transition", *transition_args, "followups")
+        mismatch_stdout = io.StringIO()
+        mismatch_stderr = io.StringIO()
+        with (
+            contextlib.redirect_stdout(mismatch_stdout),
+            contextlib.redirect_stderr(mismatch_stderr),
+        ):
+            mismatched = module.main(
+                [
+                    *common,
+                    "result",
+                    "--repo",
+                    str(root),
+                    "--run-id",
+                    state["runId"],
+                    "--task",
+                    "ci",
+                    "--outcome",
+                    "completed",
+                    "--pr-number",
+                    "42",
+                    "--pr-url",
+                    "https://example.test/pull/999",
+                    "--review-rounds",
+                    "2",
+                    "--json",
+                ]
+            )
+        self.assertEqual(mismatched, 2)
+        self.assertIn("contradicts recorded evidence", mismatch_stderr.getvalue())
         completed = invoke(
             "result",
             "--run-id",
@@ -3397,13 +4003,14 @@ class WorkLoopTests(InstallTestCase):
             "--pr-number",
             "42",
             "--pr-url",
-            "https://example.test/pr/42",
+            "https://example.test/pull/42",
             "--review-rounds",
             "2",
             "--decision",
             "selected CI first",
         )
         self.assertEqual(completed["counters"]["completed"], 1)
+        self.assertEqual(completed["counters"]["mergedPrs"], 1)
 
         invoke("transition", *transition_args, "inventory")
         focused = invoke("focus", "--run-id", state["runId"], "--clear")

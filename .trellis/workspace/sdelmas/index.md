@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 273
+- **Total Sessions**: 274
 - **Last Active**: 2026-07-31
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~921 | Active |
+| `journal-6.md` | ~980 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 274 | 2026-07-31 | PR #291 review loop: ship-receipt validation hardening (rounds 4-9) | `01ca5adc`, `9e65cfb9`, `e7ab9c8c`, `85260377`, `b282daf9`, `3c86d72b`, `b3a43760`, `0cb8f666`, `4d656f50`, `76bdd98c`, `7ebffc75`, `04c90f81`, `695457f0`, `16e94172`, `c2075414`, `b0cffa1d`, `bc3b7c56`, `f66c358f`, `b752def8`, `506297e3`, `64d033ae`, `8e993984`, `ed76ca15`, `2ae8c306`, `bf700b23` | `fix/add-ship-result-receipt` |
 | 273 | 2026-07-31 | Retire transitional review surfaces: removal version and catalog status | `a1ae4bc5`, `afdcd54a`, `7cf1cbba` | `fix/retire-transitional-review-surfaces` |
 | 272 | 2026-07-31 | Align status and housekeeping selector contracts to F/T | `b690b9eb`, `1ac22f79` | `fix/align-status-selector-contract` |
 | 271 | 2026-07-31 | Declare and pin build dependency toolchain (A-108/109/110) | `05ab4f61`, `26ae2976`, `bf2e5aae`, `49d633af`, `af8f96eb` | `fix/declare-pin-build-dependencies` |
