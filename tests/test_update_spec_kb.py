@@ -959,6 +959,44 @@ class UpdateSpecKbTests(InstallTestCase):
             user_note.read_text(encoding="utf-8"), "# My private notes\n"
         )
 
+    def test_update_spec_kb_preserves_user_file_quoting_copy_marker(self) -> None:
+        root = self.make_repo()
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        user_note = root / ".obsidian-kb/Repository Overview/marker-notes.md"
+        user_note.parent.mkdir(parents=True)
+        # A user note that quotes the marker mid-file must not be treated as
+        # pack-owned; only the trailing marker the copier writes proves that.
+        note_content = (
+            "# Notes\n"
+            "The pack marks copies with `<!-- SD-AI-COMMAND-PACK:KB-COPY -->`\n"
+            "at the end of each generated file.\n"
+        )
+        user_note.write_text(note_content, encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(
+                    install.ROOT
+                    / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+                ),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertTrue(
+            user_note.is_file(),
+            "prune deleted a user note that merely quotes the copy marker",
+        )
+        self.assertEqual(
+            user_note.read_text(encoding="utf-8"), note_content
+        )
+
     def test_update_spec_kb_preserves_user_file_behind_root_symlink(self) -> None:
         root = self.make_repo()
         (root / "README.md").write_text("# Project\n", encoding="utf-8")

@@ -42,6 +42,7 @@ DASHBOARD_MARKER = "<!-- SD-AI-COMMAND-PACK:OBSIDIAN-KB-DASHBOARD -->"
 OVERVIEW_MARKER = "<!-- SD-AI-COMMAND-PACK:LLM-KB-OVERVIEW -->"
 KB_COPY_MARKER = "<!-- SD-AI-COMMAND-PACK:KB-COPY -->"
 KB_COPY_MARKER_SUFFIX = f"\n{KB_COPY_MARKER}\n"
+KB_COPY_MARKER_SUFFIX_BYTES = KB_COPY_MARKER_SUFFIX.encode("utf-8")
 DOC_SUFFIXES = {".adoc", ".md", ".mdx", ".rst", ".txt"}
 MAP_SUFFIXES = DOC_SUFFIXES | {".json", ".xml", ".yaml", ".yml"}
 ROOT_DOC_PREFIXES = (
@@ -253,15 +254,17 @@ def is_stale_generated_kb_entry(
                 or relative_candidate in legacy_sources
             )
         )
-    # A plain file is deletable only when it carries the pack's copy marker.
-    # Location alone is not ownership: the KB root may be a symlink into an
-    # operator's vault, where a folder can share a category title. Copies
-    # written before the marker existed are adopted on the next rewrite when
-    # their source still exists; copies orphaned before then are left in place.
+    # A plain file is deletable only when it ends with the pack's copy marker,
+    # the exact shape the copier writes. Location alone is not ownership: the
+    # KB root may be a symlink into an operator's vault, where a folder can
+    # share a category title, and a user note may quote the marker mid-file.
+    # Copies written before the marker existed are adopted on the next rewrite
+    # when their source still exists; copies orphaned before then are left in
+    # place.
     return (
         candidate.is_file()
         and is_managed_kb_category_path(relative_candidate)
-        and file_contains_marker(candidate, KB_COPY_MARKER)
+        and file_ends_with_kb_copy_marker(candidate)
     )
 
 
@@ -540,12 +543,27 @@ def file_contains_marker(path: Path, marker: str) -> bool:
     return text is not None and marker in text
 
 
+def file_ends_with_kb_copy_marker(path: Path) -> bool:
+    # Ownership proof for the prune: copies are written with the marker as a
+    # trailing suffix, so only a trailing match counts. A user note that merely
+    # quotes the marker mid-file must not look pack-owned.
+    if not path.is_file() or path.is_symlink():
+        return False
+    try:
+        return path.read_bytes().endswith(KB_COPY_MARKER_SUFFIX_BYTES)
+    except OSError:
+        return False
+
+
 def kb_copy_payload(source: Path) -> bytes:
-    return source.read_bytes() + KB_COPY_MARKER_SUFFIX.encode("utf-8")
+    return source.read_bytes() + KB_COPY_MARKER_SUFFIX_BYTES
 
 
 def kb_copy_is_current(source: Path, copy: Path) -> bool:
     try:
+        expected_size = source.stat().st_size + len(KB_COPY_MARKER_SUFFIX_BYTES)
+        if copy.stat().st_size != expected_size:
+            return False
         return copy.read_bytes() == kb_copy_payload(source)
     except OSError:
         return False

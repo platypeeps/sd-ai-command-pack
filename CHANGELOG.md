@@ -2,10 +2,11 @@
 
 ## 0.57.2 - 2026-07-31
 
-- Require a `<!-- SD-AI-COMMAND-PACK:KB-COPY -->` provenance marker before the
-  Obsidian KB prune deletes a plain file in a managed category folder, so user
-  files are never removed just for sitting in a folder that shares a category
-  title — including through a KB root symlink into a personal vault. Generated
+- Require a trailing `<!-- SD-AI-COMMAND-PACK:KB-COPY -->` provenance marker
+  before the Obsidian KB prune deletes a plain file in a managed category
+  folder, so user files are never removed just for sitting in a folder that
+  shares a category title — or for quoting the marker text mid-file — including
+  through a KB root symlink into a personal vault. Generated
   copies now end with that trailing marker instead of being byte-identical to
   their sources, and both the refresh currency check and `--check` compare
   against the marked payload. Copies written by older versions adopt the marker
