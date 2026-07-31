@@ -1054,23 +1054,50 @@ def _recover_locked_path(
         except OSError as error:
             raise WorkLoopError(f"cannot recover {context}: {error}") from error
         return
+    # Restore choice: hardlink first (atomic, no-clobber), then an
+    # O_CREAT|O_EXCL rewrite where hardlinks are unavailable (EPERM/EXDEV/
+    # ENOSYS on some network and container mounts). Never os.rename here — it
+    # would clobber a competitor's newer lock. If both primitives fail, the
+    # aside file is the only remaining copy of a live foreign lock, so it must
+    # stay on disk and the error must name it.
     restore_error: OSError | None = None
+    restored = False
     try:
         os.link(aside, lock_path)
+        restored = True
     except FileExistsError:
-        pass
+        # A newer lock already exists; it is authoritative and the aside copy
+        # is redundant.
+        restored = True
     except OSError as error:
-        restore_error = error
+        try:
+            payload = aside.read_bytes()
+            descriptor = os.open(
+                lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+            )
+        except FileExistsError:
+            restored = True
+        except OSError:
+            restore_error = error
+        else:
+            try:
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(payload)
+                restored = True
+            except OSError as write_error:
+                restore_error = write_error
+    if not restored:
+        raise WorkLoopError(
+            f"cannot recover {context}: {restore_error}; the foreign lock is "
+            f"preserved at {aside}; move it back to {lock_path} before "
+            "retrying"
+        ) from restore_error
     try:
         aside.unlink()
     except FileNotFoundError:
         pass
     except OSError as error:
-        restore_error = restore_error or error
-    if restore_error is not None:
-        raise WorkLoopError(
-            f"cannot recover {context}: {restore_error}"
-        ) from restore_error
+        raise WorkLoopError(f"cannot recover {context}: {error}") from error
 
 
 def acquire_lock(
