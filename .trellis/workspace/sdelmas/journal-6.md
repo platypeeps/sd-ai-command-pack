@@ -387,3 +387,79 @@ Implemented Trellis task 07-28-allowlist-review-json-install-audit: added .sd-ai
 ### Next Steps
 
 - None - task complete
+
+
+## Session 260: Scope final-bundle validator to the change delta (0.56.7, PR #287)
+
+**Date**: 2026-07-30
+**Task**: Scope final-bundle validator to the change delta (0.56.7, PR #287)
+**Branch**: `fix/scope-final-bundle-validator-to-delta`
+
+### Summary
+
+Implemented Trellis task 07-29-scope-final-bundle-validator-to-delta: findings anchored to task files outside the bundle delta demote to non-blocking advisories (capped at 25, advisoriesDropped evidence); journal-only planning recovery partitions cited-commit paths five ways with ordinary repository paths allowed as maintenance work; sd-finish-work SKILL.md documents the captured-base rule, maintenance-branch flow, and advisories contract. PR #273 replay: 3 blocking findings + 5 advisories against today's baseline (the historical 25-advisory figure predates the pristine-scaffold exemption). Copilot round 1 found a real early-return bypass (delta-anchored prd/context checks skipped when a demoted sibling task.json fails to load), fixed with regression test; rounds 2-3 clean, CI green. Released 0.56.7.
+
+### Main Changes
+
+- Delta scoping + advisories contract in the bookkeeping validator (templates + root mirror): addScoped routing for group-1/topology sites, advisories array with cap and truncation, printBookkeepingResult advisory output
+- Five-way cited-commit path partition in journal-only planning recovery; planning_recovery_task_change_missing fires only when zero allowed paths change
+- Closed early-return bypass: prd/task-text/context checks run even when sibling task.json load or parse fails; pristine-scaffold exemption requires a readable planning record
+- sd-finish-work SKILL.md: captured-base rule, maintenance-branch planning flow, advisories paragraph; release 0.56.7 with regenerated payload digest
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c24d3e6d` | fix: scope final-bundle validator findings to the change delta |
+| `1d93d605` | fix: keep delta-anchored checks blocking when sibling task.json is broken |
+| `781c887a` | chore(release): refresh candidate validation digest for updated payload |
+
+### Testing
+
+- [OK] tests.test_bookkeeping_validator + tests.test_pr_eligibility: Ran 93 tests, OK (red-first: 9 expected failures pre-fix)
+- [OK] make release-prep: Full check complete, exit 0
+- [OK] PR #273 replay 49b43afd..7fde6218: status invalid, 3 findings (2 bundle_scope_invalid, 1 journal_session_missing), 5 advisories
+- [OK] PR #287 CI: all checks pass; Copilot review converged round 3 with zero unresolved threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 261: Repair follow-up task PRD reference after 07-29 archive
+
+**Date**: 2026-07-30
+**Task**: Repair follow-up task PRD reference after 07-29 archive
+**Branch**: `fix/scope-final-bundle-validator-to-delta`
+
+### Summary
+
+The archive of 07-29-scope-final-bundle-validator-to-delta moved its prd.md under .trellis/tasks/archive/2026-07/, leaving a dangling path reference in the follow-up task 07-30-recover-bookkeeping-repair-sessions PRD that failed the CI scope reference check on PR #287. Retargeted the reference to the archive path.
+
+### Main Changes
+
+- Pointed the 07-30-recover-bookkeeping-repair-sessions PRD root-cause reference at the archived 07-29 task path
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fca7ef70` | chore(task): point follow-up PRD at archived 07-29 task path |
+
+### Testing
+
+- [OK] repo-wide grep for the old active path: only historical journal prose remains
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

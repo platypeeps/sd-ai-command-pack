@@ -493,7 +493,7 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("evidence.planningSubtype: journal-only-recovery", finish)
         self.assertIn("post-archive-review-successor", finish)
         self.assertIn("callers never select a third mode", finish_text)
-        self.assertIn("without retroactively applying", finish_text)
+        self.assertIn("does not retroactively apply", finish_text)
         self.assertIn("preserve archive and journal commits locally", finish_text)
         self.assertIn("Only after validation", finish)
         self.assertIn("one final push", finish_text)

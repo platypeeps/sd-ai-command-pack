@@ -78,6 +78,22 @@ journaled in its own isolated push. A fix must either let the recovery subtype
 admit workspace paths for commits the session itself declares, or stop
 validating push increments as standalone bundles.
 
+**Scope decision (2026-07-30, adversarial planning review):** root cause 3 is
+split out to the follow-up task
+`.trellis/tasks/07-30-recover-bookkeeping-repair-sessions/`. Two review rounds
+failed to produce a sound no-re-audit justification for admitting
+`.trellis/workspace/**` paths in cited commits — an initial pull-request push
+receives no per-increment bookkeeping validation
+(`.github/scripts/bookkeeping_ci_scope.py` classifies non-`synchronize`
+pull-request events as full CI, and the `Validate bookkeeping head` step is
+gated on `mode == 'bookkeeping'`), so cited workspace mutations could go
+entirely unaudited. The session-251 shape additionally needs a
+direction-of-repair rule for commits like `f92221e5` whose parent lifecycle
+state was already dirty. This task therefore fixes root causes 1 and 2 only:
+the recovery subtype's cited-commit scope widens to repo-maintenance paths,
+while `.trellis/workspace/**` cited commits and dirty-parent task repairs
+remain rejected until the follow-up lands.
+
 Two adjacent sharp edges surfaced while diagnosing this and belong in the same
 review:
 
@@ -114,10 +130,11 @@ review:
   3. **Completion-only** — gated on `completionReady` (`:697`):
      `task_lifecycle_not_completion_ready`, `task_branch_invalid`. These never
      fire in `planning` mode and were never part of the #273 failure.
-  4. **Relationship** — `validateBookkeepingTopology` (`:743`) emits four codes,
+  4. **Relationship** — `validateBookkeepingTopology` (`:743`) emits six codes,
      not the one this PRD previously named: `task_topology_base_invalid`,
      `task_topology_not_reciprocal`, `task_topology_prd_missing_child`,
-     `task_topology_unverifiable`. These span two task directories, so "is the
+     `task_topology_unverifiable`, `task_topology_missing`,
+     `task_topology_ambiguous`. These span two task directories, so "is the
      file in the delta" has more than one answer. `design.md` must say which end
      of the link governs.
 - Report a **group 1** finding only when that file is present in the base..head
@@ -169,42 +186,42 @@ review:
 
 ## Acceptance Criteria
 
-- [ ] A bundle whose delta touches **only a clean sibling file** in a task
+- [x] A bundle whose delta touches **only a clean sibling file** in a task
       directory that separately contains a stale `_example` scaffold row or an
       empty `task.json` description validates successfully, and a regression test
       asserts it. The defective file must be absent from the delta — a delta that
       includes it is the next-but-one criterion, not this one.
-- [ ] The same holds across group 1 as a whole, not a sampled pair. A regression
+- [x] The same holds across group 1 as a whole, not a sampled pair. A regression
       asserts at least one code from each distinct producer:
       `validateBookkeepingTaskDirectory` itself (`task_prd_empty`),
       `validateBookkeepingTaskContexts` (`task_context_malformed`), and
       `validateBookkeepingTextWhitespace`. A three-code special case must not be
       able to pass. Groups 2, 3, and 4 are explicitly outside this criterion —
       `design.md` states their rule instead.
-- [ ] A bundle whose delta itself contains such a defect still fails, and a
+- [x] A bundle whose delta itself contains such a defect still fails, and a
       regression test asserts it — the fix narrows scope without removing the
       check.
-- [ ] The untouched-file finding is still **reported**, not silently dropped. A
+- [x] The untouched-file finding is still **reported**, not silently dropped. A
       regression asserts it appears in whichever non-blocking channel `design.md`
       chose, on a bundle that simultaneously reaches `status=valid` and is
       accepted by `sd-ai-command-pack-pr-eligibility.py`. An implementation that
       merely stops scanning untouched files satisfies every other criterion here
       while violating the signal-preservation requirement; this criterion is what
       separates the two.
-- [ ] A repo-maintenance branch produces a valid receipt, and a regression test
+- [x] A repo-maintenance branch produces a valid receipt, and a regression test
       asserts it. `design.md` must first fix the exact allowlist of paths such a
       branch may touch, and must state whether the range still has to carry the
       journal-plus-index pair: `validateBookkeepingJournalBundle` (`:1622`) adds
       `journal_session_missing` (`:1645-1646`) whenever the delta contains no
       `.trellis/workspace/` journal file, so "changes only skills, scripts,
       specs, or release payload" is not by itself a finalizable delta today.
-- [ ] That receipt is accepted end to end, not just by the validator: it passes
+- [x] That receipt is accepted end to end, not just by the validator: it passes
       `sd-ai-command-pack-pr-eligibility.py` without raising
       `EligibilityInputError`, and `sd-finish-work/SKILL.md` documents the mode
       the operator must actually pass. Asserting `status=valid` alone does not
       satisfy this criterion.
-- [ ] `bundle_scope_invalid` still fails a delta containing `.trellis/audit/**`.
-- [ ] Replaying the PR #273 delta (`49b43afd..7fde6218`, 154 files: 152 under
+- [x] `bundle_scope_invalid` still fails a delta containing `.trellis/audit/**`.
+- [x] Replaying the PR #273 delta (`49b43afd..7fde6218`, 154 files: 152 under
       `.trellis/tasks/` and 2 under `.trellis/audit/`) under the fixed validator
       drops all 25 whole-directory findings and keeps the 2 `bundle_scope_invalid`
       findings. It must **not** reach `status=valid`, and the residue is not the
@@ -215,7 +232,7 @@ review:
       `7fde6218` is checked out — but checking it out also restores the *pre-fix*
       validator, so run the fixed validator from a separate worktree or fixture
       rather than from inside that checkout.
-- [ ] `templates/` and root copies remain byte-identical after `make sync` for
+- [x] `templates/` and root copies remain byte-identical after `make sync` for
       every file this change touches, not the validator alone —
       `sd-finish-work/SKILL.md` is mirrored the same way and hard-codes the mode
       list at `:122` in both copies.
