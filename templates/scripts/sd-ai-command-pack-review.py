@@ -683,7 +683,6 @@ def _run_local(
     base: str,
     head: str,
     attempt_id: str,
-    artifact_root: Path,
     args: argparse.Namespace,
     local_policy: str,
 ) -> dict[str, Any]:
@@ -707,8 +706,6 @@ def _run_local(
         args.successor,
         "--attempt-id",
         attempt_id,
-        "--artifact-root",
-        str(artifact_root / "local"),
         "--local-policy",
         local_policy,
         "--fix",
@@ -1812,7 +1809,6 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             base=effective_base,
             head=pr["head"] if pr else str(identity["head"]),
             attempt_id=attempt_id,
-            artifact_root=root,
             args=args,
             local_policy=local_policy,
         )

@@ -662,12 +662,12 @@ class ReviewControllerTests(InstallTestCase):
                 base="origin/main",
                 head="HEAD",
                 attempt_id="attempt-1",
-                artifact_root=self.artifact_root(root),
                 args=args,
                 local_policy="optional",
             )
         self.assertIn("--finding-family", captured[1])
         self.assertNotIn("bash", captured[1])
+        self.assertNotIn("--artifact-root", captured[1])
 
         request = {"value": "literal"}
         completed = mock.Mock(returncode=0, stdout="", stderr="")
