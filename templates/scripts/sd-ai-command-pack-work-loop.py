@@ -2183,7 +2183,9 @@ def record_result(
         )
     recorded_pr = state["current"].get("prNumber")
     recorded_url = state["current"].get("prUrl")
-    normalized_url = compact_text(pr_url, limit=240) if pr_url else None
+    # Same default limit as the evidence path stores current.prUrl with;
+    # a tighter limit here truncates long URLs into a false contradiction.
+    normalized_url = compact_text(pr_url) if pr_url else None
     if pr_number is not None and recorded_pr is not None and pr_number != recorded_pr:
         raise WorkLoopError(
             "iteration result pull request number contradicts recorded evidence"
@@ -2333,7 +2335,7 @@ def record_result_from_receipt(
             "ship_receipt_task_mismatch",
             "receipt task does not match the selected task",
         )
-    receipt_url = compact_text(receipt["prUrl"], limit=240)
+    receipt_url = compact_text(receipt["prUrl"])
     if (
         current.get("prNumber") != receipt["prNumber"]
         or current.get("prUrl") != receipt_url

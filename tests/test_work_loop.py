@@ -1543,6 +1543,36 @@ class WorkLoopTests(InstallTestCase):
             state["counters"]["reviewRounds"], 2 * (module.MAX_HISTORY + 3)
         )
 
+    def test_result_accepts_long_pr_url_matching_recorded_evidence(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        long_url = "https://example.test/" + "a" * 230 + "/pull/42"
+        self.assertGreater(len(long_url), 240)
+        state["phase"] = "followups"
+        state["current"]["task"] = "task-1"
+        state["current"]["prNumber"] = 42
+        state["current"]["prUrl"] = module.compact_text(long_url)
+        module.record_result(
+            state,
+            task="task-1",
+            outcome="completed",
+            pr_number=42,
+            pr_url=long_url,
+            review_rounds=1,
+            ci_retries=0,
+            decisions=[],
+            followups=[],
+        )
+        self.assertEqual(state["iterations"][-1]["prUrl"], long_url)
+
     def test_result_rejects_negative_counters_and_non_positive_pr(self) -> None:
         module = self.load_module()
         root = self.make_repo()
