@@ -667,6 +667,9 @@ class ReviewControllerTests(InstallTestCase):
             )
         self.assertIn("--finding-family", captured[1])
         self.assertNotIn("bash", captured[1])
+        # The coordinator must never forward its private artifact root: the
+        # local stage requires an in-repo, git-ignored root and owns that
+        # default itself. This assertion pins the intentional removal.
         self.assertNotIn("--artifact-root", captured[1])
 
         request = {"value": "literal"}

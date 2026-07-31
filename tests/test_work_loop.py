@@ -1543,6 +1543,47 @@ class WorkLoopTests(InstallTestCase):
             state["counters"]["reviewRounds"], 2 * (module.MAX_HISTORY + 3)
         )
 
+    def test_result_rejects_negative_counters_and_non_positive_pr(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        base = dict(
+            task="task-1",
+            outcome="parked",
+            pr_url=None,
+            decisions=[],
+            followups=[],
+        )
+        for review_rounds, ci_retries in ((-1, 0), (0, -1)):
+            with self.subTest(review_rounds=review_rounds, ci_retries=ci_retries):
+                with self.assertRaisesRegex(module.WorkLoopError, "non-negative"):
+                    module.record_result(
+                        state,
+                        pr_number=None,
+                        review_rounds=review_rounds,
+                        ci_retries=ci_retries,
+                        **base,
+                    )
+        for pr_number in (0, -7):
+            with self.subTest(pr_number=pr_number):
+                with self.assertRaisesRegex(
+                    module.WorkLoopError, "positive integer"
+                ):
+                    module.record_result(
+                        state,
+                        pr_number=pr_number,
+                        review_rounds=0,
+                        ci_retries=0,
+                        **base,
+                    )
+
     def test_evidence_tracks_publish_review_finish_and_squash_merge(self) -> None:
         module = self.load_module()
         root = self.make_repo()

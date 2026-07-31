@@ -2177,6 +2177,10 @@ def record_result(
         raise WorkLoopError(f"unknown iteration outcome: {outcome}")
     if review_rounds < 0 or ci_retries < 0:
         raise WorkLoopError("review rounds and CI retries must be non-negative")
+    if pr_number is not None and pr_number < 1:
+        raise WorkLoopError(
+            "iteration result pull request number must be a positive integer"
+        )
     recorded_pr = state["current"].get("prNumber")
     recorded_url = state["current"].get("prUrl")
     normalized_url = compact_text(pr_url, limit=240) if pr_url else None
