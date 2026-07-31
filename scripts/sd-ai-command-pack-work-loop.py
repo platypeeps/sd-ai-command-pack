@@ -87,6 +87,28 @@ TRANSITION_CURRENT_FIELDS = frozenset(STABLE_CURRENT_FIELDS)
 MERGE_STATES = ("merged", "open", "closed", "blocked")
 FINISH_WORK_STATES = ("completed", "blocked", "not-run")
 HOUSEKEEPING_STATES = ("healthy", "attention", "blocked")
+SHIP_RECEIPT_KIND = "sd-ship-merge-result"
+SHIP_RECEIPT_SCHEMA_VERSION = 1
+# Every receipt rejection carries exactly one of these codes as its error
+# prefix, in the same typed-reason style as RECOVERY_REFERENCE_BY_REASON.
+# They are command failures, not loop states, so they carry no recovery
+# reference.
+SHIP_RECEIPT_REASON_CODES = (
+    "ship_receipt_unreadable",
+    "ship_receipt_malformed",
+    "ship_receipt_version_unsupported",
+    "ship_receipt_run_mismatch",
+    "ship_receipt_iteration_mismatch",
+    "ship_receipt_task_mismatch",
+    "ship_receipt_pr_mismatch",
+    "ship_receipt_merge_unverified",
+)
+SHIP_RECEIPT_OUTCOME_BY_MERGE_STATE = {
+    "merged": "completed",
+    "open": "blocked",
+    "blocked": "blocked",
+    "closed": "failed",
+}
 ACTIVE_EVIDENCE_PHASES = frozenset(
     {"selected", "planning", "implementing", "validating", "shipping", "followups"}
 )
@@ -2195,6 +2217,158 @@ def record_result(
     )
 
 
+def _ship_receipt_error(code: str, detail: str) -> WorkLoopError:
+    if code not in SHIP_RECEIPT_REASON_CODES:
+        raise WorkLoopError(f"unknown ship receipt reason code: {code}")
+    return WorkLoopError(f"{code}: {detail}")
+
+
+def load_ship_receipt(path: Path) -> dict[str, Any]:
+    """Parse and shape-check a schema-v1 ship result receipt, failing closed."""
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise _ship_receipt_error(
+            "ship_receipt_unreadable", f"cannot read {path}: {error}"
+        ) from error
+    try:
+        receipt = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise _ship_receipt_error(
+            "ship_receipt_malformed", f"receipt is not valid JSON: {error}"
+        ) from error
+    if not isinstance(receipt, dict):
+        raise _ship_receipt_error(
+            "ship_receipt_malformed", "receipt must be a JSON object"
+        )
+    if (
+        receipt.get("schemaVersion") != SHIP_RECEIPT_SCHEMA_VERSION
+        or receipt.get("kind") != SHIP_RECEIPT_KIND
+    ):
+        raise _ship_receipt_error(
+            "ship_receipt_version_unsupported",
+            f"expected schemaVersion {SHIP_RECEIPT_SCHEMA_VERSION} and kind"
+            f" {SHIP_RECEIPT_KIND}, found"
+            f" {receipt.get('schemaVersion')!r}/{receipt.get('kind')!r}",
+        )
+
+    def malformed(detail: str) -> WorkLoopError:
+        return _ship_receipt_error("ship_receipt_malformed", detail)
+
+    for key in ("runId", "task", "prUrl", "finalBranch", "finalHead"):
+        value = receipt.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise malformed(f"{key} must be a non-empty string")
+    for key, minimum in (("iteration", 1), ("prNumber", 1)):
+        value = receipt.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+            raise malformed(f"{key} must be an integer >= {minimum}")
+    for key in ("reviewRounds", "ciRetries"):
+        value = receipt.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise malformed(f"{key} must be a non-negative integer")
+    for key, allowed in (
+        ("mergeState", MERGE_STATES),
+        ("finishWork", FINISH_WORK_STATES),
+        ("housekeeping", HOUSEKEEPING_STATES),
+    ):
+        if receipt.get(key) not in allowed:
+            raise malformed(f"{key} must be one of: {', '.join(allowed)}")
+    anomalies = receipt.get("anomalies")
+    if not isinstance(anomalies, list) or any(
+        not isinstance(item, str) or not item.strip() for item in anomalies
+    ):
+        raise malformed("anomalies must be a list of non-empty strings")
+    if receipt["mergeState"] == "merged" and (
+        receipt["finalBranch"] == "unknown" or receipt["finalHead"] == "unknown"
+    ):
+        raise malformed(
+            "a merged receipt requires a known final branch and final head"
+        )
+    return receipt
+
+
+def record_result_from_receipt(
+    state: dict[str, Any],
+    *,
+    task: str,
+    receipt: Mapping[str, Any],
+    repo: Path,
+    decisions: Sequence[str],
+    followups: Sequence[str],
+) -> None:
+    """Record an iteration result from a receipt after recomputing its claims."""
+    if receipt["runId"] != state["runId"]:
+        raise _ship_receipt_error(
+            "ship_receipt_run_mismatch",
+            f"receipt belongs to run {receipt['runId']}, not {state['runId']}",
+        )
+    if receipt["iteration"] != state["iteration"]:
+        raise _ship_receipt_error(
+            "ship_receipt_iteration_mismatch",
+            f"receipt covers iteration {receipt['iteration']},"
+            f" ledger is at {state['iteration']}",
+        )
+    receipt_task = compact_text(receipt["task"], limit=160)
+    if receipt_task != compact_text(task, limit=160):
+        raise _ship_receipt_error(
+            "ship_receipt_task_mismatch",
+            "receipt task does not match the task being recorded",
+        )
+    current = state["current"]
+    recorded_task = current.get("task")
+    if recorded_task is not None and receipt_task != recorded_task:
+        raise _ship_receipt_error(
+            "ship_receipt_task_mismatch",
+            "receipt task does not match the selected task",
+        )
+    receipt_url = compact_text(receipt["prUrl"], limit=240)
+    if (
+        current.get("prNumber") != receipt["prNumber"]
+        or current.get("prUrl") != receipt_url
+    ):
+        raise _ship_receipt_error(
+            "ship_receipt_pr_mismatch",
+            "receipt pull request does not match the recorded evidence",
+        )
+    merge_state = receipt["mergeState"]
+    if merge_state == "merged":
+        base_branch = current.get("baseBranch")
+        if base_branch is None or receipt["finalBranch"] != base_branch:
+            raise _ship_receipt_error(
+                "ship_receipt_merge_unverified",
+                "receipt final branch does not match the recorded base branch",
+            )
+        final_head = _resolved_commit(repo, receipt["finalHead"])
+        if final_head is None:
+            raise _ship_receipt_error(
+                "ship_receipt_merge_unverified",
+                f"receipt final head is not a local commit: {receipt['finalHead']}",
+            )
+        base_tip = _branch_commit(repo, base_branch)
+        if base_tip is None or not _is_ancestor(repo, final_head, base_tip):
+            raise _ship_receipt_error(
+                "ship_receipt_merge_unverified",
+                "receipt final head is not reachable from the base branch",
+            )
+    current["mergeState"] = merge_state
+    current["finishWorkState"] = receipt["finishWork"]
+    current["housekeepingState"] = receipt["housekeeping"]
+    joined_anomalies = "; ".join(item.strip() for item in receipt["anomalies"])
+    current["anomalies"] = compact_text(joined_anomalies) if joined_anomalies else None
+    record_result(
+        state,
+        task=task,
+        outcome=SHIP_RECEIPT_OUTCOME_BY_MERGE_STATE[merge_state],
+        pr_number=receipt["prNumber"],
+        pr_url=receipt_url,
+        review_rounds=receipt["reviewRounds"],
+        ci_retries=receipt["ciRetries"],
+        decisions=decisions,
+        followups=followups,
+    )
+
+
 def recovery_directive(reason_code: str) -> dict[str, str | None]:
     """Return the one conditional recovery reference selected by typed state."""
 
@@ -2543,12 +2717,16 @@ def build_parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--outcome",
         choices=("completed", "parked", "blocked", "skipped", "failed"),
-        required=True,
     )
     result.add_argument("--pr-number", type=int)
     result.add_argument("--pr-url")
-    result.add_argument("--review-rounds", type=int, default=0)
-    result.add_argument("--ci-retries", type=int, default=0)
+    result.add_argument("--review-rounds", type=int)
+    result.add_argument("--ci-retries", type=int)
+    result.add_argument(
+        "--from-receipt",
+        type=Path,
+        help="record from a validated schema-v1 ship result receipt",
+    )
     result.add_argument("--decision", action="append", default=[])
     result.add_argument("--follow-up", action="append", default=[])
     result.add_argument("--json", action="store_true")
@@ -2740,22 +2918,58 @@ def main(argv: Sequence[str] | None = None) -> int:
                 state_root=state_root,
             )
         elif args.command == "result":
-            state = mutate_state(
-                args.repo,
-                args.run_id,
-                lambda item: record_result(
-                    item,
-                    task=args.task,
-                    outcome=args.outcome,
-                    pr_number=args.pr_number,
-                    pr_url=args.pr_url,
-                    review_rounds=args.review_rounds,
-                    ci_retries=args.ci_retries,
-                    decisions=args.decision,
-                    followups=args.follow_up,
-                ),
-                state_root=state_root,
-            )
+            if args.from_receipt is not None:
+                supplied = [
+                    flag
+                    for flag, value in (
+                        ("--outcome", args.outcome),
+                        ("--pr-number", args.pr_number),
+                        ("--pr-url", args.pr_url),
+                        ("--review-rounds", args.review_rounds),
+                        ("--ci-retries", args.ci_retries),
+                    )
+                    if value is not None
+                ]
+                if supplied:
+                    raise WorkLoopError(
+                        "--from-receipt supplies these values; remove"
+                        f" {', '.join(supplied)}"
+                    )
+                receipt = load_ship_receipt(args.from_receipt)
+                state = mutate_state(
+                    args.repo,
+                    args.run_id,
+                    lambda item: record_result_from_receipt(
+                        item,
+                        task=args.task,
+                        receipt=receipt,
+                        repo=args.repo,
+                        decisions=args.decision,
+                        followups=args.follow_up,
+                    ),
+                    state_root=state_root,
+                )
+            else:
+                if args.outcome is None:
+                    raise WorkLoopError(
+                        "result requires --outcome unless --from-receipt is given"
+                    )
+                state = mutate_state(
+                    args.repo,
+                    args.run_id,
+                    lambda item: record_result(
+                        item,
+                        task=args.task,
+                        outcome=args.outcome,
+                        pr_number=args.pr_number,
+                        pr_url=args.pr_url,
+                        review_rounds=args.review_rounds or 0,
+                        ci_retries=args.ci_retries or 0,
+                        decisions=args.decision,
+                        followups=args.follow_up,
+                    ),
+                    state_root=state_root,
+                )
         elif args.command == "focus":
             if args.clear and (args.prefer or args.only):
                 raise WorkLoopError("--clear cannot be combined with focus expressions")
