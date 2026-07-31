@@ -3,7 +3,7 @@
   "name": "document-remaining-shipped-scripts",
   "title": "Document the three undocumented shipped scripts",
   "description": "A-115 (corrected): 3 of 26 manifest scripts/ targets are absent from the installed guide, not 5.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.58.0 - 2026-07-31
+
+- Close the shipped-script documentation gap (audit A-115). Every manifest
+  `scripts/` target now carries an explicit public/internal classification:
+  `sd-ai-command-pack-pr-eligibility.py` gains an installed-guide entry as the
+  read-only exact-head PR eligibility evaluator, while
+  `sd-ai-command-pack-review-local.py` and `sd_ai_command_pack_lib.py` are
+  declared internal. The guide now distinguishes `review-local.sh` (documented
+  operator runner) from `review-local.py` (internal review stage) — the two
+  never call each other. CONTRIBUTING narrows the stable-surface promise to
+  guide-documented script CLIs and names the internal category, and a new
+  doc-coverage gate (`.github/scripts/check-shipped-script-docs.sh`, wired
+  into `make test` and CI) fails when a shipped script is neither documented
+  nor deliberately allowlisted, so the gap cannot reopen silently.
+
 ## 0.57.2 - 2026-07-31
 
 - Require a trailing `<!-- SD-AI-COMMAND-PACK:KB-COPY -->` provenance marker

@@ -99,6 +99,14 @@ Quick links:
 - `scripts/sd-ai-command-pack-housekeeping.sh`: canonical post-merge housekeeping script.
 - `scripts/sd-ai-command-pack-housekeeping-result.py`: read-only composer for
   schema-versioned housekeeping action, eligibility, and final-status evidence.
+- `scripts/sd-ai-command-pack-pr-eligibility.py`: read-only exact-head
+  pull-request eligibility evaluator used by the housekeeping merge decision.
+  Accepts a schema-versioned JSON request via `--input` or the equivalent
+  flags (`--repo`, `--branch`, `--dependency-pr-number`, `--remote`,
+  `--default-branch`, `--finish-work-receipt`, `--github-repository`), emits
+  the eligibility verdict as `--format json`, `shell`, or `json-shell`, and
+  exits `0` with the verdict payload or nonzero on invalid input or
+  collection failure; it never mutates repository or PR state.
 - `scripts/sd-ai-command-pack-status.py`: read-only local/fleet status collector
   and schema-versioned JSON reporter used by housekeeping final verification.
 - `scripts/sd-ai-command-pack-work-loop.py`: standard-library user-local loop
@@ -119,7 +127,11 @@ Quick links:
   Trellis journal consistency, npm override drift, and large diff warnings.
 - `scripts/sd-ai-command-pack-review-local.sh`: local Prism/Gito and configured
   review-tool runner for the review-local loop, including its `all`
-  full-codebase mode.
+  full-codebase mode. Distinct from the similarly named
+  `scripts/sd-ai-command-pack-review-local.py`, the internal local review
+  stage that `scripts/sd-ai-command-pack-review.py` invokes; the two share a
+  base name but do not call each other, and the `.py` is an internal pipeline
+  stage rather than an operator entry point.
 - `scripts/sd-ai-command-pack-review-learnings.py`: local review feedback
   pattern scanner and managed learning-block updater. It preserves current,
   non-outdated unresolved comments as individual actionable rows, clusters
