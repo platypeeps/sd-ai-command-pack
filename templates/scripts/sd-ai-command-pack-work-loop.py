@@ -2125,17 +2125,37 @@ def record_result(
         raise WorkLoopError(f"unknown iteration outcome: {outcome}")
     if review_rounds < 0 or ci_retries < 0:
         raise WorkLoopError("review rounds and CI retries must be non-negative")
+    recorded_pr = state["current"].get("prNumber")
+    recorded_url = state["current"].get("prUrl")
+    normalized_url = compact_text(pr_url, limit=240) if pr_url else None
+    if pr_number is not None and recorded_pr is not None and pr_number != recorded_pr:
+        raise WorkLoopError(
+            "iteration result pull request number contradicts recorded evidence"
+        )
+    if (
+        normalized_url is not None
+        and recorded_url is not None
+        and normalized_url != recorded_url
+    ):
+        raise WorkLoopError(
+            "iteration result pull request URL contradicts recorded evidence"
+        )
     state["counters"][counter_key] += 1
     state["counters"]["reviewRounds"] += review_rounds
     state["counters"]["ciRetries"] += ci_retries
     if outcome == "completed" and pr_number is not None:
+        if recorded_pr is None:
+            raise WorkLoopError(
+                "completed iteration with a pull request requires recorded"
+                " pull request evidence"
+            )
         state["counters"]["mergedPrs"] += 1
     result = {
         "iteration": state["iteration"],
         "task": compact_text(task, limit=160),
         "outcome": outcome,
         "prNumber": pr_number,
-        "prUrl": compact_text(pr_url, limit=240) if pr_url else None,
+        "prUrl": normalized_url,
         "reviewRounds": review_rounds,
         "ciRetries": ci_retries,
         "completedAt": utc_now(),

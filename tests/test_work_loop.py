@@ -1502,6 +1502,8 @@ class WorkLoopTests(InstallTestCase):
             state["phase"] = "followups"
             state["iteration"] = index + 1
             state["current"]["task"] = f"task-{index}"
+            state["current"]["prNumber"] = 100 + index
+            state["current"]["prUrl"] = f"https://example.test/pr/{index}"
             module.record_result(
                 state,
                 task=f"task-{index}",
@@ -3082,6 +3084,8 @@ class WorkLoopTests(InstallTestCase):
             module.transition_state(state, "validating")
             module.transition_state(state, "shipping")
             module.transition_state(state, "followups")
+            state["current"]["prNumber"] = 100 + index
+            state["current"]["prUrl"] = f"https://example.test/pr/{100 + index}"
             module.record_result(
                 state,
                 task=f"task-{index + 1}",
@@ -3255,6 +3259,35 @@ class WorkLoopTests(InstallTestCase):
         )
         self.assertEqual(shipped["current"]["prNumber"], 42)
         invoke("transition", *transition_args, "followups")
+        mismatch_stdout = io.StringIO()
+        mismatch_stderr = io.StringIO()
+        with (
+            contextlib.redirect_stdout(mismatch_stdout),
+            contextlib.redirect_stderr(mismatch_stderr),
+        ):
+            mismatched = module.main(
+                [
+                    *common,
+                    "result",
+                    "--repo",
+                    str(root),
+                    "--run-id",
+                    state["runId"],
+                    "--task",
+                    "ci",
+                    "--outcome",
+                    "completed",
+                    "--pr-number",
+                    "42",
+                    "--pr-url",
+                    "https://example.test/pr/42",
+                    "--review-rounds",
+                    "2",
+                    "--json",
+                ]
+            )
+        self.assertEqual(mismatched, 2)
+        self.assertIn("contradicts recorded evidence", mismatch_stderr.getvalue())
         completed = invoke(
             "result",
             "--run-id",
@@ -3266,13 +3299,14 @@ class WorkLoopTests(InstallTestCase):
             "--pr-number",
             "42",
             "--pr-url",
-            "https://example.test/pr/42",
+            "https://example.test/pull/42",
             "--review-rounds",
             "2",
             "--decision",
             "selected CI first",
         )
         self.assertEqual(completed["counters"]["completed"], 1)
+        self.assertEqual(completed["counters"]["mergedPrs"], 1)
 
         invoke("transition", *transition_args, "inventory")
         focused = invoke("focus", "--run-id", state["runId"], "--clear")
