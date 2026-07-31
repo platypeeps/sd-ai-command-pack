@@ -6,7 +6,7 @@ Sessions whose work commits repair bookkeeping itself — journal-history fixes
 under `.trellis/workspace/**` and task-lifecycle repairs whose *parent* state
 was already dirty — cannot be journaled through the `journal-only-recovery`
 subtype. This is root cause 3 of
-`.trellis/tasks/07-29-scope-final-bundle-validator-to-delta/prd.md`, descoped
+`.trellis/tasks/archive/2026-07/07-29-scope-final-bundle-validator-to-delta/prd.md`, descoped
 from that task by its 2026-07-30 adversarial-review scope decision after two
 review rounds found the proposed no-re-audit widening unsound.
 
