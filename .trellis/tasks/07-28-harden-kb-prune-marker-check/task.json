@@ -3,7 +3,7 @@
   "name": "harden-kb-prune-marker-check",
   "title": "Require a generated marker before pruning KB category files",
   "description": "A-070 residual: is_stale_generated_kb_entry deletes any regular file under a managed KB category title with no marker check.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

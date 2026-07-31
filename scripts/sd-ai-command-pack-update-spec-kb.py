@@ -16,12 +16,10 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import filecmp
 import functools
 import json
 import os
 import shlex
-import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -42,6 +40,8 @@ KB_IGNORE_BLOCK_START = "# sd-ai-command-pack obsidian-kb start"
 KB_IGNORE_BLOCK_END = "# sd-ai-command-pack obsidian-kb end"
 DASHBOARD_MARKER = "<!-- SD-AI-COMMAND-PACK:OBSIDIAN-KB-DASHBOARD -->"
 OVERVIEW_MARKER = "<!-- SD-AI-COMMAND-PACK:LLM-KB-OVERVIEW -->"
+KB_COPY_MARKER = "<!-- SD-AI-COMMAND-PACK:KB-COPY -->"
+KB_COPY_MARKER_SUFFIX = f"\n{KB_COPY_MARKER}\n"
 DOC_SUFFIXES = {".adoc", ".md", ".mdx", ".rst", ".txt"}
 MAP_SUFFIXES = DOC_SUFFIXES | {".json", ".xml", ".yaml", ".yml"}
 ROOT_DOC_PREFIXES = (
@@ -253,7 +253,16 @@ def is_stale_generated_kb_entry(
                 or relative_candidate in legacy_sources
             )
         )
-    return candidate.is_file() and is_managed_kb_category_path(relative_candidate)
+    # A plain file is deletable only when it carries the pack's copy marker.
+    # Location alone is not ownership: the KB root may be a symlink into an
+    # operator's vault, where a folder can share a category title. Copies
+    # written before the marker existed are adopted on the next rewrite when
+    # their source still exists; copies orphaned before then are left in place.
+    return (
+        candidate.is_file()
+        and is_managed_kb_category_path(relative_candidate)
+        and file_contains_marker(candidate, KB_COPY_MARKER)
+    )
 
 
 def is_within(path: Path, root: Path) -> bool:
@@ -531,6 +540,17 @@ def file_contains_marker(path: Path, marker: str) -> bool:
     return text is not None and marker in text
 
 
+def kb_copy_payload(source: Path) -> bytes:
+    return source.read_bytes() + KB_COPY_MARKER_SUFFIX.encode("utf-8")
+
+
+def kb_copy_is_current(source: Path, copy: Path) -> bool:
+    try:
+        return copy.read_bytes() == kb_copy_payload(source)
+    except OSError:
+        return False
+
+
 def ignore_present_state(*, local: bool) -> str:
     return "local-exclude present" if local else "present"
 
@@ -710,7 +730,7 @@ def collect_copy_state(
                         f"{relative_destination.as_posix()} is occupied by a non-file",
                     )
                 )
-            elif filecmp.cmp(source, copy, shallow=False):
+            elif kb_copy_is_current(source, copy):
                 present += 1
             else:
                 issues.append(
@@ -1339,14 +1359,19 @@ def create_copies(root: Path, sources: list[Path]) -> tuple[int, int, list[str]]
         elif copy.exists() and not copy.is_file():
             conflicts.append(relative_destination.as_posix())
             continue
-        elif copy.exists() and filecmp.cmp(source, copy, shallow=False):
+        elif copy.exists() and kb_copy_is_current(source, copy):
             copied += 1
             continue
 
         # Sources are filtered to regular non-symlink files during discovery;
-        # follow_symlinks=False keeps that contract explicit so a future
-        # symlinked source cannot smuggle out-of-repo content into the KB.
-        shutil.copy2(source, copy, follow_symlinks=False)
+        # re-checking here keeps that contract explicit so a future symlinked
+        # source cannot smuggle out-of-repo content into the KB. The copy is
+        # the source plus a trailing provenance marker — the proof the prune
+        # requires before it may delete a category file.
+        if source.is_symlink():
+            conflicts.append(relative_destination.as_posix())
+            continue
+        copy.write_bytes(kb_copy_payload(source))
         copied += 1
 
     return copied, removed, conflicts
