@@ -186,42 +186,42 @@ review:
 
 ## Acceptance Criteria
 
-- [ ] A bundle whose delta touches **only a clean sibling file** in a task
+- [x] A bundle whose delta touches **only a clean sibling file** in a task
       directory that separately contains a stale `_example` scaffold row or an
       empty `task.json` description validates successfully, and a regression test
       asserts it. The defective file must be absent from the delta — a delta that
       includes it is the next-but-one criterion, not this one.
-- [ ] The same holds across group 1 as a whole, not a sampled pair. A regression
+- [x] The same holds across group 1 as a whole, not a sampled pair. A regression
       asserts at least one code from each distinct producer:
       `validateBookkeepingTaskDirectory` itself (`task_prd_empty`),
       `validateBookkeepingTaskContexts` (`task_context_malformed`), and
       `validateBookkeepingTextWhitespace`. A three-code special case must not be
       able to pass. Groups 2, 3, and 4 are explicitly outside this criterion —
       `design.md` states their rule instead.
-- [ ] A bundle whose delta itself contains such a defect still fails, and a
+- [x] A bundle whose delta itself contains such a defect still fails, and a
       regression test asserts it — the fix narrows scope without removing the
       check.
-- [ ] The untouched-file finding is still **reported**, not silently dropped. A
+- [x] The untouched-file finding is still **reported**, not silently dropped. A
       regression asserts it appears in whichever non-blocking channel `design.md`
       chose, on a bundle that simultaneously reaches `status=valid` and is
       accepted by `sd-ai-command-pack-pr-eligibility.py`. An implementation that
       merely stops scanning untouched files satisfies every other criterion here
       while violating the signal-preservation requirement; this criterion is what
       separates the two.
-- [ ] A repo-maintenance branch produces a valid receipt, and a regression test
+- [x] A repo-maintenance branch produces a valid receipt, and a regression test
       asserts it. `design.md` must first fix the exact allowlist of paths such a
       branch may touch, and must state whether the range still has to carry the
       journal-plus-index pair: `validateBookkeepingJournalBundle` (`:1622`) adds
       `journal_session_missing` (`:1645-1646`) whenever the delta contains no
       `.trellis/workspace/` journal file, so "changes only skills, scripts,
       specs, or release payload" is not by itself a finalizable delta today.
-- [ ] That receipt is accepted end to end, not just by the validator: it passes
+- [x] That receipt is accepted end to end, not just by the validator: it passes
       `sd-ai-command-pack-pr-eligibility.py` without raising
       `EligibilityInputError`, and `sd-finish-work/SKILL.md` documents the mode
       the operator must actually pass. Asserting `status=valid` alone does not
       satisfy this criterion.
-- [ ] `bundle_scope_invalid` still fails a delta containing `.trellis/audit/**`.
-- [ ] Replaying the PR #273 delta (`49b43afd..7fde6218`, 154 files: 152 under
+- [x] `bundle_scope_invalid` still fails a delta containing `.trellis/audit/**`.
+- [x] Replaying the PR #273 delta (`49b43afd..7fde6218`, 154 files: 152 under
       `.trellis/tasks/` and 2 under `.trellis/audit/`) under the fixed validator
       drops all 25 whole-directory findings and keeps the 2 `bundle_scope_invalid`
       findings. It must **not** reach `status=valid`, and the residue is not the
@@ -232,7 +232,7 @@ review:
       `7fde6218` is checked out — but checking it out also restores the *pre-fix*
       validator, so run the fixed validator from a separate worktree or fixture
       rather than from inside that checkout.
-- [ ] `templates/` and root copies remain byte-identical after `make sync` for
+- [x] `templates/` and root copies remain byte-identical after `make sync` for
       every file this change touches, not the validator alone —
       `sd-finish-work/SKILL.md` is mirrored the same way and hard-codes the mode
       list at `:122` in both copies.

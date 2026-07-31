@@ -149,11 +149,19 @@ Still in the template validator, `validateJournalOnlyPlanningRecovery`:
 
 ## 7. Ship
 
-- [ ] Commit work (tests + validator + docs + release artifacts; mirrors via
-      sync). Push branch.
-- [ ] PR via `--body-file` (scratchpad), with the standing
+- [x] Commit work (tests + validator + docs + release artifacts; mirrors via
+      sync). Push branch. (c24d3e6d; review fix 1d93d605; digest refresh
+      781c887a)
+- [x] PR via `--body-file` (scratchpad), with the standing
       "Tooling/generated scope:" section listing every generated-mirror path.
-- [ ] Copilot review loop to convergence; CI green.
+      (PR #287)
+- [x] Copilot review loop to convergence; CI green. (Round 1: one real
+      finding — early-return in `validateBookkeepingTaskDirectory` skipped
+      delta-anchored prd/context checks when a demoted sibling task.json
+      failed to load; fixed in 1d93d605 with regression test. Rounds 2–3: no
+      new comments; two suppressed low-confidence notes assessed as
+      deliberate wording choice and pre-existing noise already narrowed by
+      this change. All threads resolved; all CI checks pass.)
 - [ ] Finish-work: archive task + journal session (use
       `scripts/sd-ai-command-pack-record-session.py` with `--change`/`--test`,
       not bare `add_session.py`); push; receipt via
