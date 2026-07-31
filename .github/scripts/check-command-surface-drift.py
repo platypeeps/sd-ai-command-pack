@@ -447,6 +447,11 @@ def _manifest_findings(
         str(item.get("target")) for item in files if isinstance(item.get("target"), str)
     }
     for retirement in retirements:
+        # Schedule-only rows announce a removal version for surfaces that
+        # still ship; only enforcing rows assert manifest absence, matching
+        # the source-checkout pass.
+        if not retirement.source_paths_must_be_absent:
+            continue
         for target in sorted(
             (set(retirement.installed_targets) & manifest_targets) - reported_targets
         ):

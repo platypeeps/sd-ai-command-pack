@@ -326,6 +326,22 @@ class CheckTests(InstallTestCase):
                     )
                 ]
             ),
+            self.config(
+                checks=[
+                    self.command_entry("perl-inline", ["perl", "-e", "exit 0"])
+                ]
+            ),
+            self.config(
+                checks=[
+                    self.command_entry("ruby-inline", ["ruby", "-e", "exit 0"])
+                ]
+            ),
+            self.config(checks=[self.command_entry("git-push", ["git", "push"])]),
+            self.config(
+                checks=[
+                    self.command_entry("git-commit", ["git", "commit", "-m", "x"])
+                ]
+            ),
             self.config(checks=[self.command_entry("remote", ["gh", "pr", "view"])]),
             self.config(checks=[self.command_entry("escape", ["true"], cwd="../outside")]),
             self.config(checks=[self.command_entry("timeout", ["true"], timeout=3601)]),

@@ -12,9 +12,9 @@ Cover the branch that enforces sd-check's headline guarantee — that configured
 
 ## Acceptance Criteria
 
-- [ ] Lines 514-519 of `scripts/sd-ai-command-pack-check.py` leave the coverage missing list.
-- [ ] Deleting the `READ_ONLY_GIT_SUBCOMMANDS` branch makes the suite fail.
-- [ ] `make check` passes.
+- [x] Lines 514-519 of `scripts/sd-ai-command-pack-check.py` leave the coverage missing list.
+- [x] Deleting the `READ_ONLY_GIT_SUBCOMMANDS` branch makes the suite fail.
+- [x] `make check` passes.
 
 ## Notes
 

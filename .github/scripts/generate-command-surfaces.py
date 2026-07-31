@@ -80,7 +80,10 @@ from installer.registry import (  # noqa: E402
     SHARED_SKILL_REFERENCES,
     SKILL_FANOUT_PLATFORMS,
     SOURCE_ONLY_COMMAND_NAMES,
+    SUPERSEDED_COMMANDS,
     CommandInfo,
+    retired_surface_removed_version,
+    source_only_adapter_twins,
 )
 
 # The neutral-body preamble line that platform-agnostic adapters keep but the
@@ -349,11 +352,17 @@ def generate_command_catalog() -> str:
             ]
         )
         for command in commands:
-            availability = (
-                "source-checkout-only"
-                if command.name in SOURCE_ONLY_COMMAND_NAMES
-                else "included in installed pack"
-            )
+            if command.name in SOURCE_ONLY_COMMAND_NAMES:
+                availability = "source-checkout-only"
+            elif command.name in SUPERSEDED_COMMANDS:
+                successor, retirement_id = SUPERSEDED_COMMANDS[command.name]
+                removed_version = retired_surface_removed_version(retirement_id)
+                availability = (
+                    f"included in installed pack — transitional until "
+                    f"{removed_version}; use {successor}"
+                )
+            else:
+                availability = "included in installed pack"
             lines.append(
                 f"| `{command.name}` | {availability} | "
                 f"{_markdown_cell(skill_description(command.name))} |"
@@ -898,9 +907,31 @@ def generate_manifest_text() -> str:
     return json.dumps(output, indent=2) + "\n"
 
 
+def generate_source_only_dev_adapters(outputs: dict[str, str]) -> dict[str, str]:
+    # Source-only commands have no consumer manifest entries, so the dogfood
+    # self-install never refreshes their dev-tree adapters; emit those copies
+    # here or they freeze at whatever release last hand-touched them.
+    dev: dict[str, str] = {}
+    for command in COMMAND_REGISTRY:
+        if command.name not in SOURCE_ONLY_COMMAND_NAMES:
+            continue
+        for source, target in source_only_adapter_twins(
+            command.name, command.short, command.target_families, root=PACK_ROOT
+        ):
+            content = outputs.get(source)
+            if content is None:
+                raise GenerationError(
+                    f"source-only dev adapter {target} has no generated "
+                    f"template source {source}"
+                )
+            dev[target] = content
+    return dev
+
+
 def generate_surfaces() -> dict[str, str]:
     outputs = generate_neutral_adapters()
     outputs.update(generate_adapters())
+    outputs.update(generate_source_only_dev_adapters(outputs))
     outputs[HELP_CATALOG_PATH] = generate_command_catalog()
     outputs[STRUCTURED_QUESTION_REFERENCE_PATH] = (
         generate_structured_question_reference()

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 266
+- **Total Sessions**: 275
 - **Last Active**: 2026-07-31
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~653 | Active |
+| `journal-6.md` | ~1020 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,7 +34,16 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 266 | 2026-07-31 | Measure .github/scripts Python under coverage (lane 1) | `82cc6a03`, `0c73cb0` | `fix/measure-unmeasured-runtime-surface` |
+| 275 | 2026-07-31 | Measure .github/scripts Python under coverage (lane 1) | `82cc6a03`, `0c73cb0` | `fix/measure-unmeasured-runtime-surface` |
+| 274 | 2026-07-31 | PR #291 review loop: ship-receipt validation hardening (rounds 4-9) | `01ca5adc`, `9e65cfb9`, `e7ab9c8c`, `85260377`, `b282daf9`, `3c86d72b`, `b3a43760`, `0cb8f666`, `4d656f50`, `76bdd98c`, `7ebffc75`, `04c90f81`, `695457f0`, `16e94172`, `c2075414`, `b0cffa1d`, `bc3b7c56`, `f66c358f`, `b752def8`, `506297e3`, `64d033ae`, `8e993984`, `ed76ca15`, `2ae8c306`, `bf700b23` | `fix/add-ship-result-receipt` |
+| 273 | 2026-07-31 | Retire transitional review surfaces: removal version and catalog status | `a1ae4bc5`, `afdcd54a`, `7cf1cbba` | `fix/retire-transitional-review-surfaces` |
+| 272 | 2026-07-31 | Align status and housekeeping selector contracts to F/T | `b690b9eb`, `1ac22f79` | `fix/align-status-selector-contract` |
+| 271 | 2026-07-31 | Declare and pin build dependency toolchain (A-108/109/110) | `05ab4f61`, `26ae2976`, `bf2e5aae`, `49d633af`, `af8f96eb` | `fix/declare-pin-build-dependencies` |
+| 270 | 2026-07-31 | Document remaining shipped scripts and gate doc coverage (A-115, PR #297) | `6efe757c`, `14d6c75c`, `a595f670`, `dfef55df` | `fix/document-remaining-shipped-scripts` |
+| 269 | 2026-07-31 | Harden KB prune with trailing provenance marker (PR #296) | `bc6611b9`, `24c3b612` | `fix/harden-kb-prune-marker-check` |
+| 268 | 2026-07-31 | Preserve the aside lock when work-loop restore fails (A-092) | `9ef65a56`, `ef0ec529` | `fix/work-loop-lock-restore` |
+| 267 | 2026-07-31 | Cover sd-check read-only git guard (A-049) | `1c8992a9` | `fix/test-sd-check-read-only-git-guard` |
+| 266 | 2026-07-31 | Regenerate frozen source-only fleet-refresh adapters | `bd98b831` | `fix/regenerate-fleet-refresh-adapters` |
 | 265 | 2026-07-30 | Merge Phase B PR #289 and close simplify-review-shipping-composition | `d6de646d7a7b` | `chore/archive-simplify-review-shipping-composition` |
 | 264 | 2026-07-30 | Ship Phase B of simplify-review-shipping-composition (0.57.0) | `13661913`, `71d12d1f`, `190f2585`, `1f50f3b9`, `0812a4b0` | `fix/simplify-review-shipping-composition` |
 | 263 | 2026-07-30 | PR 288 review loop converged for ship composition Phase A | `e8d10910`, `b2e8d830` | `fix/simplify-review-shipping-composition` |

@@ -99,6 +99,15 @@ Quick links:
 - `scripts/sd-ai-command-pack-housekeeping.sh`: canonical post-merge housekeeping script.
 - `scripts/sd-ai-command-pack-housekeeping-result.py`: read-only composer for
   schema-versioned housekeeping action, eligibility, and final-status evidence.
+- `scripts/sd-ai-command-pack-pr-eligibility.py`: read-only exact-head
+  pull-request eligibility evaluator used by the housekeeping merge decision.
+  Accepts a schema-versioned JSON request via `--input` or the equivalent
+  flags (`--repo`, `--branch`, `--dependency-pr-number`, `--remote`,
+  `--default-branch`, `--finish-work-receipt`, `--github-repository`), emits
+  the eligibility verdict as `--format json`, `shell`, or `json-shell`, and
+  maps the verdict status to its exit code: `0` for `eligible`, `1` for
+  `blocked`, and `2` for any other status, including invalid input and
+  indeterminate collection failures; it never mutates repository or PR state.
 - `scripts/sd-ai-command-pack-status.py`: read-only local/fleet status collector
   and schema-versioned JSON reporter used by housekeeping final verification.
 - `scripts/sd-ai-command-pack-work-loop.py`: standard-library user-local loop
@@ -119,7 +128,11 @@ Quick links:
   Trellis journal consistency, npm override drift, and large diff warnings.
 - `scripts/sd-ai-command-pack-review-local.sh`: local Prism/Gito and configured
   review-tool runner for the review-local loop, including its `all`
-  full-codebase mode.
+  full-codebase mode. Distinct from the similarly named
+  `scripts/sd-ai-command-pack-review-local.py`, the internal local review
+  stage that `scripts/sd-ai-command-pack-review.py` invokes; the two share a
+  base name but do not call each other, and the `.py` is an internal pipeline
+  stage rather than an operator entry point.
 - `scripts/sd-ai-command-pack-review-learnings.py`: local review feedback
   pattern scanner and managed learning-block updater. It preserves current,
   non-outdated unresolved comments as individual actionable rows, clusters
@@ -127,6 +140,12 @@ Quick links:
   only category-specific actions backed by recurring observations.
 - `scripts/sd-ai-command-pack-install-audit.py`: structural post-install audit
   for missing installed targets and unlisted pack-like files.
+- `scripts/sd-ai-command-pack-recovery-artifacts.py`: receipt-driven lifecycle
+  manager for pack-created Git recovery stashes and worktrees; described in
+  detail in the recovery-artifacts section below.
+- `scripts/sd-ai-command-pack-surface-check.py`: schema-versioned shipped-surface
+  validator the pack source repository invokes from its tracked check
+  configuration; described in detail in the surface-check section below.
 - `scripts/sd-ai-command-pack-pr-body-scope.py`: configurable PR-body scope
   preflight for broad behavior-changing diffs.
 - `scripts/sd-ai-command-pack-update-spec-kb.py`: Obsidian KB copy-folder
@@ -802,7 +821,7 @@ matrix. `copilotReviewFileLimit` defaults to `300`, accepts only a positive
 integer, and warns before remote review when the selected local diff exceeds
 GitHub Copilot's changed-file limit. Repos that intentionally
 document service-user paths under `/home/<user>/` can add those service users to
-`allowedLinuxHomeUsers` in that config. The script requires Node 16.9 or newer
+`allowedLinuxHomeUsers` in that config. The script requires Node 22 or newer
 and scans regular documentation files only; symlinked docs are skipped
 intentionally so local/generated links do not expand outside the repository.
 Generated GitHub paths and path-like comment snippets inside the complete
@@ -1057,6 +1076,14 @@ entrypoint is intentionally maintained as repo documentation. If an existing
 `.obsidian-kb` folder was created by an older symlink-based helper, the refresh
 replaces pack-owned relative symlinks with real copies in the category layout
 and prunes the old mirrored generated paths.
+Each generated copy ends with a trailing `<!-- SD-AI-COMMAND-PACK:KB-COPY -->`
+provenance marker, and the prune deletes a plain file in a category folder only
+when the file ends with that marker, so files the pack never wrote — including
+notes that merely quote the marker text — survive refreshes even when the KB
+root symlink points into a personal vault whose folders share a category
+title. Copies written by older pack versions carry no marker; a
+refresh rewrites them with one while their source exists, and copies orphaned
+before the upgrade are left in place for manual cleanup.
 The root `.obsidian-kb` path may itself be a symlink when it resolves to an
 existing directory, including a directory outside the repository. Refreshes
 preserve that root symlink and write through it. A broken root symlink, a root

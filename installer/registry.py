@@ -1216,6 +1216,58 @@ def command_installed_targets(
     return tuple(targets)
 
 
+def source_only_adapter_twins(
+    name: str,
+    short: str,
+    target_families: tuple[str, ...],
+    *,
+    root: Path,
+) -> tuple[tuple[str, str], ...]:
+    """Return (template source, dev-tree target) adapter pairs for one
+    source-only command.
+
+    Source-only commands have no consumer manifest entries, so the dogfood
+    self-install never refreshes their dev-tree adapters. The command-surface
+    generator and the pack drift gate both derive that dev-tree footprint from
+    this one helper. Mirroring the installer's anchor rule, a platform
+    contributes a pair only when its anchor directory exists under ``root``.
+    """
+
+    def neutral_pair(platform: str) -> tuple[str, str]:
+        pattern = PLATFORM_REGISTRY[platform].command_target_pattern
+        if pattern is None:
+            raise RuntimeError(f"platform has no command target pattern: {platform}")
+        return (
+            f"templates/.commands/{name}.md",
+            pattern.format(filename=f"{name}.md", name=short),
+        )
+
+    pairs: list[tuple[str, tuple[str, str]]] = []
+    if "claude" in target_families:
+        path = f".claude/commands/sd/{short}.md"
+        pairs.append(("claude", (f"templates/{path}", path)))
+    if "cursor" in target_families:
+        pairs.append(("cursor", neutral_pair("cursor")))
+    if "gemini" in target_families:
+        path = f".gemini/commands/sd/{short}.toml"
+        pairs.append(("gemini", (f"templates/{path}", path)))
+    if "github" in target_families:
+        path = f".github/prompts/{name}.prompt.md"
+        pairs.append(("github", (f"templates/{path}", path)))
+    if "opencode" in target_families:
+        pairs.append(("opencode", neutral_pair("opencode")))
+    pairs.extend(
+        (platform, neutral_pair(platform))
+        for platform in LATER_NEUTRAL_COMMAND_PLATFORMS
+        if platform in target_families
+    )
+    return tuple(
+        pair
+        for platform, pair in pairs
+        if (root / PLATFORM_REGISTRY[platform].directory).is_dir()
+    )
+
+
 @dataclass(frozen=True)
 class RetiredCommandSurface:
     id: str
@@ -1268,6 +1320,34 @@ RETIRED_COMMAND_SURFACES: tuple[RetiredCommandSurface, ...] = (
         removed_version="0.57.0",
         owner_task="07-24-simplify-review-shipping-composition",
     ),
+    # Schedule-only rows: the three transitional review surfaces still ship
+    # until the announced removal release. identifiers stay empty and
+    # source_paths_must_be_absent stays False until the owner task deletes
+    # the files and flips the rows to enforcing.
+    RetiredCommandSurface(
+        id="full-check-command",
+        identifiers=(),
+        installed_targets=command_installed_targets("sd-full-check", "full-check"),
+        removed_version="0.62.0",
+        owner_task="07-24-remove-retired-review-surfaces",
+        source_paths_must_be_absent=False,
+    ),
+    RetiredCommandSurface(
+        id="review-local-command",
+        identifiers=(),
+        installed_targets=command_installed_targets("sd-review-local", "review-local"),
+        removed_version="0.62.0",
+        owner_task="07-24-remove-retired-review-surfaces",
+        source_paths_must_be_absent=False,
+    ),
+    RetiredCommandSurface(
+        id="review-pr-command",
+        identifiers=(),
+        installed_targets=command_installed_targets("sd-review-pr", "review-pr"),
+        removed_version="0.62.0",
+        owner_task="07-24-remove-retired-review-surfaces",
+        source_paths_must_be_absent=False,
+    ),
 )
 
 
@@ -1278,6 +1358,45 @@ def retired_surface_targets(surface_id: str) -> tuple[str, ...]:
         if surface.id == surface_id:
             return surface.installed_targets
     raise RuntimeError(f"unknown retired command surface id: {surface_id}")
+
+
+def retired_surface_removed_version(surface_id: str) -> str:
+    """Return one retirement's announced removal release or fail actionably."""
+
+    for surface in RETIRED_COMMAND_SURFACES:
+        if surface.id == surface_id:
+            return surface.removed_version
+    raise RuntimeError(f"unknown retired command surface id: {surface_id}")
+
+
+# Commands that still ship but carry an announced removal release. The catalog
+# derives the transitional availability status from these mappings; the
+# removal version always comes from the referenced retirement row so the
+# schedule has exactly one source of truth.
+SUPERSEDED_COMMANDS: dict[str, tuple[str, str]] = {
+    "sd-full-check": ("sd-check", "full-check-command"),
+    "sd-review-local": ("sd-review", "review-local-command"),
+    "sd-review-pr": ("sd-review", "review-pr-command"),
+}
+
+
+def validate_superseded_commands(
+    command_names: tuple[tuple[str, str], ...],
+    superseded: dict[str, tuple[str, str]],
+    retirements: tuple[RetiredCommandSurface, ...],
+) -> None:
+    known = {name for name, _short in command_names}
+    retirement_ids = {surface.id for surface in retirements}
+    errors = []
+    for name, (successor, retirement_id) in superseded.items():
+        if name not in known:
+            errors.append(f"unknown command: {name}")
+        if successor not in known:
+            errors.append(f"{name} names unknown successor: {successor}")
+        if retirement_id not in retirement_ids:
+            errors.append(f"{name} names missing retirement id: {retirement_id}")
+    if errors:
+        raise RuntimeError("invalid SUPERSEDED_COMMANDS: " + "; ".join(errors))
 
 
 COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
@@ -1600,6 +1719,9 @@ validate_source_only_skill_references(
     SOURCE_ONLY_COMMAND_NAMES, SOURCE_ONLY_SKILL_REFERENCES
 )
 validate_shared_skill_references(COMMAND_NAMES, SHARED_SKILL_REFERENCES)
+validate_superseded_commands(
+    COMMAND_NAMES, SUPERSEDED_COMMANDS, RETIRED_COMMAND_SURFACES
+)
 
 # Pack-owned .gito defaults are not a platform but share the local-gitignore
 # grouping; kept here so the managed block order below stays byte-stable.
@@ -1875,6 +1997,7 @@ __all__ = [
     "SHARED_SKILL_REFERENCES",
     "SKILL_FANOUT_PLATFORMS",
     "SOURCE_ONLY_COMMAND_NAMES",
+    "SUPERSEDED_COMMANDS",
     "TRELLIS_BLANKET_GITIGNORE_ENTRIES",
     "TRELLIS_GITIGNORE_END",
     "TRELLIS_GITIGNORE_PATTERNS",
@@ -1890,6 +2013,8 @@ __all__ = [
     "validate_interaction_registry",
     "validate_command_surface_registry",
     "command_installed_targets",
+    "source_only_adapter_twins",
     "validate_shared_skill_references",
     "validate_source_only_command_names",
+    "validate_superseded_commands",
 ]

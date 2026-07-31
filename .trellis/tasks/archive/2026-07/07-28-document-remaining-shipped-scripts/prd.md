@@ -90,17 +90,17 @@ shipped target is mentioned in the guide, which is why the gap opened silently.
 
 ## Acceptance Criteria
 
-- [ ] R1: every one of the 26 targets carries a public/internal classification.
-- [ ] R5: the coverage test passes, and fails if a new `scripts/` target is added
+- [x] R1: every one of the 26 targets carries a public/internal classification.
+- [x] R5: the coverage test passes, and fails if a new `scripts/` target is added
       to the manifest without either a guide entry or an allowlist entry.
       Verify the failure mode, not just the passing one.
-- [ ] R2: `CONTRIBUTING.md` and the guide agree — no target is simultaneously
+- [x] R2: `CONTRIBUTING.md` and the guide agree — no target is simultaneously
       "stable public surface" and undocumented.
-- [ ] R4: `docs/SD_AI_COMMAND_PACK.md` distinguishes `review-local.sh` from
+- [x] R4: `docs/SD_AI_COMMAND_PACK.md` distinguishes `review-local.sh` from
       `review-local.py`; a reader can tell which one `sd-review` runs.
-- [ ] R6: `docs/` and `templates/docs/` copies are identical; `make sync` passes.
-- [ ] `make check` passes.
-- [ ] Changelog + version; fleet rollout via normal refresh.
+- [x] R6: `docs/` and `templates/docs/` copies are identical; `make sync` passes.
+- [x] `make check` passes.
+- [x] Changelog + version; fleet rollout via normal refresh.
 
 ## Notes
 

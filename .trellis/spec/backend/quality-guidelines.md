@@ -930,6 +930,72 @@ Wrong: infer historical branch proof from newly submitted main-branch evidence
 Correct: require an already-recorded non-empty main branch before skipping the repeated shipped-branch check; still validate head ancestry and all identities
 ```
 
+## Ship Receipt Recording Contract
+
+### 1. Scope / Trigger
+
+Use this contract when changing the schema-v1 ship merge-result receipt in
+`sd-ship`, or `load_ship_receipt()` / `record_result_from_receipt()` /
+`result --from-receipt` in `sd-ai-command-pack-work-loop.py` and its template
+twin.
+
+### 2. Signatures
+
+- Loader: `load_ship_receipt(path) -> dict` — fails closed with
+  `ship_receipt_unreadable`, `ship_receipt_malformed`, or
+  `ship_receipt_version_unsupported`. `prUrl` must already be canonical
+  (lowercase scheme/host, no userinfo, query, or fragment, and no trailing
+  slash on the path); a non-canonical `prUrl` is `ship_receipt_malformed`.
+- Recorder: `record_result_from_receipt(state, *, task, receipt, repo,
+  decisions, followups)` — fails closed with `ship_receipt_run_mismatch`,
+  `ship_receipt_iteration_mismatch`, `ship_receipt_task_mismatch`,
+  `ship_receipt_pr_mismatch`, or `ship_receipt_merge_unverified`.
+- CLI: `result --from-receipt <path>` forbids `--outcome`, `--pr-number`,
+  `--pr-url`, `--review-rounds`, and `--ci-retries`; the receipt supplies
+  them.
+
+### 3. Contracts
+
+- `sd-ship` writes the receipt from authoritative stage reports to a private
+  temp file and reports the path on an `SD_SHIP_MERGE_RESULT_RECEIPT:` line;
+  the free-text `SD_SHIP_MERGE_RESULT` block stays display-only and is never
+  parsed back into typed state.
+- The work loop independently recomputes every receipt claim it can: run,
+  iteration, task, and PR identity must match the ledger, and a `merged`
+  claim requires the reported `finalBranch` to equal the recorded base branch
+  and the reported `finalHead` to resolve and be an ancestor of the current
+  base-branch tip.
+- The iteration outcome derives from the verified merge state
+  (`merged -> completed`, `open`/`blocked` -> `blocked`, `closed -> failed`);
+  `mergedPrs` therefore increments only for verified merges.
+- Receipt failure reasons are command errors in the dedicated
+  `SHIP_RECEIPT_REASON_CODES` namespace, not loop states, and never carry
+  recovery references.
+- `mergeState`, `finishWorkState`, `housekeepingState`, and `anomalies` are
+  transient per-iteration current-state fields: enum-guarded in
+  `validated_evidence()`, excluded from stable and transition field sets, and
+  absent fields in persisted ledgers are backfilled to `None` by
+  `upgrade_state()` at every load site.
+
+### 4. Tests Required
+
+- Verified-merge happy path recording counters and destination fields.
+- Non-merged receipt recording a blocked outcome without `mergedPrs`.
+- Every identity mismatch and loader rejection by named reason code.
+- Unverified merge claims: wrong final branch, unresolvable head,
+  non-ancestor head.
+- CLI conflict rejection for `--from-receipt` plus a supplied typed flag.
+
+### 5. Wrong vs Correct
+
+```text
+Wrong: parse the free-text SD_SHIP_MERGE_RESULT block back into typed loop state
+Correct: record only through the validated receipt path and treat a missing or rejected receipt as a blocked iteration
+
+Wrong: trust the receipt's merged claim because sd-ship wrote it
+Correct: re-verify the merge against git ancestry before counting it
+```
+
 ## Session Recorder Retry Contract
 
 ### 1. Scope / Trigger

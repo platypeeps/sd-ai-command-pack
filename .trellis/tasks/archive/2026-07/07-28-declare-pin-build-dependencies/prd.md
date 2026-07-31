@@ -13,10 +13,10 @@ Make the build and CI toolchain reproducible and its version floors machine-read
 
 ## Acceptance Criteria
 
-- [ ] CI pins an explicit Node version and the `.mjs` fails closed below the floor.
-- [ ] `pyproject.toml` declares `requires-python`, and the CI matrix is derived from or checked against it.
-- [ ] CI installs with `--require-hashes` and a re-run resolves an identical tree.
-- [ ] `make check` passes.
+- [x] CI pins an explicit Node version and the `.mjs` fails closed below the floor.
+- [x] `pyproject.toml` declares `requires-python`, and the CI matrix is derived from or checked against it.
+- [x] CI installs with `--require-hashes` and a re-run resolves an identical tree.
+- [x] `make check` passes.
 
 ## Notes
 

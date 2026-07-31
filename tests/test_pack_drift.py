@@ -7,6 +7,8 @@ except ModuleNotFoundError as exc:
         raise
     from . import install_test_support as _support
 
+from installer import registry
+
 contextlib = _support.contextlib
 hashlib = _support.hashlib
 importlib = _support.importlib
@@ -162,6 +164,34 @@ class PackDriftTests(InstallTestCase):
         self.assertEqual(missing, [])
         self.assertGreaterEqual(compared, len(required_files))
         self.assertEqual(drifted, [])
+
+    def test_source_only_dev_adapters_match_templates(self) -> None:
+        # Source-only commands have no consumer manifest entries, so the
+        # manifest-driven twin gate above is structurally blind to them; the
+        # registry helper enumerates their dev-tree footprint instead.
+        compared = 0
+        missing: list[str] = []
+        drifted: list[str] = []
+        for command in registry.COMMAND_REGISTRY:
+            if command.name not in registry.SOURCE_ONLY_COMMAND_NAMES:
+                continue
+            for source, target in registry.source_only_adapter_twins(
+                command.name,
+                command.short,
+                command.target_families,
+                root=install.ROOT,
+            ):
+                installed = install.ROOT / target
+                if not installed.is_file():
+                    missing.append(target)
+                    continue
+                compared += 1
+                if installed.read_bytes() != (install.ROOT / source).read_bytes():
+                    drifted.append(target)
+
+        self.assertEqual(missing, [])
+        self.assertEqual(drifted, [])
+        self.assertGreaterEqual(compared, 4)
 
     def test_dogfood_drift_gate_detects_missing_existing_platform_targets(
         self,
