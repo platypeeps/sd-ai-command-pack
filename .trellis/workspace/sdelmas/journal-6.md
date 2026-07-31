@@ -839,3 +839,37 @@ Single-sourced the Python floor in pyproject.toml [project].requires-python with
 ### Next Steps
 
 - None - task complete
+
+
+## Session 272: Align status and housekeeping selector contracts to F/T
+
+**Date**: 2026-07-31
+**Task**: Align status and housekeeping selector contracts to F/T
+**Branch**: `fix/align-status-selector-contract`
+
+### Summary
+
+Closed review finding 1.1.1: removed retired F/T/R selector wording from sd-status and sd-housekeeping skills, added generic non-F/T selector rejection covering stale-snapshot input, and added an allowlist drift test over the shipped surface. Version 0.59.1. PR #299, 2 Copilot rounds (round-1 comment-clarity finding complied), CI green after one unrelated macOS housekeeping-fixture flake.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b690b9eb` | (see git log) |
+| `1ac22f79` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
