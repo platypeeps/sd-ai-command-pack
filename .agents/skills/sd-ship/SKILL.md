@@ -163,8 +163,9 @@ before Stage 1.
    `timeout-minutes × 3` attempts, ending in exactly one of `settled-green`,
    `settled-blocked`, `timed-out`, or `probe-failed`. Only `settled-green`
    continues the chain to Stage 4; any other outcome stops the chain with
-   the coordinator's report, leaving the active Trellis task unarchived for
-   a later resume. The coordinator never merges and never invokes
+   the coordinator's report, leaving the PR unmerged for a later resume —
+   the Trellis task keeps whatever state Stage 2b's finalization already
+   established. The coordinator never merges and never invokes
    housekeeping, so Stage 4 owns that side effect exactly once.
 6. Stage 4 — `sd-housekeeping`: invoke housekeeping exactly once, with zero
    finish-work flow invocations of its own — the gate's

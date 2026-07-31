@@ -457,7 +457,11 @@ class SdlcCommandsTests(InstallTestCase):
             "never merges, archives Trellis work, or runs housekeeping", ship_text
         )
         self.assertIn("`no-merge` is not an sd-ship argument", ship_text)
-        self.assertIn("leaving the active Trellis task unarchived", ship_text)
+        self.assertIn("leaving the PR unmerged for a later resume", ship_text)
+        self.assertIn(
+            "keeps whatever state Stage 2b's finalization already established",
+            ship_text,
+        )
         self.assertIn("exactly once", ship_text)
         self.assertIn(
             "one read-only, PR-scoped post-cycle review-learning pass", ship_text
@@ -498,6 +502,56 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("post-finish Obsidian KB refresh", ship_text)
         self.assertIn("housekeeping remains its only owner", ship_text)
         self.assertNotIn("sd-ai-command-pack-update-spec-kb.py", ship)
+
+    def test_ship_watch_coordinator_is_read_only_and_bounded(self) -> None:
+        ship = self._skill_text("sd-ship")
+        ship_text = " ".join(ship.split())
+        coordinator = (
+            install.ROOT
+            / "templates/.agents/skills/sd-ship/references/watch-coordinator.md"
+        ).read_text(encoding="utf-8")
+        coordinator_text = " ".join(coordinator.split())
+
+        self.assertIn("read-only 20-second poll of the eligibility probe", ship_text)
+        self.assertIn("`timeout-minutes × 3` attempts", ship_text)
+        for outcome in (
+            "`settled-green`",
+            "`settled-blocked`",
+            "`timed-out`",
+            "`probe-failed`",
+        ):
+            self.assertIn(outcome, ship_text)
+            self.assertIn(outcome, coordinator_text)
+        self.assertIn(
+            "Only `settled-green` continues the chain to Stage 4", ship_text
+        )
+
+        self.assertIn(
+            "it has no adapter, no catalog row, and no direct user invocation",
+            coordinator_text,
+        )
+        self.assertIn(
+            "never merges, never mutates local or remote state, and never hands "
+            "off to housekeeping",
+            coordinator_text,
+        )
+        self.assertIn("sd-ai-command-pack-pr-eligibility.py", coordinator_text)
+        self.assertIn("--dependency-pr-number", coordinator_text)
+        self.assertIn("Interval: 20 seconds between probes", coordinator_text)
+        self.assertIn(
+            "Stop at the ceiling regardless of state", coordinator_text
+        )
+        self.assertIn(
+            "classification keys on `checks.items`, not on reason codes",
+            coordinator_text,
+        )
+        self.assertIn(
+            "do not add a second pagination path", coordinator_text
+        )
+        self.assertIn(
+            "must not treat an absent thread list in a blocked report",
+            coordinator_text,
+        )
 
     def test_finish_work_gates_archive_and_single_push_with_one_validator(self) -> None:
         finish = self._skill_text("sd-finish-work")

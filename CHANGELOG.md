@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.57.0 - 2026-07-30
+
+- Remove the public `sd-watch-pr` command. `sd-ship` Stage 3 now runs an
+  internal read-only watch coordinator: it polls the PR-eligibility probe
+  every 20 seconds with an attempt ceiling of `timeout-minutes × 3` (default
+  30 minutes) and classifies the result as settled-green, settled-blocked,
+  timed-out, or probe-failed; only settled-green continues to Stage 4. The
+  retired command name joins the drift-scan retirement registry, and
+  `no-merge` fails as an unknown `sd-ship` argument — `until=review` is the
+  supported stop-before-merge point.
+- Move finish-work finalization into `sd-ship` Stage 2b for both
+  `until=review` and `until=merge`: the SD finish-work flow runs exactly once
+  per chain, bound to the exact head Stage 2 reviewed, with the
+  completion-vs-planning selection owned by the flow's typed deterministic
+  contract. Stage 4 runs zero finish-work flow invocations of its own — on an
+  unchanged head it passes Stage 2b's retained exact-head receipt to the
+  housekeeping gate, and on a moved head it recomputes the receipt with a
+  direct read-only final-bundle validator invocation (completion mode against
+  the current head's empty delta, planning mode re-running the captured base
+  under journal-only-recovery scope). The eligibility gate's independent
+  recomputation remains the double-run guard.
+- If Stage 2b's finalization produces a new head, the chain re-enters
+  Stage 2's check/review once for that head; a second finalization head stops
+  the chain as a defect. Re-entry repeats only Stage 2 — never the learning
+  pass, finalization, or Stage 4's merge.
+- Narrow `sd-create-pr` to publish-only in every invocation: Step 6 names the
+  next command (`sd-review scope=pr`, or `sd-ship` for the full chain)
+  instead of entering a review loop, and the composite-only Stage 1
+  orchestration context (`caller:`/`stage:`/`return-after:`) is removed —
+  `sd-ship` Stage 1 invokes the same public flow and reads the publish result
+  from its report. The trusted `sd-work-backlog` and `sd-fleet-refresh`
+  contexts are unchanged.
+
 ## 0.56.8 - 2026-07-30
 
 - Repoint `sd-ship` Stage 2 from the transitional `sd-review-pr` loop to the
