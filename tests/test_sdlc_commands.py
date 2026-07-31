@@ -466,25 +466,33 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("Stage 2b is the only review-learning owner", ship_text)
         self.assertNotIn("sd-ai-command-pack-review-learnings.py", ship)
         # Per-`until=` truth table: learning 0/1/1, finish-work 0/1/1 with
-        # distinct owners — Stage 2b for review, Stage 4 for merge.
+        # one owner — Stage 2b in both modes; Stage 4 only consumes the receipt.
         self.assertIn(
             "under both `until=review` and `until=merge`",
             ship_text,
         )
         self.assertIn("never for `until=pr`", ship_text)
         self.assertIn(
-            "run the SD finish-work flow bound to the exact head Stage 2 reviewed",
+            "run the SD finish-work flow exactly once, bound to the exact head "
+            "Stage 2 reviewed",
             ship_text,
         )
-        self.assertIn("skip Stage 2b's finish-work step", ship_text)
+        self.assertIn("zero finish-work flow invocations", ship_text)
+        self.assertIn("re-enter Stage 2's check/review loop for that head, once", ship_text)
+        self.assertIn("A second finalization head is a defect", ship_text)
+        self.assertIn(
+            "the learning pass and finalization never run again", ship_text
+        )
         self.assertIn(
             "Stage 2 itself never runs finish-work under any `until=` value",
             ship_text,
         )
-        self.assertIn("Stage 2b owns finish-work", ship_text)
+        self.assertIn("Stage 2b owns finalization in both `until=` modes", ship_text)
+        self.assertIn("post-archive-review-successor recovery", ship_text)
+        self.assertIn("journal-only-recovery scope rules", ship_text)
+        self.assertIn("that atomic recheck is the double-run guard", ship_text)
         self.assertIn(
-            "Finish-work owner and outcome: Stage 2b for `until=review`, Stage 4 for "
-            "`until=merge`",
+            "Finish-work owner and outcome: Stage 2b in both `until=` modes",
             ship_text,
         )
         self.assertIn("post-finish Obsidian KB refresh", ship_text)
@@ -815,9 +823,12 @@ class SdlcCommandsTests(InstallTestCase):
         guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")
         guide_text = " ".join(guide.split())
 
-        self.assertIn("`until=review` runs finish-work in Stage 2b", guide_text)
-        self.assertIn("skips Stage 2b's finish-work step", guide_text)
-        self.assertIn("whose gate runs finish-work against the final head", guide_text)
+        self.assertIn("Stage 2b runs finish-work in both `until=` modes", guide_text)
+        self.assertIn("zero finish-work flow invocations of its own", guide_text)
+        self.assertIn("re-enters Stage 2 once for that head", guide_text)
+        self.assertIn("second finalization head stops the chain as a defect", guide_text)
+        self.assertIn("passes Stage 2b's retained receipt through `--finish-work-receipt`", guide_text)
+        self.assertIn("direct read-only final-bundle validator invocation", guide_text)
         self.assertIn(
             "runs the internal read-only watch coordinator in Stage 3", guide_text
         )

@@ -1429,16 +1429,22 @@ Stage 2b owns the one post-cycle review-learning pass, invoking
 `sd-review-learnings` in its read-only PR-scoped completed-cycle form for both
 `until=review` and `until=merge`. No other ship stage repeats it.
 
-Lifecycle side effects have one owner. `until=review` runs finish-work in
-Stage 2b, bound to the exact reviewed head, then stops.
-The default merge-through chain skips Stage 2b's finish-work step,
+Lifecycle side effects have one owner. Stage 2b runs finish-work in both
+`until=` modes, exactly once per chain, bound to the exact head Stage 2
+reviewed; the flow's own typed contract selects completion or planning
+finalization, and planning keeps the planned task open with only journal and
+bookkeeping commits. If finalization moves the head, the chain re-enters
+Stage 2 once for that head; a second finalization head stops the chain as a
+defect. The default merge-through chain then
 runs the internal read-only watch coordinator in Stage 3, and invokes
 housekeeping exactly once in
-Stage 4, whose gate runs finish-work against the final head. A blocked or
-timed-out watch therefore leaves the active Trellis task
-available for a later resume instead of archiving it before the PR settles.
-After finish-work, housekeeping passes `--finish-work-receipt` with the exact
-retained JSON to the shell gate; eligibility recomputes and compares the proof.
+Stage 4, with zero finish-work flow invocations of its own. On an unchanged
+head, housekeeping passes Stage 2b's retained receipt through
+`--finish-work-receipt` to the shell gate; on a moved head it recomputes the
+receipt with a direct read-only final-bundle validator invocation —
+completion mode against the current head's empty delta, planning mode
+re-running the captured base under journal-only-recovery scope — and
+eligibility recomputes and compares the proof before merge.
 Housekeeping owns one normal KB refresh before merge so archived task
 documentation is current. A missing handoff leaves the PR open.
 The refresh creates an absent
