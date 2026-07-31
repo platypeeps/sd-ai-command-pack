@@ -511,10 +511,16 @@ class SurfaceGenerationTests(InstallTestCase):
         review_commands = (
             "sd-review",
             "sd-review-pr",
-            "sd-create-pr",
             "sd-ship",
             "sd-work-backlog",
             "sd-fleet-refresh",
+        )
+        # Publish-only sd-create-pr requests no reviews; its authority text
+        # must keep excluding them.
+        create_pr_description = generator.skill_description("sd-create-pr")
+        self.assertNotIn(
+            "configured GitHub review requests or re-requests",
+            create_pr_description,
         )
 
         for command in authority_commands:

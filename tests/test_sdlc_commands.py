@@ -23,16 +23,6 @@ SKILL_SECTIONS = (
 
 # name -> (short form, skill pins, adapter pins)
 COMMANDS = {
-    "sd-watch-pr": (
-        "watch-pr",
-        [
-            "timeout-minutes=",
-            "no-merge",
-            "never merges directly",
-            "sd-housekeeping",
-        ],
-        ["sd-housekeeping"],
-    ),
     "sd-fix-ci": (
         "fix-ci",
         [
@@ -466,8 +456,12 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn(
             "never merges, archives Trellis work, or runs housekeeping", ship_text
         )
-        self.assertIn("with `no-merge`", ship_text)
-        self.assertIn("leaves the active Trellis task unarchived", ship_text)
+        self.assertIn("`no-merge` is not an sd-ship argument", ship_text)
+        self.assertIn("leaving the PR unmerged for a later resume", ship_text)
+        self.assertIn(
+            "keeps whatever state Stage 2b's finalization already established",
+            ship_text,
+        )
         self.assertIn("exactly once", ship_text)
         self.assertIn(
             "one read-only, PR-scoped post-cycle review-learning pass", ship_text
@@ -476,30 +470,88 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("Stage 2b is the only review-learning owner", ship_text)
         self.assertNotIn("sd-ai-command-pack-review-learnings.py", ship)
         # Per-`until=` truth table: learning 0/1/1, finish-work 0/1/1 with
-        # distinct owners — Stage 2b for review, Stage 4 for merge.
+        # one owner — Stage 2b in both modes; Stage 4 only consumes the receipt.
         self.assertIn(
             "under both `until=review` and `until=merge`",
             ship_text,
         )
         self.assertIn("never for `until=pr`", ship_text)
         self.assertIn(
-            "run the SD finish-work flow bound to the exact head Stage 2 reviewed",
+            "run the SD finish-work flow exactly once, bound to the exact head "
+            "Stage 2 reviewed",
             ship_text,
         )
-        self.assertIn("skip Stage 2b's finish-work step", ship_text)
+        self.assertIn("zero finish-work flow invocations", ship_text)
+        self.assertIn("re-enter Stage 2's check/review loop for that head, once", ship_text)
+        self.assertIn("A second finalization head is a defect", ship_text)
+        self.assertIn(
+            "the learning pass and finalization never run again", ship_text
+        )
         self.assertIn(
             "Stage 2 itself never runs finish-work under any `until=` value",
             ship_text,
         )
-        self.assertIn("Stage 2b owns finish-work", ship_text)
+        self.assertIn("Stage 2b owns finalization in both `until=` modes", ship_text)
+        self.assertIn("post-archive-review-successor recovery", ship_text)
+        self.assertIn("journal-only-recovery scope rules", ship_text)
+        self.assertIn("that atomic recheck is the double-run guard", ship_text)
         self.assertIn(
-            "Finish-work owner and outcome: Stage 2b for `until=review`, Stage 4 for "
-            "`until=merge`",
+            "Finish-work owner and outcome: Stage 2b in both `until=` modes",
             ship_text,
         )
         self.assertIn("post-finish Obsidian KB refresh", ship_text)
         self.assertIn("housekeeping remains its only owner", ship_text)
         self.assertNotIn("sd-ai-command-pack-update-spec-kb.py", ship)
+
+    def test_ship_watch_coordinator_is_read_only_and_bounded(self) -> None:
+        ship = self._skill_text("sd-ship")
+        ship_text = " ".join(ship.split())
+        coordinator = (
+            install.ROOT
+            / "templates/.agents/skills/sd-ship/references/watch-coordinator.md"
+        ).read_text(encoding="utf-8")
+        coordinator_text = " ".join(coordinator.split())
+
+        self.assertIn("read-only 20-second poll of the eligibility probe", ship_text)
+        self.assertIn("`timeout-minutes × 3` attempts", ship_text)
+        for outcome in (
+            "`settled-green`",
+            "`settled-blocked`",
+            "`timed-out`",
+            "`probe-failed`",
+        ):
+            self.assertIn(outcome, ship_text)
+            self.assertIn(outcome, coordinator_text)
+        self.assertIn(
+            "Only `settled-green` continues the chain to Stage 4", ship_text
+        )
+
+        self.assertIn(
+            "it has no adapter, no catalog row, and no direct user invocation",
+            coordinator_text,
+        )
+        self.assertIn(
+            "never merges, never mutates local or remote state, and never hands "
+            "off to housekeeping",
+            coordinator_text,
+        )
+        self.assertIn("sd-ai-command-pack-pr-eligibility.py", coordinator_text)
+        self.assertIn("--dependency-pr-number", coordinator_text)
+        self.assertIn("Interval: 20 seconds between probes", coordinator_text)
+        self.assertIn(
+            "Stop at the ceiling regardless of state", coordinator_text
+        )
+        self.assertIn(
+            "classification keys on `checks.items`, not on reason codes",
+            coordinator_text,
+        )
+        self.assertIn(
+            "do not add a second pagination path", coordinator_text
+        )
+        self.assertIn(
+            "must not treat an absent thread list in a blocked report",
+            coordinator_text,
+        )
 
     def test_finish_work_gates_archive_and_single_push_with_one_validator(self) -> None:
         finish = self._skill_text("sd-finish-work")
@@ -566,7 +618,7 @@ class SdlcCommandsTests(InstallTestCase):
             "review-profile: integration-only",
             "falls back to the normal remote-review convergence loop",
             "existing comments and unresolved threads",
-            "sd-watch-pr` with its internal `no-merge",
+            "through the read-only watch coordinator",
         ):
             self.assertIn(pin.casefold(), fleet_text.casefold())
 
@@ -603,41 +655,56 @@ class SdlcCommandsTests(InstallTestCase):
         )[0]
         invocation_text = " ".join(invocation_modes.split())
         for pin in (
-            "caller: `sd-ship`",
-            "stage: `1`",
-            "return-after: `pr`",
+            "one behavior in every invocation",
+            "no composite-only delegation mode or internal orchestration context",
+            "`sd-ship` Stage 1 invokes this same public flow",
             "reject the request before Step 1",
             "make no update-spec",
         ):
             self.assertIn(pin, invocation_text)
+        for removed_control in ("caller: `sd-ship`", "stage: `1`", "return-after: `pr`"):
+            self.assertNotIn(removed_control, invocation_text)
 
         create_step_6 = create_pr.split("## Step 6", 1)[1].split("## Final Report", 1)[
             0
         ]
         create_step_6_text = " ".join(create_step_6.split())
-        self.assertIn("verified internal orchestration context", create_step_6_text)
-        self.assertIn("Do not resolve or invoke `sd-review-pr`", create_step_6_text)
-        self.assertIn("For every standalone invocation", create_step_6_text)
-        self.assertIn("resolve and follow the `sd-review-pr`", create_step_6_text)
+        self.assertNotIn("orchestration context", create_step_6_text)
+        self.assertIn(
+            "Do not resolve or invoke any review skill", create_step_6_text
+        )
+        self.assertIn(
+            "in every invocation, including `sd-ship` Stage 1", create_step_6_text
+        )
+        self.assertIn(
+            "names the next command instead: `sd-review scope=pr`",
+            create_step_6_text,
+        )
+        self.assertIn("A composite caller reads the Step 5", create_step_6_text)
 
         safety_text = " ".join(
             create_pr.split("## Safety Rules", 1)[1]
             .split("## Invocation Modes", 1)[0]
             .split()
         )
-        self.assertIn("In standalone mode, also resolve `sd-review-pr`", safety_text)
-        self.assertIn("the composite owns `sd-review` resolution", safety_text)
+        self.assertIn(
+            "never resolves or invokes a review skill in any mode", safety_text
+        )
+        self.assertIn(
+            "review ownership stays with `sd-review scope=pr`", safety_text
+        )
 
         ship_stage_1 = ship.split("2. Stage 1", 1)[1].split("3. Stage 2", 1)[0]
         ship_stage_1_text = " ".join(ship_stage_1.split())
         for pin in (
-            "caller: sd-ship",
-            "stage: 1",
-            "return-after: pr",
-            "without entering `sd-create-pr`'s standalone review handoff",
+            "run its public publish-only flow",
+            "reports the next command instead of running review",
+            "never resolves or invokes a review skill in any mode",
             "stop the chain here without running review",
         ):
             self.assertIn(pin, ship_stage_1_text)
+        for removed_control in ("caller: sd-ship", "stage: 1", "return-after: pr"):
+            self.assertNotIn(removed_control, ship_stage_1_text)
 
         ship_safety = ship.split("## Safety rules", 1)[1].split("## Final report", 1)[0]
         ship_safety_text = " ".join(ship_safety.split())
@@ -677,8 +744,7 @@ class SdlcCommandsTests(InstallTestCase):
 
         self.assertIn("user-provided body", normalized)
         self.assertIn("byte-for-byte", normalized)
-        self.assertIn("standalone", normalized)
-        self.assertIn("verified `sd-ship` Stage 1", normalized)
+        self.assertIn("every invocation, including `sd-ship` Stage 1", normalized)
         self.assertNotIn("gh pr edit --body ", step_5)
         self.assertNotIn("gh pr create --body ", step_5)
         self.assertNotIn("keeping GitHub's auto-filled body unchanged", step_5)
@@ -696,7 +762,7 @@ class SdlcCommandsTests(InstallTestCase):
         )
         self.assertIn("stop before staging, committing, or pushing", normalized)
         self.assertIn(
-            "Do not treat a later `sd-review-pr` run as a substitute", normalized
+            "Do not treat a later `sd-review scope=pr` run as a substitute", normalized
         )
         self.assertIn("reinstall sd-ai-command-pack before publishing", normalized)
 
@@ -816,12 +882,17 @@ class SdlcCommandsTests(InstallTestCase):
         guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")
         guide_text = " ".join(guide.split())
 
-        self.assertIn("`until=review` runs finish-work in Stage 2b", guide_text)
-        self.assertIn("skips Stage 2b's finish-work step", guide_text)
-        self.assertIn("whose gate runs finish-work against the final head", guide_text)
-        self.assertIn("watches with `no-merge`", guide_text)
+        self.assertIn("Stage 2b runs finish-work in both `until=` modes", guide_text)
+        self.assertIn("zero finish-work flow invocations of its own", guide_text)
+        self.assertIn("re-enters Stage 2 once for that head", guide_text)
+        self.assertIn("second finalization head stops the chain as a defect", guide_text)
+        self.assertIn("passes Stage 2b's retained receipt through `--finish-work-receipt`", guide_text)
+        self.assertIn("direct read-only final-bundle validator invocation", guide_text)
+        self.assertIn(
+            "runs the internal read-only watch coordinator in Stage 3", guide_text
+        )
         self.assertIn("housekeeping exactly once", guide_text)
-        self.assertIn("Stage 2 the only review owner", guide_text)
+        self.assertIn("Stage 2 is the only review owner", guide_text)
         self.assertIn("no review for `until=pr`", guide_text)
         self.assertIn("Stage 2b owns the one post-cycle review-learning pass", guide_text)
         self.assertIn(

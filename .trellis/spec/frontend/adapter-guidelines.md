@@ -1669,15 +1669,18 @@ safety rules that prevent deleting branches unless GitHub confirms the PR is
 merged and the local branch head matches that PR.
 
 The `sd-ship` shared skill must assign lifecycle side effects to one stage.
-For `until=review`, Stage 2 invokes `sd-review-pr` normally and that command
-runs finish-work. For `until=merge`, Stage 2 uses the review skill's internal
-`defer-finish-work` mode, Stage 3 uses `sd-watch-pr no-merge`, and Stage 4
-invokes `sd-housekeeping` exactly once. If Stage 3 blocks or times out, the
-active Trellis task remains unarchived for a later resume. These internal
-delegation modes are not public `sd-ship` arguments, and they must not weaken
-any delegated stage gate.
-Stage 2 also owns the one post-cycle review-learning pass inside
-`sd-review-pr`; the composite and later stages must not repeat that pass.
+Stage 2 runs the routed `sd-review scope=pr` review-only loop. Stage 2b —
+the composite's own lifecycle step — owns the one post-cycle review-learning
+pass and the deterministically selected completion or planning finalization
+under both `until=review` and `until=merge`, retaining the exact-head
+receipt; no other stage repeats either. Stage 3 runs the internal read-only
+watch coordinator (`.agents/skills/sd-ship/references/watch-coordinator.md`),
+and only its `settled-green` outcome continues the chain. Stage 4 invokes
+`sd-housekeeping` exactly once, consuming the retained or validator-recomputed
+receipt, and runs zero finish-work flow invocations. If Stage 3 settles
+blocked, times out, or fails its probe, the active Trellis task remains
+unarchived for a later resume. Internal delegation context is not a public
+`sd-ship` argument, and it must not weaken any delegated stage gate.
 
 The `sd-work-backlog` shared skill should compose existing task, PR, review,
 and housekeeping workflows instead of duplicating them. It must work exactly

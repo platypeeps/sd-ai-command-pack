@@ -258,7 +258,7 @@ Use `stage-start` and `stage-end` around these exact boundaries:
 | Consumer | `commit-push` | Refresh commit, review classification, and push |
 | Consumer | `pr-creation` | Consumer PR publication |
 | Consumer | `reviewer-wait` | `sd-review-pr` convergence |
-| Consumer | `ci-wait` | Required-check settle through `sd-watch-pr` |
+| Consumer | `ci-wait` | Required-check settle through the read-only watch coordinator |
 | Consumer | `housekeeping` | Merge gate and branch cleanup |
 | Consumer | `post-merge-audit` | Installed-version and audit confirmation |
 

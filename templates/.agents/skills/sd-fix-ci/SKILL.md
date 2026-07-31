@@ -36,13 +36,13 @@ that diagnostic; do not retry the tool bare or redirect `GH_CONFIG_DIR`.
 
 Run this command when CI is red and the user wants it triaged: the current
 branch's PR shows failing checks, or the default branch's latest run failed
-(`main` flag). Typical entry points: an `sd-watch-pr` blocker report, a
-push that went red, or a scheduled default-branch run that failed while
-nobody was looking.
+(`main` flag). Typical entry points: an `sd-ship` Stage 3 watch report that
+settled blocked on red checks, a push that went red, or a scheduled
+default-branch run that failed while nobody was looking.
 
 It complements `sd-full-check` (the local gate every fix must pass),
-`sd-watch-pr` (which points here on red checks), and `sd-review-pr` (review
-feedback, not CI state). It is not a review loop: it works CI runs and
+`sd-ship` (whose Stage 3 watch points here on red checks), and `sd-review`
+(review feedback, not CI state). It is not a review loop: it works CI runs and
 checks, never review threads. For failures that only occur locally, run
 `sd-full-check` instead.
 
@@ -114,8 +114,8 @@ variables; tuning is arguments-only.
      repeatedly to outwait an outage.
 5. Confirm outcomes. Poll the affected runs and checks with `gh` until
    they conclude, and record the resulting states for the report. After
-   a pushed PR-branch fix, `sd-watch-pr` is the tool for watching the
-   fresh checks to a settled state.
+   a pushed PR-branch fix, resuming `sd-ship` watches the fresh checks to
+   a settled state through its Stage 3 coordinator.
 6. Collect follow-ups: jobs still red, flaky tests worth a stabilization
    task, infra outages worth a status link, stale baselines needing a
    branch update.
@@ -137,8 +137,8 @@ variables; tuning is arguments-only.
   or unrelated changes into a CI fix.
 - Unknown arguments stop the run before any classification.
 - This skill never merges the PRs it creates or fixes; merge authority
-  stays with the `sd-housekeeping` gate. Watch the fixed PR with
-  `sd-watch-pr`.
+  stays with the `sd-housekeeping` gate. Watch the fixed PR by resuming
+  `sd-ship`.
 
 ## Final report
 

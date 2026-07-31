@@ -23,6 +23,8 @@ STALE_COMMAND = ".claude/commands/sd/review-local-all.md"
 STALE_CONTENT = "# sd-review-local-all\n\nRun the full-codebase review loop.\n"
 STALE_WORK_DESIGNS_SKILL = ".agents/skills/sd-work-designs/SKILL.md"
 STALE_WORK_DESIGNS_CONTENT = "# sd-work-designs\n\nUse the former design selector.\n"
+STALE_WATCH_PR_SKILL = ".agents/skills/sd-watch-pr/SKILL.md"
+STALE_WATCH_PR_CONTENT = "# sd-watch-pr\n\nRun the former PR watch loop.\n"
 
 
 class RetiredTargetsTests(InstallTestCase):
@@ -76,7 +78,8 @@ class RetiredTargetsTests(InstallTestCase):
         self.assertEqual(len(install.RETIRED_REVIEW_LOCAL_ALL_TARGETS), 25)
         self.assertEqual(len(install.SOURCE_ONLY_COMMAND_TARGETS), 25)
         self.assertEqual(len(install.RETIRED_WORK_DESIGNS_TARGETS), 25)
-        self.assertEqual(len(install.RETIRED_TARGETS), 75)
+        self.assertEqual(len(install.RETIRED_WATCH_PR_TARGETS), 25)
+        self.assertEqual(len(install.RETIRED_TARGETS), 100)
         self.assertEqual(
             len(set(install.RETIRED_TARGETS)),
             len(install.RETIRED_TARGETS),
@@ -90,6 +93,9 @@ class RetiredTargetsTests(InstallTestCase):
         for target in install.RETIRED_WORK_DESIGNS_TARGETS:
             with self.subTest(target=target):
                 self.assertIn("work-designs", target)
+        for target in install.RETIRED_WATCH_PR_TARGETS:
+            with self.subTest(target=target):
+                self.assertIn("watch-pr", target)
         # A retired path must never come back as a live manifest target.
         manifest_targets = {file.target.as_posix() for file in self._manifest_files}
         self.assertEqual(
@@ -151,6 +157,23 @@ class RetiredTargetsTests(InstallTestCase):
         self.assertIn(f"{'retired':17} {STALE_WORK_DESIGNS_SKILL}", result.stdout)
         self.assertFalse(stale.exists())
         self.assertTrue((root / ".agents/skills/sd-work-backlog/SKILL.md").is_file())
+
+    def test_refresh_deletes_vouched_watch_pr_target(self) -> None:
+        root = self.make_repo()
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        stale = self.seed_stale_target(
+            root,
+            STALE_WATCH_PR_SKILL,
+            content=STALE_WATCH_PR_CONTENT,
+        )
+
+        result = self.run_install_inproc(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(f"{'retired':17} {STALE_WATCH_PR_SKILL}", result.stdout)
+        self.assertFalse(stale.exists())
+        self.assertTrue((root / ".agents/skills/sd-ship/SKILL.md").is_file())
 
     def test_refresh_preserves_drifted_stale_target_without_force(self) -> None:
         root = self.make_repo()

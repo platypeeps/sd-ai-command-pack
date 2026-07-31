@@ -30,7 +30,7 @@ branch, pull request, task, and goal context when producing a final invocation.
 ## Pull requests and shipping
 
 - Publish or ship: `Use sd-help to compare sd-create-pr with sd-ship.`
-- Watch a PR: `Use sd-help to explain sd-watch-pr for PR #123.`
+- Ship a branch: `Use sd-help to explain sd-ship for the current branch.`
 - Finish or clean up: `Use sd-help to compare sd-finish-work with sd-housekeeping.`
 
 ## Maintenance and fleet

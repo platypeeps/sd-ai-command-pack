@@ -219,7 +219,6 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-create-pr/SKILL.md",
                 ".agents/skills/sd-work-backlog/SKILL.md",
                 ".agents/skills/sd-audit-repo/SKILL.md",
-                ".agents/skills/sd-watch-pr/SKILL.md",
                 ".agents/skills/sd-ship/SKILL.md",
                 ".agents/skills/sd-fix-ci/SKILL.md",
                 ".agents/skills/sd-update-deps/SKILL.md",
@@ -262,7 +261,6 @@ class InstallCoreTests(InstallTestCase):
                 ".gemini/commands/sd/create-pr.toml",
                 ".gemini/commands/sd/work-backlog.toml",
                 ".gemini/commands/sd/audit-repo.toml",
-                ".gemini/commands/sd/watch-pr.toml",
                 ".gemini/commands/sd/ship.toml",
                 ".gemini/commands/sd/fix-ci.toml",
                 ".gemini/commands/sd/update-deps.toml",
@@ -286,7 +284,6 @@ class InstallCoreTests(InstallTestCase):
                 ".claude/commands/sd/create-pr.md",
                 ".claude/commands/sd/work-backlog.md",
                 ".claude/commands/sd/audit-repo.md",
-                ".claude/commands/sd/watch-pr.md",
                 ".claude/commands/sd/ship.md",
                 ".claude/commands/sd/fix-ci.md",
                 ".claude/commands/sd/update-deps.md",
@@ -305,7 +302,6 @@ class InstallCoreTests(InstallTestCase):
                 ".cursor/commands/sd-create-pr.md",
                 ".cursor/commands/sd-work-backlog.md",
                 ".cursor/commands/sd-audit-repo.md",
-                ".cursor/commands/sd-watch-pr.md",
                 ".cursor/commands/sd-ship.md",
                 ".cursor/commands/sd-fix-ci.md",
                 ".cursor/commands/sd-update-deps.md",
@@ -324,7 +320,6 @@ class InstallCoreTests(InstallTestCase):
                 ".github/prompts/sd-create-pr.prompt.md",
                 ".github/prompts/sd-work-backlog.prompt.md",
                 ".github/prompts/sd-audit-repo.prompt.md",
-                ".github/prompts/sd-watch-pr.prompt.md",
                 ".github/prompts/sd-ship.prompt.md",
                 ".github/prompts/sd-fix-ci.prompt.md",
                 ".github/prompts/sd-update-deps.prompt.md",
@@ -344,7 +339,6 @@ class InstallCoreTests(InstallTestCase):
                 ".opencode/commands/sd-create-pr.md",
                 ".opencode/commands/sd-work-backlog.md",
                 ".opencode/commands/sd-audit-repo.md",
-                ".opencode/commands/sd-watch-pr.md",
                 ".opencode/commands/sd-ship.md",
                 ".opencode/commands/sd-fix-ci.md",
                 ".opencode/commands/sd-update-deps.md",
@@ -2387,7 +2381,6 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-create-pr/SKILL.md",
                 ".agents/skills/sd-work-backlog/SKILL.md",
                 ".agents/skills/sd-audit-repo/SKILL.md",
-                ".agents/skills/sd-watch-pr/SKILL.md",
                 ".agents/skills/sd-ship/SKILL.md",
                 ".agents/skills/sd-fix-ci/SKILL.md",
                 ".agents/skills/sd-update-deps/SKILL.md",
@@ -2417,7 +2410,6 @@ class InstallCoreTests(InstallTestCase):
                 ".opencode/commands/sd-create-pr.md",
                 ".opencode/commands/sd-work-backlog.md",
                 ".opencode/commands/sd-audit-repo.md",
-                ".opencode/commands/sd-watch-pr.md",
                 ".opencode/commands/sd-ship.md",
                 ".opencode/commands/sd-fix-ci.md",
                 ".opencode/commands/sd-update-deps.md",
@@ -2490,7 +2482,6 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-create-pr/SKILL.md",
                 ".agents/skills/sd-work-backlog/SKILL.md",
                 ".agents/skills/sd-audit-repo/SKILL.md",
-                ".agents/skills/sd-watch-pr/SKILL.md",
                 ".agents/skills/sd-ship/SKILL.md",
                 ".agents/skills/sd-fix-ci/SKILL.md",
                 ".agents/skills/sd-update-deps/SKILL.md",
@@ -2500,7 +2491,6 @@ class InstallCoreTests(InstallTestCase):
                 ".cursor/commands/sd-create-pr.md",
                 ".cursor/commands/sd-work-backlog.md",
                 ".cursor/commands/sd-audit-repo.md",
-                ".cursor/commands/sd-watch-pr.md",
                 ".cursor/commands/sd-ship.md",
                 ".cursor/commands/sd-fix-ci.md",
                 ".cursor/commands/sd-update-deps.md",
@@ -2525,7 +2515,6 @@ class InstallCoreTests(InstallTestCase):
             ".agents/skills/sd-create-pr/SKILL.md",
             ".agents/skills/sd-work-backlog/SKILL.md",
             ".agents/skills/sd-audit-repo/SKILL.md",
-            ".agents/skills/sd-watch-pr/SKILL.md",
             ".agents/skills/sd-ship/SKILL.md",
             ".agents/skills/sd-fix-ci/SKILL.md",
             ".agents/skills/sd-update-deps/SKILL.md",
@@ -2538,7 +2527,6 @@ class InstallCoreTests(InstallTestCase):
             ".cursor/commands/sd-create-pr.md",
             ".cursor/commands/sd-work-backlog.md",
             ".cursor/commands/sd-audit-repo.md",
-            ".cursor/commands/sd-watch-pr.md",
             ".cursor/commands/sd-ship.md",
             ".cursor/commands/sd-fix-ci.md",
             ".cursor/commands/sd-update-deps.md",
@@ -3203,17 +3191,18 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("name: sd-create-pr", create_pr)
         self.assertIn("# SD Create Pull Request", create_pr)
         self.assertIn("Resolve `sd-update-spec` by name", create_pr)
-        self.assertIn("In standalone mode, also resolve `sd-review-pr`", create_pr)
+        self.assertIn(
+            "never resolves or invokes a review\n  skill in any mode", create_pr
+        )
         self.assertRegex(
             create_pr,
-            r"the composite owns\s+`sd-review` resolution",
+            r"review ownership stays with `sd-review scope=pr`",
         )
         self.assertIn("Do not create a duplicate PR", create_pr)
         self.assertIn("Do not assume the base branch is `main`", create_pr)
         self.assertIn("SD_AI_COMMAND_PACK_CREATE_PR_BRANCH", create_pr)
         self.assertIn("SD_AI_COMMAND_PACK_CREATE_PR_BRANCH_SLUG", create_pr)
         self.assertIn("git switch -c", create_pr)
-        self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR", create_pr)
         self.assertIn("Do not run Prism, Gito", create_pr)
         self.assertIn("sd-ai-command-pack-toolchain.sh doctor", create_pr)
         self.assertIn(
@@ -3226,7 +3215,7 @@ class InstallCoreTests(InstallTestCase):
             create_pr,
             r"gh pr (?:create|edit)[^\n]* --body(?:\s|=)",
         )
-        self.assertIn("Project checks:", create_pr)
+        self.assertIn("Pre-publication review preflight result", create_pr)
 
         work_backlog = (
             install.ROOT / "templates/.agents/skills/sd-work-backlog/SKILL.md"
@@ -3407,7 +3396,6 @@ class InstallCoreTests(InstallTestCase):
                 "create-pr",
                 "work-backlog",
                 "audit-repo",
-                "watch-pr",
                 "ship",
                 "fix-ci",
                 "update-deps",

@@ -532,3 +532,49 @@ Converged the PR 288 Copilot review loop for the sd-ship Stage 2 repoint and Sta
 ### Next Steps
 
 - None - task complete
+
+
+## Session 264: Ship Phase B of simplify-review-shipping-composition (0.57.0)
+
+**Date**: 2026-07-30
+**Task**: Ship Phase B of simplify-review-shipping-composition (0.57.0)
+**Branch**: `fix/simplify-review-shipping-composition`
+
+### Summary
+
+Implemented Phase B of 07-24-simplify-review-shipping-composition: R1 narrowed sd-create-pr to publish-only, R3+R4+R5 replaced the public sd-watch-pr command with sd-ship's internal read-only watch coordinator and swept all references, R2 moved finish-work finalization into Stage 2b for both until= modes with Stage 4 consuming the retained or validator-recomputed receipt, and R6 removed the Stage 1 orchestration context. Prepared release 0.57.0 with CHANGELOG entries and aligned all test pins, including a new coordinator zero-mutation test.
+
+### Main Changes
+
+- sd-create-pr publish-only in every invocation; Step 6 names sd-review scope=pr or sd-ship instead of running review
+- sd-watch-pr removed as a public command; Stage 3 runs the internal read-only watch coordinator (20s poll, timeout-minutes x 3 ceiling, four outcomes, only settled-green continues)
+- Stage 2b runs the SD finish-work flow exactly once for both until=review and until=merge, retains the exact-head receipt, and re-enters Stage 2 once for a finalization successor head
+- Stage 4 runs zero finish-work flow invocations: retained receipt on unchanged head, direct read-only final-bundle validator recomputation on moved head; eligibility recheck stays the double-run guard
+- Stage 1 orchestration context (caller/stage/return-after) removed from sd-create-pr and sd-ship; trusted sd-work-backlog and sd-fleet-refresh contexts unchanged
+- Release prep 0.57.0: manifest bump, CHANGELOG, catalog regeneration, candidate-ledger refresh
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `13661913` | refactor(create-pr): narrow sd-create-pr to publish-or-reuse only (R1) |
+| `71d12d1f` | feat(ship): replace sd-watch-pr with internal read-only watch coordinator |
+| `190f2585` | feat(ship): move finish-work finalization into Stage 2b for both until modes |
+| `1f50f3b9` | refactor(ship): remove the Stage 1 orchestration context |
+| `0812a4b0` | chore(release): prepare 0.57.0 |
+
+### Testing
+
+- [OK] make release-prep green (Full check complete, 0 failures)
+- [OK] unittest suites test_sdlc_commands, test_generated_parity, test_install_core, test_script_lib, test_retired_targets, test_surface_generation all OK
+- [OK] shipped-surface closure: clean; 67 changed path(s), 1092 affected node(s)
+- [OK] route grep for sd-review-pr across ship/create-pr/work-backlog/fix-ci/status.py: 0 hits; fleet carve-out grep: 1 hit (parked with owner)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Open PR for Phase B, run the Copilot review loop, then validated housekeeping merge with the journal-only planning receipt (task stays open pending cutover evidence)

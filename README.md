@@ -385,13 +385,6 @@ charters; `depth=exhaustive` runs all charters. Bare charter names and
 live in the installed guide's
 [Commands](docs/SD_AI_COMMAND_PACK.md#commands) section.
 
-### sd-watch-pr
-
-Watches the current branch's open PR inside a bounded polling loop until
-checks, the requested reviewer, and review threads settle, then hands off to
-the `sd-housekeeping` gate (or reports blockers with `no-merge`). Never merges
-outside that gate.
-
 ### sd-fix-ci
 
 Triages a red CI run: classifies each failing job as real-code, flake, infra,

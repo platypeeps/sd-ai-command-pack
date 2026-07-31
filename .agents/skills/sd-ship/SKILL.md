@@ -8,8 +8,9 @@ description: Use when the user asks to take the current branch all the way from 
 Run this project-local skill for `sd-ship` and `/sd:ship` style work. It is
 the composite publish-to-merge orchestrator: one command that sequences the
 standard SD stages — the `sd-create-pr` flow, the `sd-review scope=pr` loop,
-sd-ship's own Stage 2b lifecycle step, the `sd-watch-pr` flow, and the
-`sd-housekeeping` merge gate — as a single chain with `until=` stop-points.
+sd-ship's own Stage 2b lifecycle step, its internal Stage 3 watch
+coordinator, and the `sd-housekeeping` merge gate — as a single chain with
+`until=` stop-points.
 
 sd-ship only sequences and reports. Each stage runs under its own skill's
 preconditions, gates, and safety rules, and the chain's stop-points sit
@@ -53,10 +54,11 @@ branch as a pull request, work the review loop until it is clean, watch
 checks and reviewers until the PR settles, then merge through the
 housekeeping gate.
 
-It complements `sd-create-pr`, `sd-review`, `sd-watch-pr`, and
-`sd-housekeeping` and replaces none of them: each stage command is still
-the right tool when the user wants exactly one stage, and `until=` covers
-runs that want only a prefix of the chain.
+It complements `sd-create-pr`, `sd-review`, and `sd-housekeeping` and
+replaces none of them: each stage command is still the right tool when the
+user wants exactly one stage, and `until=` covers runs that want only a
+prefix of the chain. Waiting for checks has no standalone command: Stage 3
+runs sd-ship's internal read-only watch coordinator.
 
 Preconditions — verify both before Stage 1, and stop with a report if
 either fails:
@@ -79,24 +81,23 @@ is arguments-only.
 
 - `until=pr|review|merge` — the chain's stop-point. Default `merge`.
   - `until=pr` stops after Stage 1 creates or reuses the pull request.
-  - `until=review` stops after Stage 2b finishes the Trellis work that
-    follows Stage 2's completed review loop.
+  - `until=review` stops after Stage 2b's finalization and any single
+    successor-head re-entry of Stage 2 complete.
   - `until=merge` runs the full chain through the gated merge.
-- `timeout-minutes=N` — pass-through argument, forwarded verbatim to
-  `sd-watch-pr` as Stage 3's watch budget. sd-ship neither interprets nor
-  re-defaults it.
+- `timeout-minutes=N` — Stage 3's watch budget, consumed by the internal
+  coordinator (default 30): it polls every 20 seconds with an attempt
+  ceiling of `timeout-minutes × 3`.
 
 `no-merge` is not an sd-ship argument: `until=review` already covers
-stopping before the watch-and-merge tail, so `no-merge` fails as an
-unknown argument like any other unrecognized name.
+stopping before the watch-and-merge tail, and the internal coordinator is
+report-only by construction, so there is no handoff to suppress. `no-merge`
+fails as an unknown argument like any other unrecognized name.
 
-`sd-create-pr`'s Stage 1 orchestration context and Stage 3's `no-merge` are
-internal delegation modes, not public `sd-ship` arguments. The composite
-supplies them only as described below so review and lifecycle side effects
-each have one owner. Reject user-supplied `publish-only`, `caller=`, `stage=`,
-or `return-after=` controls as unknown arguments.
+Stage 1 invokes `sd-create-pr`'s public publish-only flow; there is no
+composite-only delegation context. `publish-only`, `caller=`, `stage=`, and
+`return-after=` fail as unknown arguments like any other unrecognized name.
 
-The autonomous work-loop controller may supply one additional trusted internal
+The autonomous work-loop controller may supply one trusted internal
 context after resolving this skill directly:
 
 ```text
@@ -121,12 +122,12 @@ before Stage 1.
    instructions: its own preconditions, gates, loops, and reports remain
    authoritative, and sd-ship never re-implements, abridges, or reorders a
    stage's internals.
-2. Stage 1 — `sd-create-pr`: delegate its flow with the exact internal
-   orchestration context `caller: sd-ship`, `stage: 1`, `return-after: pr`.
-   This runs update-spec, commit, push, and PR creation/reuse, then returns the
-   publish result without entering `sd-create-pr`'s standalone review handoff.
-   Record the PR number and URL for the report. If `until=pr`, stop the chain
-   here without running review.
+2. Stage 1 — `sd-create-pr`: run its public publish-only flow. This runs
+   update-spec, commit, push, and PR creation/reuse, then reports the next
+   command instead of running review — `sd-create-pr` never resolves or
+   invokes a review skill in any mode. Read the PR number, URL, and head
+   from its report and record them for this chain's report. If `until=pr`,
+   stop the chain here without running review.
 3. Stage 2 — `sd-review scope=pr`: run its bounded review loop — typed
    deterministic `sd-check`, configured remote review, fixes, replies — until
    the loop stops clean or blocked. The successor is review-only: it never
@@ -135,35 +136,60 @@ before Stage 1.
    never to Stage 2. Invoke it identically for `until=review` and
    `until=merge`; the stop-points differ after review, not inside it.
 4. Stage 2b — the post-review lifecycle step, run by sd-ship itself once
-   Stage 2's loop completes clean. Two steps, in order:
+   Stage 2's loop completes clean. Three steps, in order:
    - Review learnings: resolve the `sd-review-learnings` skill and run its
      documented completed-cycle form — read-only and PR-scoped via
      `--github-pr <PR>` with `--dry-run` — exactly once, under both
      `until=review` and `until=merge`. This is the one read-only, PR-scoped
      post-cycle review-learning pass; no other ship stage repeats it.
-   - Finish-work: with `until=review`, run the SD finish-work flow bound to
-     the exact head Stage 2 reviewed, then stop the chain at the
-     `until=review` stop-point. With `until=merge`, skip Stage 2b's
-     finish-work step — Stage 4's gate runs finish-work exactly once against
-     the final head, and running it here too would finish the work twice
-     against two different heads.
-5. Stage 3 — `sd-watch-pr`: for the merge-through path, run its watch flow
-   with `no-merge` until the pull request settles green or blocked, forwarding
-   `timeout-minutes=` verbatim when it was passed. `no-merge` suppresses the
-   standalone watch command's automatic housekeeping handoff so Stage 4 owns
-   that side effect exactly once. If Stage 3 blocks or times out, stop the
-   chain; this leaves the active Trellis task unarchived for a later resume.
-6. Stage 4 — `sd-housekeeping`: invoke housekeeping exactly once. Its gate
-   runs finish-work, pushes any resulting task/journal commits and waits for
-   their checks, and reuses finish-work's retained schema-version-1
-   bookkeeping receipt bound to that exact final head. It then invokes the
-   housekeeping script with `--finish-work-receipt "$FINISH_WORK_RECEIPT"`;
-   eligibility independently recomputes the same validator result before
-   merge. That exact-head proof lets the executable gate own the one
-   post-finish Obsidian KB refresh for
+   - Finalization: under both `until=review` and `until=merge`, run the SD
+     finish-work flow exactly once, bound to the exact head Stage 2
+     reviewed. The completion-vs-planning selection is the flow's own typed
+     deterministic contract; sd-ship adds no task-state heuristics of its
+     own. Planning finalization keeps the planned task open and produces
+     only journal and bookkeeping commits. Retain the flow's exact-head
+     schema-version-1 bookkeeping receipt for Stage 4.
+   - Successor-head re-entry: if finalization produced a new exact head,
+     re-enter Stage 2's check/review loop for that head, once. A second
+     finalization head is a defect that stops the chain with a report, never
+     a retry; fix commits pushed by the re-entered loop are legitimate
+     convergence, not that defect. Re-entry repeats only Stage 2 — the
+     learning pass and finalization never run again — and planned task state
+     survives it. With `until=review`, stop the chain once Stage 2b plus any
+     re-entry completes.
+5. Stage 3 — internal watch coordinator: for the merge-through path, follow
+   [`references/watch-coordinator.md`](references/watch-coordinator.md): a
+   read-only 20-second poll of the eligibility probe, bounded by
+   `timeout-minutes × 3` attempts, ending in exactly one of `settled-green`,
+   `settled-blocked`, `timed-out`, or `probe-failed`. Only `settled-green`
+   continues the chain to Stage 4; any other outcome stops the chain with
+   the coordinator's report, leaving the PR unmerged for a later resume —
+   the Trellis task keeps whatever state Stage 2b's finalization already
+   established. The coordinator never merges and never invokes
+   housekeeping, so Stage 4 owns that side effect exactly once.
+6. Stage 4 — `sd-housekeeping`: invoke housekeeping exactly once, with zero
+   finish-work flow invocations of its own — the gate's
+   run-finish-work-first step is satisfied by Stage 2b in the same chain,
+   and the finish-work wrapper's do-not-rerun rule forbids a second flow
+   entry (under planning finalization a rerun would archive the
+   deliberately open task). Supply the receipt by currency:
+   - Unchanged head: pass Stage 2b's retained receipt through the documented
+     `--finish-work-receipt "$FINISH_WORK_RECEIPT"` path — the same
+     retained-receipt handoff `sd-fleet-refresh`'s merge action documents.
+   - Moved head (re-entry fixes): recompute the receipt with a direct
+     read-only final-bundle validator invocation that runs no Trellis flow.
+     Completion mode invokes the validator with base equal to the current
+     head — the empty delta activates the post-archive-review-successor
+     recovery — never the original captured base, whose enlarged delta
+     fails scope validation. Planning mode re-runs the same captured base
+     against the new head under the journal-only-recovery scope rules. An
+     invalid recomputation stops the chain with the validator's report.
+   Eligibility independently recomputes the same validator result before
+   merge; that atomic recheck is the double-run guard. The exact-head proof
+   lets the executable gate own the one post-finish Obsidian KB refresh for
    repositories that already have a KB, perform the merge, and report the
    post-merge state; housekeeping remains its only owner and `sd-ship` relays
-   that outcome. Never pass the receipt when finish-work blocked or its
+   that outcome. Never pass a receipt whose finalization blocked or whose
    commits are not pushed and green.
    Under the trusted `sd-work-backlog` context, convert that report into the
    compact nested result below and return control to the parent controller.
@@ -182,11 +208,13 @@ before Stage 1.
 - The `sd-housekeeping` gate is the only merge authority. sd-ship never
   merges directly, and neither a stop-point nor a resume changes that
   gate's criteria.
-- In an `until=merge` chain, finish-work and housekeeping side effects belong
-  only to Stage 4. Stage 2b skips its finish-work step and Stage 3 must not
-  invoke housekeeping. In an `until=review` chain, Stage 2b owns finish-work,
-  bound to the exact head Stage 2 reviewed. Stage 2 itself never runs
-  finish-work under any `until=` value.
+- Stage 2b owns finalization in both `until=` modes: it runs the SD
+  finish-work flow exactly once per chain, bound to the exact head Stage 2
+  reviewed, and retains its exact-head receipt. Stage 4 consumes rather than
+  produces — zero finish-work flow invocations — and Stage 3 must not invoke
+  housekeeping. Stage 2 itself never runs finish-work under any `until=`
+  value, and a successor-head re-entry repeats only Stage 2 — never Stage
+  2b's learning pass or finalization, and never Stage 4's merge.
 - Stage 1 always returns after publishing and never runs review. Stage 2 is the
   only review owner in an `sd-ship` chain: it does not run for `until=pr`, and
   runs the same review-only loop once each for `until=review` and
@@ -196,9 +224,9 @@ before Stage 1.
   `until=review` and `until=merge`, and never for `until=pr`, which stops
   before any review cycle exists. The publish, review, watch, and housekeeping
   stages never repeat it.
-- The Stage 1 orchestration context is supplied by this composite directly to
-  `sd-create-pr`. Never expose it through a platform adapter, environment
-  variable, or user-facing argument.
+- Stage 1 invokes `sd-create-pr`'s public publish-only flow. There is no
+  composite-only delegation context, platform-adapter control, or
+  environment variable that changes `sd-create-pr`'s behavior for sd-ship.
 - sd-ship never force-pushes; any push happens inside a stage flow, under
   that stage skill's own rules.
 - A stopped chain is a report, not an error loop: never restart the chain
@@ -251,9 +279,10 @@ bullets, one point per line, no paragraph blobs.
   stopped the run before a PR existed.
 - Stopping stage's report: the report of the stage that ended the chain
   early, or an explicit `none — the chain ran to its stop-point`.
-- Finish-work owner and outcome: Stage 2b for `until=review`, Stage 4 for
-  `until=merge`, or an explicit deferred/unrun state when an earlier stage
-  stopped the chain.
+- Finish-work owner and outcome: Stage 2b in both `until=` modes, with the
+  receipt disposition (retained or validator-recomputed) and any
+  successor-head re-entry, or an explicit deferred/unrun state when an
+  earlier stage stopped the chain.
 - Post-cycle review learnings: Stage 2b's one PR-scoped attempt and outcome, or
   `not run` with the stage/stop reason.
 - Next step: the single most useful follow-up — the next stage command

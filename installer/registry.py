@@ -813,13 +813,6 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
         interaction_decisions=("audit.followups",),
     ),
     CommandInfo(
-        "sd-watch-pr",
-        "watch-pr",
-        "pull-requests-shipping",
-        mutates_local=True,
-        mutates_remote=True,
-    ),
-    CommandInfo(
         "sd-fix-ci",
         "fix-ci",
         "verification-improvement",
@@ -1268,6 +1261,13 @@ RETIRED_COMMAND_SURFACES: tuple[RetiredCommandSurface, ...] = (
         removed_version="0.39.0",
         owner_task="07-22-streamline-backlog-design-workflows",
     ),
+    RetiredCommandSurface(
+        id="watch-pr-command",
+        identifiers=("sd-watch-pr",),
+        installed_targets=command_installed_targets("sd-watch-pr", "watch-pr"),
+        removed_version="0.57.0",
+        owner_task="07-24-simplify-review-shipping-composition",
+    ),
 )
 
 
@@ -1325,6 +1325,31 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         identifier="sd-work-designs",
         path_pattern="tests/test_retired_targets.py",
         reason="retired-target cleanup regression fixture",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-watch-pr",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-watch-pr",
+        path_pattern="CHANGELOG.md",
+        reason="bounded historical release record",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-watch-pr",
+        path_pattern="tests/test_retired_targets.py",
+        reason="retired-target cleanup regression fixture",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-watch-pr",
+        path_pattern=".trellis/audit/ledger.md",
+        reason="bounded historical audit record",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-watch-pr",
+        path_pattern=".trellis/audit/report-2026-07-28.md",
+        reason="bounded historical audit record",
     ),
 )
 
@@ -1486,6 +1511,7 @@ SHARED_SKILL_REFERENCES: dict[str, tuple[str, ...]] = {
         "references/recovery-artifacts.md",
         "references/structured-questions.md",
     ),
+    "sd-ship": ("references/watch-coordinator.md",),
     "sd-update-spec": (
         "references/architecture.md",
         "references/repository-map.md",

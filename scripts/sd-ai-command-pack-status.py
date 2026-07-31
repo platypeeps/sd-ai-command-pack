@@ -1622,7 +1622,7 @@ def collect_follow_ups(
         if isinstance(pr, dict) and pr.get("state") == "OPEN":
             add(
                 "action",
-                f"Continue PR #{pr.get('number')} through sd-watch-pr or sd-housekeeping.",
+                f"Continue PR #{pr.get('number')} through sd-ship or sd-housekeeping.",
                 "github.currentPr",
             )
 
@@ -1743,7 +1743,7 @@ def next_steps(report: Mapping[str, Any]) -> list[str]:
     if isinstance(github, dict) and isinstance(github.get("currentPr"), dict):
         pr = github["currentPr"]
         if pr.get("state") == "OPEN":
-            steps.append(f"Continue PR #{pr.get('number')} through sd-watch-pr or sd-housekeeping.")
+            steps.append(f"Continue PR #{pr.get('number')} through sd-ship or sd-housekeeping.")
     work_loop = report.get("workLoop")
     if isinstance(work_loop, dict):
         loop_status = work_loop.get("status")

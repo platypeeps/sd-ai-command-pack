@@ -65,11 +65,13 @@ MANAGED_BLOCK_REMOVAL_TARGETS = frozenset(
 RETIRED_REVIEW_LOCAL_ALL_TARGETS = retired_surface_targets("review-local-all-command")
 SOURCE_ONLY_COMMAND_TARGETS = retired_surface_targets("fleet-refresh-consumer-targets")
 RETIRED_WORK_DESIGNS_TARGETS = retired_surface_targets("work-designs-command")
+RETIRED_WATCH_PR_TARGETS = retired_surface_targets("watch-pr-command")
 
 RETIRED_TARGETS = (
     *RETIRED_REVIEW_LOCAL_ALL_TARGETS,
     *SOURCE_ONLY_COMMAND_TARGETS,
     *RETIRED_WORK_DESIGNS_TARGETS,
+    *RETIRED_WATCH_PR_TARGETS,
 )
 
 # remove_pack_file statuses renamed so the install summary reads as
@@ -407,6 +409,7 @@ __all__ = [
     "MANAGED_BLOCK_REMOVAL_TARGETS",
     "RETIRED_REVIEW_LOCAL_ALL_TARGETS",
     "RETIRED_TARGETS",
+    "RETIRED_WATCH_PR_TARGETS",
     "RETIRED_WORK_DESIGNS_TARGETS",
     "SOURCE_ONLY_COMMAND_TARGETS",
     "installed_target_candidates",
