@@ -14,7 +14,7 @@ Bring the roughly 12,600 unmeasured lines of shipped runtime — Node, shell, an
 
 ## Acceptance Criteria
 
-- [ ] `.github/scripts/bookkeeping_ci_scope.py` (477 lines) reports a coverage number.
+- [x] `.github/scripts/bookkeeping_ci_scope.py` (477 lines) reports a coverage number.
 - [ ] review-preflight.mjs reports a coverage number in CI.
 - [ ] The shell lane reports a coverage number in CI.
 - [ ] Floors are added only in a follow-up change, at or below measured values.
@@ -30,3 +30,4 @@ Bring the roughly 12,600 unmeasured lines of shipped runtime — Node, shell, an
 - **Verified 2026-07-28:** `.coveragerc:6` is the `[run] include` list and `.coveragerc:34` is a separate `[report] include` narrowed to `install.py` + `installer/*` with `fail_under = 100`. Adding `.github/scripts/*.py` to `[run]` therefore measures without touching the strict gate, so R1 is genuinely zero-risk and lands alone.
 - **Nuance the finding omits:** `.github/scripts/*.py` is not entirely unchecked — `tests.yml:346` already runs mypy over `bookkeeping_ci_scope.py` and `check-command-surface-drift.py`. They are type-checked but not coverage-measured.
 - Created from the 2026-07-28 repo audit with explicit user consent via the `audit.followups` decision. Planning complete 2026-07-28: `design.md` and `implement.md` added.
+- **Lane 1 measured baseline (2026-07-31, PR #292):** `bookkeeping_ci_scope.py` 77% — 233 statements, 51 missed, 94 branches, 21 partial — via `coverage run -m unittest tests.test_bookkeeping_ci_scope` + `combine` + `report --include=".github/scripts/*"`. No floor set (R4). `[report]` strict gate confirmed unchanged.
