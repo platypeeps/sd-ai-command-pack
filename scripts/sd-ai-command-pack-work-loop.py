@@ -434,6 +434,17 @@ def _normalized_pr_url(value: object) -> str | None:
     return urlunsplit((split.scheme.casefold(), netloc, path, "", ""))
 
 
+def _comparable_pr_url(value: str | None) -> str | None:
+    """Canonicalize a pull request URL for equivalence comparison.
+
+    Falls back to the raw text when it does not parse as a well-formed URL,
+    so malformed input still compares (and mismatches) exactly as before.
+    """
+    if value is None:
+        return None
+    return _normalized_pr_url(value) or value
+
+
 def _valid_pr_record(value: object) -> bool:
     if not isinstance(value, dict) or set(value) != {
         "prNumber",
@@ -2222,7 +2233,7 @@ def record_result(
     if (
         normalized_url is not None
         and recorded_url is not None
-        and normalized_url != recorded_url
+        and _comparable_pr_url(normalized_url) != _comparable_pr_url(recorded_url)
     ):
         raise WorkLoopError(
             "iteration result pull request URL contradicts recorded evidence"
@@ -2297,10 +2308,13 @@ def load_ship_receipt(path: Path) -> dict[str, Any]:
     def malformed(detail: str) -> WorkLoopError:
         return _ship_receipt_error("ship_receipt_malformed", detail)
 
-    for key in ("runId", "task", "prUrl", "finalBranch", "finalHead"):
+    for key in ("runId", "task", "finalBranch", "finalHead"):
         value = receipt.get(key)
         if not isinstance(value, str) or not value.strip():
             raise malformed(f"{key} must be a non-empty string")
+    pr_url = receipt.get("prUrl")
+    if not isinstance(pr_url, str) or _normalized_pr_url(pr_url) != pr_url:
+        raise malformed("prUrl must be a canonical http(s) pull request URL")
     for key, minimum in (("iteration", 1), ("prNumber", 1)):
         value = receipt.get(key)
         if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
@@ -2365,10 +2379,9 @@ def record_result_from_receipt(
             "receipt task does not match the selected task",
         )
     receipt_url = compact_text(receipt["prUrl"])
-    if (
-        current.get("prNumber") != receipt["prNumber"]
-        or current.get("prUrl") != receipt_url
-    ):
+    if current.get("prNumber") != receipt["prNumber"] or _comparable_pr_url(
+        current.get("prUrl")
+    ) != _comparable_pr_url(receipt_url):
         raise _ship_receipt_error(
             "ship_receipt_pr_mismatch",
             "receipt pull request does not match the recorded evidence",
