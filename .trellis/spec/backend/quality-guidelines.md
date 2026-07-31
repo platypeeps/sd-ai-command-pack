@@ -943,7 +943,9 @@ twin.
 
 - Loader: `load_ship_receipt(path) -> dict` — fails closed with
   `ship_receipt_unreadable`, `ship_receipt_malformed`, or
-  `ship_receipt_version_unsupported`.
+  `ship_receipt_version_unsupported`. `prUrl` must already be canonical
+  (lowercase scheme/host, no userinfo, query, or fragment, and no trailing
+  slash on the path); a non-canonical `prUrl` is `ship_receipt_malformed`.
 - Recorder: `record_result_from_receipt(state, *, task, receipt, repo,
   decisions, followups)` — fails closed with `ship_receipt_run_mismatch`,
   `ship_receipt_iteration_mismatch`, `ship_receipt_task_mismatch`,
