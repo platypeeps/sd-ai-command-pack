@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.58.0 - 2026-07-30
+
+- Give the ship-to-work-loop handoff a validated schema-v1 receipt. `sd-ship`
+  now materializes its merge result as a JSON receipt file and reports the
+  path on an `SD_SHIP_MERGE_RESULT_RECEIPT:` line; the free-text
+  `SD_SHIP_MERGE_RESULT` block stays display-only. The work-loop helper gains
+  `result --from-receipt`, which fails closed on unreadable, malformed, or
+  unsupported payloads with named `ship_receipt_*` reasons, cross-checks run,
+  iteration, task, and PR identity against the ledger, and independently
+  verifies merged claims by requiring the reported final head to be an
+  ancestor of the recorded base branch tip. The `sd-work-backlog` controller
+  records iteration results exclusively through the receipt and treats a
+  missing or rejected receipt as a blocked iteration.
+- Fix two work-loop recording defects: `record_result` now routes its phase
+  change through `transition_state` instead of mutating the phase directly,
+  and it rejects pull request numbers or URLs that contradict recorded
+  evidence, gating the `mergedPrs` counter on verified merge state.
+- Track four new per-iteration ledger fields (`mergeState`,
+  `finishWorkState`, `housekeepingState`, `anomalies`) with enum validation,
+  and upgrade persisted ledgers from older schemas in place.
+
 ## 0.57.0 - 2026-07-30
 
 - Remove the public `sd-watch-pr` command. `sd-ship` Stage 3 now runs an
