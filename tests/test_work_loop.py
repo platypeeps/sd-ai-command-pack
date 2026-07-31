@@ -7,6 +7,8 @@ except ModuleNotFoundError as exc:
         raise
     from . import install_test_support as _support
 
+import errno
+
 contextlib = _support.contextlib
 io = _support.io
 json = _support.json
@@ -904,6 +906,136 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(module.read_json(lock_path)["runId"], "winner-run")
         siblings = [p.name for p in lock_path.parent.iterdir()]
         self.assertFalse(any(".recovering-" in name for name in siblings))
+
+    def test_recover_locked_path_restores_via_excl_when_link_unavailable(
+        self,
+    ) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        _first, _state_path, lock_path = self.make_state(module, root, state_root)
+        # A competitor's live lock was moved aside; the filesystem then refuses
+        # hard links, so the no-clobber restore must fall back to O_EXCL.
+        winner = module.read_json(lock_path)
+        winner["runId"] = "winner-run"
+        module.atomic_write_json(lock_path, winner)
+        before = lock_path.read_bytes()
+
+        with mock.patch.object(
+            module.os, "link", side_effect=OSError(errno.EPERM, "no hardlinks")
+        ):
+            module._recover_locked_path(
+                lock_path,
+                expected_run_id="stale-run",
+                context="stale work-loop lock",
+            )
+
+        self.assertTrue(lock_path.exists())
+        self.assertEqual(lock_path.read_bytes(), before)
+        siblings = [p.name for p in lock_path.parent.iterdir()]
+        self.assertFalse(any(".recovering-" in name for name in siblings))
+
+    def test_recover_locked_path_yields_to_lock_recreated_during_restore(
+        self,
+    ) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        _first, _state_path, lock_path = self.make_state(module, root, state_root)
+        winner = module.read_json(lock_path)
+        winner["runId"] = "winner-run"
+        module.atomic_write_json(lock_path, winner)
+        newer = dict(winner)
+        newer["runId"] = "newer-run"
+        newer_bytes = (json.dumps(newer) + "\n").encode("utf-8")
+
+        real_link = module.os.link
+
+        def racing_link(src, dst, *args, **kwargs):
+            # A competitor recreates the canonical lock in the window between
+            # the rename-aside and the no-clobber restore.
+            Path(dst).write_bytes(newer_bytes)
+            return real_link(src, dst, *args, **kwargs)
+
+        with mock.patch.object(module.os, "link", racing_link):
+            module._recover_locked_path(
+                lock_path,
+                expected_run_id="stale-run",
+                context="stale work-loop lock",
+            )
+
+        # The recreated lock is authoritative and the aside copy is redundant.
+        self.assertEqual(lock_path.read_bytes(), newer_bytes)
+        siblings = [p.name for p in lock_path.parent.iterdir()]
+        self.assertFalse(any(".recovering-" in name for name in siblings))
+
+    def test_recover_locked_path_preserves_aside_when_restore_fails(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        _first, _state_path, lock_path = self.make_state(module, root, state_root)
+        winner = module.read_json(lock_path)
+        winner["runId"] = "winner-run"
+        module.atomic_write_json(lock_path, winner)
+        before = lock_path.read_bytes()
+
+        # Both restore primitives fail: no hardlink support and the O_EXCL
+        # fallback is denied. The aside file is the only copy of the
+        # competitor's live lock and must survive on disk.
+        with mock.patch.object(
+            module.os, "link", side_effect=OSError(errno.EPERM, "no hardlinks")
+        ), mock.patch.object(
+            module.os, "open", side_effect=OSError(errno.EACCES, "denied")
+        ):
+            with self.assertRaises(module.WorkLoopError) as caught:
+                module._recover_locked_path(
+                    lock_path,
+                    expected_run_id="stale-run",
+                    context="stale work-loop lock",
+                )
+
+        asides = [
+            path
+            for path in lock_path.parent.iterdir()
+            if ".recovering-" in path.name
+        ]
+        self.assertEqual(len(asides), 1)
+        self.assertEqual(asides[0].read_bytes(), before)
+        self.assertIn(asides[0].name, str(caught.exception))
+        # The error reports what actually blocked the fallback restore, not
+        # the earlier hardlink failure.
+        self.assertIn("denied", str(caught.exception))
+
+    def test_acquire_lock_blocked_after_link_unavailable_recovery(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        _first, _state_path, lock_path = self.make_state(module, root, state_root)
+        winner = module.read_json(lock_path)
+        winner["runId"] = "winner-run"
+        module.atomic_write_json(lock_path, winner)
+
+        with mock.patch.object(
+            module.os, "link", side_effect=OSError(errno.EPERM, "no hardlinks")
+        ):
+            module._recover_locked_path(
+                lock_path,
+                expected_run_id="stale-run",
+                context="stale work-loop lock",
+            )
+
+        # The competitor's lock is back on the canonical path, so the next
+        # arriving run must be told the lock is held, not admitted silently.
+        second = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-2",
+        )
+        with self.assertRaisesRegex(module.WorkLoopError, "active work-loop lock"):
+            module.acquire_lock(lock_path, second)
 
     def test_recover_locked_path_removes_matching_stale_lock(self) -> None:
         module = self.load_module()

@@ -40,6 +40,14 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
+      # Pin the Node major that runs review-preflight.mjs instead of taking
+      # whatever the runner image ships. Node 22 is in the image tool cache,
+      # so this resolves locally and adds no download to the fast lane.
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
       - name: Classify exact-head CI scope
         id: classify
         env:
@@ -307,7 +315,7 @@ jobs:
           cache-dependency-path: requirements-dev.txt
 
       - name: Install test dependencies
-        run: python3 -m pip install -r requirements-dev.txt
+        run: python3 -m pip install --require-hashes -r requirements-dev.txt
 
       - name: Run tests
         # Shards the suite by module across workers (coverage --parallel-mode
@@ -335,6 +343,9 @@ jobs:
       - name: Report shipped-scripts coverage
         run: bash .github/scripts/check-shipped-script-coverage.sh
 
+      - name: Check shipped-script doc coverage
+        run: bash .github/scripts/check-shipped-script-docs.sh
+
   lint:
     needs: ci-scope
     if: needs.ci-scope.outputs.mode == 'full'
@@ -354,8 +365,13 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
 
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
       - name: Install lint dependencies
-        run: python3 -m pip install -r requirements-dev.txt
+        run: python3 -m pip install --require-hashes -r requirements-dev.txt
 
       - name: Ruff (pack Python)
         run: python3 -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py
@@ -395,7 +411,7 @@ jobs:
           cache-dependency-path: requirements-security.txt
 
       - name: Install security scanners
-        run: python3 -m pip install -r requirements-security.txt
+        run: python3 -m pip install --require-hashes -r requirements-security.txt
 
       # Scans pack-owned shipped Python only. Trellis-vendored hook adapters
       # and the unshipped test suite are out of scope; the gate blocks on

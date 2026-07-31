@@ -402,7 +402,8 @@ class UpdateSpecKbTests(InstallTestCase):
             self.assertFalse(copied.is_symlink(), copied)
             self.assertEqual(
                 copied.read_bytes(),
-                (root / relative_path).read_bytes(),
+                (root / relative_path).read_bytes()
+                + b"\n<!-- SD-AI-COMMAND-PACK:KB-COPY -->\n",
             )
         for copied_path in (root / ".obsidian-kb").rglob("*"):
             relative = copied_path.relative_to(root / ".obsidian-kb")
@@ -860,7 +861,10 @@ class UpdateSpecKbTests(InstallTestCase):
         copy = root / ".obsidian-kb/Repository Overview/README.md"
         self.assertTrue(copy.is_file())
         self.assertFalse(copy.is_symlink())
-        self.assertEqual(copy.read_text(encoding="utf-8"), "# Project\n")
+        self.assertEqual(
+            copy.read_text(encoding="utf-8"),
+            "# Project\n\n<!-- SD-AI-COMMAND-PACK:KB-COPY -->\n",
+        )
 
     def test_update_spec_kb_converts_existing_symlink_tree_to_category_copies(self) -> None:
         root = self.make_repo()
@@ -911,7 +915,10 @@ class UpdateSpecKbTests(InstallTestCase):
             copy = legacy_root / relative_path
             self.assertTrue(copy.is_file(), copy)
             self.assertFalse(copy.is_symlink(), copy)
-            self.assertEqual(copy.read_text(encoding="utf-8"), content)
+            self.assertEqual(
+                copy.read_text(encoding="utf-8"),
+                content + "\n<!-- SD-AI-COMMAND-PACK:KB-COPY -->\n",
+            )
         self.assertEqual(
             [
                 path
@@ -920,6 +927,211 @@ class UpdateSpecKbTests(InstallTestCase):
             ],
             [],
         )
+
+    def test_update_spec_kb_preserves_user_file_in_category_folder(self) -> None:
+        root = self.make_repo()
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        user_note = root / ".obsidian-kb/Repository Overview/my-notes.md"
+        user_note.parent.mkdir(parents=True)
+        user_note.write_text("# My private notes\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(
+                    install.ROOT
+                    / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+                ),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertTrue(
+            user_note.is_file(),
+            "prune deleted a user file the pack never wrote",
+        )
+        self.assertEqual(
+            user_note.read_text(encoding="utf-8"), "# My private notes\n"
+        )
+
+    def test_update_spec_kb_preserves_user_file_quoting_copy_marker(self) -> None:
+        root = self.make_repo()
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        user_note = root / ".obsidian-kb/Repository Overview/marker-notes.md"
+        user_note.parent.mkdir(parents=True)
+        # A user note that quotes the marker mid-file must not be treated as
+        # pack-owned; only the trailing marker the copier writes proves that.
+        note_content = (
+            "# Notes\n"
+            "The pack marks copies with `<!-- SD-AI-COMMAND-PACK:KB-COPY -->`\n"
+            "at the end of each generated file.\n"
+        )
+        user_note.write_text(note_content, encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(
+                    install.ROOT
+                    / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+                ),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertTrue(
+            user_note.is_file(),
+            "prune deleted a user note that merely quotes the copy marker",
+        )
+        self.assertEqual(
+            user_note.read_text(encoding="utf-8"), note_content
+        )
+
+    def test_update_spec_kb_preserves_user_file_behind_root_symlink(self) -> None:
+        root = self.make_repo()
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "vault-kb"
+            user_note = target / "Architecture and Decisions/notes.md"
+            user_note.parent.mkdir(parents=True)
+            user_note.write_text("# Vault notes\n", encoding="utf-8")
+            kb_root = root / ".obsidian-kb"
+            try:
+                kb_root.symlink_to(target, target_is_directory=True)
+            except OSError as error:
+                self.skipTest(f"symlinks are not available: {error}")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(
+                        install.ROOT
+                        / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+                    ),
+                ],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertTrue(
+                user_note.is_file(),
+                "prune reached through the root symlink and deleted a vault file",
+            )
+            self.assertEqual(
+                user_note.read_text(encoding="utf-8"), "# Vault notes\n"
+            )
+
+    def test_update_spec_kb_prunes_marked_copy_after_source_removed(self) -> None:
+        root = self.make_repo()
+        script = (
+            install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+        )
+        (root / "README.md").write_text("# Project\n", encoding="utf-8")
+        (root / "AGENTS.md").write_text("# Agent Notes\n", encoding="utf-8")
+
+        first = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(first.returncode, 0, first.stdout)
+        orphan = root / ".obsidian-kb/Agent and Platform Guidance/AGENTS.md"
+        self.assertTrue(orphan.is_file(), first.stdout)
+
+        (root / "AGENTS.md").unlink()
+        second = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(second.returncode, 0, second.stdout)
+        self.assertFalse(
+            orphan.exists(),
+            "orphaned pack copy survived the refresh after its source was removed",
+        )
+        self.assertTrue(
+            (root / ".obsidian-kb/Repository Overview/README.md").is_file()
+        )
+
+    def test_update_spec_kb_adopts_pre_marker_copies_and_stays_idempotent(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        script = (
+            install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
+        )
+        source_content = "# Project\n"
+        (root / "README.md").write_text(source_content, encoding="utf-8")
+        copy = root / ".obsidian-kb/Repository Overview/README.md"
+        copy.parent.mkdir(parents=True)
+        # A pre-marker pack copy is byte-identical to its source.
+        copy.write_text(source_content, encoding="utf-8")
+
+        first = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(first.returncode, 0, first.stdout)
+        adopted = copy.read_text(encoding="utf-8")
+        self.assertTrue(adopted.startswith(source_content), adopted)
+        self.assertIn("SD-AI-COMMAND-PACK:KB-COPY", adopted)
+
+        before = {
+            path: path.stat().st_mtime_ns
+            for path in (root / ".obsidian-kb").rglob("*")
+            if path.is_file()
+        }
+        second = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(second.returncode, 0, second.stdout)
+        after = {
+            path: path.stat().st_mtime_ns
+            for path in (root / ".obsidian-kb").rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(before, after, "second refresh rewrote current copies")
+
+        check = subprocess.run(
+            [sys.executable, str(script), "--check"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(check.returncode, 0, check.stdout)
 
     def test_update_spec_kb_help_is_read_only(self) -> None:
         root = self.make_repo()
@@ -1240,7 +1452,7 @@ class UpdateSpecKbTests(InstallTestCase):
                 root
                 / ".obsidian-kb/Task Documentation/07-20-follow-up-prd.md"
             ).read_text(encoding="utf-8"),
-            "# Follow-up task\n",
+            "# Follow-up task\n\n<!-- SD-AI-COMMAND-PACK:KB-COPY -->\n",
         )
 
     def test_update_spec_kb_if_present_does_not_skip_occupied_path(self) -> None:

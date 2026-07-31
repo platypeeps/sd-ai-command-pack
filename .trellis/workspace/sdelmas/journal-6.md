@@ -614,3 +614,310 @@ Converged the PR #289 review loop (Copilot round 1 returned zero findings, all C
 ### Next Steps
 
 - Survey the backlog and start the next item
+
+
+## Session 266: Regenerate frozen source-only fleet-refresh adapters
+
+**Date**: 2026-07-31
+**Task**: Regenerate frozen source-only fleet-refresh adapters
+**Branch**: `fix/regenerate-fleet-refresh-adapters`
+
+### Summary
+
+Fixed audit finding A-044: four dev-tree fleet-refresh adapters frozen at 0.20.0 because source-only commands have no consumer manifest entries, so neither dogfood self-install nor the manifest-driven twin gate ever touched them. Added registry helper source_only_adapter_twins() as single source of truth for the dev-tree footprint, taught the command-surface generator to emit those copies, added a registry-driven parity test plus helper unit tests, and regenerated the four adapters byte-identical to their template twins. Shipped as PR #293 (clean Copilot round 1, CI green).
+
+### Main Changes
+
+- installer/registry.py: added source_only_adapter_twins() anchor-gated helper + __all__ export
+- .github/scripts/generate-command-surfaces.py: emit dev-tree adapters for source-only commands via generate_source_only_dev_adapters()
+- tests/test_pack_drift.py: registry-driven parity test for source-only dev adapters
+- tests/test_help_command.py: unit tests for source_only_adapter_twins() anchor gating and no-pattern rejection
+- Regenerated .claude/.gemini/.github/.opencode fleet-refresh adapters to current template content
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bd98b831` | fix: regenerate frozen source-only fleet-refresh adapters |
+
+### Testing
+
+- [OK] make release-prep exit 0 (installer 100% coverage gate incl new helper)
+- [OK] generator --check 94/94; twin cmp identical x4; manifest.json byte-unchanged
+- [OK] desync bite proof: parity test FAILED on desynced adapter, OK after restore
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 267: Cover sd-check read-only git guard (A-049)
+
+**Date**: 2026-07-31
+**Task**: Cover sd-check read-only git guard (A-049)
+**Branch**: `fix/test-sd-check-read-only-git-guard`
+
+### Summary
+
+Added invalid-config subtests executing the READ_ONLY_GIT_SUBCOMMANDS guard and inline-eval branches in sd-check; raised check.py coverage floor 70 to 74 with parity test sync; shipped via PR #294.
+
+### Main Changes
+
+- tests/test_check.py: perl-inline, ruby-inline, git-push, git-commit invalid-config entries
+- .github/scripts/check-shipped-script-coverage.sh + tests/test_generated_parity.py: check.py floor 70 to 74
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1c8992a9` | test: cover the sd-check read-only git guard |
+
+### Testing
+
+- [OK] make release-prep exit 0; coverage 75% measured
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 268: Preserve the aside lock when work-loop restore fails (A-092)
+
+**Date**: 2026-07-31
+**Task**: Preserve the aside lock when work-loop restore fails (A-092)
+**Branch**: `fix/work-loop-lock-restore`
+
+### Summary
+
+Fixed _recover_locked_path deleting the only copy of a live foreign lock when the no-clobber restore fails: aside file now survives with its path named in the error, and an O_CREAT|O_EXCL rewrite fallback restores the canonical path where hard links are unavailable. Four new tests; 0.57.1; shipped via PR #295.
+
+### Main Changes
+
+- scripts+templates work-loop.py: A+C restore with preserved aside and fallback-error reporting
+- tests/test_work_loop.py: four recovery tests plus errno assertion
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9ef65a56` | fix(work-loop): preserve the aside lock file when restore fails |
+| `ef0ec529` | fix(work-loop): report the fallback error when lock restore fails |
+
+### Testing
+
+- [OK] unittest -k recover -k lock: 23 OK; make release-prep exit 0 twice
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 269: Harden KB prune with trailing provenance marker (PR #296)
+
+**Date**: 2026-07-31
+**Task**: Harden KB prune with trailing provenance marker (PR #296)
+**Branch**: `fix/harden-kb-prune-marker-check`
+
+### Summary
+
+Fixed audit A-070 residual: KB prune deleted any plain file in a managed category folder without ownership proof, endangering user files behind a vault root symlink. Copies now end with a trailing SD-AI-COMMAND-PACK:KB-COPY marker; the prune requires the file to end with that marker (substring quoting is safe), currency checks compare marked payload with a size pre-check, pre-marker copies adopt on next refresh. Round-1 Copilot findings (marker-anywhere too permissive; size pre-check) complied; round 2 clean. 40/40 tests, release-prep green, version 0.57.2.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bc6611b9` | (see git log) |
+| `24c3b612` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 270: Document remaining shipped scripts and gate doc coverage (A-115, PR #297)
+
+**Date**: 2026-07-31
+**Task**: Document remaining shipped scripts and gate doc coverage (A-115, PR #297)
+**Branch**: `fix/document-remaining-shipped-scripts`
+
+### Summary
+
+Classified all 26 shipped script targets (23 public documented, pr-eligibility newly documented, review-local.py and lib allowlisted internal), narrowed CONTRIBUTING stable-surface promise, added colon-anchored doc-coverage gate to make test and CI with allowlist/guide-entry conflict detection, corrected pr-eligibility exit-code docs. Four Copilot rounds converged; round 4 approved.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6efe757c` | (see git log) |
+| `14d6c75c` | (see git log) |
+| `a595f670` | (see git log) |
+| `dfef55df` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 271: Declare and pin build dependency toolchain (A-108/109/110)
+
+**Date**: 2026-07-31
+**Task**: Declare and pin build dependency toolchain (A-108/109/110)
+**Branch**: `fix/declare-pin-build-dependencies`
+
+### Summary
+
+Single-sourced the Python floor in pyproject.toml [project].requires-python with a guard test, raised and CI-pinned the Node floor to 22.0.0, and compiled both requirements files into hash-pinned closures enforced with --require-hashes at all four install sites. PR #298: two Copilot rounds; round-1 findings (regex TOML parse brittleness, setuptools auto-discovery leak) verified and fixed.
+
+### Main Changes
+
+- pyproject.toml: added [project] with requires-python ">=3.10", [build-system], [tool.setuptools] packages = [] (auto-discovery off), [tool.uv] package = false; dropped hand-written ruff target-version (now inferred); deleted stray uv.lock.
+- tests/test_python_floor.py (new): asserts CI matrix floor leg and toolchain probe against the declared floor; parses via tomllib with pinned-tomli fallback on 3.10.
+- Review-preflight MIN_NODE_VERSION raised 16.9.0 to 22.0.0 in both script copies; tests.yml ci-scope and lint jobs pin SHA-pinned actions/setup-node at node-version 22.
+- requirements-dev.txt / requirements-security.txt recompiled as universal hash-pinned closures; --require-hashes enforced at three CI install sites plus the Makefile setup target; CONTRIBUTING.md documents the bump/recompile workflow.
+- Suites realigned: parity expects the --require-hashes install line, bookkeeping workflow-contract tests locate ci-scope steps by id, manifest bumped to 0.59.0 with CHANGELOG entry.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `05ab4f61` | fix: parse floor via tomllib/tomli and disable package auto-discovery |
+| `26ae2976` | test: align suites with pinned toolchain and refresh release evidence |
+| `bf2e5aae` | feat: install Python dependencies from hash-pinned compiled requirements |
+| `49d633af` | feat: raise review-preflight Node floor to 22 and pin CI's Node version |
+| `af8f96eb` | feat: declare requires-python and check floor copies against it |
+
+### Testing
+
+- `make release-prep` exit 0 on head `26ae2976` (full battery: coverage-gated tests, ruff, mypy, node checks, bandit, zizmor, full-check).
+- Round-1 fix head `05ab4f61`: ruff clean; tests.test_python_floor and tests.test_generated_parity OK.
+- Hash tamper check: zeroed hashes rejected ("THESE PACKAGES DO NOT MATCH THE HASHES"); --ignore-installed dry-runs resolve cleanly; recompile fixed point (run 3 = run 2).
+- PR #298 CI Result SUCCESS on `05ab4f61`; Copilot round 2 generated no new comments; sd-check attempt it8-pr298-sdcheck2 status passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 272: Align status and housekeeping selector contracts to F/T
+
+**Date**: 2026-07-31
+**Task**: Align status and housekeeping selector contracts to F/T
+**Branch**: `fix/align-status-selector-contract`
+
+### Summary
+
+Closed review finding 1.1.1: removed retired F/T/R selector wording from sd-status and sd-housekeeping skills, added generic non-F/T selector rejection covering stale-snapshot input, and added an allowlist drift test over the shipped surface. Version 0.59.1. PR #299, 2 Copilot rounds (round-1 comment-clarity finding complied), CI green after one unrelated macOS housekeeping-fixture flake.
+
+### Main Changes
+
+- `templates/.agents/skills/sd-status/SKILL.md:140`: report-local selector wording `F/T/R` → `F/T`, plus a new generic rejection sentence — any selector that is not an `F-*` or `T-*` row of the current snapshot is unresolved input with no action taken (covers both retired-prefix and stale-snapshot requests without naming the removed category).
+- `templates/.agents/skills/sd-housekeeping/SKILL.md:118`: delegated-result contract relays `F/T selectors` (was `F/T/R selectors`).
+- `tests/test_selector_contract_drift.py` (new): allowlist drift guard over shipped roots (`templates/`, `docs/`, generated adapters and root mirrors, existence-guarded) for retired `F/T/R`, `R-*`, `R-<n>`, and standalone `Roadmap` heading wording; `.trellis/` out of scope by construction. Round-1 Copilot feedback tightened the pattern comment.
+- Mirrors regenerated via `make sync`; release bookkeeping for 0.59.1 (`manifest.json`, dogfood manifest, `CHANGELOG.md`, command-catalog restamp, `docs/fleet/candidate-validation.json`).
+- No change to `scripts/sd-ai-command-pack-status.py` — `select_items` already emits only `prefix="T"`/`prefix="F"` (AC1 verified, not built).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b690b9eb` | fix: align status and housekeeping selector contracts to F/T |
+| `1ac22f79` | docs: clarify which Roadmap wording the drift guard bans |
+
+### Testing
+
+- `make release-prep` exit 0 on b690b9eb (surface generation, self-sync, payload version gate 0.59.0 → 0.59.1, fleet candidate validation, full check).
+- `tests/test_selector_contract_drift.py` 2 tests OK (correctly failed on the stale mirror before `make sync`); `tests/test_status.py` 47 tests OK; ruff clean on 1ac22f79.
+- Validation greps: retired wording 0 hits across live surfaces; `.trellis/` history paths unchanged; no diff to `scripts/sd-ai-command-pack-status.py`.
+- PR #299 CI SUCCESS on 1ac22f79 (round-1 run had one unrelated macOS housekeeping-fixture copytree flake; passed on retry). Copilot round 2: "reviewed 13 out of 13 changed files … generated no new comments"; 0 unresolved threads. sd-check `check.status` passed (attempt it9-sdcheck-1ac22f79-a).
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 273: Retire transitional review surfaces: removal version and catalog status
+
+**Date**: 2026-07-31
+**Task**: Retire transitional review surfaces: removal version and catalog status
+**Branch**: `fix/retire-transitional-review-surfaces`
+
+### Summary
+
+Pre-registered removed_version=0.62.0 for sd-full-check, sd-review-local, sd-review-pr; added transitional catalog status to sd-help; PR #300 reviewed and greenlit.
+
+### Main Changes
+
+- Pre-registered RetiredCommandSurface rows with removed_version=0.62.0 for the three remaining transitional surfaces (installer/registry.py)
+- Added transitional/superseded-by status to the sd-help command catalog so it stops recommending the legacy commands as live
+- Added CHANGELOG deprecation note per CONTRIBUTING.md policy
+- Fixed Copilot review finding: renamed shadowed variable in generate-command-surfaces.py
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a1ae4bc5` | chore(task): plan retirement schedule for transitional review surfaces |
+| `afdcd54a` | feat: name a removal version for the transitional review surfaces |
+| `7cf1cbba` | fix: address review feedback round 1 |
+
+### Testing
+
+- [OK] sd-check gate: 8/8 passed
+- [OK] make check: Full check complete, exit 0
+- [OK] Copilot remote review: 2 rounds — round 1 found variable shadowing (fixed), round 2 clean with no new comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Push finish-work commits and hand off to sd-housekeeping to merge PR #300

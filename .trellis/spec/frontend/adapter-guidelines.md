@@ -666,6 +666,9 @@ noise.
 - Retirement row: `RetiredCommandSurface(id, identifiers, installed_targets,
   removed_version, owner_task, ...)`, with targets derived by
   `command_installed_targets()` rather than copied into the remover.
+- Superseded-command row: `SUPERSEDED_COMMANDS[name] = (successor_name,
+  retirement_id)`, validated by `validate_superseded_commands()` against known
+  command names and `RETIRED_COMMAND_SURFACES` ids.
 - Historical allowance row:
   `CommandSurfaceAllowance(identifier, path_pattern, reason)`.
 - Compatibility view: `COMMAND_NAMES: tuple[tuple[str, str], ...]`, derived
@@ -753,6 +756,12 @@ noise.
 - `sd-help` reconciles the generated pack catalog with the current runtime
   skill inventory. An `sd-` prefix alone never proves pack ownership or local
   availability.
+- A `SUPERSEDED_COMMANDS` entry marks a still-shipping command transitional:
+  the catalog reports `included in installed pack — transitional until
+  <version>; use <successor>`, with `<version>` always read from the named
+  retirement row's `removed_version` rather than duplicated as a literal, and
+  `sd-help`'s `recommend` mode routes to the named successor instead of the
+  transitional command.
 - Help is strictly read-only. It may inspect skill text and metadata but never
   invokes the selected workflow or mutates repository, Trellis, or GitHub
   state in the same request.
@@ -804,6 +813,9 @@ noise.
   identifiers/configuration keys, stale or unsafe allowances, and retired
   manifest entries -> command-surface lint fails with exact file/line JSON
   findings.
+- `SUPERSEDED_COMMANDS` naming an unknown command, an unknown successor, or a
+  retirement id absent from `RETIRED_COMMAND_SURFACES` -> registry import
+  fails.
 - Archived Trellis task/workspace history, backups, caches, vendor, and build
   output -> excluded by scanner policy; live specs, docs, adapters, manifests,
   help, configuration, code, and bounded migration fixtures remain in scope.

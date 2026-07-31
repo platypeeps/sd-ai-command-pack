@@ -945,9 +945,11 @@ class GeneratedParityTests(InstallTestCase):
         pyproject = (PACK_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         gitignore = (PACK_ROOT / ".gitignore").read_text(encoding="utf-8")
 
+        # The compiled hash-pinned file continues each pin with " \" before
+        # its hash lines, so the pins are anchored at line start only.
         self.assertRegex(requirements, r"(?m)^coverage[<>=!~]")
-        self.assertRegex(requirements, r"(?m)^ruff==\d+\.\d+\.\d+$")
-        self.assertRegex(requirements, r"(?m)^mypy==\d+\.\d+\.\d+$")
+        self.assertRegex(requirements, r"(?m)^ruff==\d+\.\d+\.\d+")
+        self.assertRegex(requirements, r"(?m)^mypy==\d+\.\d+\.\d+")
         for expected in (
             "runs-on: ${{ matrix.os }}",
             "fail-fast: false",
@@ -964,10 +966,14 @@ class GeneratedParityTests(InstallTestCase):
             "LINT_RESULT",
         ):
             self.assertIn(expected, workflow)
+        # Ruff's lint target is inferred from project.requires-python (covered
+        # by tests/test_python_floor.py); mypy has no such inference, so its
+        # python_version stays written out.
         for expected in (
+            "[project]",
+            'requires-python = ">=3.10"',
             "[tool.ruff]",
             "[tool.mypy]",
-            'target-version = "py310"',
             'python_version = "3.10"',
             'select = ["E4", "E7", "E9", "F", "I", "B"]',
             '".ruff_cache"',
@@ -977,7 +983,7 @@ class GeneratedParityTests(InstallTestCase):
         self.assertIn(".ruff_cache/", gitignore)
         self.assertIn("unittest-output.log", gitignore)
         for expected in (
-            "python3 -m pip install -r requirements-dev.txt",
+            "python3 -m pip install --require-hashes -r requirements-dev.txt",
             "bash .github/scripts/run-tests.sh",
             "python3 -m coverage combine",
             'python3 -m coverage report --include="install.py,installer/*"'
@@ -1009,7 +1015,7 @@ class GeneratedParityTests(InstallTestCase):
         )
         self.assertIn("--fail-under=76", coverage_gate)
         for expected in (
-            "scripts/sd-ai-command-pack-check.py 70",
+            "scripts/sd-ai-command-pack-check.py 74",
             "scripts/sd-ai-command-pack-fleet-candidate-check.py 90",
             "scripts/sd-ai-command-pack-fleet-controller.py 76",
             "scripts/sd-ai-command-pack-fleet-finding-classify.py 85",

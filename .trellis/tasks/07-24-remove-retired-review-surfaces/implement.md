@@ -8,9 +8,30 @@ All three must be verified, not assumed:
 grep -n "removed_version" installer/registry.py
 ```
 
-**Gate:** four schedule-only rows exist for `sd-full-check`, `sd-review-local`,
-`sd-review-pr`, `sd-watch-pr` (from `07-28-retire-transitional-review-surfaces`).
-No rows, no schedule to execute against — stop (R8).
+**Gate (updated 2026-07-31 by `07-28-retire-transitional-review-surfaces`
+planning):** **three** schedule-only rows exist for `sd-full-check`,
+`sd-review-local`, `sd-review-pr` — `sd-watch-pr` already carries a **full**
+retirement row (`installer/registry.py:1315-1322`, landed 0.57.0 via
+`07-24-simplify-review-shipping-composition`) and needs no schedule-only row.
+Agreed removal version: **`0.62.0`** (R8: reuse it, never mint a second one; if
+deletion slips past 0.62.0, update the inert rows in place). No rows, no
+schedule to execute against — stop (R8).
+
+When populating `identifiers` and flipping `source_paths_must_be_absent` to
+`True`, also append the script surface the schedule-only rows deliberately
+omit — but **only the manifest target**,
+`scripts/sd-ai-command-pack-review-local.sh` (adapter-only footprint boundary
+recorded in the retire task's implement.md step 3). Its `templates/scripts/`
+twin is that target's manifest **source** and must never be listed in
+`installed_targets`: `RETIRED_TARGETS` derives from row `installed_targets`
+via `retired_surface_targets(id)` (`installer/removal.py:62-75`), removal
+candidates are consumer-repo paths, and a listed source path would mark a
+consumer-owned `templates/scripts/` file for deletion (unconditional under
+`--force`). Delete the template twin as source cleanup in the same commit —
+leaving it in place makes `make sync` regenerate the deleted script.
+`scripts/sd-ai-command-pack-review-local.py` is **not** deleted — it is the
+successor's local-lane engine (`scripts/sd-ai-command-pack-review.py:34`
+`LOCAL_SCRIPT`).
 
 ```bash
 grep -rn "sd-review-pr\|sd-watch-pr\|sd-review-local" .agents/skills/sd-ship/SKILL.md .agents/skills/sd-work-backlog/SKILL.md
@@ -83,9 +104,13 @@ Plus the PRD's stated dependencies: `07-24-implement-read-only-sd-check` and
    `source_paths_must_be_absent=True`, keep the pre-registered `removed_version`
    unchanged (R8 — do not mint a second version).
 
-9. Add the four target families to `RETIRED_TARGETS`
-   (`installer/removal.py:69-73`). This tuple is hand-maintained; without this
-   edit uninstall never reaches the old copies.
+9. Add the retirement ids to `RETIRED_TARGETS`
+   (`installer/removal.py:62-75` as of 2026-07-31): enumerate each new id via
+   `retired_surface_targets(id)` — the targets derive from the registry rows.
+   The id list is hand-maintained; without this edit uninstall never reaches
+   the old copies. Only consumer-install paths belong in the rows'
+   `installed_targets` (see the prerequisite note above — never the
+   `templates/` sources).
 
 10. **Prove uninstall on a real prior-release install**, not only fixtures:
     unchanged vouched copy deleted, locally modified copy preserved and reported,
@@ -108,7 +133,7 @@ Plus the PRD's stated dependencies: `07-24-implement-read-only-sd-check` and
     commit that lands the deletion — not before it.
 
     **The ledger is the only place these go.** `RetiredCommandSurface`
-    (`installer/registry.py:1226-1234`) has fields `id`, `identifiers`,
+    (`installer/registry.py:1271-1279` as of 2026-07-31) has fields `id`, `identifiers`,
     `installed_targets`, `removed_version`, `owner_task`,
     `source_paths_must_be_absent`, `configuration_keys` — and no finding or
     evidence field. Do not extend the dataclass to carry audit IDs: the registry

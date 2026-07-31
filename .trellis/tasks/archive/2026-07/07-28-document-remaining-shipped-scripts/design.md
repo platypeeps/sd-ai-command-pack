@@ -76,3 +76,33 @@ internal that operators actually invoke silently removes a compatibility promise
 they were relying on. `pr-eligibility.py` is the one at risk — it is already
 referenced from a shipped skill, which is weak evidence of operator use. Default
 it to public.
+
+## Classification record (implement.md step 1, recorded 2026-07-31)
+
+Enumerated 26 manifest `scripts/` targets; guide grep confirms exactly 3
+basenames absent from `docs/SD_AI_COMMAND_PACK.md` (matches PRD Evidence).
+
+**Public — documented (23).** Every target already named in the guide keeps its
+public classification; the guide entry is the compatibility contract. This
+includes the two support libraries the guide describes as libraries
+(`sd-ai-command-pack-shell-lib.sh` at `:89`, `sd_ai_command_pack_fleet_lib.py`
+at `:106`): they are documented as shared internals, and that description is
+the stable surface.
+
+**Public — undocumented (1).** `sd-ai-command-pack-pr-eligibility.py`: argparse
+CLI ("Evaluate exact-head pull-request eligibility without mutation", flags
+`--input/--repo/--branch/--dependency-pr-number/--remote/--default-branch/
+--finish-work-receipt/--github-repository/--format`), referenced from
+`sd-housekeeping/SKILL.md:74` as an operator-visible step. Gets a guide entry.
+
+**Internal — allowlisted (2).**
+- `sd-ai-command-pack-review-local.py`: pipeline stage invoked only by
+  `sd-ai-command-pack-review.py` (`LOCAL_SCRIPT`); not an operator entry
+  point. Its manifest path stays stable; its CLI does not become public
+  surface.
+- `sd_ai_command_pack_lib.py`: shared library imported by 31 files; its
+  `__main__` dispatches the private cache-env helper. Documenting it as an
+  operator tool would misrepresent it.
+
+Consequence: CONTRIBUTING gains the internal category (R2); the doc-coverage
+gate's allowlist is seeded with exactly the two internal targets.

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.58.0 - 2026-07-30
+## 0.61.0 - 2026-07-31
 
 - Give the ship-to-work-loop handoff a validated schema-v1 receipt. `sd-ship`
   now materializes its merge result as a JSON receipt file and reports the
@@ -20,6 +20,89 @@
 - Track four new per-iteration ledger fields (`mergeState`,
   `finishWorkState`, `housekeepingState`, `anomalies`) with enum validation,
   and upgrade persisted ledgers from older schemas in place.
+
+## 0.60.0 - 2026-07-31
+
+- Announce a removal version for the transitional review surfaces (audit
+  A-045). `sd-full-check`, `sd-review-local`, and `sd-review-pr` each gain a
+  `RetiredCommandSurface` registry row with `removed_version = 0.62.0`, and
+  the command catalog now reports their status as `included in installed
+  pack — transitional until 0.62.0; use <successor>` instead of a plain
+  `included in installed pack` line indistinguishable from a live command.
+  `sd-help`'s `recommend` mode now routes to the named successor (`sd-check`
+  for `sd-full-check`; `sd-review` for `sd-review-local` and `sd-review-pr`)
+  instead of the transitional command. **Consumer-facing:** none of the three
+  commands change behavior or stop working — this only publishes their end
+  date and stops the help surface from steering new usage toward them.
+  Deletion is tracked separately in `07-24-remove-retired-review-surfaces`,
+  targeting the same 0.62.0.
+
+## 0.59.1 - 2026-07-31
+
+- Align the status and housekeeping selector contracts (review finding 1.1.1).
+  `sd-status` and `sd-housekeeping` now describe only the shipped `F-*`
+  follow-up and `T-*` task selectors — the retired `F/T/R` wording is gone —
+  and a selector that does not resolve to an `F-*` or `T-*` row of the current
+  snapshot is reported as unresolved input with no action taken. A new drift
+  test scans the shipped surface (templates, docs, generated adapters and
+  mirrors) so the retired selector contract cannot reappear; `.trellis/` task
+  history stays out of scope by construction.
+
+## 0.59.0 - 2026-07-31
+
+- Declare and pin the build dependency toolchain (audit A-108/A-109/A-110).
+  `pyproject.toml` gains a `[project]` table with `requires-python = ">=3.10"`
+  as the single machine-readable Python floor — ruff now infers its lint
+  target from it, and a new test checks the hand-written copies (CI matrix
+  floor leg, toolchain interpreter probe) against it. **Consumer-facing:**
+  `sd-ai-command-pack-review-preflight.mjs` now requires Node 22 or newer
+  (was 16.9, EOL since 2023); repos that install the pack need a supported
+  Node LTS to run the preflight. CI pins `actions/setup-node` to Node 22 in
+  the jobs that execute or parse the script instead of taking whatever the
+  runner image ships, and installs Python dependencies from hash-pinned
+  compiled requirements with `--require-hashes`, so transitive dependencies
+  stop re-resolving unreviewed on every run.
+
+## 0.58.0 - 2026-07-31
+
+- Close the shipped-script documentation gap (audit A-115). Every manifest
+  `scripts/` target now carries an explicit public/internal classification:
+  `sd-ai-command-pack-pr-eligibility.py` gains an installed-guide entry as the
+  read-only exact-head PR eligibility evaluator, while
+  `sd-ai-command-pack-review-local.py` and `sd_ai_command_pack_lib.py` are
+  declared internal. The guide now distinguishes `review-local.sh` (documented
+  operator runner) from `review-local.py` (internal review stage) — the two
+  never call each other. CONTRIBUTING narrows the stable-surface promise to
+  guide-documented script CLIs and names the internal category, and a new
+  doc-coverage gate (`.github/scripts/check-shipped-script-docs.sh`, wired
+  into `make test` and CI) fails when a shipped script is neither documented
+  nor deliberately allowlisted — or is both allowlisted and given an explicit
+  guide entry bullet — so the gap cannot reopen silently and a
+  reclassification must update both places. The eligibility evaluator's guide
+  entry documents its real exit mapping (`0` eligible, `1` blocked, `2`
+  anything else).
+
+## 0.57.2 - 2026-07-31
+
+- Require a trailing `<!-- SD-AI-COMMAND-PACK:KB-COPY -->` provenance marker
+  before the Obsidian KB prune deletes a plain file in a managed category
+  folder, so user files are never removed just for sitting in a folder that
+  shares a category title — or for quoting the marker text mid-file — including
+  through a KB root symlink into a personal vault. Generated
+  copies now end with that trailing marker instead of being byte-identical to
+  their sources, and both the refresh currency check and `--check` compare
+  against the marked payload. Copies written by older versions adopt the marker
+  on the next refresh while their source exists; copies orphaned before the
+  upgrade are no longer pruned automatically and need manual cleanup (audit
+  A-070 residual).
+
+## 0.57.1 - 2026-07-31
+
+- Preserve the moved-aside foreign lock when work-loop lock recovery cannot
+  restore it, and name the aside path in the raised error so an operator can
+  move it back. Restore now falls back to an `O_CREAT|O_EXCL` rewrite on
+  filesystems without hard-link support, so the canonical lock path is
+  restored instead of silently voiding mutual exclusion (audit A-092).
 
 ## 0.57.0 - 2026-07-30
 

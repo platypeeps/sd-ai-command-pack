@@ -13,9 +13,9 @@ Make the only runnable fleet-refresh surface carry the current checkout-trust ga
 
 ## Acceptance Criteria
 
-- [ ] `.claude/commands/sd/fleet-refresh.md` and its template twin agree on the checkout-trust block.
-- [ ] Hand-editing one of the four adapters out of sync fails `make check`.
-- [ ] `make check` passes.
+- [x] `.claude/commands/sd/fleet-refresh.md` and its template twin agree on the checkout-trust block.
+- [x] Hand-editing one of the four adapters out of sync fails `make check`.
+- [x] `make check` passes.
 
 ## Notes
 

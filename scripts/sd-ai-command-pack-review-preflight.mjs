@@ -17,7 +17,7 @@ let documentationGuardFilesCache;
 const readTextCache = new Map();
 
 const URI_SCHEME_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:/;
-const MIN_NODE_VERSION = { major: 16, minor: 9, label: '16.9.0' };
+const MIN_NODE_VERSION = { major: 22, minor: 0, label: '22.0.0' };
 // Git output ceiling for spawnSync calls that read diffs; Node's 1 MiB
 // default truncates large diffs and surfaces as a spawn error.
 const GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
