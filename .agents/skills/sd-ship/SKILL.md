@@ -293,7 +293,8 @@ and the remaining fields are strings. Fill values only from the authoritative
 stage reports, never from memory. `finalBranch` and `finalHead` may be
 `unknown` only when `mergeState` is not `merged`. When the free-text
 `review-rounds` or `ci-retries` value is `unavailable`, write `0` and add an
-anomaly entry saying so. When a required numeric value has no authoritative source, do not
+anomaly entry saying so. When any other required value — numeric or string —
+has no authoritative source and no documented placeholder above, do not
 write a receipt; report the missing value as an anomaly and treat the nested
 result as blocked.
 

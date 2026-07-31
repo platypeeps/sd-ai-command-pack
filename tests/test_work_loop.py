@@ -1522,13 +1522,13 @@ class WorkLoopTests(InstallTestCase):
             state["iteration"] = index + 1
             state["current"]["task"] = f"task-{index}"
             state["current"]["prNumber"] = 100 + index
-            state["current"]["prUrl"] = f"https://example.test/pull/{index}"
+            state["current"]["prUrl"] = f"https://example.test/pull/{100 + index}"
             module.record_result(
                 state,
                 task=f"task-{index}",
                 outcome="completed",
                 pr_number=100 + index,
-                pr_url=f"https://example.test/pull/{index}",
+                pr_url=f"https://example.test/pull/{100 + index}",
                 review_rounds=2,
                 ci_retries=1,
                 decisions=[f"decision {index}"],

@@ -7,8 +7,8 @@
   path on an `SD_SHIP_MERGE_RESULT_RECEIPT:` line; the free-text
   `SD_SHIP_MERGE_RESULT` block stays display-only. The work-loop helper gains
   `result --from-receipt`, which fails closed on unreadable, malformed, or
-  unsupported payloads with named `ship_receipt_*` reasons, cross-checks run,
-  iteration, task, and PR identity against the ledger, and independently
+  unsupported payloads with named `ship_receipt_*` reasons, cross-checks the
+  run, iteration, task, and PR identity against the ledger, and independently
   verifies merged claims by requiring the reported final head to be an
   ancestor of the recorded base branch tip. The `sd-work-backlog` controller
   records iteration results exclusively through the receipt and treats a
