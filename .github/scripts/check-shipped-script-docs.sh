@@ -31,6 +31,7 @@ MANIFEST_PATH="$MANIFEST" GUIDE_PATH="$GUIDE" ALLOWLIST="$INTERNAL_ALLOWLIST" \
   "$PYTHON_BIN" - <<'PY'
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -39,8 +40,11 @@ guide_path = Path(os.environ["GUIDE_PATH"])
 allowlist = {line.strip() for line in os.environ["ALLOWLIST"].splitlines() if line.strip()}
 
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+# Installed target paths (scripts/...), not template source paths: the guide
+# documents what an installation contains, and mismatch reports should name
+# the paths a reader can actually look up.
 targets = sorted({
-    entry["source"]
+    entry["target"]
     for entry in manifest["files"]
     if entry.get("kind") == "script"
 })
@@ -50,6 +54,15 @@ if not targets:
 
 guide = guide_path.read_text(encoding="utf-8")
 
+
+def has_guide_entry(target: str) -> bool:
+    # Only an explicit inventory entry counts: a list bullet opening with the
+    # backticked installed path. A passing mention elsewhere in the guide (for
+    # example the review-local name-collision note) must not satisfy the gate,
+    # or the public/internal classification would erode silently.
+    return re.search(rf"(?m)^- `{re.escape(target)}`", guide) is not None
+
+
 stale_allowlist = sorted(
     name for name in allowlist
     if not any(target.rsplit("/", 1)[-1] == name for target in targets)
@@ -57,7 +70,7 @@ stale_allowlist = sorted(
 missing = sorted(
     target for target in targets
     if target.rsplit("/", 1)[-1] not in allowlist
-    and target.rsplit("/", 1)[-1] not in guide
+    and not has_guide_entry(target)
 )
 
 if stale_allowlist:
@@ -65,7 +78,7 @@ if stale_allowlist:
     for name in stale_allowlist:
         print(f"  {name}", file=sys.stderr)
 if missing:
-    print(f"error: shipped scripts named neither in {guide_path} nor on the internal allowlist:", file=sys.stderr)
+    print(f"error: shipped scripts with neither a guide entry bullet in {guide_path} nor an internal allowlist entry:", file=sys.stderr)
     for target in missing:
         print(f"  {target}", file=sys.stderr)
 if stale_allowlist or missing:

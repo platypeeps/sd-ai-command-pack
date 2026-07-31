@@ -139,6 +139,12 @@ Quick links:
   only category-specific actions backed by recurring observations.
 - `scripts/sd-ai-command-pack-install-audit.py`: structural post-install audit
   for missing installed targets and unlisted pack-like files.
+- `scripts/sd-ai-command-pack-recovery-artifacts.py`: receipt-driven lifecycle
+  manager for pack-created Git recovery stashes and worktrees; described in
+  detail in the recovery-artifacts section below.
+- `scripts/sd-ai-command-pack-surface-check.py`: schema-versioned shipped-surface
+  validator the pack source repository invokes from its tracked check
+  configuration; described in detail in the surface-check section below.
 - `scripts/sd-ai-command-pack-pr-body-scope.py`: configurable PR-body scope
   preflight for broad behavior-changing diffs.
 - `scripts/sd-ai-command-pack-update-spec-kb.py`: Obsidian KB copy-folder
