@@ -2245,9 +2245,11 @@ def record_result(
             "completed iteration with a pull request requires recorded"
             " pull request evidence"
         )
-    transition_state(
-        state, "complete", updates={"task": compact_text(task, limit=160)}
-    )
+    # Let transition_state apply its own default-limit compaction, the same
+    # normalization the stable current.task field was originally stored
+    # with; a tighter limit here truncates a long task into a false
+    # "cannot replace stable current-state field" contradiction.
+    transition_state(state, "complete", updates={"task": task})
     state["counters"][counter_key] += 1
     state["counters"]["reviewRounds"] += review_rounds
     state["counters"]["ciRetries"] += ci_retries
@@ -2367,8 +2369,10 @@ def record_result_from_receipt(
             f"receipt covers iteration {receipt['iteration']},"
             f" ledger is at {state['iteration']}",
         )
-    receipt_task = compact_text(receipt["task"], limit=160)
-    if receipt_task != compact_text(task, limit=160):
+    # Default-limit compaction here too, matching the stable current.task
+    # normalization below so an equal-content long task never false-mismatches.
+    receipt_task = compact_text(receipt["task"])
+    if receipt_task != compact_text(task):
         raise _ship_receipt_error(
             "ship_receipt_task_mismatch",
             "receipt task does not match the task being recorded",

@@ -1705,6 +1705,34 @@ class WorkLoopTests(InstallTestCase):
         )
         self.assertEqual(state["iterations"][-1]["prUrl"], long_url)
 
+    def test_result_accepts_long_task_matching_recorded_evidence(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        long_task = "task " + "a" * 230
+        self.assertGreater(len(long_task), 160)
+        state["phase"] = "followups"
+        state["current"]["task"] = module.compact_text(long_task)
+        module.record_result(
+            state,
+            task=long_task,
+            outcome="completed",
+            pr_number=None,
+            pr_url=None,
+            review_rounds=1,
+            ci_retries=0,
+            decisions=[],
+            followups=[],
+        )
+        self.assertEqual(state["phase"], "complete")
+
     def test_result_accepts_case_and_slash_equivalent_pr_url(self) -> None:
         module = self.load_module()
         root = self.make_repo()
@@ -3518,6 +3546,33 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(
             state["iterations"][-1]["prUrl"], "https://example.test/pull/7"
         )
+
+    def test_receipt_result_accepts_long_task_matching_recorded_evidence(
+        self,
+    ) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state, merged_head = self.make_receipt_followups_state(module, root)
+        long_task = "task " + "a" * 230
+        self.assertGreater(len(long_task), 160)
+        state["current"]["task"] = module.compact_text(long_task)
+        receipt_path = root.parent / "receipt.json"
+        receipt_path.write_text(
+            json.dumps(
+                self.make_ship_receipt(state, finalHead=merged_head, task=long_task)
+            ),
+            encoding="utf-8",
+        )
+        receipt = module.load_ship_receipt(receipt_path)
+        module.record_result_from_receipt(
+            state,
+            task=long_task,
+            receipt=receipt,
+            repo=root,
+            decisions=["shipped"],
+            followups=[],
+        )
+        self.assertEqual(state["phase"], "complete")
 
     def test_receipt_result_records_blocked_merge_without_merged_pr(self) -> None:
         module = self.load_module()
