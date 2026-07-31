@@ -81,6 +81,7 @@ from installer.registry import (  # noqa: E402
     SKILL_FANOUT_PLATFORMS,
     SOURCE_ONLY_COMMAND_NAMES,
     CommandInfo,
+    source_only_adapter_twins,
 )
 
 # The neutral-body preamble line that platform-agnostic adapters keep but the
@@ -898,9 +899,31 @@ def generate_manifest_text() -> str:
     return json.dumps(output, indent=2) + "\n"
 
 
+def generate_source_only_dev_adapters(outputs: dict[str, str]) -> dict[str, str]:
+    # Source-only commands have no consumer manifest entries, so the dogfood
+    # self-install never refreshes their dev-tree adapters; emit those copies
+    # here or they freeze at whatever release last hand-touched them.
+    dev: dict[str, str] = {}
+    for command in COMMAND_REGISTRY:
+        if command.name not in SOURCE_ONLY_COMMAND_NAMES:
+            continue
+        for source, target in source_only_adapter_twins(
+            command.name, command.short, command.target_families, root=PACK_ROOT
+        ):
+            content = outputs.get(source)
+            if content is None:
+                raise GenerationError(
+                    f"source-only dev adapter {target} has no generated "
+                    f"template source {source}"
+                )
+            dev[target] = content
+    return dev
+
+
 def generate_surfaces() -> dict[str, str]:
     outputs = generate_neutral_adapters()
     outputs.update(generate_adapters())
+    outputs.update(generate_source_only_dev_adapters(outputs))
     outputs[HELP_CATALOG_PATH] = generate_command_catalog()
     outputs[STRUCTURED_QUESTION_REFERENCE_PATH] = (
         generate_structured_question_reference()

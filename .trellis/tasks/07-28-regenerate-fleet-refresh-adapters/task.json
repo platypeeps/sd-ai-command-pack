@@ -3,7 +3,7 @@
   "name": "regenerate-fleet-refresh-adapters",
   "title": "Regenerate the frozen source-only fleet-refresh adapters",
   "description": "Regenerate the four fleet-refresh adapter files the generator currently skips, so they stop drifting from their template source.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
