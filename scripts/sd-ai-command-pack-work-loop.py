@@ -70,10 +70,23 @@ CURRENT_FIELD_ORDER = (
     "prNumber",
     "prUrl",
     "lastShippedSha",
+    "mergeState",
+    "finishWorkState",
+    "housekeepingState",
+    "anomalies",
 )
 CURRENT_FIELDS = frozenset(CURRENT_FIELD_ORDER)
+# The four ship-outcome fields are transient per-iteration facts: they are
+# written by the validated receipt path, survive same-iteration transitions
+# like every non-stable field, and reset with the rest of `current` at the
+# complete -> inventory boundary. None belong in STABLE_CURRENT_FIELDS (a
+# re-ship after a blocked attempt must be able to replace them) or in
+# TRANSITION_CURRENT_FIELDS (they are repo/PR facts, owned by evidence).
 STABLE_CURRENT_FIELDS = ("task", "baseBranch")
 TRANSITION_CURRENT_FIELDS = frozenset(STABLE_CURRENT_FIELDS)
+MERGE_STATES = ("merged", "open", "closed", "blocked")
+FINISH_WORK_STATES = ("completed", "blocked", "not-run")
+HOUSEKEEPING_STATES = ("healthy", "attention", "blocked")
 ACTIVE_EVIDENCE_PHASES = frozenset(
     {"selected", "planning", "implementing", "validating", "shipping", "followups"}
 )
@@ -919,15 +932,7 @@ def new_state(
         "updatedAt": now,
         "heartbeatAt": now,
         "contextHealth": {"level": "green", "epoch": 0, "reasons": []},
-        "current": {
-            "task": None,
-            "branch": None,
-            "head": None,
-            "baseBranch": None,
-            "prNumber": None,
-            "prUrl": None,
-            "lastShippedSha": None,
-        },
+        "current": {key: None for key in CURRENT_FIELD_ORDER},
         "counters": {
             "completed": 0,
             "parked": 0,
@@ -1224,6 +1229,15 @@ def acquire_terminal_lock(
         return operation_id
 
 
+def upgrade_state(state: dict[str, Any]) -> dict[str, Any]:
+    """Fill current-state fields added after a persisted ledger was written."""
+    current = state.get("current")
+    if isinstance(current, dict):
+        for key in CURRENT_FIELD_ORDER:
+            current.setdefault(key, None)
+    return state
+
+
 def load_state_for_repo(
     repo: Path,
     *,
@@ -1233,7 +1247,7 @@ def load_state_for_repo(
     identity = repository_identity(repo)
     root = state_root or resolve_state_root(environ=environ)
     state_path, lock_path = state_paths(identity, root)
-    state = read_json(state_path)
+    state = upgrade_state(read_json(state_path))
     validate_state(state)
     if state["repository"]["digest"] != identity["digest"]:
         raise WorkLoopError(
@@ -1536,7 +1550,7 @@ def reconcile_terminal_state(
         operation_lock_path, state, recover_stale=recover_stale
     )
     try:
-        state = read_json(state_path)
+        state = upgrade_state(read_json(state_path))
         validate_state(state)
         if state["repository"]["digest"] != identity["digest"]:
             raise WorkLoopError(
@@ -1772,6 +1786,15 @@ def validated_evidence(
         observed = candidate.get(key)
         if remembered is not None and observed != remembered:
             raise WorkLoopError(f"cannot replace stable current-state field: {key}")
+
+    for key, allowed in (
+        ("mergeState", MERGE_STATES),
+        ("finishWorkState", FINISH_WORK_STATES),
+        ("housekeepingState", HOUSEKEEPING_STATES),
+    ):
+        value = candidate.get(key)
+        if value is not None and value not in allowed:
+            raise WorkLoopError(f"{key} evidence must be one of: {', '.join(allowed)}")
 
     remembered_pr = current.get("prNumber")
     if remembered_pr is not None and candidate.get("prNumber") != remembered_pr:
@@ -2284,7 +2307,7 @@ def status_snapshot(
                     terminal_lock, terminal_lock_error
                 ),
             }
-        state = read_json(state_path)
+        state = upgrade_state(read_json(state_path))
         validate_state(state)
         if state["repository"]["digest"] != identity["digest"]:
             raise WorkLoopError("repository identity does not match loop state")
@@ -2582,7 +2605,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.bare_focus is not None or args.focus or args.focus_only
             )
             if state_path.is_file():
-                state = read_json(state_path)
+                state = upgrade_state(read_json(state_path))
                 validate_state(state)
                 if state["repository"]["digest"] != identity["digest"]:
                     raise WorkLoopError(
