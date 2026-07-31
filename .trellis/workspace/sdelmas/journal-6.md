@@ -880,3 +880,44 @@ Closed review finding 1.1.1: removed retired F/T/R selector wording from sd-stat
 ### Next Steps
 
 - None - task complete
+
+
+## Session 273: Retire transitional review surfaces: removal version and catalog status
+
+**Date**: 2026-07-31
+**Task**: Retire transitional review surfaces: removal version and catalog status
+**Branch**: `fix/retire-transitional-review-surfaces`
+
+### Summary
+
+Pre-registered removed_version=0.62.0 for sd-full-check, sd-review-local, sd-review-pr; added transitional catalog status to sd-help; PR #300 reviewed and greenlit.
+
+### Main Changes
+
+- Pre-registered RetiredCommandSurface rows with removed_version=0.62.0 for the three remaining transitional surfaces (installer/registry.py)
+- Added transitional/superseded-by status to the sd-help command catalog so it stops recommending the legacy commands as live
+- Added CHANGELOG deprecation note per CONTRIBUTING.md policy
+- Fixed Copilot review finding: renamed shadowed variable in generate-command-surfaces.py
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a1ae4bc5` | chore(task): plan retirement schedule for transitional review surfaces |
+| `afdcd54a` | feat: name a removal version for the transitional review surfaces |
+| `7cf1cbba` | fix: address review feedback round 1 |
+
+### Testing
+
+- [OK] sd-check gate: 8/8 passed
+- [OK] make check: Full check complete, exit 0
+- [OK] Copilot remote review: 2 rounds — round 1 found variable shadowing (fixed), round 2 clean with no new comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Push finish-work commits and hand off to sd-housekeeping to merge PR #300
