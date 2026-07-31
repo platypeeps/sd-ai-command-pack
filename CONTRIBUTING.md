@@ -49,11 +49,12 @@ The shipped-script coverage lane has two thresholds: the aggregate
 floor for each shipped Python helper. Set per-file floors at or just below the
 current measured coverage and ratchet them upward when focused tests improve a
 script; do not let a single helper regress behind a healthy aggregate total.
-Shell scripts, GitHub workflow YAML, and `.github/scripts/*` automation are
-coverage.py-exempt by design. Cover behavior with focused subprocess tests,
-syntax checks, ShellCheck, workflow assertions, and the live CI gate instead
-of introducing a second shell-coverage tool unless a concrete defect shows the
-current controls are insufficient.
+`.github/scripts/*.py` automation is coverage-measured (no floor yet; floors
+arrive in a follow-up at or below measured values). Shell scripts and GitHub
+workflow YAML remain coverage.py-exempt for now. Cover shell behavior with
+focused subprocess tests, syntax checks, ShellCheck, workflow assertions, and
+the live CI gate instead of introducing a second shell-coverage tool unless a
+concrete defect shows the current controls are insufficient.
 
 Ruff covers pack-owned Python in `install.py`, `installer/`, `scripts/`,
 `templates/scripts/`, and `tests/`. Trellis-owned platform runtime is excluded;
