@@ -78,21 +78,21 @@ Added 2026-07-28 — the interim, before retirement lands:
 
 ## Acceptance Criteria
 
-- [ ] `sd-create-pr` fixtures prove publication stops after the PR exists and no
+- [x] `sd-create-pr` fixtures prove publication stops after the PR exists and no
   provider, polling, finish-work, or merge call occurs.
-- [ ] `sd-ship` fixtures prove the complete ordered lifecycle, including
+- [x] `sd-ship` fixtures prove the complete ordered lifecycle, including
   completion/planning finalization, successor-head re-entry, preserved planned
   task state, and a single housekeeping merge owner.
-- [ ] No public catalog, registry, adapter, or help output exposes `sd-watch-pr`.
-- [ ] Internal waiting tests prove bounded polling, complete thread pagination,
+- [x] No public catalog, registry, adapter, or help output exposes `sd-watch-pr`.
+- [x] Internal waiting tests prove bounded polling, complete thread pagination,
   timeout reporting, and zero mutation.
-- [ ] There is no private create/review/watch composition mode or compatibility
+- [x] There is no private create/review/watch composition mode or compatibility
   argument that preserves the prior overlap.
-- [ ] Focused publishing/shipping tests, generated parity, install audit,
+- [x] Focused publishing/shipping tests, generated parity, install audit,
   `make sync`, and `make check` pass.
-- [ ] No shipped skill, adapter, or doc routes the primary delivery path through
+- [x] No shipped skill, adapter, or doc routes the primary delivery path through
   `sd-review-pr` while `sd-review` is the declared successor.
-- [ ] The recommended review loop in the shipped guide describes exactly one
+- [x] The recommended review loop in the shipped guide describes exactly one
   lifecycle, or routes through an explicit decision point.
 
 ## Out Of Scope

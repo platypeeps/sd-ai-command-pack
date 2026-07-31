@@ -578,3 +578,39 @@ Implemented Phase B of 07-24-simplify-review-shipping-composition: R1 narrowed s
 ### Next Steps
 
 - Open PR for Phase B, run the Copilot review loop, then validated housekeeping merge with the journal-only planning receipt (task stays open pending cutover evidence)
+
+
+## Session 265: Merge Phase B PR #289 and close simplify-review-shipping-composition
+
+**Date**: 2026-07-30
+**Task**: Merge Phase B PR #289 and close simplify-review-shipping-composition
+**Branch**: `chore/archive-simplify-review-shipping-composition`
+
+### Summary
+
+Converged the PR #289 review loop (Copilot round 1 returned zero findings, all CI checks green), produced the planning-mode journal-only-recovery receipt for the febd6707 finalization delta, and merged 0.57.0 through the validated housekeeping flow. With both phases shipped, ticked the eight acceptance criteria and archived task 07-24-simplify-review-shipping-composition.
+
+### Main Changes
+
+- Merged PR #289 (sd-create-pr publish-only, sd-watch-pr removal behind the internal watch coordinator, Stage 2b finalization ownership, release 0.57.0) into main via scripts/sd-ai-command-pack-housekeeping.sh with a planning-mode final-bundle receipt
+- Marked all eight acceptance criteria complete in the task prd and archived 07-24-simplify-review-shipping-composition to .trellis/tasks/archive/2026-07/
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d6de646d7a7b` | Merge pull request #289 from platypeeps/fix/simplify-review-shipping-composition |
+
+### Testing
+
+- [OK] Planning-mode final-bundle validator returned planning_bundle_valid (journal-only-recovery) for 0812a4b0..febd6707 before the merge
+- [OK] PR #289 CI checks lint, security, and all three unittest matrix jobs passed; Copilot reviewed 69/69 files with zero comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Survey the backlog and start the next item
