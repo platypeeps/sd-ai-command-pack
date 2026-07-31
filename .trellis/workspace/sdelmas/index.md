@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 268
+- **Total Sessions**: 269
 - **Last Active**: 2026-07-31
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~727 | Active |
+| `journal-6.md` | ~761 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 269 | 2026-07-31 | Harden KB prune with trailing provenance marker (PR #296) | `bc6611b9`, `24c3b612` | `fix/harden-kb-prune-marker-check` |
 | 268 | 2026-07-31 | Preserve the aside lock when work-loop restore fails (A-092) | `9ef65a56`, `ef0ec529` | `fix/work-loop-lock-restore` |
 | 267 | 2026-07-31 | Cover sd-check read-only git guard (A-049) | `1c8992a9` | `fix/test-sd-check-read-only-git-guard` |
 | 266 | 2026-07-31 | Regenerate frozen source-only fleet-refresh adapters | `bd98b831` | `fix/regenerate-fleet-refresh-adapters` |
