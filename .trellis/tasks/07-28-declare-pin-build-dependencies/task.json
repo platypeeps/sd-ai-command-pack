@@ -3,7 +3,7 @@
   "name": "declare-pin-build-dependencies",
   "title": "Declare and pin the build dependency toolchain",
   "description": "Declare the build toolchain explicitly and pin it, so builds stop depending on whatever versions happen to be installed.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
