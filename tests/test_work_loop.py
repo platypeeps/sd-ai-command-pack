@@ -1736,6 +1736,38 @@ class WorkLoopTests(InstallTestCase):
             state["iterations"][-1]["prUrl"], "https://example.test/pull/42"
         )
 
+    def test_result_missing_pr_evidence_leaves_counters_unmutated(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        state["phase"] = "followups"
+        state["current"]["task"] = "task-1"
+        state["current"]["prNumber"] = None
+        state["current"]["prUrl"] = None
+        counters_before = dict(state["counters"])
+        with self.assertRaisesRegex(module.WorkLoopError, "recorded"):
+            module.record_result(
+                state,
+                task="task-1",
+                outcome="completed",
+                pr_number=42,
+                pr_url="https://example.test/pull/42",
+                review_rounds=2,
+                ci_retries=1,
+                decisions=[],
+                followups=[],
+            )
+        self.assertEqual(state["counters"], counters_before)
+        self.assertEqual(state["iterations"], [])
+        self.assertEqual(state["phase"], "followups")
+
     def test_result_rejects_negative_counters_and_non_positive_pr(self) -> None:
         module = self.load_module()
         root = self.make_repo()

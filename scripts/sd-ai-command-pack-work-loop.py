@@ -2238,15 +2238,15 @@ def record_result(
         raise WorkLoopError(
             "iteration result pull request URL contradicts recorded evidence"
         )
+    if outcome == "completed" and pr_number is not None and recorded_pr is None:
+        raise WorkLoopError(
+            "completed iteration with a pull request requires recorded"
+            " pull request evidence"
+        )
     state["counters"][counter_key] += 1
     state["counters"]["reviewRounds"] += review_rounds
     state["counters"]["ciRetries"] += ci_retries
     if outcome == "completed" and pr_number is not None:
-        if recorded_pr is None:
-            raise WorkLoopError(
-                "completed iteration with a pull request requires recorded"
-                " pull request evidence"
-            )
         state["counters"]["mergedPrs"] += 1
     result = {
         "iteration": state["iteration"],
