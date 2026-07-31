@@ -517,7 +517,6 @@ Converged the PR 288 Copilot review loop for the sd-ship Stage 2 repoint and Sta
 
 | Hash | Message |
 |------|---------|
-| `7fae38b1` | feat(ship): repoint Stage 2 to routed sd-review and add Stage 2b lifecycle step |
 | `e8d10910` | docs: clarify router-owned reviewer requests in recommended loop |
 | `b2e8d830` | chore(release): refresh candidate ledger for doc clarification |
 

@@ -34,7 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 263 | 2026-07-30 | PR 288 review loop converged for ship composition Phase A | `7fae38b1`, `e8d10910`, `b2e8d830` | `fix/simplify-review-shipping-composition` |
+| 263 | 2026-07-30 | PR 288 review loop converged for ship composition Phase A | `e8d10910`, `b2e8d830` | `fix/simplify-review-shipping-composition` |
 | 262 | 2026-07-30 | Ship composition Phase A: Stage 2 repoint and Stage 2b | - | `fix/simplify-review-shipping-composition` |
 | 261 | 2026-07-30 | Repair follow-up task PRD reference after 07-29 archive | `fca7ef70` | `fix/scope-final-bundle-validator-to-delta` |
 | 260 | 2026-07-30 | Scope final-bundle validator to the change delta (0.56.7, PR #287) | `c24d3e6d`, `1d93d605`, `781c887a` | `fix/scope-final-bundle-validator-to-delta` |
