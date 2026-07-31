@@ -654,3 +654,38 @@ Fixed audit finding A-044: four dev-tree fleet-refresh adapters frozen at 0.20.0
 ### Next Steps
 
 - None - task complete
+
+
+## Session 267: Cover sd-check read-only git guard (A-049)
+
+**Date**: 2026-07-31
+**Task**: Cover sd-check read-only git guard (A-049)
+**Branch**: `fix/test-sd-check-read-only-git-guard`
+
+### Summary
+
+Added invalid-config subtests executing the READ_ONLY_GIT_SUBCOMMANDS guard and inline-eval branches in sd-check; raised check.py coverage floor 70 to 74 with parity test sync; shipped via PR #294.
+
+### Main Changes
+
+- tests/test_check.py: perl-inline, ruby-inline, git-push, git-commit invalid-config entries
+- .github/scripts/check-shipped-script-coverage.sh + tests/test_generated_parity.py: check.py floor 70 to 74
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1c8992a9` | test: cover the sd-check read-only git guard |
+
+### Testing
+
+- [OK] make release-prep exit 0; coverage 75% measured
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
