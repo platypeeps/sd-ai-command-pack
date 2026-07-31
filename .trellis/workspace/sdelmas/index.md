@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 263
+- **Total Sessions**: 264
 - **Last Active**: 2026-07-30
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~534 | Active |
+| `journal-6.md` | ~577 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 264 | 2026-07-30 | Ship Phase B of simplify-review-shipping-composition (0.57.0) | `13661913`, `71d12d1f`, `190f2585`, `1f50f3b9`, `0812a4b0` | `fix/simplify-review-shipping-composition` |
 | 263 | 2026-07-30 | PR 288 review loop converged for ship composition Phase A | `e8d10910`, `b2e8d830` | `fix/simplify-review-shipping-composition` |
 | 262 | 2026-07-30 | Ship composition Phase A: Stage 2 repoint and Stage 2b | - | `fix/simplify-review-shipping-composition` |
 | 261 | 2026-07-30 | Repair follow-up task PRD reference after 07-29 archive | `fca7ef70` | `fix/scope-final-bundle-validator-to-delta` |
