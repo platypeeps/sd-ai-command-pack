@@ -1796,7 +1796,7 @@ class WorkLoopTests(InstallTestCase):
                         ci_retries=ci_retries,
                         **base,
                     )
-        for pr_number in (0, -7):
+        for pr_number in (0, -7, True):
             with self.subTest(pr_number=pr_number):
                 with self.assertRaisesRegex(
                     module.WorkLoopError, "positive integer"

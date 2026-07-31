@@ -2217,7 +2217,9 @@ def record_result(
         raise WorkLoopError(f"unknown iteration outcome: {outcome}")
     if review_rounds < 0 or ci_retries < 0:
         raise WorkLoopError("review rounds and CI retries must be non-negative")
-    if pr_number is not None and pr_number < 1:
+    if pr_number is not None and (
+        isinstance(pr_number, bool) or pr_number < 1
+    ):
         raise WorkLoopError(
             "iteration result pull request number must be a positive integer"
         )
