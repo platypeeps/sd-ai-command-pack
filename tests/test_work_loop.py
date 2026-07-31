@@ -1768,6 +1768,38 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(state["iterations"], [])
         self.assertEqual(state["phase"], "followups")
 
+    def test_result_illegal_transition_leaves_state_unmutated(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        state["phase"] = "planning"
+        state["current"]["task"] = "task-1"
+        counters_before = dict(state["counters"])
+        with self.assertRaisesRegex(module.WorkLoopError, "illegal work-loop transition"):
+            module.record_result(
+                state,
+                task="task-1",
+                outcome="parked",
+                pr_number=None,
+                pr_url=None,
+                review_rounds=1,
+                ci_retries=1,
+                decisions=["a decision"],
+                followups=["a follow-up"],
+            )
+        self.assertEqual(state["counters"], counters_before)
+        self.assertEqual(state["iterations"], [])
+        self.assertEqual(state["decisions"], [])
+        self.assertEqual(state["followups"], [])
+        self.assertEqual(state["phase"], "planning")
+
     def test_result_rejects_negative_counters_and_non_positive_pr(self) -> None:
         module = self.load_module()
         root = self.make_repo()

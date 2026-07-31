@@ -2245,6 +2245,9 @@ def record_result(
             "completed iteration with a pull request requires recorded"
             " pull request evidence"
         )
+    transition_state(
+        state, "complete", updates={"task": compact_text(task, limit=160)}
+    )
     state["counters"][counter_key] += 1
     state["counters"]["reviewRounds"] += review_rounds
     state["counters"]["ciRetries"] += ci_retries
@@ -2267,9 +2270,6 @@ def record_result(
     state["followups"] = (
         state["followups"] + [compact_text(item) for item in followups]
     )[-MAX_NOTES:]
-    transition_state(
-        state, "complete", updates={"task": compact_text(task, limit=160)}
-    )
 
 
 def _ship_receipt_error(code: str, detail: str) -> WorkLoopError:
