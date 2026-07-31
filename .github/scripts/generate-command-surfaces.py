@@ -356,10 +356,10 @@ def generate_command_catalog() -> str:
                 availability = "source-checkout-only"
             elif command.name in SUPERSEDED_COMMANDS:
                 successor, retirement_id = SUPERSEDED_COMMANDS[command.name]
-                version = retired_surface_removed_version(retirement_id)
+                removed_version = retired_surface_removed_version(retirement_id)
                 availability = (
                     f"included in installed pack — transitional until "
-                    f"{version}; use {successor}"
+                    f"{removed_version}; use {successor}"
                 )
             else:
                 availability = "included in installed pack"
