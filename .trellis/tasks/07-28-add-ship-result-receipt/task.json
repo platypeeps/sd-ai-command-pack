@@ -3,7 +3,7 @@
   "name": "add-ship-result-receipt",
   "title": "Give the ship to work-loop handoff a validated receipt",
   "description": "Make sd-ship emit a receipt the work loop can validate independently, recomputing the claimed outcome against git and the PR instead of trusting the handoff payload.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

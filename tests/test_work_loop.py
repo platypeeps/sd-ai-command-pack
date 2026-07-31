@@ -1501,6 +1501,7 @@ class WorkLoopTests(InstallTestCase):
         for index in range(module.MAX_HISTORY + 3):
             state["phase"] = "followups"
             state["iteration"] = index + 1
+            state["current"]["task"] = f"task-{index}"
             module.record_result(
                 state,
                 task=f"task-{index}",

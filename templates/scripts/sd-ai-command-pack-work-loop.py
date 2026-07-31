@@ -2147,8 +2147,9 @@ def record_result(
     state["followups"] = (
         state["followups"] + [compact_text(item) for item in followups]
     )[-MAX_NOTES:]
-    state["phase"] = "complete"
-    state["current"]["task"] = compact_text(task, limit=160)
+    transition_state(
+        state, "complete", updates={"task": compact_text(task, limit=160)}
+    )
 
 
 def recovery_directive(reason_code: str) -> dict[str, str | None]:
