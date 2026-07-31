@@ -1015,6 +1015,10 @@ Implemented lane 1 of 07-28-measure-unmeasured-runtime-surface: added .github/sc
 
 [OK] **Completed**
 
+Session complete; task `07-28-measure-unmeasured-runtime-surface` stays `in_progress` — only lane 1 shipped.
+
 ### Next Steps
 
-- None - task complete
+- Lane 2: measure `review-preflight.mjs` via c8/NODE_V8_COVERAGE.
+- Lane 3: decide and implement the shell coverage scope.
+- Shell lane must report a coverage number in CI before the task's acceptance criteria are met.
