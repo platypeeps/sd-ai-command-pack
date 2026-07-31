@@ -2225,9 +2225,16 @@ def record_result(
         )
     recorded_pr = state["current"].get("prNumber")
     recorded_url = state["current"].get("prUrl")
-    # Same default limit as the evidence path stores current.prUrl with;
-    # a tighter limit here truncates long URLs into a false contradiction.
-    normalized_url = compact_text(pr_url) if pr_url else None
+    if pr_url is None:
+        normalized_url = None
+    else:
+        # Same default limit as the evidence path stores current.prUrl with;
+        # a tighter limit here truncates long URLs into a false contradiction.
+        normalized_url = compact_text(pr_url)
+        if not normalized_url:
+            raise WorkLoopError(
+                "iteration result pull request URL must not be blank when supplied"
+            )
     if pr_number is not None and recorded_pr is not None and pr_number != recorded_pr:
         raise WorkLoopError(
             "iteration result pull request number contradicts recorded evidence"

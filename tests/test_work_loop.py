@@ -1869,6 +1869,38 @@ class WorkLoopTests(InstallTestCase):
                         **base,
                     )
 
+    def test_result_rejects_blank_pr_url(self) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state = module.new_state(
+            module.repository_identity(root),
+            mode="backlog",
+            selector="all",
+            focus=module.normalize_focus(),
+            until="merge",
+            run_id="run-1",
+        )
+        state["phase"] = "followups"
+        state["current"]["task"] = "task-1"
+        state["current"]["prNumber"] = 42
+        state["current"]["prUrl"] = "https://example.test/pull/42"
+        for blank_url in ("", "   "):
+            with self.subTest(pr_url=blank_url):
+                with self.assertRaisesRegex(module.WorkLoopError, "must not be blank"):
+                    module.record_result(
+                        state,
+                        task="task-1",
+                        outcome="completed",
+                        pr_number=42,
+                        pr_url=blank_url,
+                        review_rounds=0,
+                        ci_retries=0,
+                        decisions=[],
+                        followups=[],
+                    )
+        self.assertEqual(state["iterations"], [])
+        self.assertEqual(state["phase"], "followups")
+
     def test_evidence_tracks_publish_review_finish_and_squash_merge(self) -> None:
         module = self.load_module()
         root = self.make_repo()
