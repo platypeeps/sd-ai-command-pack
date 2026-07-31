@@ -720,26 +720,33 @@ function validateBookkeepingTaskDirectory(taskDir, options) {
   if (prdLoaded.status !== 'loaded') {
     addScoped('task_prd_invalid', prdFile, prdLoaded.message);
   }
-  if (taskLoaded.status !== 'loaded') return null;
-
-  let record;
-  try {
-    record = JSON.parse(taskLoaded.text);
-  } catch (error) {
-    addScoped('task_json_invalid', taskFile, `task metadata is not valid JSON: ${thrownValueMessage(error)}`);
-    return null;
+  // A failed task.json load or parse must not skip the sibling checks below:
+  // with delta scoping that failure may be a mere advisory, and a
+  // delta-changed prd.md or task-context file still needs its blocking
+  // validation. Only the checks that read the parsed record are gated on it.
+  let record = null;
+  let recordAvailable = false;
+  if (taskLoaded.status === 'loaded') {
+    try {
+      record = JSON.parse(taskLoaded.text);
+      recordAvailable = true;
+    } catch (error) {
+      addScoped('task_json_invalid', taskFile, `task metadata is not valid JSON: ${thrownValueMessage(error)}`);
+    }
   }
-  for (const issue of validateTrellisBookkeepingMetadata(record, taskDir, archived)) {
-    addScoped('task_metadata_invalid', taskFile, `field ${issue}`);
-  }
-  if (completionReady && !['in_progress', 'review'].includes(record.status)) {
-    add('task_lifecycle_not_completion_ready', taskFile, 'status must be in_progress or review before archive');
-  }
-  if (completionReady && (typeof record.branch !== 'string' || record.branch.trim().length === 0)) {
-    add('task_branch_invalid', taskFile, 'completion-ready task must have a non-empty feature branch');
-  }
-  if (archived && record.status !== 'completed') {
-    addScoped('task_lifecycle_incomplete', taskFile, 'archived task status must be completed');
+  if (recordAvailable) {
+    for (const issue of validateTrellisBookkeepingMetadata(record, taskDir, archived)) {
+      addScoped('task_metadata_invalid', taskFile, `field ${issue}`);
+    }
+    if (completionReady && !['in_progress', 'review'].includes(record.status)) {
+      add('task_lifecycle_not_completion_ready', taskFile, 'status must be in_progress or review before archive');
+    }
+    if (completionReady && (typeof record.branch !== 'string' || record.branch.trim().length === 0)) {
+      add('task_branch_invalid', taskFile, 'completion-ready task must have a non-empty feature branch');
+    }
+    if (archived && record.status !== 'completed') {
+      addScoped('task_lifecycle_incomplete', taskFile, 'archived task status must be completed');
+    }
   }
   if (prdLoaded.status === 'loaded') {
     if (prdLoaded.text.trim().length === 0) {
@@ -750,20 +757,24 @@ function validateBookkeepingTaskDirectory(taskDir, options) {
       validateBookkeepingAcceptanceReadiness(prdFile, prdLoaded.text, add);
     }
   }
-  validateBookkeepingTextWhitespace(taskFile, taskLoaded.text, addScoped);
+  if (taskLoaded.status === 'loaded') {
+    validateBookkeepingTextWhitespace(taskFile, taskLoaded.text, addScoped);
+  }
   validateBookkeepingTaskContexts(taskDir, record, archived, addScoped);
   validateBookkeepingTopology(taskFile, taskDir, record, addScoped);
-  return record;
+  return recordAvailable ? record : null;
 }
 
 function validateBookkeepingTaskContexts(taskDir, record, archived, add) {
-  if (!isPlainObject(record)) return;
+  // Context files are validated even when task.json is broken or missing —
+  // their defects stand on their own. Without a readable planning-status
+  // record the pristine-scaffold exemption cannot be proven, so it is off.
   // A planning task's untouched generated scaffold matches the shape
   // `task.py create` writes — a lone `_example`-only row. The match is on that
   // shape, not on Trellis's seed text, which Trellis owns and revises across
   // versions. The review-preflight task-context gate exempts it on the same
   // terms, so creating a task never fails either lane.
-  const scaffoldExempt = !archived && record.status === 'planning';
+  const scaffoldExempt = !archived && isPlainObject(record) && record.status === 'planning';
   for (const artifact of ['implement.jsonl', 'check.jsonl']) {
     const file = `${taskDir}/${artifact}`;
     if (!pathEntryExists(file)) continue;

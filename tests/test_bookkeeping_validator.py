@@ -2313,6 +2313,61 @@ class BookkeepingValidatorTests(InstallTestCase):
         loaded = eligibility_module().load_finish_work_receipt(receipt_path)
         self.assertEqual(loaded["mode"], "planning")
 
+    def test_planning_bundle_broken_sibling_task_json_keeps_delta_checks_blocking(
+        self,
+    ) -> None:
+        cases = (
+            ("malformed-json", '{"broken": \n', "task_json_invalid"),
+            ("missing-file", None, "task_artifact_invalid"),
+        )
+        for label, task_json_content, advisory_code in cases:
+            with self.subTest(label=label):
+                root = self.make_validator_repo()
+                name = f"broken-sibling-{label}"
+                task_dir = f".trellis/tasks/07-25-{name}"
+                task = self.write_task(
+                    root,
+                    task_dir,
+                    self.task_record(
+                        name,
+                        status="planning",
+                        branch=None,
+                        completed_at=None,
+                    ),
+                )
+                if task_json_content is None:
+                    (task / "task.json").unlink()
+                else:
+                    (task / "task.json").write_text(
+                        task_json_content, encoding="utf-8"
+                    )
+                self.run_git(root, "add", ".trellis/tasks")
+                self.run_git(root, "commit", "-m", "seed broken sibling task.json")
+                base = self.git_output(root, "rev-parse", "HEAD")
+
+                (task / "prd.md").write_text(
+                    "# Fixture\n\ntrailing \n", encoding="utf-8"
+                )
+                self.run_git(root, "add", task_dir)
+                self.run_git(root, "commit", "-m", "refine prd only")
+                work_commit = self.git_output(root, "rev-parse", "HEAD")
+                head = self.commit_planning_journal(root, work_commit)
+
+                result = self.run_planning_bundle(root, base, head)
+
+                payload = json.loads(result.stdout)
+                self.assertEqual(payload["status"], "invalid", result.stdout)
+                finding_codes = {
+                    item["reasonCode"] for item in payload["findings"]
+                }
+                self.assertIn(
+                    "bookkeeping_whitespace_invalid", finding_codes, result.stdout
+                )
+                advisory_codes = {
+                    item["reasonCode"] for item in payload["advisories"]
+                }
+                self.assertIn(advisory_code, advisory_codes, result.stdout)
+
     def test_planning_bundle_group_one_producers_delta_scope(self) -> None:
         grounded_row = '{"file":".trellis/spec/backend/index.md","reason":"grounded"}\n'
         cases = (
