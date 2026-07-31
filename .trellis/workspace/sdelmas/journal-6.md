@@ -795,3 +795,40 @@ Classified all 26 shipped script targets (23 public documented, pr-eligibility n
 ### Next Steps
 
 - None - task complete
+
+
+## Session 271: Declare and pin build dependency toolchain (A-108/109/110)
+
+**Date**: 2026-07-31
+**Task**: Declare and pin build dependency toolchain (A-108/109/110)
+**Branch**: `fix/declare-pin-build-dependencies`
+
+### Summary
+
+Single-sourced the Python floor in pyproject.toml [project].requires-python with a guard test, raised and CI-pinned the Node floor to 22.0.0, and compiled both requirements files into hash-pinned closures enforced with --require-hashes at all four install sites. PR #298: two Copilot rounds; round-1 findings (regex TOML parse brittleness, setuptools auto-discovery leak) verified and fixed.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `05ab4f61` | (see git log) |
+| `26ae2976` | (see git log) |
+| `bf2e5aae` | (see git log) |
+| `49d633af` | (see git log) |
+| `af8f96eb` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
