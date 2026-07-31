@@ -593,6 +593,13 @@ def validate_state(state: Mapping[str, Any]) -> None:
         )
     ):
         raise WorkLoopError("work-loop current state is malformed")
+    for field, allowed in (
+        ("mergeState", MERGE_STATES),
+        ("finishWorkState", FINISH_WORK_STATES),
+        ("housekeepingState", HOUSEKEEPING_STATES),
+    ):
+        if current.get(field) is not None and current[field] not in allowed:
+            raise WorkLoopError("work-loop current state is malformed")
     counters = state.get("counters")
     if (
         not isinstance(counters, dict)

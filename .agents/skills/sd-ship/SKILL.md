@@ -246,11 +246,13 @@ controller using values from the authoritative stage reports:
 SD_SHIP_MERGE_RESULT
 run-id: <run ID>
 iteration: <number>
+task: <task identifier>
 pr: <number and URL>
 merge-state: <merged|open|closed|blocked>
 finish-work: <completed|blocked|not-run>
 housekeeping: <healthy|attention|blocked>
 review-rounds: <non-negative count|unavailable>
+ci-retries: <non-negative count|unavailable>
 final-branch: <branch|unknown>
 final-head: <SHA|unknown>
 anomalies: <none|compact list>
@@ -290,8 +292,8 @@ Every field is required; `iteration`, `prNumber`, `reviewRounds`, and
 and the remaining fields are strings. Fill values only from the authoritative
 stage reports, never from memory. `finalBranch` and `finalHead` may be
 `unknown` only when `mergeState` is not `merged`. When the free-text
-`review-rounds` value is `unavailable`, write `0` and add an anomaly entry
-saying so. When a required numeric value has no authoritative source, do not
+`review-rounds` or `ci-retries` value is `unavailable`, write `0` and add an
+anomaly entry saying so. When a required numeric value has no authoritative source, do not
 write a receipt; report the missing value as an anomaly and treat the nested
 result as blocked.
 

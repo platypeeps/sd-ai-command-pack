@@ -604,6 +604,25 @@ class WorkLoopTests(InstallTestCase):
                     ):
                         module.validate_state(candidate)
 
+        enum_cases = {
+            "mergeState": module.MERGE_STATES,
+            "finishWorkState": module.FINISH_WORK_STATES,
+            "housekeepingState": module.HOUSEKEEPING_STATES,
+        }
+        for field, allowed in enum_cases.items():
+            candidate = dict(state)
+            candidate["current"] = dict(state["current"])
+            candidate["current"][field] = "surprise"
+            with self.subTest(field=field, value="surprise"):
+                with self.assertRaisesRegex(
+                    module.WorkLoopError, "current state is malformed"
+                ):
+                    module.validate_state(candidate)
+            for value in allowed:
+                candidate["current"][field] = value
+                with self.subTest(field=field, value=value):
+                    module.validate_state(candidate)
+
     def test_atomic_write_preserves_prior_state_when_replace_fails(self) -> None:
         module = self.load_module()
         root = self.make_repo()
