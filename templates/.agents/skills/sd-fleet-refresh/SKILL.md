@@ -178,8 +178,11 @@ but defines no ordering or transition policy:
   defer-finish-work: true
   ```
 - `merge-eligibility`: run the finding severity gate, settle required checks
-  through `sd-watch-pr` with its internal `no-merge` handoff, and prove the
-  recorded head remains green, comment-clean, and mergeable.
+  through the read-only watch coordinator
+  (`../sd-ship/references/watch-coordinator.md`) until it reports
+  `settled-green`, and prove the recorded head remains green, comment-clean,
+  and mergeable. Any other coordinator outcome stops this action with its
+  report.
 - `merge`: only the controller's single eligible action may invoke the
   consumer's `sd-housekeeping` gate. Complete the dedicated task through
   `sd-finish-work` and retain its exact-head receipt. Compare the resulting

@@ -8,8 +8,9 @@ description: Use when the user asks to take the current branch all the way from 
 Run this project-local skill for `sd-ship` and `/sd:ship` style work. It is
 the composite publish-to-merge orchestrator: one command that sequences the
 standard SD stages — the `sd-create-pr` flow, the `sd-review scope=pr` loop,
-sd-ship's own Stage 2b lifecycle step, the `sd-watch-pr` flow, and the
-`sd-housekeeping` merge gate — as a single chain with `until=` stop-points.
+sd-ship's own Stage 2b lifecycle step, its internal Stage 3 watch
+coordinator, and the `sd-housekeeping` merge gate — as a single chain with
+`until=` stop-points.
 
 sd-ship only sequences and reports. Each stage runs under its own skill's
 preconditions, gates, and safety rules, and the chain's stop-points sit
@@ -53,10 +54,11 @@ branch as a pull request, work the review loop until it is clean, watch
 checks and reviewers until the PR settles, then merge through the
 housekeeping gate.
 
-It complements `sd-create-pr`, `sd-review`, `sd-watch-pr`, and
-`sd-housekeeping` and replaces none of them: each stage command is still
-the right tool when the user wants exactly one stage, and `until=` covers
-runs that want only a prefix of the chain.
+It complements `sd-create-pr`, `sd-review`, and `sd-housekeeping` and
+replaces none of them: each stage command is still the right tool when the
+user wants exactly one stage, and `until=` covers runs that want only a
+prefix of the chain. Waiting for checks has no standalone command: Stage 3
+runs sd-ship's internal read-only watch coordinator.
 
 Preconditions — verify both before Stage 1, and stop with a report if
 either fails:
@@ -82,19 +84,20 @@ is arguments-only.
   - `until=review` stops after Stage 2b finishes the Trellis work that
     follows Stage 2's completed review loop.
   - `until=merge` runs the full chain through the gated merge.
-- `timeout-minutes=N` — pass-through argument, forwarded verbatim to
-  `sd-watch-pr` as Stage 3's watch budget. sd-ship neither interprets nor
-  re-defaults it.
+- `timeout-minutes=N` — Stage 3's watch budget, consumed by the internal
+  coordinator (default 30): it polls every 20 seconds with an attempt
+  ceiling of `timeout-minutes × 3`.
 
 `no-merge` is not an sd-ship argument: `until=review` already covers
-stopping before the watch-and-merge tail, so `no-merge` fails as an
-unknown argument like any other unrecognized name.
+stopping before the watch-and-merge tail, and the internal coordinator is
+report-only by construction, so there is no handoff to suppress. `no-merge`
+fails as an unknown argument like any other unrecognized name.
 
-`sd-create-pr`'s Stage 1 orchestration context and Stage 3's `no-merge` are
-internal delegation modes, not public `sd-ship` arguments. The composite
-supplies them only as described below so review and lifecycle side effects
-each have one owner. Reject user-supplied `publish-only`, `caller=`, `stage=`,
-or `return-after=` controls as unknown arguments.
+`sd-create-pr`'s Stage 1 orchestration context is an internal delegation
+mode, not a public `sd-ship` argument. The composite supplies it only as
+described below so review side effects have one owner. Reject user-supplied
+`publish-only`, `caller=`, `stage=`, or `return-after=` controls as unknown
+arguments.
 
 The autonomous work-loop controller may supply one additional trusted internal
 context after resolving this skill directly:
@@ -147,12 +150,15 @@ before Stage 1.
      finish-work step — Stage 4's gate runs finish-work exactly once against
      the final head, and running it here too would finish the work twice
      against two different heads.
-5. Stage 3 — `sd-watch-pr`: for the merge-through path, run its watch flow
-   with `no-merge` until the pull request settles green or blocked, forwarding
-   `timeout-minutes=` verbatim when it was passed. `no-merge` suppresses the
-   standalone watch command's automatic housekeeping handoff so Stage 4 owns
-   that side effect exactly once. If Stage 3 blocks or times out, stop the
-   chain; this leaves the active Trellis task unarchived for a later resume.
+5. Stage 3 — internal watch coordinator: for the merge-through path, follow
+   [`references/watch-coordinator.md`](references/watch-coordinator.md): a
+   read-only 20-second poll of the eligibility probe, bounded by
+   `timeout-minutes × 3` attempts, ending in exactly one of `settled-green`,
+   `settled-blocked`, `timed-out`, or `probe-failed`. Only `settled-green`
+   continues the chain to Stage 4; any other outcome stops the chain with
+   the coordinator's report, leaving the active Trellis task unarchived for
+   a later resume. The coordinator never merges and never invokes
+   housekeeping, so Stage 4 owns that side effect exactly once.
 6. Stage 4 — `sd-housekeeping`: invoke housekeeping exactly once. Its gate
    runs finish-work, pushes any resulting task/journal commits and waits for
    their checks, and reuses finish-work's retained schema-version-1

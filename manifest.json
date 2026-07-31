@@ -2606,181 +2606,6 @@
     {
       "platform": "shared",
       "kind": "skill",
-      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
-      "target": ".agents/skills/sd-watch-pr/SKILL.md",
-      "install": "always"
-    },
-    {
-      "platform": "claude",
-      "kind": "command",
-      "source": "templates/.claude/commands/sd/watch-pr.md",
-      "target": ".claude/commands/sd/watch-pr.md",
-      "anchor": ".claude"
-    },
-    {
-      "platform": "cursor",
-      "kind": "command",
-      "source": "templates/.commands/sd-watch-pr.md",
-      "target": ".cursor/commands/sd-watch-pr.md",
-      "anchor": ".cursor"
-    },
-    {
-      "platform": "gemini",
-      "kind": "command",
-      "source": "templates/.gemini/commands/sd/watch-pr.toml",
-      "target": ".gemini/commands/sd/watch-pr.toml",
-      "anchor": ".gemini"
-    },
-    {
-      "platform": "github",
-      "kind": "prompt",
-      "source": "templates/.github/prompts/sd-watch-pr.prompt.md",
-      "target": ".github/prompts/sd-watch-pr.prompt.md",
-      "anchor": ".github"
-    },
-    {
-      "platform": "opencode",
-      "kind": "command",
-      "source": "templates/.commands/sd-watch-pr.md",
-      "target": ".opencode/commands/sd-watch-pr.md",
-      "anchor": ".opencode"
-    },
-    {
-      "platform": "antigravity",
-      "kind": "workflow",
-      "source": "templates/.commands/sd-watch-pr.md",
-      "target": ".agent/workflows/sd-watch-pr.md",
-      "anchor": ".agent"
-    },
-    {
-      "platform": "codebuddy",
-      "kind": "command",
-      "source": "templates/.commands/sd-watch-pr.md",
-      "target": ".codebuddy/commands/sd/watch-pr.md",
-      "anchor": ".codebuddy"
-    },
-    {
-      "platform": "devin",
-      "kind": "workflow",
-      "source": "templates/.commands/sd-watch-pr.md",
-      "target": ".devin/workflows/sd-watch-pr.md",
-      "anchor": ".devin"
-    },
-    {
-      "platform": "droid",
-      "kind": "command",
-      "source": "templates/.commands/sd-watch-pr.md",
-      "target": ".factory/commands/sd/watch-pr.md",
-      "anchor": ".factory"
-    },
-    {
-      "platform": "kilo",
-      "kind": "workflow",
-      "source": "templates/.commands/sd-watch-pr.md",
-      "target": ".kilocode/workflows/sd-watch-pr.md",
-      "anchor": ".kilocode"
-    },
-    {
-      "platform": "pi",
-      "kind": "prompt",
-      "source": "templates/.commands/sd-watch-pr.md",
-      "target": ".pi/prompts/sd-watch-pr.md",
-      "anchor": ".pi"
-    },
-    {
-      "platform": "qoder",
-      "kind": "command",
-      "source": "templates/.commands/sd-watch-pr.md",
-      "target": ".qoder/commands/sd-watch-pr.md",
-      "anchor": ".qoder"
-    },
-    {
-      "platform": "trae",
-      "kind": "command",
-      "source": "templates/.commands/sd-watch-pr.md",
-      "target": ".trae/commands/sd-watch-pr.md",
-      "anchor": ".trae"
-    },
-    {
-      "platform": "zcode",
-      "kind": "command",
-      "source": "templates/.commands/sd-watch-pr.md",
-      "target": ".zcode/commands/sd/watch-pr.md",
-      "anchor": ".zcode"
-    },
-    {
-      "platform": "antigravity",
-      "kind": "skill",
-      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
-      "target": ".agent/skills/sd-watch-pr/SKILL.md",
-      "anchor": ".agent"
-    },
-    {
-      "platform": "codebuddy",
-      "kind": "skill",
-      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
-      "target": ".codebuddy/skills/sd-watch-pr/SKILL.md",
-      "anchor": ".codebuddy"
-    },
-    {
-      "platform": "devin",
-      "kind": "skill",
-      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
-      "target": ".devin/skills/sd-watch-pr/SKILL.md",
-      "anchor": ".devin"
-    },
-    {
-      "platform": "droid",
-      "kind": "skill",
-      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
-      "target": ".factory/skills/sd-watch-pr/SKILL.md",
-      "anchor": ".factory"
-    },
-    {
-      "platform": "kilo",
-      "kind": "skill",
-      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
-      "target": ".kilocode/skills/sd-watch-pr/SKILL.md",
-      "anchor": ".kilocode"
-    },
-    {
-      "platform": "kiro",
-      "kind": "skill",
-      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
-      "target": ".kiro/skills/sd-watch-pr/SKILL.md",
-      "anchor": ".kiro"
-    },
-    {
-      "platform": "pi",
-      "kind": "skill",
-      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
-      "target": ".pi/skills/sd-watch-pr/SKILL.md",
-      "anchor": ".pi"
-    },
-    {
-      "platform": "qoder",
-      "kind": "skill",
-      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
-      "target": ".qoder/skills/sd-watch-pr/SKILL.md",
-      "anchor": ".qoder"
-    },
-    {
-      "platform": "reasonix",
-      "kind": "skill",
-      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
-      "target": ".reasonix/skills/sd-watch-pr/SKILL.md",
-      "anchor": ".reasonix"
-    },
-    {
-      "platform": "trae",
-      "kind": "skill",
-      "source": "templates/.agents/skills/sd-watch-pr/SKILL.md",
-      "target": ".trae/skills/sd-watch-pr/SKILL.md",
-      "anchor": ".trae"
-    },
-    {
-      "platform": "shared",
-      "kind": "skill",
       "source": "templates/.agents/skills/sd-fix-ci/SKILL.md",
       "target": ".agents/skills/sd-fix-ci/SKILL.md",
       "install": "always"
@@ -3651,6 +3476,83 @@
       "kind": "skill",
       "source": "templates/.agents/skills/sd-ship/SKILL.md",
       "target": ".trae/skills/sd-ship/SKILL.md",
+      "anchor": ".trae"
+    },
+    {
+      "platform": "shared",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-ship/references/watch-coordinator.md",
+      "target": ".agents/skills/sd-ship/references/watch-coordinator.md",
+      "install": "always"
+    },
+    {
+      "platform": "antigravity",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-ship/references/watch-coordinator.md",
+      "target": ".agent/skills/sd-ship/references/watch-coordinator.md",
+      "anchor": ".agent"
+    },
+    {
+      "platform": "codebuddy",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-ship/references/watch-coordinator.md",
+      "target": ".codebuddy/skills/sd-ship/references/watch-coordinator.md",
+      "anchor": ".codebuddy"
+    },
+    {
+      "platform": "devin",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-ship/references/watch-coordinator.md",
+      "target": ".devin/skills/sd-ship/references/watch-coordinator.md",
+      "anchor": ".devin"
+    },
+    {
+      "platform": "droid",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-ship/references/watch-coordinator.md",
+      "target": ".factory/skills/sd-ship/references/watch-coordinator.md",
+      "anchor": ".factory"
+    },
+    {
+      "platform": "kilo",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-ship/references/watch-coordinator.md",
+      "target": ".kilocode/skills/sd-ship/references/watch-coordinator.md",
+      "anchor": ".kilocode"
+    },
+    {
+      "platform": "kiro",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-ship/references/watch-coordinator.md",
+      "target": ".kiro/skills/sd-ship/references/watch-coordinator.md",
+      "anchor": ".kiro"
+    },
+    {
+      "platform": "pi",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-ship/references/watch-coordinator.md",
+      "target": ".pi/skills/sd-ship/references/watch-coordinator.md",
+      "anchor": ".pi"
+    },
+    {
+      "platform": "qoder",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-ship/references/watch-coordinator.md",
+      "target": ".qoder/skills/sd-ship/references/watch-coordinator.md",
+      "anchor": ".qoder"
+    },
+    {
+      "platform": "reasonix",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-ship/references/watch-coordinator.md",
+      "target": ".reasonix/skills/sd-ship/references/watch-coordinator.md",
+      "anchor": ".reasonix"
+    },
+    {
+      "platform": "trae",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-ship/references/watch-coordinator.md",
+      "target": ".trae/skills/sd-ship/references/watch-coordinator.md",
       "anchor": ".trae"
     },
     {

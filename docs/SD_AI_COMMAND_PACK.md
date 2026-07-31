@@ -62,8 +62,6 @@ Quick links:
 - `.agents/skills/sd-audit-repo/charters/`: fifteen per-dimension reviewer
   charters the audit dispatches; a single shared copy used by every platform
   copy of the skill.
-- `.agents/skills/sd-watch-pr/SKILL.md`: PR settle watcher with gated
-  housekeeping handoff.
 - `.agents/skills/sd-fix-ci/SKILL.md`: red-CI triage and fix loop.
 - `.agents/skills/sd-update-deps/SKILL.md`: dependency PR batch triage
   workflow.
@@ -165,7 +163,7 @@ Codex exposes the pack entry points as skills named `sd-help`, `sd-status`,
 `sd-finish-work`, `sd-create-pr`, `sd-work-backlog`,
 `sd-check`, `sd-full-check`, `sd-housekeeping`, `sd-review`, `sd-review-pr`, `sd-review-local`,
 `sd-review-learnings`, `sd-audit-repo`, `sd-ship`,
-`sd-watch-pr`, `sd-fix-ci`, `sd-update-deps`,
+`sd-fix-ci`, `sd-update-deps`,
 `sd-test-gaps`, `sd-retro`, and `sd-update-spec`; type
 `/sd` in Codex command completion or invoke them with
 `$sd-review`-style skill mentions.
@@ -459,7 +457,6 @@ Qoder commands, Trae commands, Pi prompts, workflow adapters, and Codex skills:
 /sd-ship
 /sd-review-learnings
 /sd-audit-repo
-/sd-watch-pr
 /sd-fix-ci
 /sd-update-deps
 /sd-test-gaps
@@ -1287,16 +1284,6 @@ become prd-ready task proposals that wait for explicit user consent.
 `sd-review` (routed review), and `sd-full-check` (gate); it is the periodic
 formal audit, not a per-change review loop.
 
-The `sd-watch-pr` command watches the current branch's open pull request
-until it settles — no pending checks, the requested reviewer has reviewed
-(or a short grace period passes), and review threads are counted — inside a
-bounded polling loop (default 30 minutes; `timeout-minutes=N` overrides).
-On a settled, green, comment-clean PR it hands off to the `sd-housekeeping`
-flow, whose gate remains the only merge authority; with `no-merge` it stops
-after reporting readiness. On blockers it reports failing checks by name
-and unresolved threads by path, pointing at `sd-fix-ci` or `sd-review`
-as follow-ups. It never merges directly.
-
 The `sd-fix-ci` command triages a red CI run back toward green. It targets
 the current branch's PR checks by default, or the default branch's latest
 failing run with `main`. Each failing job is classified as real-code,
@@ -1424,8 +1411,8 @@ lowers configured coverage floors.
 The `sd-ship` command takes the current branch from committed work to a
 merged pull request by sequencing the standard SD stages: the sd-create-pr
 flow, the routed `sd-review scope=pr` loop, sd-ship's own Stage 2b lifecycle
-step, the sd-watch-pr settle watcher, and the
-sd-housekeeping gate, which remains the only merge authority. `until=pr`,
+step, its internal read-only watch coordinator, and sd-housekeeping,
+whose gate remains the only merge authority. `until=pr`,
 `until=review`, or the default `until=merge` choose the stop-point, and
 stage arguments such as `timeout-minutes=` pass through. It adds no new
 gate logic; every stage's own gates remain authoritative, and a failed or
@@ -1445,7 +1432,8 @@ Stage 2b owns the one post-cycle review-learning pass, invoking
 Lifecycle side effects have one owner. `until=review` runs finish-work in
 Stage 2b, bound to the exact reviewed head, then stops.
 The default merge-through chain skips Stage 2b's finish-work step,
-watches with `no-merge` in Stage 3, and invokes housekeeping exactly once in
+runs the internal read-only watch coordinator in Stage 3, and invokes
+housekeeping exactly once in
 Stage 4, whose gate runs finish-work against the final head. A blocked or
 timed-out watch therefore leaves the active Trellis task
 available for a later resume instead of archiving it before the PR settles.

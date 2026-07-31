@@ -123,6 +123,7 @@ from installer.registry import (
 from installer.removal import (
     RETIRED_REVIEW_LOCAL_ALL_TARGETS,
     RETIRED_TARGETS,
+    RETIRED_WATCH_PR_TARGETS,
     RETIRED_WORK_DESIGNS_TARGETS,
     SOURCE_ONLY_COMMAND_TARGETS,
     installed_target_candidates,
@@ -165,6 +166,7 @@ __all__ = [
     "PackFile",
     "RETIRED_TARGETS",
     "RETIRED_REVIEW_LOCAL_ALL_TARGETS",
+    "RETIRED_WATCH_PR_TARGETS",
     "RETIRED_WORK_DESIGNS_TARGETS",
     "REVIEW_ARTIFACT_GITIGNORE_PATTERNS",
     "ROOT",

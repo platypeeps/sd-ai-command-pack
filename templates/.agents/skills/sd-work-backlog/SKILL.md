@@ -234,8 +234,8 @@ return-after: merge-result
 ```
 
 `sd-ship` remains the only owner of create/review/watch/finish/merge/housekeeping
-stages. The outer loop must not invoke `sd-create-pr`, `sd-review-pr`,
-`sd-watch-pr`, or `sd-housekeeping` separately. Its nested result records the
+stages. The outer loop must not invoke `sd-create-pr`, `sd-review`, or
+`sd-housekeeping` separately. Its nested result records the
 PR, merge state, finish-work, housekeeping, review rounds, final branch/HEAD,
 and anomalies, then returns here.
 

@@ -453,7 +453,6 @@ class ScriptLibTests(InstallTestCase):
         for name in (
             "sd-create-pr",
             "sd-review-pr",
-            "sd-watch-pr",
             "sd-fix-ci",
             "sd-update-deps",
             "sd-review-learnings",

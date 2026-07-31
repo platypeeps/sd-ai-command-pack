@@ -23,16 +23,6 @@ SKILL_SECTIONS = (
 
 # name -> (short form, skill pins, adapter pins)
 COMMANDS = {
-    "sd-watch-pr": (
-        "watch-pr",
-        [
-            "timeout-minutes=",
-            "no-merge",
-            "never merges directly",
-            "sd-housekeeping",
-        ],
-        ["sd-housekeeping"],
-    ),
     "sd-fix-ci": (
         "fix-ci",
         [
@@ -466,8 +456,8 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn(
             "never merges, archives Trellis work, or runs housekeeping", ship_text
         )
-        self.assertIn("with `no-merge`", ship_text)
-        self.assertIn("leaves the active Trellis task unarchived", ship_text)
+        self.assertIn("`no-merge` is not an sd-ship argument", ship_text)
+        self.assertIn("leaving the active Trellis task unarchived", ship_text)
         self.assertIn("exactly once", ship_text)
         self.assertIn(
             "one read-only, PR-scoped post-cycle review-learning pass", ship_text
@@ -566,7 +556,7 @@ class SdlcCommandsTests(InstallTestCase):
             "review-profile: integration-only",
             "falls back to the normal remote-review convergence loop",
             "existing comments and unresolved threads",
-            "sd-watch-pr` with its internal `no-merge",
+            "through the read-only watch coordinator",
         ):
             self.assertIn(pin.casefold(), fleet_text.casefold())
 
@@ -616,17 +606,26 @@ class SdlcCommandsTests(InstallTestCase):
         ]
         create_step_6_text = " ".join(create_step_6.split())
         self.assertIn("verified internal orchestration context", create_step_6_text)
-        self.assertIn("Do not resolve or invoke `sd-review-pr`", create_step_6_text)
+        self.assertIn(
+            "Do not resolve or invoke any review skill", create_step_6_text
+        )
         self.assertIn("For every standalone invocation", create_step_6_text)
-        self.assertIn("resolve and follow the `sd-review-pr`", create_step_6_text)
+        self.assertIn(
+            "names the next command instead: `sd-review scope=pr`",
+            create_step_6_text,
+        )
 
         safety_text = " ".join(
             create_pr.split("## Safety Rules", 1)[1]
             .split("## Invocation Modes", 1)[0]
             .split()
         )
-        self.assertIn("In standalone mode, also resolve `sd-review-pr`", safety_text)
-        self.assertIn("the composite owns `sd-review` resolution", safety_text)
+        self.assertIn(
+            "never resolves or invokes a review skill in any mode", safety_text
+        )
+        self.assertIn(
+            "review ownership stays with `sd-review scope=pr`", safety_text
+        )
 
         ship_stage_1 = ship.split("2. Stage 1", 1)[1].split("3. Stage 2", 1)[0]
         ship_stage_1_text = " ".join(ship_stage_1.split())
@@ -696,7 +695,7 @@ class SdlcCommandsTests(InstallTestCase):
         )
         self.assertIn("stop before staging, committing, or pushing", normalized)
         self.assertIn(
-            "Do not treat a later `sd-review-pr` run as a substitute", normalized
+            "Do not treat a later `sd-review scope=pr` run as a substitute", normalized
         )
         self.assertIn("reinstall sd-ai-command-pack before publishing", normalized)
 
@@ -819,7 +818,9 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("`until=review` runs finish-work in Stage 2b", guide_text)
         self.assertIn("skips Stage 2b's finish-work step", guide_text)
         self.assertIn("whose gate runs finish-work against the final head", guide_text)
-        self.assertIn("watches with `no-merge`", guide_text)
+        self.assertIn(
+            "runs the internal read-only watch coordinator in Stage 3", guide_text
+        )
         self.assertIn("housekeeping exactly once", guide_text)
         self.assertIn("Stage 2 the only review owner", guide_text)
         self.assertIn("no review for `until=pr`", guide_text)
