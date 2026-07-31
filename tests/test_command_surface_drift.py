@@ -410,6 +410,25 @@ class CommandSurfaceDriftTests(unittest.TestCase):
             self.assertEqual(len(manifest_findings), 1)
             self.assertEqual(manifest_findings[0].category, "retired_identifier_live")
 
+    def test_schedule_only_retirement_with_live_manifest_targets_is_clean(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            command = self.make_repo(root)
+            retirement = registry.RetiredCommandSurface(
+                id="one-command",
+                identifiers=(),
+                installed_targets=registry.command_installed_targets("sd-one", "one"),
+                removed_version="2.0.0",
+                owner_task="fixture",
+                source_paths_must_be_absent=False,
+            )
+
+            report = self.lint(root, command, retirements=(retirement,))
+
+            self.assertEqual(report.findings, ())
+
     def test_retired_installed_target_reports_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

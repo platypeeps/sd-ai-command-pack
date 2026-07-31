@@ -290,6 +290,39 @@ class HelpCommandTests(InstallTestCase):
                 ),
             )
 
+    def test_superseded_commands_are_validated(self) -> None:
+        command_names = (("sd-one", "one"), ("sd-two", "two"))
+        retirements = (
+            registry.RetiredCommandSurface(
+                id="ret-one",
+                identifiers=(),
+                installed_targets=(),
+                removed_version="1.0.0",
+                owner_task="fixture",
+                source_paths_must_be_absent=False,
+            ),
+        )
+
+        registry.validate_superseded_commands(
+            command_names, {"sd-one": ("sd-two", "ret-one")}, retirements
+        )
+        with self.assertRaisesRegex(RuntimeError, "unknown command: sd-missing"):
+            registry.validate_superseded_commands(
+                command_names, {"sd-missing": ("sd-two", "ret-one")}, retirements
+            )
+        with self.assertRaisesRegex(
+            RuntimeError, "sd-one names unknown successor: sd-missing"
+        ):
+            registry.validate_superseded_commands(
+                command_names, {"sd-one": ("sd-missing", "ret-one")}, retirements
+            )
+        with self.assertRaisesRegex(
+            RuntimeError, "sd-one names missing retirement id: missing-id"
+        ):
+            registry.validate_superseded_commands(
+                command_names, {"sd-one": ("sd-two", "missing-id")}, retirements
+            )
+
     def test_retired_command_surface_schema_rejects_invalid_shapes(self) -> None:
         command = registry.CommandInfo(
             "sd-one",
@@ -531,6 +564,10 @@ class HelpCommandTests(InstallTestCase):
             RuntimeError, "unknown retired command surface id: missing"
         ):
             registry.retired_surface_targets("missing")
+        with self.assertRaisesRegex(
+            RuntimeError, "unknown retired command surface id: missing"
+        ):
+            registry.retired_surface_removed_version("missing")
 
     def test_shared_skill_reference_validation_rejects_unknown_and_unsafe(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "unknown skill"):
@@ -572,6 +609,14 @@ class HelpCommandTests(InstallTestCase):
                 self.assertIn(generator.skill_description(command.name), catalog)
         self.assertIn("| `sd-fleet-refresh` | source-checkout-only |", catalog)
         self.assertIn("| `sd-help` | included in installed pack |", catalog)
+        for name, (successor, retirement_id) in registry.SUPERSEDED_COMMANDS.items():
+            with self.subTest(command=name):
+                version = registry.retired_surface_removed_version(retirement_id)
+                self.assertIn(
+                    f"| `{name}` | included in installed pack — transitional "
+                    f"until {version}; use {successor} |",
+                    catalog,
+                )
 
     def test_manifest_derivation_honors_declared_target_families(self) -> None:
         generator = load_surface_generator()

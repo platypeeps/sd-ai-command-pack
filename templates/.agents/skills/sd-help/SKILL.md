@@ -88,8 +88,10 @@ forms and stop without executing another workflow.
    position, and distinguishing signal. End with a concrete selection rule.
 6. For `recommend`, infer the desired outcome, current lifecycle state,
    supplied context, and requested mutation. Prefer one smallest-fit available
-   command, including a composite such as `sd-ship`. Ask at most one question
-   only when the answer changes the route; otherwise state the assumption.
+   command, including a composite such as `sd-ship`. When the best-fit command's
+   catalog availability is transitional, recommend its named successor instead
+   and say why. Ask at most one question only when the answer changes the
+   route; otherwise state the assumption.
 7. Recommend a chain only when no single command owns the outcome. Use at most
    three commands and name the artifact or state handed between each stage.
 8. For `examples`, read `references/examples.md` and return only examples
