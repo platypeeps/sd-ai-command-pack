@@ -689,3 +689,39 @@ Added invalid-config subtests executing the READ_ONLY_GIT_SUBCOMMANDS guard and 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 268: Preserve the aside lock when work-loop restore fails (A-092)
+
+**Date**: 2026-07-31
+**Task**: Preserve the aside lock when work-loop restore fails (A-092)
+**Branch**: `fix/work-loop-lock-restore`
+
+### Summary
+
+Fixed _recover_locked_path deleting the only copy of a live foreign lock when the no-clobber restore fails: aside file now survives with its path named in the error, and an O_CREAT|O_EXCL rewrite fallback restores the canonical path where hard links are unavailable. Four new tests; 0.57.1; shipped via PR #295.
+
+### Main Changes
+
+- scripts+templates work-loop.py: A+C restore with preserved aside and fallback-error reporting
+- tests/test_work_loop.py: four recovery tests plus errno assertion
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9ef65a56` | fix(work-loop): preserve the aside lock file when restore fails |
+| `ef0ec529` | fix(work-loop): report the fallback error when lock restore fails |
+
+### Testing
+
+- [OK] unittest -k recover -k lock: 23 OK; make release-prep exit 0 twice
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

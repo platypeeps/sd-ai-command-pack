@@ -93,20 +93,20 @@ Call sites: `:1123`, `:1141` (`acquire_lock`, `:1076`) and `:1214`
 
 ## Acceptance Criteria
 
-- [ ] R1: a test that forces `os.link` to raise a non-`FileExistsError` `OSError`
+- [x] R1: a test that forces `os.link` to raise a non-`FileExistsError` `OSError`
       leaves the aside file present on disk after `_recover_locked_path` raises.
       This file is deleted today.
-- [ ] R2: a test where `lock_path` is recreated between the rename and the link
+- [x] R2: a test where `lock_path` is recreated between the rename and the link
       still removes the aside and does not raise.
-- [ ] R3: the raised message contains the aside path.
-- [ ] R1/R2: after a failed restore, a subsequent `acquire_lock` on the same path
+- [x] R3: the raised message contains the aside path.
+- [x] R1/R2: after a failed restore, a subsequent `acquire_lock` on the same path
       does **not** silently succeed — either the restored lock blocks it or the
       preserved aside is detected and reported.
-- [ ] R5: existing stale-recovery tests pass unchanged.
-- [ ] R6: `scripts/` and `templates/scripts/` copies are identical; `make sync`
+- [x] R5: existing stale-recovery tests pass unchanged.
+- [x] R6: `scripts/` and `templates/scripts/` copies are identical; `make sync`
       passes.
-- [ ] `make check` passes.
-- [ ] Changelog + version; fleet rollout via normal refresh.
+- [x] `make check` passes.
+- [x] Changelog + version; fleet rollout via normal refresh.
 
 ## Notes
 

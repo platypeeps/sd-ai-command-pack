@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.57.1 - 2026-07-31
+
+- Preserve the moved-aside foreign lock when work-loop lock recovery cannot
+  restore it, and name the aside path in the raised error so an operator can
+  move it back. Restore now falls back to an `O_CREAT|O_EXCL` rewrite on
+  filesystems without hard-link support, so the canonical lock path is
+  restored instead of silently voiding mutual exclusion (audit A-092).
+
 ## 0.57.0 - 2026-07-30
 
 - Remove the public `sd-watch-pr` command. `sd-ship` Stage 3 now runs an
