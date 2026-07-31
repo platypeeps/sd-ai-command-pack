@@ -8,7 +8,7 @@ VENV_BIN = $(VENV)/bin
 
 setup:
 	"$(PYTHON)" -m venv "$(VENV)"
-	"$(VENV_PYTHON)" -m pip install -r requirements-dev.txt -r requirements-security.txt
+	"$(VENV_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
 	git config core.hooksPath .githooks
 
 hooks:
