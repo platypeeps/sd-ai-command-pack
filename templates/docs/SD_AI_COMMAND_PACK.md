@@ -1057,6 +1057,14 @@ entrypoint is intentionally maintained as repo documentation. If an existing
 `.obsidian-kb` folder was created by an older symlink-based helper, the refresh
 replaces pack-owned relative symlinks with real copies in the category layout
 and prunes the old mirrored generated paths.
+Each generated copy ends with a trailing `<!-- SD-AI-COMMAND-PACK:KB-COPY -->`
+provenance marker, and the prune deletes a plain file in a category folder only
+when the file ends with that marker, so files the pack never wrote — including
+notes that merely quote the marker text — survive refreshes even when the KB
+root symlink points into a personal vault whose folders share a category
+title. Copies written by older pack versions carry no marker; a
+refresh rewrites them with one while their source exists, and copies orphaned
+before the upgrade are left in place for manual cleanup.
 The root `.obsidian-kb` path may itself be a symlink when it resolves to an
 existing directory, including a directory outside the repository. Refreshes
 preserve that root symlink and write through it. A broken root symlink, a root

@@ -725,3 +725,37 @@ Fixed _recover_locked_path deleting the only copy of a live foreign lock when th
 ### Next Steps
 
 - None - task complete
+
+
+## Session 269: Harden KB prune with trailing provenance marker (PR #296)
+
+**Date**: 2026-07-31
+**Task**: Harden KB prune with trailing provenance marker (PR #296)
+**Branch**: `fix/harden-kb-prune-marker-check`
+
+### Summary
+
+Fixed audit A-070 residual: KB prune deleted any plain file in a managed category folder without ownership proof, endangering user files behind a vault root symlink. Copies now end with a trailing SD-AI-COMMAND-PACK:KB-COPY marker; the prune requires the file to end with that marker (substring quoting is safe), currency checks compare marked payload with a size pre-check, pre-marker copies adopt on next refresh. Round-1 Copilot findings (marker-anywhere too permissive; size pre-check) complied; round 2 clean. 40/40 tests, release-prep green, version 0.57.2.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bc6611b9` | (see git log) |
+| `24c3b612` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

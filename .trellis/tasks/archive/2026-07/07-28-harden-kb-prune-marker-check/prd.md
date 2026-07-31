@@ -85,20 +85,20 @@ distinctive-but-not-unique folder names.
 
 ## Acceptance Criteria
 
-- [ ] R1: a fixture KB whose root symlink targets a directory containing a
+- [x] R1: a fixture KB whose root symlink targets a directory containing a
       pre-existing `Architecture and Decisions/notes.md` that the pack did not
       write survives a full refresh. This case deletes the file today.
-- [ ] R1: a pack-written category document that is dropped from the source set
+- [x] R1: a pack-written category document that is dropped from the source set
       is still pruned on the next refresh.
-- [ ] R2: the upgrade path is exercised — a KB populated by the current version,
+- [x] R2: the upgrade path is exercised — a KB populated by the current version,
       then refreshed by the new one, ends in the same state a fresh KB would,
       with no orphans and no deletion of non-pack files.
-- [ ] R4: the existing root-symlink tests and the documentation assertion at
+- [x] R4: the existing root-symlink tests and the documentation assertion at
       `tests/test_update_spec_kb.py:138` still pass unchanged.
-- [ ] R5: `scripts/` and `templates/scripts/` copies are identical; `make sync`
+- [x] R5: `scripts/` and `templates/scripts/` copies are identical; `make sync`
       passes.
-- [ ] `make check` passes.
-- [ ] Changelog + version; fleet rollout via normal refresh.
+- [x] `make check` passes.
+- [x] Changelog + version; fleet rollout via normal refresh.
 
 ## Notes
 
