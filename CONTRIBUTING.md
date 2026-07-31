@@ -15,6 +15,15 @@ bash scripts/sd-ai-command-pack-toolchain.sh doctor
 `requirements-security.txt`, and arms the direct-to-main safety hook with
 `git config core.hooksPath .githooks`.
 
+Both requirements files are hash-pinned compiled resolutions, installed with
+`--require-hashes` locally and in CI so the transitive closure cannot drift
+between runs. To bump a dependency, edit its `==` pin and rerun the compile
+command recorded in the file's header
+(`uv pip compile --universal --generate-hashes --python-version 3.10 <file> -o <file>`);
+if the bump conflicts with a stale transitive pin, delete that transitive's
+block and recompile. Do not hand-edit hashes. Dependabot updates these files
+with matching hashes on its own.
+
 ## Local Checks
 
 ```bash

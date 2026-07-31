@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.59.0 - 2026-07-31
+
+- Declare and pin the build dependency toolchain (audit A-108/A-109/A-110).
+  `pyproject.toml` gains a `[project]` table with `requires-python = ">=3.10"`
+  as the single machine-readable Python floor — ruff now infers its lint
+  target from it, and a new test checks the hand-written copies (CI matrix
+  floor leg, toolchain interpreter probe) against it. **Consumer-facing:**
+  `sd-ai-command-pack-review-preflight.mjs` now requires Node 22 or newer
+  (was 16.9, EOL since 2023); repos that install the pack need a supported
+  Node LTS to run the preflight. CI pins `actions/setup-node` to Node 22 in
+  the jobs that execute or parse the script instead of taking whatever the
+  runner image ships, and installs Python dependencies from hash-pinned
+  compiled requirements with `--require-hashes`, so transitive dependencies
+  stop re-resolving unreviewed on every run.
+
 ## 0.58.0 - 2026-07-31
 
 - Close the shipped-script documentation gap (audit A-115). Every manifest

@@ -795,3 +795,47 @@ Classified all 26 shipped script targets (23 public documented, pr-eligibility n
 ### Next Steps
 
 - None - task complete
+
+
+## Session 271: Declare and pin build dependency toolchain (A-108/109/110)
+
+**Date**: 2026-07-31
+**Task**: Declare and pin build dependency toolchain (A-108/109/110)
+**Branch**: `fix/declare-pin-build-dependencies`
+
+### Summary
+
+Single-sourced the Python floor in pyproject.toml [project].requires-python with a guard test, raised and CI-pinned the Node floor to 22.0.0, and compiled both requirements files into hash-pinned closures enforced with --require-hashes at all four install sites. PR #298: two Copilot rounds; round-1 findings (regex TOML parse brittleness, setuptools auto-discovery leak) verified and fixed.
+
+### Main Changes
+
+- pyproject.toml: added [project] with requires-python ">=3.10", [build-system], [tool.setuptools] packages = [] (auto-discovery off), [tool.uv] package = false; dropped hand-written ruff target-version (now inferred); deleted stray uv.lock.
+- tests/test_python_floor.py (new): asserts CI matrix floor leg and toolchain probe against the declared floor; parses via tomllib with pinned-tomli fallback on 3.10.
+- Review-preflight MIN_NODE_VERSION raised 16.9.0 to 22.0.0 in both script copies; tests.yml ci-scope and lint jobs pin SHA-pinned actions/setup-node at node-version 22.
+- requirements-dev.txt / requirements-security.txt recompiled as universal hash-pinned closures; --require-hashes enforced at three CI install sites plus the Makefile setup target; CONTRIBUTING.md documents the bump/recompile workflow.
+- Suites realigned: parity expects the --require-hashes install line, bookkeeping workflow-contract tests locate ci-scope steps by id, manifest bumped to 0.59.0 with CHANGELOG entry.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `05ab4f61` | fix: parse floor via tomllib/tomli and disable package auto-discovery |
+| `26ae2976` | test: align suites with pinned toolchain and refresh release evidence |
+| `bf2e5aae` | feat: install Python dependencies from hash-pinned compiled requirements |
+| `49d633af` | feat: raise review-preflight Node floor to 22 and pin CI's Node version |
+| `af8f96eb` | feat: declare requires-python and check floor copies against it |
+
+### Testing
+
+- `make release-prep` exit 0 on head `26ae2976` (full battery: coverage-gated tests, ruff, mypy, node checks, bandit, zizmor, full-check).
+- Round-1 fix head `05ab4f61`: ruff clean; tests.test_python_floor and tests.test_generated_parity OK.
+- Hash tamper check: zeroed hashes rejected ("THESE PACKAGES DO NOT MATCH THE HASHES"); --ignore-installed dry-runs resolve cleanly; recompile fixed point (run 3 = run 2).
+- PR #298 CI Result SUCCESS on `05ab4f61`; Copilot round 2 generated no new comments; sd-check attempt it8-pr298-sdcheck2 status passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

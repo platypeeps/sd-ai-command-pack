@@ -821,7 +821,7 @@ matrix. `copilotReviewFileLimit` defaults to `300`, accepts only a positive
 integer, and warns before remote review when the selected local diff exceeds
 GitHub Copilot's changed-file limit. Repos that intentionally
 document service-user paths under `/home/<user>/` can add those service users to
-`allowedLinuxHomeUsers` in that config. The script requires Node 16.9 or newer
+`allowedLinuxHomeUsers` in that config. The script requires Node 22 or newer
 and scans regular documentation files only; symlinked docs are skipped
 intentionally so local/generated links do not expand outside the repository.
 Generated GitHub paths and path-like comment snippets inside the complete

@@ -1,5 +1,23 @@
+[project]
+name = "sd-ai-command-pack"
+version = "0.0.0"
+description = "Repository tooling project; not a distributable package."
+requires-python = ">=3.10"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# Repository tooling only: an accidental `pip install .` must produce an
+# empty distribution, so package auto-discovery (which would pick up
+# installer/) stays disabled.
+[tool.setuptools]
+packages = []
+
+[tool.uv]
+package = false
+
 [tool.ruff]
-target-version = "py310"
 line-length = 88
 extend-exclude = [
     ".agents",

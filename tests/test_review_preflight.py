@@ -581,9 +581,9 @@ const journal = parseJournalSessionsFromText('.trellis/workspace/dev/journal-1.m
   '### Git Commits',
   '- abcdef1',
 ].join('\\n'));
-assert.equal(unsupportedNodeVersionMessage('v16.9.0'), '');
-assert.equal(unsupportedNodeVersionMessage('v20.0.0'), '');
-assert.match(unsupportedNodeVersionMessage('v16.8.0'), /requires Node >= 16\\.9\\.0/);
+assert.equal(unsupportedNodeVersionMessage('v22.0.0'), '');
+assert.equal(unsupportedNodeVersionMessage('v24.1.0'), '');
+assert.match(unsupportedNodeVersionMessage('v20.19.0'), /requires Node >= 22\\.0\\.0/);
 assert.match(unsupportedNodeVersionMessage('not-a-version'), /could not parse/);
 const index = parseWorkspaceIndexSessionsFromText('.trellis/workspace/dev/index.md', '| 1 | Done | Completed | 1234567 | note |  \\n');
 const validation = validateTrellisJournalSessions({

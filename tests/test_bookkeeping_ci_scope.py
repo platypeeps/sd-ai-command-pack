@@ -522,6 +522,14 @@ class BookkeepingWorkflowContractTests(unittest.TestCase):
         self.text = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.workflow = yaml.load(self.text, Loader=yaml.BaseLoader)
 
+    def scope_step(self, step_id: str) -> dict:
+        steps = self.workflow["jobs"]["ci-scope"]["steps"]
+        matches = [step for step in steps if step.get("id") == step_id]
+        self.assertEqual(
+            len(matches), 1, f"expected exactly one ci-scope step with id {step_id}"
+        )
+        return matches[0]
+
     def test_scope_job_is_read_only_prior_head_and_exact_event_head(self) -> None:
         scope = self.workflow["jobs"]["ci-scope"]
         self.assertEqual(scope["name"], "CI scope")
@@ -535,7 +543,7 @@ class BookkeepingWorkflowContractTests(unittest.TestCase):
             checkout["with"]["ref"],
             "${{ github.event.pull_request.head.sha || github.sha }}",
         )
-        classify = scope["steps"][1]["run"]
+        classify = self.scope_step("classify")["run"]
         self.assertIn('git ls-tree "$BEFORE_SHA"', classify)
         self.assertIn('git show "$BEFORE_SHA:.github/scripts/bookkeeping_ci_scope.py"', classify)
         self.assertIn("actions/workflows/tests.yml/runs?head_sha=${BEFORE_SHA}", classify)
@@ -548,7 +556,7 @@ class BookkeepingWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("pull_request_target", self.text)
 
     def test_prior_classifier_is_pinned_to_the_pull_request_base(self) -> None:
-        classify_step = self.workflow["jobs"]["ci-scope"]["steps"][1]
+        classify_step = self.scope_step("classify")
         classify = classify_step["run"]
 
         # The base sha must be wired in. Without it the guard compares
@@ -620,8 +628,7 @@ class BookkeepingWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("paths-ignore", self.workflow["on"]["push"])
 
     def test_bookkeeping_lane_reuses_canonical_validators(self) -> None:
-        validation = self.workflow["jobs"]["ci-scope"]["steps"][2]
-        self.assertEqual(validation["id"], "bookkeeping-validation")
+        validation = self.scope_step("bookkeeping-validation")
         self.assertIn("git diff --check", validation["run"])
         self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF", validation["run"])
         self.assertIn("sd-ai-command-pack-review-preflight.mjs", validation["run"])
