@@ -56,11 +56,13 @@ guide = guide_path.read_text(encoding="utf-8")
 
 
 def has_guide_entry(target: str) -> bool:
-    # Only an explicit inventory entry counts: a list bullet opening with the
-    # backticked installed path. A passing mention elsewhere in the guide (for
-    # example the review-local name-collision note) must not satisfy the gate,
-    # or the public/internal classification would erode silently.
-    return re.search(rf"(?m)^- `{re.escape(target)}`", guide) is not None
+    # Only an explicit inventory entry counts: a list bullet of the shape
+    # "- `scripts/...`: purpose". The colon directly after the closing
+    # backtick excludes other bullet mentions — the review-local
+    # name-collision note and troubleshooting bullets like
+    # "- `scripts/...` is missing: reinstall" — which must not satisfy the
+    # gate, or the public/internal classification would erode silently.
+    return re.search(rf"(?m)^- `{re.escape(target)}`:", guide) is not None
 
 
 stale_allowlist = sorted(
