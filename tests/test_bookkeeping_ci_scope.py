@@ -635,6 +635,19 @@ class BookkeepingWorkflowContractTests(unittest.TestCase):
         self.assertIn("final-bundle --mode", validation["run"])
         self.assertIn('reasonCodes == [($mode + "_bundle_valid")]', validation["run"])
 
+    def test_bookkeeping_lane_measures_review_preflight_coverage(self) -> None:
+        install = self.scope_step("install-review-preflight-coverage-tooling")
+        self.assertEqual(install["if"], "steps.classify.outputs.mode == 'bookkeeping'")
+        self.assertIn("npm ci", install["run"])
+
+        report = self.scope_step("report-review-preflight-coverage")
+        self.assertEqual(
+            report["if"], "steps.classify.outputs.mode == 'bookkeeping' && !cancelled()"
+        )
+        self.assertIn(
+            "jq -e '.total.lines.total > 0 and .total.lines.covered > 0'", report["run"]
+        )
+
     def test_aggregate_and_auto_tag_are_mode_bound(self) -> None:
         jobs = self.workflow["jobs"]
         aggregate = jobs["ci-result"]

@@ -223,6 +223,7 @@ jobs:
       # the bookkeeping path runs them, so installation is gated the same way
       # instead of paying npm cost on every "full" mode run.
       - name: Install review preflight coverage tooling
+        id: install-review-preflight-coverage-tooling
         if: steps.classify.outputs.mode == 'bookkeeping'
         run: npm ci
 
@@ -277,6 +278,7 @@ jobs:
           esac
 
       - name: Report review preflight JavaScript coverage
+        id: report-review-preflight-coverage
         if: steps.classify.outputs.mode == 'bookkeeping' && !cancelled()
         shell: bash
         run: |
