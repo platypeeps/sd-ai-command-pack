@@ -68,6 +68,11 @@ concrete defect shows the current controls are insufficient.
 Ruff covers pack-owned Python in `install.py`, `installer/`, `scripts/`,
 `templates/scripts/`, and `tests/`. Trellis-owned platform runtime is excluded;
 tracked OpenCode JavaScript receives syntax-only validation with `node --check`.
+`scripts/sd-ai-command-pack-review-preflight.mjs` keeps that `node --check`
+syntax gate in the `lint` job and is additionally coverage-measured with c8 in
+the `ci-scope` job's bookkeeping lane (no floor yet; floors arrive in a
+follow-up at or below measured values). The `templates/scripts/` twin is a
+byte-identical mirror and is not separately measured.
 
 ## Main Branch Policy
 
