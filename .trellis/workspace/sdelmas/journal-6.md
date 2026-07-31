@@ -495,3 +495,41 @@ Repointed sd-ship Stage 2 to the routed sd-review scope=pr loop, added the compo
 ### Next Steps
 
 - None - task complete
+
+
+## Session 263: PR 288 review loop converged for ship composition Phase A
+
+**Date**: 2026-07-30
+**Task**: PR 288 review loop converged for ship composition Phase A
+**Branch**: `fix/simplify-review-shipping-composition`
+
+### Summary
+
+Converged the PR 288 Copilot review loop for the sd-ship Stage 2 repoint and Stage 2b lifecycle step: fixed the router-owned reviewer-request wording the round-1 comment flagged, refreshed the candidate ledger, and verified CI green with a clean round-2 review.
+
+### Main Changes
+
+- Reworded the recommended review loop's reviewer-request rule in the usage guide to say the router issues the configured request (default @copilot alias) and manual reviewer or backend requests stay outside the loop, resolving the Copilot round-1 ambiguity with the configuration paragraph.
+- Refreshed docs/fleet/candidate-validation.json after the doc clarification changed the release payload digest.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7fae38b1` | feat(ship): repoint Stage 2 to routed sd-review and add Stage 2b lifecycle step |
+| `e8d10910` | docs: clarify router-owned reviewer requests in recommended loop |
+| `b2e8d830` | chore(release): refresh candidate ledger for doc clarification |
+
+### Testing
+
+- [OK] make release-prep green after the clarification (==> Full check complete, exit 0)
+- [OK] PR 288 CI green on head b2e8d830 (CI Result, CI scope, Release payload gate, lint, security all pass); Copilot round-2 review returned zero new comments and the round-1 thread is resolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
