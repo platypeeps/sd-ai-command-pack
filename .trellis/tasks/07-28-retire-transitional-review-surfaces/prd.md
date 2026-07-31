@@ -23,9 +23,9 @@ surfaces: `sd-full-check`, `sd-review-local`, `sd-review-pr`.
 
 ## Acceptance Criteria
 
-- [ ] Every transitional surface has a `removed_version` recorded in the registry.
-- [ ] `sd-help` reports the transitional status for the legacy commands.
-- [ ] `make check` passes.
+- [x] Every transitional surface has a `removed_version` recorded in the registry.
+- [x] `sd-help` reports the transitional status for the legacy commands.
+- [x] `make check` passes.
 
 ## Notes
 
