@@ -137,8 +137,11 @@ cached or refreshed and whether GitHub inventory was queried. Do not claim the
 repository or fleet is clean when the report marks any member dirty, stale,
 missing, behind, or diverged.
 
-If the user later supplies an F/T/R identifier, treat it as a report-local
+If the user later supplies an F/T identifier, treat it as a report-local
 selector for this snapshot and resolve it back to the durable row contents. A
 selection is a new request; it does not retroactively authorize `sd-status` to
 mutate the repository or bypass the selected workflow's task, approval, and
 safety gates.
+
+A selector that is not an `F-*` or `T-*` row of this snapshot is unsupported
+input: report it as unresolved against the current report and take no action.

@@ -115,7 +115,7 @@ The JSON result is the primary deterministic handoff:
   merge, branch deletion, archive, force operation, or broad cleanup. See
   [`../sd-help/references/environment-blocked-recovery.md`](../sd-help/references/environment-blocked-recovery.md);
 - `status` embeds the complete delegated `sd-status` result, including
-  repo-wide open PRs/issues, Trellis inventory, review rounds, F/T/R selectors,
+  repo-wide open PRs/issues, Trellis inventory, review rounds, F/T selectors,
   and next steps; and
 - `outcome.status` is `clean`, `blocked`, `indeterminate`, or `failed`, with
   stable `outcome.reasonCodes`.

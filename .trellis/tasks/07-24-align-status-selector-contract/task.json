@@ -3,7 +3,7 @@
   "name": "align-status-selector-contract",
   "title": "Align status and housekeeping selector contracts",
   "description": "Resolve review finding 1.1.1 by removing the obsolete R-selector and Roadmap contract from every live status and housekeeping surface while preserving roadmap-file items as F follow-ups.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
