@@ -2358,6 +2358,10 @@ def record_result_from_receipt(
                 "ship_receipt_merge_unverified",
                 "receipt final head is not reachable from the base branch",
             )
+    # Receipt fields name stage outcomes (finishWork, housekeeping); the
+    # ledger's current fields carry the -State suffix shared by the other
+    # transient snapshot fields. The ledger stores only bounded compact
+    # strings; the full anomaly list stays in the ship report and journal.
     current["mergeState"] = merge_state
     current["finishWorkState"] = receipt["finishWork"]
     current["housekeepingState"] = receipt["housekeeping"]

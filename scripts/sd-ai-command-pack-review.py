@@ -689,6 +689,9 @@ def _run_local(
     script = repo / LOCAL_SCRIPT
     if not script.is_file() or script.is_symlink():
         raise ReviewError(f"missing regular local review helper: {LOCAL_SCRIPT}")
+    # The local stage owns its artifact root: an in-repo, git-ignored
+    # directory (default .build/sd-review). The coordinator's private root
+    # must stay outside the repository, so it is never forwarded here.
     command = [
         sys.executable,
         str(script),

@@ -1522,13 +1522,13 @@ class WorkLoopTests(InstallTestCase):
             state["iteration"] = index + 1
             state["current"]["task"] = f"task-{index}"
             state["current"]["prNumber"] = 100 + index
-            state["current"]["prUrl"] = f"https://example.test/pr/{index}"
+            state["current"]["prUrl"] = f"https://example.test/pull/{index}"
             module.record_result(
                 state,
                 task=f"task-{index}",
                 outcome="completed",
                 pr_number=100 + index,
-                pr_url=f"https://example.test/pr/{index}",
+                pr_url=f"https://example.test/pull/{index}",
                 review_rounds=2,
                 ci_retries=1,
                 decisions=[f"decision {index}"],
@@ -3104,13 +3104,13 @@ class WorkLoopTests(InstallTestCase):
             module.transition_state(state, "shipping")
             module.transition_state(state, "followups")
             state["current"]["prNumber"] = 100 + index
-            state["current"]["prUrl"] = f"https://example.test/pr/{100 + index}"
+            state["current"]["prUrl"] = f"https://example.test/pull/{100 + index}"
             module.record_result(
                 state,
                 task=f"task-{index + 1}",
                 outcome="completed",
                 pr_number=100 + index,
-                pr_url=f"https://example.test/pr/{100 + index}",
+                pr_url=f"https://example.test/pull/{100 + index}",
                 review_rounds=1,
                 ci_retries=0,
                 decisions=[f"selected task-{index + 1}"],
@@ -3570,7 +3570,7 @@ class WorkLoopTests(InstallTestCase):
                     "--pr-number",
                     "42",
                     "--pr-url",
-                    "https://example.test/pr/42",
+                    "https://example.test/pull/999",
                     "--review-rounds",
                     "2",
                     "--json",

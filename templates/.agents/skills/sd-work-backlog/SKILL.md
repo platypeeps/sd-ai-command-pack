@@ -282,7 +282,7 @@ bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
   --from-receipt "<receipt path from SD_SHIP_MERGE_RESULT_RECEIPT>"
 ```
 
-The helper independently revalidates the receipt against the ledger and git
+The helper independently revalidates the receipt against the ledger and Git
 before recording; `--from-receipt` supplies the outcome, PR, review-round, and
 CI-retry values, so do not pass those flags alongside it. After the helper
 accepts the receipt, delete the receipt file, verify the repository is back on
