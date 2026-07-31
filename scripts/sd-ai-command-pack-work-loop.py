@@ -2298,15 +2298,17 @@ def load_ship_receipt(path: Path) -> dict[str, Any]:
         raise _ship_receipt_error(
             "ship_receipt_malformed", "receipt must be a JSON object"
         )
+    schema_version = receipt.get("schemaVersion")
     if (
-        receipt.get("schemaVersion") != SHIP_RECEIPT_SCHEMA_VERSION
+        isinstance(schema_version, bool)
+        or schema_version != SHIP_RECEIPT_SCHEMA_VERSION
         or receipt.get("kind") != SHIP_RECEIPT_KIND
     ):
         raise _ship_receipt_error(
             "ship_receipt_version_unsupported",
             f"expected schemaVersion {SHIP_RECEIPT_SCHEMA_VERSION} and kind"
             f" {SHIP_RECEIPT_KIND}, found"
-            f" {receipt.get('schemaVersion')!r}/{receipt.get('kind')!r}",
+            f" {schema_version!r}/{receipt.get('kind')!r}",
         )
 
     def malformed(detail: str) -> WorkLoopError:

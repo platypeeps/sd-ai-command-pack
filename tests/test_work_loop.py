@@ -3691,6 +3691,7 @@ class WorkLoopTests(InstallTestCase):
         base = self.make_ship_receipt(state, finalHead=merged_head)
         for overrides in (
             {"schemaVersion": 2},
+            {"schemaVersion": True},
             {"kind": "sd-ship-other"},
         ):
             with self.subTest(overrides=overrides):
