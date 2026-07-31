@@ -93,13 +93,11 @@ stopping before the watch-and-merge tail, and the internal coordinator is
 report-only by construction, so there is no handoff to suppress. `no-merge`
 fails as an unknown argument like any other unrecognized name.
 
-`sd-create-pr`'s Stage 1 orchestration context is an internal delegation
-mode, not a public `sd-ship` argument. The composite supplies it only as
-described below so review side effects have one owner. Reject user-supplied
-`publish-only`, `caller=`, `stage=`, or `return-after=` controls as unknown
-arguments.
+Stage 1 invokes `sd-create-pr`'s public publish-only flow; there is no
+composite-only delegation context. `publish-only`, `caller=`, `stage=`, and
+`return-after=` fail as unknown arguments like any other unrecognized name.
 
-The autonomous work-loop controller may supply one additional trusted internal
+The autonomous work-loop controller may supply one trusted internal
 context after resolving this skill directly:
 
 ```text
@@ -124,12 +122,12 @@ before Stage 1.
    instructions: its own preconditions, gates, loops, and reports remain
    authoritative, and sd-ship never re-implements, abridges, or reorders a
    stage's internals.
-2. Stage 1 — `sd-create-pr`: delegate its flow with the exact internal
-   orchestration context `caller: sd-ship`, `stage: 1`, `return-after: pr`.
-   This runs update-spec, commit, push, and PR creation/reuse, then returns the
-   publish result without entering `sd-create-pr`'s standalone review handoff.
-   Record the PR number and URL for the report. If `until=pr`, stop the chain
-   here without running review.
+2. Stage 1 — `sd-create-pr`: run its public publish-only flow. This runs
+   update-spec, commit, push, and PR creation/reuse, then reports the next
+   command instead of running review — `sd-create-pr` never resolves or
+   invokes a review skill in any mode. Read the PR number, URL, and head
+   from its report and record them for this chain's report. If `until=pr`,
+   stop the chain here without running review.
 3. Stage 2 — `sd-review scope=pr`: run its bounded review loop — typed
    deterministic `sd-check`, configured remote review, fixes, replies — until
    the loop stops clean or blocked. The successor is review-only: it never
@@ -225,9 +223,9 @@ before Stage 1.
   `until=review` and `until=merge`, and never for `until=pr`, which stops
   before any review cycle exists. The publish, review, watch, and housekeeping
   stages never repeat it.
-- The Stage 1 orchestration context is supplied by this composite directly to
-  `sd-create-pr`. Never expose it through a platform adapter, environment
-  variable, or user-facing argument.
+- Stage 1 invokes `sd-create-pr`'s public publish-only flow. There is no
+  composite-only delegation context, platform-adapter control, or
+  environment variable that changes `sd-create-pr`'s behavior for sd-ship.
 - sd-ship never force-pushes; any push happens inside a stage flow, under
   that stage skill's own rules.
 - A stopped chain is a report, not an error loop: never restart the chain

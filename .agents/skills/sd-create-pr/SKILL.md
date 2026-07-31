@@ -85,23 +85,13 @@ offer a question as a way to cross the force-push or destructive boundary.
 
 ## Invocation Modes
 
-Standalone mode is the only public `sd-create-pr` behavior: publish or reuse
-the pull request, then report the next command in Step 6.
-
-`sd-ship` may delegate its Stage 1 with this exact internal orchestration
-context:
-
-- caller: `sd-ship`
-- stage: `1`
-- return-after: `pr`
-
-Accept that context only while the current session is actively executing
-`sd-ship` Stage 1 and the composite supplied all three values. It is not an
-environment variable or a public argument. If the user invokes `sd-create-pr`
-with `publish-only`, `caller=`, `stage=`, or `return-after=`, reject the
-request before Step 1 and make no update-spec, branch, commit, push, or PR
-changes. Never infer the internal context merely because a PR already exists
-or the user mentions `sd-ship`.
+`sd-create-pr` has one behavior in every invocation: publish or reuse the
+pull request, then report the next command in Step 6. There is no
+composite-only delegation mode or internal orchestration context —
+`sd-ship` Stage 1 invokes this same public flow and reads the Step 6
+report. If the invocation carries `publish-only`, `caller=`, `stage=`, or
+`return-after=`, reject the request before Step 1 and make no update-spec,
+branch, commit, push, or PR changes.
 
 ## Step 1: Resolve Prerequisites And Branch State
 
@@ -290,7 +280,7 @@ byte-for-byte and leave the existing strict scope validator authoritative.
 
 For the no-custom-body path, use secure regular temporary files to capture the
 exact auto-filled body and the NUL-delimited branch diff. The same Step 5 flow
-applies to standalone publication and verified `sd-ship` Stage 1 publication:
+applies to every invocation, including `sd-ship` Stage 1:
 
 ```bash
 if ! gh pr create --base "$BASE_BRANCH" --fill; then
@@ -370,18 +360,16 @@ After creation or reuse, capture:
 - head branch and head SHA
 - base branch
 
-## Step 6: Return To SD Ship Or Report The Next Command
+## Step 6: Report The Next Command
 
-When and only when the verified internal orchestration context is active,
-return the Step 5 PR number, URL, base branch, head branch, head SHA, and
-created/reused result to the active `sd-ship` Stage 1. The composite owns its
-separate Stage 2 (`sd-review scope=pr`) and its Stage 2b lifecycle step.
-
-For every standalone invocation, publication ends this command's work. Do not
-resolve or invoke any review skill, finish-work, housekeeping, or a polling
-loop. The final report names the next command instead: `sd-review scope=pr`
-for the review loop alone, or `sd-ship` for the remaining publish-to-merge
-chain.
+Publication ends this command's work in every invocation, including
+`sd-ship` Stage 1. Do not resolve or invoke any review skill, finish-work,
+housekeeping, or a polling loop. The final report names the next command
+instead: `sd-review scope=pr` for the review loop alone, or `sd-ship` for
+the remaining publish-to-merge chain. A composite caller reads the Step 5
+PR number, URL, base branch, head branch, head SHA, and created/reused
+result from this report; the composite owns its separate Stage 2
+(`sd-review scope=pr`) and its Stage 2b lifecycle step.
 
 ## Final Report
 
@@ -392,7 +380,6 @@ Report:
 - Staged/committed paths and commit SHA, or why no commit was needed.
 - Push target and result.
 - PR number, URL, base branch, and whether the PR was created or reused.
-- Outcome: the recommended next command for a standalone run
-  (`sd-review scope=pr`, or `sd-ship` for the full chain), or confirmation
-  that verified `sd-ship` Stage 1 received the publish result.
+- Outcome: the recommended next command (`sd-review scope=pr`, or `sd-ship`
+  for the full chain).
 - Final working-tree state.

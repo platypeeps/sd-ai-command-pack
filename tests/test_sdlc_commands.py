@@ -601,27 +601,32 @@ class SdlcCommandsTests(InstallTestCase):
         )[0]
         invocation_text = " ".join(invocation_modes.split())
         for pin in (
-            "caller: `sd-ship`",
-            "stage: `1`",
-            "return-after: `pr`",
+            "one behavior in every invocation",
+            "no composite-only delegation mode or internal orchestration context",
+            "`sd-ship` Stage 1 invokes this same public flow",
             "reject the request before Step 1",
             "make no update-spec",
         ):
             self.assertIn(pin, invocation_text)
+        for removed_control in ("caller: `sd-ship`", "stage: `1`", "return-after: `pr`"):
+            self.assertNotIn(removed_control, invocation_text)
 
         create_step_6 = create_pr.split("## Step 6", 1)[1].split("## Final Report", 1)[
             0
         ]
         create_step_6_text = " ".join(create_step_6.split())
-        self.assertIn("verified internal orchestration context", create_step_6_text)
+        self.assertNotIn("orchestration context", create_step_6_text)
         self.assertIn(
             "Do not resolve or invoke any review skill", create_step_6_text
         )
-        self.assertIn("For every standalone invocation", create_step_6_text)
+        self.assertIn(
+            "in every invocation, including `sd-ship` Stage 1", create_step_6_text
+        )
         self.assertIn(
             "names the next command instead: `sd-review scope=pr`",
             create_step_6_text,
         )
+        self.assertIn("A composite caller reads the Step 5", create_step_6_text)
 
         safety_text = " ".join(
             create_pr.split("## Safety Rules", 1)[1]
@@ -638,13 +643,14 @@ class SdlcCommandsTests(InstallTestCase):
         ship_stage_1 = ship.split("2. Stage 1", 1)[1].split("3. Stage 2", 1)[0]
         ship_stage_1_text = " ".join(ship_stage_1.split())
         for pin in (
-            "caller: sd-ship",
-            "stage: 1",
-            "return-after: pr",
-            "without entering `sd-create-pr`'s standalone review handoff",
+            "run its public publish-only flow",
+            "reports the next command instead of running review",
+            "never resolves or invokes a review skill in any mode",
             "stop the chain here without running review",
         ):
             self.assertIn(pin, ship_stage_1_text)
+        for removed_control in ("caller: sd-ship", "stage: 1", "return-after: pr"):
+            self.assertNotIn(removed_control, ship_stage_1_text)
 
         ship_safety = ship.split("## Safety rules", 1)[1].split("## Final report", 1)[0]
         ship_safety_text = " ".join(ship_safety.split())
@@ -684,8 +690,7 @@ class SdlcCommandsTests(InstallTestCase):
 
         self.assertIn("user-provided body", normalized)
         self.assertIn("byte-for-byte", normalized)
-        self.assertIn("standalone", normalized)
-        self.assertIn("verified `sd-ship` Stage 1", normalized)
+        self.assertIn("every invocation, including `sd-ship` Stage 1", normalized)
         self.assertNotIn("gh pr edit --body ", step_5)
         self.assertNotIn("gh pr create --body ", step_5)
         self.assertNotIn("keeping GitHub's auto-filled body unchanged", step_5)
@@ -833,7 +838,7 @@ class SdlcCommandsTests(InstallTestCase):
             "runs the internal read-only watch coordinator in Stage 3", guide_text
         )
         self.assertIn("housekeeping exactly once", guide_text)
-        self.assertIn("Stage 2 the only review owner", guide_text)
+        self.assertIn("Stage 2 is the only review owner", guide_text)
         self.assertIn("no review for `until=pr`", guide_text)
         self.assertIn("Stage 2b owns the one post-cycle review-learning pass", guide_text)
         self.assertIn(

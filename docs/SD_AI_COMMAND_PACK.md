@@ -1418,12 +1418,12 @@ stage arguments such as `timeout-minutes=` pass through. It adds no new
 gate logic; every stage's own gates remain authoritative, and a failed or
 blocked stage stops the chain with that stage's report.
 
-Stage 1 delegates `sd-create-pr` with an internal composite-only orchestration
-context that returns after PR publication. It is not a public argument or
-environment variable. This keeps standalone `sd-create-pr` behavior unchanged
-while making Stage 2 the only review owner in `sd-ship`: no review for
-`until=pr`, and one identical review-only loop for `until=review` and
-`until=merge`.
+Stage 1 invokes the public `sd-create-pr` flow, which publishes or reuses
+the PR and reports the next command instead of running review; there is no
+composite-only orchestration context or hidden argument. `sd-create-pr`
+behaves identically everywhere, and Stage 2 is the only review owner in
+`sd-ship`: no review for `until=pr`, and one identical review-only loop for
+`until=review` and `until=merge`.
 
 Stage 2b owns the one post-cycle review-learning pass, invoking
 `sd-review-learnings` in its read-only PR-scoped completed-cycle form for both
