@@ -614,3 +614,43 @@ Converged the PR #289 review loop (Copilot round 1 returned zero findings, all C
 ### Next Steps
 
 - Survey the backlog and start the next item
+
+
+## Session 266: Measure .github/scripts Python under coverage (lane 1)
+
+**Date**: 2026-07-31
+**Task**: Measure .github/scripts Python under coverage (lane 1)
+**Branch**: `fix/measure-unmeasured-runtime-surface`
+
+### Summary
+
+Implemented lane 1 of 07-28-measure-unmeasured-runtime-surface: added .github/scripts/*.py to the coverage [run] include list (plus */ variant) so CI automation helpers are measured, updated the CONTRIBUTING.md exemption paragraph (A-033 partial reversal), and shipped the change through PR #292 with a clean Copilot round and green CI. Recorded the 77% measured baseline; no floor introduced. Lanes 2 and 3 stay open.
+
+### Main Changes
+
+- Added .github/scripts/*.py and */.github/scripts/*.py to .coveragerc [run] include; [report] strict installer gate untouched
+- Updated CONTRIBUTING.md so .github/scripts/*.py is no longer documented as coverage.py-exempt; floors deferred to a follow-up at or below measured values
+- Ticked lane 1 acceptance criterion and recorded the 77% (233-statement) measured baseline in the task PRD
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `82cc6a03` | feat: measure .github/scripts Python under coverage |
+| `0c73cb0` | chore(task): record lane 1 baseline for 07-28-measure-unmeasured-runtime-surface |
+
+### Testing
+
+- [OK] coverage report --include=".github/scripts/*" shows bookkeeping_ci_scope.py 233 stmts 77% (non-zero measurement gate)
+- [OK] grep [report] .coveragerc — include still install.py + installer/*, fail_under=100 unchanged
+- [OK] make release-prep exit 0
+- [OK] PR #292 CI Result pass (unit matrix, lint, security, release payload gate); Copilot review round 1 zero findings
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

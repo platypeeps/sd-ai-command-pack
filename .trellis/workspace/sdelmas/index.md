@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 265
-- **Last Active**: 2026-07-30
+- **Total Sessions**: 266
+- **Last Active**: 2026-07-31
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~615 | Active |
+| `journal-6.md` | ~653 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 266 | 2026-07-31 | Measure .github/scripts Python under coverage (lane 1) | `82cc6a03`, `0c73cb0` | `fix/measure-unmeasured-runtime-surface` |
 | 265 | 2026-07-30 | Merge Phase B PR #289 and close simplify-review-shipping-composition | `d6de646d7a7b` | `chore/archive-simplify-review-shipping-composition` |
 | 264 | 2026-07-30 | Ship Phase B of simplify-review-shipping-composition (0.57.0) | `13661913`, `71d12d1f`, `190f2585`, `1f50f3b9`, `0812a4b0` | `fix/simplify-review-shipping-composition` |
 | 263 | 2026-07-30 | PR 288 review loop converged for ship composition Phase A | `e8d10910`, `b2e8d830` | `fix/simplify-review-shipping-composition` |
