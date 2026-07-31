@@ -2008,7 +2008,7 @@ class GeneratedParityTests(InstallTestCase):
             "review": "Run one exact-scope local and routed-remote Software Delivery review lifecycle.",
             "review-pr": "Run the Software Delivery (SD) pull-request review loop.",
             "review-local": "Run the Software Delivery (SD) local review loop.",
-            "ship": "Take the current branch from committed work to a merged pull request by sequencing the standard SD create-pr, review-pr, watch-pr, and housekeeping stages.",
+            "ship": "Take the current branch from committed work to a merged pull request by sequencing the standard SD create-pr, routed review, lifecycle, watch-pr, and housekeeping stages.",
             "review-learnings": "Detect or update repository review learnings.",
             "check": "Run deterministic read-only Software Delivery checks and report a typed result.",
             "full-check": "Run the Software Delivery (SD) full-check gate for deterministic checks, local review, and readiness reporting.",

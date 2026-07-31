@@ -49,8 +49,8 @@ offer a question as a way to cross the force-push or destructive boundary.
 - Resolve `sd-update-spec` by name using the agent's trusted installed-skill
   resolver before starting. In standalone mode, also resolve `sd-review-pr`
   before starting. In verified `sd-ship` Stage 1 mode, the composite owns
-  `sd-review-pr` resolution for its separate Stage 2; this skill must not
-  resolve or invoke it. Stop if a required skill is missing, unreadable, empty,
+  `sd-review` resolution for its separate Stage 2; this skill must not
+  resolve or invoke any review skill. Stop if a required skill is missing, unreadable, empty,
   resolves to more than one candidate, fails validation, defines contradictory
   steps that violate this command's safety rules, or requires unavailable
   tools.
@@ -379,9 +379,9 @@ After creation or reuse, capture:
 When and only when the verified internal orchestration context is active,
 return the Step 5 PR number, URL, base branch, head branch, head SHA, and
 created/reused result to the active `sd-ship` Stage 1. Do not resolve or invoke
-`sd-review-pr`, run finish-work, or run housekeeping from this branch. The
-composite owns its separate Stage 2 and decides whether review is normal or
-uses `defer-finish-work`.
+`sd-review-pr`, `sd-review`, finish-work, or housekeeping from this branch. The
+composite owns its separate Stage 2 (`sd-review scope=pr`) and its Stage 2b
+lifecycle step.
 
 For every standalone invocation, preserve the normal handoff below.
 

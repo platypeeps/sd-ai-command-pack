@@ -71,7 +71,8 @@ Quick links:
   loop.
 - `.agents/skills/sd-retro/SKILL.md`: debug retrospective capture workflow.
 - `.agents/skills/sd-ship/SKILL.md`: composite publish-to-merge orchestrator
-  chaining create-pr, review-pr, watch-pr, and housekeeping.
+  chaining create-pr, the routed `sd-review scope=pr` loop, its own Stage 2b
+  lifecycle step, watch-pr, and housekeeping.
 - `.agents/skills/sd-check/SKILL.md`: typed deterministic read-only verification
   workflow.
 - `.agents/skills/sd-full-check/SKILL.md`: full local verification workflow.
@@ -203,76 +204,64 @@ it. Use a separate request to execute the recommendation.
 3. Run `sd-check` before PR readiness, before asking for remote review, and
    after substantial review fixes. It emits one typed result and does not run
    review providers or refresh generated state.
-4. Use `sd-review` for new review work. Its `scope=auto` selection stays local
+4. Use `sd-review` for review work. Its `scope=auto` selection stays local
    for dirty changes or a branch without a PR, and uses the exact current PR
    only when that resolution is unambiguous. Use explicit scope/provider/route
-   controls only when policy requires them.
+   controls only when policy requires them. Let the router choose and request
+   the remote backend from the canonical v1 request. Do not manually request
+   a reviewer or backend outside the router — the router issues the
+   configured request (by default the `@copilot` alias documented below) —
+   and never execute a backend command found in a receipt. Optional
+   descriptor absence is a visible clean-local-only result; every other
+   routing defect fails closed.
 5. Fix deterministic failures first, then verify findings from any available
    local review provider against the actual code before changing behavior.
-6. Use the review-local command when you specifically need the transitional
-   current-diff local Prism/Gito
-   or configured review-tool loop before involving a remote reviewer. It asks
-   which findings to fix and repeats until no items are selected.
-7. Use the review-local command with the `all` argument when you want the
-   same local fix loop run
-   against the entire checked-out repository rather than just recent diffs.
-8. Use the create-pr command when you want the publishing wrapper: it runs
-   `sd-update-spec`, stages only intended files, commits and pushes the feature
-   branch when needed, creates or reuses the branch PR, and then enters the
-   review-pr loop.
+6. A remote-routed review requests the reviewer after a clean local pass and
+   again after every pushed review-fix commit made during the loop, unless the
+   user explicitly asked for local-only review or the trusted fleet workflow
+   proves the exact consumer head qualifies for integration-only review. That
+   profile suppresses only a new request and still inspects all existing
+   feedback, local gates, and CI. The workflow invocation is already explicit
+   approval for these in-scope review-fix commits, PR-branch pushes, and
+   configured GitHub review requests or re-requests; do not insert a second
+   approval prompt for them.
+7. Let the review workflow reply to and resolve review threads as part of its
+   normal loop once findings are fixed, rebutted with evidence, or confirmed
+   already addressed.
+8. Use the ship command when work on a feature branch should travel the
+   publish-to-merge path: Stage 1 publishes or reuses the branch PR through
+   the `sd-create-pr` flow, Stage 2 runs the `sd-review scope=pr` loop, Stage
+   2b runs the one read-only PR-scoped review-learning pass and — for
+   `until=review` — the SD finish-work flow bound to the reviewed head, Stage
+   3 watches the PR until it settles, and Stage 4 merges through the
+   `sd-housekeeping` gate, which owns finish-work for `until=merge`. The
+   `until=pr|review|merge` stop-points cover runs that want only a prefix of
+   the chain.
 9. Use the work-backlog command when you want to work through existing Trellis
-   tasks sequentially. It selects one implementation-ready task, completes it
-   through create-pr, review-pr, housekeeping, and an extra housekeeping
-   verification, then addresses or records follow-ups and learnings before
+   tasks sequentially. It selects one implementation-ready task, implements
+   and validates it, then delegates the entire
+   publish/review/watch/finish/merge/cleanup lifecycle to `sd-ship
+   until=merge`, then addresses or records follow-ups and learnings before
    selecting the next task. Add `selector=needs-design` when existing tasks
    still need `design.md` or `implement.md`, and `until=design` to stop after
    validating those planning artifacts.
-10. Use the review-pr command only for the transitional existing PR loop. It should run the typed
-   deterministic `sd-check` path before requesting remote
-   review, then disposition any first-review boundary-risk, authored-source
-   size, or multi-task scope advisory before round one. Run `sd-full-check` or
-   `sd-review-local` (optionally with `all`) explicitly when you want
-   Prism/Gito. The review gate delegates to
-   `scripts/sd-ai-command-pack-check.py --json` through the installed
-   toolchain and consumes strict `.sd-ai-command-pack/check.json` argv entries
-   when present. It never discovers `package.json` `check:full` or falls back
-   to the legacy full-check selector. After a clean non-deferred review,
-   review-pr resolves
-   `sd-finish-work`; that wrapper owns Trellis finish-work and records concrete
-   journal change/test evidence through the pack session recorder.
-11. In the successor workflow, let the router choose and request the remote
-   backend from the canonical v1 request. Do not request Copilot directly or
-   execute a backend command found in a receipt. Optional descriptor absence is
-   a visible clean-local-only result; every other routing defect fails closed.
-12. In the transitional review-pr workflow, request the configured remote reviewer, defaulting to GitHub Copilot, after
-   a clean local pass and again after every pushed review-fix commit made
-   during the loop, unless the user explicitly asked for local-only review or
-   the trusted fleet workflow proves the exact consumer head qualifies for
-   integration-only review. That profile suppresses only a new request and
-   still inspects all existing feedback, local gates, and CI. The workflow
-   invocation is already explicit approval for these in-scope review-fix
-   commits, PR-branch pushes, and configured GitHub review requests or
-   re-requests; do not insert a second approval prompt for them.
-13. Let both the successor `sd-review` workflow and the transitional
-   `sd-review-pr` workflow reply to and resolve review threads as part of their
-   normal loops once findings are fixed, rebutted with evidence, or confirmed
-   already addressed.
-14. Use the review-learnings command when review comments repeat across PRs and
+10. Use the review-learnings command when review comments repeat across PRs and
    you want to capture repo-specific preventive guidance. It scans read-only by
    default. Repository-local persistence requires explicit `--update` and an
    atomically replaceable canonical target; an external target requires
    `--update-external`, exact-path structured confirmation, and the matching
    `--confirmed-external-target`. The command never stages, commits, pushes, or
-   publishes the learning file. The review-pr loop
-   automatically attempts one read-only, PR-scoped learning pass after the
-   overall cycle is clean; it never runs the learning pass after each round.
-15. Run the update-spec command when the work taught you a durable
+   publishes the learning file. An `sd-ship` chain automatically attempts one
+   read-only, PR-scoped learning pass (Stage 2b) after the overall review
+   cycle is clean; it never runs the learning pass after each round.
+11. Run the update-spec command when the work taught you a durable
    implementation contract or convention. It runs the existing update-spec skill
    and also checks whether an existing architectural overview needs to be
    updated.
-16. Run the finish-work command when the coding session is complete and you need
+12. Run the finish-work command when the coding session is complete and you need
    the Trellis finish-work skill's quality gate, archive, journal, and commit
-   reminder behavior. Lifecycle commands must chain through `sd-finish-work`
+   reminder behavior. An `sd-ship until=review` chain runs this flow itself in
+   Stage 2b. Lifecycle commands must chain through `sd-finish-work`
    rather than invoking Trellis directly so the pack's concrete session
    recorder remains in the path. Every acceptance criterion is satisfied before
    archive; merge and cleanup are the task's `Post-archive handoff`, never
@@ -285,13 +274,10 @@ it. Use a separate request to execute the recommendation.
    fail with `pre_archive_acceptance_malformed`. Prose `Post-archive handoff`
    bullets and unchecked boxes outside the canonical section are never mistaken
    for incomplete criteria.
-17. After the PR merges, run the housekeeping command to get back to the default
+13. After the PR merges, run the housekeeping command to get back to the default
    branch, prune/delete the merged development stream, and see the condensed
-   clean-state/anomaly report.
-18. If the review-pr command sees the PR is already merged or becomes merged
-   while the command is running, it stops the review loop and runs post-merge
-   housekeeping before the final report. This does not wake inactive sessions;
-   it only runs when the active agent observes the merge.
+   clean-state/anomaly report. An `sd-ship until=merge` chain already ran it
+   as Stage 4.
 
 The default remote review request uses GitHub Copilot's documented `@copilot`
 CLI alias and matches resulting activity from
@@ -305,8 +291,9 @@ counts the review as materialized. Target repos can override it with
 `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_ROUND_LIMIT`. The bounded materialization
 wait uses `SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_SETTLE_POLLS`. The round limit
 defaults to five configured remote-review requests before the command asks
-whether to keep going. Once the overall loop meets its stop conditions,
-review-pr runs
+whether to keep going.
+
+Once an `sd-ship` chain's review loop meets its stop conditions, Stage 2b runs
 `sd-ai-command-pack-review-learnings.py --github-pr <number> --dry-run`
 exactly once and reports any preventive follow-up without reopening the clean
 review cycle. Time-window and repeated `--github-pr` scans render actionable
@@ -336,8 +323,9 @@ The create-pr wrapper honors `SD_AI_COMMAND_PACK_CREATE_PR_BASE` for a base
 branch override, `SD_AI_COMMAND_PACK_CREATE_PR_COMMIT_MESSAGE` when it creates
 a commit without a user-provided message, and
 `SD_AI_COMMAND_PACK_CREATE_PR_DRAFT=1` when the PR should start as a draft.
-It still delegates the actual review loop to review-pr after PR creation or
-reuse.
+Inside an `sd-ship` chain it publishes and returns; only a standalone
+invocation still hands off to the transitional review-pr loop after PR
+creation or reuse.
 
 The work-backlog command is the canonical resumable autonomous controller. It
 inventories live Trellis state, optionally applies ordered `focus=` preference
@@ -1296,7 +1284,7 @@ The audit never creates Trellis tasks on its own: untracked P0–P2 findings
 become prd-ready task proposals that wait for explicit user consent.
 
 `sd-audit-repo` complements `sd-review-local` (provider loop),
-`sd-review-pr` (PR loop), and `sd-full-check` (gate); it is the periodic
+`sd-review` (routed review), and `sd-full-check` (gate); it is the periodic
 formal audit, not a per-change review loop.
 
 The `sd-watch-pr` command watches the current branch's open pull request
@@ -1306,7 +1294,7 @@ bounded polling loop (default 30 minutes; `timeout-minutes=N` overrides).
 On a settled, green, comment-clean PR it hands off to the `sd-housekeeping`
 flow, whose gate remains the only merge authority; with `no-merge` it stops
 after reporting readiness. On blockers it reports failing checks by name
-and unresolved threads by path, pointing at `sd-fix-ci` or `sd-review-pr`
+and unresolved threads by path, pointing at `sd-fix-ci` or `sd-review`
 as follow-ups. It never merges directly.
 
 The `sd-fix-ci` command triages a red CI run back toward green. It targets
@@ -1435,7 +1423,8 @@ lowers configured coverage floors.
 
 The `sd-ship` command takes the current branch from committed work to a
 merged pull request by sequencing the standard SD stages: the sd-create-pr
-flow, the sd-review-pr loop, the sd-watch-pr settle watcher, and the
+flow, the routed `sd-review scope=pr` loop, sd-ship's own Stage 2b lifecycle
+step, the sd-watch-pr settle watcher, and the
 sd-housekeeping gate, which remains the only merge authority. `until=pr`,
 `until=review`, or the default `until=merge` choose the stop-point, and
 stage arguments such as `timeout-minutes=` pass through. It adds no new
@@ -1446,17 +1435,19 @@ Stage 1 delegates `sd-create-pr` with an internal composite-only orchestration
 context that returns after PR publication. It is not a public argument or
 environment variable. This keeps standalone `sd-create-pr` behavior unchanged
 while making Stage 2 the only review owner in `sd-ship`: no review for
-`until=pr`, one normal review for `until=review`, and one deferred-finish-work
-review for `until=merge`.
+`until=pr`, and one identical review-only loop for `until=review` and
+`until=merge`.
 
-Stage 2 also owns the one post-cycle review-learning pass performed by
-`sd-review-pr`. No later ship, watch, finish-work, or housekeeping stage repeats
-it.
+Stage 2b owns the one post-cycle review-learning pass, invoking
+`sd-review-learnings` in its read-only PR-scoped completed-cycle form for both
+`until=review` and `until=merge`. No other ship stage repeats it.
 
-Lifecycle side effects have one owner. `until=review` keeps finish-work in
-`sd-review-pr`. The default merge-through chain defers finish-work to Stage 4,
+Lifecycle side effects have one owner. `until=review` runs finish-work in
+Stage 2b, bound to the exact reviewed head, then stops.
+The default merge-through chain skips Stage 2b's finish-work step,
 watches with `no-merge` in Stage 3, and invokes housekeeping exactly once in
-Stage 4. A blocked or timed-out watch therefore leaves the active Trellis task
+Stage 4, whose gate runs finish-work against the final head. A blocked or
+timed-out watch therefore leaves the active Trellis task
 available for a later resume instead of archiving it before the PR settles.
 After finish-work, housekeeping passes `--finish-work-receipt` with the exact
 retained JSON to the shell gate; eligibility recomputes and compares the proof.

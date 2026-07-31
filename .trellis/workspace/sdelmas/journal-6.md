@@ -463,3 +463,72 @@ The archive of 07-29-scope-final-bundle-validator-to-delta moved its prd.md unde
 ### Next Steps
 
 - None - task complete
+
+
+## Session 262: Ship composition Phase A: Stage 2 repoint and Stage 2b
+
+**Date**: 2026-07-30
+**Task**: Ship composition Phase A: Stage 2 repoint and Stage 2b
+**Branch**: `fix/simplify-review-shipping-composition`
+
+### Summary
+
+Repointed sd-ship Stage 2 to the routed sd-review scope=pr loop, added the composite-owned Stage 2b lifecycle step, moved the until=review stop-point, removed defer-finish-work, and drove make release-prep green for 0.56.8.
+
+### Main Changes
+
+- Phase A of simplify-review-shipping-composition: repointed sd-ship Stage 2 from sd-review-pr to the routed sd-review scope=pr loop, added the composite-owned Stage 2b lifecycle step (one PR-scoped review-learnings pass for until=review and until=merge; finish-work bound to the reviewed head for until=review only), moved the until=review stop-point after Stage 2b, and removed the defer-finish-work delegation mode. Updated the authored command source .github/command-sources/sd-ship.md (adapters are generated), sd-ship SKILL, sd-create-pr SKILL, the usage guide's recommended review loop and ship sections, four generated ship adapters, manifest 0.56.8, and CHANGELOG. Restored the guide's explicit remote-reviewer env-var paragraph after a wildcard rewrite broke the shipped-env-vars drift gate.
+
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] make release-prep green end to end (prepare-release 0.56.8 validation, full test suite, lint, audit, full-check); targeted reruns of the six previously failing tests (gemini toml shape, two pack-drift gates, reviewer-configurable, round-limit, shipped-env-vars) all pass; grep confirms zero sd-review-pr or defer-finish-work references remain under the sd-ship skill.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 263: PR 288 review loop converged for ship composition Phase A
+
+**Date**: 2026-07-30
+**Task**: PR 288 review loop converged for ship composition Phase A
+**Branch**: `fix/simplify-review-shipping-composition`
+
+### Summary
+
+Converged the PR 288 Copilot review loop for the sd-ship Stage 2 repoint and Stage 2b lifecycle step: fixed the router-owned reviewer-request wording the round-1 comment flagged, refreshed the candidate ledger, and verified CI green with a clean round-2 review.
+
+### Main Changes
+
+- Reworded the recommended review loop's reviewer-request rule in the usage guide to say the router issues the configured request (default @copilot alias) and manual reviewer or backend requests stay outside the loop, resolving the Copilot round-1 ambiguity with the configuration paragraph.
+- Refreshed docs/fleet/candidate-validation.json after the doc clarification changed the release payload digest.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e8d10910` | docs: clarify router-owned reviewer requests in recommended loop |
+| `b2e8d830` | chore(release): refresh candidate ledger for doc clarification |
+
+### Testing
+
+- [OK] make release-prep green after the clarification (==> Full check complete, exit 0)
+- [OK] PR 288 CI green on head b2e8d830 (CI Result, CI scope, Release payload gate, lint, security all pass); Copilot round-2 review returned zero new comments and the round-1 thread is resolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

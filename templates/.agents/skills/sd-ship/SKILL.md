@@ -7,9 +7,9 @@ description: Use when the user asks to take the current branch all the way from 
 
 Run this project-local skill for `sd-ship` and `/sd:ship` style work. It is
 the composite publish-to-merge orchestrator: one command that sequences the
-standard SD stages — the `sd-create-pr` flow, the `sd-review-pr` loop, the
-`sd-watch-pr` flow, and the `sd-housekeeping` merge gate — as a single
-chain with `until=` stop-points.
+standard SD stages — the `sd-create-pr` flow, the `sd-review scope=pr` loop,
+sd-ship's own Stage 2b lifecycle step, the `sd-watch-pr` flow, and the
+`sd-housekeeping` merge gate — as a single chain with `until=` stop-points.
 
 sd-ship only sequences and reports. Each stage runs under its own skill's
 preconditions, gates, and safety rules, and the chain's stop-points sit
@@ -30,7 +30,7 @@ extra review rounds, destructive actions, or bypassing any delegated gate.
 Read [`../sd-help/references/structured-questions.md`](../sd-help/references/structured-questions.md)
 before asking. During its review stage this composite carries
 `review.higher-risk-fixes`, `review.scope-expansion`, and
-`review.round-extension` unchanged from `sd-review-pr`. It adds no confirmation
+`review.round-extension` unchanged from `sd-review`. It adds no confirmation
 between routine stages already authorized by the invocation.
 
 ## Completion boundary
@@ -53,7 +53,7 @@ branch as a pull request, work the review loop until it is clean, watch
 checks and reviewers until the PR settles, then merge through the
 housekeeping gate.
 
-It complements `sd-create-pr`, `sd-review-pr`, `sd-watch-pr`, and
+It complements `sd-create-pr`, `sd-review`, `sd-watch-pr`, and
 `sd-housekeeping` and replaces none of them: each stage command is still
 the right tool when the user wants exactly one stage, and `until=` covers
 runs that want only a prefix of the chain.
@@ -79,7 +79,8 @@ is arguments-only.
 
 - `until=pr|review|merge` — the chain's stop-point. Default `merge`.
   - `until=pr` stops after Stage 1 creates or reuses the pull request.
-  - `until=review` stops after Stage 2's review loop completes.
+  - `until=review` stops after Stage 2b finishes the Trellis work that
+    follows Stage 2's completed review loop.
   - `until=merge` runs the full chain through the gated merge.
 - `timeout-minutes=N` — pass-through argument, forwarded verbatim to
   `sd-watch-pr` as Stage 3's watch budget. sd-ship neither interprets nor
@@ -89,11 +90,11 @@ is arguments-only.
 stopping before the watch-and-merge tail, so `no-merge` fails as an
 unknown argument like any other unrecognized name.
 
-`sd-create-pr`'s Stage 1 orchestration context, `defer-finish-work`, and Stage
-3's `no-merge` are internal delegation modes, not public `sd-ship` arguments.
-The composite supplies them only as described below so review and lifecycle
-side effects each have one owner. Reject user-supplied `publish-only`,
-`caller=`, `stage=`, or `return-after=` controls as unknown arguments.
+`sd-create-pr`'s Stage 1 orchestration context and Stage 3's `no-merge` are
+internal delegation modes, not public `sd-ship` arguments. The composite
+supplies them only as described below so review and lifecycle side effects
+each have one owner. Reject user-supplied `publish-only`, `caller=`, `stage=`,
+or `return-after=` controls as unknown arguments.
 
 The autonomous work-loop controller may supply one additional trusted internal
 context after resolving this skill directly:
@@ -126,22 +127,33 @@ before Stage 1.
    publish result without entering `sd-create-pr`'s standalone review handoff.
    Record the PR number and URL for the report. If `until=pr`, stop the chain
    here without running review.
-3. Stage 2 — `sd-review-pr`: run its bounded review loop — typed deterministic
-   `sd-check`, configured remote review, fixes, replies — until the loop
-   stops clean or blocked. Its completed loop owns the one read-only,
-   PR-scoped post-cycle review-learning pass; no other ship stage repeats it.
-   With `until=review`, invoke it without
-   `defer-finish-work`, so its normal Step 8 finishes the Trellis work before
-   the chain stops. With `until=merge`, invoke it with `defer-finish-work` and
-   require the explicit Stage 4 handoff; no task archive or final journal
-   commit happens in Stage 2.
-4. Stage 3 — `sd-watch-pr`: for the merge-through path, run its watch flow
+3. Stage 2 — `sd-review scope=pr`: run its bounded review loop — typed
+   deterministic `sd-check`, configured remote review, fixes, replies — until
+   the loop stops clean or blocked. The successor is review-only: it never
+   merges, archives Trellis work, or runs housekeeping, so the lifecycle side
+   effects that used to ride along with review belong to Stage 2b and Stage 4,
+   never to Stage 2. Invoke it identically for `until=review` and
+   `until=merge`; the stop-points differ after review, not inside it.
+4. Stage 2b — the post-review lifecycle step, run by sd-ship itself once
+   Stage 2's loop completes clean. Two steps, in order:
+   - Review learnings: resolve the `sd-review-learnings` skill and run its
+     documented completed-cycle form — read-only and PR-scoped via
+     `--github-pr <PR>` with `--dry-run` — exactly once, under both
+     `until=review` and `until=merge`. This is the one read-only, PR-scoped
+     post-cycle review-learning pass; no other ship stage repeats it.
+   - Finish-work: with `until=review`, run the SD finish-work flow bound to
+     the exact head Stage 2 reviewed, then stop the chain at the
+     `until=review` stop-point. With `until=merge`, skip Stage 2b's
+     finish-work step — Stage 4's gate runs finish-work exactly once against
+     the final head, and running it here too would finish the work twice
+     against two different heads.
+5. Stage 3 — `sd-watch-pr`: for the merge-through path, run its watch flow
    with `no-merge` until the pull request settles green or blocked, forwarding
    `timeout-minutes=` verbatim when it was passed. `no-merge` suppresses the
    standalone watch command's automatic housekeeping handoff so Stage 4 owns
    that side effect exactly once. If Stage 3 blocks or times out, stop the
    chain; this leaves the active Trellis task unarchived for a later resume.
-5. Stage 4 — `sd-housekeeping`: invoke housekeeping exactly once. Its gate
+6. Stage 4 — `sd-housekeeping`: invoke housekeeping exactly once. Its gate
    runs finish-work, pushes any resulting task/journal commits and waits for
    their checks, and reuses finish-work's retained schema-version-1
    bookkeeping receipt bound to that exact final head. It then invokes the
@@ -157,7 +169,7 @@ before Stage 1.
    compact nested result below and return control to the parent controller.
    Do not emit the parent session's final response and do not start another
    task from inside sd-ship.
-6. A failed or blocked stage stops the chain immediately with that
+7. A failed or blocked stage stops the chain immediately with that
    stage's report; later stages do not run and appear in the stage table
    as skipped. Stopping — at a stop-point, a failed stage, or a blocked
    stage — ends the run with the final report, never with a retry.
@@ -171,16 +183,19 @@ before Stage 1.
   merges directly, and neither a stop-point nor a resume changes that
   gate's criteria.
 - In an `until=merge` chain, finish-work and housekeeping side effects belong
-  only to Stage 4. Stage 2 must defer finish-work and Stage 3 must not invoke
-  housekeeping. In an `until=review` chain, Stage 2 retains its normal
-  finish-work behavior.
+  only to Stage 4. Stage 2b skips its finish-work step and Stage 3 must not
+  invoke housekeeping. In an `until=review` chain, Stage 2b owns finish-work,
+  bound to the exact head Stage 2 reviewed. Stage 2 itself never runs
+  finish-work under any `until=` value.
 - Stage 1 always returns after publishing and never runs review. Stage 2 is the
-  only review owner in an `sd-ship` chain: it does not run for `until=pr`, runs
-  once normally for `until=review`, and runs once with `defer-finish-work` for
+  only review owner in an `sd-ship` chain: it does not run for `until=pr`, and
+  runs the same review-only loop once each for `until=review` and
   `until=merge`.
-- Stage 2 is also the only review-learning owner. Its `sd-review-pr` invocation
-  attempts the PR-scoped learning pass once after the overall review loop; the
-  composite, watch, finish-work, and housekeeping stages never repeat it.
+- Stage 2b is the only review-learning owner. It attempts the PR-scoped
+  learning pass exactly once after Stage 2's completed loop — for both
+  `until=review` and `until=merge`, and never for `until=pr`, which stops
+  before any review cycle exists. The publish, review, watch, and housekeeping
+  stages never repeat it.
 - The Stage 1 orchestration context is supplied by this composite directly to
   `sd-create-pr`. Never expose it through a platform adapter, environment
   variable, or user-facing argument.
@@ -225,7 +240,7 @@ The final response is mandatory-shaped: every item below appears in every
 run, and an empty item states its emptiness explicitly. Keep it scannable —
 bullets, one point per line, no paragraph blobs.
 
-- Stage table: one line per stage — stage · outcome — covering all four
+- Stage table: one line per stage — stage · outcome — covering all five
   stages. Outcomes are `completed`, `failed`, `blocked`, or `skipped`, and
   every skipped stage names its reason: the stop-point, the resume entry
   point, or the earlier stage that stopped the chain.
@@ -236,10 +251,10 @@ bullets, one point per line, no paragraph blobs.
   stopped the run before a PR existed.
 - Stopping stage's report: the report of the stage that ended the chain
   early, or an explicit `none — the chain ran to its stop-point`.
-- Finish-work owner and outcome: Stage 2 for `until=review`, Stage 4 for
+- Finish-work owner and outcome: Stage 2b for `until=review`, Stage 4 for
   `until=merge`, or an explicit deferred/unrun state when an earlier stage
   stopped the chain.
-- Post-cycle review learnings: Stage 2's one PR-scoped attempt and outcome, or
+- Post-cycle review learnings: Stage 2b's one PR-scoped attempt and outcome, or
   `not run` with the stage/stop reason.
 - Next step: the single most useful follow-up — the next stage command
   after a stop-point, the stopping stage's own recommendation after a

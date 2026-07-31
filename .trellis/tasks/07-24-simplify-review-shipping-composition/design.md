@@ -91,17 +91,32 @@ makes the lifecycle explicit in `sd-ship`, and `sd-review/SKILL.md:73` forbids
 finish-work inside the successor (option C), while option B silently drops work
 onto the operator for every current `until=review` caller.
 
-So Stage 2b is two explicit `sd-ship` steps, run once after Stage 2 and only
-under `until=review` — `until=merge` reaches Stage 4, which already runs
-finish-work (`SKILL.md:145`) and must not run it twice:
+So Stage 2b is two explicit `sd-ship` steps, run once after Stage 2, with
+different `until=` conditionality — the double-run hazard exists only for
+finish-work, because Stage 4 already runs finish-work (`SKILL.md:145`) while no
+other stage runs the learning pass:
 
-1. finish-work, bound to the same head Stage 2 reviewed;
-2. `sd-review-learnings`, invoked by name.
+1. `sd-review-learnings`, invoked by name in its documented completed-cycle
+   form — `sd-ai-command-pack-review-learnings.py --github-pr <PR> --dry-run`
+   (the skill's default scan analyzes the working-tree diff, which is the
+   wrong scope post-merge-loop) — under both `until=review` and
+   `until=merge`, because the predecessor's completed loop ran the pass
+   regardless of `defer-finish-work` and Stage 4 has no learning step to
+   collide with;
+2. finish-work, bound to the same head Stage 2 reviewed — under `until=review`
+   only; `until=merge` defers it to Stage 4.
 
 Stage 2b does **not** collapse into Stage 2 (that is option C) and does not
 collapse into Stage 4 (which `until=review` never reaches). Under `until=merge`
-Stage 2b is skipped entirely — that skip is the double-run guard, and it is the
-thing to test.
+Stage 2b runs only its learning half — the finish-work skip is the double-run
+guard, and both halves' per-`until=` counts are the thing to test.
+
+Because Stage 2b sits after Stage 2, `until=review`'s stop-point moves with
+it: `SKILL.md:82` currently reads "stops after Stage 2's review loop
+completes" and must be rewritten to stop after Stage 2b, or the new stage is
+unreachable in exactly the mode that needs its finish-work half. The
+user-visible promise — review completes, Trellis work finishes, no merge —
+is unchanged; only the internal stage boundary shifts.
 
 ## R8 — the guide
 
