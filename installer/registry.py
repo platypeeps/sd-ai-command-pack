@@ -1216,6 +1216,58 @@ def command_installed_targets(
     return tuple(targets)
 
 
+def source_only_adapter_twins(
+    name: str,
+    short: str,
+    target_families: tuple[str, ...],
+    *,
+    root: Path,
+) -> tuple[tuple[str, str], ...]:
+    """Return (template source, dev-tree target) adapter pairs for one
+    source-only command.
+
+    Source-only commands have no consumer manifest entries, so the dogfood
+    self-install never refreshes their dev-tree adapters. The command-surface
+    generator and the pack drift gate both derive that dev-tree footprint from
+    this one helper. Mirroring the installer's anchor rule, a platform
+    contributes a pair only when its anchor directory exists under ``root``.
+    """
+
+    def neutral_pair(platform: str) -> tuple[str, str]:
+        pattern = PLATFORM_REGISTRY[platform].command_target_pattern
+        if pattern is None:
+            raise RuntimeError(f"platform has no command target pattern: {platform}")
+        return (
+            f"templates/.commands/{name}.md",
+            pattern.format(filename=f"{name}.md", name=short),
+        )
+
+    pairs: list[tuple[str, tuple[str, str]]] = []
+    if "claude" in target_families:
+        path = f".claude/commands/sd/{short}.md"
+        pairs.append(("claude", (f"templates/{path}", path)))
+    if "cursor" in target_families:
+        pairs.append(("cursor", neutral_pair("cursor")))
+    if "gemini" in target_families:
+        path = f".gemini/commands/sd/{short}.toml"
+        pairs.append(("gemini", (f"templates/{path}", path)))
+    if "github" in target_families:
+        path = f".github/prompts/{name}.prompt.md"
+        pairs.append(("github", (f"templates/{path}", path)))
+    if "opencode" in target_families:
+        pairs.append(("opencode", neutral_pair("opencode")))
+    pairs.extend(
+        (platform, neutral_pair(platform))
+        for platform in LATER_NEUTRAL_COMMAND_PLATFORMS
+        if platform in target_families
+    )
+    return tuple(
+        pair
+        for platform, pair in pairs
+        if (root / PLATFORM_REGISTRY[platform].directory).is_dir()
+    )
+
+
 @dataclass(frozen=True)
 class RetiredCommandSurface:
     id: str
@@ -1890,6 +1942,7 @@ __all__ = [
     "validate_interaction_registry",
     "validate_command_surface_registry",
     "command_installed_targets",
+    "source_only_adapter_twins",
     "validate_shared_skill_references",
     "validate_source_only_command_names",
 ]
