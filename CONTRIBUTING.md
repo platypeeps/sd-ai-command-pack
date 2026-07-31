@@ -132,13 +132,18 @@ behavior changes and the patch number for compatible fixes or documentation.
 - Bump the patch version for compatible bug fixes, performance improvements,
   test-only improvements, doc corrections, provenance/hash refreshes, or
   internal refactors that keep installed behavior stable.
-- Treat command names, command arguments, shipped script paths and CLIs,
-  documented `SD_AI_COMMAND_PACK_*` environment variables, managed-block names,
-  manifest target paths, and generated state file names as stable public
-  surface.
+- Treat command names, command arguments, the paths and CLIs of shipped scripts
+  that carry an explicit entry bullet in the installed guide, documented
+  `SD_AI_COMMAND_PACK_*` environment variables, managed-block names, manifest
+  target paths, and generated state file names as stable public surface.
 - Treat private Python helper functions, shell helper internals, test fixtures,
   local implementation structure, and undocumented temporary files as internal
-  unless a consumer-facing doc names them.
+  unless a consumer-facing doc names them. Shipped scripts on the doc-coverage
+  gate's internal allowlist (`.github/scripts/check-shipped-script-docs.sh` —
+  internal pipeline stages and library modules) stay internal even when the
+  guide mentions them for context, such as the review-local name-collision
+  note: their manifest paths are stable, but only an explicit guide entry
+  bullet makes a script's CLI public surface.
 - Keep deprecated public aliases documented until the removal release that
   intentionally drops them, and note the removal in `CHANGELOG.md`.
 

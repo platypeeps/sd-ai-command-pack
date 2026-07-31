@@ -759,3 +759,39 @@ Fixed audit A-070 residual: KB prune deleted any plain file in a managed categor
 ### Next Steps
 
 - None - task complete
+
+
+## Session 270: Document remaining shipped scripts and gate doc coverage (A-115, PR #297)
+
+**Date**: 2026-07-31
+**Task**: Document remaining shipped scripts and gate doc coverage (A-115, PR #297)
+**Branch**: `fix/document-remaining-shipped-scripts`
+
+### Summary
+
+Classified all 26 shipped script targets (23 public documented, pr-eligibility newly documented, review-local.py and lib allowlisted internal), narrowed CONTRIBUTING stable-surface promise, added colon-anchored doc-coverage gate to make test and CI with allowlist/guide-entry conflict detection, corrected pr-eligibility exit-code docs. Four Copilot rounds converged; round 4 approved.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6efe757c` | (see git log) |
+| `14d6c75c` | (see git log) |
+| `a595f670` | (see git log) |
+| `dfef55df` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

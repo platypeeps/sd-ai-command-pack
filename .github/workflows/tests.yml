@@ -335,6 +335,9 @@ jobs:
       - name: Report shipped-scripts coverage
         run: bash .github/scripts/check-shipped-script-coverage.sh
 
+      - name: Check shipped-script doc coverage
+        run: bash .github/scripts/check-shipped-script-docs.sh
+
   lint:
     needs: ci-scope
     if: needs.ci-scope.outputs.mode == 'full'

@@ -44,6 +44,7 @@ test:
 	"$(VENV_PYTHON)" -m coverage combine
 	"$(VENV_PYTHON)" -m coverage report --include="install.py,installer/*" --fail-under=100
 	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/check-shipped-script-coverage.sh
+	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/check-shipped-script-docs.sh
 
 # Pass STRICT=1 to turn missing-tool skips below into hard errors (CI
 # parity: the CI lint/security jobs always run the Node and ShellCheck
