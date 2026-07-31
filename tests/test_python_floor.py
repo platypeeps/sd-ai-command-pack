@@ -14,6 +14,11 @@ import re
 import unittest
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11; tomli is in the pinned closure
+    import tomli as tomllib  # type: ignore[no-redef]
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 TESTS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "tests.yml"
@@ -21,20 +26,12 @@ TOOLCHAIN = REPO_ROOT / "scripts" / "sd-ai-command-pack-toolchain.sh"
 
 
 def declared_floor() -> tuple[int, int]:
-    # Parsed with a regex instead of tomllib: the suite itself must run on
-    # the declared floor, and tomllib only exists on Python 3.11+.
-    text = PYPROJECT.read_text(encoding="utf-8")
-    matches = re.findall(r'(?m)^requires-python\s*=\s*"([^"]*)"$', text)
-    if len(matches) != 1:
-        raise AssertionError(
-            "pyproject.toml must declare requires-python exactly once, "
-            f"found {len(matches)} declarations"
-        )
-    match = re.fullmatch(r">=\s*(\d+)\.(\d+)", matches[0])
+    data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    spec = data["project"]["requires-python"]
+    match = re.fullmatch(r">=\s*(\d+)\.(\d+)", spec)
     if match is None:
         raise AssertionError(
-            "project.requires-python must be a plain '>=X.Y' floor, "
-            f"got {matches[0]!r}"
+            f"project.requires-python must be a plain '>=X.Y' floor, got {spec!r}"
         )
     return int(match.group(1)), int(match.group(2))
 
