@@ -983,6 +983,9 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(len(asides), 1)
         self.assertEqual(asides[0].read_bytes(), before)
         self.assertIn(asides[0].name, str(caught.exception))
+        # The error reports what actually blocked the fallback restore, not
+        # the earlier hardlink failure.
+        self.assertIn("denied", str(caught.exception))
 
     def test_acquire_lock_blocked_after_link_unavailable_recovery(self) -> None:
         module = self.load_module()

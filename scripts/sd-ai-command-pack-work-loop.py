@@ -1069,7 +1069,7 @@ def _recover_locked_path(
         # A newer lock already exists; it is authoritative and the aside copy
         # is redundant.
         restored = True
-    except OSError as error:
+    except OSError:
         try:
             payload = aside.read_bytes()
             descriptor = os.open(
@@ -1077,8 +1077,10 @@ def _recover_locked_path(
             )
         except FileExistsError:
             restored = True
-        except OSError:
-            restore_error = error
+        except OSError as fallback_error:
+            # Report what actually blocked the fallback; the original link
+            # failure stays chained as its __context__.
+            restore_error = fallback_error
         else:
             try:
                 with os.fdopen(descriptor, "wb") as handle:
