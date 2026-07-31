@@ -105,8 +105,9 @@ Quick links:
   flags (`--repo`, `--branch`, `--dependency-pr-number`, `--remote`,
   `--default-branch`, `--finish-work-receipt`, `--github-repository`), emits
   the eligibility verdict as `--format json`, `shell`, or `json-shell`, and
-  exits `0` with the verdict payload or nonzero on invalid input or
-  collection failure; it never mutates repository or PR state.
+  maps the verdict status to its exit code: `0` for `eligible`, `1` for
+  `blocked`, and `2` for any other status, including invalid input and
+  indeterminate collection failures; it never mutates repository or PR state.
 - `scripts/sd-ai-command-pack-status.py`: read-only local/fleet status collector
   and schema-versioned JSON reporter used by housekeeping final verification.
 - `scripts/sd-ai-command-pack-work-loop.py`: standard-library user-local loop

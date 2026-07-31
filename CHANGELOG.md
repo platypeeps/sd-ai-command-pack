@@ -13,7 +13,11 @@
   guide-documented script CLIs and names the internal category, and a new
   doc-coverage gate (`.github/scripts/check-shipped-script-docs.sh`, wired
   into `make test` and CI) fails when a shipped script is neither documented
-  nor deliberately allowlisted, so the gap cannot reopen silently.
+  nor deliberately allowlisted — or is both allowlisted and given an explicit
+  guide entry bullet — so the gap cannot reopen silently and a
+  reclassification must update both places. The eligibility evaluator's guide
+  entry documents its real exit mapping (`0` eligible, `1` blocked, `2`
+  anything else).
 
 ## 0.57.2 - 2026-07-31
 

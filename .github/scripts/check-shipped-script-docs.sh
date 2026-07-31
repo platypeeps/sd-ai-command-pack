@@ -74,6 +74,13 @@ missing = sorted(
     if target.rsplit("/", 1)[-1] not in allowlist
     and not has_guide_entry(target)
 )
+# A guide entry bullet is what makes a script public surface, so a script
+# that is allowlisted as internal AND carries an entry bullet is a
+# contradictory classification: reclassifying must update both places.
+conflicting = sorted(
+    target for target in targets
+    if target.rsplit("/", 1)[-1] in allowlist and has_guide_entry(target)
+)
 
 if stale_allowlist:
     print("error: internal allowlist names scripts missing from the manifest:", file=sys.stderr)
@@ -83,7 +90,11 @@ if missing:
     print(f"error: shipped scripts with neither a guide entry bullet in {guide_path} nor an internal allowlist entry:", file=sys.stderr)
     for target in missing:
         print(f"  {target}", file=sys.stderr)
-if stale_allowlist or missing:
+if conflicting:
+    print(f"error: internal-allowlisted scripts with an explicit guide entry bullet in {guide_path} (drop the allowlist entry or the bullet):", file=sys.stderr)
+    for target in conflicting:
+        print(f"  {target}", file=sys.stderr)
+if stale_allowlist or missing or conflicting:
     sys.exit(1)
 
 print(f"Shipped-script doc coverage OK: {len(targets)} targets, {len(allowlist)} allowlisted internal.")
