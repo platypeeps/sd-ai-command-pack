@@ -45,8 +45,9 @@ TEXT_SUFFIXES = {
     ".yml",
 }
 
-# Precise retired wording only: bare "Roadmap" stays legal because
-# roadmap-file discovery is a live feature of the status collector.
+# Precise retired wording only. Prose mentions of roadmap files stay legal
+# (roadmap-file discovery is a live collector feature); a standalone
+# "Roadmap" line — the retired report-collection heading — is banned.
 RETIRED_PATTERNS = (
     ("F/T/R selector wording", re.compile(r"F/T/R")),
     ("retired R-* selector", re.compile(r"R-\*")),
