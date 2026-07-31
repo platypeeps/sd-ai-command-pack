@@ -614,3 +614,43 @@ Converged the PR #289 review loop (Copilot round 1 returned zero findings, all C
 ### Next Steps
 
 - Survey the backlog and start the next item
+
+
+## Session 266: Regenerate frozen source-only fleet-refresh adapters
+
+**Date**: 2026-07-31
+**Task**: Regenerate frozen source-only fleet-refresh adapters
+**Branch**: `fix/regenerate-fleet-refresh-adapters`
+
+### Summary
+
+Fixed audit finding A-044: four dev-tree fleet-refresh adapters frozen at 0.20.0 because source-only commands have no consumer manifest entries, so neither dogfood self-install nor the manifest-driven twin gate ever touched them. Added registry helper source_only_adapter_twins() as single source of truth for the dev-tree footprint, taught the command-surface generator to emit those copies, added a registry-driven parity test plus helper unit tests, and regenerated the four adapters byte-identical to their template twins. Shipped as PR #293 (clean Copilot round 1, CI green).
+
+### Main Changes
+
+- installer/registry.py: added source_only_adapter_twins() anchor-gated helper + __all__ export
+- .github/scripts/generate-command-surfaces.py: emit dev-tree adapters for source-only commands via generate_source_only_dev_adapters()
+- tests/test_pack_drift.py: registry-driven parity test for source-only dev adapters
+- tests/test_help_command.py: unit tests for source_only_adapter_twins() anchor gating and no-pattern rejection
+- Regenerated .claude/.gemini/.github/.opencode fleet-refresh adapters to current template content
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bd98b831` | fix: regenerate frozen source-only fleet-refresh adapters |
+
+### Testing
+
+- [OK] make release-prep exit 0 (installer 100% coverage gate incl new helper)
+- [OK] generator --check 94/94; twin cmp identical x4; manifest.json byte-unchanged
+- [OK] desync bite proof: parity test FAILED on desynced adapter, OK after restore
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
