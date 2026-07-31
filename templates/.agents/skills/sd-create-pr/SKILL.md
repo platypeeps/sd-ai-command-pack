@@ -1,28 +1,25 @@
 ---
 name: sd-create-pr
-description: Use when the user wants to update specs through the SD wrapper, commit and push the current branch, create or reuse a GitHub pull request, then enter the SD PR review loop. Invocation is explicit approval for those in-scope commits, PR-branch pushes, and configured GitHub review requests or re-requests without another prompt.
+description: Use when the user wants to update specs through the SD wrapper, commit and push the current branch, then create or reuse a GitHub pull request. Invocation is explicit approval for those in-scope commits, PR-branch pushes, and PR creation or reuse without another prompt.
 ---
 
 # SD Create Pull Request
 
 Use this project-local Software Delivery skill for `sd-create-pr` and
-`/sd:create-pr` style work. It is an orchestration wrapper: it runs the
+`/sd:create-pr` style work. It is a publish-only wrapper: it runs the
 installed `sd-update-spec` workflow, commits and pushes the intended branch
-changes, creates or reuses the branch pull request, then hands off to
-`sd-review-pr` for the typed `sd-check` gate, configured remote reviewer requests,
-Copilot-style polling when configured, fixes, CI handling, and the bounded
-review loop.
+changes, and creates or reuses the branch pull request. It runs no review:
+the final report names `sd-review scope=pr` (or the full `sd-ship` chain) as
+the next command.
 
 ## Standing GitHub authority
 
 Invoking this workflow is explicit approval for its ordinary in-scope GitHub
-actions: intended commits, pushes to the current PR branch, PR creation or
-reuse, and configured GitHub review requests or re-requests through
-`sd-review-pr`. Do not ask again solely because the diff/code will be
-committed, pushed, published, or sent to the configured reviewer. This does not
-authorize unrelated or ambiguous files, force pushes, default-branch pushes,
-scope or risk expansion, extra review rounds, destructive actions, or
-bypassing any gate.
+actions: intended commits, pushes to the current PR branch, and PR creation or
+reuse. Do not ask again solely because the diff/code will be committed,
+pushed, or published. This does not authorize unrelated or ambiguous files,
+force pushes, default-branch pushes, scope or risk expansion, review
+requests, destructive actions, or bypassing any gate.
 
 ## Sandbox-safe tool execution
 
@@ -47,20 +44,19 @@ offer a question as a way to cross the force-push or destructive boundary.
   selected Python and project-check report for this command run; do not retry
   raw interpreters in sequence after an authoritative candidate fails.
 - Resolve `sd-update-spec` by name using the agent's trusted installed-skill
-  resolver before starting. In standalone mode, also resolve `sd-review-pr`
-  before starting. In verified `sd-ship` Stage 1 mode, the composite owns
-  `sd-review` resolution for its separate Stage 2; this skill must not
-  resolve or invoke any review skill. Stop if a required skill is missing, unreadable, empty,
-  resolves to more than one candidate, fails validation, defines contradictory
-  steps that violate this command's safety rules, or requires unavailable
-  tools.
-- Do not duplicate the detailed update-spec or review-pr workflows. Use
-  `sd-update-spec` for repository knowledge refreshes and `sd-review-pr` for
-  typed deterministic checks, configured remote reviewer requests, review polling, fix
-  loops, CI handling, and final finish-work behavior.
+  resolver before starting. This skill never resolves or invokes a review
+  skill in any mode; review ownership stays with `sd-review scope=pr` and the
+  `sd-ship` composite after publication. Stop if a required skill is missing,
+  unreadable, empty, resolves to more than one candidate, fails validation,
+  defines contradictory steps that violate this command's safety rules, or
+  requires unavailable tools.
+- Do not duplicate the detailed update-spec workflow, and do not fold review
+  behavior into this command: typed deterministic checks, configured remote
+  reviewer requests, review polling, fix loops, CI handling, finish-work, and
+  merge all belong to the successor review, ship, and housekeeping surfaces.
 - Do not run Prism, Gito, or other local review providers directly from this
-  command. `sd-review-pr` owns the typed `sd-check` gate and every configured
-  review-provider stage.
+  command. The routed `sd-review` workflow owns the typed `sd-check` gate and
+  every configured review-provider stage.
 - Do not create a PR from the repository default branch. If the current branch
   is the default branch, create a feature branch before continuing. Prefer
   `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH` when set; otherwise derive a concise
@@ -74,7 +70,7 @@ offer a question as a way to cross the force-push or destructive boundary.
   branch and working-tree diff before staging a new commit or pushing an
   already-committed branch. Never publish when that gate is missing or fails.
 - Do not create a duplicate PR. If the current branch already has an open PR,
-  reuse it and continue into `sd-review-pr`.
+  reuse it and continue to the final report.
 - Never pass generated or user-provided Markdown through `gh pr create --body`
   or `gh pr edit --body` in a shell command. Markdown commonly contains
   backticks, dollar signs, and command-substitution syntax. Materialize the
@@ -90,7 +86,7 @@ offer a question as a way to cross the force-push or destructive boundary.
 ## Invocation Modes
 
 Standalone mode is the only public `sd-create-pr` behavior: publish or reuse
-the pull request, then enter `sd-review-pr` in Step 6.
+the pull request, then report the next command in Step 6.
 
 `sd-ship` may delegate its Stage 1 with this exact internal orchestration
 context:
@@ -102,10 +98,10 @@ context:
 Accept that context only while the current session is actively executing
 `sd-ship` Stage 1 and the composite supplied all three values. It is not an
 environment variable or a public argument. If the user invokes `sd-create-pr`
-with `publish-only`, `caller=`, `stage=`, `return-after=`, or otherwise asks it
-to skip review, reject the request before Step 1 and make no update-spec,
-branch, commit, push, or PR changes. Never infer the internal context merely
-because a PR already exists or the user mentions `sd-ship`.
+with `publish-only`, `caller=`, `stage=`, or `return-after=`, reject the
+request before Step 1 and make no update-spec, branch, commit, push, or PR
+changes. Never infer the internal context merely because a PR already exists
+or the user mentions `sd-ship`.
 
 ## Step 1: Resolve Prerequisites And Branch State
 
@@ -231,7 +227,7 @@ node scripts/sd-ai-command-pack-review-preflight.mjs
 ```
 
 If the preflight exits nonzero, stop before staging, committing, or pushing and
-report its complete output. Do not treat a later `sd-review-pr` run as a
+report its complete output. Do not treat a later `sd-review scope=pr` run as a
 substitute for this pre-publication gate.
 
 When a new commit is needed, stage only the classified intended paths and
@@ -374,30 +370,18 @@ After creation or reuse, capture:
 - head branch and head SHA
 - base branch
 
-## Step 6: Return To SD Ship Or Enter The SD Review PR Loop
+## Step 6: Return To SD Ship Or Report The Next Command
 
 When and only when the verified internal orchestration context is active,
 return the Step 5 PR number, URL, base branch, head branch, head SHA, and
-created/reused result to the active `sd-ship` Stage 1. Do not resolve or invoke
-`sd-review-pr`, `sd-review`, finish-work, or housekeeping from this branch. The
-composite owns its separate Stage 2 (`sd-review scope=pr`) and its Stage 2b
-lifecycle step.
+created/reused result to the active `sd-ship` Stage 1. The composite owns its
+separate Stage 2 (`sd-review scope=pr`) and its Stage 2b lifecycle step.
 
-For every standalone invocation, preserve the normal handoff below.
-
-Set the PR selector for the handoff, then resolve and follow the `sd-review-pr`
-skill as the source of truth:
-
-```bash
-export SD_AI_COMMAND_PACK_REVIEW_PR_SELECTOR="<pr-number-or-url>"
-```
-
-Let `sd-review-pr` run its typed deterministic `sd-check` gate, request the
-configured remote reviewer when appropriate, wait for
-review completion, address actionable comments or CI failures, push review-fix
-commits, re-request review after pushed fixes, observe its configured round
-limit, run finish-work after a clean loop, and run housekeeping if it observes
-the PR merged.
+For every standalone invocation, publication ends this command's work. Do not
+resolve or invoke any review skill, finish-work, housekeeping, or a polling
+loop. The final report names the next command instead: `sd-review scope=pr`
+for the review loop alone, or `sd-ship` for the remaining publish-to-merge
+chain.
 
 ## Final Report
 
@@ -408,12 +392,7 @@ Report:
 - Staged/committed paths and commit SHA, or why no commit was needed.
 - Push target and result.
 - PR number, URL, base branch, and whether the PR was created or reused.
-- Handoff outcome: either confirmation that standalone mode entered
-  `sd-review-pr`, or confirmation that verified `sd-ship` Stage 1 received the
-  publish result without review.
-- Project checks: configured command or reported candidates, and which project
-  checks actually ran.
-- SD check: typed aggregate, non-passing rows, and state-guard result.
-- Optional AI review: configured remote-review rounds and outcome.
-- Comments fixed or rebutted, CI status, finish-work actions, and final
-  working-tree state.
+- Outcome: the recommended next command for a standalone run
+  (`sd-review scope=pr`, or `sd-ship` for the full chain), or confirmation
+  that verified `sd-ship` Stage 1 received the publish result.
+- Final working-tree state.
