@@ -3,7 +3,7 @@
   "name": "test-sd-check-read-only-git-guard",
   "title": "Test the sd-check read-only git guard",
   "description": "Add tests for the sd-check read-only git guard, which currently enforces the mutation boundary with no coverage of its own.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
