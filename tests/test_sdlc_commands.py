@@ -460,8 +460,12 @@ class SdlcCommandsTests(InstallTestCase):
         )
 
         self.assertIn("`until=review`", ship_text)
-        self.assertIn("without `defer-finish-work`", ship_text)
-        self.assertIn("with `defer-finish-work`", ship_text)
+        self.assertNotIn("defer-finish-work", ship)
+        self.assertNotIn("sd-review-pr", ship)
+        self.assertIn("Stage 2 — `sd-review scope=pr`", ship_text)
+        self.assertIn(
+            "never merges, archives Trellis work, or runs housekeeping", ship_text
+        )
         self.assertIn("with `no-merge`", ship_text)
         self.assertIn("leaves the active Trellis task unarchived", ship_text)
         self.assertIn("exactly once", ship_text)
@@ -469,8 +473,30 @@ class SdlcCommandsTests(InstallTestCase):
             "one read-only, PR-scoped post-cycle review-learning pass", ship_text
         )
         self.assertIn("no other ship stage repeats it", ship_text)
-        self.assertIn("Stage 2 is also the only review-learning owner", ship_text)
+        self.assertIn("Stage 2b is the only review-learning owner", ship_text)
         self.assertNotIn("sd-ai-command-pack-review-learnings.py", ship)
+        # Per-`until=` truth table: learning 0/1/1, finish-work 0/1/1 with
+        # distinct owners — Stage 2b for review, Stage 4 for merge.
+        self.assertIn(
+            "under both `until=review` and `until=merge`",
+            ship_text,
+        )
+        self.assertIn("never for `until=pr`", ship_text)
+        self.assertIn(
+            "run the SD finish-work flow bound to the exact head Stage 2 reviewed",
+            ship_text,
+        )
+        self.assertIn("skip Stage 2b's finish-work step", ship_text)
+        self.assertIn(
+            "Stage 2 itself never runs finish-work under any `until=` value",
+            ship_text,
+        )
+        self.assertIn("Stage 2b owns finish-work", ship_text)
+        self.assertIn(
+            "Finish-work owner and outcome: Stage 2b for `until=review`, Stage 4 for "
+            "`until=merge`",
+            ship_text,
+        )
         self.assertIn("post-finish Obsidian KB refresh", ship_text)
         self.assertIn("housekeeping remains its only owner", ship_text)
         self.assertNotIn("sd-ai-command-pack-update-spec-kb.py", ship)
@@ -600,7 +626,7 @@ class SdlcCommandsTests(InstallTestCase):
             .split()
         )
         self.assertIn("In standalone mode, also resolve `sd-review-pr`", safety_text)
-        self.assertIn("the composite owns `sd-review-pr` resolution", safety_text)
+        self.assertIn("the composite owns `sd-review` resolution", safety_text)
 
         ship_stage_1 = ship.split("2. Stage 1", 1)[1].split("3. Stage 2", 1)[0]
         ship_stage_1_text = " ".join(ship_stage_1.split())
@@ -617,9 +643,9 @@ class SdlcCommandsTests(InstallTestCase):
         ship_safety_text = " ".join(ship_safety.split())
         self.assertIn("Stage 1 always returns after publishing", ship_safety_text)
         self.assertIn("does not run for `until=pr`", ship_safety_text)
-        self.assertIn("runs once normally for `until=review`", ship_safety_text)
         self.assertIn(
-            "runs once with `defer-finish-work` for `until=merge`",
+            "runs the same review-only loop once each for `until=review` and "
+            "`until=merge`",
             ship_safety_text,
         )
 
@@ -790,15 +816,16 @@ class SdlcCommandsTests(InstallTestCase):
         guide = GUIDE_TEMPLATE.read_text(encoding="utf-8")
         guide_text = " ".join(guide.split())
 
-        self.assertIn("`until=review` keeps finish-work in `sd-review-pr`", guide_text)
-        self.assertIn("defers finish-work to Stage 4", guide_text)
+        self.assertIn("`until=review` runs finish-work in Stage 2b", guide_text)
+        self.assertIn("skips Stage 2b's finish-work step", guide_text)
+        self.assertIn("whose gate runs finish-work against the final head", guide_text)
         self.assertIn("watches with `no-merge`", guide_text)
         self.assertIn("housekeeping exactly once", guide_text)
         self.assertIn("Stage 2 the only review owner", guide_text)
         self.assertIn("no review for `until=pr`", guide_text)
-        self.assertIn("one post-cycle review-learning pass", guide_text)
+        self.assertIn("Stage 2b owns the one post-cycle review-learning pass", guide_text)
         self.assertIn(
-            "No later ship, watch, finish-work, or housekeeping stage repeats it",
+            "for both `until=review` and `until=merge`. No other ship stage repeats it",
             guide_text,
         )
 

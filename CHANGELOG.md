@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.56.8 - 2026-07-30
+
+- Repoint `sd-ship` Stage 2 from the transitional `sd-review-pr` loop to the
+  routed successor, `sd-review scope=pr`. The successor is review-only, so the
+  two lifecycle side effects that used to ride along with review move to a new
+  explicit Stage 2b owned by the composite: the one read-only, PR-scoped
+  post-cycle review-learning pass (run for both `until=review` and
+  `until=merge`), and — for `until=review` only — the SD finish-work flow bound
+  to the exact reviewed head. `until=merge` still defers finish-work to the
+  Stage 4 housekeeping gate, which remains the only merge authority. The
+  `until=review` stop-point now sits after Stage 2b instead of after Stage 2's
+  loop; its user-visible contract — review completes, Trellis work finishes,
+  no merge — is unchanged. The internal `defer-finish-work` delegation mode is
+  gone from `sd-ship`; `sd-review-pr` itself stays installed and callable
+  standalone.
+- Rewrite the usage guide's recommended review loop around the successor
+  lifecycle only: `sd-check`, routed `sd-review`, `sd-ship` with its stage
+  composition, work-backlog delegation to `sd-ship until=merge`, and the
+  lifecycle commands. The transitional `sd-review-local`, `sd-review-pr`, and
+  merged-PR interception steps leave the recommended path; the commands remain
+  installed, documented in the catalog, and callable.
+
 ## 0.56.7 - 2026-07-30
 
 - Scope the finalization bundle validator to the change delta. The final-bundle

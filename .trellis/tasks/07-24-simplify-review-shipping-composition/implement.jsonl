@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Source-template versus generated-mirror parity and skill/adapter regeneration rules that govern editing sd-ship, sd-create-pr, and the installed guide through templates plus make sync."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Owns the docs-consistency pin-test bar in tests/test_sdlc_commands.py that the Stage 2 repoint, Stage 2b addition, and recommended-loop rewrite must keep aligned."}

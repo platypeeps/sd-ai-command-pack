@@ -3206,7 +3206,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("In standalone mode, also resolve `sd-review-pr`", create_pr)
         self.assertRegex(
             create_pr,
-            r"the composite owns\s+`sd-review-pr` resolution",
+            r"the composite owns\s+`sd-review` resolution",
         )
         self.assertIn("Do not create a duplicate PR", create_pr)
         self.assertIn("Do not assume the base branch is `main`", create_pr)

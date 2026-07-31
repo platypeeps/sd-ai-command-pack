@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 261
+- **Total Sessions**: 262
 - **Last Active**: 2026-07-30
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~465 | Active |
+| `journal-6.md` | ~497 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 262 | 2026-07-30 | Ship composition Phase A: Stage 2 repoint and Stage 2b | - | `fix/simplify-review-shipping-composition` |
 | 261 | 2026-07-30 | Repair follow-up task PRD reference after 07-29 archive | `fca7ef70` | `fix/scope-final-bundle-validator-to-delta` |
 | 260 | 2026-07-30 | Scope final-bundle validator to the change delta (0.56.7, PR #287) | `c24d3e6d`, `1d93d605`, `781c887a` | `fix/scope-final-bundle-validator-to-delta` |
 | 259 | 2026-07-30 | Allowlist shipped review.json in install audit (T-1, v0.56.6) | `46ee5de8`, `6750f8de`, `29cfcbb1` | `fix/allowlist-review-json-install-audit` |

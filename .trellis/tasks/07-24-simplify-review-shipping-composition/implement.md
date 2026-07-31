@@ -19,17 +19,29 @@ grep -n "self-contained" .agents/skills/sd-review/SKILL.md
    decided in planning (option A, `design.md`): the composer runs it as an
    explicit step after Stage 2, bound to the same head Stage 2 reviewed.
    `sd-review/SKILL.md:73` forbids it inside the successor and Stage 4 only
-   covers `until=merge`, so no other placement is available.
-   **Gate:** Stage 2b must not run under `until=merge` — Stage 4 already runs
-   finish-work at `SKILL.md:145`, and an unconditional Stage 2b runs it twice
-   against two different heads. Test both modes, not just the one being fixed.
+   covers `until=merge`, so no other placement is available. Because Stage 2b
+   sits after Stage 2, also move `until=review`'s stop-point: `SKILL.md:82`
+   ("stops after Stage 2's review loop completes") must become "stops after
+   Stage 2b", or the new stage is unreachable in exactly the mode that needs
+   its finish-work half.
+   **Gate:** Stage 2b's finish-work half must not run under `until=merge` —
+   Stage 4 already runs finish-work at `SKILL.md:145`, and an unconditional
+   finish-work step runs it twice against two different heads. The learning
+   half is exempt from this gate (step 2). Test both modes, not just the one
+   being fixed.
 
 2. **Add the review-learning invocation to the same stage.** `grep -n
    "review-learning" .agents/skills/sd-review/SKILL.md` returns nothing, so the
    successor has none and the pass has no owner today. `sd-ship` invokes
-   `sd-review-learnings` by name.
-   **Gate:** exactly once per cycle. Stage 2 asserts that, and a repoint is
-   precisely when a once-per-cycle pass goes missing without anyone noticing.
+   `sd-review-learnings` by name in its documented completed-cycle form —
+   `sd-ai-command-pack-review-learnings.py --github-pr <PR> --dry-run`, not the
+   default working-tree scan — in **both** `until=review` and `until=merge`
+   chains; only Stage 2b's finish-work half is `until=review`-conditional,
+   because Stage 4 duplicates finish-work but has no learning step.
+   **Gate:** exactly once per review cycle (`until=review` and `until=merge`;
+   `until=pr` has no cycle — see Validation). Stage 2 asserts that, and a
+   repoint is precisely when a once-per-cycle pass goes missing without anyone
+   noticing.
 
 3. **Repoint Stage 2** at `.agents/skills/sd-ship/SKILL.md:129` to
    `sd-review scope=pr`, and rewrite `:133-136` to express the decisions from
@@ -112,8 +124,13 @@ review-learning pass — are the decisive cases:
 python3 -m pytest tests/test_sdlc_commands.py -k "ship" -q
 ```
 
-Assert per `until=` value that finish-work happens exactly once and the
-review-learning pass happens exactly once, at the stage decided in steps 1-2.
+Assert the per-`until=` truth table, at the stages decided in steps 1-2:
+
+| `until=` | finish-work | review-learning |
+|----------|-------------|-----------------|
+| `pr`     | 0 (stops after Stage 1) | 0 |
+| `review` | 1 (Stage 2b)            | 1 (Stage 2b) |
+| `merge`  | 1 (Stage 4)             | 1 (Stage 2b) |
 
 Zero mutation from the internal coordinator:
 
