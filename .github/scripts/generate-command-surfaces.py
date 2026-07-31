@@ -80,7 +80,9 @@ from installer.registry import (  # noqa: E402
     SHARED_SKILL_REFERENCES,
     SKILL_FANOUT_PLATFORMS,
     SOURCE_ONLY_COMMAND_NAMES,
+    SUPERSEDED_COMMANDS,
     CommandInfo,
+    retired_surface_removed_version,
     source_only_adapter_twins,
 )
 
@@ -350,11 +352,17 @@ def generate_command_catalog() -> str:
             ]
         )
         for command in commands:
-            availability = (
-                "source-checkout-only"
-                if command.name in SOURCE_ONLY_COMMAND_NAMES
-                else "included in installed pack"
-            )
+            if command.name in SOURCE_ONLY_COMMAND_NAMES:
+                availability = "source-checkout-only"
+            elif command.name in SUPERSEDED_COMMANDS:
+                successor, retirement_id = SUPERSEDED_COMMANDS[command.name]
+                removed_version = retired_surface_removed_version(retirement_id)
+                availability = (
+                    f"included in installed pack — transitional until "
+                    f"{removed_version}; use {successor}"
+                )
+            else:
+                availability = "included in installed pack"
             lines.append(
                 f"| `{command.name}` | {availability} | "
                 f"{_markdown_cell(skill_description(command.name))} |"

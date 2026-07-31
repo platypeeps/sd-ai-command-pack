@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.60.0 - 2026-07-31
+
+- Announce a removal version for the transitional review surfaces (audit
+  A-045). `sd-full-check`, `sd-review-local`, and `sd-review-pr` each gain a
+  `RetiredCommandSurface` registry row with `removed_version = 0.62.0`, and
+  the command catalog now reports their status as `included in installed
+  pack — transitional until 0.62.0; use <successor>` instead of a plain
+  `included in installed pack` line indistinguishable from a live command.
+  `sd-help`'s `recommend` mode now routes to the named successor (`sd-check`
+  for `sd-full-check`; `sd-review` for `sd-review-local` and `sd-review-pr`)
+  instead of the transitional command. **Consumer-facing:** none of the three
+  commands change behavior or stop working — this only publishes their end
+  date and stops the help surface from steering new usage toward them.
+  Deletion is tracked separately in `07-24-remove-retired-review-surfaces`,
+  targeting the same 0.62.0.
+
 ## 0.59.1 - 2026-07-31
 
 - Align the status and housekeeping selector contracts (review finding 1.1.1).
