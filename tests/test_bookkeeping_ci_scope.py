@@ -4,6 +4,8 @@ import argparse
 import importlib.util
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -212,6 +214,27 @@ class BookkeepingCiScopeTests(unittest.TestCase):
 
         self.assertEqual(decision["mode"], "bookkeeping")
         self.assertEqual(decision["validationMode"], "completion")
+        self.assertIn(
+            ".trellis/tasks/archive/2026-07/07-01-example/task.json",
+            decision["changedPaths"],
+        )
+
+    def test_unarchive_delta_selects_none_validation(self) -> None:
+        active = self.root / ".trellis/tasks/07-01-example"
+        archive = self.root / ".trellis/tasks/archive/2026-07/07-01-example"
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        active.mkdir(parents=True, exist_ok=True)
+        self.write(".trellis/tasks/archive/2026-07/07-01-example/task.json", '{"status":"completed"}\n')
+        self.write(".trellis/tasks/archive/2026-07/07-01-example/prd.md", "# Example\n")
+        before = self.commit("archive task")
+        self.git("mv", str(archive.relative_to(self.root)), str(active.relative_to(self.root)))
+        self.write(".trellis/tasks/07-01-example/task.json", '{"status":"in_progress"}\n')
+        after = self.commit("un-archive task")
+
+        decision = self.classify(before, after)
+
+        self.assertEqual(decision["mode"], "bookkeeping")
+        self.assertEqual(decision["validationMode"], "none")
         self.assertIn(
             ".trellis/tasks/archive/2026-07/07-01-example/task.json",
             decision["changedPaths"],
@@ -634,6 +657,64 @@ class BookkeepingWorkflowContractTests(unittest.TestCase):
         self.assertIn("sd-ai-command-pack-review-preflight.mjs", validation["run"])
         self.assertIn("final-bundle --mode", validation["run"])
         self.assertIn('reasonCodes == [($mode + "_bundle_valid")]', validation["run"])
+
+    def test_bookkeeping_lane_measures_review_preflight_coverage(self) -> None:
+        install = self.scope_step("install-review-preflight-coverage-tooling")
+        self.assertEqual(install["if"], "steps.classify.outputs.mode == 'bookkeeping'")
+        self.assertIn("npm ci", install["run"])
+
+        validation = self.scope_step("bookkeeping-validation")
+        self.assertIn("--clean=false", validation["run"])
+        self.assertIn("c8_run=(npm exec --no -- c8", validation["run"])
+        self.assertEqual(
+            validation["run"].count('"${c8_run[@]}"'),
+            2,
+            "both review-preflight.mjs invocations must reuse the shared c8_run wrapper",
+        )
+
+        report = self.scope_step("report-review-preflight-coverage")
+        self.assertEqual(
+            report["if"], "steps.classify.outputs.mode == 'bookkeeping' && !cancelled()"
+        )
+        self.assertIn(
+            "jq -e '.total.lines.total > 0 and .total.lines.covered > 0'", report["run"]
+        )
+
+        validation_temp_dir = re.search(r'c8_temp_dir="([^"]+)"', validation["run"])
+        report_temp_dir = re.search(r'c8_temp_dir="([^"]+)"', report["run"])
+        self.assertIsNotNone(validation_temp_dir)
+        self.assertIsNotNone(report_temp_dir)
+        self.assertEqual(
+            validation_temp_dir.group(1),
+            report_temp_dir.group(1),
+            "validation and report steps must accumulate coverage in the same --temp-directory",
+        )
+
+    def test_report_review_preflight_coverage_gate_fails_closed_on_zero_lines(self) -> None:
+        if shutil.which("jq") is None:
+            self.skipTest("jq is not available on PATH")
+        report = self.scope_step("report-review-preflight-coverage")
+        match = re.search(r"jq -e '([^']+)'", report["run"])
+        self.assertIsNotNone(match, "expected a jq -e gate expression in the report step")
+        gate_expression = match.group(1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            summary_path = Path(tmp) / "coverage-summary.json"
+            summary_path.write_text(
+                json.dumps({"total": {"lines": {"total": 0, "covered": 0, "pct": 0}}}),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["jq", "-e", gate_expression, str(summary_path)],
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertNotEqual(
+            result.returncode,
+            0,
+            "jq -e gate must fail closed (nonzero exit) when c8 measures zero lines",
+        )
 
     def test_aggregate_and_auto_tag_are_mode_bound(self) -> None:
         jobs = self.workflow["jobs"]

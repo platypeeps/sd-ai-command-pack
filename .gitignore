@@ -16,6 +16,10 @@ build/
 dist/
 *.egg-info/
 
+# c8 (JS coverage) default report/temp output; CI writes coverage artifacts
+# under $RUNNER_TEMP instead, but local ad hoc runs default here.
+coverage/
+
 # Source-checkout local install markers; consumer repos track normal install
 # state unless installed with --local-only.
 .sd-ai-command-pack/installed-targets.txt

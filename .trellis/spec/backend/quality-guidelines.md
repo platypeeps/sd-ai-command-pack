@@ -1649,6 +1649,80 @@ Wrong: python3 -m coverage report ...
 Correct: PYTHON_BIN=.venv/bin/python bash .github/scripts/check-shipped-script-coverage.sh
 ```
 
+## JavaScript Coverage Measurement Contract (review-preflight.mjs)
+
+### 1. Scope / Trigger
+
+Use this contract when changing `scripts/sd-ai-command-pack-review-preflight.mjs`
+coverage instrumentation, the `c8` devDependency in `package.json` /
+`package-lock.json`, or the coverage steps in the `ci-scope` job's bookkeeping
+lane in `.github/workflows/tests.yml`.
+
+### 2. Signatures
+
+- Wrapped invocation: `npm exec --no -- c8 --clean=false --reporter=none --temp-directory="$c8_temp_dir" --include="scripts/sd-ai-command-pack-review-preflight.mjs" node scripts/sd-ai-command-pack-review-preflight.mjs ...`
+- Report: `npm exec --no -- c8 report --temp-directory="$c8_temp_dir" --include="scripts/sd-ai-command-pack-review-preflight.mjs" --reporter=text --reporter=json-summary --reports-dir="$report_dir"`
+- Local reproduction: `npm ci` then the same two commands against a local `$c8_temp_dir`.
+
+### 3. Contracts
+
+- `c8` is pinned exact (`"c8": "12.0.0"`) with a committed `package-lock.json`;
+  invocation goes through `npm exec --no --`, which fails closed instead of
+  fetching an unpinned registry version when the local install is missing —
+  mirrors this repo's SHA-pinned Actions / hash-pinned `requirements-*.txt`
+  convention.
+- Both bookkeeping-mode calls to `review-preflight.mjs` in the same CI step
+  (the bare validation call and the `final-bundle` call) accumulate into one
+  report via `--clean=false` plus a shared `--temp-directory`; the c8 default
+  `--clean=true` would discard the first call's data instead of merging it.
+- No coverage floor exists yet. This lane is measurement-only; a floor is a
+  separate follow-up set at or below the measured value, matching the R4
+  publish-before-gate rollout order.
+- Baseline measured at Lane 2 introduction (2026-07-31): ~46% lines
+  (2174/4738) from a bare invocation alone. Any future floor should land at or
+  below the actual measured value at that time, not this snapshot.
+- `templates/scripts/` is a byte-identical mirror and is not separately
+  measured; only the `scripts/` copy is instrumented.
+
+### 4. Validation & Error Matrix
+
+- c8 measures zero covered lines -> nonzero from the
+  `jq -e '.total.lines.total > 0 and .total.lines.covered > 0'` gate on the
+  `coverage-summary.json` total, not a silent pass.
+- `review-preflight.mjs` missing or invalid syntax -> caught by the
+  pre-existing `node --check` gate in the `lint` job, independent of coverage.
+- Non-bookkeeping mode (`steps.classify.outputs.mode != 'bookkeeping'`) ->
+  coverage install/run/report steps skipped via the same `if:` condition that
+  guards the wrapped invocations.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a new `review-preflight.mjs` code path is exercised by a real
+  bookkeeping-mode CI run and the measured percentage rises.
+- Base: an unrelated Lane 2 tooling change (e.g. a c8 reporter flag) leaves
+  the measured percentage unchanged.
+- Bad: c8 silently reports 0/0 lines because `--include` stopped matching the
+  file, and nothing catches it before the step goes green.
+
+### 6. Tests Required
+
+- A wiring check proving `ci-scope`'s bookkeeping lane routes both
+  `review-preflight.mjs` invocations through the shared `c8_run` wrapper into
+  one `--temp-directory` before the report step runs.
+- A negative-case run of the `Report review preflight JavaScript coverage`
+  step proving the `jq -e` zero-lines gate fails closed when `--include`
+  matches nothing.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: npx c8 ... (off-TTY in CI this silently fetches an unpinned version)
+Correct: npm exec --no -- c8 ... (fails closed if the pinned local install is missing)
+
+Wrong: run c8 twice with default --clean=true, keeping only the second call's coverage
+Correct: run both calls with --clean=false and one shared --temp-directory, then a single c8 report pass
+```
+
 ## Bookkeeping-only CI Fast-lane Contract
 
 ### 1. Scope / Trigger

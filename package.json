@@ -1,0 +1,9 @@
+{
+  "name": "sd-ai-command-pack",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Repository tooling project; not a distributable package.",
+  "devDependencies": {
+    "c8": "12.0.0"
+  }
+}

@@ -219,6 +219,14 @@ jobs:
           python3 "$classifier_file" "${classifier_args[@]}" >"$result_file"
           publish_result
 
+      # c8 coverage-measures the review-preflight.mjs invocations below; only
+      # the bookkeeping path runs them, so installation is gated the same way
+      # instead of paying npm cost on every "full" mode run.
+      - name: Install review preflight coverage tooling
+        id: install-review-preflight-coverage-tooling
+        if: steps.classify.outputs.mode == 'bookkeeping'
+        run: npm ci
+
       - name: Validate bookkeeping head
         id: bookkeeping-validation
         if: steps.classify.outputs.mode == 'bookkeeping'
@@ -230,15 +238,27 @@ jobs:
         run: |
           set -euo pipefail
           git diff --check "$BEFORE_SHA" "$AFTER_SHA" -- .trellis/tasks .trellis/workspace
+
+          # Coverage-instrument every review-preflight.mjs invocation below
+          # into one shared V8 raw-coverage directory: --clean=false keeps
+          # each run's data instead of the next invocation wiping the
+          # previous one. "npm exec --no" refuses to fall back to an
+          # unpinned registry fetch if the lockfile-pinned local install is
+          # missing, failing loudly instead. The "Report review preflight
+          # coverage" step below combines and publishes the merged number.
+          c8_temp_dir="$RUNNER_TEMP/c8-review-preflight"
+          mkdir -p "$c8_temp_dir"
+          c8_run=(npm exec --no -- c8 --clean=false --reporter=none --temp-directory="$c8_temp_dir" --include="scripts/sd-ai-command-pack-review-preflight.mjs")
+
           SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF="$BEFORE_SHA" \
-            node scripts/sd-ai-command-pack-review-preflight.mjs
+            "${c8_run[@]}" node scripts/sd-ai-command-pack-review-preflight.mjs
 
           case "$VALIDATION_MODE" in
             none)
               ;;
             completion|planning)
               receipt="$RUNNER_TEMP/bookkeeping-final-bundle.json"
-              node scripts/sd-ai-command-pack-review-preflight.mjs \
+              "${c8_run[@]}" node scripts/sd-ai-command-pack-review-preflight.mjs \
                 final-bundle --mode "$VALIDATION_MODE" \
                 --base "$BEFORE_SHA" --head "$AFTER_SHA" --json >"$receipt"
               jq -e \
@@ -256,6 +276,44 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Report review preflight JavaScript coverage
+        id: report-review-preflight-coverage
+        if: steps.classify.outputs.mode == 'bookkeeping' && !cancelled()
+        shell: bash
+        run: |
+          set -euo pipefail
+          c8_temp_dir="$RUNNER_TEMP/c8-review-preflight"
+          report_dir="$RUNNER_TEMP/c8-review-preflight-report"
+          mkdir -p "$c8_temp_dir"
+          npm exec --no -- c8 report \
+            --temp-directory="$c8_temp_dir" \
+            --include="scripts/sd-ai-command-pack-review-preflight.mjs" \
+            --reporter=text --reporter=json-summary \
+            --reports-dir="$report_dir"
+
+          summary="$report_dir/coverage-summary.json"
+          total_lines=$(jq -r '.total.lines.total' "$summary")
+          covered_lines=$(jq -r '.total.lines.covered' "$summary")
+          pct=$(jq -r '.total.lines.pct' "$summary")
+
+          # Hard gate: a c8 invocation that instruments no files still exits
+          # 0 and reports 0/0, which looks like success. Fail loudly instead
+          # of publishing a silent zero over 4,700+ lines.
+          if ! jq -e '.total.lines.total > 0 and .total.lines.covered > 0' "$summary" >/dev/null; then
+            printf 'error: c8 measured zero lines for scripts/sd-ai-command-pack-review-preflight.mjs (total=%s covered=%s). Coverage plumbing is broken, not merely unexercised code.\n' \
+              "$total_lines" "$covered_lines" >&2
+            exit 1
+          fi
+
+          printf 'review-preflight.mjs coverage: %s%% (%s/%s lines)\n' "$pct" "$covered_lines" "$total_lines"
+
+          {
+            printf '%s\n' "## Review preflight JavaScript coverage"
+            printf '%s\n' "- File: scripts/sd-ai-command-pack-review-preflight.mjs"
+            printf '%s\n' "- Lines: ${covered_lines}/${total_lines} (${pct}%)"
+            printf '%s\n' "- No coverage floor is enforced yet; this step publishes a measured baseline."
+          } >>"$GITHUB_STEP_SUMMARY"
 
       - name: Summarize CI scope
         if: always()
