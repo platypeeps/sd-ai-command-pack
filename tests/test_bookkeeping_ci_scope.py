@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -669,6 +670,8 @@ class BookkeepingWorkflowContractTests(unittest.TestCase):
         )
 
     def test_report_review_preflight_coverage_gate_fails_closed_on_zero_lines(self) -> None:
+        if shutil.which("jq") is None:
+            self.skipTest("jq is not available on PATH")
         report = self.scope_step("report-review-preflight-coverage")
         match = re.search(r"jq -e '([^']+)'", report["run"])
         self.assertIsNotNone(match, "expected a jq -e gate expression in the report step")
