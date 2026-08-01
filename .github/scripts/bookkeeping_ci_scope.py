@@ -233,7 +233,10 @@ def classify_history(repo: Path, before_sha: str, after_sha: str) -> tuple[Histo
     if unsafe_entries:
         return None, "tree_entry_unsafe", unsafe_entries
 
-    has_archive = any(path.startswith(".trellis/tasks/archive/") for path in paths)
+    has_archive = any(
+        path.startswith(".trellis/tasks/archive/") and entries[path][2] in {"A", "M"}
+        for path in paths
+    )
     has_workspace = any(path.startswith(".trellis/workspace/") for path in paths)
     validation_mode = "completion" if has_archive else "planning" if has_workspace else "none"
     return (

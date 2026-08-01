@@ -219,6 +219,27 @@ class BookkeepingCiScopeTests(unittest.TestCase):
             decision["changedPaths"],
         )
 
+    def test_unarchive_delta_selects_none_validation(self) -> None:
+        active = self.root / ".trellis/tasks/07-01-example"
+        archive = self.root / ".trellis/tasks/archive/2026-07/07-01-example"
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        active.mkdir(parents=True, exist_ok=True)
+        self.write(".trellis/tasks/archive/2026-07/07-01-example/task.json", '{"status":"completed"}\n')
+        self.write(".trellis/tasks/archive/2026-07/07-01-example/prd.md", "# Example\n")
+        before = self.commit("archive task")
+        self.git("mv", str(archive.relative_to(self.root)), str(active.relative_to(self.root)))
+        self.write(".trellis/tasks/07-01-example/task.json", '{"status":"in_progress"}\n')
+        after = self.commit("un-archive task")
+
+        decision = self.classify(before, after)
+
+        self.assertEqual(decision["mode"], "bookkeeping")
+        self.assertEqual(decision["validationMode"], "none")
+        self.assertIn(
+            ".trellis/tasks/archive/2026-07/07-01-example/task.json",
+            decision["changedPaths"],
+        )
+
     def test_direct_main_bookkeeping_uses_same_ref_evidence(self) -> None:
         before = self.oid()
         self.write(".trellis/tasks/07-01-example/task.json", '{"status":"planning"}\n')
