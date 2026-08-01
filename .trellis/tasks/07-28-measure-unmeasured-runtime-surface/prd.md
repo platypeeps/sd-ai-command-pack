@@ -15,7 +15,7 @@ Bring the roughly 12,600 unmeasured lines of shipped runtime — Node, shell, an
 ## Acceptance Criteria
 
 - [x] `.github/scripts/bookkeeping_ci_scope.py` (477 lines) reports a coverage number.
-- [ ] review-preflight.mjs reports a coverage number in CI.
+- [x] review-preflight.mjs reports a coverage number in CI.
 - [ ] The shell lane reports a coverage number in CI.
 - [ ] Floors are added only in a follow-up change, at or below measured values.
 - [ ] `make check` passes.
@@ -31,3 +31,4 @@ Bring the roughly 12,600 unmeasured lines of shipped runtime — Node, shell, an
 - **Nuance the finding omits:** `.github/scripts/*.py` is not entirely unchecked — `tests.yml:346` already runs mypy over `bookkeeping_ci_scope.py` and `check-command-surface-drift.py`. They are type-checked but not coverage-measured.
 - Created from the 2026-07-28 repo audit with explicit user consent via the `audit.followups` decision. Planning complete 2026-07-28: `design.md` and `implement.md` added.
 - **Lane 1 measured baseline (2026-07-31, PR #292):** `bookkeeping_ci_scope.py` 77% — 233 statements, 51 missed, 94 branches, 21 partial — via `coverage run -m unittest tests.test_bookkeeping_ci_scope` + `combine` + `report --include=".github/scripts/*"`. No floor set (R4). `[report]` strict gate confirmed unchanged.
+- **Lane 2 measured baseline (2026-07-31/08-01, PR #301):** `review-preflight.mjs` 52.3% — 2,478/4,738 lines — via `c8 --clean=false --include="scripts/sd-ai-command-pack-review-preflight.mjs"` wrapping every bookkeeping-mode invocation in tests.yml, reported by CI run 30675259927 job "CI scope" step "Report review preflight JavaScript coverage". No floor set (R4); the step hard-fails only on a 0/0 zero-lines measurement, not on a low percentage. Lane 3 (shell) remains open — task stays `in_progress`.
