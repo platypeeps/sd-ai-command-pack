@@ -49,6 +49,46 @@ const CODE_FENCE_RE = /^[ \t]{0,3}(`{3,}|~{3,})/;
 const TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review', 'completed']);
 const ACTIVE_TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review']);
 const TRELLIS_TASK_PRIORITIES = new Set(['P0', 'P1', 'P2', 'P3']);
+// Option sets for the shared `validateTaskLifecycleIdentity` helper (defined
+// near its callers, close to `validateCompletionBundle`). Declared here, at
+// module top level before the CLI dispatch below, because that dispatch runs
+// synchronously as soon as this module is the Node entry point -- a `const`
+// declared further down the file would still be in its temporal dead zone
+// when that first synchronous call chain reaches it.
+//
+// Archive-move caller: `current` is the archived record. Both
+// `current.status === 'completed'` and a non-empty `current.completedAt` are
+// already independently enforced before this helper ever runs --
+// `validateBookkeepingTaskDirectory(mapping.archiveDir, {archived: true})`
+// raises `task_lifecycle_incomplete` for a non-completed archived status, and
+// `validateTrellisBookkeepingMetadata` raises `task_metadata_invalid` for a
+// missing `completedAt` on a completed record. Checking either again here
+// would inject a reason code this call site never emitted before this
+// extraction, so both stay off for this caller.
+const ARCHIVE_MOVE_IDENTITY_OPTIONS = {
+  sourceStatuses: ['in_progress', 'review'],
+  checkCurrentStatus: false,
+  checkSourceCompletedAtNull: false,
+  checkCompletedAt: false,
+  tolerateBranchNewlyRecorded: true,
+  sourceCode: 'completion_source_lifecycle_invalid',
+  identityCode: 'completion_archive_identity_changed',
+};
+// In-place caller: `current` is the same task directory's own live record
+// (same path as `source`, different ref -- the file never moves). Decision 4:
+// no status/branch transition tolerance for this shape.
+const IN_PLACE_IDENTITY_OPTIONS = {
+  sourceStatuses: ['in_progress', 'review'],
+  checkCurrentStatus: true,
+  currentStatuses: ['in_progress', 'review'],
+  requireStatusEqual: true,
+  checkSourceCompletedAtNull: true,
+  checkCompletedAt: true,
+  currentCompletedAtRule: 'null',
+  tolerateBranchNewlyRecorded: false,
+  sourceCode: 'completion_source_lifecycle_invalid',
+  identityCode: 'completion_task_identity_changed',
+};
 const REVIEW_CODE_PATH_PATTERN = /\.(?:cjs|js|mjs|py|sh|ts|tsx)$/;
 const REVIEW_WORKFLOW_PATH_PATTERN = /^\.github\/workflows\/[^/]+\.ya?ml$/;
 const NON_PRODUCTION_CODE_DIRECTORY_SEGMENTS = new Set([
@@ -1151,8 +1191,21 @@ function bookkeepingJournalSessionEvidence(summary) {
   }));
 }
 
-function validateCompletionSuccessorRecovery(evidence, headOid, add) {
-  evidence.completionSubtype = 'post-archive-review-successor';
+// Mechanical extraction of the pre-existing archive-anchor search into a
+// local-findings attempt function (implement.md step 3): "existing logic,
+// local findings, no behavior change" in isolation. Also exposes
+// `shapedTailCount` (an existing local variable) in the return value, which
+// the orchestrator below needs to pick the right findings on double failure
+// -- see the Round 3 note in design.md for why this exact field is the
+// discriminator, found empirically by running the existing test suite
+// against a literal implementation of an earlier, unconditional version of
+// that orchestration (9 of 11 existing fixtures broke).
+function attemptArchiveAnchorRecovery(headOid) {
+  const findings = [];
+  const add = (reasonCode, path, message, disposition = 'invalid') => {
+    if (findings.length >= MAX_BOOKKEEPING_FINDINGS) return;
+    findings.push({ reasonCode, path, message, disposition });
+  };
   const history = runGit([
     'rev-list',
     '--first-parent',
@@ -1166,7 +1219,7 @@ function validateCompletionSuccessorRecovery(evidence, headOid, add) {
       'Git could not enumerate bounded first-parent history for completion recovery',
       'indeterminate',
     );
-    return;
+    return { status: 'indeterminate', shapedTailCount: 0, findings, evidence: {} };
   }
   const commits = history.stdout.trim().split(/\s+/).filter(Boolean);
 
@@ -1185,7 +1238,7 @@ function validateCompletionSuccessorRecovery(evidence, headOid, add) {
         'Git could not inspect a candidate journal delta during completion recovery',
         'indeterminate',
       );
-      return;
+      return { status: 'indeterminate', shapedTailCount, findings, evidence: {} };
     }
     const archiveEntries = bookkeepingChangedEntries(baseOid, archiveOid, () => {});
     if (archiveEntries === null) {
@@ -1195,7 +1248,7 @@ function validateCompletionSuccessorRecovery(evidence, headOid, add) {
         'Git could not inspect a candidate archive delta during completion recovery',
         'indeterminate',
       );
-      return;
+      return { status: 'indeterminate', shapedTailCount, findings, evidence: {} };
     }
     if (!isAdjacentJournalCommit(journalEntries) || !isAdjacentArchiveCommit(archiveEntries)) {
       continue;
@@ -1206,7 +1259,7 @@ function validateCompletionSuccessorRecovery(evidence, headOid, add) {
       for (const finding of successor.findings) {
         add(finding.reasonCode, finding.path, finding.message, finding.disposition);
       }
-      return;
+      return { status: 'invalid', shapedTailCount, findings, evidence: {} };
     }
     const anchor = evaluateHistoricalCompletionBundle(baseOid, bookkeepingHeadOid);
     if (anchor.status !== 'valid') {
@@ -1226,7 +1279,7 @@ function validateCompletionSuccessorRecovery(evidence, headOid, add) {
         '',
         `the nearest adjacent archive/journal tail failed canonical completion validation${reasons ? `: ${reasons}` : ''}`,
       );
-      return;
+      return { status: 'invalid', shapedTailCount, findings, evidence: {} };
     }
     if (commits.length > MAX_BOOKKEEPING_ANCHOR_SEARCH_COMMITS) {
       add(
@@ -1234,27 +1287,412 @@ function validateCompletionSuccessorRecovery(evidence, headOid, add) {
         '',
         `no completion anchor was found within ${MAX_BOOKKEEPING_ANCHOR_SEARCH_COMMITS} first-parent commits`,
       );
-      return;
+      return { status: 'invalid', shapedTailCount, findings, evidence: {} };
     }
     add(
       'completion_successor_anchor_missing',
       '',
       'no bounded adjacent archive/journal completion tail is reachable from the final head',
     );
-    return;
+    return { status: 'invalid', shapedTailCount, findings, evidence: {} };
   }
 
   const selected = eligible[0];
-  evidence.taskDirectories = [...selected.anchor.evidence.taskDirectories];
-  evidence.journalSessions = [...selected.anchor.evidence.journalSessions];
-  evidence.completionAnchor = {
-    source: 'historical-adjacent-tail',
-    baseOid: selected.anchor.evidence.baseOid,
-    bookkeepingHeadOid: selected.anchor.evidence.headOid,
-    taskDirectories: [...selected.anchor.evidence.taskDirectories],
-    journalSessions: [...selected.anchor.evidence.journalSessions],
+  return {
+    status: 'valid',
+    shapedTailCount,
+    findings,
+    evidence: {
+      taskDirectories: [...selected.anchor.evidence.taskDirectories],
+      journalSessions: [...selected.anchor.evidence.journalSessions],
+      completionAnchor: {
+        source: 'historical-adjacent-tail',
+        baseOid: selected.anchor.evidence.baseOid,
+        bookkeepingHeadOid: selected.anchor.evidence.headOid,
+        taskDirectories: [...selected.anchor.evidence.taskDirectories],
+        journalSessions: [...selected.anchor.evidence.journalSessions],
+      },
+      successor: selected.successor.evidence,
+    },
   };
-  evidence.successor = selected.successor.evidence;
+}
+
+function commitArchiveAnchorEvidence(evidence, archiveResult) {
+  evidence.completionSubtype = 'post-archive-review-successor';
+  evidence.taskDirectories = archiveResult.evidence.taskDirectories;
+  evidence.journalSessions = archiveResult.evidence.journalSessions;
+  evidence.completionAnchor = archiveResult.evidence.completionAnchor;
+  evidence.successor = archiveResult.evidence.successor;
+}
+
+function commitActiveTaskAnchorEvidence(evidence, activeTaskResult) {
+  evidence.completionSubtype = 'active-task-review-successor';
+  evidence.taskDirectories = activeTaskResult.evidence.taskDirectories;
+  evidence.completionAnchor = activeTaskResult.evidence.completionAnchor;
+}
+
+// Change B, step 1: discover "the" active task purely from live head content.
+// Any candidate whose task.json fails to load/parse counts toward ambiguity,
+// not toward "not a candidate" -- a malformed sibling record must not hide a
+// genuine second in_progress/review task.
+function discoverActiveTrellisTaskDirectory() {
+  const tasksRoot = '.trellis/tasks';
+  let entries;
+  try {
+    entries = readdirSync(resolve(rootDir, tasksRoot), { withFileTypes: true });
+  } catch {
+    return { taskDir: null, ambiguous: true };
+  }
+  const qualifying = [];
+  let anyLoadFailure = false;
+  for (const entry of entries) {
+    if (entry.name === 'archive') continue;
+    if (!/^\d{2}-\d{2}-[^/]+$/.test(entry.name)) continue;
+    const taskDir = `${tasksRoot}/${entry.name}`;
+    const loaded = loadTrellisTaskMetadataFile(`${taskDir}/task.json`);
+    if (loaded.status !== 'loaded') {
+      anyLoadFailure = true;
+      continue;
+    }
+    let record;
+    try {
+      record = JSON.parse(loaded.text);
+    } catch {
+      anyLoadFailure = true;
+      continue;
+    }
+    if (!isPlainObject(record)) {
+      anyLoadFailure = true;
+      continue;
+    }
+    if (record.status === 'in_progress' || record.status === 'review') {
+      qualifying.push(taskDir);
+    }
+  }
+  if (anyLoadFailure || qualifying.length !== 1) {
+    return { taskDir: null, ambiguous: true };
+  }
+  return { taskDir: qualifying[0], ambiguous: false };
+}
+
+// Change B, step 2: find the range's starting point. Walks the bounded
+// first-parent history from the newest fetched commit toward the oldest
+// (indices commits.length-2 down to 0 -- commits[commits.length] is out of
+// bounds and there is no commit further back to serve as a parent), looking
+// for the OLDEST commit that (a) touches the task's own directory and (b)
+// whose PARENT is already a qualifying in_progress/review record. Condition
+// (b) is load-bearing: `task.py create` (status planning) and `task.py
+// start` (planning -> in_progress) both touch the task's own directory too,
+// and neither's own preceding state can satisfy IN_PLACE_IDENTITY_OPTIONS's
+// sourceStatuses -- without requiring the parent to already qualify, the
+// search would select one of those commits as the starting point for any
+// task whose whole lifecycle fits in the search window, which is the
+// ordinary case for a young task, not an edge case.
+function findActiveTaskHistoricalBase(taskDir, headOid) {
+  const history = runGit([
+    'rev-list',
+    '--first-parent',
+    `--max-count=${MAX_BOOKKEEPING_ANCHOR_SEARCH_COMMITS + 1}`,
+    headOid,
+  ]);
+  if (history.status !== 0) {
+    return {
+      status: 'indeterminate',
+      findings: [
+        {
+          reasonCode: 'completion_successor_history_unavailable',
+          path: '',
+          message: 'Git could not enumerate bounded first-parent history for active-task completion recovery',
+          disposition: 'indeterminate',
+        },
+      ],
+    };
+  }
+  const commits = history.stdout.trim().split(/\s+/).filter(Boolean);
+
+  let historicalBase = null;
+  let qualifyingIndex = null;
+  for (let i = commits.length - 2; i >= 0; i -= 1) {
+    const entries = bookkeepingChangedEntries(commits[i + 1], commits[i], () => {});
+    if (entries === null) {
+      return {
+        status: 'indeterminate',
+        findings: [
+          {
+            reasonCode: 'completion_successor_history_unavailable',
+            path: '',
+            message: 'Git could not inspect a candidate task-directory delta during active-task completion recovery',
+            disposition: 'indeterminate',
+          },
+        ],
+      };
+    }
+    const touchesTaskDir = entries.some((entry) =>
+      [entry.oldPath, entry.path].filter(Boolean).some((path) => path.startsWith(`${taskDir}/`)));
+    if (!touchesTaskDir) continue;
+    // Shape probe, not a validation step -- mirrors isAdjacentJournalCommit's
+    // silent-probe pattern. Full lifecycle/identity rigor happens later, once
+    // historicalBase is chosen, with real `add` reporting.
+    const probed = loadBookkeepingJsonAtRef(commits[i + 1], `${taskDir}/task.json`, () => {});
+    if (probed && (probed.status === 'in_progress' || probed.status === 'review')) {
+      historicalBase = commits[i + 1];
+      qualifyingIndex = i;
+      break;
+    }
+  }
+
+  if (historicalBase === null) {
+    return {
+      status: 'invalid',
+      findings: [
+        {
+          reasonCode: 'completion_successor_active_task_anchor_missing',
+          path: '',
+          message: 'no commit touching the active task directory within the bounded search window resolves to a qualifying starting point',
+          disposition: 'invalid',
+        },
+      ],
+    };
+  }
+  // The window cannot distinguish "this is really where the task's
+  // bookkeeping starts" from "the task's history continues past what was
+  // fetched" when the fetch hit its cap and the only qualifying candidate is
+  // right at the edge of the fetched window.
+  if (commits.length > MAX_BOOKKEEPING_ANCHOR_SEARCH_COMMITS && qualifyingIndex === commits.length - 2) {
+    return {
+      status: 'invalid',
+      findings: [
+        {
+          reasonCode: 'completion_successor_history_oversized',
+          path: '',
+          message: `no active-task completion anchor was confidently resolved within ${MAX_BOOKKEEPING_ANCHOR_SEARCH_COMMITS} first-parent commits`,
+          disposition: 'invalid',
+        },
+      ],
+    };
+  }
+  return { status: 'valid', historicalBase };
+}
+
+// Change B, steps 3+4: validate the whole historicalBase..headOid range as a
+// unit -- bound + per-commit linearity (a merge commit anywhere in the range
+// is caught here automatically, including if the "oldest touching" commit
+// itself is one), plus two orthogonal scope checks that neither substitutes
+// for the other: an aggregate net-unique-path count (reuses the existing
+// dedup pattern exactly), and a per-commit category check that inspects
+// every path in every commit's OWN diff (catches a forbidden mutation later
+// reverted by another commit in the same range, which a net diff would
+// miss).
+function evaluateActiveTaskSuccessorRange(taskDir, historicalBase, headOid) {
+  const findings = [];
+  const add = (reasonCode, path, message, disposition = 'invalid') => {
+    if (findings.length >= MAX_BOOKKEEPING_FINDINGS) return;
+    findings.push({ reasonCode, path, message, disposition });
+  };
+  const range = runGit(['rev-list', '--first-parent', '--reverse', `${historicalBase}..${headOid}`]);
+  if (range.status !== 0) {
+    add(
+      'completion_successor_history_unavailable',
+      '',
+      'Git could not inspect the active-task completion-successor commit range',
+      'indeterminate',
+    );
+    return { status: 'indeterminate', findings };
+  }
+  const commits = range.stdout.trim().split(/\s+/).filter(Boolean);
+  if (commits.length > MAX_BOOKKEEPING_SUCCESSOR_COMMITS) {
+    add(
+      'completion_successor_history_oversized',
+      '',
+      `active-task completion successor contains more than ${MAX_BOOKKEEPING_SUCCESSOR_COMMITS} commits`,
+    );
+  }
+
+  let parent = historicalBase;
+  for (const oid of commits.slice(0, MAX_BOOKKEEPING_SUCCESSOR_COMMITS)) {
+    const parents = runGit(['rev-list', '--parents', '-n', '1', oid]);
+    const fields = parents.status === 0
+      ? parents.stdout.trim().split(/\s+/).filter(Boolean)
+      : [];
+    if (fields.length !== 2 || fields[0] !== oid) {
+      add(
+        'completion_successor_history_non_linear',
+        '',
+        `active-task completion successor commit ${oid.slice(0, 12)} must have exactly one parent`,
+        parents.status === 0 ? 'invalid' : 'indeterminate',
+      );
+      parent = oid;
+      continue;
+    }
+    const commitEntries = bookkeepingChangedEntries(parent, oid, () => {});
+    if (commitEntries === null) {
+      add(
+        'completion_successor_history_unavailable',
+        '',
+        `Git could not inspect the per-commit delta for active-task completion successor commit ${oid.slice(0, 12)}`,
+        'indeterminate',
+      );
+      return { status: 'indeterminate', findings };
+    }
+    for (const entry of commitEntries) {
+      for (const path of [entry.oldPath, entry.path].filter(Boolean)) {
+        // Ordinary code (not under .trellis/ and not finalization runtime
+        // evidence) is always allowed; the task's own directory is allowed;
+        // a journal/index workspace file is allowed. Anything else --
+        // another task, the archive, .trellis/.runtime/,
+        // .sd-ai-command-pack/finish-work, a non-journal workspace path --
+        // is forbidden.
+        const allowed =
+          (!path.startsWith('.trellis/') && !path.startsWith('.sd-ai-command-pack/finish-work'))
+          || path.startsWith(`${taskDir}/`)
+          || /^\.trellis\/workspace\/[^/]+\/(?:journal-\d+\.md|index\.md)$/.test(path);
+        if (!allowed) {
+          add(
+            'completion_successor_scope_invalid',
+            path,
+            'active-task completion successor must not change another task, the archive, runtime evidence, or a non-journal workspace path',
+          );
+        }
+      }
+    }
+    parent = oid;
+  }
+
+  const entries = bookkeepingChangedEntries(historicalBase, headOid, () => {});
+  if (entries === null) {
+    add(
+      'completion_successor_history_unavailable',
+      '',
+      'Git could not inspect changed paths in the active-task completion-successor range',
+      'indeterminate',
+    );
+    return { status: 'indeterminate', findings };
+  }
+  const paths = new Set(entries.flatMap((entry) => [entry.oldPath, entry.path].filter(Boolean)));
+  if (paths.size > MAX_BOOKKEEPING_CHANGED_PATHS) {
+    add(
+      'completion_successor_scope_oversized',
+      '',
+      `active-task completion successor changes more than ${MAX_BOOKKEEPING_CHANGED_PATHS} paths`,
+    );
+  }
+
+  const invalid = findings.some((finding) => finding.disposition === 'invalid');
+  return {
+    status: invalid ? 'invalid' : findings.length > 0 ? 'indeterminate' : 'valid',
+    findings,
+  };
+}
+
+function attemptActiveTaskAnchorRecovery(headOid) {
+  const discovery = discoverActiveTrellisTaskDirectory();
+  if (discovery.ambiguous) {
+    return {
+      status: 'invalid',
+      shapedTailCount: 0,
+      findings: [
+        {
+          reasonCode: 'completion_successor_active_task_ambiguous',
+          path: '',
+          message: 'zero, more than one, or an unreadable in_progress/review task candidate exists at head; the active-task successor cannot be attempted',
+          disposition: 'invalid',
+        },
+      ],
+      evidence: {},
+    };
+  }
+  const taskDir = discovery.taskDir;
+
+  const base = findActiveTaskHistoricalBase(taskDir, headOid);
+  if (base.status !== 'valid') {
+    return { status: base.status, shapedTailCount: 0, findings: base.findings, evidence: {} };
+  }
+  const historicalBase = base.historicalBase;
+
+  const range = evaluateActiveTaskSuccessorRange(taskDir, historicalBase, headOid);
+  if (range.status !== 'valid') {
+    return { status: range.status, shapedTailCount: 0, findings: range.findings, evidence: {} };
+  }
+
+  // Steps 5-7: identity, journal presence, and the full content sweep all
+  // accumulate into one shared findings list -- these are three independent
+  // properties, not a sequential dependency chain, so all three run and
+  // report together rather than stopping at the first one.
+  const findings = [];
+  const add = (reasonCode, path, message, disposition = 'invalid') => {
+    if (findings.length >= MAX_BOOKKEEPING_FINDINGS) return;
+    findings.push({ reasonCode, path, message, disposition });
+  };
+
+  const taskFile = `${taskDir}/task.json`;
+  // Full content sweep, once, live -- deltaPaths: null means every defect in
+  // the task directory's current content blocks, matching Change A's direct
+  // path and the pre-archive gate; addAdvisory is irrelevant here since a
+  // null deltaPaths already routes every finding through `add`, never
+  // addAdvisory. Its return value is also step 5's "current" record, so the
+  // sweep runs exactly once, not once per historical checkpoint.
+  const current = validateBookkeepingTaskDirectory(taskDir, {
+    add,
+    archived: false,
+    addAdvisory: null,
+    deltaPaths: null,
+  });
+  // historicalBase is a genuine git-at-ref read; current is genuinely live
+  // head, never a stand-in for some earlier point.
+  const source = loadBookkeepingJsonAtRef(historicalBase, taskFile, add);
+  validateTaskLifecycleIdentity(source, current, taskFile, taskFile, add, IN_PLACE_IDENTITY_OPTIONS);
+
+  const rangeEntries = bookkeepingChangedEntries(historicalBase, headOid, add);
+  if (rangeEntries !== null) {
+    validateBookkeepingJournalBundle(rangeEntries, historicalBase, headOid, add);
+  }
+
+  const invalid = findings.some((finding) => finding.disposition === 'invalid');
+  const status = invalid ? 'invalid' : findings.length > 0 ? 'indeterminate' : 'valid';
+  if (status !== 'valid') {
+    return { status, shapedTailCount: 0, findings, evidence: {} };
+  }
+  return {
+    status: 'valid',
+    shapedTailCount: 0,
+    findings,
+    evidence: {
+      taskDirectories: [taskDir],
+      completionAnchor: {
+        source: 'active-task-range',
+        taskDir,
+        historicalBase,
+        headOid,
+      },
+    },
+  };
+}
+
+function validateCompletionSuccessorRecovery(evidence, headOid, add) {
+  const archiveResult = attemptArchiveAnchorRecovery(headOid);
+  if (archiveResult.status === 'valid') {
+    commitArchiveAnchorEvidence(evidence, archiveResult);
+    return;
+  }
+  const activeTaskResult = attemptActiveTaskAnchorRecovery(headOid);
+  if (activeTaskResult.status === 'valid') {
+    commitActiveTaskAnchorEvidence(evidence, activeTaskResult);
+    return;
+  }
+  // Both failed. Prefer the archive search's OWN diagnosis when it found a
+  // real shaped archive/journal tail that failed downstream (a specific,
+  // actionable reason already exists there), or when Git itself failed
+  // mid-search (`status === 'indeterminate'` -- a materially more urgent
+  // situation than "genuinely found nothing," reusing the three-way
+  // valid/invalid/indeterminate convention `evaluateCompletionSuccessorRange`
+  // already uses elsewhere in this file). Only defer to the active-task
+  // diagnosis when the archive search definitively found no shaped tail at
+  // all anywhere in bounded history -- see design.md's Control Flow
+  // "Round 3 note" for the full empirical trace of both fixes.
+  const findingsToCommit = (archiveResult.shapedTailCount > 0 || archiveResult.status === 'indeterminate')
+    ? archiveResult.findings
+    : activeTaskResult.findings;
+  for (const f of findingsToCommit) add(f.reasonCode, f.path, f.message, f.disposition);
 }
 
 function isAdjacentJournalCommit(entries) {
@@ -1486,6 +1924,84 @@ function validateBookkeepingDiffWhitespace(baseOid, headOid, add) {
   }
 }
 
+// Validates the status/completedAt/field-identity invariant shared by the
+// archive-move and in-place completion-bundle shapes. Behavior differs by
+// caller because `task.py archive` unconditionally rewrites a fresh archive
+// record (status -> completed, completedAt set) while an in-place touch must
+// keep both fields exactly as the base recorded them; parameterize rather
+// than hardcode one shape so each caller only sees the checks it needs.
+// `sourcePath`/`currentPath` are separate because the archive-move caller
+// reports the source-status finding at the active task's path but the
+// identity-changed finding at the archived path -- a single shared path
+// cannot reproduce that split. The in-place caller passes the same path
+// twice (the file never moves; only the ref differs).
+function validateTaskLifecycleIdentity(source, current, sourcePath, currentPath, add, options) {
+  const {
+    sourceStatuses,
+    checkCurrentStatus = false,
+    currentStatuses,
+    requireStatusEqual = false,
+    checkSourceCompletedAtNull = false,
+    checkCompletedAt = false,
+    currentCompletedAtRule,
+    tolerateBranchNewlyRecorded = false,
+    sourceCode = 'completion_source_lifecycle_invalid',
+    identityCode = 'completion_task_identity_changed',
+  } = options;
+  if (!source || !current) return;
+  if (!sourceStatuses.includes(source.status)) {
+    add(sourceCode, sourcePath, `source status must be one of: ${sourceStatuses.join(', ')}`);
+  }
+  if (checkSourceCompletedAtNull && source.completedAt !== null) {
+    add(sourceCode, sourcePath, 'source completedAt must be null for this bundle shape');
+  }
+  if (checkCurrentStatus && !currentStatuses.includes(current.status)) {
+    add(sourceCode, currentPath, `status must be one of: ${currentStatuses.join(', ')}`);
+  }
+  if (requireStatusEqual && source.status !== current.status) {
+    add(sourceCode, currentPath, 'status must stay unchanged for this bundle shape');
+  }
+  if (checkCompletedAt) {
+    const completedAtOk = currentCompletedAtRule === 'null'
+      ? current.completedAt === null
+      : typeof current.completedAt === 'string' && current.completedAt.trim().length > 0;
+    if (!completedAtOk) {
+      add(
+        identityCode,
+        currentPath,
+        `completedAt must be ${currentCompletedAtRule === 'null' ? 'null' : 'a non-empty timestamp'} for this bundle shape`,
+      );
+    }
+  }
+  const stripLifecycle = (record) => {
+    const copy = { ...record };
+    delete copy.status;
+    delete copy.completedAt;
+    return copy;
+  };
+  const sourceRecord = stripLifecycle(source);
+  const currentRecord = stripLifecycle(current);
+  // The pre-archive gate requires a completion-ready task to carry a
+  // non-empty branch. An operator who satisfies it after the finalization
+  // base is captured lands that write inside the archive commit, where this
+  // comparison would otherwise read it as smuggled content. Archive-move
+  // tolerates exactly that transition -- a rewrite or an erasure still fails,
+  // and an absent key is a distinct state that stays blocked. The in-place
+  // shape never tolerates it (Decision 4): status and branch must be
+  // byte-identical between base and head.
+  const branchNewlyRecorded = tolerateBranchNewlyRecorded
+    && sourceRecord.branch === null
+    && typeof currentRecord.branch === 'string'
+    && currentRecord.branch.trim().length > 0;
+  if (branchNewlyRecorded) {
+    delete sourceRecord.branch;
+    delete currentRecord.branch;
+  }
+  if (stableJson(sourceRecord) !== stableJson(currentRecord)) {
+    add(identityCode, currentPath, 'fields other than status, completedAt, and (where tolerated) a newly recorded branch changed');
+  }
+}
+
 function validateCompletionBundle(entries, evidence, baseOid, add, options = {}) {
   const taskEntries = entries.filter((entry) =>
     entry.path.startsWith('.trellis/tasks/') || entry.oldPath.startsWith('.trellis/tasks/'));
@@ -1519,7 +2035,16 @@ function validateCompletionBundle(entries, evidence, baseOid, add, options = {})
     mappings.map((mapping) => [`${mapping.sourceDir}\0${mapping.archiveDir}`, mapping]),
   ).values()];
   if (uniqueMappings.length === 0) {
-    add('completion_archive_move_missing', '', 'completion bundle must move at least one active task into a supported archive month');
+    const inPlace = detectInPlaceTaskTouch(taskEntries);
+    if (inPlace) {
+      validateInPlaceTaskTouch(inPlace.taskDir, taskEntries, baseOid, add, options, evidence);
+      return;
+    }
+    add(
+      'completion_archive_move_missing',
+      '',
+      'completion bundle must move an active task into an archive month, or touch exactly one active task directory in place',
+    );
     return;
   }
   evidence.taskDirectories = uniqueMappings.map((mapping) => mapping.archiveDir).sort();
@@ -1544,35 +2069,75 @@ function validateCompletionBundle(entries, evidence, baseOid, add, options = {})
     for (const issue of validateTrellisBookkeepingMetadata(source, mapping.sourceDir, false)) {
       add('completion_source_metadata_invalid', `${mapping.sourceDir}/task.json`, `field ${issue}`);
     }
-    if (!['in_progress', 'review'].includes(source.status)) {
-      add('completion_source_lifecycle_invalid', `${mapping.sourceDir}/task.json`, 'source status must be in_progress or review');
-    }
-    const stripLifecycle = (record) => {
-      const copy = { ...record };
-      delete copy.status;
-      delete copy.completedAt;
-      return copy;
-    };
-    const sourceRecord = stripLifecycle(source);
-    const archivedRecord = stripLifecycle(archived);
-    // The pre-archive gate requires a completion-ready task to carry a
-    // non-empty branch. An operator who satisfies it after the finalization
-    // base is captured lands that write inside the archive commit, where this
-    // comparison would otherwise read it as smuggled content. Tolerate exactly
-    // that transition -- a rewrite or an erasure still fails, and an absent key
-    // is a distinct state that stays blocked.
-    const branchNewlyRecorded =
-      sourceRecord.branch === null
-      && typeof archivedRecord.branch === 'string'
-      && archivedRecord.branch.trim().length > 0;
-    if (branchNewlyRecorded) {
-      delete sourceRecord.branch;
-      delete archivedRecord.branch;
-    }
-    if (stableJson(sourceRecord) !== stableJson(archivedRecord)) {
-      add('completion_archive_identity_changed', `${mapping.archiveDir}/task.json`, 'archive move changed fields other than status, completedAt, and a newly recorded branch');
+    validateTaskLifecycleIdentity(
+      source,
+      archived,
+      `${mapping.sourceDir}/task.json`,
+      `${mapping.archiveDir}/task.json`,
+      add,
+      ARCHIVE_MOVE_IDENTITY_OPTIONS,
+    );
+  }
+}
+
+// Second valid completion-bundle shape (Change A): an in_progress/review
+// task's own directory touched in place, with no archive move at all. Only
+// reachable when no clean archive-move mapping was detected. Collects the set
+// of active (non-archive) task directories touched by `taskEntries`, using
+// the same extraction `validatePlanningBundle` uses for its own task-dir set.
+// Any `archive/`-prefixed path here means a malformed/partial archive attempt
+// -- fall through to the caller's existing `completion_archive_move_missing`
+// message rather than treating it as an in-place touch. Exactly one
+// non-archive directory and zero archive-prefixed paths qualifies; zero or
+// more than one falls through to that same existing failure.
+function detectInPlaceTaskTouch(taskEntries) {
+  const activeDirs = new Set();
+  let hasArchivePath = false;
+  for (const entry of taskEntries) {
+    for (const path of [entry.oldPath, entry.path].filter(Boolean)) {
+      if (path.startsWith('.trellis/tasks/archive/')) {
+        hasArchivePath = true;
+        continue;
+      }
+      const match = /^(\.trellis\/tasks\/\d{2}-\d{2}-[^/]+)\//.exec(path);
+      if (match) activeDirs.add(match[1]);
     }
   }
+  if (hasArchivePath || activeDirs.size !== 1) return null;
+  return { taskDir: [...activeDirs][0] };
+}
+
+function validateInPlaceTaskTouch(taskDir, taskEntries, baseOid, add, options, evidence) {
+  // completion_task_scope_invalid covers both shapes for this bundle: a
+  // task-entry path outside the one detected directory, and a delete/rename
+  // inside it -- mirroring the archive-move shape's own allowedPrefixes sweep
+  // plus its (absence of a) deletion tolerance.
+  for (const entry of taskEntries) {
+    for (const path of [entry.oldPath, entry.path].filter(Boolean)) {
+      if (!path.startsWith(`${taskDir}/`)) {
+        add('completion_task_scope_invalid', path, 'task change is outside the detected in-place task directory');
+      }
+    }
+    if (entry.status.startsWith('D') || entry.status.startsWith('R')) {
+      add('completion_task_scope_invalid', entry.oldPath || entry.path, 'in-place task touch must not delete or rename task artifacts');
+    }
+  }
+  const current = validateBookkeepingTaskDirectory(taskDir, {
+    add,
+    archived: false,
+    addAdvisory: options.addAdvisory ?? null,
+    deltaPaths: options.deltaPaths ?? null,
+  });
+  const source = loadBookkeepingJsonAtRef(baseOid, `${taskDir}/task.json`, add);
+  validateTaskLifecycleIdentity(
+    source,
+    current,
+    `${taskDir}/task.json`,
+    `${taskDir}/task.json`,
+    add,
+    IN_PLACE_IDENTITY_OPTIONS,
+  );
+  evidence.taskDirectories = [taskDir];
 }
 
 function bookkeepingTaskEntries(entries) {

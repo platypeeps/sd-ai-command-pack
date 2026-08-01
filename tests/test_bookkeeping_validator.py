@@ -116,7 +116,10 @@ class BookkeepingValidatorTests(InstallTestCase):
 
     def write_sessions(self, root: Path, sessions: list[list[str]]) -> None:
         workspace = root / ".trellis/workspace/dev"
-        workspace.mkdir(parents=True)
+        # exist_ok: a fixture that records two separate journal-writing
+        # commits (e.g. AC3's two-touch case) calls this helper twice against
+        # the same repo; the second call must overwrite, not fail.
+        workspace.mkdir(parents=True, exist_ok=True)
         journal_lines = ["# Development Journal", ""]
         index_lines = [
             "# Sessions",
@@ -816,6 +819,117 @@ class BookkeepingValidatorTests(InstallTestCase):
         self.assertEqual(payload["status"], "valid", result.stdout)
         self.assertEqual(payload["reasonCodes"], ["completion_bundle_valid"])
 
+    IN_PLACE_TASK_DIR = ".trellis/tasks/07-25-in-place-completion"
+
+    def run_in_place_bundle(
+        self,
+        *,
+        branch_before: str | None,
+        status_after: str,
+        branch_after: str | None,
+    ) -> subprocess.CompletedProcess[str]:
+        """Touch an in_progress task's own directory with no archive move.
+
+        ``branch_before``/``status_after``/``branch_after`` let callers pin the
+        Decision 4 invariant: status and branch must stay byte-identical
+        between base and head for this bundle shape (no transition tolerance,
+        unlike the archive-move shape).
+        """
+        root = self.make_validator_repo()
+        name = "in-place-completion"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name,
+                status="in_progress",
+                branch=branch_before,
+                completed_at=None,
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "fixture work")
+        base = self.git_output(root, "rev-parse", "HEAD")
+
+        record = json.loads((task / "task.json").read_text(encoding="utf-8"))
+        record["status"] = status_after
+        record["branch"] = branch_after
+        (task / "task.json").write_text(
+            json.dumps(record, indent=2) + "\n", encoding="utf-8"
+        )
+        # Always touch prd.md too, so the identity-preserving success fixture
+        # (status/branch unchanged) still produces a real bookkeeping commit
+        # instead of an empty diff.
+        (task / "prd.md").write_text(
+            "# Fixture\n\nValidated task.\n\n- [x] Bookkeeping touch recorded.\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "record bookkeeping touch")
+
+        self.write_session(root, base)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record fixture journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        return self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            base,
+            "--head",
+            head,
+        )
+
+    def test_completion_bundle_validates_in_place_task_touch(self) -> None:
+        # AC1: an in_progress task's own bookkeeping touch (no archive move)
+        # validates directly through the widened normal path.
+        result = self.run_in_place_bundle(
+            branch_before="codex/in-place-completion",
+            status_after="in_progress",
+            branch_after="codex/in-place-completion",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "valid", result.stdout)
+        self.assertEqual(payload["reasonCodes"], ["completion_bundle_valid"])
+        self.assertNotIn("completionSubtype", payload["evidence"])
+        self.assertEqual(
+            payload["evidence"]["taskDirectories"], [self.IN_PLACE_TASK_DIR]
+        )
+
+    def test_completion_bundle_rejects_status_transition_in_place(self) -> None:
+        # AC10 / Decision 4: unlike the archive-move shape, this shape
+        # tolerates no in_progress -> review transition.
+        result = self.run_in_place_bundle(
+            branch_before="codex/in-place-completion",
+            status_after="review",
+            branch_after="codex/in-place-completion",
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "invalid", result.stdout)
+        self.assertIn("completion_source_lifecycle_invalid", payload["reasonCodes"])
+
+    def test_completion_bundle_rejects_branch_newly_recorded_in_place(self) -> None:
+        # AC10 / Decision 4: unlike the archive-move shape, this shape has no
+        # "newly recorded branch" exception.
+        result = self.run_in_place_bundle(
+            branch_before=None,
+            status_after="in_progress",
+            branch_after="codex/newly-recorded",
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "invalid", result.stdout)
+        self.assertIn("completion_task_identity_changed", payload["reasonCodes"])
+
     def make_post_archive_successor_repo(
         self, *, prehistory_commits: int = 0, corrupt_archive: bool = False
     ) -> tuple[Path, str, str]:
@@ -1219,6 +1333,12 @@ class BookkeepingValidatorTests(InstallTestCase):
         self.assertNotEqual(bookkeeping_head, head)
 
     def test_completion_successor_requires_a_canonical_anchor(self) -> None:
+        # A one-commit repo with no task and no archive ever created:
+        # shapedTailCount is structurally always 0 here (definitively, no Git
+        # errors), so the active-task-ambiguous fallback correctly supersedes
+        # the old generic anchor-missing diagnostic. Intentional, documented
+        # behavior change (design.md's Control Flow "Round 3 note"), not a
+        # regression.
         root = self.make_validator_repo()
         head = self.git_output(root, "rev-parse", "HEAD")
 
@@ -1236,7 +1356,534 @@ class BookkeepingValidatorTests(InstallTestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertEqual(
             json.loads(result.stdout)["reasonCodes"],
-            ["completion_successor_anchor_missing"],
+            ["completion_successor_active_task_ambiguous"],
+        )
+
+    def test_active_task_successor_recovers_single_touch(self) -> None:
+        # AC2: a single touch+journal pair recovers via the new subtype;
+        # historicalBase resolves to the commit before the prd.md touch.
+        root = self.make_validator_repo()
+        name = "active-task-successor"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name,
+                status="in_progress",
+                branch="codex/active-task-successor",
+                completed_at=None,
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "fixture work")
+        fixture_work = self.git_output(root, "rev-parse", "HEAD")
+
+        (task / "prd.md").write_text(
+            "# Fixture\n\nValidated task.\n\n- [x] Bookkeeping touch recorded.\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "record bookkeeping touch")
+
+        self.write_session(root, fixture_work)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record fixture journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reasonCodes"], ["completion_bundle_valid"])
+        evidence = payload["evidence"]
+        self.assertEqual(evidence["completionSubtype"], "active-task-review-successor")
+        self.assertEqual(evidence["taskDirectories"], [task_dir])
+        self.assertEqual(
+            evidence["completionAnchor"],
+            {
+                "source": "active-task-range",
+                "taskDir": task_dir,
+                "historicalBase": fixture_work,
+                "headOid": head,
+            },
+        )
+
+    def test_active_task_successor_recovers_oldest_of_two_touches(self) -> None:
+        # AC3: two touches inside one range; historicalBase resolves to
+        # before the OLDER touch (the oldest qualifying one within the
+        # bound, not the nearest), and both journal sessions are confirmed.
+        root = self.make_validator_repo()
+        name = "active-task-two-touches"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name,
+                status="in_progress",
+                branch="codex/active-task-two-touches",
+                completed_at=None,
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "fixture work")
+        fixture_work = self.git_output(root, "rev-parse", "HEAD")
+
+        (task / "prd.md").write_text(
+            "# Fixture\n\nValidated task.\n\n- [x] First touch recorded.\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "record first bookkeeping touch")
+
+        self.write_session(root, fixture_work)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record first fixture journal")
+
+        (root / "ordinary.txt").write_text("ordinary work\n", encoding="utf-8")
+        self.run_git(root, "add", "ordinary.txt")
+        self.run_git(root, "commit", "-m", "ordinary repo work")
+
+        (task / "prd.md").write_text(
+            "# Fixture\n\nValidated task.\n\n"
+            "- [x] First touch recorded.\n- [x] Second touch recorded.\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "record second bookkeeping touch")
+        touch2 = self.git_output(root, "rev-parse", "HEAD")
+
+        self.write_sessions(root, [[fixture_work], [touch2]])
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record second fixture journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reasonCodes"], ["completion_bundle_valid"])
+        evidence = payload["evidence"]
+        self.assertEqual(evidence["completionSubtype"], "active-task-review-successor")
+        # historicalBase resolving to before touch1 (not touch2) proves the
+        # range spans both touches and both journal-recording commits without
+        # rejecting on the second journal write; evidence.journalSessions is
+        # not part of this subtype's shape (design.md's explicit evidence
+        # list), unlike the archive-successor subtype's separate anchor.
+        self.assertEqual(evidence["completionAnchor"]["historicalBase"], fixture_work)
+
+    def test_active_task_successor_recovers_when_task_created_and_started_in_window(
+        self,
+    ) -> None:
+        # AC3b / AC11, the most serious round-2 finding: task.py create
+        # (status planning) and task.py start (-> in_progress) both touch the
+        # task's own directory too. historicalBase must resolve to after
+        # start, never to the creation or start commit itself -- this is the
+        # ordinary shape for any task young enough to fit in the search
+        # window, not an edge case.
+        root = self.make_validator_repo()
+        name = "active-task-created-started"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name,
+                status="planning",
+                branch=None,
+                completed_at=None,
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "create task")
+
+        record = json.loads((task / "task.json").read_text(encoding="utf-8"))
+        record["status"] = "in_progress"
+        (task / "task.json").write_text(
+            json.dumps(record, indent=2) + "\n", encoding="utf-8"
+        )
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "start task")
+        start_commit = self.git_output(root, "rev-parse", "HEAD")
+
+        (task / "prd.md").write_text(
+            "# Fixture\n\nValidated task.\n\n- [x] Bookkeeping touch recorded.\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "record bookkeeping touch")
+
+        self.write_session(root, start_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record fixture journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reasonCodes"], ["completion_bundle_valid"])
+        evidence = payload["evidence"]
+        self.assertEqual(evidence["completionSubtype"], "active-task-review-successor")
+        self.assertEqual(evidence["completionAnchor"]["historicalBase"], start_commit)
+
+    def test_active_task_successor_rejects_second_active_task_touch(self) -> None:
+        # AC4(a): a range touching a second, unrelated task directory blocks.
+        # The sibling is `planning` (not in_progress/review) so discovery
+        # itself still resolves to exactly one candidate; the violation is
+        # caught by the per-commit scope check, not discovery ambiguity.
+        root = self.make_validator_repo()
+        name = "active-task-scope"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        other_dir = ".trellis/tasks/07-26-active-task-scope-other"
+        self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name, status="in_progress", branch="codex/active-task-scope", completed_at=None
+            ),
+        )
+        self.write_task(
+            root,
+            other_dir,
+            self.task_record(
+                "active-task-scope-other", status="planning", branch=None, completed_at=None
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "fixture work")
+        fixture_work = self.git_output(root, "rev-parse", "HEAD")
+
+        (root / task_dir / "prd.md").write_text(
+            "# Fixture\n\n- [x] Touch.\n", encoding="utf-8"
+        )
+        (root / other_dir / "prd.md").write_text(
+            "# Fixture\n\n- [x] Unrelated touch.\n", encoding="utf-8"
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "touch both tasks")
+
+        self.write_session(root, fixture_work)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record fixture journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "completion_successor_scope_invalid",
+            json.loads(result.stdout)["reasonCodes"],
+        )
+
+    def test_active_task_successor_rejects_archive_touch_in_range(self) -> None:
+        # AC4(b): a range touching the archive blocks.
+        root = self.make_validator_repo()
+        name = "active-task-archive-scope"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name,
+                status="in_progress",
+                branch="codex/active-task-archive-scope",
+                completed_at=None,
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "fixture work")
+        fixture_work = self.git_output(root, "rev-parse", "HEAD")
+
+        archive_dir = root / ".trellis/tasks/archive/2026-06/06-01-already-done"
+        archive_dir.mkdir(parents=True)
+        archived_record = self.task_record(
+            "already-done",
+            status="completed",
+            branch="codex/already-done",
+            completed_at="2026-06-01",
+        )
+        (archive_dir / "task.json").write_text(
+            json.dumps(archived_record, indent=2) + "\n", encoding="utf-8"
+        )
+        (archive_dir / "prd.md").write_text("# Archived\n\nDone.\n", encoding="utf-8")
+        (archive_dir / "implement.jsonl").write_text("", encoding="utf-8")
+        (archive_dir / "check.jsonl").write_text("", encoding="utf-8")
+        self.run_git(root, "add", ".trellis/tasks/archive")
+        self.run_git(root, "commit", "-m", "seed pre-existing archive")
+
+        (root / task_dir / "prd.md").write_text(
+            "# Fixture\n\n- [x] Touch.\n", encoding="utf-8"
+        )
+        (archive_dir / "task.json").write_text(
+            json.dumps({**archived_record, "notes": "mutated"}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", task_dir, ".trellis/tasks/archive")
+        self.run_git(root, "commit", "-m", "touch task and mutate archive")
+
+        self.write_session(root, fixture_work)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record fixture journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "completion_successor_scope_invalid",
+            json.loads(result.stdout)["reasonCodes"],
+        )
+
+    def test_active_task_successor_rejects_merge_commit_in_range(self) -> None:
+        # AC4(c): a merge commit anywhere in the range blocks.
+        root = self.make_validator_repo()
+        name = "active-task-merge-scope"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name,
+                status="in_progress",
+                branch="codex/active-task-merge-scope",
+                completed_at=None,
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "fixture work")
+        fixture_work = self.git_output(root, "rev-parse", "HEAD")
+
+        (task / "prd.md").write_text(
+            "# Fixture\n\n- [x] Touch.\n", encoding="utf-8"
+        )
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "record bookkeeping touch")
+
+        self.run_git(root, "switch", "-c", "side-branch")
+        (root / "side.txt").write_text("side\n", encoding="utf-8")
+        self.run_git(root, "add", "side.txt")
+        self.run_git(root, "commit", "-m", "side work")
+        self.run_git(root, "switch", "main")
+        self.run_git(root, "merge", "--no-ff", "side-branch", "-m", "merge side work")
+
+        self.write_session(root, fixture_work)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record fixture journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "completion_successor_history_non_linear",
+            json.loads(result.stdout)["reasonCodes"],
+        )
+
+    def test_active_task_successor_rejects_mutate_then_revert_in_range(self) -> None:
+        # AC4(d): a forbidden-path mutation later reverted by another commit
+        # in the same range still blocks -- proves the scope check is
+        # per-commit, not a net diff a revert could evade.
+        root = self.make_validator_repo()
+        name = "active-task-revert-scope"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        other_dir = ".trellis/tasks/07-26-active-task-revert-scope-other"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name,
+                status="in_progress",
+                branch="codex/active-task-revert-scope",
+                completed_at=None,
+            ),
+        )
+        self.write_task(
+            root,
+            other_dir,
+            self.task_record(
+                "active-task-revert-scope-other",
+                status="planning",
+                branch=None,
+                completed_at=None,
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "fixture work")
+        fixture_work = self.git_output(root, "rev-parse", "HEAD")
+
+        (task / "prd.md").write_text(
+            "# Fixture\n\n- [x] Touch.\n", encoding="utf-8"
+        )
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "record bookkeeping touch")
+
+        original_other_prd = (root / other_dir / "prd.md").read_text(encoding="utf-8")
+        (root / other_dir / "prd.md").write_text("mutated\n", encoding="utf-8")
+        self.run_git(root, "add", other_dir)
+        self.run_git(root, "commit", "-m", "forbidden mutation of unrelated task")
+
+        (root / other_dir / "prd.md").write_text(original_other_prd, encoding="utf-8")
+        self.run_git(root, "add", other_dir)
+        self.run_git(root, "commit", "-m", "revert forbidden mutation")
+
+        self.write_session(root, fixture_work)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record fixture journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "completion_successor_scope_invalid",
+            json.loads(result.stdout)["reasonCodes"],
+        )
+
+    def test_active_task_successor_ambiguous_when_no_qualifying_task(self) -> None:
+        # AC5, "zero" variant: one task exists but is not in_progress/review.
+        root = self.make_validator_repo()
+        name = "active-task-planning-only"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        self.write_task(
+            root,
+            task_dir,
+            self.task_record(name, status="planning", branch=None, completed_at=None),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "fixture work")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(
+            json.loads(result.stdout)["reasonCodes"],
+            ["completion_successor_active_task_ambiguous"],
+        )
+
+    def test_active_task_successor_ambiguous_when_multiple_qualifying_tasks(
+        self,
+    ) -> None:
+        # AC5, "multiple" variant: two in_progress/review tasks exist.
+        root = self.make_validator_repo()
+        self.write_task(
+            root,
+            ".trellis/tasks/07-25-active-task-multi-a",
+            self.task_record(
+                "active-task-multi-a", status="in_progress", branch="codex/a", completed_at=None
+            ),
+        )
+        self.write_task(
+            root,
+            ".trellis/tasks/07-26-active-task-multi-b",
+            self.task_record(
+                "active-task-multi-b", status="review", branch="codex/b", completed_at=None
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "fixture work")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(
+            json.loads(result.stdout)["reasonCodes"],
+            ["completion_successor_active_task_ambiguous"],
+        )
+
+    def test_active_task_successor_ambiguous_when_sibling_task_json_corrupt(
+        self,
+    ) -> None:
+        # AC5, "unreadable sibling" variant: one valid in_progress task plus
+        # one sibling whose task.json is corrupt/unparseable -- the corrupt
+        # sibling must not be silently treated as "not a candidate," since
+        # that could hide a genuine second in_progress task.
+        root = self.make_validator_repo()
+        self.write_task(
+            root,
+            ".trellis/tasks/07-25-active-task-corrupt-sibling",
+            self.task_record(
+                "active-task-corrupt-sibling",
+                status="in_progress",
+                branch="codex/valid",
+                completed_at=None,
+            ),
+        )
+        corrupt_dir = root / ".trellis/tasks/07-26-active-task-corrupt-other"
+        corrupt_dir.mkdir(parents=True)
+        (corrupt_dir / "task.json").write_text("{not valid json", encoding="utf-8")
+        (corrupt_dir / "prd.md").write_text(
+            "# Fixture\n\nCorrupt sibling.\n", encoding="utf-8"
+        )
+        (corrupt_dir / "implement.jsonl").write_text("", encoding="utf-8")
+        (corrupt_dir / "check.jsonl").write_text("", encoding="utf-8")
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "fixture work")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(
+            json.loads(result.stdout)["reasonCodes"],
+            ["completion_successor_active_task_ambiguous"],
+        )
+
+    def test_active_task_successor_reports_no_anchor_within_bound(self) -> None:
+        # AC6: exactly one active task, but no commit touching its directory
+        # within the bounded search window resolves to a qualifying starting
+        # point (the only touch is the task's own creation, whose parent
+        # never had the file) -- a direct diagnostic, not old archive-search
+        # noise from unrelated history.
+        root = self.make_validator_repo()
+        name = "active-task-no-anchor"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name, status="in_progress", branch="codex/active-task-no-anchor", completed_at=None
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "fixture work")
+        for index in range(5):
+            self.run_git(
+                root, "commit", "--allow-empty", "-m", f"unrelated commit {index + 1}"
+            )
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(
+            json.loads(result.stdout)["reasonCodes"],
+            ["completion_successor_active_task_anchor_missing"],
         )
 
     def test_valid_planning_task_and_journal_bundle(self) -> None:
