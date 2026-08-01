@@ -1022,3 +1022,39 @@ Session complete; task `07-28-measure-unmeasured-runtime-surface` stays `in_prog
 - Lane 2: measure `review-preflight.mjs` via c8/NODE_V8_COVERAGE.
 - Lane 3: decide and implement the shell coverage scope.
 - Shell lane must report a coverage number in CI before the task's acceptance criteria are met.
+
+
+## Session 276: Lane 2: measure review-preflight.mjs coverage via c8, PR #301 review loop to clean
+
+**Date**: 2026-07-31
+**Task**: Lane 2: measure review-preflight.mjs coverage via c8, PR #301 review loop to clean
+**Branch**: `fix/measure-unmeasured-runtime-surface`
+
+### Summary
+
+Implemented lane 2 of 07-28-measure-unmeasured-runtime-surface: added c8-based coverage measurement for scripts/sd-ai-command-pack-review-preflight.mjs to the bookkeeping CI lane, with a shared c8_run wrapper reused across both preflight invocations and a fail-closed jq -e gate against zero measured lines. Shipped through PR #301 and drove its Copilot review loop to a clean round 4: round 1 added missing step ids plus a wiring/gate contract test; round 2 extended it with c8_run wrapper-reuse and temp-directory assertions plus a new negative-case test executing the live jq gate expression against a synthetic zero-coverage fixture; round 3 added the repo's established shutil.which("jq") + skipTest guard to that new test. All 8 sd-check gates and full CI green at 394f3cc0; PR-scoped review-learnings dry run recorded 1 proposed change, 0 applied.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cf2f36fa` | (see git log) |
+| `cba06eb3` | (see git log) |
+| `a81e548a` | (see git log) |
+| `394f3cc0` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
