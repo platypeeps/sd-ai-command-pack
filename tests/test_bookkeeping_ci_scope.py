@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -640,12 +641,55 @@ class BookkeepingWorkflowContractTests(unittest.TestCase):
         self.assertEqual(install["if"], "steps.classify.outputs.mode == 'bookkeeping'")
         self.assertIn("npm ci", install["run"])
 
+        validation = self.scope_step("bookkeeping-validation")
+        self.assertIn("--clean=false", validation["run"])
+        self.assertIn("c8_run=(npm exec --no -- c8", validation["run"])
+        self.assertEqual(
+            validation["run"].count('"${c8_run[@]}"'),
+            2,
+            "both review-preflight.mjs invocations must reuse the shared c8_run wrapper",
+        )
+
         report = self.scope_step("report-review-preflight-coverage")
         self.assertEqual(
             report["if"], "steps.classify.outputs.mode == 'bookkeeping' && !cancelled()"
         )
         self.assertIn(
             "jq -e '.total.lines.total > 0 and .total.lines.covered > 0'", report["run"]
+        )
+
+        validation_temp_dir = re.search(r'c8_temp_dir="([^"]+)"', validation["run"])
+        report_temp_dir = re.search(r'c8_temp_dir="([^"]+)"', report["run"])
+        self.assertIsNotNone(validation_temp_dir)
+        self.assertIsNotNone(report_temp_dir)
+        self.assertEqual(
+            validation_temp_dir.group(1),
+            report_temp_dir.group(1),
+            "validation and report steps must accumulate coverage in the same --temp-directory",
+        )
+
+    def test_report_review_preflight_coverage_gate_fails_closed_on_zero_lines(self) -> None:
+        report = self.scope_step("report-review-preflight-coverage")
+        match = re.search(r"jq -e '([^']+)'", report["run"])
+        self.assertIsNotNone(match, "expected a jq -e gate expression in the report step")
+        gate_expression = match.group(1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            summary_path = Path(tmp) / "coverage-summary.json"
+            summary_path.write_text(
+                json.dumps({"total": {"lines": {"total": 0, "covered": 0, "pct": 0}}}),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["jq", "-e", gate_expression, str(summary_path)],
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertNotEqual(
+            result.returncode,
+            0,
+            "jq -e gate must fail closed (nonzero exit) when c8 measures zero lines",
         )
 
     def test_aggregate_and_auto_tag_are_mode_bound(self) -> None:
