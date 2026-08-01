@@ -2,7 +2,7 @@
   "id": "completion-recovery-no-archive-anchor",
   "name": "completion-recovery-no-archive-anchor",
   "title": "Fix completion-mode recovery for partial multi-lane tasks with no archive anchor",
-  "description": "",
+  "description": "Widen validateCompletionBundle's normal path with an in-place active-task bundle shape and add a new active-task-review-successor recovery subtype, so a legitimately-open (non-archived) task's own bookkeeping touch gets a valid finish-work receipt.",
   "status": "completed",
   "dev_type": null,
   "scope": null,
