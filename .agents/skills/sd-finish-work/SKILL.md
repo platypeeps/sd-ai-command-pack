@@ -184,6 +184,23 @@ task. Ordinary task archival, journal work, and validation need no confirmation.
    workspace, or finalization evidence. This remains ordinary `completion`
    mode and creates no duplicate journal or bookkeeping commit.
 
+   When that archive search finds nothing because no task was archived this
+   session, and exactly one active task is `in_progress` or `review`, the same
+   base-equal-to-head call may instead recover as an
+   `active-task-review-successor`: the task's own bounded bookkeeping range,
+   from the oldest reachable prior touch to the current head, proves as one
+   scope-bounded unit — status, `completedAt`, and branch must stay
+   byte-identical across the whole range, and every commit in it is limited to
+   the task's own directory, ordinary repository paths, and journal/index
+   workspace files. This is a sibling to `journal-only-recovery`'s existing
+   documented recovery route, not a replacement for it: a task still in the
+   `planning` phase (pre-`task.py start`) continues to use `--mode planning`.
+   Zero, more than one, or any unreadable active task fails closed
+   immediately with no history search. A merge commit anywhere in the range,
+   or bookkeeping history older than the bounded search window, still fails
+   closed and is not a bug — this recovers one bounded segment, never a
+   second, independent search for an older starting point.
+
    A valid result may carry a non-empty `advisories` array: defects in task
    files the bundle did not touch, demoted from blocking findings because
    they sit outside the change delta. Advisories are informational and never

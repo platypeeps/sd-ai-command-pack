@@ -646,6 +646,26 @@ class PrEligibilityTests(unittest.TestCase):
         )
         self.assertEqual(validated["evidence"]["taskDirectories"], [])
 
+    def test_finish_work_receipt_accepts_active_task_successor_shape(self) -> None:
+        # AC8 / R4: the new active-task-review-successor completion subtype
+        # is a free-form string (require_string(..., limit=100), no enum),
+        # so it flows through with no eligibility code change -- same
+        # contract journal-only-recovery already proved for planning mode.
+        receipt = finish_work_receipt()
+        receipt["evidence"]["completionSubtype"] = "active-task-review-successor"
+        receipt["evidence"]["taskDirectories"] = [
+            ".trellis/tasks/07-25-active-task-fixture"
+        ]
+        validated = eligibility.validate_finish_work_receipt(receipt)
+        self.assertEqual(
+            validated["evidence"]["completionSubtype"],
+            "active-task-review-successor",
+        )
+        self.assertEqual(
+            validated["evidence"]["taskDirectories"],
+            [".trellis/tasks/07-25-active-task-fixture"],
+        )
+
     def test_parse_helpers_fail_closed_and_classify_status_contexts(self) -> None:
         with self.assertRaisesRegex(eligibility.EligibilityInputError, "unavailable"):
             eligibility.parse_json_object(eligibility.CommandResult(1, ""), "fixture")
