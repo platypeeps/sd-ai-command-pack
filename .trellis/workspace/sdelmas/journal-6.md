@@ -1058,3 +1058,36 @@ Implemented lane 2 of 07-28-measure-unmeasured-runtime-surface: added c8-based c
 ### Next Steps
 
 - None - task complete
+
+
+## Session 277: Fix completion-mode recovery for open multi-lane tasks
+
+**Date**: 2026-08-01
+**Task**: Fix completion-mode recovery for open multi-lane tasks
+**Branch**: `claude/vibrant-banach-299a9e`
+
+### Summary
+
+Widened validateCompletionBundle's normal path with an in-place active-task bundle shape and added a new active-task-review-successor recovery subtype for --base == --head, so a legitimately-open (non-archived) task's own bookkeeping touch gets a valid finish-work receipt. Two rounds of host+Codex adversarial review and three implementation-time empirical fixes (found only by running the existing suite) are recorded in the task's design.md; 108/108 tests pass.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `71e5c877` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
