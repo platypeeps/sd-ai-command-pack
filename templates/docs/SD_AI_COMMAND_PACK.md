@@ -1789,8 +1789,9 @@ of bypassing the cache contract.
   joins both results.
 - Every material concern receives a `C-*` identifier and an `addressed`,
   `rebutted`, `parked`, or `unresolved` disposition backed by repository
-  evidence. Changed remediation is reviewed once more; a repeated substantive
-  concern stops for user judgment instead of starting a third automatic round.
+  evidence. Changed remediation is reviewed again for up to two rounds; a
+  substantive concern that persists stops for user judgment instead of starting
+  a fourth automatic round.
 - Missing, incompatible, unauthenticated, or failed Codex is reported as a
   degraded optional lane while Claude's host review continues. The integration
   neither requires the OpenAI Codex Claude plugin nor changes upstream Trellis.

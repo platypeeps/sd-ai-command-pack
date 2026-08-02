@@ -3514,6 +3514,129 @@ assert.deepEqual(
         self.assertIn("line", result.stdout)
         self.assertIn("break.py", result.stdout)
 
+    def test_ledger_gate_pre_push_dispatch(self) -> None:
+        """Pre-push fleet-candidate-ledger gate dispatch logic.
+
+        The hook is the unit under test; the real
+        sd-ai-command-pack-fleet-candidate-check.py is stubbed so its exit code
+        is deterministic without reproducing the full payload-digest closure
+        (the checker's own exit-code semantics are covered by its tests). The
+        skip-outside-pack-source case (R6) is covered by
+        test_chore_scope_pre_push_hook_gates_direct_main_pushes, whose clone
+        carries no checker or ledger.
+        """
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-pack-ledger-hook-")
+        self.addCleanup(tempdir.cleanup)
+        base = Path(tempdir.name)
+        origin = base / "origin.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(origin)], check=True)
+        clone = base / "clone"
+        subprocess.run(
+            ["git", "clone", "-q", str(origin), str(clone)],
+            check=True,
+            stderr=subprocess.DEVNULL,
+        )
+
+        def run(*args: str, env: dict[str, str] | None = None):
+            return subprocess.run(
+                args,
+                cwd=clone,
+                env={**os.environ, **(env or {})},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        run("git", "config", "user.email", "test@example.com")
+        run("git", "config", "user.name", "Test User")
+        # Feature branch keeps the main-only chore-scope guard out of the way,
+        # so only the ledger gate is exercised.
+        run("git", "checkout", "-q", "-b", "feature")
+
+        hooks_dir = clone / ".githooks"
+        hooks_dir.mkdir()
+        shutil.copy2(PACK_ROOT / ".githooks/pre-push", hooks_dir / "pre-push")
+        run("git", "config", "core.hooksPath", ".githooks")
+
+        # Stub checker: exit code + diagnostics driven by FAKE_LEDGER_RC.
+        checker = clone / "scripts/sd-ai-command-pack-fleet-candidate-check.py"
+        checker.parent.mkdir(parents=True)
+        checker.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os, sys\n"
+            "rc = int(os.environ.get('FAKE_LEDGER_RC', '0'))\n"
+            "if rc == 1:\n"
+            "    print('candidate ledger error: payloadDigest mismatch', file=sys.stderr)\n"
+            "elif rc == 2:\n"
+            "    print('candidate validation error: cannot read fleet manifest', file=sys.stderr)\n"
+            "sys.exit(rc)\n",
+            encoding="utf-8",
+        )
+        ledger = clone / "docs/fleet/candidate-validation.json"
+        ledger.parent.mkdir(parents=True)
+        ledger.write_text('{"schemaVersion": 2}\n', encoding="utf-8")
+
+        counter = {"n": 0}
+
+        def advance() -> None:
+            """Create a fresh commit so the next push has a ref to send."""
+            counter["n"] += 1
+            marker = clone / f"marker-{counter['n']}.txt"
+            marker.write_text(f"commit {counter['n']}\n", encoding="utf-8")
+            run("git", "add", "-A")
+            run("git", "commit", "-q", "-m", f"chore: advance {counter['n']}")
+
+        # Fresh ledger (exit 0), clean tree == HEAD -> push succeeds, no advisory.
+        advance()
+        result = run(
+            "git", "push", "-q", "origin", "feature", env={"FAKE_LEDGER_RC": "0"}
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("validated against the working tree", result.stdout)
+
+        # Stale/invalid ledger (exit 1) -> blocked with ledger message + fix.
+        advance()
+        result = run(
+            "git", "push", "-q", "origin", "feature", env={"FAKE_LEDGER_RC": "1"}
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("stale or invalid", result.stdout)
+        self.assertIn("payloadDigest mismatch", result.stdout)
+        self.assertIn("fleet-candidate-check.py", result.stdout)
+
+        # Config/execution failure (exit 2) -> generic message, no stale claim.
+        advance()
+        result = run(
+            "git", "push", "-q", "origin", "feature", env={"FAKE_LEDGER_RC": "2"}
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("could not run", result.stdout)
+        self.assertNotIn("stale or invalid", result.stdout)
+
+        # Bypass skips only the ledger gate, even with a stale ledger.
+        result = run(
+            "git",
+            "push",
+            "-q",
+            "origin",
+            "feature",
+            env={"FAKE_LEDGER_RC": "1", "SD_AI_COMMAND_PACK_LEDGER_BYPASS": "1"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        # Non-authoritative working tree (dirty) + fresh ledger -> pass + advisory.
+        advance()
+        (clone / "marker-dirty.txt").write_text("uncommitted\n", encoding="utf-8")
+        result = run(
+            "git", "push", "-q", "origin", "feature", env={"FAKE_LEDGER_RC": "0"}
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("validated against the working tree", result.stdout)
+
     def test_review_preflight_accepts_line_suffixed_doc_references(self) -> None:
         node = shutil.which("node")
         if node is None:

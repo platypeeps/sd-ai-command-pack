@@ -85,12 +85,13 @@ implementation approval and prevents `task.py start`.
 
 When addressed concerns change a planning artifact, rerun the host review and,
 only if it was available in the initial round, one fresh Codex review against
-the updated artifact set. Reconcile the second-round results through the same
-ledger. Do not start a third automatic round.
+the updated artifact set. Reconcile each remediation round through the same
+ledger. Run at most two remediation rounds (three automatic rounds total); do
+not start a fourth automatic round.
 
-If a substantive concern repeats after the remediation round, or the two lanes
-remain in material conflict, stop before implementation approval or
-`task.py start` and ask the user for judgment.
+If a substantive concern persists after the permitted remediation rounds, or
+the two lanes remain in material conflict, stop before implementation approval
+or `task.py start` and ask the user for judgment.
 
 ## 5. Completion report
 
