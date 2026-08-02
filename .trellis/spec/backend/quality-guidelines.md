@@ -1244,6 +1244,10 @@ and completed journal already exist.
   successor -> `completion_successor_history_non_linear`.
 - More than 500 changed paths -> `completion_successor_scope_oversized`;
   protected bookkeeping/runtime path -> `completion_successor_scope_invalid`.
+- Successor range un-archives the exact task the candidate anchor archived, so the
+  finish-work receipt no longer describes this head ->
+  `completion_successor_anchor_reverted` (emitted alongside the scope findings, not
+  instead of them).
 - Receipt branch/head mismatch -> `finish_work_stale`; canonical replay invalid
   -> `finish_work_invalid`; valid replay differs ->
   `finish_work_receipt_mismatch`; unavailable replay ->

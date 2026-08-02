@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
-# Chore-scope guard: direct pushes to main may only touch Trellis chore
-# paths (.trellis/tasks/**, .trellis/workspace/**, .trellis/audit/**).
-# Everything else goes
-# through a pull request, matching the repository's branch-protection
-# policy (admin pushes bypass GitHub's PR requirement, so this hook is
-# the guardrail that keeps the bypass honest).
+# Two independent pre-push guards:
+#
+# 1. Chore-scope guard: direct pushes to main may only touch Trellis chore
+#    paths (.trellis/tasks/**, .trellis/workspace/**, .trellis/audit/**).
+#    Everything else goes through a pull request, matching the repository's
+#    branch-protection policy (admin pushes bypass GitHub's PR requirement, so
+#    this hook is the guardrail that keeps the bypass honest).
+# 2. Fleet candidate ledger gate: any push from a pack-source checkout is
+#    blocked if docs/fleet/candidate-validation.json is stale/invalid for the
+#    current payload, so the drift surfaces locally instead of reddening CI at
+#    test_surface_closure. Skips silently outside a pack-source checkout.
 #
 # Install once per clone:  git config core.hooksPath .githooks
 # One-shot emergency bypass:
-#   SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS=1 git push ...
+#   SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS=1 git push ...   # skips the whole hook
+#   SD_AI_COMMAND_PACK_LEDGER_BYPASS=1 git push ...        # skips only the ledger gate
 set -uo pipefail
 
 if [ "${SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS:-0}" = "1" ]; then
@@ -19,7 +25,20 @@ fi
 zero=0000000000000000000000000000000000000000
 status=0
 
+# Track whether the working tree authoritatively represents the pushed
+# commits, for the ledger gate's advisory (the checker validates the working
+# tree, not each pushed SHA). Dirty tree or a pushed ref whose tip != HEAD
+# makes the ledger pass non-authoritative.
+head_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+nonauthoritative=0
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    nonauthoritative=1
+fi
+
 while read -r _local_ref local_sha remote_ref remote_sha; do
+    if [ "$local_sha" != "$zero" ] && [ "$local_sha" != "$head_sha" ]; then
+        nonauthoritative=1
+    fi
     [ "$remote_ref" = "refs/heads/main" ] || continue
     # Branch deletion is governed by the remote ruleset, not this hook.
     [ "$local_sha" != "$zero" ] || continue
@@ -67,5 +86,57 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
         status=1
     fi
 done
+
+# Fleet candidate ledger gate. Skips silently outside a pack-source checkout
+# (consumer clone / partial fixture): nothing to validate there.
+if [ "${SD_AI_COMMAND_PACK_LEDGER_BYPASS:-0}" != "1" ]; then
+    repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    checker="$repo_root/scripts/sd-ai-command-pack-fleet-candidate-check.py"
+    ledger="$repo_root/docs/fleet/candidate-validation.json"
+    if [ -n "$repo_root" ] && [ -f "$checker" ] && [ -f "$ledger" ]; then
+        py=""
+        if [ -x "$repo_root/.venv/bin/python" ]; then
+            py="$repo_root/.venv/bin/python"
+        elif command -v python3 >/dev/null 2>&1; then
+            py="python3"
+        fi
+        if [ -z "$py" ]; then
+            {
+                echo "pre-push: no runnable Python (.venv/bin/python or python3) to verify the"
+                echo "pre-push:   fleet candidate ledger; set up the venv (make setup) or bypass with"
+                echo "pre-push:   SD_AI_COMMAND_PACK_LEDGER_BYPASS=1."
+            } >&2
+            status=1
+        else
+            ledger_output="$("$py" "$checker" --check-ledger 2>&1)"
+            ledger_rc=$?
+            if [ "$ledger_rc" -eq 0 ]; then
+                if [ "$nonauthoritative" = "1" ]; then
+                    {
+                        echo "pre-push: fleet candidate ledger validated against the working tree, not the"
+                        echo "pre-push:   pushed commit(s); run 'make check' on the pushed ref to be sure."
+                    } >&2
+                fi
+            elif [ "$ledger_rc" -eq 1 ]; then
+                {
+                    echo "pre-push: fleet candidate ledger is stale or invalid for the current payload."
+                    printf '  %s\n' "$ledger_output"
+                    echo "  Fix:   $py scripts/sd-ai-command-pack-fleet-candidate-check.py"
+                    echo "         (regenerates docs/fleet/candidate-validation.json; ~60s, rewrites validatedAt)"
+                    echo "  Bypass (intentional WIP): SD_AI_COMMAND_PACK_LEDGER_BYPASS=1 git push ..."
+                } >&2
+                status=1
+            else
+                {
+                    echo "pre-push: fleet candidate ledger check could not run (exit $ledger_rc)."
+                    printf '  %s\n' "$ledger_output"
+                    echo "  This is not a stale-ledger failure; fix the reported condition, or bypass"
+                    echo "  with SD_AI_COMMAND_PACK_LEDGER_BYPASS=1 if intentional."
+                } >&2
+                status=1
+            fi
+        fi
+    fi
+fi
 
 exit "$status"
