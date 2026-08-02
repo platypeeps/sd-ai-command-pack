@@ -63,6 +63,37 @@ These guides help you **ask the right questions before coding**.
 2. **Ignoring design comments**: Flagging intentional behavior documented in code comments as bugs
 3. **Variable misreading**: Not tracing a variable to its actual definition (e.g., Map keyed by path vs name)
 
+### When a Design Changes Control Flow That Existing Tests Already Pin
+
+Adopted 2026-08-01, from `.trellis/tasks/archive/2026-08/07-31-completion-recovery-no-archive-anchor`.
+That task's design went through two full rounds of host+Codex adversarial
+review — read-only, line-by-line against real source — before any code was
+written, and both rounds found and fixed real, confirmed defects. Despite
+that, implementing the design and running the *existing* test suite against
+it immediately surfaced three further genuine defects neither review round
+caught, all three specifically about control-flow discriminators: an
+orchestration choice that silently replaced 9 of 11 existing tests' specific
+reason codes with a generic one; a follow-up gap in that same discriminator
+missed by the first fix; an anchor-search that would select the wrong commit
+for the single most common real-world case. Static, evidence-checking review
+is a different check from running the real suite against a real
+implementation — it is not a stronger version of the same check, and it
+catches a different class of bug.
+
+- [ ] Design changes an existing function's control flow (a new branch, a
+      changed discriminator, a new early return) → find every existing test
+      that already exercises that function and confirm someone has actually
+      run them against a literal implementation of the new logic, not just
+      reasoned about it against the code.
+- [ ] Review reasoning says "this preserves existing behavior" → that is a
+      claim to test, not a conclusion reasoning alone can certify. Prefer
+      "confirmed: N/N existing tests pass, byte-identical" over "should be
+      behavior-preserving."
+- [ ] A design review's stated confidence is entirely text/reasoning-based
+      (no test run mentioned) → treat control-flow claims in it as
+      unverified until an implementation actually exercises them, regardless
+      of how many review rounds or how rigorous the citations were.
+
 **Verification rule**: Every CRITICAL/WARNING finding must be verified against the actual code before prioritizing. Budget ~35% false-positive rate for AI reviews.
 
 ### When a Reviewer Reports Nothing

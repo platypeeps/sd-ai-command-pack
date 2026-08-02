@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify the C7 matrix edit and the shipped code agree in both directions per implement.md's review gate: every reason code the validator can emit has a matrix row, and every matrix row is still reachable, including the untouched :1246 and :1235 rows."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Confirm C1's extracted archiveTaskName/activeTaskName helpers are actually reused by C3 rather than restated, and that no other near-duplicate regex was left uncentralized."}

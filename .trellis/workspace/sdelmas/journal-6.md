@@ -1058,3 +1058,110 @@ Implemented lane 2 of 07-28-measure-unmeasured-runtime-surface: added c8-based c
 ### Next Steps
 
 - None - task complete
+
+
+## Session 277: Fix completion-mode recovery for open multi-lane tasks
+
+**Date**: 2026-08-01
+**Task**: Fix completion-mode recovery for open multi-lane tasks
+**Branch**: `claude/vibrant-banach-299a9e`
+
+### Summary
+
+Widened validateCompletionBundle's normal path with an in-place active-task bundle shape and added a new active-task-review-successor recovery subtype for --base == --head, so a legitimately-open (non-archived) task's own bookkeeping touch gets a valid finish-work receipt. Two rounds of host+Codex adversarial review and three implementation-time empirical fixes (found only by running the existing suite) are recorded in the task's design.md; 108/108 tests pass.
+
+### Main Changes
+
+- Widened `validateCompletionBundle`'s normal path (`scripts/sd-ai-command-pack-review-preflight.mjs`) with a second bundle shape: an `in_progress`/`review` task's own-directory touch, status/branch byte-identical, no archive — reusing a parameterized `validateTaskLifecycleIdentity` shared with the existing archive-move path.
+- Added a new completion-mode recovery subtype, `active-task-review-successor`, for the `--base == --head` fallback: validates one bounded range from the oldest qualifying prior touch to head (linearity, per-commit scope, net-effect identity, journal presence), tried only after the existing archive-anchor search fails.
+- Two rounds of host+Codex adversarial review (read-only, evidence-checked against the real source) found and fixed 10 blocking defects in the design before any code was written; implementing it and running the existing test suite then surfaced 3 further genuine defects (an orchestration discriminator that silently replaced 9 of 11 existing tests' specific reason codes with a generic one; a follow-up gap in that same discriminator; an anchor search that would select `task.py create`/`start` itself for the single most common real-world case). All are fixed and documented in the task's `design.md`.
+- Documented the new subtype in `.agents/skills/sd-finish-work/SKILL.md` Step 7.
+- Captured two reusable lessons in new spec docs: a top-level `const`-placement gotcha specific to this file's CLI-dispatch structure, and the architectural principle that a "historical proof via a live-reading function" is only sound for content that's provably immutable afterward (`.trellis/spec/tooling/`); a review-methodology lesson (static review vs. running the real suite) in `.trellis/spec/guides/index.md`.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `71e5c877` | fix: recover completion receipts for open multi-lane tasks |
+
+### Testing
+
+- `python3 -m unittest tests.test_bookkeeping_validator tests.test_pr_eligibility` — 108/108 tests pass (79 + 29), independently re-run at each verification checkpoint rather than trusted from a single report.
+- `ruff check` and `mypy` — clean on all changed Python.
+- `node --check` on both `scripts/` and `templates/scripts/` copies of the validator — pass; `diff` confirms the two mirrors are byte-identical.
+- Mirror re-sync (`install.py . --force`) introduces zero additional drift.
+- `git diff` on `scripts/sd-ai-command-pack-pr-eligibility.py` — zero lines changed, confirming no eligibility-side code change was needed for the new subtype.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 278: Direction-aware completion-successor validation (rebased onto #302, shipped 0.62.0)
+
+**Date**: 2026-08-02
+**Task**: Direction-aware completion-successor validation (rebased onto #302, shipped 0.62.0)
+**Branch**: `fix/direction-aware-completion-successor`
+
+### Summary
+
+Made completion-successor validation direction-aware in review-preflight: isAdjacentArchiveCommit now qualifies an anchor via an archive move-set (name both lands in archive/ and vacates its active location), so a pure un-archive no longer masquerades as an archive commit. Added completion_successor_anchor_reverted, emitted alongside scope findings when a successor un-archives the anchored task, naming the stale receipt and recovery action. Integrated origin/main (PR #302 had rewritten the same subsystem into a dispatcher over attemptArchiveAnchorRecovery + attemptActiveTaskAnchorRecovery); re-planned artifacts and ported the fix verbatim; re-ran the adversarial review (Codex: no impl defect). Bumped pack to 0.62.0 with changelog + regenerated surfaces/manifest/ledger. 6 new tests, suite 85 pass, make check green. Pruned 2 stale agent worktrees.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `caaa08de` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 279: Pre-push gate against stale fleet candidate ledger
+
+**Date**: 2026-08-02
+**Task**: Pre-push gate against stale fleet candidate ledger
+**Branch**: `fix/prevent-stale-candidate-ledger`
+
+### Summary
+
+Added a pre-push ledger digest gate (.githooks/pre-push) that blocks pushes when docs/fleet/candidate-validation.json is stale/invalid for the current payload, skipping outside pack-source checkouts. Documented the branch-protection strict=false merge-skew cause of main reds in FLEET_ROLLOUT.md as a maintainer follow-up. Two Codex adversarial planning rounds; make check green.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ba0bd20b` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

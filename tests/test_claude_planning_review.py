@@ -85,7 +85,8 @@ class ClaudePlanningReviewTests(InstallTestCase):
             "`--ephemeral`",
             "`addressed`, `rebutted`, `parked`, or `unresolved`",
             "prevents `task.py start`",
-            "Do not start a third automatic round",
+            "three automatic rounds total",
+            "start a fourth automatic round",
             "Codex: skipped",
             "Codex: failed",
         ):

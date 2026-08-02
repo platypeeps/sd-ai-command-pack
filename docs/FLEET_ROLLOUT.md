@@ -475,3 +475,42 @@ every empty category is reported as `none`.
 Do not include stale aliases such as `green-button-manager` or historical
 predecessors such as `trellis-review-pr-pack`; they are explicitly excluded in
 the fleet manifest.
+
+## Ops: candidate ledger staleness and branch-protection merge-skew
+
+The fleet candidate ledger (`docs/fleet/candidate-validation.json`) carries a
+`payloadDigest` that CI enforces via `test_surface_closure`
+(`provenance.candidate-stale`, `scripts/sd-ai-command-pack-surface-check.py:553`).
+A shipped-payload change that forgets to regenerate the ledger reds CI. Two
+failure paths, two mitigations:
+
+- **Feature branch (author forgot regen).** The pre-push hook
+  (`.githooks/pre-push`) now runs `sd-ai-command-pack-fleet-candidate-check.py
+  --check-ledger` and blocks the push locally with the fix command. Regenerate
+  with `.venv/bin/python scripts/sd-ai-command-pack-fleet-candidate-check.py`
+  (or bypass an intentional WIP push with `SD_AI_COMMAND_PACK_LEDGER_BYPASS=1`).
+
+- **`main` on merge (payloadDigest merge-skew).** With
+  `required_status_checks.strict = false`, two payload PRs each pass CI in
+  isolation, merge sequentially, and leave combined `main` with a payloadDigest
+  matching neither ledger, so `main` reds on the merge push (observed: run
+  30720359738, 2026-08-01). The local hook cannot catch this — it is a
+  server-side merge ordering problem.
+  **Remediation applied 2026-08-02:** branch protection on
+  `platypeeps/sd-ai-command-pack` now sets `required_status_checks.strict = true`
+  ("Require branches to be up to date before merging"). A PR whose base advanced
+  must update onto the new tip and re-run CI before merge, so its ledger
+  regenerates against the combined tree and a stale digest blocks pre-merge
+  instead of reddening `main`. Trade-off: a rebase + ledger regen and a full
+  ~6-minute CI cycle whenever `main` advances under an open PR. `enforce_admins`
+  stays `false` so emergency merges remain possible; the `.githooks/pre-push`
+  chore-scope guard backstops direct `main` pushes.
+  Rollback:
+
+  ```
+  gh api --method PATCH \
+    repos/platypeeps/sd-ai-command-pack/branches/main/protection/required_status_checks \
+    -F strict=false
+  ```
+
+  A GitHub merge queue remains the heavier alternative if PR concurrency rises.
