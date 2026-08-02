@@ -931,7 +931,11 @@ class BookkeepingValidatorTests(InstallTestCase):
         self.assertIn("completion_task_identity_changed", payload["reasonCodes"])
 
     def make_post_archive_successor_repo(
-        self, *, prehistory_commits: int = 0, corrupt_archive: bool = False
+        self,
+        *,
+        prehistory_commits: int = 0,
+        corrupt_archive: bool = False,
+        unarchive_after: bool = False,
     ) -> tuple[Path, str, str]:
         root = self.make_validator_repo()
         for index in range(prehistory_commits):
@@ -974,6 +978,21 @@ class BookkeepingValidatorTests(InstallTestCase):
         self.run_git(root, "add", ".trellis/workspace")
         self.run_git(root, "commit", "-m", "record fixture journal")
         bookkeeping_head = self.git_output(root, "rev-parse", "HEAD")
+        if unarchive_after:
+            # Reproduce the PR #301 shape: rename the task directory back from
+            # archive/ to its active location AND restore the original active
+            # task.json content, so task.json is a *modified* rename (R09x), not
+            # an identical-content R100. This is the direction the fix must detect.
+            (root / archive_dir).rename(root / active_dir)
+            restored = root / active_dir / "task.json"
+            record = json.loads(restored.read_text(encoding="utf-8"))
+            record["status"] = "in_progress"
+            record["completedAt"] = None
+            restored.write_text(
+                json.dumps(record, indent=2) + "\n", encoding="utf-8"
+            )
+            self.run_git(root, "add", ".trellis/tasks")
+            self.run_git(root, "commit", "-m", 'Revert "archive fixture"')
         return root, archive_dir, bookkeeping_head
 
     def test_completion_successor_recovers_post_archive_review_fixes(self) -> None:
@@ -1358,6 +1377,184 @@ class BookkeepingValidatorTests(InstallTestCase):
             json.loads(result.stdout)["reasonCodes"],
             ["completion_successor_active_task_ambiguous"],
         )
+
+    def test_completion_successor_flags_reverted_anchor(self) -> None:
+        # PR #301 witness: the successor range un-archives the exact task the
+        # candidate anchor archived. Direction-aware detection must name the
+        # revert AND keep reporting the scope violation for the same paths.
+        root, _, _ = self.make_post_archive_successor_repo(unarchive_after=True)
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        codes = json.loads(result.stdout)["reasonCodes"]
+        self.assertIn("completion_successor_anchor_reverted", codes)
+        self.assertIn("completion_successor_scope_invalid", codes)
+        # The revert diagnosis is prepended so the actionable cause reads first.
+        self.assertEqual(codes[0], "completion_successor_anchor_reverted")
+
+    def test_completion_successor_rejects_pure_unarchive_as_anchor(self) -> None:
+        # A commit that only moves a task out of archive/ is not an archive
+        # commit (C1/R1). With the direction-aware predicate the pure un-archive
+        # is no longer a shaped archive tail, so recovery falls through to the
+        # active-task path, which diagnoses the now-active task rather than
+        # dressing the un-archive up as a reverted archive anchor.
+        root = self.make_validator_repo()
+        name = "completion-successor"
+        active_dir = f".trellis/tasks/07-25-{name}"
+        archive_dir = f".trellis/tasks/archive/2026-07/07-25-{name}"
+        self.write_task(
+            root,
+            archive_dir,
+            self.task_record(
+                name,
+                status="completed",
+                branch="codex/completion-successor",
+                completed_at="2026-07-25",
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "seed archived task")
+
+        (root / archive_dir).rename(root / active_dir)
+        restored = root / active_dir / "task.json"
+        record = json.loads(restored.read_text(encoding="utf-8"))
+        record["status"] = "in_progress"
+        record["completedAt"] = None
+        restored.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", 'Revert "archive"')
+
+        work_commit = self.git_output(root, "rev-parse", "HEAD")
+        self.write_session(root, work_commit)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record fixture journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        codes = json.loads(result.stdout)["reasonCodes"]
+        self.assertNotIn("completion_successor_anchor_reverted", codes)
+        self.assertEqual(codes, ["completion_successor_active_task_anchor_missing"])
+
+    def test_completion_successor_indeterminate_range_is_not_a_revert(self) -> None:
+        # An un-archive whose successor range cannot be inspected must fail closed
+        # as history_unavailable and must never be dressed up as a revert.
+        root, _, bookkeeping_head = self.make_post_archive_successor_repo(
+            unarchive_after=True
+        )
+        head = self.git_output(root, "rev-parse", "HEAD")
+        real_git = shutil.which("git")
+        self.assertIsNotNone(real_git)
+        stub_bin = root / ".test-diff-bin"
+        stub_bin.mkdir()
+        git_stub = stub_bin / "git"
+        git_stub.write_text(
+            "#!/bin/sh\n"
+            f"if [ \"$1\" = diff ] && [ \"$5\" = {bookkeeping_head} ] "
+            f"&& [ \"$6\" = {head} ]; then\n"
+            "  exit 73\n"
+            "fi\n"
+            f"exec {json.dumps(real_git)} \"$@\"\n",
+            encoding="utf-8",
+        )
+        git_stub.chmod(0o755)
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+            extra_env={"PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"},
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(
+            payload["reasonCodes"], ["completion_successor_history_unavailable"]
+        )
+        self.assertEqual(payload["status"], "indeterminate")
+        self.assertNotIn(
+            "completion_successor_anchor_reverted", payload["reasonCodes"]
+        )
+
+    def test_completion_successor_delete_only_is_not_a_revert(self) -> None:
+        # Half an un-archive: the archived task.json leaves but no active copy
+        # arrives. Cleanup, not a revert — scope_invalid without the revert code.
+        root, archive_dir, _ = self.make_post_archive_successor_repo()
+        (root / archive_dir / "task.json").unlink()
+        self.run_git(root, "add", "-A", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "delete archived task json")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        codes = json.loads(result.stdout)["reasonCodes"]
+        self.assertIn("completion_successor_scope_invalid", codes)
+        self.assertNotIn("completion_successor_anchor_reverted", codes)
+
+    def test_completion_successor_added_active_copy_is_not_a_revert(self) -> None:
+        # Half an un-archive: an active task.json is added (A) while the archive
+        # path stays untouched. A duplicate, not a revert.
+        root, _, _ = self.make_post_archive_successor_repo()
+        active_dir = ".trellis/tasks/07-25-completion-successor"
+        self.write_task(
+            root,
+            active_dir,
+            self.task_record(
+                "completion-successor",
+                status="in_progress",
+                branch="codex/completion-successor",
+                completed_at=None,
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "add active copy while archive remains")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        codes = json.loads(result.stdout)["reasonCodes"]
+        self.assertIn("completion_successor_scope_invalid", codes)
+        self.assertNotIn("completion_successor_anchor_reverted", codes)
+
+    def test_completion_successor_revert_does_not_mask_runtime_write(self) -> None:
+        # A revert that also persists forbidden .runtime/ state must report both
+        # the revert AND the independent scope violation — the new code cannot
+        # absorb an unrelated failure.
+        root, _, _ = self.make_post_archive_successor_repo(unarchive_after=True)
+        runtime = root / ".trellis/.runtime"
+        runtime.mkdir(parents=True)
+        (runtime / "finish-work.json").write_text("{}\n", encoding="utf-8")
+        self.run_git(root, "add", ".trellis/.runtime/finish-work.json")
+        self.run_git(root, "commit", "-m", "persist forbidden finish-work state")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root, "final-bundle", "--mode", "completion", "--base", head, "--head", head
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        codes = json.loads(result.stdout)["reasonCodes"]
+        self.assertIn("completion_successor_anchor_reverted", codes)
+        self.assertIn("completion_successor_scope_invalid", codes)
+        self.assertIn(".trellis/.runtime/finish-work.json", result.stdout)
 
     def test_active_task_successor_recovers_single_touch(self) -> None:
         # AC2: a single touch+journal pair recovers via the new subtype;
