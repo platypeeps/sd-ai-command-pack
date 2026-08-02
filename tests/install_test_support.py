@@ -198,8 +198,16 @@ class InstallTestCase(unittest.TestCase):
         env_path.write_bytes(text.encode("utf-8"))
 
     def _run_git_process(self, root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        # gc.auto=0 disables git's automatic (and by default detached) garbage
+        # collection for every git command issued through this helper -- which
+        # includes the run_git/git_output calls that build the per-class template
+        # repos. Auto-gc writes transient objects/bitmap-ref-tips_* files while
+        # repacking; those templates are later shutil.copytree-cloned by each
+        # test, and a copy racing a still-running detached gc raises shutil.Error
+        # when such a temp file vanishes mid-copy. Never letting auto-gc fire on
+        # the template builders removes that race.
         return subprocess.run(
-            ["git", *args],
+            ["git", "-c", "gc.auto=0", *args],
             cwd=root,
             text=True,
             stdout=subprocess.PIPE,
