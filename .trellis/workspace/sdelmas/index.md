@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 276
-- **Last Active**: 2026-07-31
+- **Total Sessions**: 279
+- **Last Active**: 2026-08-02
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~1060 | Active |
+| `journal-6.md` | ~1167 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,9 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 279 | 2026-08-02 | Pre-push gate against stale fleet candidate ledger | `ba0bd20b` | `fix/prevent-stale-candidate-ledger` |
+| 278 | 2026-08-02 | Direction-aware completion-successor validation (rebased onto #302, shipped 0.62.0) | `caaa08de` | `fix/direction-aware-completion-successor` |
+| 277 | 2026-08-01 | Fix completion-mode recovery for open multi-lane tasks | `71e5c877` | `claude/vibrant-banach-299a9e` |
 | 276 | 2026-07-31 | Lane 2: measure review-preflight.mjs coverage via c8, PR #301 review loop to clean | `cf2f36fa`, `cba06eb3`, `a81e548a`, `394f3cc0` | `fix/measure-unmeasured-runtime-surface` |
 | 275 | 2026-07-31 | Measure .github/scripts Python under coverage (lane 1) | `82cc6a03`, `0c73cb0` | `fix/measure-unmeasured-runtime-surface` |
 | 274 | 2026-07-31 | PR #291 review loop: ship-receipt validation hardening (rounds 4-9) | `01ca5adc`, `9e65cfb9`, `e7ab9c8c`, `85260377`, `b282daf9`, `3c86d72b`, `b3a43760`, `0cb8f666`, `4d656f50`, `76bdd98c`, `7ebffc75`, `04c90f81`, `695457f0`, `16e94172`, `c2075414`, `b0cffa1d`, `bc3b7c56`, `f66c358f`, `b752def8`, `506297e3`, `64d033ae`, `8e993984`, `ed76ca15`, `2ae8c306`, `bf700b23` | `fix/add-ship-result-receipt` |
