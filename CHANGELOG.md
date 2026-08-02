@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.63.0 - 2026-08-02
+
+- Raise the planning adversarial-review convergence limit from two automatic
+  rounds to three. Section 4 of `planning-adversarial-review.md` now permits up
+  to two remediation rounds (three automatic rounds total) before stopping for
+  user judgment, instead of one remediation round. The stop-and-ask escalation
+  still fires when a substantive concern persists past the permitted rounds or
+  the host and Codex lanes remain in material conflict. Documentation surface in
+  `docs/SD_AI_COMMAND_PACK.md` updated to match.
+
 ## 0.62.0 - 2026-08-02
 
 - Make completion-successor validation direction-aware in the review-preflight
