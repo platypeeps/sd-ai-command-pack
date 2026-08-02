@@ -505,7 +505,12 @@ failure paths, two mitigations:
   ~6-minute CI cycle whenever `main` advances under an open PR. `enforce_admins`
   stays `false` so emergency merges remain possible; the `.githooks/pre-push`
   chore-scope guard backstops direct `main` pushes.
-  Rollback: `gh api --method PATCH
-  repos/platypeeps/sd-ai-command-pack/branches/main/protection/required_status_checks
-  -F strict=false`. A GitHub merge queue remains the heavier alternative if PR
-  concurrency rises.
+  Rollback:
+
+  ```
+  gh api --method PATCH \
+    repos/platypeeps/sd-ai-command-pack/branches/main/protection/required_status_checks \
+    -F strict=false
+  ```
+
+  A GitHub merge queue remains the heavier alternative if PR concurrency rises.
