@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 277
-- **Last Active**: 2026-08-01
+- **Total Sessions**: 278
+- **Last Active**: 2026-08-02
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~1101 | Active |
+| `journal-6.md` | ~1134 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 278 | 2026-08-02 | Direction-aware completion-successor validation (rebased onto #302, shipped 0.62.0) | `caaa08de` | `fix/direction-aware-completion-successor` |
 | 277 | 2026-08-01 | Fix completion-mode recovery for open multi-lane tasks | `71e5c877` | `claude/vibrant-banach-299a9e` |
 | 276 | 2026-07-31 | Lane 2: measure review-preflight.mjs coverage via c8, PR #301 review loop to clean | `cf2f36fa`, `cba06eb3`, `a81e548a`, `394f3cc0` | `fix/measure-unmeasured-runtime-surface` |
 | 275 | 2026-07-31 | Measure .github/scripts Python under coverage (lane 1) | `82cc6a03`, `0c73cb0` | `fix/measure-unmeasured-runtime-surface` |

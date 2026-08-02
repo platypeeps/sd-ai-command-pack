@@ -1099,3 +1099,36 @@ Widened validateCompletionBundle's normal path with an in-place active-task bund
 ### Next Steps
 
 - None - task complete
+
+
+## Session 278: Direction-aware completion-successor validation (rebased onto #302, shipped 0.62.0)
+
+**Date**: 2026-08-02
+**Task**: Direction-aware completion-successor validation (rebased onto #302, shipped 0.62.0)
+**Branch**: `fix/direction-aware-completion-successor`
+
+### Summary
+
+Made completion-successor validation direction-aware in review-preflight: isAdjacentArchiveCommit now qualifies an anchor via an archive move-set (name both lands in archive/ and vacates its active location), so a pure un-archive no longer masquerades as an archive commit. Added completion_successor_anchor_reverted, emitted alongside scope findings when a successor un-archives the anchored task, naming the stale receipt and recovery action. Integrated origin/main (PR #302 had rewritten the same subsystem into a dispatcher over attemptArchiveAnchorRecovery + attemptActiveTaskAnchorRecovery); re-planned artifacts and ported the fix verbatim; re-ran the adversarial review (Codex: no impl defect). Bumped pack to 0.62.0 with changelog + regenerated surfaces/manifest/ledger. 6 new tests, suite 85 pass, make check green. Pruned 2 stale agent worktrees.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `caaa08de` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

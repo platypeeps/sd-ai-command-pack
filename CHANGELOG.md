@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.62.0 - 2026-08-02
+
+- Make completion-successor validation direction-aware in the review-preflight
+  validator. `isAdjacentArchiveCommit` now qualifies a completion anchor only when
+  a task both lands in `archive/` and vacates its active location in the same
+  commit, so a pure un-archive is no longer mistaken for an archive anchor. When a
+  successor commit un-archives the exact task a candidate anchor archived, the
+  validator emits a new `completion_successor_anchor_reverted` reason code —
+  alongside, not instead of, the existing scope findings — naming the stale
+  finish-work receipt and the re-run recovery action, instead of leaving an opaque
+  `completion_successor_scope_invalid`. The scope guard is unchanged; a reverted
+  finalization still fails, now legibly.
+
 ## 0.61.0 - 2026-07-31
 
 - Give the ship-to-work-loop handoff a validated schema-v1 receipt. `sd-ship`

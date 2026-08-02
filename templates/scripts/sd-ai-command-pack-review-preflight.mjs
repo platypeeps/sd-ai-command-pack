@@ -49,6 +49,8 @@ const CODE_FENCE_RE = /^[ \t]{0,3}(`{3,}|~{3,})/;
 const TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review', 'completed']);
 const ACTIVE_TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review']);
 const TRELLIS_TASK_PRIORITIES = new Set(['P0', 'P1', 'P2', 'P3']);
+const ARCHIVE_TASK_JSON = /^\.trellis\/tasks\/archive\/\d{4}-\d{2}\/(\d{2}-\d{2}-[^/]+)\/task\.json$/;
+const ACTIVE_TASK_JSON = /^\.trellis\/tasks\/(\d{2}-\d{2}-[^/]+)\/task\.json$/;
 // Option sets for the shared `validateTaskLifecycleIdentity` helper (defined
 // near its callers, close to `validateCompletionBundle`). Declared here, at
 // module top level before the CLI dispatch below, because that dispatch runs
@@ -1256,6 +1258,17 @@ function attemptArchiveAnchorRecovery(headOid) {
     shapedTailCount += 1;
     const successor = evaluateCompletionSuccessorRange(bookkeepingHeadOid, headOid);
     if (successor.status !== 'valid') {
+      if (successor.status === 'invalid') {
+        const anchorMoveSet = archiveMoveSet(archiveEntries);
+        const revertedNames = completionAnchorRevertedNames(anchorMoveSet, successor.entries);
+        for (const name of revertedNames) {
+          add(
+            'completion_successor_anchor_reverted',
+            `.trellis/tasks/${name}`,
+            `the completion anchor at ${archiveOid.slice(0, 12)} archives ${name}, but a later commit restores it to .trellis/tasks/${name}; the finish-work receipt no longer describes this head — re-run finish-work to regenerate it`,
+          );
+        }
+      }
       for (const finding of successor.findings) {
         add(finding.reasonCode, finding.path, finding.message, finding.disposition);
       }
@@ -1714,19 +1727,81 @@ function isAdjacentJournalCommit(entries) {
   return hasJournal && hasIndex;
 }
 
+function archiveTaskName(path) {
+  return ARCHIVE_TASK_JSON.exec(path)?.[1] ?? null;
+}
+
+function activeTaskName(path) {
+  return ACTIVE_TASK_JSON.exec(path)?.[1] ?? null;
+}
+
+// The commit's true archive move-set: task names that both land in archive/ as a
+// non-D destination AND vacate their active location (rename source of an R… entry,
+// or the path of a D entry). git diff runs --find-renames with no --find-copies, so
+// C… is never emitted here; the intersection is what distinguishes a real archive
+// from a pure un-archive, and C3 reuses it so an unrelated archive copy in the same
+// commit is never mistaken for the anchored task.
+function archiveMoveSet(entries) {
+  if (!entries || entries.length === 0) return new Set();
+  const archivedNames = new Set();
+  const vacatedNames = new Set();
+  for (const entry of entries) {
+    if (!entry.status.startsWith('D')) {
+      const name = archiveTaskName(entry.path);
+      if (name) archivedNames.add(name);
+    }
+    if (entry.status.startsWith('R') && entry.oldPath) {
+      const name = activeTaskName(entry.oldPath);
+      if (name) vacatedNames.add(name);
+    }
+    if (entry.status.startsWith('D')) {
+      const name = activeTaskName(entry.path);
+      if (name) vacatedNames.add(name);
+    }
+  }
+  const moveSet = new Set();
+  for (const name of archivedNames) {
+    if (vacatedNames.has(name)) moveSet.add(name);
+  }
+  return moveSet;
+}
+
 function isAdjacentArchiveCommit(entries) {
   if (!entries || entries.length === 0) return false;
   const paths = entries.flatMap((entry) => [entry.oldPath, entry.path].filter(Boolean));
   if (paths.some((path) => !path.startsWith('.trellis/tasks/'))) return false;
-  const activeTaskNames = new Set(
-    paths
-      .map((path) => /^\.trellis\/tasks\/(\d{2}-\d{2}-[^/]+)\/task\.json$/.exec(path)?.[1])
-      .filter(Boolean),
-  );
-  return paths.some((path) => {
-    const match = /^\.trellis\/tasks\/archive\/\d{4}-\d{2}\/(\d{2}-\d{2}-[^/]+)\/task\.json$/.exec(path);
-    return Boolean(match && activeTaskNames.has(match[1]));
-  });
+  return archiveMoveSet(entries).size > 0;
+}
+
+// Names in the anchor's archive move-set that a later commit genuinely un-archived:
+// both halves required for the same name — the archived task.json leaves (rename
+// source of an R… entry, or the path of a D entry) AND the active task.json arrives
+// (non-D destination). An AND, not an OR: either half alone is a different event
+// (cleanup, or a duplicate copy) and keeps its own scope code.
+function completionAnchorRevertedNames(anchorMoveSet, successorEntries) {
+  const reverted = new Set();
+  if (!anchorMoveSet || anchorMoveSet.size === 0) return reverted;
+  if (!successorEntries || successorEntries.length === 0) return reverted;
+  const archiveLeft = new Set();
+  const activeArrived = new Set();
+  for (const entry of successorEntries) {
+    if (entry.status.startsWith('R') && entry.oldPath) {
+      const name = archiveTaskName(entry.oldPath);
+      if (name) archiveLeft.add(name);
+    }
+    if (entry.status.startsWith('D')) {
+      const name = archiveTaskName(entry.path);
+      if (name) archiveLeft.add(name);
+    }
+    if (!entry.status.startsWith('D')) {
+      const name = activeTaskName(entry.path);
+      if (name) activeArrived.add(name);
+    }
+  }
+  for (const name of anchorMoveSet) {
+    if (archiveLeft.has(name) && activeArrived.has(name)) reverted.add(name);
+  }
+  return reverted;
 }
 
 function evaluateHistoricalCompletionBundle(baseOid, headOid) {
@@ -1853,6 +1928,7 @@ function evaluateCompletionSuccessorRange(anchorOid, headOid) {
       commits: commitEvidence,
       changedPaths: paths.slice(0, MAX_BOOKKEEPING_CHANGED_PATHS),
     },
+    entries,
     findings,
   };
 }
