@@ -475,3 +475,30 @@ every empty category is reported as `none`.
 Do not include stale aliases such as `green-button-manager` or historical
 predecessors such as `trellis-review-pr-pack`; they are explicitly excluded in
 the fleet manifest.
+
+## Ops: candidate ledger staleness and branch-protection merge-skew
+
+The fleet candidate ledger (`docs/fleet/candidate-validation.json`) carries a
+`payloadDigest` that CI enforces via `test_surface_closure`
+(`provenance.candidate-stale`, `scripts/sd-ai-command-pack-surface-check.py:553`).
+A shipped-payload change that forgets to regenerate the ledger reds CI. Two
+failure paths, two mitigations:
+
+- **Feature branch (author forgot regen).** The pre-push hook
+  (`.githooks/pre-push`) now runs `sd-ai-command-pack-fleet-candidate-check.py
+  --check-ledger` and blocks the push locally with the fix command. Regenerate
+  with `.venv/bin/python scripts/sd-ai-command-pack-fleet-candidate-check.py`
+  (or bypass an intentional WIP push with `SD_AI_COMMAND_PACK_LEDGER_BYPASS=1`).
+
+- **`main` on merge (payloadDigest merge-skew).** Branch protection on
+  `platypeeps/sd-ai-command-pack` currently has
+  `required_status_checks.strict = false` (verified 2026-08-02 via
+  `gh api repos/platypeeps/sd-ai-command-pack/branches/main/protection`). With
+  strict off, two payload PRs each pass CI in isolation, merge sequentially,
+  and leave combined `main` with a payloadDigest matching neither ledger, so
+  `main` reds on the merge push (observed: run 30720359738, 2026-08-01). The
+  local hook cannot catch this — it is a server-side merge ordering problem.
+  **Recommended remediation (maintainer, not yet applied):** enable "Require
+  branches to be up to date before merging" (strict) or adopt a GitHub merge
+  queue. Trade-off: strict forces a rebase + ledger regen before every merge,
+  adding churn on the ~6-minute CI.
