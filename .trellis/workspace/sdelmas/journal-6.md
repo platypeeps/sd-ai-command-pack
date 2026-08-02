@@ -1132,3 +1132,36 @@ Made completion-successor validation direction-aware in review-preflight: isAdja
 ### Next Steps
 
 - None - task complete
+
+
+## Session 279: Pre-push gate against stale fleet candidate ledger
+
+**Date**: 2026-08-02
+**Task**: Pre-push gate against stale fleet candidate ledger
+**Branch**: `fix/prevent-stale-candidate-ledger`
+
+### Summary
+
+Added a pre-push ledger digest gate (.githooks/pre-push) that blocks pushes when docs/fleet/candidate-validation.json is stale/invalid for the current payload, skipping outside pack-source checkouts. Documented the branch-protection strict=false merge-skew cause of main reds in FLEET_ROLLOUT.md as a maintainer follow-up. Two Codex adversarial planning rounds; make check green.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ba0bd20b` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
