@@ -171,7 +171,7 @@ class SurfaceGenerationTests(InstallTestCase):
                 self.assertNotIn(exemption, authored)
                 self.assertEqual(neutral.count(expected), 1)
                 self.assertNotIn(unexpected, neutral)
-                self.assertLess(neutral.index(expected), neutral.index("1. Resolve"))
+                self.assertLess(neutral.index(expected), neutral.index("\n1. "))
                 self.assertNotIn("require maintainer approval", neutral)
                 self.assertIn("checkout-trust:", neutral)
                 if command.executes_checkout_code:
@@ -238,6 +238,54 @@ class SurfaceGenerationTests(InstallTestCase):
                 Path("templates/.claude/commands/sd/status.md"),
                 "1. Resolve the `sd-status` skill by name.\n",
             )
+
+    def test_fleet_refresh_uses_custom_injection_anchor(self) -> None:
+        generator = load_surface_generator()
+        command = next(
+            command
+            for command in generator.COMMAND_REGISTRY
+            if command.name == "sd-fleet-refresh"
+        )
+        # fleet-refresh reads its source-only skill file instead of resolving it
+        # by name, so it carries a custom anchor and the default resolution
+        # anchor must NOT be what locates the injection point.
+        self.assertIsNotNone(command.injection_anchor)
+
+        step_one = (
+            "1. Load the fleet-refresh procedure by reading "
+            "`.agents/skills/sd-fleet-refresh/SKILL.md`.\n"
+        )
+        body = "# SD Fleet Refresh\n\n" + step_one
+        guarded = generator.guarded_command_body(command, body)
+        # policy injected, and injected before the anchored step-1 line
+        self.assertIn(generator.CHECKOUT_TRUST_POLICY_MARKER, guarded)
+        self.assertLess(
+            guarded.index(generator.CHECKOUT_TRUST_POLICY_MARKER),
+            guarded.index("1. Load the fleet-refresh procedure"),
+        )
+        # the old default "Resolve ... skill by name" wording no longer anchors
+        # this command: a body with only that line has zero matching anchors.
+        with self.assertRaisesRegex(generator.GenerationError, "exactly one"):
+            generator.guarded_command_body(
+                command,
+                "# SD Fleet Refresh\n\n1. Resolve the `sd-fleet-refresh` skill by name.\n",
+            )
+
+    def test_invalid_injection_anchor_raises_generation_error(self) -> None:
+        # A malformed injection_anchor regex must fail closed as a
+        # command-scoped GenerationError, not leak a raw re.error out of the
+        # generator.
+        generator = load_surface_generator()
+        command = next(
+            command
+            for command in generator.COMMAND_REGISTRY
+            if command.name == "sd-fleet-refresh"
+        )
+        broken = replace(command, injection_anchor="1. Load(")
+        with self.assertRaisesRegex(
+            generator.GenerationError, "invalid injection_anchor regex"
+        ):
+            generator.guarded_command_body(broken, "# X\n\n1. Load the thing.\n")
 
     def test_interaction_registry_enforces_portable_question_shape(self) -> None:
         tools = {

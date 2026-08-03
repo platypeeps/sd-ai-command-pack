@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.64.2 - 2026-08-03
+
+- Decouple the `sd:fleet-refresh` command from installed-skill resolution. The
+  source-only `sd-fleet-refresh` skill is never materialized under
+  `.claude/skills/`, so resolving it by name failed everywhere and the command
+  could not start. Step 1 now reads
+  `.agents/skills/sd-fleet-refresh/SKILL.md` from the pack source checkout
+  directly; the skill stays source-only (unchanged manifest, still
+  unresolvable by name, same auto-invocation protection).
+- Give the command-surface generator a per-command checkout-trust injection
+  anchor (`CommandInfo.injection_anchor`). The generator previously required
+  every command's step 1 to read "Resolve `<skill>` skill by name" to locate
+  where it injects the checkout-trust policy; fleet-refresh's reworded step 1
+  sets its own anchor, and the other commands are unaffected (surfaces
+  byte-identical).
+
 ## 0.64.1 - 2026-08-03
 
 - Harden the vendored, installer-managed recovery/status/update-spec scripts

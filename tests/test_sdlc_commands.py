@@ -201,7 +201,16 @@ class SdlcCommandsTests(InstallTestCase):
             for adapter in adapters:
                 with self.subTest(adapter=adapter.name):
                     content = adapter.read_text(encoding="utf-8")
-                    self.assertIn(f"Resolve the `{name}` skill by name", content)
+                    if name == "sd-fleet-refresh":
+                        # Source-only skill: the command reads its checkout file
+                        # directly instead of resolving it by name.
+                        self.assertIn(
+                            "Load the fleet-refresh procedure by reading "
+                            "`.agents/skills/sd-fleet-refresh/SKILL.md`",
+                            content,
+                        )
+                    else:
+                        self.assertIn(f"Resolve the `{name}` skill by name", content)
                     for pin in adapter_pins:
                         self.assertIn(pin, content)
                     self.assertIn("final-report format", content)

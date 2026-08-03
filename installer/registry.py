@@ -732,6 +732,12 @@ class CommandInfo:
     target_families: tuple[str, ...] = GENERATED_COMMAND_TARGET_FAMILIES
     configuration_keys: tuple[str, ...] = ()
     interaction_decisions: tuple[str, ...] = ()
+    # Regex (matched per line) marking where the generator injects the
+    # checkout-trust policy. Defaults to the shared "Resolve `<skill>` skill by
+    # name" step-1 anchor; a command whose step 1 is worded differently (e.g.
+    # sd-fleet-refresh, which reads its source-only skill file instead of
+    # resolving it) sets its own anchor here. Exactly one line must match.
+    injection_anchor: str | None = None
 
 
 COMMAND_FAMILIES: tuple[CommandFamily, ...] = (
@@ -833,6 +839,10 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
         "maintenance-fleet",
         mutates_local=True,
         mutates_remote=True,
+        # Step 1 reads the source-only skill file instead of resolving it by
+        # name, so the default "Resolve `<skill>` skill by name" anchor is
+        # absent; anchor the checkout-trust injection on the file-read step.
+        injection_anchor=r"^1\. Load the fleet-refresh procedure by reading `[^`]+`",
     ),
     CommandInfo(
         "sd-test-gaps", "test-gaps", "verification-improvement", mutates_local=True

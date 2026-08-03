@@ -1262,3 +1262,36 @@ Fixed 0.64.0-refresh lint/robustness findings in four vendored pack scripts (rec
 ### Next Steps
 
 - None - task complete
+
+
+## Session 283: Decouple sd:fleet-refresh command from installed-skill resolution (0.64.2)
+
+**Date**: 2026-08-03
+**Task**: Decouple sd:fleet-refresh command from installed-skill resolution (0.64.2)
+**Branch**: `feat/decouple-fleet-refresh-command`
+
+### Summary
+
+Rewrote neutral command source to load the source-only fleet-refresh procedure by reading .agents/skills/sd-fleet-refresh/SKILL.md directly instead of resolving it by name (which could never succeed, leaving the command broken). Added per-command injection_anchor override on CommandInfo so the checkout-trust policy anchors on the new step-1 line; the other 21 commands regenerate byte-identical. Bumped to 0.64.2, refreshed version-bearing surfaces, dogfood manifest, changelog, candidate ledger. fleet-refresh remains source-only, 0 manifest consumer entries. Two-lane adversarial review pre-caught 4 blockers (generator anchor coupling was deepest). make release-prep EXIT 0. Committed 74bc984c; task archived. Fanout deferred.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `74bc984c` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

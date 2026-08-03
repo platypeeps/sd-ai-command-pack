@@ -547,13 +547,21 @@ def guarded_command_body(
             "checkout-trust or structured-interaction policy"
         )
     lines = body.splitlines()
-    anchors = [
-        index for index, line in enumerate(lines) if SKILL_RESOLUTION_ANCHOR.match(line)
-    ]
+    if command.injection_anchor:
+        try:
+            anchor = re.compile(command.injection_anchor)
+        except re.error as error:
+            raise GenerationError(
+                f"{command.name}: invalid injection_anchor regex "
+                f"{command.injection_anchor!r}: {error}"
+            ) from error
+    else:
+        anchor = SKILL_RESOLUTION_ANCHOR
+    anchors = [index for index, line in enumerate(lines) if anchor.match(line)]
     if len(anchors) != 1:
         raise GenerationError(
-            f"{command.name}: expected exactly one skill-resolution anchor line, "
-            f"found {len(anchors)}"
+            f"{command.name}: expected exactly one checkout-trust injection anchor "
+            f"line, found {len(anchors)}"
         )
     policy = (
         CHECKOUT_TRUST_STATIC_EXEMPTION
