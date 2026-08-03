@@ -1443,6 +1443,60 @@ class StatusTests(InstallTestCase):
         self.assertEqual(result["status"], "invalid")
         self.assertIn("corrupt recovery helper", result["error"])
 
+    def test_collect_recovery_rejects_unexpected_schema_version(self) -> None:
+        root = self.make_status_repo()
+        status = self.load_status_module()
+        spec = mock.Mock()
+        spec.loader = mock.Mock()
+        module = mock.Mock()
+        module.SCHEMA_VERSION = 1
+        module.classify_repository.return_value = {"schemaVersion": 99, "counts": {}}
+        with (
+            mock.patch.object(
+                status.importlib.util, "spec_from_file_location", return_value=spec
+            ),
+            mock.patch.object(
+                status.importlib.util, "module_from_spec", return_value=module
+            ),
+        ):
+            result = status.collect_recovery(root)
+        self.assertEqual(result["status"], "invalid")
+        self.assertIn("schema version", result["error"])
+
+    def test_collect_recovery_rejects_symlinked_helper(self) -> None:
+        root = self.make_status_repo()
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            target = tmp_path / "real-recovery.py"
+            target.write_text(
+                "def classify_repository(repo):\n    return {}\n", encoding="utf-8"
+            )
+            link = tmp_path / "sd-ai-command-pack-recovery-artifacts.py"
+            link.symlink_to(target)
+            fake_status = tmp_path / "sd-ai-command-pack-status.py"
+            with mock.patch.object(status, "__file__", str(fake_status)):
+                result = status.collect_recovery(root)
+        self.assertEqual(result["status"], "unavailable")
+        self.assertIn("not installed", result["error"])
+
+    def test_collect_work_loop_rejects_symlinked_helper(self) -> None:
+        root = self.make_status_repo()
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            target = tmp_path / "real-work-loop.py"
+            target.write_text(
+                "def status_snapshot(repo):\n    return {}\n", encoding="utf-8"
+            )
+            link = tmp_path / "sd-ai-command-pack-work-loop.py"
+            link.symlink_to(target)
+            fake_status = tmp_path / "sd-ai-command-pack-status.py"
+            with mock.patch.object(status, "__file__", str(fake_status)):
+                result = status.collect_work_loop(root)
+        self.assertEqual(result["status"], "unavailable")
+        self.assertIn("not installed", result["error"])
+
     def test_local_status_reports_recovery_artifacts_read_only(self) -> None:
         root = self.make_status_repo()
         state_root = root.parent / "recovery-state"

@@ -798,7 +798,7 @@ def collect_roadmap_candidates(
 def collect_work_loop(repo: Path) -> dict[str, Any]:
     """Read the shared user-local loop ledger without mutating it."""
     helper = Path(__file__).resolve().with_name("sd-ai-command-pack-work-loop.py")
-    if not helper.is_file():
+    if helper.parent.is_symlink() or helper.is_symlink() or not helper.is_file():
         return {"status": "unavailable", "error": "work-loop helper is not installed"}
     try:
         spec = importlib.util.spec_from_file_location(
@@ -1193,7 +1193,7 @@ def collect_recovery(repo: Path) -> dict[str, Any]:
     helper = Path(__file__).resolve().with_name(
         "sd-ai-command-pack-recovery-artifacts.py"
     )
-    if not helper.is_file():
+    if helper.parent.is_symlink() or helper.is_symlink() or not helper.is_file():
         return {
             "status": "unavailable",
             "error": "recovery-artifacts helper is not installed",
@@ -1223,6 +1223,11 @@ def collect_recovery(repo: Path) -> dict[str, Any]:
         return {
             "status": "invalid",
             "error": "recovery-artifacts helper returned invalid data",
+        }
+    if classified.get("schemaVersion") != module.SCHEMA_VERSION:
+        return {
+            "status": "invalid",
+            "error": "recovery-artifacts helper returned an unexpected schema version",
         }
     return summarize_recovery(classified)
 

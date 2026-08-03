@@ -166,6 +166,34 @@ class UpdateSpecKbTests(InstallTestCase):
         self.assertEqual(gitignore.read_text(encoding="utf-8"), original)
         self.assertEqual(list(root.glob(".*.tmp")), [])
 
+    def test_file_ends_with_kb_copy_marker_bounded_tail_read(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py",
+            "sd_ai_command_pack_update_spec_kb_marker_tail",
+        )
+        root = self.make_repo()
+        marker = module.KB_COPY_MARKER_SUFFIX_BYTES
+
+        ends_with = root / "ends-with.md"
+        ends_with.write_bytes(b"# Copy\nbody text\n" + marker)
+        self.assertTrue(module.file_ends_with_kb_copy_marker(ends_with))
+
+        no_marker = root / "no-marker.md"
+        no_marker.write_bytes(b"# Plain user note\nno marker here\n")
+        self.assertFalse(module.file_ends_with_kb_copy_marker(no_marker))
+
+        mid_file = root / "mid-file.md"
+        mid_file.write_bytes(b"quote " + marker + b" then more trailing text\n")
+        self.assertFalse(module.file_ends_with_kb_copy_marker(mid_file))
+
+        shorter = root / "shorter.md"
+        shorter.write_bytes(marker[:-1])
+        self.assertFalse(module.file_ends_with_kb_copy_marker(shorter))
+
+        empty = root / "empty.md"
+        empty.write_bytes(b"")
+        self.assertFalse(module.file_ends_with_kb_copy_marker(empty))
+
     def test_update_spec_kb_reports_gitignore_symlink_conflict(self) -> None:
         root = self.make_repo()
         (root / "README.md").write_text("# Project\n", encoding="utf-8")
