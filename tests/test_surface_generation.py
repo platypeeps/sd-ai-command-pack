@@ -271,6 +271,22 @@ class SurfaceGenerationTests(InstallTestCase):
                 "# SD Fleet Refresh\n\n1. Resolve the `sd-fleet-refresh` skill by name.\n",
             )
 
+    def test_invalid_injection_anchor_raises_generation_error(self) -> None:
+        # A malformed injection_anchor regex must fail closed as a
+        # command-scoped GenerationError, not leak a raw re.error out of the
+        # generator.
+        generator = load_surface_generator()
+        command = next(
+            command
+            for command in generator.COMMAND_REGISTRY
+            if command.name == "sd-fleet-refresh"
+        )
+        broken = replace(command, injection_anchor="1. Load(")
+        with self.assertRaisesRegex(
+            generator.GenerationError, "invalid injection_anchor regex"
+        ):
+            generator.guarded_command_body(broken, "# X\n\n1. Load the thing.\n")
+
     def test_interaction_registry_enforces_portable_question_shape(self) -> None:
         tools = {
             platform: info.structured_question_tool
