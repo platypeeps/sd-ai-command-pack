@@ -1165,3 +1165,34 @@ Added a pre-push ledger digest gate (.githooks/pre-push) that blocks pushes when
 ### Next Steps
 
 - None - task complete
+
+
+## Session 280: Abandon review_preflight in-proc install conversion (hypothesis falsified)
+
+**Date**: 2026-08-02
+**Task**: Abandon review_preflight in-proc install conversion (hypothesis falsified)
+**Branch**: `main`
+
+### Summary
+
+Planned + adversarially reviewed (2 Codex rounds, cap 3) the run_install->run_install_inproc conversion for test_review_preflight. Implemented all 54 sites, proved isolation (cwd/env/argv unchanged), 66 tests OK. Measured under full CI env: coverage 92.2s->87.5s (-5.1%), plain 79.8s->77.9s (-2.4%). AC4 (>=30%) FAILED: spawn is ~35ms/call; install copytree/git I/O and 44 unconvertible node-preflight spawns dominate. Reverted, nothing shipped. Same falsification pattern as PR #312. Real levers deferred: shared install fixture, fewer node spawns.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
