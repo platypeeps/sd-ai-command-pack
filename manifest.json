@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "sd-ai-command-pack",
-  "version": "0.63.0",
+  "version": "0.64.0",
   "license": "MIT",
   "description": "Install project-local SD AI command workflows, Prism/Gito defaults, usage guide, and platform adapters into Trellis repos.",
   "requiresTrellis": true,
@@ -469,6 +469,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/SKILL.md",
+      "target": ".claude/skills/sd-help/SKILL.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-help/SKILL.md",
@@ -544,6 +551,13 @@
       "source": "templates/.agents/skills/sd-help/references/command-catalog.md",
       "target": ".agent/skills/sd-help/references/command-catalog.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/command-catalog.md",
+      "target": ".claude/skills/sd-help/references/command-catalog.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",
@@ -623,6 +637,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/completion-lifecycle.md",
+      "target": ".claude/skills/sd-help/references/completion-lifecycle.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-help/references/completion-lifecycle.md",
@@ -698,6 +719,13 @@
       "source": "templates/.agents/skills/sd-help/references/environment-blocked-recovery.md",
       "target": ".agent/skills/sd-help/references/environment-blocked-recovery.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/environment-blocked-recovery.md",
+      "target": ".claude/skills/sd-help/references/environment-blocked-recovery.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",
@@ -777,6 +805,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/examples.md",
+      "target": ".claude/skills/sd-help/references/examples.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-help/references/examples.md",
@@ -854,6 +889,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/recovery-artifacts.md",
+      "target": ".claude/skills/sd-help/references/recovery-artifacts.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-help/references/recovery-artifacts.md",
@@ -929,6 +971,13 @@
       "source": "templates/.agents/skills/sd-help/references/structured-questions.md",
       "target": ".agent/skills/sd-help/references/structured-questions.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-help/references/structured-questions.md",
+      "target": ".claude/skills/sd-help/references/structured-questions.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",
@@ -1106,6 +1155,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-status/SKILL.md",
+      "target": ".claude/skills/sd-status/SKILL.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-status/SKILL.md",
@@ -1279,6 +1335,13 @@
       "source": "templates/.agents/skills/sd-continue/SKILL.md",
       "target": ".agent/skills/sd-continue/SKILL.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-continue/SKILL.md",
+      "target": ".claude/skills/sd-continue/SKILL.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",
@@ -1456,6 +1519,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-start/SKILL.md",
+      "target": ".claude/skills/sd-start/SKILL.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-start/SKILL.md",
@@ -1629,6 +1699,13 @@
       "source": "templates/.agents/skills/sd-finish-work/SKILL.md",
       "target": ".agent/skills/sd-finish-work/SKILL.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-finish-work/SKILL.md",
+      "target": ".claude/skills/sd-finish-work/SKILL.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",
@@ -1806,6 +1883,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
+      "target": ".claude/skills/sd-create-pr/SKILL.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-create-pr/SKILL.md",
@@ -1981,6 +2065,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/SKILL.md",
+      "target": ".claude/skills/sd-work-backlog/SKILL.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-work-backlog/SKILL.md",
@@ -2056,6 +2147,13 @@
       "source": "templates/.agents/skills/sd-work-backlog/references/autonomous-loop.md",
       "target": ".agent/skills/sd-work-backlog/references/autonomous-loop.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/autonomous-loop.md",
+      "target": ".claude/skills/sd-work-backlog/references/autonomous-loop.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",
@@ -2135,6 +2233,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ledger-recovery.md",
+      "target": ".claude/skills/sd-work-backlog/references/ledger-recovery.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-work-backlog/references/ledger-recovery.md",
@@ -2210,6 +2315,13 @@
       "source": "templates/.agents/skills/sd-work-backlog/references/ownership-recovery.md",
       "target": ".agent/skills/sd-work-backlog/references/ownership-recovery.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/ownership-recovery.md",
+      "target": ".claude/skills/sd-work-backlog/references/ownership-recovery.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",
@@ -2289,6 +2401,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/run-recovery.md",
+      "target": ".claude/skills/sd-work-backlog/references/run-recovery.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-work-backlog/references/run-recovery.md",
@@ -2364,6 +2483,13 @@
       "source": "templates/.agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
       "target": ".agent/skills/sd-work-backlog/references/terminal-reconciliation.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "target": ".claude/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",
@@ -2541,6 +2667,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
+      "target": ".claude/skills/sd-audit-repo/SKILL.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-audit-repo/SKILL.md",
@@ -2714,6 +2847,13 @@
       "source": "templates/.agents/skills/sd-fix-ci/SKILL.md",
       "target": ".agent/skills/sd-fix-ci/SKILL.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-fix-ci/SKILL.md",
+      "target": ".claude/skills/sd-fix-ci/SKILL.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",
@@ -2891,6 +3031,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-deps/SKILL.md",
+      "target": ".claude/skills/sd-update-deps/SKILL.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-update-deps/SKILL.md",
@@ -3064,6 +3211,13 @@
       "source": "templates/.agents/skills/sd-test-gaps/SKILL.md",
       "target": ".agent/skills/sd-test-gaps/SKILL.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-test-gaps/SKILL.md",
+      "target": ".claude/skills/sd-test-gaps/SKILL.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",
@@ -3241,6 +3395,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-retro/SKILL.md",
+      "target": ".claude/skills/sd-retro/SKILL.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-retro/SKILL.md",
@@ -3416,6 +3577,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-ship/SKILL.md",
+      "target": ".claude/skills/sd-ship/SKILL.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-ship/SKILL.md",
@@ -3491,6 +3659,13 @@
       "source": "templates/.agents/skills/sd-ship/references/watch-coordinator.md",
       "target": ".agent/skills/sd-ship/references/watch-coordinator.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-ship/references/watch-coordinator.md",
+      "target": ".claude/skills/sd-ship/references/watch-coordinator.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",
@@ -3668,6 +3843,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review/SKILL.md",
+      "target": ".claude/skills/sd-review/SKILL.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-review/SKILL.md",
@@ -3841,6 +4023,13 @@
       "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
       "target": ".agent/skills/sd-review-pr/SKILL.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-pr/SKILL.md",
+      "target": ".claude/skills/sd-review-pr/SKILL.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",
@@ -4018,6 +4207,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-local/SKILL.md",
+      "target": ".claude/skills/sd-review-local/SKILL.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-review-local/SKILL.md",
@@ -4191,6 +4387,13 @@
       "source": "templates/.agents/skills/sd-review-learnings/SKILL.md",
       "target": ".agent/skills/sd-review-learnings/SKILL.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-review-learnings/SKILL.md",
+      "target": ".claude/skills/sd-review-learnings/SKILL.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",
@@ -4368,6 +4571,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-check/SKILL.md",
+      "target": ".claude/skills/sd-check/SKILL.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-check/SKILL.md",
@@ -4541,6 +4751,13 @@
       "source": "templates/.agents/skills/sd-full-check/SKILL.md",
       "target": ".agent/skills/sd-full-check/SKILL.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-full-check/SKILL.md",
+      "target": ".claude/skills/sd-full-check/SKILL.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",
@@ -4718,6 +4935,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-housekeeping/SKILL.md",
+      "target": ".claude/skills/sd-housekeeping/SKILL.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-housekeeping/SKILL.md",
@@ -4893,6 +5117,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/SKILL.md",
+      "target": ".claude/skills/sd-update-spec/SKILL.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-update-spec/SKILL.md",
@@ -4968,6 +5199,13 @@
       "source": "templates/.agents/skills/sd-update-spec/references/architecture.md",
       "target": ".agent/skills/sd-update-spec/references/architecture.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/architecture.md",
+      "target": ".claude/skills/sd-update-spec/references/architecture.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",
@@ -5047,6 +5285,13 @@
       "anchor": ".agent"
     },
     {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/repository-map.md",
+      "target": ".claude/skills/sd-update-spec/references/repository-map.md",
+      "anchor": ".claude"
+    },
+    {
       "platform": "codebuddy",
       "kind": "skill",
       "source": "templates/.agents/skills/sd-update-spec/references/repository-map.md",
@@ -5122,6 +5367,13 @@
       "source": "templates/.agents/skills/sd-update-spec/references/obsidian-kb.md",
       "target": ".agent/skills/sd-update-spec/references/obsidian-kb.md",
       "anchor": ".agent"
+    },
+    {
+      "platform": "claude",
+      "kind": "skill",
+      "source": "templates/.agents/skills/sd-update-spec/references/obsidian-kb.md",
+      "target": ".claude/skills/sd-update-spec/references/obsidian-kb.md",
+      "anchor": ".claude"
     },
     {
       "platform": "codebuddy",

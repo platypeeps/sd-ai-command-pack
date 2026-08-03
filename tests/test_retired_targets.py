@@ -75,11 +75,11 @@ class RetiredTargetsTests(InstallTestCase):
         )
 
     def test_retired_targets_pin_known_command_footprints(self) -> None:
-        self.assertEqual(len(install.RETIRED_REVIEW_LOCAL_ALL_TARGETS), 25)
-        self.assertEqual(len(install.SOURCE_ONLY_COMMAND_TARGETS), 25)
-        self.assertEqual(len(install.RETIRED_WORK_DESIGNS_TARGETS), 25)
-        self.assertEqual(len(install.RETIRED_WATCH_PR_TARGETS), 25)
-        self.assertEqual(len(install.RETIRED_TARGETS), 100)
+        self.assertEqual(len(install.RETIRED_REVIEW_LOCAL_ALL_TARGETS), 26)
+        self.assertEqual(len(install.SOURCE_ONLY_COMMAND_TARGETS), 26)
+        self.assertEqual(len(install.RETIRED_WORK_DESIGNS_TARGETS), 26)
+        self.assertEqual(len(install.RETIRED_WATCH_PR_TARGETS), 26)
+        self.assertEqual(len(install.RETIRED_TARGETS), 104)
         self.assertEqual(
             len(set(install.RETIRED_TARGETS)),
             len(install.RETIRED_TARGETS),

@@ -455,6 +455,7 @@ LATER_NEUTRAL_COMMAND_PLATFORMS = tuple(
 )
 SKILL_FANOUT_PLATFORMS = (
     "antigravity",
+    "claude",
     "codebuddy",
     "devin",
     "droid",
