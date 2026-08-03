@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.64.3 - 2026-08-03
+
+- Harden the sibling-helper module loaders against a check-then-load (TOCTOU)
+  race. `sd-ai-command-pack-status.py` (work-loop and recovery-artifacts
+  loaders), `sd-ai-command-pack-surface-check.py` (`_load_source_module`), and
+  the source-only `sd-ai-command-pack-fleet-controller.py` (`_wave_planner`) no
+  longer stat a path and then re-resolve it with `exec_module`. Each now reads
+  the helper source atomically on one `O_NOFOLLOW | O_NONBLOCK` descriptor with
+  an `fstat` regular-file check, then executes the already-read bytes via
+  `compile`/`exec` — `spec.loader.exec_module` is never invoked, closing the
+  race at all four sites. An advisory `lstat` preserves each caller's existing
+  classification (symlink / socket / FIFO / directory → the prior
+  "unavailable"/raised outcome); genuine I/O errors, module metadata,
+  `sys.modules` registration, and the status bytecode-write suppression are all
+  behavior-preserved on valid inputs.
+- Add `tests/test_helper_loader_safety.py` covering symlink and non-regular
+  rejection (including a Unix socket and a mocked raced-symlink that exercises
+  the authoritative `O_NOFOLLOW` branch), metadata parity, registration
+  semantics, and an old-vs-new seam differential; rework the status helper-loader
+  tests off the retired `importlib` seam onto real temporary helpers.
+
 ## 0.64.2 - 2026-08-03
 
 - Decouple the `sd:fleet-refresh` command from installed-skill resolution. The

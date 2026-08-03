@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import errno
 import hashlib
 import importlib.util
 import json
@@ -124,16 +125,107 @@ def _action_identity(action: Mapping[str, Any]) -> dict[str, Any]:
     return {key: action[key] for key in ACTION_IDENTITY_FIELDS}
 
 
+class _UnsafeSiblingPath(OSError):
+    """Path-policy rejection for a trusted sibling-module load: symlink, any
+    non-regular node (socket / FIFO / directory), a missing path, or a platform
+    without ``O_NOFOLLOW``. Distinct from an arbitrary open/read ``OSError`` so a
+    caller can route path-policy failures through its own boundary while a real
+    I/O fault still propagates unchanged."""
+
+
+class _SiblingLoadError(ImportError):
+    """The import spec/loader could not be constructed for an already path-safe
+    sibling."""
+
+
+# errno values where the path itself violates policy: a missing final component,
+# a symlinked final component (``ELOOP`` under ``O_NOFOLLOW``), or a non-directory
+# in the parent chain. Any other open/read errno is a genuine I/O fault.
+_PATH_POLICY_ERRNOS = frozenset(
+    value
+    for value in (getattr(errno, name, None) for name in ("ENOENT", "ELOOP", "ENOTDIR"))
+    if value is not None
+)
+
+
+def _read_trusted_sibling_source(path: Path) -> bytes:
+    """Read a sibling module's source with no TOCTOU window.
+
+    Fails closed when ``O_NOFOLLOW`` is unavailable. An advisory ``lstat`` picks
+    the caller branch for an unsafe path (missing / symlink / any non-regular
+    node) but never authorizes a read; the authoritative gate is the fd-anchored
+    ``O_NOFOLLOW`` open plus same-descriptor ``fstat``. ``O_NONBLOCK`` keeps a
+    FIFO from blocking the open. Executes nothing. Raises ``_UnsafeSiblingPath``
+    for a path-policy failure and lets any other open/read ``OSError`` propagate
+    unchanged.
+    """
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise _UnsafeSiblingPath("O_NOFOLLOW unavailable; refusing sibling load")
+    try:
+        advisory = os.lstat(path)
+    except OSError as error:
+        raise _UnsafeSiblingPath(str(error)) from error
+    if stat.S_ISLNK(advisory.st_mode) or not stat.S_ISREG(advisory.st_mode):
+        raise _UnsafeSiblingPath(f"{path} is not a regular file")
+    flags = (
+        os.O_RDONLY
+        | os.O_NOFOLLOW
+        | getattr(os, "O_NONBLOCK", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        if error.errno in _PATH_POLICY_ERRNOS:
+            raise _UnsafeSiblingPath(str(error)) from error
+        raise
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            raise _UnsafeSiblingPath(f"{path} is not a regular file")
+        chunks = []
+        while True:
+            block = os.read(descriptor, 65536)
+            if not block:
+                break
+            chunks.append(block)
+    finally:
+        os.close(descriptor)
+    return b"".join(chunks)
+
+
+def _exec_sibling_module(source, path, module_name, *, register):
+    """Compile and exec already-read (fd-verified) source into a fresh module.
+
+    The module object is built with the real ``spec_from_file_location`` +
+    ``module_from_spec`` pair, so its metadata matches the retired loader
+    exactly; neither call reads or executes the file. Execution runs on the bytes
+    already read from the verified descriptor, never ``loader.exec_module``.
+    """
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise _SiblingLoadError(f"cannot construct loader for {path}")
+    module = importlib.util.module_from_spec(spec)
+    if register:
+        sys.modules[module_name] = module
+    code = compile(source, str(path), "exec")
+    # Trusted sibling; source read from an fd verified regular + non-symlink.
+    exec(code, module.__dict__)  # nosec B102
+    return module
+
+
 def _wave_planner() -> Any:
     path = SCRIPT_DIR / "sd-ai-command-pack-fleet-wave-plan.py"
-    spec = importlib.util.spec_from_file_location(
-        "sd_ai_command_pack_fleet_wave_plan_for_controller", path
-    )
-    if spec is None or spec.loader is None:
-        raise FleetControllerError("fleet wave planner cannot be loaded")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    try:
+        source = _read_trusted_sibling_source(path)
+        return _exec_sibling_module(
+            source,
+            path,
+            "sd_ai_command_pack_fleet_wave_plan_for_controller",
+            register=False,
+        )
+    except (_UnsafeSiblingPath, _SiblingLoadError) as error:
+        raise FleetControllerError("fleet wave planner cannot be loaded") from error
 
 
 WAVE_PLANNER = _wave_planner()
