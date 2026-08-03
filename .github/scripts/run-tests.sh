@@ -6,7 +6,7 @@
 #
 # Env:
 #   PYTHON_BIN     interpreter to run (default: python3)
-#   TEST_WORKERS   parallel workers (default: online CPUs minus one, min 1)
+#   TEST_WORKERS   parallel workers (default: 2x online CPUs, capped at 8, min 1)
 set -uo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -49,8 +49,17 @@ else
   case "$cores" in
     '' | *[!0-9]*) cores=4 ;;
   esac
+  # The suite is subprocess/I/O-bound (each test shells out to git/node/python
+  # and waits), not CPU-bound -- coverage line-tracing adds ~no wall-clock. So
+  # oversubscribing CPUs overlaps those subprocess waits and shortens the run.
+  # Measured on a module-sharded run: 3 workers 187s, 6 workers 113s (-39%), 10
+  # workers 117s (contention past the plateau). Default to 2x cores, capped at 8
+  # to stay in the measured sweet spot and bound peak memory.
   if [ "$cores" -gt 1 ]; then
-    TEST_WORKERS=$((cores - 1))
+    TEST_WORKERS=$((cores * 2))
+    if [ "$TEST_WORKERS" -gt 8 ]; then
+      TEST_WORKERS=8
+    fi
   else
     TEST_WORKERS=1
   fi
