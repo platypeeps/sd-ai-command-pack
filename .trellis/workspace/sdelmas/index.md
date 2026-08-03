@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 282
+- **Total Sessions**: 283
 - **Last Active**: 2026-08-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~1264 | Active |
+| `journal-6.md` | ~1297 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 283 | 2026-08-03 | Decouple sd:fleet-refresh command from installed-skill resolution (0.64.2) | `74bc984c` | `feat/decouple-fleet-refresh-command` |
 | 282 | 2026-08-03 | Release sd-ai-command-pack 0.64.1 — vendored pack-source hardening | `dcdf0820` | `chore/pack-source-hardening-0.64.1` |
 | 281 | 2026-08-03 | Ship sd skills to Claude Code .claude/skills/sd-* (fanout parity) | `ac1243b9` | `main` |
 | 280 | 2026-08-02 | Abandon review_preflight in-proc install conversion (hypothesis falsified) | - | `main` |
