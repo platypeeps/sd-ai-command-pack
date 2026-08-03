@@ -1196,3 +1196,36 @@ Planned + adversarially reviewed (2 Codex rounds, cap 3) the run_install->run_in
 ### Next Steps
 
 - None - task complete
+
+
+## Session 281: Ship sd skills to Claude Code .claude/skills/sd-* (fanout parity)
+
+**Date**: 2026-08-03
+**Task**: Ship sd skills to Claude Code .claude/skills/sd-* (fanout parity)
+**Branch**: `main`
+
+### Summary
+
+Added claude to SKILL_FANOUT_PLATFORMS so the 21 non-source-only sd skills fan out to .claude/skills/sd-* and ship to consumers via manifest.json, making them resolvable by Claude Code's installed-skill resolver. sd-fleet-refresh stays source-only (intentionally unresolvable). Reconciled install-audit twins (PACK_FILE_PATTERNS + SOURCE_ONLY_ALLOWED_PACK_FILES + Claude rogue-skill test), pinned counts (25->26, RETIRED 100->104), manifest 0.64.0, CHANGELOG, regenerated candidate ledger. Consumer coordination: loadsmith PR #173 (merged) data-drove its review-readiness classifier from installed-targets.txt. Copilot flagged a CHANGELOG overclaim (fixed). CI flaky macOS copytree race re-run green. Merged as #313.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ac1243b9` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
