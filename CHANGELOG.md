@@ -6,9 +6,10 @@
   parity with the other skill-fanout platforms). `claude` is now in
   `SKILL_FANOUT_PLATFORMS`, so consumers receive the 21 non-source-only sd
   skills as `.claude/skills/sd-<name>/SKILL.md` (+ references) via `manifest.json`,
-  and Claude Code's installed-skill resolver can resolve `/sd:*` skills by name
-  (fixing the `/sd:fleet-refresh` skill-resolution blocker). `sd-fleet-refresh`
-  stays source-only and is not shipped. The install audit now covers
+  so Claude Code's installed-skill resolver can now resolve those shipped `/sd:*`
+  skills by name. `sd-fleet-refresh` stays source-only and is not shipped, so
+  `/sd:fleet-refresh` remains intentionally unresolvable in consumers. The install
+  audit now covers
   `.claude/skills/sd-*` in both the root and shipped-twin scripts.
 
 ## 0.63.0 - 2026-08-02
