@@ -203,6 +203,14 @@ class RecoveryArtifactTests(InstallTestCase):
         # A benign structure must not raise.
         self.mod._reject_secret_keys({"purpose": "protect", "run": {"pid": 1}})
 
+    def test_read_json_rejects_invalid_utf8(self) -> None:
+        # An unreadable (non-UTF-8) receipt must surface as a bounded
+        # RecoveryError, not an unhandled UnicodeError.
+        receipt = self.state_root / "corrupt.json"
+        receipt.write_bytes(b"\xff\xfe not valid utf-8")
+        with self.assertRaises(self.mod.RecoveryError):
+            self.mod.read_json(receipt)
+
     # -- classify (read-only) --------------------------------------------
 
     def test_classify_empty_state_is_all_zero(self) -> None:

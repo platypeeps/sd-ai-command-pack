@@ -1196,3 +1196,69 @@ Planned + adversarially reviewed (2 Codex rounds, cap 3) the run_install->run_in
 ### Next Steps
 
 - None - task complete
+
+
+## Session 281: Ship sd skills to Claude Code .claude/skills/sd-* (fanout parity)
+
+**Date**: 2026-08-03
+**Task**: Ship sd skills to Claude Code .claude/skills/sd-* (fanout parity)
+**Branch**: `main`
+
+### Summary
+
+Added claude to SKILL_FANOUT_PLATFORMS so the 21 non-source-only sd skills fan out to .claude/skills/sd-* and ship to consumers via manifest.json, making them resolvable by Claude Code's installed-skill resolver. sd-fleet-refresh stays source-only (intentionally unresolvable). Reconciled install-audit twins (PACK_FILE_PATTERNS + SOURCE_ONLY_ALLOWED_PACK_FILES + Claude rogue-skill test), pinned counts (25->26, RETIRED 100->104), manifest 0.64.0, CHANGELOG, regenerated candidate ledger. Consumer coordination: loadsmith PR #173 (merged) data-drove its review-readiness classifier from installed-targets.txt. Copilot flagged a CHANGELOG overclaim (fixed). CI flaky macOS copytree race re-run green. Merged as #313.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ac1243b9` | (see git log) |
+
+### Testing
+
+- Validation of record: PR #313 merged 2026-08-03 with CI 8 checks SUCCESS / 2 SKIPPED (macOS copytree-race re-run passed green before merge). No additional local validation was captured this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 282: Release sd-ai-command-pack 0.64.1 — vendored pack-source hardening
+
+**Date**: 2026-08-03
+**Task**: Release sd-ai-command-pack 0.64.1 — vendored pack-source hardening
+**Branch**: `chore/pack-source-hardening-0.64.1`
+
+### Summary
+
+Fixed 0.64.0-refresh lint/robustness findings in four vendored pack scripts (recovery-artifacts, work-loop, update-spec-kb, status) across both scripts/ and templates/scripts/ twins: structural contextlib.suppress for CodeQL py/empty-except, UnicodeError-hardened reads, bounded KB tail-read, status.py schemaVersion fail-closed + symlink-reject import guards. Added unit tests for every new branch. Bumped manifest.json 0.64.0->0.64.1 + CHANGELOG; make sync regenerated command surfaces, dogfood manifest, provenance, and fleet candidate ledger. make release-prep green (test/lint/audit/full-check). No consumer fanout (deferred per PRD).
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dcdf0820` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

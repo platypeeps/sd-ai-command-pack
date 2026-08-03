@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.64.1 - 2026-08-03
+
+- Harden the vendored, installer-managed recovery/status/update-spec scripts
+  flagged by consumer reviewers during the 0.64.0 fleet refresh. Behavior is
+  unchanged on valid inputs; the only new behavior is on malformed or unsafe
+  failure paths (schemaVersion mismatch and symlinked-helper rejection now fail
+  closed to `invalid`/`unavailable` instead of trusting the input):
+  - Replace empty `except: pass` handlers in
+    `scripts/sd-ai-command-pack-recovery-artifacts.py` and
+    `scripts/sd-ai-command-pack-work-loop.py` with `contextlib.suppress(...)` /
+    `Path.unlink(missing_ok=True)` so CodeQL `py/empty-except` no longer fires
+    on the shipped copies.
+  - Catch `UnicodeError` alongside `OSError` when reading receipts and cleanup
+    locks in `sd-ai-command-pack-recovery-artifacts.py`, so an invalid-UTF-8
+    file surfaces a bounded `RecoveryError` instead of an unhandled exception.
+  - Read only the trailing marker bytes in
+    `sd-ai-command-pack-update-spec-kb.py`'s `file_ends_with_kb_copy_marker`
+    instead of loading the whole file.
+  - Fail closed in `sd-ai-command-pack-status.py` `collect_recovery` when the
+    dynamically loaded helper returns an unexpected `schemaVersion`, and reject
+    symlinked helper modules in both recovery and work-loop import guards.
+
 ## 0.64.0 - 2026-08-03
 
 - Ship the `sd` skill set to Claude Code's `.claude/skills/sd-*` surface (full
