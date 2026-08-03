@@ -70,6 +70,29 @@ class InstallAuditTests(InstallTestCase):
             result.stdout,
         )
 
+    def test_install_audit_discovers_pack_like_skills_on_claude(self) -> None:
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        rogue = root / ".claude/skills/sd-rogue/SKILL.md"
+        rogue.parent.mkdir(parents=True, exist_ok=True)
+        rogue.write_text("# not installed by the pack\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(".claude/skills/sd-rogue/SKILL.md", result.stdout)
+        self.assertIn(
+            "error: pack-like file is not listed in installed targets",
+            result.stdout,
+        )
+
     def test_install_audit_allows_source_only_fleet_files_in_source_repo(self) -> None:
         audit = self.load_module_from_path(
             install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",

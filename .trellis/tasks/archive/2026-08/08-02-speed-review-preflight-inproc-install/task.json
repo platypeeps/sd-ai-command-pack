@@ -2,7 +2,7 @@
   "id": "speed-review-preflight-inproc-install",
   "name": "speed-review-preflight-inproc-install",
   "title": "Convert review_preflight installs to in-process twin",
-  "description": "",
+  "description": "Cut test_review_preflight wall-clock by converting eligible run_install subprocess calls to the in-process run_install_inproc twin, without changing test meaning or regressing the installer coverage gate.",
   "status": "completed",
   "dev_type": null,
   "scope": null,

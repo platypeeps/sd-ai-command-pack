@@ -136,7 +136,7 @@ class HelpCommandTests(InstallTestCase):
             default.target_families, registry.GENERATED_COMMAND_TARGET_FAMILIES
         )
         self.assertEqual(
-            len(registry.command_installed_targets("sd-one", "one")), 25
+            len(registry.command_installed_targets("sd-one", "one")), 26
         )
         self.assertEqual(
             registry.command_installed_targets(

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.64.0 - 2026-08-03
+
+- Ship the `sd` skill set to Claude Code's `.claude/skills/sd-*` surface (full
+  parity with the other skill-fanout platforms). `claude` is now in
+  `SKILL_FANOUT_PLATFORMS`, so consumers receive the 21 non-source-only sd
+  skills as `.claude/skills/sd-<name>/SKILL.md` (+ references) via `manifest.json`,
+  so Claude Code's installed-skill resolver can now resolve those shipped `/sd:*`
+  skills by name. `sd-fleet-refresh` stays source-only and is not shipped, so
+  `/sd:fleet-refresh` remains intentionally unresolvable in consumers. The install
+  audit now covers
+  `.claude/skills/sd-*` in both the root and shipped-twin scripts.
+
 ## 0.63.0 - 2026-08-02
 
 - Raise the planning adversarial-review convergence limit from two automatic
