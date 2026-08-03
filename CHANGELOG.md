@@ -3,8 +3,10 @@
 ## 0.64.1 - 2026-08-03
 
 - Harden the vendored, installer-managed recovery/status/update-spec scripts
-  flagged by consumer reviewers during the 0.64.0 fleet refresh, with no
-  behavior change to installed consumers:
+  flagged by consumer reviewers during the 0.64.0 fleet refresh. Behavior is
+  unchanged on valid inputs; the only new behavior is on malformed or unsafe
+  failure paths (schemaVersion mismatch and symlinked-helper rejection now fail
+  closed to `invalid`/`unavailable` instead of trusting the input):
   - Replace empty `except: pass` handlers in
     `scripts/sd-ai-command-pack-recovery-artifacts.py` and
     `scripts/sd-ai-command-pack-work-loop.py` with `contextlib.suppress(...)` /

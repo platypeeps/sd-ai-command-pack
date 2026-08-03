@@ -1463,6 +1463,27 @@ class StatusTests(InstallTestCase):
         self.assertEqual(result["status"], "invalid")
         self.assertIn("schema version", result["error"])
 
+    def test_collect_recovery_rejects_helper_missing_schema_version(self) -> None:
+        root = self.make_status_repo()
+        status = self.load_status_module()
+        spec = mock.Mock()
+        spec.loader = mock.Mock()
+        # spec-restricted: accessing module.SCHEMA_VERSION raises AttributeError,
+        # so reading it must fail closed to "invalid", never crash the collector.
+        module = mock.Mock(spec=["classify_repository"])
+        module.classify_repository.return_value = {"schemaVersion": 1, "counts": {}}
+        with (
+            mock.patch.object(
+                status.importlib.util, "spec_from_file_location", return_value=spec
+            ),
+            mock.patch.object(
+                status.importlib.util, "module_from_spec", return_value=module
+            ),
+        ):
+            result = status.collect_recovery(root)
+        self.assertEqual(result["status"], "invalid")
+        self.assertIn("schema version", result["error"])
+
     def test_collect_recovery_rejects_symlinked_helper(self) -> None:
         root = self.make_status_repo()
         status = self.load_status_module()

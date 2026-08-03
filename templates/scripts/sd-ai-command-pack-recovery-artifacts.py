@@ -212,7 +212,7 @@ def read_json(path: Path) -> dict[str, Any]:
     try:
         raw = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
-        detail = getattr(error, "strerror", None) or "unreadable"
+        detail = getattr(error, "strerror", None) or str(error) or "unreadable"
         raise RecoveryError(f"cannot read receipt {path.name}: {detail}") from error
     if len(raw.encode("utf-8")) > MAX_RECEIPT_BYTES:
         raise RecoveryError(f"receipt is implausibly large: {path.name}")

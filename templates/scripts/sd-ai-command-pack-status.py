@@ -1224,7 +1224,8 @@ def collect_recovery(repo: Path) -> dict[str, Any]:
             "status": "invalid",
             "error": "recovery-artifacts helper returned invalid data",
         }
-    if classified.get("schemaVersion") != module.SCHEMA_VERSION:
+    expected_schema = getattr(module, "SCHEMA_VERSION", None)
+    if expected_schema is None or classified.get("schemaVersion") != expected_schema:
         return {
             "status": "invalid",
             "error": "recovery-artifacts helper returned an unexpected schema version",
