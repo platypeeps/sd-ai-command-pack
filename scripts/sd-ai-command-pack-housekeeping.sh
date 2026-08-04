@@ -277,18 +277,24 @@ refresh_obsidian_kb() {
     add_anomaly kb_helper_missing "Obsidian KB refresh failed because a required pack helper is missing or unreadable; restore the pack install, then run: bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-update-spec-kb.py"
     return 1
   fi
+  local refresh_output
   if [ "$DRY_RUN" -eq 1 ]; then
-    if bash "$toolchain" run-python -- "$helper" --dry-run; then
+    if refresh_output="$(bash "$toolchain" run-python -- "$helper" --dry-run 2>&1)"; then
       refresh_status=0
     else
       refresh_status=$?
     fi
   else
-    if bash "$toolchain" run-python -- "$helper"; then
+    if refresh_output="$(bash "$toolchain" run-python -- "$helper" 2>&1)"; then
       refresh_status=0
     else
       refresh_status=$?
     fi
+  fi
+  # Preserve the helper's own output in the section log; capturing it above is
+  # only so the read-only target can be classified below.
+  if [ -n "$refresh_output" ]; then
+    printf '%s\n' "$refresh_output"
   fi
   if [ "$refresh_status" -eq 0 ]; then
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -296,6 +302,19 @@ refresh_obsidian_kb() {
     else
       add_action kb_refreshed "refreshed .obsidian-kb after finish-work"
     fi
+    return 0
+  fi
+
+  # KB refresh is advisory when the linked target is merely read-only. The
+  # .obsidian-kb copy folder is a regenerable mirror (re-running rewrites every
+  # entry and prunes stale ones), so a single read-only personal-wiki file must
+  # not block a merge (finding #7: a 0444 file hard-blocked a merge gate). The
+  # helper returns exit 2 for any kb-target OSError; only EACCES/EROFS
+  # (read-only / permission-denied) are treated as skippable. Every other
+  # failure — corrupt vault, disk full, broken symlink — still hard-blocks.
+  if [ "$refresh_status" -eq 2 ] &&
+    grep -Eqi 'errno 13|permission denied|errno 30|read-only file system|eacces|erofs' <<<"$refresh_output"; then
+    add_action kb_refresh_skipped "Obsidian KB refresh skipped: the .obsidian-kb target (or its linked vault) is read-only. The KB copy folder is regenerable; make it writable and re-run: bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-update-spec-kb.py"
     return 0
   fi
 
