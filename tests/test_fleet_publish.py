@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -163,6 +164,121 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
         git(self.repo, "commit", "-aqm", "task change")
         head = publish.git_out(["rev-parse", "HEAD"], cwd=self.repo)
         publish.assert_trellis_only_delta(self.repo, base, head)
+
+    # ---------------------------------------------------------- end-to-end publish
+
+    def _install_publish_fakes(self) -> None:
+        """Commit fakes for the three shell-outs publish() makes.
+
+        Real ``task.py archive``, ``record-session``, and the node completion
+        bundle need a full Trellis + review-preflight environment; the helper's
+        orchestration is otherwise validated on a live disposable clone. These
+        stand-ins keep every commit ``.trellis``-only and emit a ``valid``
+        receipt so the in-process happy path is exercised hermetically.
+        """
+
+        trellis_scripts = self.repo / ".trellis" / "scripts"
+        trellis_scripts.mkdir(parents=True, exist_ok=True)
+        (trellis_scripts / "task.py").write_text(
+            "import pathlib, subprocess, sys\n"
+            "slug = sys.argv[2]\n"
+            "src = pathlib.Path('.trellis/tasks') / slug\n"
+            "dst = pathlib.Path('.trellis/tasks/archive') / slug\n"
+            "dst.parent.mkdir(parents=True, exist_ok=True)\n"
+            "subprocess.run(['git', 'mv', str(src), str(dst)], check=True)\n"
+            "subprocess.run(['git', 'commit', '-q', '-m', 'chore(task): archive ' + slug], check=True)\n",
+            encoding="utf-8",
+        )
+        record_session = self.repo / "scripts" / "fake-record-session.py"
+        record_session.parent.mkdir(exist_ok=True)
+        record_session.write_text(
+            "import pathlib, subprocess\n"
+            "workspace = pathlib.Path('.trellis/workspace')\n"
+            "workspace.mkdir(parents=True, exist_ok=True)\n"
+            "(workspace / 'journal.md').write_text('session\\n', encoding='utf-8')\n"
+            "subprocess.run(['git', 'add', '-A'], check=True)\n"
+            "subprocess.run(['git', 'commit', '-q', '-m', 'chore: record journal'], check=True)\n",
+            encoding="utf-8",
+        )
+        # completion_receipt shells to `node scripts/sd-ai-command-pack-review-preflight.mjs`.
+        preflight = self.repo / "scripts" / "sd-ai-command-pack-review-preflight.mjs"
+        preflight.write_text(
+            "process.stdout.write(JSON.stringify({status: 'valid'}));\n",
+            encoding="utf-8",
+        )
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "install publish fakes")
+
+    @unittest.skipUnless(shutil.which("node"), "node required for completion receipt")
+    def test_publish_folds_finish_work_into_the_head_and_writes_a_valid_receipt(
+        self,
+    ) -> None:
+        self._make_repomix('printf "# regenerated\\n" > docs/repomix-map.md\n')
+        self._install_publish_fakes()
+        base = publish.git_out(["rev-parse", "HEAD"], cwd=self.repo)
+
+        # Pending finish-work: an allowlisted .trellis change the work commit folds in.
+        workspace = self.repo / ".trellis" / "workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
+        (workspace / "note.md").write_text("finish work\n", encoding="utf-8")
+
+        aux = tempfile.TemporaryDirectory(prefix="sd-fleet-publish-aux-")
+        self.addCleanup(aux.cleanup)
+        work_message = Path(aux.name) / "work.txt"
+        work_message.write_text("chore: fold finish-work into head\n", encoding="utf-8")
+        receipt = Path(aux.name) / "receipt.json"
+
+        rc = publish.main(
+            [
+                str(self.repo),
+                self.slug,
+                "--branch",
+                "main",
+                "--title",
+                "Demo publish",
+                "--summary",
+                "Fold finish-work.",
+                "--change",
+                "folded finish-work",
+                "--test",
+                "unit: fleet-publish happy path",
+                "--work-message-file",
+                str(work_message),
+                "--receipt-out",
+                str(receipt),
+                "--record-session",
+                str(self.repo / "scripts" / "fake-record-session.py"),
+                "--python",
+                sys.executable,
+                "--archive-month",
+                "2026-01",
+                "--no-push",
+            ]
+        )
+
+        self.assertEqual(rc, 0)
+        # Receipt is valid and persisted.
+        self.assertIn('"valid"', receipt.read_text(encoding="utf-8"))
+        # The task was archived and the journal recorded, both in the published head.
+        head = publish.git_out(["rev-parse", "HEAD"], cwd=self.repo)
+        self.assertNotEqual(head, base)
+        self.assertTrue(
+            (self.repo / ".trellis/tasks/archive" / self.slug).is_dir(),
+            "task should be archived into the published head",
+        )
+        self.assertTrue(
+            (self.repo / ".trellis/workspace/journal.md").is_file(),
+            "journal should be recorded into the published head",
+        )
+        # publish() internally asserts the H1..H3 delta is .trellis-only; a valid
+        # rc of 0 means that held. Under --no-push no branch was pushed.
+        branches = subprocess.run(
+            ["git", "branch", "--format=%(refname:short)"],
+            cwd=str(self.repo),
+            capture_output=True,
+            text=True,
+        ).stdout.split()
+        self.assertEqual(branches, ["main"], "no push/new branch under --no-push")
 
 
 if __name__ == "__main__":
