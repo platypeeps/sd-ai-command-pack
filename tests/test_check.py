@@ -311,7 +311,7 @@ class CheckTests(InstallTestCase):
         external = root.parent / "external-vault"
         external.mkdir()
         (external / "note.md").write_text("live vault\n", encoding="utf-8")
-        os.symlink(external, root / ".obsidian-kb")
+        (root / ".obsidian-kb").symlink_to(external, target_is_directory=True)
         self._write_kb_check_helper(
             root, exit_code=1, message="knowledge export is stale"
         )
@@ -337,7 +337,7 @@ class CheckTests(InstallTestCase):
         root = self.make_check_repo()
         external = root.parent / "external-vault"
         external.mkdir()
-        os.symlink(external, root / ".obsidian-kb")
+        (root / ".obsidian-kb").symlink_to(external, target_is_directory=True)
         self._write_kb_check_helper(
             root, exit_code=0, message="knowledge export is fresh"
         )
@@ -358,7 +358,7 @@ class CheckTests(InstallTestCase):
         store = root / "kb-store"
         store.mkdir()
         (store / "note.md").write_text("in-repo kb\n", encoding="utf-8")
-        os.symlink(store, root / ".obsidian-kb")
+        (root / ".obsidian-kb").symlink_to(store, target_is_directory=True)
         self._write_kb_check_helper(
             root, exit_code=1, message="knowledge export is stale"
         )
@@ -385,14 +385,14 @@ class CheckTests(InstallTestCase):
         external_target = base / "external-vault"
         external_target.mkdir()
         external_link = repo / "external-kb"
-        os.symlink(external_target, external_link)
+        external_link.symlink_to(external_target, target_is_directory=True)
         self.assertTrue(module._is_external_symlink(external_link, repo))
 
         # In-repo symlink whose target resolves under the repo -> keeps blocking.
         in_repo_target = repo / "kb-store"
         in_repo_target.mkdir()
         in_repo_link = repo / "in-repo-kb"
-        os.symlink(in_repo_target, in_repo_link)
+        in_repo_link.symlink_to(in_repo_target, target_is_directory=True)
         self.assertFalse(module._is_external_symlink(in_repo_link, repo))
 
         # A real (non-symlink) directory is never advisory.
@@ -403,10 +403,10 @@ class CheckTests(InstallTestCase):
         # A broken link resolves to its declared target: external -> advisory,
         # in-repo -> keeps blocking so the breakage surfaces.
         broken_external = repo / "broken-external-kb"
-        os.symlink(base / "missing-external", broken_external)
+        broken_external.symlink_to(base / "missing-external", target_is_directory=True)
         self.assertTrue(module._is_external_symlink(broken_external, repo))
         broken_in_repo = repo / "broken-in-repo-kb"
-        os.symlink(repo / "missing-in-repo", broken_in_repo)
+        broken_in_repo.symlink_to(repo / "missing-in-repo", target_is_directory=True)
         self.assertFalse(module._is_external_symlink(broken_in_repo, repo))
 
     def test_state_guard_detects_configured_repository_mutation(self) -> None:

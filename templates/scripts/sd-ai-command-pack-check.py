@@ -14,7 +14,7 @@ import sys
 import time
 from collections import Counter
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence, cast
 
 from sd_ai_command_pack_lib import (
     CacheSetupError,
@@ -1046,10 +1046,10 @@ def build_report(repo: Path, config_path: Path) -> dict[str, object]:
                     "non-deterministic and never shipped; "
                     + str(row.get("diagnostic", ""))
                 ),
-                remediation=row.get("remediation"),
-                exit_code=row.get("exitCode"),
-                command=row.get("command"),
-                duration_ms=int(row.get("durationMs") or 0),
+                remediation=cast("str | None", row.get("remediation")),
+                exit_code=cast("int | None", row.get("exitCode")),
+                command=cast("dict[str, object] | None", row.get("command")),
+                duration_ms=cast("int", row.get("durationMs") or 0),
             )
         return row
 
