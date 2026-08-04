@@ -1328,3 +1328,40 @@ Corrective release 0.64.3. Replaced islink-precheck-then-exec_module at 4 siblin
 ### Next Steps
 
 - None - task complete
+
+
+## Session 285: sd-ai-command-pack 0.64.4 — fleet-rollout hardening
+
+**Date**: 2026-08-04
+**Task**: sd-ai-command-pack 0.64.4 — fleet-rollout hardening
+**Branch**: `feat/0.64.4-fleet-rollout-hardening`
+
+### Summary
+
+Shipped 0.64.4: six behavior fixes (#2/#5/#6/#7/#11/AC1.c), source-only fleet-publish.py, controller/timing ergonomics; addressed 4 Copilot findings on PR #318 (f1c1dd48).
+
+### Main Changes
+
+- 0.64.4 hardening: pr-eligibility BLOCKED/MERGEABLE classification, review-preflight _example-only advisory gate, review-scope CLOSED-PR guard, housekeeping read-only KB advisory skip, sibling-loader reason codes, fleet-refresh checkout/pr-publication steps
+- New source-only fleet-publish.py folds finish-work into the reviewed head under allowlist/transactional-restore/.trellis-only guards
+- Copilot review on PR #318 (f1c1dd48): rename moved inside try/finally, --record-session resolved to CWD, ENOTDIR->non_regular + ELOOP->symlink in status/surface-check twins, +2 regression tests
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1561b5119237fe0a63a5cfa764b2109314af745e` | chore(task): record 0.64.4 fleet-rollout hardening task artifacts |
+
+### Testing
+
+- [OK] make release-prep green; install-audit vouched hashes match at 0.64.4 (210 targets); 71 focused unittests OK
+- [OK] PR #318 CI all green on fixed head f1c1dd48 (unittest matrix incl.); 4/4 Copilot threads resolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
