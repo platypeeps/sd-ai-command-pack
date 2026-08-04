@@ -470,17 +470,21 @@ jobs:
         # If C is empty, kcov instrumentation itself is broken; if C has hits but
         # A/B don't, the include-pattern or path handling is the culprit.
         if: always()
+        # errexit OFF on purpose: dump()'s greps legitimately find no matches on
+        # an empty report (exit 1), and GitHub's default `bash -e` wrapper would
+        # abort the step before printing the very evidence we want.
+        shell: bash --noprofile --norc {0}
         run: |
-          set -uo pipefail
+          set +e -u
           dump() {  # $1 = kcov output dir, $2 = label
-            local f cov=0 tot=0
-            while IFS= read -r f; do
+            local f cov tot
+            for f in $(find "$1" -name 'cobertura.xml' 2>/dev/null); do
               printf '  cobertura: %s\n' "$f"
-              grep -o 'filename="[^"]*"' "$f" | sort -u | sed 's/^/    file: /'
-              tot=$(grep -c '<line ' "$f" || true)
-              cov=$(grep -o 'hits="[1-9]' "$f" | grep -c . || true)
-              printf '  lines: %s tags, %s with hits>=1\n' "$tot" "$cov"
-            done < <(find "$1" -name 'cobertura.xml')
+              grep -o 'filename="[^"]*"' "$f" 2>/dev/null | sort -u | sed 's/^/    file: /'
+              tot=$(grep -c '<line ' "$f" 2>/dev/null); tot=${tot:-0}
+              cov=$(grep -oc 'hits="[1-9]' "$f" 2>/dev/null); cov=${cov:-0}
+              printf '  lines: %s <line> tags, %s with hits>=1\n' "$tot" "$cov"
+            done
           }
           echo "=== A: real shipped script, bash FILE, include filter ==="
           kcov --include-pattern=sd-ai-command-pack- --bash-dont-parse-binary-dir \
