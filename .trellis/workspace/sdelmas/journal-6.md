@@ -1398,3 +1398,36 @@ Planning-only, NO code impl started, NO active task, NO campaign (standing const
 ### Next Steps
 
 - None - task complete
+
+
+## Session 287: 0.64.5 planning gate CLOSED (Option A) — held before implementation
+
+**Date**: 2026-08-04
+**Task**: 0.64.5 planning gate CLOSED (Option A) — held before implementation
+**Branch**: `main`
+
+### Summary
+
+HELD at user request; NO code impl, NO campaign (standing constraint: no fleet rollout until user explicitly asks; loadsmith deferred, 6 consumers on 0.64.3). Planning-adversarial-review COMPLETE (3 passes, contract cap): C-1..C-9 (r1) + N-1 (r2) + M-1/M-2/M-3 (r3) all dispositioned; report at .trellis/tasks/08-04-0-64-5-followup-hardening/adversarial-review.md. Gate CLOSED on host review. HONESTY CAVEAT: Option A (M-1 fix) landed after the final review pass -> host-verified only, NOT Codex-approved (pass budget spent); used 3 remediation rounds vs nominal 2. 0.64.5 SHIPS: A (sibling-loader ENOTDIR->missing, both branches/both twins, templates-first, caller verify-only, repo-relative path OK, advisory+authoritative tests) + B-fleet (fleet-publish.py loud abort on non-zero archive: PublishError+recovery, NO rollback) + C (self-publish guard: bookkeeping-CI fingerprint -> PublishError code 3 naming sd-finish-work + consumer-only docs) + R (bump 0.64.5, CHANGELOG, release-prep, check, PR, tag). OUT OF 0.64.5 (M-1): task_store retry handed upstream as standalone task 08-04-trellis-upstream-archive-commit-lock-retry (Trellis-owned file, pack doesn't ship it; carries M-2 preserve 'not source_was_tracked' return contract + M-3 anchor retry on 'index.lock' substring). SIDE EFFECT: task.py create auto-activated the upstream task as session current; on resume, task.py start a 0.64.5 child instead (order C->B->A->R per implement.md, each phase green gate). TO RESUME: task.py start 08-04-fleet-publish-pack-self-publish-gate, implement C->B->A->R. Codex CLI flaky this session (exit 144 hook-startup; macOS has no 'timeout' binary -> run codex plain). Impl NOT allowed until user go-ahead; NO campaign until user explicitly asks.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `be12f4d8` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

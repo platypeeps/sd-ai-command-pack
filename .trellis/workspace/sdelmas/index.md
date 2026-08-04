@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 286
+- **Total Sessions**: 287
 - **Last Active**: 2026-08-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~1400 | Active |
+| `journal-6.md` | ~1433 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 287 | 2026-08-04 | 0.64.5 planning gate CLOSED (Option A) — held before implementation | `be12f4d8` | `main` |
 | 286 | 2026-08-04 | 0.64.5 planning — adversarial review round-2 remediation (Option 1) | `2228505e` | `main` |
 | 285 | 2026-08-04 | sd-ai-command-pack 0.64.4 — fleet-rollout hardening | `1561b5119237fe0a63a5cfa764b2109314af745e` | `feat/0.64.4-fleet-rollout-hardening` |
 | 284 | 2026-08-03 | Ship 0.64.3: harden sibling-helper loaders against TOCTOU | `46243a5c` | `fix/harden-helper-loader-toctou` |
