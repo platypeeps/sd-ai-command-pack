@@ -809,14 +809,17 @@ function validateBookkeepingTaskDirectory(taskDir, options) {
 
 function validateBookkeepingTaskContexts(taskDir, record, archived, add) {
   // Context files are validated even when task.json is broken or missing —
-  // their defects stand on their own. Without a readable planning-status
-  // record the pristine-scaffold exemption cannot be proven, so it is off.
-  // A planning task's untouched generated scaffold matches the shape
-  // `task.py create` writes — a lone `_example`-only row. The match is on that
-  // shape, not on Trellis's seed text, which Trellis owns and revises across
-  // versions. The review-preflight task-context gate exempts it on the same
-  // terms, so creating a task never fails either lane.
-  const scaffoldExempt = !archived && isPlainObject(record) && record.status === 'planning';
+  // their defects stand on their own. A manifest whose ONLY row is the untouched
+  // generated `_example`-only scaffold `task.py create` writes is treated as
+  // unfilled/advisory, not a blocking seed row — regardless of task status or
+  // archival. A lone scaffold is indistinguishable from an empty/unfilled
+  // manifest and is never genuine leftover scaffold; that only happens when an
+  // `_example` row is MIXED with real rows, which still fails below. Gating the
+  // exemption on `status === 'planning'` was too narrow and produced a LATE,
+  // merge-time `task_context_seed` failure on completion (finding #5); the match
+  // is on the lone-scaffold shape, not on Trellis's seed text.
+  void record;
+  void archived;
   for (const artifact of ['implement.jsonl', 'check.jsonl']) {
     const file = `${taskDir}/${artifact}`;
     if (!pathEntryExists(file)) continue;
@@ -825,7 +828,7 @@ function validateBookkeepingTaskContexts(taskDir, record, archived, add) {
       add('task_context_invalid', file, loaded.message);
       continue;
     }
-    const exemptScaffold = scaffoldExempt && isPristineTrellisTaskContextScaffold(loaded.text);
+    const exemptScaffold = isPristineTrellisTaskContextScaffold(loaded.text);
     for (const issue of findTrellisTaskContextIssues(file, loaded.text)) {
       if (issue.kind === 'seed' && exemptScaffold) continue;
       const message = issue.kind === 'seed'
@@ -3703,13 +3706,13 @@ function checkTrellisTaskContextManifests() {
 
     inspectedFiles += 1;
     const text = readText(file);
-    const planningScaffold = isPlanningTaskContextScaffold(file, text);
-    if (planningScaffold) {
+    const loneScaffold = isPristineTrellisTaskContextScaffold(text);
+    if (loneScaffold) {
       exemptScaffolds += 1;
     }
     for (const issue of findTrellisTaskContextIssues(file, text)) {
       if (issue.kind === 'seed') {
-        if (planningScaffold) {
+        if (loneScaffold) {
           continue;
         }
         fail(
@@ -3741,7 +3744,7 @@ function checkTrellisTaskContextManifests() {
 
   if (failures.length === failureStart) {
     const exemptSuffix = exemptScaffolds
-      ? ` ${exemptScaffolds} untouched planning scaffold(s) are exempt until the task leaves planning.`
+      ? ` ${exemptScaffolds} untouched lone _example scaffold(s) are exempt (advisory/unfilled).`
       : '';
     pass(
       `checked ${inspectedFiles} changed Trellis task context file(s) for valid JSONL, generated _example scaffold rows, and spec/research-only references.${exemptSuffix}`,
@@ -3837,33 +3840,6 @@ export function isPristineTrellisTaskContextScaffold(text) {
     Object.keys(record).length === 1 &&
     Object.prototype.hasOwnProperty.call(record, '_example')
   );
-}
-
-function isPlanningTaskContextScaffold(file, text) {
-  if (!isPristineTrellisTaskContextScaffold(text)) {
-    return false;
-  }
-
-  const artifact = parseTrellisTaskArtifactPath(file);
-  if (!artifact || artifact.archived) {
-    return false;
-  }
-
-  const loaded = loadTrellisTaskMetadataFile(`${artifact.taskDir}/task.json`, {
-    deletedIsMissing: true,
-  });
-  if (loaded.status !== 'loaded') {
-    return false;
-  }
-
-  let record;
-  try {
-    record = JSON.parse(loaded.text);
-  } catch {
-    return false;
-  }
-
-  return isPlainObject(record) && record.status === 'planning';
 }
 
 export function findTrellisTaskContextSeedRows(file, text) {

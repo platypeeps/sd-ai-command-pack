@@ -2580,7 +2580,7 @@ assert.deepEqual(
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
-            "2 untouched planning scaffold(s) are exempt until the task leaves planning",
+            "2 untouched lone _example scaffold(s) are exempt (advisory/unfilled)",
             result.stdout,
         )
         self.assertNotIn(".trellis/tasks/07-17-demo/implement.jsonl:1", result.stdout)
@@ -2611,8 +2611,12 @@ assert.deepEqual(
             + "\n",
             encoding="utf-8",
         )
-        (task / "implement.jsonl").write_text(seed, encoding="utf-8")
-        (task / "check.jsonl").write_text(seed, encoding="utf-8")
+        # A lone _example is advisory now (finding #5); a seed row MIXED with a
+        # real row is still genuine leftover scaffold and must fail. Seed is on
+        # line 1, so the ":1 still contains" diagnostics stand.
+        mixed = seed + '{"file":".trellis/spec/backend/index.md","reason":"grounded"}\n'
+        (task / "implement.jsonl").write_text(mixed, encoding="utf-8")
+        (task / "check.jsonl").write_text(mixed, encoding="utf-8")
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
@@ -2663,7 +2667,7 @@ assert.deepEqual(
             result.stdout,
         )
 
-    def test_review_preflight_exempts_only_untouched_planning_scaffolds(self) -> None:
+    def test_review_preflight_exempts_untouched_lone_scaffolds_in_any_phase(self) -> None:
         node = shutil.which("node")
         if node is None:
             self.skipTest("node is not available on PATH")
@@ -2710,14 +2714,27 @@ assert.deepEqual(
             result.stdout,
         )
 
-        implement.write_text(seed, encoding="utf-8")
+        # Restore the active task to grounded context so only the archived task
+        # under test drives the outcome.
+        implement.write_text(context, encoding="utf-8")
         archived = root / ".trellis/tasks/archive/2026-07/07-29-archived-scaffold"
         archived.mkdir(parents=True)
         (archived / "task.json").write_text(
             json.dumps(self.trellis_task_record("archived-scaffold")) + "\n",
             encoding="utf-8",
         )
+        # A lone _example scaffold is advisory even in the archive (finding #5):
+        # it is indistinguishable from an unfilled/empty manifest.
         (archived / "implement.jsonl").write_text(seed, encoding="utf-8")
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn(
+            "archive/2026-07/07-29-archived-scaffold/implement.jsonl:1", result.stdout
+        )
+
+        # But a seed row MIXED with a real row in the archive is genuine leftover
+        # scaffold and must still fail.
+        (archived / "implement.jsonl").write_text(seed + context, encoding="utf-8")
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
@@ -2836,8 +2853,20 @@ assert.deepEqual(
             + "\n",
             encoding="utf-8",
         )
+        # The sibling manifests are inspected because the active task changed.
+        # Their lone _example scaffolds are advisory (finding #5), so the task
+        # passes without manual emptying.
         result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn(".trellis/tasks/07-17-active/implement.jsonl:1", result.stdout)
+        self.assertNotIn(".trellis/tasks/07-17-active/check.jsonl:1", result.stdout)
 
+        # A seed row MIXED with a real row in the sibling manifests is still
+        # caught, proving the sibling context is genuinely inspected.
+        mixed = seed + '{"file":".trellis/spec/backend/index.md","reason":"grounded"}\n'
+        (task / "implement.jsonl").write_text(mixed, encoding="utf-8")
+        (task / "check.jsonl").write_text(mixed, encoding="utf-8")
+        result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(
             ".trellis/tasks/07-17-active/implement.jsonl:1 still contains",
@@ -2893,8 +2922,12 @@ assert.deepEqual(
             + "\n",
             encoding="utf-8",
         )
+        # A newly-added archived manifest with a seed row MIXED with a real row is
+        # genuine leftover scaffold and is caught; a lone _example would be advisory
+        # (finding #5), so the must-fail case uses a mixed manifest.
         (current / "implement.jsonl").write_text(
-            '{"_example":"current"}\n', encoding="utf-8"
+            '{"_example":"current"}\n{"file":".trellis/spec/backend/index.md","reason":"grounded"}\n',
+            encoding="utf-8",
         )
         (current / "check.jsonl").write_text(
             '{"file":".trellis/spec/backend/index.md","reason":"grounded"}\n',
