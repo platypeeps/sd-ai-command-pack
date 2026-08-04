@@ -408,6 +408,49 @@ class FleetControllerTests(InstallTestCase):
         self.assertIsNone(winner["heldBehind"])
         self.assertIsNone(winner["queueNote"])
 
+    def test_parked_canary_allows_wave_progression_only_with_opt_in(self) -> None:
+        controller = self.load_controller()
+        for allow, expect_wave in ((False, False), (True, True)):
+            with self.subTest(allow_parked_canary=allow):
+                root = self.make_git_repo_without_trellis()
+                fleet, manifest = self.write_inputs(root)
+                state = controller.new_state(
+                    repo=root,
+                    campaign="campaign-1",
+                    release="0.37.0",
+                    fleet_path=fleet,
+                    pack_manifest_path=manifest,
+                    allow_parked_canary=allow,
+                )
+                self.pass_preflight(controller, state)
+                # canary-a settles at-target; canary-b is parked (operator-decision).
+                first = self.issued_action_for(controller, state, "canary-a")
+                controller.record_result(
+                    state,
+                    action_id=first["actionId"],
+                    release="0.37.0",
+                    consumer="canary-a",
+                    result="at-target",
+                )
+                parked = self.issued_action_for(controller, state, "canary-b")
+                controller.record_result(
+                    state,
+                    action_id=parked["actionId"],
+                    release="0.37.0",
+                    consumer="canary-b",
+                    result="operator-decision",
+                    reason_code="operator-parked",
+                )
+
+                issued = controller.issue_next(state)
+                started = sorted(action["consumer"] for action in issued)
+                if expect_wave:
+                    self.assertEqual(started, ["wave-a", "wave-b"])
+                    self.assertEqual(state["status"], "active")
+                else:
+                    self.assertEqual(issued, [])
+                    self.assertEqual(state["status"], "blocked")
+
     def test_load_provenance_validates_operator_decision_input(self) -> None:
         controller = self.load_controller()
         root = self.make_git_repo_without_trellis()

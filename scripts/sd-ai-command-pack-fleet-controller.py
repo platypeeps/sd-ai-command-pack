@@ -472,11 +472,18 @@ def _normalize_state(state: dict[str, Any]) -> dict[str, Any]:
                 else recovery
                 for recovery in state["recoveries"]
             ]
+        state.setdefault("allowParkedCanary", False)
         state["schemaVersion"] = 2
         return state
-    if state.get("schemaVersion") == SCHEMA_VERSION and "recoveries" not in state:
+    if state.get("schemaVersion") == SCHEMA_VERSION and (
+        "recoveries" not in state or "allowParkedCanary" not in state
+    ):
         state = dict(state)
-        state["recoveries"] = []
+        state.setdefault("recoveries", [])
+        # allowParkedCanary is an additive optional field (no schema bump): a
+        # campaign planned before it existed defaults to the safe halt-on-parked
+        # behavior and loads unchanged.
+        state.setdefault("allowParkedCanary", False)
     return state
 
 
@@ -729,6 +736,7 @@ def validate_state(state: Mapping[str, Any]) -> None:
     _strict_fields(
         state,
         {
+            "allowParkedCanary",
             "campaignId",
             "createdAt",
             "fleetManifest",
@@ -764,6 +772,8 @@ def validate_state(state: Mapping[str, Any]) -> None:
         raise FleetControllerError("fleetManifestDigest is invalid")
     if not isinstance(state["noMerge"], bool):
         raise FleetControllerError("noMerge must be boolean")
+    if not isinstance(state["allowParkedCanary"], bool):
+        raise FleetControllerError("allowParkedCanary must be boolean")
     if state["status"] not in {"active", "blocked", "complete"}:
         raise FleetControllerError("campaign status is invalid")
     if not isinstance(state["manifestConsumers"], list) or not state["manifestConsumers"]:
@@ -898,6 +908,7 @@ def new_state(
     selected: Sequence[str] = (),
     checkout_overrides: Mapping[str, Path] | None = None,
     no_merge: bool = False,
+    allow_parked_canary: bool = False,
 ) -> dict[str, Any]:
     campaign = safe_token(campaign, "campaign")
     release = safe_token(release, "release")
@@ -950,6 +961,7 @@ def new_state(
         )
     now = utc_now()
     state = {
+        "allowParkedCanary": allow_parked_canary,
         "campaignId": campaign,
         "createdAt": now,
         "fleetManifest": str(fleet_path.expanduser().resolve()),
@@ -1024,7 +1036,11 @@ def _observations(state: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     for name in state["manifestConsumers"]:
         lane = selected.get(name)
         if lane is None:
-            observations[name] = {"state": "at-target", "packBlocker": False}
+            observations[name] = {
+                "state": "at-target",
+                "packBlocker": False,
+                "parked": False,
+            }
             continue
         result = lane["result"]
         if result == "at-target":
@@ -1052,6 +1068,7 @@ def _observations(state: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
         observations[name] = {
             "state": observed,
             "packBlocker": lane["packBlocker"],
+            "parked": result == "operator-decision",
         }
     return observations
 
@@ -1066,6 +1083,7 @@ def _planner(state: Mapping[str, Any]) -> dict[str, Any]:
             policy,
             _observations(state),
             no_merge=state["noMerge"],
+            allow_parked_canary=state["allowParkedCanary"],
         )
     except WAVE_PLANNER.FleetWavePlanError as error:
         raise FleetControllerError(str(error)) from None
@@ -1810,6 +1828,7 @@ def status_report(
             entry["issuedActionId"] = issued["actionId"] if issued else None
         lanes.append(entry)
     return {
+        "allowParkedCanary": state["allowParkedCanary"],
         "campaignId": state["campaignId"],
         "lanes": lanes,
         "noMerge": state["noMerge"],
@@ -1842,6 +1861,7 @@ def _planning_identity(state: Mapping[str, Any]) -> dict[str, Any]:
             }
             for lane in state["lanes"]
         ],
+        "allowParkedCanary": state["allowParkedCanary"],
         "manifestConsumers": state["manifestConsumers"],
         "noMerge": state["noMerge"],
         "release": state["release"],
@@ -1911,6 +1931,11 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--consumer", action="append", default=[])
     plan.add_argument("--checkout", action="append", default=[])
     plan.add_argument("--no-merge", action="store_true")
+    plan.add_argument(
+        "--allow-parked-canary",
+        action="store_true",
+        help="an operator-decision (parked) canary settles the cohort, not halts it",
+    )
 
     next_parser = commands.add_parser("next")
     _common(next_parser)
@@ -1983,6 +2008,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 selected=args.consumer,
                 checkout_overrides=_checkout_overrides(args.checkout),
                 no_merge=args.no_merge,
+                allow_parked_canary=args.allow_parked_canary,
             )
             with store.locked():
                 if store.state_path.exists():

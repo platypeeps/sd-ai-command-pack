@@ -104,17 +104,18 @@ def parse_observations(
     observations: dict[str, dict[str, Any]] = {}
     for index, row in enumerate(rows):
         label = f"wave state consumers[{index}]"
-        if not isinstance(row, dict) or set(row) != {
-            "name",
-            "state",
-            "packBlocker",
-        }:
+        # "parked" is an optional back-compatible field: a state file may omit it
+        # (defaults false) or carry a boolean marking an operator-decision lane.
+        if not isinstance(row, dict) or not {"name", "state", "packBlocker"} <= set(
+            row
+        ) <= {"name", "state", "packBlocker", "parked"}:
             raise FleetWavePlanError(
-                f"{label} fields must be name, state, and packBlocker"
+                f"{label} fields must be name, state, packBlocker, and optionally parked"
             )
         name = row.get("name")
         state = row.get("state")
         pack_blocker = row.get("packBlocker")
+        parked = row.get("parked", False)
         if not isinstance(name, str) or name not in known:
             raise FleetWavePlanError(f"{label} names an unknown consumer")
         if name in observations:
@@ -123,9 +124,12 @@ def parse_observations(
             raise FleetWavePlanError(f"{label} has invalid state")
         if not isinstance(pack_blocker, bool):
             raise FleetWavePlanError(f"{label} packBlocker must be boolean")
+        if not isinstance(parked, bool):
+            raise FleetWavePlanError(f"{label} parked must be boolean")
         observations[name] = {
             "state": state,
             "packBlocker": pack_blocker,
+            "parked": parked,
         }
 
     missing = [consumer.name for consumer in consumers if consumer.name not in observations]
@@ -163,6 +167,7 @@ def plan_rollout(
     observations: Mapping[str, Mapping[str, Any]],
     *,
     no_merge: bool = False,
+    allow_parked_canary: bool = False,
 ) -> dict[str, Any]:
     blockers = [
         name for name, row in observations.items() if row.get("packBlocker") is True
@@ -178,6 +183,16 @@ def plan_rollout(
     canary_success_states = (
         NO_MERGE_CANARY_SUCCESS_STATES if no_merge else CANARY_SUCCESS_STATES
     )
+
+    def canary_settled(name: str, state: str) -> bool:
+        # A parked canary (operator-decision, recorded provenance) reports the
+        # terminal "blocked" state. Under an explicit --allow-parked-canary opt-in
+        # it counts as settled for wave progression instead of halting the whole
+        # campaign, so the operator can defer one canary without a full restart.
+        if state in canary_success_states:
+            return True
+        return bool(allow_parked_canary and observations[name].get("parked"))
+
     active_cohort: fleet_lib.FleetRolloutCohort | None = None
     for index, cohort in enumerate(policy.cohorts):
         states = [str(observations[name]["state"]) for name in cohort.consumers]
@@ -185,7 +200,7 @@ def plan_rollout(
             failed_canaries = [
                 name
                 for name, state in zip(cohort.consumers, states, strict=True)
-                if state in TERMINAL_STATES and state not in canary_success_states
+                if state in TERMINAL_STATES and not canary_settled(name, state)
             ]
             if failed_canaries:
                 return _result(
@@ -194,7 +209,10 @@ def plan_rollout(
                     hold_merges=True,
                     reason=f"canary health is incomplete at {failed_canaries[0]}",
                 )
-            if all(state in canary_success_states for state in states):
+            if all(
+                canary_settled(name, state)
+                for name, state in zip(cohort.consumers, states, strict=True)
+            ):
                 continue
         elif all(state in TERMINAL_STATES for state in states):
             continue
@@ -258,6 +276,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="treat PR-open canaries as settled and suppress merge candidates",
     )
+    parser.add_argument(
+        "--allow-parked-canary",
+        action="store_true",
+        help="treat an operator-decision (parked) canary as settled, not a halt",
+    )
     parser.add_argument("--json", action="store_true")
     return parser
 
@@ -288,7 +311,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             _load_json_object(args.state, "wave state"),
             consumers,
         )
-        plan = plan_rollout(policy, observations, no_merge=args.no_merge)
+        plan = plan_rollout(
+            policy,
+            observations,
+            no_merge=args.no_merge,
+            allow_parked_canary=args.allow_parked_canary,
+        )
     except (FleetWavePlanError, fleet_lib.FleetConfigError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
