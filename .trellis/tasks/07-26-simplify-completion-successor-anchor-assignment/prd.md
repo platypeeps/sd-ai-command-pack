@@ -13,10 +13,25 @@ Follow up on rwbp-coordinator PR #177 code-quality feedback by removing the redu
 
 ## Acceptance Criteria
 
-- [ ] The source template assigns the invalid anchor directly before leaving the loop, with no behavioral change.
-- [ ] The root installed mirror matches the template.
-- [ ] Focused completion-successor tests pass and demonstrate the same invalid-anchor diagnostic.
-- [ ] Pack validation and `make check` pass before publication.
+- [x] The source template assigns the invalid anchor directly before leaving the loop, with no behavioral change.
+- [x] The root installed mirror matches the template.
+- [x] Focused completion-successor tests pass and demonstrate the same invalid-anchor diagnostic.
+- [x] Pack validation and `make check` pass before publication.
+
+## Completion note (2026-08-04)
+
+- Guard removed in the canonical template `templates/scripts/sd-ai-command-pack-review-preflight.mjs`
+  and mirrored byte-for-byte into `scripts/sd-ai-command-pack-review-preflight.mjs`
+  (`if (nearestAnchorFailure === null) nearestAnchorFailure = anchor;` → `nearestAnchorFailure = anchor;`).
+  The guard was provably always-true: `nearestAnchorFailure` is `null` on entry and every path
+  reaching the assignment `break`s immediately, so the loop assigns it at most once.
+- Regression coverage confirmed (no new tests needed): `test_completion_successor_rejects_invalid_nearest_anchor`
+  (invalid tail → rc 1, `["completion_successor_anchor_invalid"]`) and
+  `test_completion_successor_recovers_post_archive_review_fixes` (valid tail) both pass.
+- Because the edit touches shipped payload, it ships as release **0.64.6**: `manifest.json`
+  bumped 0.64.5→0.64.6, matching `CHANGELOG.md` heading added, command-catalog twins and the
+  install manifest/provenance regenerated, and the fleet candidate ledger re-validated across all
+  8 consumers (packVersion 0.64.6). `make check` green.
 
 ## Notes
 
