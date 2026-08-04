@@ -138,6 +138,23 @@ It owns canary/wave order, concurrency, attempts, action identities, receipts,
 blockers, exact PR heads, and the next eligible action; it never runs consumer
 commands or GitHub mutations itself.
 
+Campaign state is a private atomic file written outside every repository at
+`<state-home>/<repo-sha256>/<campaign>.json`, with a sibling `<campaign>.lock`.
+`<state-home>` is `$XDG_STATE_HOME/sd-ai-command-pack/fleet-campaigns` when
+`XDG_STATE_HOME` is set, otherwise
+`~/.local/state/sd-ai-command-pack/fleet-campaigns`; `<repo-sha256>` is the
+SHA-256 of the resolved absolute source root, so the same campaign ID against
+two different source checkouts never collides. The hidden `--state-home`
+override exists only for tests. If a campaign action ID is lost mid-rollout, it
+can be recovered directly from this JSON rather than reconstructed from
+conversation history.
+
+`preflight` is not a controller subcommand. It is the fleet-lane stage run once
+from the pack checkout via `scripts/sd-ai-command-pack-fleet-preflight.py` (see
+**Preflight**) before the controller issues any consumer action. The controller
+consumes the resulting release-identity and candidate evidence; it does not
+re-run preflight and exposes no `preflight` verb of its own.
+
 Create one safe campaign ID and plan once:
 
 ```bash
@@ -186,6 +203,23 @@ manifest-policy `canStart` lanes, never exceeds `maxConcurrency`, and issues at
 most one manifest-ordered merge action. A pack blocker stops new starts and
 holds unsettled merges after a verified `packBlocker` receipt. `no-merge` turns successful merge eligibility
 into terminal PR-open evidence without issuing a merge.
+
+Operator ergonomics, none of which mutate a repository:
+
+- `status --show-issued` adds each lane's already-issued `issuedActionId` to the
+  read-only status output, so a recorded action ID can be re-read without
+  re-issuing it or re-deriving it from the state file.
+- Status output surfaces merge-queue transparency: a lane whose merge is held
+  behind a lower-priority candidate reports `heldBehind` and a `queueNote`, so
+  "nothing is happening" is distinguishable from "waiting its turn". This is
+  display-only and never rewrites a persisted blocker.
+- An `operator-decision` result parks one lane in the terminal `blocked` state
+  with a recorded `--reason-code` (and, for a canary, a validated
+  `--provenance`). By default a parked canary halts the whole campaign
+  (`stopStarting`). The explicit `plan --allow-parked-canary` opt-in instead
+  treats a parked canary as settled for wave progression, letting the operator
+  defer exactly one canary without a full restart while every other guard stays
+  in force.
 
 ## Refresh Shape
 
@@ -239,6 +273,12 @@ bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
   init --run-id <run-id> --target-version <version> \
   --consumer <name>:<priority> [...]
 ```
+
+`<priority>` accepts either a raw integer or a case-insensitive cohort label —
+`canary` (10), `post-canary` (50), or `final` (90) — so the common three-wave
+shape can be written `--consumer amc:canary --consumer rwbp-website:post-canary`
+without memorizing the numbers. Raw integers still work and mix freely with
+labels; an unknown token is rejected with a message naming the valid labels.
 
 Record the run ID in the active rollout task or session and reuse it after an
 interruption. Repeating `init`, an already-active start, an identical end, or
@@ -413,6 +453,20 @@ housekeeping, and post-merge audit run again, while the failed merge action is
 never replayed. Do not weaken the bookkeeping validator or rewrite the
 preserved journal history.
 
+**Fresh-campaign redo recovery.** The controller has no in-place verb to relink
+a lane onto a redone PR after its recorded head is abandoned; that redo-lane
+relink is deliberately out of scope (its typed-recovery-record design is filed
+as a controller follow-up). When a lane's published head must be discarded
+outright — the PR was closed, the branch was force-rewound, or the recorded
+exact head no longer exists — do not try to splice the new work into the old
+campaign state. Recover by starting a **fresh campaign** over the still-unmerged
+consumers from a fresh `preflight`: pick a new campaign ID, `plan` with the
+`--consumer` set narrowed to the repos that still need the refresh, and let each
+lane republish and re-review from a clean epoch. Already-merged consumers are
+reported `at-target` by preflight and skipped, so a fresh campaign never redoes
+completed work. The abandoned campaign's state file can be left in place or
+removed; it is keyed by its own campaign ID and never consulted by the new one.
+
 If an urgent independent
 security defect would become riskier while waiting for the bounded sweep, it
 may ship immediately with that reason recorded; keep the remaining campaign
@@ -467,6 +521,31 @@ This boundary is enforced, not inferred from a scope hint. A pure qualifying
 refresh records `integration-only` with zero new remote-review rounds. A mixed,
 ambiguous, explicitly overridden, or invalid refresh records `remote` and uses
 the configured reviewer. Existing reviewer feedback blocks both profiles.
+
+### Requesting the Copilot reviewer
+
+When a consumer refresh PR takes the `remote` profile, request the Copilot
+reviewer directly through the REST endpoint. This is the only invocation
+observed to attach Copilot reliably:
+
+```bash
+gh api --method POST \
+  repos/<owner>/<repo>/pulls/<pr-number>/requested_reviewers \
+  -f "reviewers[]=Copilot"
+```
+
+Failure modes to expect, none of which should block the rollout:
+
+- `gh pr edit --add-reviewer Copilot` and the GitHub MCP
+  `request_copilot_review` tool have both silently no-op'd against these repos —
+  the PR shows no requested Copilot reviewer afterward. Fall back to the `gh api`
+  form above and confirm with `gh pr view <pr-number> --json reviewRequests`.
+- A `422` from the endpoint means Copilot is not enabled for the repository or
+  the account lacks the seat; record it as an override with rationale and
+  proceed with the configured human reviewer rather than retrying.
+- Copilot's review is advisory. Its findings still pass through the source
+  finding-severity gate like any other reviewer feedback; an empty or pending
+  Copilot review never gates the merge.
 
 The final rollout report records blocker owners, deferred owners, duplicate
 observation counts, explicit overrides with rationale, and follow-up task IDs;
