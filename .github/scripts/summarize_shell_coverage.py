@@ -8,10 +8,13 @@ merged run data. This reads that report, counts line coverage across the shipped
     <covered> <total> <pct>
 
 Exit status:
-    0  a non-zero measurement was found and printed
-    2  the report parsed but measured zero shipped-shell lines (a kcov run that
-       instrumented nothing exits 0 and looks like success — the caller treats
-       this as a broken-plumbing failure, not merely unexercised code)
+    0  the report parsed and shipped-shell lines were measured (total > 0);
+       the printed percentage may legitimately be 0.0% when the surface is
+       present but unexercised — that is data, not a failure (measure before
+       gating: no floor is enforced here)
+    2  the report parsed but measured zero shipped-shell LINES (total == 0): a
+       kcov run that instrumented nothing exits 0 and looks like success, so
+       the caller treats a zero-line report as broken plumbing
     1  the report is missing or unparseable
 """
 
@@ -66,7 +69,13 @@ def main(argv: list[str]) -> int:
     except (OSError, ET.ParseError) as exc:
         print(f"error: cannot read kcov report {path}: {exc}", file=sys.stderr)
         return 1
-    if total == 0 or covered == 0:
+    if total == 0:
+        # total == 0 means kcov attributed no shipped-shell lines at all — a
+        # plumbing break, since a real run always parses executable lines. A
+        # covered == 0 / total > 0 report is NOT a failure: the surface was
+        # measured and simply not exercised (0.0%). Failing on covered == 0
+        # would install a hidden >0% floor, which R4 (measure before gating)
+        # forbids.
         print(
             f"error: kcov measured zero shipped-shell lines "
             f"(covered={covered} total={total}). Coverage plumbing is broken, "

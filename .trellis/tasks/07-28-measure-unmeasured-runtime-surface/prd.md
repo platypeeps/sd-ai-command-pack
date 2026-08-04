@@ -18,7 +18,7 @@ Bring the roughly 12,600 unmeasured lines of shipped runtime — Node, shell, an
 - [x] review-preflight.mjs reports a coverage number in CI.
 - [x] The shell lane reports a coverage number in CI.
 - [ ] Floors are added only in a follow-up change, at or below measured values.
-- [ ] `make check` passes.
+- [x] `make check` passes.
 
 ## Notes
 

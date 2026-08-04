@@ -105,6 +105,18 @@ class InstallTestCase(unittest.TestCase):
         # behaviour to before this override existed.
         cls._real_bash_path = shutil.which("bash")
         override_bash = os.environ.get("SD_AI_COMMAND_PACK_TEST_BASH")
+        if override_bash and not (
+            os.path.isfile(override_bash) and os.access(override_bash, os.X_OK)
+        ):
+            # Fail immediately with an actionable message instead of letting a
+            # bad override surface much later as a FileNotFoundError from the
+            # first subprocess.run that spawns bash. (An unset override keeps the
+            # old behaviour: fall back to PATH bash, skip when none is found.)
+            raise RuntimeError(
+                "SD_AI_COMMAND_PACK_TEST_BASH points at "
+                f"{override_bash!r}, which is not an executable file. "
+                "Point it at the kcov shim, or unset it to use the bash on PATH."
+            )
         cls._bash_path = override_bash or cls._real_bash_path
         _, cls._manifest_files = install.load_manifest()
 
