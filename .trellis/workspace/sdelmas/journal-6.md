@@ -1365,3 +1365,36 @@ Shipped 0.64.4: six behavior fixes (#2/#5/#6/#7/#11/AC1.c), source-only fleet-pu
 ### Next Steps
 
 - None - task complete
+
+
+## Session 286: 0.64.5 planning — adversarial review round-2 remediation (Option 1)
+
+**Date**: 2026-08-04
+**Task**: 0.64.5 planning — adversarial review round-2 remediation (Option 1)
+**Branch**: `main`
+
+### Summary
+
+Planning-only, NO code impl started, NO active task, NO campaign (standing constraint: no fleet rollout until user explicitly asks; loadsmith deferred, 6 consumers still on 0.64.3). Parent 08-04-0-64-5-followup-hardening + 3 children (A=08-03-improve-unsafe-sibling-diagnostics, B=08-04-fleet-publish-archive-commit-retry, C=08-04-fleet-publish-pack-self-publish-gate). Adversarial-review status: round-1 closed C-1..C-9; round-2 (Codex) found C-8 residual + N-1, both remediated in commit 2228505e. Option 1 chosen for N-1: task_store._auto_commit_archive retries only final commit on index-lock stderr (real fix); consumer fleet-publish fails LOUDLY (PublishError+recovery), NO rollback (cmd_archive mutates status/children/sessions pre-move, task_store.py:473-506). GATE NOT CLOSED: final Codex pass-3 was interrupted by user before verdict; host pass-3 green on both items. TO RESUME: run one fresh read-only Codex pass-3 (prompt at scratchpad/codex-r3-prompt.txt, or reconstruct) against the 6 .md artifacts; if UNBLOCKED, write completion report (contract section 5) + reconcile C-1..C-9/N-1 ledger, then seek user go-ahead for task.py start and implement 0.64.5 (order C->B->A->R per implement.md). Codex CLI flaky this session (exit 144 hook-startup twice; macOS lacks 'timeout' binary — run codex plain). Impl NOT allowed until gate closes + user go-ahead.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2228505e` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
