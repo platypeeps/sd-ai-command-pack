@@ -266,7 +266,9 @@ def _read_trusted_sibling_source(path: Path) -> bytes:
         elif error.errno == errno.ELOOP:
             reason = "symlink"
         elif error.errno == errno.ENOTDIR:
-            reason = "non_regular"
+            # A non-directory parent component ⇒ no regular file is resolvable at
+            # the computed path ⇒ "not found", not "present but refused".
+            reason = "missing"
         else:
             reason = "unsafe"
         raise _UnsafeSiblingPath(str(error), reason=reason) from error
@@ -290,7 +292,12 @@ def _read_trusted_sibling_source(path: Path) -> bytes:
                 reason = "missing"
             elif error.errno == errno.ELOOP:
                 reason = "symlink"
+            elif error.errno == errno.ENOTDIR:
+                # Parity with the advisory branch: a non-directory parent means the
+                # module is not resolvable ⇒ "missing", not "non_regular".
+                reason = "missing"
             else:
+                # Defensive: unreachable for the current errno set, safe if it grows.
                 reason = "non_regular"
             raise _UnsafeSiblingPath(str(error), reason=reason) from error
         raise

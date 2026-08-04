@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Publish a fleet consumer refresh with finish-work folded into the reviewed head.
 
+Consumer-only: this helper is for fleet CONSUMER repos. It refuses to run against a
+repo carrying the completion-mode bookkeeping gate
+(``.github/scripts/bookkeeping_ci_scope.py``) — e.g. the sd-ai-command-pack repo
+itself — because the fold pattern trips that gate; such a repo must self-release via
+``sd-finish-work``. See ``check_preconditions``.
+
 This codifies the proven ``publish-lane3`` campaign procedure so the pr-publication
 stage produces a branch whose head ALREADY contains every bookkeeping artifact
 (archived task + recorded journal), leaving the merge stage with zero head-advance
@@ -152,6 +158,19 @@ def check_preconditions(repo: Path, slug: str, prefixes: Sequence[str]) -> None:
         raise PublishError(
             f"{repo} is not the git worktree root (top-level is {top})", code=3
         )
+    # Self-publish guard: refuse to run against a repo that carries the
+    # completion-mode bookkeeping gate. The fold pattern (work + archive + journal
+    # in one head) trips that gate's completion_archive_move_missing check, so a
+    # repo with .github/scripts/bookkeeping_ci_scope.py must self-release via
+    # sd-finish-work, not this consumer-only helper. Keyed on the gate, not pack
+    # identity: any repo adopting the gate is protected.
+    if (repo / ".github" / "scripts" / "bookkeeping_ci_scope.py").exists():
+        raise PublishError(
+            "refusing to run: target carries the completion-mode bookkeeping gate "
+            "that a folded publish would violate (fleet-publish is consumer-only); "
+            "use sd-finish-work for a folded-bookkeeping release",
+            code=3,
+        )
     resolve_task_dir(repo, slug)
     disallowed = [
         path for path in porcelain_paths(repo) if not is_allowed(path, prefixes)
@@ -228,10 +247,29 @@ def archive_and_journal(
     changes: Sequence[str],
     tests: Sequence[str],
 ) -> str:
-    run(
+    # Loud abort, no rollback: a consumer runs its own (unpatched) task.py, so a
+    # transient .git/index.lock can make the archive move on disk but fail to
+    # commit. We do NOT attempt a rollback — task.py's archive also flips task
+    # status, detaches children, and clears sessions before the move, so a
+    # dir-only undo here would leave a partial, misleading state. Instead surface
+    # the likely cause + exact recovery and stop.
+    archive = run(
         [python_bin, str(Path(".trellis/scripts/task.py")), "archive", slug],
         cwd=repo,
+        check=False,
     )
+    if archive.returncode != 0:
+        detail = ((archive.stdout or "").strip().splitlines()[-1:] or [""])[0]
+        raise PublishError(
+            f"task.py archive failed for {slug!r} ({detail}). Likely transient "
+            ".git/index.lock contention: the task may already be moved on disk and "
+            "staged but not committed. fleet-publish performs no rollback (the "
+            "archive also flips task status, detaches children, and clears "
+            "sessions, so a partial undo would corrupt state). Recover with "
+            "`git status` — complete or discard the archive commit — or re-run the "
+            "fleet action from a clean tree.",
+            code=2,
+        )
     session_cmd = [
         python_bin,
         str(record_session),

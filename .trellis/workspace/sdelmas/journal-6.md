@@ -1365,3 +1365,102 @@ Shipped 0.64.4: six behavior fixes (#2/#5/#6/#7/#11/AC1.c), source-only fleet-pu
 ### Next Steps
 
 - None - task complete
+
+
+## Session 286: 0.64.5 planning — adversarial review round-2 remediation (Option 1)
+
+**Date**: 2026-08-04
+**Task**: 0.64.5 planning — adversarial review round-2 remediation (Option 1)
+**Branch**: `main`
+
+### Summary
+
+Planning-only, NO code impl started, NO active task, NO campaign (standing constraint: no fleet rollout until user explicitly asks; loadsmith deferred, 6 consumers still on 0.64.3). Parent 08-04-0-64-5-followup-hardening + 3 children (A=08-03-improve-unsafe-sibling-diagnostics, B=08-04-fleet-publish-archive-commit-retry, C=08-04-fleet-publish-pack-self-publish-gate). Adversarial-review status: round-1 closed C-1..C-9; round-2 (Codex) found C-8 residual + N-1, both remediated in commit 2228505e. Option 1 chosen for N-1: task_store._auto_commit_archive retries only final commit on index-lock stderr (real fix); consumer fleet-publish fails LOUDLY (PublishError+recovery), NO rollback (cmd_archive mutates status/children/sessions pre-move, task_store.py:473-506). GATE NOT CLOSED: final Codex pass-3 was interrupted by user before verdict; host pass-3 green on both items. TO RESUME: run one fresh read-only Codex pass-3 (prompt at scratchpad/codex-r3-prompt.txt, or reconstruct) against the 6 .md artifacts; if UNBLOCKED, write completion report (contract section 5) + reconcile C-1..C-9/N-1 ledger, then seek user go-ahead for task.py start and implement 0.64.5 (order C->B->A->R per implement.md). Codex CLI flaky this session (exit 144 hook-startup twice; macOS lacks 'timeout' binary — run codex plain). Impl NOT allowed until gate closes + user go-ahead.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2228505e` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 287: 0.64.5 planning gate CLOSED (Option A) — held before implementation
+
+**Date**: 2026-08-04
+**Task**: 0.64.5 planning gate CLOSED (Option A) — held before implementation
+**Branch**: `main`
+
+### Summary
+
+HELD at user request; NO code impl, NO campaign (standing constraint: no fleet rollout until user explicitly asks; loadsmith deferred, 6 consumers on 0.64.3). Planning-adversarial-review COMPLETE (3 passes, contract cap): C-1..C-9 (r1) + N-1 (r2) + M-1/M-2/M-3 (r3) all dispositioned; report at .trellis/tasks/08-04-0-64-5-followup-hardening/adversarial-review.md. Gate CLOSED on host review. HONESTY CAVEAT: Option A (M-1 fix) landed after the final review pass -> host-verified only, NOT Codex-approved (pass budget spent); used 3 remediation rounds vs nominal 2. 0.64.5 SHIPS: A (sibling-loader ENOTDIR->missing, both branches/both twins, templates-first, caller verify-only, repo-relative path OK, advisory+authoritative tests) + B-fleet (fleet-publish.py loud abort on non-zero archive: PublishError+recovery, NO rollback) + C (self-publish guard: bookkeeping-CI fingerprint -> PublishError code 3 naming sd-finish-work + consumer-only docs) + R (bump 0.64.5, CHANGELOG, release-prep, check, PR, tag). OUT OF 0.64.5 (M-1): task_store retry handed upstream as standalone task 08-04-trellis-upstream-archive-commit-lock-retry (Trellis-owned file, pack doesn't ship it; carries M-2 preserve 'not source_was_tracked' return contract + M-3 anchor retry on 'index.lock' substring). SIDE EFFECT: task.py create auto-activated the upstream task as session current; on resume, task.py start a 0.64.5 child instead (order C->B->A->R per implement.md, each phase green gate). TO RESUME: task.py start 08-04-fleet-publish-pack-self-publish-gate, implement C->B->A->R. Codex CLI flaky this session (exit 144 hook-startup; macOS has no 'timeout' binary -> run codex plain). Impl NOT allowed until user go-ahead; NO campaign until user explicitly asks.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `be12f4d8` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 288: Release 0.64.5 — sibling-loader + fleet-publish hardening (A/B/C)
+
+**Date**: 2026-08-04
+**Task**: Release 0.64.5 — sibling-loader + fleet-publish hardening (A/B/C)
+**Branch**: `feat/0.64.5-followup-hardening`
+
+### Summary
+
+Implemented + released 0.64.5 (branch feat/0.64.5-followup-hardening). A: sibling-loader ENOTDIR->missing both branches/both twins + authoritative-branch test (loader 10/10). B: fleet-publish loud abort on archive failure, no rollback (fleet 15/15); task_store retry handed upstream (08-04-trellis-upstream-archive-commit-lock-retry). C: self-publish guard code 3 -> sd-finish-work + consumer-only docs. Version 0.64.4->0.64.5 propagated all 6 sites; make release-prep exit 0 (test+lint+mypy+audit+full-check, 0 preflight failures). 3-round adversarial review (host+Codex) complete; report at archive/2026-08/08-04-0-64-5-followup-hardening/adversarial-review.md. 4 tasks archived (3 children + parent). NEXT: push, open PR w/ Tooling/generated scope body, Copilot review, settle CI, merge, tag v0.64.5. NO fleet campaign (standing constraint; 6 consumers on 0.64.3).
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `386a7e82` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

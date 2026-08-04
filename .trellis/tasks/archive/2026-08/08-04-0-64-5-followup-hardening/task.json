@@ -1,0 +1,30 @@
+{
+  "id": "0-64-5-followup-hardening",
+  "name": "0-64-5-followup-hardening",
+  "title": "0.64.5 fleet-publish + sibling-loader hardening",
+  "description": "Parent for the 0.64.5 pack release addressing three 0.64.4 fleet-review follow-ups: (1) sibling-loader diagnostics — ENOTDIR->missing across both loader branches in status.py/surface-check.py twins plus parity test, and missing-vs-unsafe wording; (2) fleet-publish archive auto-commit — bounded retry-with-backoff on transient index.lock plus half-done-archive detection/rollback; (3) fleet-publish self-publish gate — detect the pack's own bookkeeping-CI repo and refuse to self-publish (consumer-only), pointing to sd-finish-work, plus docs. Owns cross-child acceptance, mirror-discipline integration, and the single 0.64.5 release (version bump, CHANGELOG, make release-prep, PR, review, tag). Children are implemented and checked independently.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-08-04",
+  "completedAt": "2026-08-04",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-03-improve-unsafe-sibling-diagnostics",
+    "08-04-fleet-publish-archive-commit-retry",
+    "08-04-fleet-publish-pack-self-publish-gate"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

@@ -102,6 +102,97 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
             publish.resolve_task_dir(self.repo, "../../etc")
         self.assertEqual(ctx.exception.code, 3)
 
+    # ---------------------------------------------------------- self-publish guard
+
+    def _make_pack_bookkeeping_gate(self) -> None:
+        """Install the completion-mode bookkeeping gate fingerprint + commit it."""
+
+        gate = self.repo / ".github" / "scripts"
+        gate.mkdir(parents=True, exist_ok=True)
+        (gate / "bookkeeping_ci_scope.py").write_text("# gate\n", encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "add bookkeeping gate")
+
+    def test_refuses_pack_repo_with_bookkeeping_gate(self) -> None:
+        self._make_pack_bookkeeping_gate()
+        with self.assertRaises(publish.PublishError) as ctx:
+            publish.check_preconditions(
+                self.repo, self.slug, publish.DEFAULT_ALLOWED_PREFIXES
+            )
+        self.assertEqual(ctx.exception.code, 3)
+        self.assertIn("sd-finish-work", str(ctx.exception))
+        self.assertIn("consumer-only", str(ctx.exception))
+
+    def test_consumer_repo_passes_self_publish_guard(self) -> None:
+        # Default fixture carries no bookkeeping gate → the guard is a no-op and
+        # a clean consumer tree passes preconditions.
+        publish.check_preconditions(
+            self.repo, self.slug, publish.DEFAULT_ALLOWED_PREFIXES
+        )
+
+    def test_main_propagates_self_publish_guard_code(self) -> None:
+        self._make_pack_bookkeeping_gate()
+        rc = publish.main(
+            [
+                str(self.repo),
+                self.slug,
+                "--branch", "pub",
+                "--title", "t",
+                "--summary", "s",
+                "--change", "c",
+                "--test", "t",
+                "--work-message-file", str(self.repo / "msg.txt"),
+                "--receipt-out", str(self.repo / "receipt.json"),
+                "--no-push",
+            ]
+        )
+        self.assertEqual(rc, 3)
+
+    # ------------------------------------------------------ archive loud abort (B-fleet)
+
+    def test_archive_failure_raises_with_recovery_and_no_rollback(self) -> None:
+        # Stub task.py archive: move the task on disk (staged) then FAIL before the
+        # commit — exactly the stranded state a transient index.lock yields on a
+        # consumer. fleet-publish must raise with recovery guidance and NOT roll back.
+        trellis_scripts = self.repo / ".trellis" / "scripts"
+        trellis_scripts.mkdir(parents=True, exist_ok=True)
+        (trellis_scripts / "task.py").write_text(
+            "import pathlib, subprocess, sys\n"
+            "slug = sys.argv[2]\n"
+            "src = pathlib.Path('.trellis/tasks') / slug\n"
+            "dst = pathlib.Path('.trellis/tasks/archive') / slug\n"
+            "dst.parent.mkdir(parents=True, exist_ok=True)\n"
+            "subprocess.run(['git', 'mv', str(src), str(dst)], check=True)\n"
+            "print('fatal: Unable to create .git/index.lock: File exists')\n"
+            "sys.exit(1)\n",
+            encoding="utf-8",
+        )
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "install failing archive stub")
+
+        live = self.repo / publish.TASK_ROOT / self.slug
+        archived = self.repo / publish.TASK_ROOT / "archive" / self.slug
+
+        with self.assertRaises(publish.PublishError) as ctx:
+            publish.archive_and_journal(
+                self.repo,
+                self.slug,
+                python_bin=sys.executable,
+                record_session=self.repo / "scripts" / "unused.py",
+                title="t",
+                summary="s",
+                commit="deadbeef",
+                changes=["c"],
+                tests=["t"],
+            )
+        msg = str(ctx.exception)
+        self.assertIn("git status", msg)              # recovery guidance
+        self.assertIn("no rollback", msg.lower())     # states it will not roll back
+        # NO rollback mutation: the tree is left exactly as the stub left it —
+        # task moved to archive/, live dir gone, nothing restored by fleet-publish.
+        self.assertTrue(archived.exists())
+        self.assertFalse(live.exists())
+
     # ------------------------------------------------------------ transactional restore
 
     def test_task_restored_when_repomix_fails_mid_move(self) -> None:

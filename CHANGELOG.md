@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.64.5 - 2026-08-04
+
+- Three pack-source follow-ups surfaced by the 0.64.4 fleet rollout. All are
+  hardening of the pack's own tooling; none change any consumer's installed
+  payload behavior.
+- Sibling-loader diagnostics (A): the unsafe-sibling loader in
+  `sd-ai-command-pack-status.py` and `sd-ai-command-pack-surface-check.py` now
+  maps `ENOTDIR` (a non-directory parent component ⇒ the module is unresolvable
+  at the computed path) to reason `missing` rather than `non_regular`, in BOTH
+  the advisory `lstat` branch and the authoritative `O_NOFOLLOW`-open branch, so
+  an unresolvable path reads as "not installed" instead of "present but refused".
+  Fail-closed refusal is unchanged; only the diagnostic reason/message differs.
+- fleet-publish archive resilience (B): `sd-ai-command-pack-fleet-publish.py`
+  now fails loudly on a non-zero `task.py archive` result — raising a
+  `PublishError` that names the likely transient `.git/index.lock` cause and the
+  exact recovery (the task may be moved on disk and staged but uncommitted;
+  resolve `git status` or re-run the fleet action). It attempts no rollback,
+  because the archive also flips task status, detaches children, and clears
+  sessions before the move, so a dir-only undo would corrupt state. The
+  framework-level commit-retry (which belongs in Trellis-owned `task_store.py`,
+  not shipped by this pack) is handed upstream to the Trellis source owner.
+- fleet-publish self-publish guard (C): `sd-ai-command-pack-fleet-publish.py`
+  now refuses to run against a repo carrying the completion-mode bookkeeping gate
+  (`.github/scripts/bookkeeping_ci_scope.py`) — including this pack repo itself —
+  exiting with the precondition failure code and directing self-publish to
+  `sd-finish-work`. The fold pattern trips that gate; fleet-publish is
+  consumer-only, now documented as such in `docs/FLEET_ROLLOUT.md` and the module
+  docstring.
+
 ## 0.64.4 - 2026-08-04
 
 - Fleet-rollout hardening from recent live campaigns. Six shipped fixes and a
