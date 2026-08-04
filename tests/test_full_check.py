@@ -1574,18 +1574,31 @@ class FullCheckTests(InstallTestCase):
         self.assertIn("detected Automation scope", result.stdout)
 
     def test_full_check_script_runs_pack_source_drift_gates(self) -> None:
-        script = (
-            install.ROOT / "scripts/sd-ai-command-pack-full-check.sh"
-        ).read_text(encoding="utf-8")
+        # Behavioral (was a source-text grep for the function name, the toggle
+        # env vars, and the gate's message strings). Now that the shell surface
+        # is executed under coverage, exercise the gate instead of reading the
+        # script text: on a clean pack fixture it runs and emits its summary,
+        # and the disable toggle short-circuits it. The failure paths the old
+        # grep named — release version drift, undocumented env vars,
+        # RELEASE_BASE_REF, surface-closure propagation — are covered
+        # behaviorally in tests/test_pack_drift.py.
+        root = self.make_pack_source_fixture()
 
-        self.assertIn("run_pack_source_drift_gates", script)
-        self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT", script)
-        self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF", script)
-        self.assertIn("template twin pairs compared", script)
-        self.assertIn("release version drift", script)
-        self.assertIn("undocumented env var", script)
-        self.assertIn("shipped scripts or skills", script)
-        self.assertIn("in skills", script)
+        result = self.run_pack_source_drift_gates(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Pack source drift gates:", result.stdout)
+        self.assertIn("template twin pairs compared:", result.stdout)
+
+        disabled = self.run_pack_source_drift_gates(
+            root, extra_env={"SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT": "0"}
+        )
+        self.assertEqual(disabled.returncode, 0, disabled.stdout)
+        self.assertIn(
+            "Skipping pack source drift gates because "
+            "SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT=0",
+            disabled.stdout,
+        )
+        self.assertNotIn("template twin pairs compared:", disabled.stdout)
 
 
 if __name__ == "__main__":

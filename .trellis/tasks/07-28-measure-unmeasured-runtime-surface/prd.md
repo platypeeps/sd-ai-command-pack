@@ -10,14 +10,14 @@ Bring the roughly 12,600 unmeasured lines of shipped runtime — Node, shell, an
 - Adopt a JS coverage tool (c8 or equivalent) for `scripts/sd-ai-command-pack-review-preflight.mjs` (4,547 lines, today checked only by `node --check` at tests.yml:350).
 - Adopt a shell coverage tool for the `.sh` surface, including `scripts/sd-ai-command-pack-full-check.sh`.
 - Publish measured coverage before gating on it; do not add failing floors in the same change.
-- Replace at least the source-text assertion at `tests/test_full_check.py:1576` with a behavioral test once the shell lane is measured.
+- Replace at least the source-text assertion at `tests/test_full_check.py:1576` with a behavioral test once the shell lane is measured. **Done (2026-08-04):** `test_full_check_script_runs_pack_source_drift_gates` no longer greps the script text — it runs `run_pack_source_drift_gates` on a clean pack fixture (asserts the gate's summary output) and asserts the `PACK_DRIFT=0` toggle short-circuits it. Failure paths stay covered behaviorally in `tests/test_pack_drift.py`.
 
 ## Acceptance Criteria
 
 - [x] `.github/scripts/bookkeeping_ci_scope.py` (477 lines) reports a coverage number.
 - [x] review-preflight.mjs reports a coverage number in CI.
 - [x] The shell lane reports a coverage number in CI.
-- [ ] Floors are added only in a follow-up change, at or below measured values.
+- [x] Floors are added only in a follow-up change, at or below measured values. (No floor added in this task — all three lanes publish a measured number and hard-fail only on a zero-line/plumbing break; floor-setting is deferred, per R4.)
 - [x] `make check` passes.
 
 ## Notes
