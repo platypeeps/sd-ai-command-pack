@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.64.4 - 2026-08-04
+
+- Fleet-rollout hardening from recent live campaigns. Six shipped fixes and a
+  set of source-only rollout-tooling improvements, none of which change any
+  consumer's installed payload behavior beyond the fixes below.
+- Merge-eligibility (finding #2): `sd-ai-command-pack-pr-eligibility.py` now
+  classifies a PR that GitHub reports as `BLOCKED` but `MERGEABLE`. A non-clean
+  merge state is given an actionable diagnostic — `merge_blocked_conflicts`,
+  `merge_blocked_out_of_date`, `merge_blocked_conversation`, `merge_blocked_review`,
+  or `merge_state_not_clean` — instead of a blanket skip, while the state stays
+  `blocked` and such a PR is still never reported merge-eligible.
+- Review-preflight task-context gate (finding #5): a manifest whose only row is
+  the untouched generated `_example` scaffold that `task.py create` writes is
+  treated as unfilled/advisory at any task status or archival state. The prior
+  `status === 'planning'` gate was too narrow and produced a late, merge-time
+  `task_context_seed` failure on completion; a lone scaffold is now always exempt
+  while an `_example` row mixed with real rows still fails.
+- Review scope resolution (finding #6): `sd-ai-command-pack-review-scope.sh` now
+  requests and requires `state` from `gh pr view` and ignores a CLOSED PR whose
+  head is the same branch, so a stale closed PR body can no longer redirect the
+  review scope of a fresh open PR on that branch.
+- Housekeeping merge gate (finding #7): a read-only Obsidian KB target no longer
+  hard-blocks a merge. The `.obsidian-kb` copy folder is a regenerable mirror, so
+  an `EACCES`/`EROFS` refresh failure is recorded as an advisory skip with a fix
+  command; every other refresh failure (corrupt vault, disk full, broken symlink)
+  still blocks.
+- Sibling-helper loader diagnostics (finding #11): `sd-ai-command-pack-status.py`
+  and `sd-ai-command-pack-surface-check.py` now distinguish a genuinely missing
+  helper from one that is present but refused (symlink / non-regular / no
+  `O_NOFOLLOW`) via a `reason` code. The refusal behavior is byte-for-byte
+  unchanged; only the surfaced diagnostic improves. `recovery-artifacts.py`
+  reports the expected-versus-actual schema version on a version mismatch.
+- Fleet-refresh procedure (`sd-fleet-refresh` skill): checkout-validation now
+  asserts the dedicated task's `task.json` `description` is present and non-empty
+  before advancing, a belt-and-suspenders guard against an upstream
+  `task.py create` that tolerates an empty description; and the pr-publication
+  stage now prescribes the new finish-work publish helper.
+- Rollout tooling (source-only, not shipped to consumers): a new
+  `sd-ai-command-pack-fleet-publish.py` folds a rollout's own finish-work into
+  the already-reviewed PR head under allowlist/restore/delta guards and never
+  pushes an invalid receipt; `sd-ai-command-pack-fleet-controller.py` adds
+  merge-queue transparency (`heldBehind`/`queueNote`), a read-only
+  `status --show-issued` action peek, validated operator-decision provenance, and
+  an `--allow-parked-canary` opt-in; `sd-ai-command-pack-fleet-wave-plan.py`
+  settles a parked canary only under that opt-in; and
+  `sd-ai-command-pack-fleet-timing.py` accepts `canary`/`post-canary`/`final`
+  cohort labels alongside raw integer priorities. `docs/FLEET_ROLLOUT.md` documents
+  the campaign-state file layout, the Copilot-request recipe, the cohort labels,
+  and the fresh-campaign redo recovery.
+
 ## 0.64.3 - 2026-08-03
 
 - Harden the sibling-helper module loaders against a check-then-load (TOCTOU)

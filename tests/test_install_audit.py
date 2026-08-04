@@ -121,6 +121,7 @@ class InstallAuditTests(InstallTestCase):
                 "scripts/sd-ai-command-pack-fleet-candidate-check.py",
                 "scripts/sd-ai-command-pack-fleet-finding-classify.py",
                 "scripts/sd-ai-command-pack-fleet-preflight.py",
+                "scripts/sd-ai-command-pack-fleet-publish.py",
                 "scripts/sd-ai-command-pack-fleet-review-classify.py",
                 "scripts/sd-ai-command-pack-fleet-timing.py",
                 "scripts/sd-ai-command-pack-fleet-wave-plan.py",
