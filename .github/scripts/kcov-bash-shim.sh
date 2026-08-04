@@ -1,4 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/bash
+# Absolute interpreter path on purpose: this shim stands in for _bash_path, and
+# some tests invoke it under a restricted PATH that omits bash. A
+# `#!/usr/bin/env bash` shebang would need bash on that PATH before the shim even
+# starts and fail with exit 127, which the real bash binary it replaces never
+# does.
+#
 # kcov wrapper that stands in for `bash` while the Python test suite exercises
 # the shipped shell surface, so kcov records which lines of
 # scripts/sd-ai-command-pack-*.sh the subprocess tests actually reach.
