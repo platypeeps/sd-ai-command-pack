@@ -21,13 +21,23 @@ if [ "${#runs[@]}" -eq 0 ]; then
   exit 1
 fi
 
+printf 'diagnostic: %s kcov run director(ies) under %s\n' "${#runs[@]}" "$kcov_dir" >&2
+
 kcov --merge "$merged_dir" "${runs[@]}"
 
-cobertura="$(find "$merged_dir" -name 'cobertura.xml' -print -quit)"
-if [ -z "$cobertura" ]; then
+printf 'diagnostic: cobertura.xml files under %s:\n' "$merged_dir" >&2
+find "$merged_dir" -name 'cobertura.xml' >&2 || true
+
+# Prefer the merged report; fall back to any cobertura kcov emitted.
+cobertura="$merged_dir/kcov-merged/cobertura.xml"
+if [ ! -f "$cobertura" ]; then
+  cobertura="$(find "$merged_dir" -name 'cobertura.xml' -print -quit)"
+fi
+if [ -z "$cobertura" ] || [ ! -f "$cobertura" ]; then
   printf 'error: kcov produced no cobertura.xml under %s\n' "$merged_dir" >&2
   exit 1
 fi
+printf 'diagnostic: using cobertura %s\n' "$cobertura" >&2
 
 # summarize_shell_coverage.py exits non-zero on a zero/unreadable measurement
 # (printing the reason to stderr) and prints "<covered> <total> <pct>" on

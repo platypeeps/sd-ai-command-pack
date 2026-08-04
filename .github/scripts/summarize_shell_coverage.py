@@ -73,6 +73,17 @@ def main(argv: list[str]) -> int:
             f"not merely unexercised code.",
             file=sys.stderr,
         )
+        # Diagnostic: show what filenames the report DID contain, so a zero
+        # result is debuggable without local kcov.
+        try:
+            seen = sorted(
+                {cls.get("filename", "") for cls in ET.parse(path).iter("class")}
+            )
+        except (OSError, ET.ParseError):
+            seen = []
+        print(f"diagnostic: {len(seen)} class filename(s) in report", file=sys.stderr)
+        for name in seen[:40]:
+            print(f"diagnostic:   {name}", file=sys.stderr)
         return 2
     pct = 100.0 * covered / total
     print(f"{covered} {total} {pct:.1f}")
