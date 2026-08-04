@@ -1499,7 +1499,10 @@ class StatusTests(InstallTestCase):
             with mock.patch.object(status, "__file__", str(fake_status)):
                 result = status.collect_recovery(root)
         self.assertEqual(result["status"], "unavailable")
-        self.assertIn("not installed", result["error"])
+        # A present-but-symlinked helper is refused, not absent: the diagnostic
+        # must say so rather than the misleading "not installed" (C7/AC7.a).
+        self.assertIn("present but refused (symlink)", result["error"])
+        self.assertNotIn("not installed", result["error"])
 
     def test_collect_work_loop_rejects_symlinked_helper(self) -> None:
         root = self.make_status_repo()
@@ -1516,7 +1519,9 @@ class StatusTests(InstallTestCase):
             with mock.patch.object(status, "__file__", str(fake_status)):
                 result = status.collect_work_loop(root)
         self.assertEqual(result["status"], "unavailable")
-        self.assertIn("not installed", result["error"])
+        # Present-but-symlinked → refused, not absent (C7/AC7.a).
+        self.assertIn("present but refused (symlink)", result["error"])
+        self.assertNotIn("not installed", result["error"])
 
     def test_local_status_reports_recovery_artifacts_read_only(self) -> None:
         root = self.make_status_repo()

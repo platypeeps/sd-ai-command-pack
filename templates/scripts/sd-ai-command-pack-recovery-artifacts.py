@@ -453,8 +453,12 @@ def build_receipt(
 
 
 def validate_receipt(receipt: Mapping[str, Any]) -> None:
-    if receipt.get("schemaVersion") != SCHEMA_VERSION:
-        raise RecoveryError("unsupported receipt schema version")
+    actual_version = receipt.get("schemaVersion")
+    if actual_version != SCHEMA_VERSION:
+        raise RecoveryError(
+            "unsupported receipt schema version "
+            f"(expected {SCHEMA_VERSION!r}, got {actual_version!r})"
+        )
     artifact_id = receipt.get("artifactId")
     if not isinstance(artifact_id, str) or not ARTIFACT_ID_RE.match(artifact_id):
         raise RecoveryError("receipt has no valid artifact id")
