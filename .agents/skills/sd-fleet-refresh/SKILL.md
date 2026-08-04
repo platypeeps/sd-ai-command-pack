@@ -157,7 +157,16 @@ but defines no ordering or transition policy:
   installer-managed output, receipts/provenance, and deterministic preparation
   output. Classify the exact base/head with
   `sd-ai-command-pack-fleet-review-classify.py`, push, and create or reuse one
-  PR. Record the published head and PR number. When a prior merge action
+  PR. Record the published head and PR number. Fold finish-work into the
+  reviewed head with `sd-ai-command-pack-fleet-publish.py`: it makes the work
+  commit (pack + active task + a pre-computed post-archive `repomix-map` on
+  repomix-indexed consumers), then archives the task and records the journal via
+  the shipped `record-session` wrapper so the pushed head already carries all
+  bookkeeping. It refuses to run on a tree dirty outside the managed allowlist,
+  transactionally restores the task on any error, asserts the completion delta
+  is `.trellis`-only, and never pushes on an invalid receipt — so the merge
+  stage sees zero head-advance and no successor to reclassify. When a prior
+  merge action
   returned here because `sd-finish-work` advanced the PR, do not create another
   commit or push: verify the retained finish-work receipt names the current
   local and remote PR head, reclassify that exact successor, reuse the existing
