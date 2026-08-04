@@ -11,7 +11,8 @@ CHANGELOG, `make release-prep`, PR, review, tag).
 ## Children
 
 - `08-03-improve-unsafe-sibling-diagnostics` (A) — sibling-loader diagnostics.
-- `08-04-fleet-publish-archive-commit-retry` (B) — archive auto-commit resilience.
+- `08-04-fleet-publish-archive-commit-retry` (B) — fleet-publish loud abort on
+  archive failure (task_store retry handed upstream — M-1).
 - `08-04-fleet-publish-pack-self-publish-gate` (C) — consumer-only guard.
 
 ## Requirements
@@ -39,24 +40,23 @@ CHANGELOG, `make release-prep`, PR, review, tag).
 - OUT OF SCOPE: `fleet-controller.py` loader — simpler, no granular reason codes;
   intentionally excluded.
 
-### B. archive auto-commit resilience (task_store retry + fleet-publish loud abort)
+### B. archive auto-commit resilience — fleet-publish loud abort (pack-owned)
 - A transient `.git/index.lock` contention during 0.64.4 self-publish aborted the
-  helper mid-run with the task already moved on disk. Fix at the correct layer:
-- Primary (the real fix): `task_store._auto_commit_archive` retries ONLY the final
-  `git commit` on index-lock-specific stderr (bounded ≤3, fixed backoff, no lock
-  deletion), preserving its existing scoped staging and the `after_archive` hook
-  lifecycle. Non-lock failures still fail closed. This reaches the pack repo and
-  any Trellis-updated repo. (Fixing here, not fleet-publish, avoids skipping hooks
-  and broad `git add -A` — see design C-1/C-2.)
-- Consumer safety (loud abort, no fabricated rollback): a consumer runs unpatched
-  task.py, so fleet-publish cannot get the retry. `fleet-publish.py
-  archive_and_journal` FAILS LOUDLY on a non-zero archive result — raises
-  PublishError naming the likely transient git-lock cause and the exact recovery
-  (task may be moved + staged but uncommitted; resolve `git status` / re-run the
-  fleet action). It attempts NO partial rollback: cmd_archive also mutates task
-  status, child parent links, and sessions before the move
-  (task_store.py:473-506), so a dir+index-only rollback would be incomplete and
-  misleading (see design N-1).
+  archive mid-run with the task already moved on disk.
+- The task_store retry (the framework-level fix) is OUT OF THIS RELEASE (M-1):
+  `.trellis/scripts/common/task_store.py` is a Trellis-owned runtime copy the pack
+  does not ship (one local copy, not in `manifest.json`); the README "Upstream
+  Path" forbids patching it here. Handed to the Trellis source owner as task
+  `08-04-trellis-upstream-archive-commit-lock-retry` (carries the M-2 return
+  contract + M-3 `index.lock` anchor).
+- Pack-owned deliverable (ships in 0.64.5): `fleet-publish.py archive_and_journal`
+  FAILS LOUDLY on a non-zero archive result — raises PublishError naming the likely
+  transient git-lock cause and the exact recovery (task may be moved + staged but
+  uncommitted; resolve `git status` / re-run the fleet action). It attempts NO
+  partial rollback: cmd_archive mutates task status, child parent links, and
+  sessions before the move (task_store.py:473-506), so a dir+index-only rollback
+  would be incomplete and misleading (see design N-1). Independent of the upstream
+  retry.
 
 ### C. fleet-publish self-publish guard (approach c)
 - `fleet-publish.py` must refuse to run against the pack's OWN repository (detected
@@ -74,10 +74,10 @@ CHANGELOG, `make release-prep`, PR, review, tag).
 - [ ] A: caller messages already read correctly for `missing` (verified, no
   rewrite); diagnostics emit no absolute/home path or credential (repo-relative
   path is allowed).
-- [ ] B: task_store commit retries on index-lock stderr (hooks run, staging
-  scoped, ≤3 bound, non-lock no-retry); on a consumer, a non-zero archive makes
-  fleet-publish raise PublishError with transient-cause + recovery guidance and
-  attempt NO partial rollback (no silent corruption); both covered by tests.
+- [ ] B: on a consumer, a non-zero archive makes fleet-publish raise PublishError
+  with transient-cause + recovery guidance and attempt NO partial rollback (no
+  silent corruption); covered by a test. (task_store retry handed upstream, not in
+  this release — M-1.)
 - [ ] C: running fleet-publish against this pack repo refuses with a
   sd-finish-work pointer and precondition exit code; running against a consumer
   is unaffected; covered by a test; doc updated.

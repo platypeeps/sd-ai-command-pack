@@ -1,8 +1,8 @@
 # Design — 0.64.5 fleet-publish + sibling-loader hardening
 
-> Revised after adversarial review (host + Codex, 2 rounds). See the concern ledger
-> in the completion report; C-1..C-9 and round-2 N-1 dispositions are baked into the
-> sections below.
+> Revised after adversarial review (host + Codex, 3 rounds). See the concern ledger
+> in the completion report; C-1..C-9, round-2 N-1, and round-3 M-1/M-2/M-3
+> dispositions are baked into the sections below.
 
 ## A. Sibling-loader ENOTDIR → missing
 
@@ -61,33 +61,28 @@ would leave both authoritative branches untested. So:
 - recovery-artifacts.py schema-mismatch already emits expected-vs-actual (:459/455).
 - fleet-controller loader: simpler, no granular reason codes — unchanged.
 
-## B. archive auto-commit resilience — task_store internal retry (C-1/C-2/C-3/C-4)
+## B. archive auto-commit resilience — fleet-publish loud abort (pack-owned) (C-3/N-1/M-1)
 
-### Decision
-The retry lives in `.trellis/scripts/common/task_store.py::_auto_commit_archive`,
-NOT in fleet-publish. That function already stages exactly the archive source,
-destination, and modified children (task_store.py:544/574) and its caller runs
-`after_archive` hooks only after it returns success (task_store.py:~525→hooks).
-Retrying there preserves correct staging AND the hook lifecycle. Completing the
-commit from fleet-publish would skip hooks (C-1) and a `git add -A` would stage
-unrelated/concurrent work (C-2) — both rejected.
-
-### Change — task_store._auto_commit_archive
-- Wrap ONLY the final `git commit` in a bounded retry: on failure whose git
-  stderr indicates index-lock contention specifically (`index.lock` /
-  `Unable to create '…/index.lock'` / `File exists`), sleep a fixed backoff and
-  retry the SAME commit (staging is unchanged). Max 3 attempts, fixed steps
-  (e.g. 0.2s, 0.5s). Never delete another process's lock. Any non-lock commit
-  failure returns False immediately (unchanged fail-closed).
-- Keying on the git lock stderr — not task.py's generic "Archive moved on disk"
-  line (C-4) — ensures signing/identity/hook failures are NOT retried.
+### Scope decision (M-1): task_store retry is OUT of this release
+The natural fix — retry the final `git commit` inside
+`.trellis/scripts/common/task_store.py::_auto_commit_archive` — is CORRECT but not
+the pack's to ship. That file is a Trellis-owned runtime copy: one local install
+copy, not in the pack payload / `manifest.json`, and the README "Upstream Path"
+forbids patching Trellis-owned runtime copies in this repo. Patching it here would
+(a) break that rule, (b) not survive a Trellis update, and (c) never reach
+consumers. So the retry is handed to the Trellis source owner as task
+`08-04-trellis-upstream-archive-commit-lock-retry`, which carries the full spec
+including the M-2 return contract (`not source_was_tracked`, not hardcoded False)
+and the M-3 `index.lock`-anchored retry key. 0.64.5 ships only the pack-owned half
+below.
 
 ### Change — fleet-publish.py (consumer safety, loud abort — no rollback) (C-3/N-1)
-A consumer checkout runs its OWN (unpatched) task.py, so fleet-publish cannot get
-the retry and must handle a returned archive failure safely. `archive_and_journal`
-wraps the archive call: on a non-zero result it raises PublishError naming the
-likely transient git-lock cause and the exact recovery — the task may be moved on
-disk AND staged but uncommitted; resolve `git status` or re-run the fleet action.
+`fleet-publish.py` is pack-owned. A consumer checkout runs its OWN (unpatched)
+task.py, so fleet-publish must handle a returned archive failure safely.
+`archive_and_journal` wraps the archive call: on a non-zero result it raises
+PublishError naming the likely transient git-lock cause and the exact recovery —
+the task may be moved on disk AND staged but uncommitted; resolve `git status` or
+re-run the fleet action.
 
 It deliberately does NOT attempt a rollback. Before the on-disk move, cmd_archive
 already writes `status=completed`, detaches every child (`parent=None`), and clears
@@ -96,14 +91,8 @@ the archive dir back and unstaged the index (N-1) would leave those three mutati
 in place — a partial, misleading "pre-archive" state that is worse than a clean
 loud failure. Because a fleet lane is isolated and re-runnable, a loud abort is a
 correct terminal state: the operator (or a re-run) resolves the rare transient. No
-manual commit, no `git add -A`, no fabricated rollback.
-
-### Why not fix consumers directly
-`task_store.py` is Trellis framework, not shipped in the sd-ai-command-pack
-payload, so the internal retry reaches the pack repo (and any repo that updates
-Trellis) but not consumer checkouts. The fleet-publish loud abort keeps consumer
-behavior safe and unambiguous without the hook/staging hazards of a manual commit
-or the incompleteness of a partial rollback.
+manual commit, no `git add -A`, no fabricated rollback. This is independent of the
+upstream retry.
 
 ## C. self-publish guard (fleet-publish.py)
 
@@ -130,13 +119,11 @@ for a folded-bookkeeping release"`. Exit code 3 = precondition failure.
   (renamed); NEW authoritative-branch test (mocked `lstat`) asserts `missing` for
   status + surface; verify caller messages for missing unchanged. Twin byte-diff
   check (`scripts/` == `templates/scripts/`).
-- B: `tests/test_task_store.py` (or existing archive test) — stub `git commit` to
-  fail with an `index.lock` stderr on the first attempt then succeed; assert the
-  archive commits, hooks run, and only archive paths are staged; a NON-lock
-  failure returns False without retry; assert the ≤3 attempt bound.
-  `tests/test_fleet_publish.py` — a non-zero archive result makes archive_and_journal
-  raise PublishError with the transient-cause + recovery message and perform NO
-  rollback mutation (leaves the tree exactly as task.py left it); no `git add -A`.
+- B: `tests/test_fleet_publish.py` — a non-zero archive result makes
+  archive_and_journal raise PublishError with the transient-cause + recovery message
+  and perform NO rollback mutation (leaves the tree exactly as task.py left it); no
+  `git add -A`. (task_store retry + its tests are upstream — M-1 — not in this
+  release.)
 - C: `tests/test_fleet_publish.py` — a tree with
   `.github/scripts/bookkeeping_ci_scope.py` makes `check_preconditions` raise code
   3 AND the message names sd-finish-work; a consumer-shaped tree passes; assert the
