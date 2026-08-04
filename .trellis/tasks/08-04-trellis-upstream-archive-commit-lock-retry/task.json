@@ -2,7 +2,7 @@
   "id": "trellis-upstream-archive-commit-lock-retry",
   "name": "trellis-upstream-archive-commit-lock-retry",
   "title": "Trellis upstream: archive auto-commit index-lock retry",
-  "description": "",
+  "description": "UPSTREAM / Trellis-source-owned tracking handoff, NOT shipped by this pack. During the 0.64.4 pack self-publish a transient .git/index.lock made _auto_commit_archive's final git commit return non-zero, stranding the moved task uncommitted. The fix (bounded retry of ONLY the final commit, keyed on index.lock stderr) belongs in Trellis' common/task_store.py, which this repo carries only as a local install copy (not in manifest.json); the pack README Upstream Path forbids patching Trellis-owned runtime copies here. Filed so the Trellis source owner can implement it, carrying M-2 (preserve the not-source_was_tracked return contract, not a hardcoded False) and M-3 (anchor the retry key on the index.lock substring). This pack's 0.64.5 ships only the consumer-safety half in fleet-publish (loud abort). See prd.md.",
   "status": "planning",
   "dev_type": null,
   "scope": null,

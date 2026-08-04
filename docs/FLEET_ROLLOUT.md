@@ -255,6 +255,18 @@ remain one at a time in manifest order. Do not move AMC first merely because it
 appears in an operator's local list, and never rebuild scheduler state from
 conversation history.
 
+### Publish helper is consumer-only
+
+`scripts/sd-ai-command-pack-fleet-publish.py` folds the work commit, the real
+`task.py archive`, and the recorded journal into one reviewed head. That fold is
+correct on a fleet **consumer**, but it trips the pack's own completion-mode
+bookkeeping gate (`.github/scripts/bookkeeping_ci_scope.py` +
+`completion_archive_move_missing`), which validates each incremental push and
+requires the live task to pre-exist the finish-work push. The helper therefore
+**refuses to run** against any repo carrying that gate — including the
+sd-ai-command-pack repo itself — exiting with the precondition failure code (3).
+The pack self-releases via `sd-finish-work`, never via this helper.
+
 ## Timing Evidence
 
 Every `sd-fleet-refresh` run records a local, resumable timing baseline with

@@ -147,11 +147,12 @@ class HelperLoaderSafetyTests(InstallTestCase):
             finally:
                 server.close()
 
-    def test_enotdir_parent_maps_to_specific_reason(self) -> None:
+    def test_enotdir_parent_maps_to_missing(self) -> None:
         # A non-directory parent component makes the advisory ``lstat`` raise
-        # ENOTDIR. status/surface expose granular ``reason`` codes, so that
-        # policy verdict must surface as the same specific ``non_regular`` the
-        # authoritative ``O_NOFOLLOW`` open would yield, never a vague ``unsafe``.
+        # ENOTDIR. That means no regular file is resolvable at the path, so the
+        # verdict is ``missing`` ("not found"), not ``non_regular`` ("present but
+        # refused"). This exercises the ADVISORY ``lstat`` branch (the open is
+        # never reached). status/surface must agree.
         for key in ("status", "surface"):
             mod = self._load(key)
             with self.subTest(script=key), tempfile.TemporaryDirectory() as tmp:
@@ -160,7 +161,27 @@ class HelperLoaderSafetyTests(InstallTestCase):
                 buried = not_a_dir / "sibling.py"
                 with self.assertRaises(mod._UnsafeSiblingPath) as ctx:
                     mod._read_trusted_sibling_source(buried)
-                self.assertEqual(ctx.exception.reason, "non_regular")
+                self.assertEqual(ctx.exception.reason, "missing")
+
+    def test_enotdir_authoritative_branch_maps_to_missing(self) -> None:
+        # The advisory test above never reaches the fd-anchored ``os.open``. Force
+        # the AUTHORITATIVE branch: mock ``os.lstat`` to report a regular file so
+        # the advisory check passes, but point the real path at a non-directory
+        # parent so the actual ``os.open(..., O_NOFOLLOW)`` raises ENOTDIR. Both
+        # branches must map ENOTDIR to ``missing`` (advisory/authoritative parity).
+        for key in ("status", "surface"):
+            mod = self._load(key)
+            with self.subTest(script=key), tempfile.TemporaryDirectory() as tmp:
+                not_a_dir = Path(tmp) / "file.py"
+                not_a_dir.write_text("SENTINEL = 1\n", encoding="utf-8")
+                buried = not_a_dir / "sibling.py"
+                # A genuine regular-file stat_result so the advisory lstat passes
+                # (S_ISLNK false, S_ISREG true) and control reaches os.open.
+                regular_stat = os.lstat(not_a_dir)
+                with mock.patch.object(mod.os, "lstat", return_value=regular_stat):
+                    with self.assertRaises(mod._UnsafeSiblingPath) as ctx:
+                        mod._read_trusted_sibling_source(buried)
+                self.assertEqual(ctx.exception.reason, "missing")
 
     def test_seam_differential_old_follows_symlink_new_refuses(self) -> None:
         mod = self._load("status")
