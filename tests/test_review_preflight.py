@@ -828,6 +828,7 @@ assert.deepEqual(
                 "title": "Change",
                 "body": "Tooling/generated scope: regenerated the repository map.",
                 "url": "https://example.test/pr/1",
+                "state": "OPEN",
             }
         )
         quoted = "'" + payload.replace("'", "'\\''") + "'"
