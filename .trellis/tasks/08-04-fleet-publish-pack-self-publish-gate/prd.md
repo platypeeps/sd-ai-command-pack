@@ -6,11 +6,23 @@ fleet-publish.py commits the active task at H1 and archives it at H2 in a single
 
 ## Requirements
 
-- TBD
+Child C of `08-04-0-64-5-followup-hardening`. **Decision: approach (c)** — guard +
+doc, consumer-only. Full design in the parent `design.md` §C and `implement.md`
+Phase C.
+
+- `fleet-publish.py check_preconditions` must refuse to run against the pack's own
+  repo, detected by the presence of `.github/scripts/bookkeeping_ci_scope.py`,
+  raising `PublishError(..., code=3)` that points self-publish to `sd-finish-work`.
+- Consumer checkouts (no such gate) are unaffected.
+- Document fleet-publish as consumer-only in `docs/FLEET_ROLLOUT.md` and the
+  module docstring.
 
 ## Acceptance Criteria
 
-- [ ] TBD
+- [ ] Guard raises code 3 with a sd-finish-work pointer on a pack-shaped tree (test).
+- [ ] Consumer-shaped tree passes the guard (test).
+- [ ] `docs/FLEET_ROLLOUT.md` + docstring state consumer-only.
+- [ ] `.venv/bin/python -m unittest tests.test_fleet_publish` green.
 
 ## Notes
 

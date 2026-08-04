@@ -2,11 +2,34 @@
 
 ## Goal
 
-Deferred follow-up from 0.64.3 fleet review (rwbp-coordinator PR #195, Copilot). _UnsafeSiblingPath now conflates missing-helper with unsafe/unsupported load (O_NOFOLLOW-unavailable, symlink, non-regular); 'helper is not installed' / 'missing source validator module' messages are imprecise for the unsafe cases. Also recovery schema-version mismatch error omits expected-vs-actual. Improve wording without weakening the fail-safe behavior. Candidate for 0.64.4.
+Follow-up from fleet review (0.64.3 PR #195 and 0.64.4 PR #198, Copilot).
+Scoped for **0.64.5** as child A of `08-04-0-64-5-followup-hardening`. Core work:
+map `ENOTDIR → missing` in the unsafe-sibling loader (both branches, both twins)
+so an unresolvable-parent path reads as "not found" rather than "present but
+refused", with parity-preserving tests. The original "recovery schema-version
+mismatch omits expected-vs-actual" concern is VERIFIED ALREADY FIXED
+(recovery-artifacts.py:455/459 emits both) and is out of scope.
 
 ## Requirements
 
-- TBD
+Child A of `08-04-0-64-5-followup-hardening`. Full design in the parent
+`design.md` §A and `implement.md` Phase A.
+
+- Map `ENOTDIR → "missing"` in BOTH the advisory `lstat` branch and the
+  authoritative `O_NOFOLLOW`-open branch of `status.py` and `surface-check.py`, in
+  `scripts/` AND `templates/scripts/` (byte-identical twins). Preserve
+  advisory/authoritative parity; behavior stays fail-closed (diagnostic only).
+- Caller wording already reads correctly for `missing` (status.py:935/1337 "not
+  installed"; surface-check.py:344 "missing source validator module: {relative}") —
+  VERIFY only; the reason-code flip alone yields the right message. No rewrite.
+- Diagnostics may keep the repo-relative path (intended); the contract forbids
+  only absolute/home paths and credentials.
+- Update the advisory parity test to assert `missing` (status + surface), AND add
+  an authoritative-branch test (mock `os.lstat` to a regular file so the real
+  `os.open(O_NOFOLLOW)` raises ENOTDIR) — the existing test only exercises `lstat`.
+- OUT OF SCOPE (verified fixed): recovery schema-mismatch already emits
+  expected-vs-actual (`recovery-artifacts.py:459`). fleet-controller loader
+  unchanged (no granular reasons).
 
 ### Additional evidence — 0.64.4 fleet review (rwbp-coordinator PR #198, Copilot)
 
@@ -22,7 +45,13 @@ lockstep to preserve advisory/authoritative parity.
 
 ## Acceptance Criteria
 
-- [ ] TBD
+- [ ] `ENOTDIR` yields `missing` in all four twin files, both branches.
+- [ ] `scripts/` and `templates/scripts/` twins remain byte-identical.
+- [ ] Caller messages verified correct for `missing`; no absolute/home path or
+  credential leaked (repo-relative path allowed).
+- [ ] Advisory AND authoritative-branch tests assert `missing` (status + surface);
+  `ruff check` clean.
+- [ ] `.venv/bin/python -m unittest tests.test_helper_loader_safety` green.
 
 ## Notes
 
