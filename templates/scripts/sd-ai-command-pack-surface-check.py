@@ -261,7 +261,14 @@ def _read_trusted_sibling_source(path: Path) -> bytes:
     try:
         advisory = os.lstat(path)
     except OSError as error:
-        reason = "missing" if error.errno == errno.ENOENT else "unsafe"
+        if error.errno == errno.ENOENT:
+            reason = "missing"
+        elif error.errno == errno.ELOOP:
+            reason = "symlink"
+        elif error.errno == errno.ENOTDIR:
+            reason = "non_regular"
+        else:
+            reason = "unsafe"
         raise _UnsafeSiblingPath(str(error), reason=reason) from error
     if stat.S_ISLNK(advisory.st_mode):
         raise _UnsafeSiblingPath(f"{path} is a symlink", reason="symlink")

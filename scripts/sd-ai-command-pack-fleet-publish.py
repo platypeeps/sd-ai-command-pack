@@ -177,8 +177,8 @@ def task_moved_to_archive(repo: Path, slug: str, month: str) -> Iterator[Path]:
     archive_parent = repo / TASK_ROOT / "archive" / month
     archive_dir = archive_parent / slug
     archive_parent.mkdir(parents=True, exist_ok=True)
-    task_dir.rename(archive_dir)
     try:
+        task_dir.rename(archive_dir)
         yield archive_dir
     finally:
         if archive_dir.exists() and not task_dir.exists():
@@ -296,7 +296,7 @@ def publish(args: argparse.Namespace) -> dict[str, object]:
     repo = Path(args.repo).resolve()
     prefixes = tuple(DEFAULT_ALLOWED_PREFIXES) + tuple(args.allow_path_prefix or ())
     record_session = (
-        Path(args.record_session)
+        Path(args.record_session).resolve()
         if args.record_session
         else Path(__file__).resolve().parent
         / "sd-ai-command-pack-record-session.py"

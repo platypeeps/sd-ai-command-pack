@@ -147,6 +147,21 @@ class HelperLoaderSafetyTests(InstallTestCase):
             finally:
                 server.close()
 
+    def test_enotdir_parent_maps_to_specific_reason(self) -> None:
+        # A non-directory parent component makes the advisory ``lstat`` raise
+        # ENOTDIR. status/surface expose granular ``reason`` codes, so that
+        # policy verdict must surface as the same specific ``non_regular`` the
+        # authoritative ``O_NOFOLLOW`` open would yield, never a vague ``unsafe``.
+        for key in ("status", "surface"):
+            mod = self._load(key)
+            with self.subTest(script=key), tempfile.TemporaryDirectory() as tmp:
+                not_a_dir = Path(tmp) / "file.py"
+                not_a_dir.write_text("SENTINEL = 1\n", encoding="utf-8")
+                buried = not_a_dir / "sibling.py"
+                with self.assertRaises(mod._UnsafeSiblingPath) as ctx:
+                    mod._read_trusted_sibling_source(buried)
+                self.assertEqual(ctx.exception.reason, "non_regular")
+
     def test_seam_differential_old_follows_symlink_new_refuses(self) -> None:
         mod = self._load("status")
         with tempfile.TemporaryDirectory() as tmp:

@@ -280,6 +280,23 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
         ).stdout.split()
         self.assertEqual(branches, ["main"], "no push/new branch under --no-push")
 
+    def test_archive_ctx_tidies_scaffolding_when_rename_fails(self) -> None:
+        # The archive rename lives inside the try/finally, so a rename that itself
+        # raises (here: a slug with no task dir) still runs the finally: the freshly
+        # created archive scaffolding is removed and the tree is left untouched.
+        archive_root = self.repo / publish.TASK_ROOT / "archive"
+        self.assertFalse(archive_root.exists())
+        with self.assertRaises(OSError):
+            with publish.task_moved_to_archive(self.repo, "99-99-nonexistent", "2026-01"):
+                self.fail("context body must not run when the rename fails")
+        self.assertFalse(
+            archive_root.exists(), "archive scaffolding leaked after a failed rename"
+        )
+        self.assertTrue(
+            (self.repo / publish.TASK_ROOT / self.slug).is_dir(),
+            "the real active task must be untouched by an unrelated failed archive",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
