@@ -1295,3 +1295,36 @@ Rewrote neutral command source to load the source-only fleet-refresh procedure b
 ### Next Steps
 
 - None - task complete
+
+
+## Session 284: Ship 0.64.3: harden sibling-helper loaders against TOCTOU
+
+**Date**: 2026-08-03
+**Task**: Ship 0.64.3: harden sibling-helper loaders against TOCTOU
+**Branch**: `fix/harden-helper-loader-toctou`
+
+### Summary
+
+Corrective release 0.64.3. Replaced islink-precheck-then-exec_module at 4 sibling-loader sites (status work-loop + recovery, surface-check _load_source_module, fleet-controller _wave_planner) with an atomic O_NOFOLLOW|O_NONBLOCK fd read + fstat + compile/exec; advisory lstat preserves classification; metadata/registration/bytecode-suppression behavior-preserved. Added test_helper_loader_safety.py and reworked status loader tests off the importlib seam. 4-round adversarial planning review (user-authorized round 4). make release-prep EXIT=0.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `46243a5c` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

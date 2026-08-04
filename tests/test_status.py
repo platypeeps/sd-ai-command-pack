@@ -54,6 +54,20 @@ class StatusTests(InstallTestCase):
             "status_test_recovery",
         )
 
+    def collect_with_temp_helper(self, status, collector, helper_name, source, root):
+        """Run a status collector against a REAL temp sibling helper.
+
+        Writes ``source`` to ``helper_name`` beside a faux status ``__file__`` so
+        the collector's atomic loader reads and execs actual bytes (no importlib
+        seam mock). Returns the collector result.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / helper_name).write_text(source, encoding="utf-8")
+            fake_status = tmp_path / "sd-ai-command-pack-status.py"
+            with mock.patch.object(status, "__file__", str(fake_status)):
+                return getattr(status, collector)(root)
+
     def seed_needs_review_stash(self, root: Path, state_root: Path) -> str:
         """Create a real stash and record a dead-owner receipt for it.
 
@@ -963,79 +977,45 @@ class StatusTests(InstallTestCase):
     def test_collect_work_loop_handles_helper_contract_and_syntax_failures(self) -> None:
         root = self.make_status_repo()
         status = self.load_status_module()
-        spec = mock.Mock()
-        spec.loader = mock.Mock()
 
-        with (
-            mock.patch.object(
-                status.importlib.util,
-                "spec_from_file_location",
-                return_value=spec,
-            ),
-            mock.patch.object(
-                status.importlib.util,
-                "module_from_spec",
-                return_value=object(),
-            ),
-        ):
-            missing_contract = status.collect_work_loop(root)
+        def run(source: str) -> dict:
+            return self.collect_with_temp_helper(
+                status,
+                "collect_work_loop",
+                "sd-ai-command-pack-work-loop.py",
+                source,
+                root,
+            )
 
+        # Helper missing the status_snapshot contract entrypoint.
+        missing_contract = run("VALUE = 1\n")
         self.assertEqual(missing_contract["status"], "invalid")
         self.assertIn("status_snapshot", missing_contract["error"])
 
-        spec.loader.exec_module.side_effect = SyntaxError("corrupt helper")
-        with mock.patch.object(
-            status.importlib.util,
-            "spec_from_file_location",
-            return_value=spec,
-        ):
-            syntax_failure = status.collect_work_loop(root)
-
+        # Compile-time failure (syntax error) in helper source.
+        syntax_failure = run("def status_snapshot(repo):\n    return (\n")
         self.assertEqual(syntax_failure["status"], "invalid")
-        self.assertIn("corrupt helper", syntax_failure["error"])
 
-        module = mock.Mock()
-        module.status_snapshot.side_effect = KeyError("mode")
-        spec.loader.exec_module.side_effect = None
-        with (
-            mock.patch.object(
-                status.importlib.util,
-                "spec_from_file_location",
-                return_value=spec,
-            ),
-            mock.patch.object(
-                status.importlib.util,
-                "module_from_spec",
-                return_value=module,
-            ),
-        ):
-            malformed_state = status.collect_work_loop(root)
-
+        # Runtime failure raised by the helper contract.
+        malformed_state = run(
+            "def status_snapshot(repo):\n    raise KeyError('mode')\n"
+        )
         self.assertEqual(malformed_state["status"], "invalid")
         self.assertIn("mode", malformed_state["error"])
 
     def test_collect_work_loop_validates_helper_snapshot_shapes(self) -> None:
         root = self.make_status_repo()
         status = self.load_status_module()
-        spec = mock.Mock()
-        spec.loader = mock.Mock()
-        module = mock.Mock()
 
         def collect(snapshot: object) -> dict[str, object]:
-            module.status_snapshot.return_value = snapshot
-            with (
-                mock.patch.object(
-                    status.importlib.util,
-                    "spec_from_file_location",
-                    return_value=spec,
-                ),
-                mock.patch.object(
-                    status.importlib.util,
-                    "module_from_spec",
-                    return_value=module,
-                ),
-            ):
-                return status.collect_work_loop(root)
+            source = "def status_snapshot(repo):\n    return " + repr(snapshot) + "\n"
+            return self.collect_with_temp_helper(
+                status,
+                "collect_work_loop",
+                "sd-ai-command-pack-work-loop.py",
+                source,
+                root,
+            )
 
         for loop_status in ("none", "unavailable"):
             with self.subTest(valid_terminal=loop_status):
@@ -1342,31 +1322,58 @@ class StatusTests(InstallTestCase):
                 self.assertEqual(result["status"], "invalid")
                 self.assertIn(expected, result["error"])
 
-    def test_collect_work_loop_restores_bytecode_setting_after_loader_failure(self) -> None:
+    def test_collect_work_loop_bytecode_suppression_scope_and_restore(self) -> None:
+        # R4: assert all three properties, not merely restoration (a restore-only
+        # check passes even if suppression were removed entirely):
+        #   (a) module execution observes dont_write_bytecode == True;
+        #   (b) the helper callable, invoked OUTSIDE the suppress block, observes
+        #       the prior value;
+        #   (c) the prior value is restored after both failure and success.
         root = self.make_status_repo()
         status = self.load_status_module()
-        spec = mock.Mock()
-        spec.loader = mock.Mock()
-        observed: list[bool] = []
+        helper = "sd-ai-command-pack-work-loop.py"
 
-        def fail_while_loading(_module: object) -> None:
-            observed.append(status.sys.dont_write_bytecode)
-            raise SyntaxError("corrupt helper")
+        # (a) + (c-failure): suppression active during load; restored after failure.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            probe = tmp_path / "load-probe.txt"
+            fail_source = (
+                "import sys, pathlib\n"
+                f"pathlib.Path({str(probe)!r}).write_text(str(sys.dont_write_bytecode))\n"
+                "raise SyntaxError('corrupt helper')\n"
+            )
+            (tmp_path / helper).write_text(fail_source, encoding="utf-8")
+            fake_status = tmp_path / "sd-ai-command-pack-status.py"
+            with (
+                mock.patch.object(status.sys, "dont_write_bytecode", False),
+                mock.patch.object(status, "__file__", str(fake_status)),
+            ):
+                failure = status.collect_work_loop(root)
+                self.assertFalse(status.sys.dont_write_bytecode)
+            self.assertEqual(probe.read_text(encoding="utf-8"), "True")
+        self.assertEqual(failure["status"], "invalid")
 
-        spec.loader.exec_module.side_effect = fail_while_loading
-        with (
-            mock.patch.object(status.sys, "dont_write_bytecode", False),
-            mock.patch.object(
-                status.importlib.util,
-                "spec_from_file_location",
-                return_value=spec,
-            ),
-        ):
-            result = status.collect_work_loop(root)
-            self.assertFalse(status.sys.dont_write_bytecode)
-
-        self.assertEqual(result["status"], "invalid")
-        self.assertEqual(observed, [True])
+        # (b) + (c-success): status_snapshot runs outside the suppress block, so it
+        # observes the prior value; restored after a successful load.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            probe = tmp_path / "call-probe.txt"
+            ok_source = (
+                "import sys, pathlib\n"
+                "def status_snapshot(repo):\n"
+                f"    pathlib.Path({str(probe)!r}).write_text(str(sys.dont_write_bytecode))\n"
+                "    return {'status': 'none'}\n"
+            )
+            (tmp_path / helper).write_text(ok_source, encoding="utf-8")
+            fake_status = tmp_path / "sd-ai-command-pack-status.py"
+            with (
+                mock.patch.object(status.sys, "dont_write_bytecode", False),
+                mock.patch.object(status, "__file__", str(fake_status)),
+            ):
+                success = status.collect_work_loop(root)
+                self.assertFalse(status.sys.dont_write_bytecode)
+            self.assertEqual(probe.read_text(encoding="utf-8"), "False")
+        self.assertEqual(success["status"], "none")
 
     def test_summarize_recovery_filters_active_and_bounds_fields(self) -> None:
         status = self.load_status_module()
@@ -1430,57 +1437,50 @@ class StatusTests(InstallTestCase):
         self.assertLessEqual(len(cleanable["reference"]), 200)
         self.assertLessEqual(len(cleanable["detail"]), 200)
 
+    def _collect_recovery_with_helper(self, status, source, root):
+        return self.collect_with_temp_helper(
+            status,
+            "collect_recovery",
+            "sd-ai-command-pack-recovery-artifacts.py",
+            source,
+            root,
+        )
+
     def test_collect_recovery_reports_invalid_helper_without_traceback(self) -> None:
         root = self.make_status_repo()
         status = self.load_status_module()
-        spec = mock.Mock()
-        spec.loader = mock.Mock()
-        spec.loader.exec_module.side_effect = SyntaxError("corrupt recovery helper")
-        with mock.patch.object(
-            status.importlib.util, "spec_from_file_location", return_value=spec
-        ):
-            result = status.collect_recovery(root)
+        result = self._collect_recovery_with_helper(
+            status,
+            "def classify_repository(repo):\n"
+            "    raise KeyError('corrupt recovery helper')\n",
+            root,
+        )
         self.assertEqual(result["status"], "invalid")
         self.assertIn("corrupt recovery helper", result["error"])
 
     def test_collect_recovery_rejects_unexpected_schema_version(self) -> None:
         root = self.make_status_repo()
         status = self.load_status_module()
-        spec = mock.Mock()
-        spec.loader = mock.Mock()
-        module = mock.Mock()
-        module.SCHEMA_VERSION = 1
-        module.classify_repository.return_value = {"schemaVersion": 99, "counts": {}}
-        with (
-            mock.patch.object(
-                status.importlib.util, "spec_from_file_location", return_value=spec
-            ),
-            mock.patch.object(
-                status.importlib.util, "module_from_spec", return_value=module
-            ),
-        ):
-            result = status.collect_recovery(root)
+        result = self._collect_recovery_with_helper(
+            status,
+            "SCHEMA_VERSION = 1\n"
+            "def classify_repository(repo):\n"
+            "    return {'schemaVersion': 99, 'counts': {}}\n",
+            root,
+        )
         self.assertEqual(result["status"], "invalid")
         self.assertIn("schema version", result["error"])
 
     def test_collect_recovery_rejects_helper_missing_schema_version(self) -> None:
         root = self.make_status_repo()
         status = self.load_status_module()
-        spec = mock.Mock()
-        spec.loader = mock.Mock()
-        # spec-restricted: accessing module.SCHEMA_VERSION raises AttributeError,
-        # so reading it must fail closed to "invalid", never crash the collector.
-        module = mock.Mock(spec=["classify_repository"])
-        module.classify_repository.return_value = {"schemaVersion": 1, "counts": {}}
-        with (
-            mock.patch.object(
-                status.importlib.util, "spec_from_file_location", return_value=spec
-            ),
-            mock.patch.object(
-                status.importlib.util, "module_from_spec", return_value=module
-            ),
-        ):
-            result = status.collect_recovery(root)
+        # No module-level SCHEMA_VERSION: reading it must fail closed to "invalid".
+        result = self._collect_recovery_with_helper(
+            status,
+            "def classify_repository(repo):\n"
+            "    return {'schemaVersion': 1, 'counts': {}}\n",
+            root,
+        )
         self.assertEqual(result["status"], "invalid")
         self.assertIn("schema version", result["error"])
 
