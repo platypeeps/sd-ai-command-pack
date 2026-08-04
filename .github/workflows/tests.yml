@@ -458,6 +458,47 @@ jobs:
           sudo cmake --install /tmp/kcov-build
           kcov --version
 
+      - name: kcov attribution probe (diagnostic)
+        # Diagnostic-only: the whole-suite wrap records 166 kcov runs but the
+        # merged report attributes zero shipped-shell lines. This isolates which
+        # link is broken by running kcov three ways and dumping each report's
+        # class filenames + a covered/total tally, WITHOUT the shim or a merge:
+        #   A  bash FILE on a real shipped script, with the include filter
+        #   B  bash -c 'source ...' form (what most subprocess tests use)
+        #   C  bash FILE on a throwaway script, NO include filter (baseline:
+        #      does kcov's bash collector record anything at all in this build?)
+        # If C is empty, kcov instrumentation itself is broken; if C has hits but
+        # A/B don't, the include-pattern or path handling is the culprit.
+        if: always()
+        run: |
+          set -uo pipefail
+          dump() {  # $1 = kcov output dir, $2 = label
+            local f cov=0 tot=0
+            while IFS= read -r f; do
+              printf '  cobertura: %s\n' "$f"
+              grep -o 'filename="[^"]*"' "$f" | sort -u | sed 's/^/    file: /'
+              tot=$(grep -c '<line ' "$f" || true)
+              cov=$(grep -o 'hits="[1-9]' "$f" | grep -c . || true)
+              printf '  lines: %s tags, %s with hits>=1\n' "$tot" "$cov"
+            done < <(find "$1" -name 'cobertura.xml')
+          }
+          echo "=== A: real shipped script, bash FILE, include filter ==="
+          kcov --include-pattern=sd-ai-command-pack- --bash-dont-parse-binary-dir \
+            "${{ runner.temp }}/kA" /usr/bin/bash scripts/sd-ai-command-pack-shell-lib.sh \
+            || echo "kcov A rc=$?"
+          dump "${{ runner.temp }}/kA" A
+          echo "=== B: real shipped script, bash -c source, include filter ==="
+          kcov --include-pattern=sd-ai-command-pack- --bash-dont-parse-binary-dir \
+            "${{ runner.temp }}/kB" /usr/bin/bash -c 'source scripts/sd-ai-command-pack-shell-lib.sh' \
+            || echo "kcov B rc=$?"
+          dump "${{ runner.temp }}/kB" B
+          echo "=== C: throwaway script, bash FILE, NO include filter (baseline) ==="
+          printf '%s\n' '#!/bin/bash' 'x=1' 'if [ "$x" = 1 ]; then echo hit; fi' 'echo done' \
+            > "${{ runner.temp }}/probe.sh"
+          kcov --bash-dont-parse-binary-dir "${{ runner.temp }}/kC" \
+            /usr/bin/bash "${{ runner.temp }}/probe.sh" || echo "kcov C rc=$?"
+          dump "${{ runner.temp }}/kC" C
+
       - name: Measure shipped shell coverage
         # Routes the bash the subprocess tests spawn through kcov-bash-shim.sh
         # so kcov records which lines of the shipped shell the suite reaches.
