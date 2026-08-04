@@ -3,7 +3,7 @@
   "name": "fix-ci-dispatch",
   "title": "Add per-job dispatch protocol to sd-fix-ci",
   "description": "Tier 1 pilot: one sub-agent per failing CI job for log-isolated triage, capability-first fallback, trust restatement",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
