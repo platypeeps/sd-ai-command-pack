@@ -46,8 +46,28 @@ include_pattern="${SD_AI_COMMAND_PACK_KCOV_INCLUDE:-sd-ai-command-pack-}"
 # subprocesses a single test run spawns.
 run_dir="$kcov_dir/run-$$-${RANDOM:-0}-${SRANDOM:-0}"
 
-exec kcov \
-  --include-pattern="$include_pattern" \
-  --bash-dont-parse-binary-dir \
-  "$run_dir" \
-  "$real_bash" "$@"
+# kcov engages its shell-source collector only when the coverage TARGET is the
+# script itself (kcov reads the script's shebang to pick the interpreter).
+# Passing the bash binary as the target instead — `kcov OUT bash script.sh` —
+# makes kcov treat bash as a compiled program, hunt for DWARF line info that a
+# stripped /usr/bin/bash does not carry, and record zero shell lines. So when
+# this is the plain `bash SCRIPT [args]` form (first arg an existing file, no
+# leading option), target the script directly.
+first="${1:-}"
+if [ -n "$first" ] && [ "${first#-}" = "$first" ] && [ -f "$first" ]; then
+  # kcov launches the script via its shebang, which needs the exec bit; the
+  # shipped scripts ship 0644 and the tests run writable copies, so grant it
+  # when we can. Failure is non-fatal (kcov may still parse via the shebang).
+  [ -x "$first" ] || chmod +x "$first" 2>/dev/null || true
+  exec kcov \
+    --include-pattern="$include_pattern" \
+    --bash-dont-parse-binary-dir \
+    "$run_dir" \
+    "$@"
+fi
+
+# Option-bearing invocations — `bash -c CMD` (source form) and `bash -n FILE`
+# (syntax check, nothing executes) — cannot be script-targeted without changing
+# semantics, and kcov cannot attribute them to a source file anyway. Run them
+# under the real bash unwrapped so behaviour and exit codes are identical.
+exec "$real_bash" "$@"

@@ -476,26 +476,29 @@ jobs:
         shell: bash --noprofile --norc {0}
         run: |
           set +e -u
-          echo "=== bash flags kcov advertises in this build ==="
-          kcov --help 2>&1 | grep -iE 'bash|method|collect|python' || echo "(no bash flags in --help)"
+          tally() {  # $1 = kcov output dir, $2 = label — print kcov's own line totals
+            local j
+            j="$(find "$1" -name coverage.json | head -1)"
+            printf '  %s: %s\n' "$2" \
+              "$(grep -oE '"(percent_covered|covered_lines|total_lines)"[^,}]*' "$j" 2>/dev/null | tr '\n' ' ')"
+          }
           echo "=== kcov version / bash under test ==="
           kcov --version; /usr/bin/bash --version | head -1
-          echo
-          echo "=== C: throwaway script, plain bash FILE, kcov stderr shown ==="
-          printf '%s\n' '#!/bin/bash' 'x=1' 'if [ "$x" = 1 ]; then echo hit; fi' 'echo done' \
-            > "${{ runner.temp }}/probe.sh"
-          # Capture kcov's own diagnostics (2>&1) — a silent zero often prints a
-          # warning here (missing helper, unsupported bash method, etc.).
-          kcov "${{ runner.temp }}/kC" /usr/bin/bash "${{ runner.temp }}/probe.sh" 2>&1
-          echo "--- every file kcov produced under kC ---"
-          find "${{ runner.temp }}/kC" -type f | sed 's/^/    /'
-          echo "--- any JSON coverage kcov wrote (native format, not cobertura) ---"
-          find "${{ runner.temp }}/kC" -name '*.json' -exec sh -c \
-            'echo "  $1:"; grep -oE "\"(percent_covered|covered_lines|total_lines)\"[^,}]*" "$1" | sed "s/^/    /"' _ {} \;
-          echo "--- cobertura <line> tally ---"
-          f="${{ runner.temp }}/kC/kcov-merged/cobertura.xml"
-          [ -f "$f" ] || f="$(find "${{ runner.temp }}/kC" -name cobertura.xml | head -1)"
-          echo "  cobertura=$f  <line> tags=$(grep -c '<line ' "$f" 2>/dev/null)"
+          # Two throwaway scripts, same body, one executable one not, so we learn
+          # whether kcov's shell collector needs the exec bit on a 0644 script.
+          printf '%s\n' '#!/usr/bin/env bash' 'x=1' 'if [ "$x" = 1 ]; then echo hit; fi' 'echo done' \
+            > "${{ runner.temp }}/px.sh"
+          cp "${{ runner.temp }}/px.sh" "${{ runner.temp }}/pn.sh"
+          chmod +x "${{ runner.temp }}/px.sh"; chmod 0644 "${{ runner.temp }}/pn.sh"
+          echo "=== C: target the BASH BINARY (old shim form) — expect total_lines 0 ==="
+          kcov "${{ runner.temp }}/kC" /usr/bin/bash "${{ runner.temp }}/px.sh" >/dev/null 2>&1
+          tally "${{ runner.temp }}/kC" C
+          echo "=== D: target the SCRIPT, +x (new shim form) — expect total_lines>0 ==="
+          kcov "${{ runner.temp }}/kD" "${{ runner.temp }}/px.sh" >/dev/null 2>&1
+          tally "${{ runner.temp }}/kD" D
+          echo "=== E: target the SCRIPT, 0644 (does kcov need the exec bit?) ==="
+          kcov "${{ runner.temp }}/kE" "${{ runner.temp }}/pn.sh" >/dev/null 2>&1
+          tally "${{ runner.temp }}/kE" E
 
       - name: Measure shipped shell coverage
         # Routes the bash the subprocess tests spawn through kcov-bash-shim.sh
