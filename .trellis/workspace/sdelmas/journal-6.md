@@ -1431,3 +1431,36 @@ HELD at user request; NO code impl, NO campaign (standing constraint: no fleet r
 ### Next Steps
 
 - None - task complete
+
+
+## Session 288: Release 0.64.5 — sibling-loader + fleet-publish hardening (A/B/C)
+
+**Date**: 2026-08-04
+**Task**: Release 0.64.5 — sibling-loader + fleet-publish hardening (A/B/C)
+**Branch**: `feat/0.64.5-followup-hardening`
+
+### Summary
+
+Implemented + released 0.64.5 (branch feat/0.64.5-followup-hardening). A: sibling-loader ENOTDIR->missing both branches/both twins + authoritative-branch test (loader 10/10). B: fleet-publish loud abort on archive failure, no rollback (fleet 15/15); task_store retry handed upstream (08-04-trellis-upstream-archive-commit-lock-retry). C: self-publish guard code 3 -> sd-finish-work + consumer-only docs. Version 0.64.4->0.64.5 propagated all 6 sites; make release-prep exit 0 (test+lint+mypy+audit+full-check, 0 preflight failures). 3-round adversarial review (host+Codex) complete; report at archive/2026-08/08-04-0-64-5-followup-hardening/adversarial-review.md. 4 tasks archived (3 children + parent). NEXT: push, open PR w/ Tooling/generated scope body, Copilot review, settle CI, merge, tag v0.64.5. NO fleet campaign (standing constraint; 6 consumers on 0.64.3).
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `386a7e82` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
