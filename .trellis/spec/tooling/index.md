@@ -26,6 +26,7 @@ adapter.
 | Guide | Use When |
 |-------|----------|
 | [Bookkeeping Validator Notes](./bookkeeping-validator.md) | Adding a bundle shape, recovery subtype, or historical-proof mechanism to `review-preflight.mjs`; adding a top-level `const` to that file |
+| [Runtime Coverage Lanes](./runtime-coverage-lanes.md) | Changing how shipped Python/Node/shell coverage is measured in CI — the `kcov-bash-shim.sh`, `summarize_shell_coverage.py`, `report-shell-coverage.sh`, or the `shell-coverage` job. Documents the kcov target-the-script gotcha and the summarizer exit contract |
 
 ## Pre-Development Checklist
 
