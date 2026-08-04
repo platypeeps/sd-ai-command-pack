@@ -470,38 +470,32 @@ jobs:
         # If C is empty, kcov instrumentation itself is broken; if C has hits but
         # A/B don't, the include-pattern or path handling is the culprit.
         if: always()
-        # errexit OFF on purpose: dump()'s greps legitimately find no matches on
-        # an empty report (exit 1), and GitHub's default `bash -e` wrapper would
-        # abort the step before printing the very evidence we want.
+        # errexit OFF on purpose: greps below legitimately find no matches on an
+        # empty report (exit 1), and GitHub's default `bash -e` wrapper would
+        # abort the step before printing the evidence we want.
         shell: bash --noprofile --norc {0}
         run: |
           set +e -u
-          dump() {  # $1 = kcov output dir, $2 = label
-            local f cov tot
-            for f in $(find "$1" -name 'cobertura.xml' 2>/dev/null); do
-              printf '  cobertura: %s\n' "$f"
-              grep -o 'filename="[^"]*"' "$f" 2>/dev/null | sort -u | sed 's/^/    file: /'
-              tot=$(grep -c '<line ' "$f" 2>/dev/null); tot=${tot:-0}
-              cov=$(grep -oc 'hits="[1-9]' "$f" 2>/dev/null); cov=${cov:-0}
-              printf '  lines: %s <line> tags, %s with hits>=1\n' "$tot" "$cov"
-            done
-          }
-          echo "=== A: real shipped script, bash FILE, include filter ==="
-          kcov --include-pattern=sd-ai-command-pack- --bash-dont-parse-binary-dir \
-            "${{ runner.temp }}/kA" /usr/bin/bash scripts/sd-ai-command-pack-shell-lib.sh \
-            || echo "kcov A rc=$?"
-          dump "${{ runner.temp }}/kA" A
-          echo "=== B: real shipped script, bash -c source, include filter ==="
-          kcov --include-pattern=sd-ai-command-pack- --bash-dont-parse-binary-dir \
-            "${{ runner.temp }}/kB" /usr/bin/bash -c 'source scripts/sd-ai-command-pack-shell-lib.sh' \
-            || echo "kcov B rc=$?"
-          dump "${{ runner.temp }}/kB" B
-          echo "=== C: throwaway script, bash FILE, NO include filter (baseline) ==="
+          echo "=== bash flags kcov advertises in this build ==="
+          kcov --help 2>&1 | grep -iE 'bash|method|collect|python' || echo "(no bash flags in --help)"
+          echo "=== kcov version / bash under test ==="
+          kcov --version; /usr/bin/bash --version | head -1
+          echo
+          echo "=== C: throwaway script, plain bash FILE, kcov stderr shown ==="
           printf '%s\n' '#!/bin/bash' 'x=1' 'if [ "$x" = 1 ]; then echo hit; fi' 'echo done' \
             > "${{ runner.temp }}/probe.sh"
-          kcov --bash-dont-parse-binary-dir "${{ runner.temp }}/kC" \
-            /usr/bin/bash "${{ runner.temp }}/probe.sh" || echo "kcov C rc=$?"
-          dump "${{ runner.temp }}/kC" C
+          # Capture kcov's own diagnostics (2>&1) — a silent zero often prints a
+          # warning here (missing helper, unsupported bash method, etc.).
+          kcov "${{ runner.temp }}/kC" /usr/bin/bash "${{ runner.temp }}/probe.sh" 2>&1
+          echo "--- every file kcov produced under kC ---"
+          find "${{ runner.temp }}/kC" -type f | sed 's/^/    /'
+          echo "--- any JSON coverage kcov wrote (native format, not cobertura) ---"
+          find "${{ runner.temp }}/kC" -name '*.json' -exec sh -c \
+            'echo "  $1:"; grep -oE "\"(percent_covered|covered_lines|total_lines)\"[^,}]*" "$1" | sed "s/^/    /"' _ {} \;
+          echo "--- cobertura <line> tally ---"
+          f="${{ runner.temp }}/kC/kcov-merged/cobertura.xml"
+          [ -f "$f" ] || f="$(find "${{ runner.temp }}/kC" -name cobertura.xml | head -1)"
+          echo "  cobertura=$f  <line> tags=$(grep -c '<line ' "$f" 2>/dev/null)"
 
       - name: Measure shipped shell coverage
         # Routes the bash the subprocess tests spawn through kcov-bash-shim.sh
