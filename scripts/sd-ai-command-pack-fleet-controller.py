@@ -1745,13 +1745,41 @@ def resume_report(state: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def status_report(state: Mapping[str, Any]) -> dict[str, Any]:
-    lanes = [
-        {
+def status_report(
+    state: Mapping[str, Any], *, show_issued: bool = False
+) -> dict[str, Any]:
+    plan = None
+    if (
+        state["preflight"]["status"] == "passed"
+        and state["status"] != "complete"
+        and not any(lane["status"] == "reconcile" for lane in state["lanes"])
+    ):
+        plan = _planner(state)
+    # Display-only merge-queue transparency (finding #13): a lane waiting at the
+    # merge stage that is not the current mergeCandidate is serialized in priority
+    # order behind it, not stalled. Surface that so the operator does not misread
+    # queue ordering as a stall. This never touches persisted lane["blocker"]
+    # (which the transition/relink guards compare against) and never reorders.
+    merge_candidate = plan["mergeCandidate"] if plan else None
+    lanes = []
+    for lane in state["lanes"]:
+        held_behind = (
+            merge_candidate
+            if (
+                merge_candidate is not None
+                and lane["stage"] == "merge"
+                and lane["status"] == "waiting"
+                and lane["result"] is None
+                and lane["name"] != merge_candidate
+            )
+            else None
+        )
+        entry = {
             "attempt": lane["attempt"],
             "blocker": lane["blocker"],
             "cohort": lane["cohort"],
             "head": lane["head"],
+            "heldBehind": held_behind,
             "name": lane["name"],
             "nextAction": (
                 lane["issuedAction"]["stage"]
@@ -1764,20 +1792,23 @@ def status_report(state: Mapping[str, Any]) -> dict[str, Any]:
             ),
             "packBlocker": lane["packBlocker"],
             "prNumber": lane["prNumber"],
+            "queueNote": (
+                f"merge held behind {held_behind} "
+                "(lower priority, not yet merged)"
+                if held_behind is not None
+                else None
+            ),
             "receiptCount": len(lane["receipts"]),
             "result": lane["result"],
             "stage": lane["stage"],
             "status": lane["status"],
         }
-        for lane in state["lanes"]
-    ]
-    plan = None
-    if (
-        state["preflight"]["status"] == "passed"
-        and state["status"] != "complete"
-        and not any(lane["status"] == "reconcile" for lane in state["lanes"])
-    ):
-        plan = _planner(state)
+        if show_issued:
+            # Idempotent peek (finding #9): surface the already-issued actionId
+            # read-only so an operator can recover it without a mutating `next`.
+            issued = lane["issuedAction"]
+            entry["issuedActionId"] = issued["actionId"] if issued else None
+        lanes.append(entry)
     return {
         "campaignId": state["campaignId"],
         "lanes": lanes,
@@ -1833,6 +1864,32 @@ def _render(value: Mapping[str, Any], as_json: bool) -> None:
         )
 
 
+def _load_provenance(path: Path) -> dict[str, Any]:
+    """Validate a first-class operator-decision provenance file (finding #9).
+
+    Turns the previously hand-authored, unvalidated JSON convention into a
+    checked input: it must be a JSON object carrying a ``reasonCode`` token, which
+    becomes the receipt reason code when ``--reason-code`` is not given.
+    """
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise FleetControllerError(f"cannot read provenance file: {exc}") from None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise FleetControllerError(
+            f"provenance file is not valid JSON: {exc}"
+        ) from None
+    if not isinstance(data, dict):
+        raise FleetControllerError("provenance must be a JSON object")
+    if "reasonCode" not in data:
+        raise FleetControllerError("provenance must include a 'reasonCode'")
+    safe_token(data["reasonCode"], "provenance reasonCode")
+    return data
+
+
 def _common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--repo", type=Path, default=ROOT)
     parser.add_argument("--campaign", required=True)
@@ -1869,9 +1926,22 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--pack-blocker", action="store_true")
     record.add_argument("--head")
     record.add_argument("--pr-number", type=int)
+    record.add_argument(
+        "--provenance",
+        type=Path,
+        help=(
+            "First-class provenance file (JSON object with a 'reasonCode' token); "
+            "required for --result operator-decision"
+        ),
+    )
 
     status = commands.add_parser("status")
     _common(status)
+    status.add_argument(
+        "--show-issued",
+        action="store_true",
+        help="Include each lane's already-issued actionId (read-only; issues nothing)",
+    )
 
     resume = commands.add_parser("resume")
     _common(resume)
@@ -1932,7 +2002,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "status":
-            _render(status_report(store.load()), args.json)
+            _render(
+                status_report(store.load(), show_issued=args.show_issued),
+                args.json,
+            )
             return 0
         if args.command == "validate":
             state = store.load()
@@ -1982,13 +2055,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 return 0
             if args.command == "record":
+                reason_code = args.reason_code
+                if args.result == "operator-decision" and args.provenance is None:
+                    raise FleetControllerError(
+                        "operator-decision requires --provenance <file>"
+                    )
+                if args.provenance is not None:
+                    provenance = _load_provenance(args.provenance)
+                    if reason_code is None:
+                        reason_code = provenance["reasonCode"]
                 receipt, changed = record_result(
                     state,
                     action_id=args.action_id,
                     release=args.release,
                     consumer=args.consumer,
                     result=args.result,
-                    reason_code=args.reason_code,
+                    reason_code=reason_code,
                     blocker=args.blocker,
                     pack_blocker=args.pack_blocker,
                     head=args.head,
