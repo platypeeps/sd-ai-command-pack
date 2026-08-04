@@ -586,15 +586,29 @@ def operation_lock(
             raise FleetTimingError(f"cannot release timing lock: {exc}") from exc
 
 
+# Ergonomic cohort aliases for the standard rollout bands. Operators may pass a
+# label instead of the raw integer priority; raw integers still work unchanged.
+# Two consumers that resolve to the same priority still collide under the existing
+# uniqueness check in new_state(), so a cohort is a named band, not a group.
+COHORT_PRIORITIES = {"canary": 10, "post-canary": 50, "final": 90}
+
+
 def parse_consumer(value: str) -> tuple[str, int]:
     if ":" not in value:
         raise FleetTimingError("consumer must use NAME:PRIORITY")
     name, raw_priority = value.rsplit(":", 1)
     safe_token(name, "consumer name")
-    try:
-        priority = int(raw_priority)
-    except ValueError:
-        raise FleetTimingError("consumer priority must be an integer") from None
+    cohort = raw_priority.strip().lower()
+    if cohort in COHORT_PRIORITIES:
+        priority = COHORT_PRIORITIES[cohort]
+    else:
+        try:
+            priority = int(raw_priority)
+        except ValueError:
+            raise FleetTimingError(
+                "consumer priority must be an integer or a cohort label "
+                "(canary, post-canary, final)"
+            ) from None
     _integer(priority, "consumer priority")
     return name, priority
 

@@ -148,6 +148,33 @@ class FleetWavePlanTests(InstallTestCase):
         self.assertEqual(pr_open_no_merge["canStart"], ["canary-b"])
         self.assertTrue(pr_open_no_merge["holdMerges"])
 
+    def test_parked_canary_settles_the_cohort_only_under_the_opt_in(self) -> None:
+        planner = self.load_planner()
+        policy = self.policy(planner)
+        # canary-a merged (success), canary-b parked via operator-decision (blocked).
+        parked = self.observations(**{"canary-a": "merged", "canary-b": "blocked"})
+        parked["canary-b"]["parked"] = True
+
+        # Default: a terminal non-success canary halts the whole campaign.
+        halted = planner.plan_rollout(policy, parked)
+        self.assertTrue(halted["stopStarting"])
+        self.assertIn("canary health is incomplete", halted["reason"])
+        self.assertEqual(halted["canStart"], [])
+
+        # Opt-in: the parked canary settles the cohort and the wave proceeds.
+        proceeded = planner.plan_rollout(policy, parked, allow_parked_canary=True)
+        self.assertFalse(proceeded["stopStarting"])
+        self.assertEqual(proceeded["cohort"], "post-canary")
+        self.assertEqual(sorted(proceeded["canStart"]), ["wave-a", "wave-b"])
+
+        # The opt-in does NOT excuse a genuine failure — only parked lanes settle.
+        genuine = self.observations(**{"canary-a": "merged", "canary-b": "failed"})
+        still_halted = planner.plan_rollout(
+            policy, genuine, allow_parked_canary=True
+        )
+        self.assertTrue(still_halted["stopStarting"])
+        self.assertIn("canary health is incomplete", still_halted["reason"])
+
     def test_no_merge_mode_unlocks_pr_open_canaries_and_suppresses_merges(self) -> None:
         planner = self.load_planner()
         policy = self.policy(planner)

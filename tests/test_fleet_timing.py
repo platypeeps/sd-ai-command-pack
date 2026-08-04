@@ -137,6 +137,21 @@ class FleetTimingTests(InstallTestCase):
                 "run-1", "0.23.16", "a" * 64, (), self.reading(timing, 1)
             )
 
+    def test_parse_consumer_accepts_cohort_labels_and_integers(self) -> None:
+        timing = self.load_timing()
+
+        self.assertEqual(timing.parse_consumer("web:canary"), ("web", 10))
+        self.assertEqual(timing.parse_consumer("api:post-canary"), ("api", 50))
+        self.assertEqual(timing.parse_consumer("db:final"), ("db", 90))
+        self.assertEqual(timing.parse_consumer("db:FINAL"), ("db", 90))
+        # Raw integers still work unchanged (back-compat).
+        self.assertEqual(timing.parse_consumer("web:20"), ("web", 20))
+        # Unknown labels are rejected with an actionable message.
+        with self.assertRaisesRegex(
+            timing.FleetTimingError, "integer or a cohort label"
+        ):
+            timing.parse_consumer("web:staging")
+
     def test_initialize_is_private_atomic_and_resumable(self) -> None:
         timing = self.load_timing()
         _repo, _state_home, store = self.make_store(timing)

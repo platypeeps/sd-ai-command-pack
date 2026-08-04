@@ -695,7 +695,9 @@ class PrEligibilityTests(unittest.TestCase):
             ("headRefName", "other", "pull_request_branch_mismatch"),
             ("baseRefName", "develop", "pull_request_base_mismatch"),
             ("headRefOid", OTHER_HEAD, "pull_request_head_mismatch"),
-            ("mergeStateStatus", "BEHIND", "merge_state_not_clean"),
+            # A non-CLEAN merge state is now classified into an actionable reason
+            # (finding #2) while still blocking: BEHIND → update-the-branch.
+            ("mergeStateStatus", "BEHIND", "merge_blocked_out_of_date"),
         )
         for field, value, reason in scenarios:
             with self.subTest(field=field):
@@ -704,6 +706,37 @@ class PrEligibilityTests(unittest.TestCase):
                 result = self.evaluate(self.local_request(), runner)
                 self.assertEqual(result["status"], "blocked")
                 self.assertEqual(result["reasonCodes"], [reason])
+
+    def test_blocked_but_mergeable_is_classified_but_never_eligible(self) -> None:
+        # AC3.c (finding #2): a BLOCKED-but-mergeable PR earns an actionable
+        # diagnosis, yet stays blocked and NEVER reaches ``gh pr merge``. This is
+        # the additive-only invariant — classification enriches the reason code,
+        # it does not manufacture eligibility.
+
+        # 1) BLOCKED, green checks, unresolved review threads → conversation.
+        conversation = FixtureRunner(self.repo)
+        conversation.pr_payload["mergeStateStatus"] = "BLOCKED"
+        conversation.pr_payload["mergeable"] = "MERGEABLE"
+        conversation.thread_pages = [thread_page([False, True])]
+        result = self.evaluate(self.local_request(), conversation)
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reasonCodes"], ["merge_blocked_conversation"])
+        self.assertIn("1 unresolved", result["diagnostic"])
+
+        # 2) BLOCKED, green checks, no unresolved threads → protection/approval.
+        review = FixtureRunner(self.repo)
+        review.pr_payload["mergeStateStatus"] = "BLOCKED"
+        review.pr_payload["mergeable"] = "MERGEABLE"
+        result2 = self.evaluate(self.local_request(), review)
+        self.assertEqual(result2["status"], "blocked")
+        self.assertEqual(result2["reasonCodes"], ["merge_blocked_review"])
+
+        # Invariant: neither run is eligible, and the auto-merge path is never
+        # entered regardless of how mergeable the PR looks.
+        for runner in (conversation, review):
+            self.assertNotIn(
+                ("gh", "pr", "merge"), [call[:3] for call in runner.calls]
+            )
 
     def test_local_branch_rejects_unverifiable_local_and_remote_state(self) -> None:
         dirty = FixtureRunner(self.repo)
@@ -761,7 +794,9 @@ class PrEligibilityTests(unittest.TestCase):
             ("state", "MERGED", "pull_request_not_open"),
             ("isDraft", True, "pull_request_draft"),
             ("baseRefName", "develop", "pull_request_base_mismatch"),
-            ("mergeStateStatus", "BLOCKED", "merge_state_not_clean"),
+            # BLOCKED with green checks and no unresolved threads → a required
+            # approval / protection rule is unsatisfied (still blocked, finding #2).
+            ("mergeStateStatus", "BLOCKED", "merge_blocked_review"),
         )
         for field, value, reason in scenarios:
             with self.subTest(field=field):

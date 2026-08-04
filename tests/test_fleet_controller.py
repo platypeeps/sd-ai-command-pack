@@ -324,6 +324,199 @@ class FleetControllerTests(InstallTestCase):
         )
         self.assertEqual(len(wave), 2)
 
+    def _settle_canaries_at_target(self, controller, state) -> None:
+        for canary in ("canary-a", "canary-b"):
+            action = self.issued_action_for(controller, state, canary)
+            controller.record_result(
+                state,
+                action_id=action["actionId"],
+                release="0.37.0",
+                consumer=canary,
+                result="at-target",
+            )
+
+    def _drive_both_to_merge_waiting(self, controller, state, consumers, pr_numbers):
+        # Both wave lanes share an identical stage sequence and are recorded every
+        # round, so they advance in lockstep and reach merge/waiting on the same
+        # round — before any merge action is issued for a candidate.
+        for _ in range(60):
+            if all(
+                self.lane_for(state, name)["stage"] == "merge"
+                and self.lane_for(state, name)["status"] == "waiting"
+                and self.lane_for(state, name)["result"] is None
+                for name in consumers
+            ):
+                return
+            recorded_any = False
+            for action in controller.issue_next(state):
+                if action["consumer"] not in consumers or action["stage"] == "merge":
+                    continue
+                kwargs = {}
+                if action["stage"] == "pr-publication":
+                    kwargs = {"head": HEAD, "pr_number": pr_numbers[action["consumer"]]}
+                elif action["stage"] in controller.PR_HEAD_STAGES:
+                    kwargs = {"head": HEAD}
+                controller.record_result(
+                    state,
+                    action_id=action["actionId"],
+                    release="0.37.0",
+                    consumer=action["consumer"],
+                    result="passed",
+                    **kwargs,
+                )
+                recorded_any = True
+            if not recorded_any:
+                break
+        self.fail(f"{consumers} never both reached merge/waiting")
+
+    def test_status_show_issued_peeks_issued_action_without_mutation(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(controller)
+        self.pass_preflight(controller, state)
+        issued = controller.issue_next(state)[0]
+
+        # --show-issued surfaces the already-issued actionId read-only.
+        peeked = controller.status_report(state, show_issued=True)
+        lane = next(item for item in peeked["lanes"] if item["name"] == issued["consumer"])
+        self.assertEqual(lane["issuedActionId"], issued["actionId"])
+        # A peek issues nothing new: the lane is still issued, not re-issued.
+        self.assertEqual(controller.issue_next(state), [])
+
+        # The field is opt-in: default status output does not carry it.
+        default = controller.status_report(state)
+        self.assertNotIn("issuedActionId", default["lanes"][0])
+
+    def test_status_report_surfaces_merge_queue_transparency(self) -> None:
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(controller)
+        self.pass_preflight(controller, state)
+        self._settle_canaries_at_target(controller, state)
+        self._drive_both_to_merge_waiting(
+            controller, state, ("wave-a", "wave-b"), {"wave-a": 20, "wave-b": 21}
+        )
+
+        report = controller.status_report(state)
+        candidate = report["plan"]["mergeCandidate"]
+        self.assertIn(candidate, ("wave-a", "wave-b"))
+        other = "wave-b" if candidate == "wave-a" else "wave-a"
+
+        held = next(item for item in report["lanes"] if item["name"] == other)
+        self.assertEqual(held["heldBehind"], candidate)
+        self.assertIn(f"merge held behind {candidate}", held["queueNote"])
+        # The candidate itself is never reported as held behind anyone.
+        winner = next(item for item in report["lanes"] if item["name"] == candidate)
+        self.assertIsNone(winner["heldBehind"])
+        self.assertIsNone(winner["queueNote"])
+
+    def test_parked_canary_allows_wave_progression_only_with_opt_in(self) -> None:
+        controller = self.load_controller()
+        for allow, expect_wave in ((False, False), (True, True)):
+            with self.subTest(allow_parked_canary=allow):
+                root = self.make_git_repo_without_trellis()
+                fleet, manifest = self.write_inputs(root)
+                state = controller.new_state(
+                    repo=root,
+                    campaign="campaign-1",
+                    release="0.37.0",
+                    fleet_path=fleet,
+                    pack_manifest_path=manifest,
+                    allow_parked_canary=allow,
+                )
+                self.pass_preflight(controller, state)
+                # canary-a settles at-target; canary-b is parked (operator-decision).
+                first = self.issued_action_for(controller, state, "canary-a")
+                controller.record_result(
+                    state,
+                    action_id=first["actionId"],
+                    release="0.37.0",
+                    consumer="canary-a",
+                    result="at-target",
+                )
+                parked = self.issued_action_for(controller, state, "canary-b")
+                controller.record_result(
+                    state,
+                    action_id=parked["actionId"],
+                    release="0.37.0",
+                    consumer="canary-b",
+                    result="operator-decision",
+                    reason_code="operator-parked",
+                )
+
+                issued = controller.issue_next(state)
+                started = sorted(action["consumer"] for action in issued)
+                if expect_wave:
+                    self.assertEqual(started, ["wave-a", "wave-b"])
+                    self.assertEqual(state["status"], "active")
+                else:
+                    self.assertEqual(issued, [])
+                    self.assertEqual(state["status"], "blocked")
+
+    def test_load_provenance_validates_operator_decision_input(self) -> None:
+        controller = self.load_controller()
+        root = self.make_git_repo_without_trellis()
+        good = root / "prov.json"
+        good.write_text(
+            json.dumps({"reasonCode": "operator-parked", "detail": "held by owner"}),
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            controller._load_provenance(good)["reasonCode"], "operator-parked"
+        )
+        for name, body, message in (
+            ("bad.json", "{not json", "not valid JSON"),
+            ("list.json", "[]", "must be a JSON object"),
+            ("nocode.json", '{"detail": "x"}', "must include a 'reasonCode'"),
+            ("badtoken.json", '{"reasonCode": "has spaces"}', "reasonCode"),
+        ):
+            path = root / name
+            path.write_text(body, encoding="utf-8")
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(controller.FleetControllerError, message):
+                    controller._load_provenance(path)
+
+    def test_cli_operator_decision_requires_validated_provenance(self) -> None:
+        controller = self.load_controller()
+        root = self.make_git_repo_without_trellis()
+        fleet, manifest = self.write_inputs(root)
+        state_home = root.parent / f"{root.name}-op-state"
+        common = (
+            "--repo", str(root), "--campaign", "op-campaign",
+            "--state-home", str(state_home), "--json",
+        )
+        self.run_cli(
+            controller, "plan", *common, "--release", "0.37.0",
+            "--fleet", str(fleet), "--manifest", str(manifest),
+            "--consumer", "canary-a",
+        )
+        _s, issued, _e = self.run_cli(controller, "next", *common)
+        preflight = issued["actions"][0]
+        self.run_cli(
+            controller, "record", *common, "--release", "0.37.0",
+            "--action-id", preflight["actionId"], "--result", "passed",
+        )
+        _s, issued2, _e = self.run_cli(controller, "next", *common)
+        checkout = issued2["actions"][0]
+
+        # Negative: operator-decision without --provenance is refused.
+        status, _out, error = self.run_cli(
+            controller, "record", *common, "--release", "0.37.0",
+            "--action-id", checkout["actionId"], "--result", "operator-decision",
+        )
+        self.assertEqual(status, 2)
+        self.assertIn("requires --provenance", error)
+
+        # Positive: a validated provenance file supplies the reason code.
+        prov = root / "prov.json"
+        prov.write_text(json.dumps({"reasonCode": "operator-parked"}), encoding="utf-8")
+        status, recorded, error = self.run_cli(
+            controller, "record", *common, "--release", "0.37.0",
+            "--action-id", checkout["actionId"], "--consumer", "canary-a",
+            "--result", "operator-decision", "--provenance", str(prov),
+        )
+        self.assertEqual((status, error), (0, ""))
+        self.assertEqual(recorded["receipt"]["reasonCode"], "operator-parked")
+        self.assertEqual(recorded["receipt"]["result"], "operator-decision")
+
     def test_canary_ownership_skip_blocks_later_waves(self) -> None:
         controller = self.load_controller()
         _root, _fleet, _manifest, state = self.state(controller)

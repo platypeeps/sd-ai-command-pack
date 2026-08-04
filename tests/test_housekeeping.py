@@ -596,6 +596,91 @@ class HousekeepingTests(InstallTestCase):
                 failure.stdout,
             )
 
+    def test_housekeeping_kb_refresh_skips_read_only_target_but_blocks_other_failures(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        script = str(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"
+        )
+        function_source = (
+            f'eval "$(awk \'/^refresh_obsidian_kb\\(\\)/,/^}}/\' {script})";'
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            scripts_dir = root / "scripts"
+            scripts_dir.mkdir()
+            toolchain = scripts_dir / "sd-ai-command-pack-toolchain.sh"
+            helper = scripts_dir / "sd-ai-command-pack-update-spec-kb.py"
+            helper.write_text("# fixture\n", encoding="utf-8")
+            # Emit the KB helper's diagnostic text and exit with the KB helper's
+            # exit code, so refresh_obsidian_kb can classify the failure.
+            toolchain.write_text(
+                "#!/usr/bin/env bash\n"
+                'printf "%s\\n" "${KB_OUTPUT:-}" >&2\n'
+                'exit "${KB_RESULT:-0}"\n',
+                encoding="utf-8",
+            )
+            (root / ".obsidian-kb").mkdir()
+
+            probe = (
+                "ACTIONS=(); ANOMALIES=(); DRY_RUN=0;"
+                f"SCRIPT_DIR={str(scripts_dir)!r};"
+                'add_action() { ACTIONS+=("$*"); };'
+                'add_anomaly() { ANOMALIES+=("$*"); };'
+                f"{function_source}"
+                "refresh_obsidian_kb; rc=$?;"
+                'printf "rc=%s\\nactions=%s\\nanomalies=%s\\n" '
+                '"$rc" "${ACTIONS[*]-}" "${ANOMALIES[*]-}"'
+            )
+
+            # A read-only target (exit 2 with an EACCES diagnostic) is advisory:
+            # the merge gate continues instead of blocking (finding #7).
+            read_only = subprocess.run(
+                [self._bash_path, "-c", probe],
+                cwd=root,
+                env={
+                    **os.environ,
+                    "KB_RESULT": "2",
+                    "KB_OUTPUT": (
+                        "error: failed to refresh .obsidian-kb: "
+                        "[Errno 13] Permission denied: '/vault/note.md'"
+                    ),
+                },
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(read_only.returncode, 0, read_only.stdout)
+            self.assertIn("rc=0", read_only.stdout)
+            self.assertIn("kb_refresh_skipped", read_only.stdout)
+            self.assertNotIn("kb_refresh_failed", read_only.stdout)
+
+            # A non-read-only OSError (exit 2, ENOENT) still hard-blocks.
+            other = subprocess.run(
+                [self._bash_path, "-c", probe],
+                cwd=root,
+                env={
+                    **os.environ,
+                    "KB_RESULT": "2",
+                    "KB_OUTPUT": (
+                        "error: failed to refresh .obsidian-kb: "
+                        "[Errno 2] No such file or directory: '/vault'"
+                    ),
+                },
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(other.returncode, 0, other.stdout)
+            self.assertIn("rc=1", other.stdout)
+            self.assertIn("Obsidian KB refresh failed", other.stdout)
+            self.assertNotIn("kb_refresh_skipped", other.stdout)
+
     def test_housekeeping_dry_run_previews_branch_cleanup_without_final_state_anomaly(
         self,
     ) -> None:

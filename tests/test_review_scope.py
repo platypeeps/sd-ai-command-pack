@@ -226,17 +226,26 @@ class ReviewScopeTests(InstallTestCase):
         # drift out from under the mjs matcher.
         self.assertIn("sd-ai-command-pack-scope-advisory:", result.stdout)
 
-    def write_gh_pr_body_stub(self, root: Path, body: str) -> Path:
-        """Install a `gh` stub answering `pr view` with a fixed body.
+    def write_gh_pr_body_stub(
+        self, root: Path, body: str, state: str = "OPEN"
+    ) -> Path:
+        """Install a `gh` stub answering `pr view` with a fixed body and state.
 
         Returns the directory to prepend to PATH. Advisory cases that must
         exercise the shipped resolved-body path cannot use
-        SD_AI_COMMAND_PACK_SCOPE_PR_BODY, which short-circuits above gh.
+        SD_AI_COMMAND_PACK_SCOPE_PR_BODY, which short-circuits above gh. `state`
+        defaults to OPEN; pass CLOSED/MERGED to exercise the closed-PR-bleed
+        guard (finding #6).
         """
         stub_bin = root.parent / f"{root.name}-bin"
         stub_bin.mkdir(exist_ok=True)
         payload = json.dumps(
-            {"title": "Change", "body": body, "url": "https://example.test/pr/1"}
+            {
+                "title": "Change",
+                "body": body,
+                "url": "https://example.test/pr/1",
+                "state": state,
+            }
         )
         (stub_bin / "gh").write_text(
             "#!/usr/bin/env bash\n"
@@ -339,6 +348,70 @@ class ReviewScopeTests(InstallTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertNotIn("sd-ai-command-pack-scope-advisory:", result.stdout)
         self.assertNotIn("warning:", result.stdout)
+
+    def test_review_scope_ignores_closed_same_branch_pr_body(self) -> None:
+        """Finding #6: a CLOSED same-branch PR's body must not bleed in.
+
+        `gh pr view` resolves the branch's PR and returns a CLOSED one when no
+        open PR exists. Its (possibly stale) body is not authoritative: a closed
+        body that HAPPENS to carry the scope section must not count as positive
+        evidence, and a closed body that lacks it must not be the reason the
+        check fails. Pre-publication the intended body is env-provided.
+        """
+        # A closed PR whose body DOES contain the section must not be trusted as
+        # satisfied — the resolver has no open evidence, so advisory still warns.
+        root = self.make_scoped_advisory_repo()
+        stub_bin = self.write_gh_pr_body_stub(
+            root,
+            "Tooling/generated scope: regenerated the repository map.",
+            state="CLOSED",
+        )
+        result = self.run_advisory_scope(
+            root, PATH=f"{stub_bin}{os.pathsep}{os.environ['PATH']}"
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("sd-ai-command-pack-scope-advisory:", result.stdout)
+
+        # With the intended body provided via env, the branch passes without any
+        # override reaching for the closed PR body.
+        result = self.run_advisory_scope(
+            root,
+            PATH=f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+            SD_AI_COMMAND_PACK_SCOPE_PR_BODY=(
+                "Tooling/generated scope: refreshed copied pack docs."
+            ),
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("sd-ai-command-pack-scope-advisory:", result.stdout)
+
+    def test_review_scope_closed_pr_required_mode_fails_distinctly(self) -> None:
+        """A required-mode run with only a closed PR fails with a closed-PR
+        diagnosis, not the generic resolved-body failure — so the operator is
+        told to open the PR / provide the body rather than chasing a phantom
+        unsatisfied body."""
+        root = self.make_scoped_advisory_repo()
+        stub_bin = self.write_gh_pr_body_stub(
+            root, "Fixes a product bug.", state="MERGED"
+        )
+        result = subprocess.run(
+            ["bash", "scripts/sd-ai-command-pack-review-scope.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_SCOPE_CHECK_GH": "required",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("closed/merged PR", result.stdout)
+        self.assertNotIn(
+            "does not include a recognized tooling/generated scope section",
+            result.stdout,
+        )
 
     def test_review_scope_advisory_warns_when_resolved_body_lacks_section(self) -> None:
         root = self.make_scoped_advisory_repo()
@@ -1073,7 +1146,7 @@ class ReviewScopeTests(InstallTestCase):
             "set -euo pipefail\n"
             "if [ \"${1:-}\" = pr ] && [ \"${2:-}\" = view ]; then\n"
             "  printf '%s\\n' "
-            "'{\"title\":\"Product fix\",\"body\":\"Updates behavior.\",\"url\":\"https://example.test/pr/1\"}'\n"
+            "'{\"title\":\"Product fix\",\"body\":\"Updates behavior.\",\"url\":\"https://example.test/pr/1\",\"state\":\"OPEN\"}'\n"
             "else\n"
             "  exit 1\n"
             "fi\n",
@@ -1132,7 +1205,7 @@ class ReviewScopeTests(InstallTestCase):
             "set -euo pipefail\n"
             "if [ \"${1:-}\" = pr ] && [ \"${2:-}\" = view ]; then\n"
             "  printf '%s\\n' "
-            "'{\"title\":\"Product fix\",\"body\":\"Updates behavior.\",\"url\":\"https://example.test/pr/1\"}'\n"
+            "'{\"title\":\"Product fix\",\"body\":\"Updates behavior.\",\"url\":\"https://example.test/pr/1\",\"state\":\"OPEN\"}'\n"
             "else\n"
             "  printf 'unexpected gh invocation: %s\\n' \"$*\" >&2\n"
             "  exit 1\n"
@@ -1189,7 +1262,7 @@ class ReviewScopeTests(InstallTestCase):
             "set -euo pipefail\n"
             "if [ \"${1:-}\" = pr ] && [ \"${2:-}\" = view ]; then\n"
             "  printf '%s\\n' "
-            "'{\"title\":\"Product fix\",\"body\":\"Tooling/generated scope: command-pack refresh.\",\"url\":\"https://example.test/pr/1\"}'\n"
+            "'{\"title\":\"Product fix\",\"body\":\"Tooling/generated scope: command-pack refresh.\",\"url\":\"https://example.test/pr/1\",\"state\":\"OPEN\"}'\n"
             "else\n"
             "  printf 'unexpected gh invocation: %s\\n' \"$*\" >&2\n"
             "  exit 1\n"
@@ -1243,7 +1316,7 @@ class ReviewScopeTests(InstallTestCase):
             "set -euo pipefail\n"
             "if [ \"${1:-}\" = pr ] && [ \"${2:-}\" = view ]; then\n"
             "  printf '%s\\n' "
-            "'{\"title\":\"Product fix\",\"body\":\"## Tooling/generated scope\\n- command-pack refresh.\",\"url\":\"https://example.test/pr/1\"}'\n"
+            "'{\"title\":\"Product fix\",\"body\":\"## Tooling/generated scope\\n- command-pack refresh.\",\"url\":\"https://example.test/pr/1\",\"state\":\"OPEN\"}'\n"
             "else\n"
             "  printf 'unexpected gh invocation: %s\\n' \"$*\" >&2\n"
             "  exit 1\n"

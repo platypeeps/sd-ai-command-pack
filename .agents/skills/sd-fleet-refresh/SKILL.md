@@ -140,9 +140,14 @@ but defines no ordering or transition policy:
   dedicated lightweight Trellis task for this consumer and target release when
   no current task exists. Give its PRD the immutable release identity, managed
   scope, preparation/check commands, and finish-work expectation; bind it to
-  the refresh branch. An unrelated current task, dirty Trellis state, or
-  externally owned checkout means `ownership-skip`; never repurpose another
-  task, stash, reset, clean, or install.
+  the refresh branch. After activation, assert the task's `task.json`
+  `description` is present and non-empty before advancing this stage; an empty
+  or missing description is a checkout-validation failure with an actionable
+  message (re-create the task with a real `--description`), not a silent
+  advance — a belt-and-suspenders guard against an upstream `task.py create`
+  that tolerates an empty description. An unrelated current task, dirty Trellis
+  state, or externally owned checkout means `ownership-skip`; never repurpose
+  another task, stash, reset, clean, or install.
 - `install-update` and `install-audit`: run only the commands printed by
   preflight. The installer, provenance, and audit remain authoritative.
 - `candidate-prepare`, `focused-candidate`, and `local-checks`: run the
@@ -152,7 +157,16 @@ but defines no ordering or transition policy:
   installer-managed output, receipts/provenance, and deterministic preparation
   output. Classify the exact base/head with
   `sd-ai-command-pack-fleet-review-classify.py`, push, and create or reuse one
-  PR. Record the published head and PR number. When a prior merge action
+  PR. Record the published head and PR number. Fold finish-work into the
+  reviewed head with `sd-ai-command-pack-fleet-publish.py`: it makes the work
+  commit (pack + active task + a pre-computed post-archive `repomix-map` on
+  repomix-indexed consumers), then archives the task and records the journal via
+  the shipped `record-session` wrapper so the pushed head already carries all
+  bookkeeping. It refuses to run on a tree dirty outside the managed allowlist,
+  transactionally restores the task on any error, asserts the completion delta
+  is `.trellis`-only, and never pushes on an invalid receipt — so the merge
+  stage sees zero head-advance and no successor to reclassify. When a prior
+  merge action
   returned here because `sd-finish-work` advanced the PR, do not create another
   commit or push: verify the retained finish-work receipt names the current
   local and remote PR head, reclassify that exact successor, reuse the existing

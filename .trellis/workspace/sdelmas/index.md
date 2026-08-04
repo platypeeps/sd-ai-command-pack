@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 284
-- **Last Active**: 2026-08-03
+- **Total Sessions**: 285
+- **Last Active**: 2026-08-04
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~1330 | Active |
+| `journal-6.md` | ~1366 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 285 | 2026-08-04 | sd-ai-command-pack 0.64.4 — fleet-rollout hardening | `1561b5119237fe0a63a5cfa764b2109314af745e` | `feat/0.64.4-fleet-rollout-hardening` |
 | 284 | 2026-08-03 | Ship 0.64.3: harden sibling-helper loaders against TOCTOU | `46243a5c` | `fix/harden-helper-loader-toctou` |
 | 283 | 2026-08-03 | Decouple sd:fleet-refresh command from installed-skill resolution (0.64.2) | `74bc984c` | `feat/decouple-fleet-refresh-command` |
 | 282 | 2026-08-03 | Release sd-ai-command-pack 0.64.1 — vendored pack-source hardening | `dcdf0820` | `chore/pack-source-hardening-0.64.1` |
