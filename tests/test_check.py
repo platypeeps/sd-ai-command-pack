@@ -286,6 +286,129 @@ class CheckTests(InstallTestCase):
         for log in logs:
             self.assertFalse(log.exists(), f"unexpected provider dispatch: {log}")
 
+    def _write_kb_check_helper(
+        self, root: Path, *, exit_code: int, message: str
+    ) -> None:
+        helper = root / "scripts/sd-ai-command-pack-update-spec-kb.py"
+        helper.write_text(
+            "import sys\n"
+            "assert sys.argv[1:] == ['--check']\n"
+            f"print({message!r})\n"
+            f"raise SystemExit({exit_code})\n",
+            encoding="utf-8",
+        )
+
+    def _kb_row(self, report: dict[str, object]) -> dict[str, object]:
+        return next(
+            row for row in report["checks"] if row["id"] == "knowledge.obsidian-kb"
+        )
+
+    def test_external_symlink_kb_failure_is_advisory_skipped(self) -> None:
+        # Case (b): .obsidian-kb symlinks to a live external vault; a --check
+        # failure is non-deterministic drift and must be downgraded to a
+        # non-blocking advisory rather than gate the merge.
+        root = self.make_check_repo()
+        external = root.parent / "external-vault"
+        external.mkdir()
+        (external / "note.md").write_text("live vault\n", encoding="utf-8")
+        os.symlink(external, root / ".obsidian-kb")
+        self._write_kb_check_helper(
+            root, exit_code=1, message="knowledge export is stale"
+        )
+
+        result = self.run_check(root)
+        report = self.parse_report(result)
+
+        row = self._kb_row(report)
+        self.assertEqual(row["status"], "skipped", result.stdout)
+        self.assertIn("advisory", row["diagnostic"])
+        # The original blocking diagnostics survive for the operator.
+        self.assertIn("knowledge export is stale", row["diagnostic"])
+        self.assertEqual(row["exitCode"], 1)
+        self.assertIsNotNone(row["command"])
+        self.assertIn("sd-update-spec", row["remediation"])
+        # Advisory downgrade must not gate the merge.
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotEqual(report["status"], "failed")
+
+    def test_external_symlink_kb_pass_stays_passed(self) -> None:
+        # Case (c): an external-symlinked KB whose --check passes is a normal
+        # pass — the advisory downgrade fires only on failure.
+        root = self.make_check_repo()
+        external = root.parent / "external-vault"
+        external.mkdir()
+        os.symlink(external, root / ".obsidian-kb")
+        self._write_kb_check_helper(
+            root, exit_code=0, message="knowledge export is fresh"
+        )
+
+        result = self.run_check(root)
+        report = self.parse_report(result)
+
+        row = self._kb_row(report)
+        self.assertEqual(row["status"], "passed", result.stdout)
+        self.assertNotIn("advisory", str(row.get("diagnostic") or ""))
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_in_repo_symlink_kb_failure_still_blocks(self) -> None:
+        # Case (e): an in-repo symlink resolves under the repo and stays
+        # deterministic against HEAD, so a --check failure keeps blocking —
+        # closing the is_symlink()-alone hole.
+        root = self.make_check_repo()
+        store = root / "kb-store"
+        store.mkdir()
+        (store / "note.md").write_text("in-repo kb\n", encoding="utf-8")
+        os.symlink(store, root / ".obsidian-kb")
+        self._write_kb_check_helper(
+            root, exit_code=1, message="knowledge export is stale"
+        )
+
+        result = self.run_check(root)
+        report = self.parse_report(result)
+
+        row = self._kb_row(report)
+        self.assertEqual(row["status"], "failed", result.stdout)
+        self.assertNotIn("advisory", str(row.get("diagnostic") or ""))
+        self.assertEqual(result.returncode, 1, result.stdout)
+
+    def test_is_external_symlink_discriminates_by_resolved_target(self) -> None:
+        module = self.load_module_from_path(
+            self.SCRIPT, "sd_ai_command_pack_check_under_test"
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-check-symlink-")
+        self.addCleanup(tempdir.cleanup)
+        base = Path(tempdir.name)
+        repo = base / "repo"
+        repo.mkdir()
+
+        # External symlink whose target resolves outside the repo -> advisory.
+        external_target = base / "external-vault"
+        external_target.mkdir()
+        external_link = repo / "external-kb"
+        os.symlink(external_target, external_link)
+        self.assertTrue(module._is_external_symlink(external_link, repo))
+
+        # In-repo symlink whose target resolves under the repo -> keeps blocking.
+        in_repo_target = repo / "kb-store"
+        in_repo_target.mkdir()
+        in_repo_link = repo / "in-repo-kb"
+        os.symlink(in_repo_target, in_repo_link)
+        self.assertFalse(module._is_external_symlink(in_repo_link, repo))
+
+        # A real (non-symlink) directory is never advisory.
+        real_dir = repo / "real-kb"
+        real_dir.mkdir()
+        self.assertFalse(module._is_external_symlink(real_dir, repo))
+
+        # A broken link resolves to its declared target: external -> advisory,
+        # in-repo -> keeps blocking so the breakage surfaces.
+        broken_external = repo / "broken-external-kb"
+        os.symlink(base / "missing-external", broken_external)
+        self.assertTrue(module._is_external_symlink(broken_external, repo))
+        broken_in_repo = repo / "broken-in-repo-kb"
+        os.symlink(repo / "missing-in-repo", broken_in_repo)
+        self.assertFalse(module._is_external_symlink(broken_in_repo, repo))
+
     def test_state_guard_detects_configured_repository_mutation(self) -> None:
         root = self.make_check_repo()
         helper = root.parent / "mutate.py"
