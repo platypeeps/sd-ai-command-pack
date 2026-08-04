@@ -77,7 +77,7 @@ suite with the shim as the tests' bash:
 export SD_AI_COMMAND_PACK_TEST_BASH="$PWD/.github/scripts/kcov-bash-shim.sh"
 export SD_AI_COMMAND_PACK_REAL_BASH="$(command -v bash)"
 export SD_AI_COMMAND_PACK_KCOV_DIR="$(mktemp -d)"
-export SD_AI_COMMAND_PACK_KCOV_INCLUDE="$PWD/scripts/sd-ai-command-pack-"
+export SD_AI_COMMAND_PACK_KCOV_INCLUDE="sd-ai-command-pack-"
 python3 -m unittest discover -s tests -p 'test_*.py'
 bash .github/scripts/report-shell-coverage.sh
 ```
