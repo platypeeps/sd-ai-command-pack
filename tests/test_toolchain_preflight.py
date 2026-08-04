@@ -234,7 +234,7 @@ class ToolchainPreflightTests(InstallTestCase):
             root,
             "python",
             env={
-                "PATH": f"{path_bin}{os.pathsep}{Path(self._bash_path).parent}",
+                "PATH": f"{path_bin}{os.pathsep}{Path(self._real_bash_path).parent}",
                 "SD_AI_COMMAND_PACK_TOOLCHAIN_PLATFORM": "Linux",
                 "VIRTUAL_ENV": "",
             },

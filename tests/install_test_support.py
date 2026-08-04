@@ -85,6 +85,11 @@ def fleet_manifest(consumers: list[dict[str, object]]) -> dict[str, object]:
 class InstallTestCase(unittest.TestCase):
     _bash_path: str | None
 
+    # The real bash binary, independent of any coverage-shim override. Tests
+    # that need bash's directory on PATH (not just something to invoke) must use
+    # this: _bash_path may point at the kcov shim, whose directory has no bash.
+    _real_bash_path: str | None
+
     _manifest_files: list[install.PackFile]
 
     # Per-class cache of (template_root, head_oid) for make_housekeeping_repo.
@@ -94,7 +99,25 @@ class InstallTestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls._bash_path = shutil.which("bash")
+        # CI's shell-coverage lane sets SD_AI_COMMAND_PACK_TEST_BASH to a kcov
+        # shim so the bash the subprocess tests spawn runs under coverage.
+        # Unset (local runs), fall back to the bash on PATH — identical
+        # behaviour to before this override existed.
+        cls._real_bash_path = shutil.which("bash")
+        override_bash = os.environ.get("SD_AI_COMMAND_PACK_TEST_BASH")
+        if override_bash and not (
+            os.path.isfile(override_bash) and os.access(override_bash, os.X_OK)
+        ):
+            # Fail immediately with an actionable message instead of letting a
+            # bad override surface much later as a FileNotFoundError from the
+            # first subprocess.run that spawns bash. (An unset override keeps the
+            # old behaviour: fall back to PATH bash, skip when none is found.)
+            raise RuntimeError(
+                "SD_AI_COMMAND_PACK_TEST_BASH points at "
+                f"{override_bash!r}, which is not an executable file. "
+                "Point it at the kcov shim, or unset it to use the bash on PATH."
+            )
+        cls._bash_path = override_bash or cls._real_bash_path
         _, cls._manifest_files = install.load_manifest()
 
     def valid_pack_file(
@@ -204,8 +227,9 @@ class InstallTestCase(unittest.TestCase):
         # repos. Auto-gc writes transient objects/bitmap-ref-tips_* files while
         # repacking; those templates are later shutil.copytree-cloned by each
         # test, and a copy racing a still-running detached gc raises shutil.Error
-        # when such a temp file vanishes mid-copy. Never letting auto-gc fire on
-        # the template builders removes that race.
+        # when such a temp file vanishes mid-copy. This closes the client side;
+        # the bare remote's server-side receive-pack auto-gc is disabled
+        # separately in the template builders (see _build_housekeeping_template).
         return subprocess.run(
             ["git", "-c", "gc.auto=0", *args],
             cwd=root,
@@ -603,6 +627,20 @@ class InstallTestCase(unittest.TestCase):
 
         self.run_git(remote, "init", "--bare")
         self.run_git(repo, "init", "-b", "main")
+        # Persist gc-disabling config on both repos. _run_git_process already
+        # passes `-c gc.auto=0` on the client, but that does not reach the bare
+        # remote's server-side receive-pack: after `git push`, the bare repo
+        # runs its OWN post-receive auto-gc (receive.autoGc, on by default),
+        # governed by the bare repo's config, not the pushing client's -c flag.
+        # That detached repack renames pack files and prunes loose-object dirs in
+        # origin.git/objects; when a test copytree-clones this template mid-gc,
+        # copytree raises "No such file or directory". Disabling gc persistently
+        # on the remote closes the gap the client-side -c flag leaves open (the
+        # kcov-shim job's slower git widened the window enough to hit it).
+        for git_dir in (remote, repo):
+            self.run_git(git_dir, "config", "gc.auto", "0")
+            self.run_git(git_dir, "config", "receive.autoGc", "false")
+            self.run_git(git_dir, "config", "maintenance.auto", "false")
         self.run_git(repo, "config", "user.email", "test@example.com")
         self.run_git(repo, "config", "user.name", "Test User")
         (repo / ".trellis/scripts").mkdir(parents=True)
@@ -789,6 +827,20 @@ class InstallTestCase(unittest.TestCase):
 
         self.run_git(remote, "init", "--bare")
         self.run_git(repo, "init", "-b", "main")
+        # Persist gc-disabling config on both repos. _run_git_process already
+        # passes `-c gc.auto=0` on the client, but that does not reach the bare
+        # remote's server-side receive-pack: after `git push`, the bare repo
+        # runs its OWN post-receive auto-gc (receive.autoGc, on by default),
+        # governed by the bare repo's config, not the pushing client's -c flag.
+        # That detached repack renames pack files and prunes loose-object dirs in
+        # origin.git/objects; when a test copytree-clones this template mid-gc,
+        # copytree raises "No such file or directory". Disabling gc persistently
+        # on the remote closes the gap the client-side -c flag leaves open (the
+        # kcov-shim job's slower git widened the window enough to hit it).
+        for git_dir in (remote, repo):
+            self.run_git(git_dir, "config", "gc.auto", "0")
+            self.run_git(git_dir, "config", "receive.autoGc", "false")
+            self.run_git(git_dir, "config", "maintenance.auto", "false")
         self.run_git(repo, "config", "user.email", "test@example.com")
         self.run_git(repo, "config", "user.name", "Test User")
         (repo / ".trellis/scripts").mkdir(parents=True)

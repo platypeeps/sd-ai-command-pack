@@ -768,9 +768,11 @@ Set each per-file floor at or just below the current measured helper coverage
 and ratchet it upward when focused tests improve a script. CI fails when
 `unittest` reports any skipped tests, runs the test suite on Ubuntu and macOS,
 and runs Ruff over pack Python plus `node --check` over the review-preflight
-JavaScript twins when Node is available locally. The shipped shell scripts,
-GitHub workflow YAML, and `.github/scripts/*` automation are exercised by
-behavioral tests and syntax/lint gates rather than a coverage.py number; CI
+JavaScript twins when Node is available locally. The shipped shell scripts
+(`scripts/sd-ai-command-pack-*.sh`) are coverage-measured with kcov in the
+`shell-coverage` job (measured baseline, no floor yet), and `.github/scripts/*.py`
+automation is coverage.py-measured. GitHub workflow YAML is still exercised by
+behavioral tests and syntax/lint gates rather than a coverage number; CI
 also runs `shellcheck -S warning` over every tracked shell script and the git
 hooks. Consumers exempt the vendored pack shell from line review ("reviewed
 upstream"), so upstream lint rigor and focused subprocess tests are the

@@ -1153,13 +1153,13 @@ class GeneratedParityTests(InstallTestCase):
         )
         self.assertEqual(
             workflow.count("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"),
-            8,
+            9,
         )
         self.assertEqual(
             workflow.count(
                 "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
             ),
-            3,
+            4,
         )
         self.assertIn("main-push-scope:", workflow)
         self.assertIn("release-payload-gate:", workflow)

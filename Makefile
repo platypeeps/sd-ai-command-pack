@@ -52,8 +52,8 @@ test:
 # scripts/*.py; templates/scripts/ twins are byte-identical mirrors kept
 # out of the run so duplicate script names cannot collide.
 lint:
-	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/prepare-release.py
-	"$(VENV_PYTHON)" -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/prepare-release.py
+	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/prepare-release.py .github/scripts/summarize_shell_coverage.py
+	"$(VENV_PYTHON)" -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/prepare-release.py .github/scripts/summarize_shell_coverage.py
 	@if command -v node >/dev/null 2>&1; then \
 		node --check scripts/sd-ai-command-pack-review-preflight.mjs; \
 		node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs; \
