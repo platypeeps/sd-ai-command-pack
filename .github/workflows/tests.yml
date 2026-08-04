@@ -458,48 +458,6 @@ jobs:
           sudo cmake --install /tmp/kcov-build
           kcov --version
 
-      - name: kcov attribution probe (diagnostic)
-        # Diagnostic-only: the whole-suite wrap records 166 kcov runs but the
-        # merged report attributes zero shipped-shell lines. This isolates which
-        # link is broken by running kcov three ways and dumping each report's
-        # class filenames + a covered/total tally, WITHOUT the shim or a merge:
-        #   A  bash FILE on a real shipped script, with the include filter
-        #   B  bash -c 'source ...' form (what most subprocess tests use)
-        #   C  bash FILE on a throwaway script, NO include filter (baseline:
-        #      does kcov's bash collector record anything at all in this build?)
-        # If C is empty, kcov instrumentation itself is broken; if C has hits but
-        # A/B don't, the include-pattern or path handling is the culprit.
-        if: always()
-        # errexit OFF on purpose: greps below legitimately find no matches on an
-        # empty report (exit 1), and GitHub's default `bash -e` wrapper would
-        # abort the step before printing the evidence we want.
-        shell: bash --noprofile --norc {0}
-        run: |
-          set +e -u
-          tally() {  # $1 = kcov output dir, $2 = label — print kcov's own line totals
-            local j
-            j="$(find "$1" -name coverage.json | head -1)"
-            printf '  %s: %s\n' "$2" \
-              "$(grep -oE '"(percent_covered|covered_lines|total_lines)"[^,}]*' "$j" 2>/dev/null | tr '\n' ' ')"
-          }
-          echo "=== kcov version / bash under test ==="
-          kcov --version; /usr/bin/bash --version | head -1
-          # Two throwaway scripts, same body, one executable one not, so we learn
-          # whether kcov's shell collector needs the exec bit on a 0644 script.
-          printf '%s\n' '#!/usr/bin/env bash' 'x=1' 'if [ "$x" = 1 ]; then echo hit; fi' 'echo done' \
-            > "${{ runner.temp }}/px.sh"
-          cp "${{ runner.temp }}/px.sh" "${{ runner.temp }}/pn.sh"
-          chmod +x "${{ runner.temp }}/px.sh"; chmod 0644 "${{ runner.temp }}/pn.sh"
-          echo "=== C: target the BASH BINARY (old shim form) — expect total_lines 0 ==="
-          kcov "${{ runner.temp }}/kC" /usr/bin/bash "${{ runner.temp }}/px.sh" >/dev/null 2>&1
-          tally "${{ runner.temp }}/kC" C
-          echo "=== D: target the SCRIPT, +x (new shim form) — expect total_lines>0 ==="
-          kcov "${{ runner.temp }}/kD" "${{ runner.temp }}/px.sh" >/dev/null 2>&1
-          tally "${{ runner.temp }}/kD" D
-          echo "=== E: target the SCRIPT, 0644 (does kcov need the exec bit?) ==="
-          kcov "${{ runner.temp }}/kE" "${{ runner.temp }}/pn.sh" >/dev/null 2>&1
-          tally "${{ runner.temp }}/kE" E
-
       - name: Measure shipped shell coverage
         # Routes the bash the subprocess tests spawn through kcov-bash-shim.sh
         # so kcov records which lines of the shipped shell the suite reaches.

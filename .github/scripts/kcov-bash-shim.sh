@@ -55,10 +55,10 @@ run_dir="$kcov_dir/run-$$-${RANDOM:-0}-${SRANDOM:-0}"
 # leading option), target the script directly.
 first="${1:-}"
 if [ -n "$first" ] && [ "${first#-}" = "$first" ] && [ -f "$first" ]; then
-  # kcov launches the script via its shebang, which needs the exec bit; the
-  # shipped scripts ship 0644 and the tests run writable copies, so grant it
-  # when we can. Failure is non-fatal (kcov may still parse via the shebang).
-  [ -x "$first" ] || chmod +x "$first" 2>/dev/null || true
+  # No chmod: kcov parses the script through its shebang and does NOT need the
+  # exec bit (probe case E measured a 0644 script fine). Granting +x here would
+  # mutate the mode of the tracked shipped script, dirtying the working tree —
+  # which review-local.sh and the surface-closure check both observe and fail on.
   exec kcov \
     --include-pattern="$include_pattern" \
     --bash-dont-parse-binary-dir \
