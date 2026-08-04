@@ -94,7 +94,12 @@ class InstallTestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls._bash_path = shutil.which("bash")
+        # CI's shell-coverage lane sets SD_AI_COMMAND_PACK_TEST_BASH to a kcov
+        # shim so the bash the subprocess tests spawn runs under coverage.
+        # Unset (local runs), fall back to the bash on PATH — identical
+        # behaviour to before this override existed.
+        override_bash = os.environ.get("SD_AI_COMMAND_PACK_TEST_BASH")
+        cls._bash_path = override_bash or shutil.which("bash")
         _, cls._manifest_files = install.load_manifest()
 
     def valid_pack_file(

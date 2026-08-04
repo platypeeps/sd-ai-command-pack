@@ -404,6 +404,55 @@ jobs:
       - name: Check shipped-script doc coverage
         run: bash .github/scripts/check-shipped-script-docs.sh
 
+  shell-coverage:
+    name: Shell coverage
+    needs: ci-scope
+    if: needs.ci-scope.outputs.mode == 'full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install test dependencies
+        run: python3 -m pip install --require-hashes -r requirements-dev.txt
+
+      - name: Install kcov
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends kcov
+
+      - name: Measure shipped shell coverage
+        # Routes the bash the subprocess tests spawn through kcov-bash-shim.sh
+        # so kcov records which lines of the shipped shell the suite reaches.
+        # This is a measurement-only lane: no floor is enforced (measure before
+        # gating), and the report step fails only on a zero-line measurement.
+        env:
+          SD_AI_COMMAND_PACK_TEST_BASH: ${{ github.workspace }}/.github/scripts/kcov-bash-shim.sh
+          SD_AI_COMMAND_PACK_REAL_BASH: /usr/bin/bash
+          SD_AI_COMMAND_PACK_KCOV_DIR: ${{ runner.temp }}/kcov-shell
+          SD_AI_COMMAND_PACK_KCOV_INCLUDE: ${{ github.workspace }}/scripts/sd-ai-command-pack-
+        run: |
+          set -euo pipefail
+          mkdir -p "$SD_AI_COMMAND_PACK_KCOV_DIR"
+          python3 -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Report shipped shell coverage
+        if: always()
+        env:
+          SD_AI_COMMAND_PACK_KCOV_DIR: ${{ runner.temp }}/kcov-shell
+        run: bash .github/scripts/report-shell-coverage.sh
+
   lint:
     needs: ci-scope
     if: needs.ci-scope.outputs.mode == 'full'
@@ -432,14 +481,14 @@ jobs:
         run: python3 -m pip install --require-hashes -r requirements-dev.txt
 
       - name: Ruff (pack Python)
-        run: python3 -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py
+        run: python3 -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/summarize_shell_coverage.py
 
       # Mirrors the Makefile lint target's mypy scope: installer/, the
       # install.py facade, and shipped scripts/*.py. templates/scripts/
       # twins stay excluded (byte-identical mirrors; duplicate script
       # names would collide in one mypy run).
       - name: Mypy (pack Python)
-        run: python3 -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py
+        run: python3 -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/summarize_shell_coverage.py
 
       - name: Review preflight JavaScript syntax
         run: |

@@ -59,11 +59,34 @@ floor for each shipped Python helper. Set per-file floors at or just below the
 current measured coverage and ratchet them upward when focused tests improve a
 script; do not let a single helper regress behind a healthy aggregate total.
 `.github/scripts/*.py` automation is coverage-measured (no floor yet; floors
-arrive in a follow-up at or below measured values). Shell scripts and GitHub
-workflow YAML remain coverage.py-exempt for now. Cover shell behavior with
-focused subprocess tests, syntax checks, ShellCheck, workflow assertions, and
-the live CI gate instead of introducing a second shell-coverage tool unless a
-concrete defect shows the current controls are insufficient.
+arrive in a follow-up at or below measured values). Shipped shell
+(`scripts/sd-ai-command-pack-*.sh`) is coverage-measured in the `shell-coverage`
+CI job with kcov, which routes the bash the subprocess tests spawn through
+`.github/scripts/kcov-bash-shim.sh` and publishes a measured baseline (no floor
+yet; floors arrive in a follow-up at or below measured values). `full-check.sh`'s
+inline `python3 - <<HEREDOC` region is not bash-executed, so kcov cannot
+attribute it; its extraction and measurement are tracked separately. GitHub
+workflow YAML remains coverage-exempt. Continue covering shell behavior with
+focused subprocess tests, syntax checks, and ShellCheck as well — the kcov lane
+measures reach, it does not replace behavioral assertions.
+
+To reproduce the shell-coverage measurement locally, install kcov and run the
+suite with the shim as the tests' bash:
+
+```bash
+export SD_AI_COMMAND_PACK_TEST_BASH="$PWD/.github/scripts/kcov-bash-shim.sh"
+export SD_AI_COMMAND_PACK_REAL_BASH="$(command -v bash)"
+export SD_AI_COMMAND_PACK_KCOV_DIR="$(mktemp -d)"
+export SD_AI_COMMAND_PACK_KCOV_INCLUDE="$PWD/scripts/sd-ai-command-pack-"
+python3 -m unittest discover -s tests -p 'test_*.py'
+bash .github/scripts/report-shell-coverage.sh
+```
+
+`SD_AI_COMMAND_PACK_TEST_BASH` overrides the bash the subprocess tests spawn
+(default: the bash on `PATH`); the four `SD_AI_COMMAND_PACK_KCOV_*` variables
+scope and collect the kcov data. Leaving all of them unset — the normal case —
+runs the tests exactly as before with no coverage instrumentation. kcov is
+Linux-only, so this reproduction does not run on macOS.
 
 Ruff covers pack-owned Python in `install.py`, `installer/`, `scripts/`,
 `templates/scripts/`, and `tests/`. Trellis-owned platform runtime is excluded;
