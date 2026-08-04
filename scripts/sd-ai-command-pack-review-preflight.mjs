@@ -1279,7 +1279,7 @@ function attemptArchiveAnchorRecovery(headOid) {
     }
     const anchor = evaluateHistoricalCompletionBundle(baseOid, bookkeepingHeadOid);
     if (anchor.status !== 'valid') {
-      if (nearestAnchorFailure === null) nearestAnchorFailure = anchor;
+      nearestAnchorFailure = anchor;
       break;
     }
     eligible.push({ anchor, successor });

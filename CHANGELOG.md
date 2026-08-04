@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.64.6 - 2026-08-04
+
+- Simplify completion-successor anchor assignment in
+  `sd-ai-command-pack-review-preflight.mjs`: the recovery loop's
+  `nearestAnchorFailure === null` guard was redundant — the loop always breaks
+  the first time it reaches that assignment, so the guard was invariably true.
+  Replaced with a direct `nearestAnchorFailure = anchor;`. Behavior-preserving;
+  the invalid-anchor diagnostic (`completion_successor_anchor_invalid`) is
+  unchanged and still covered by its focused regression tests. Canonical
+  template edited first, root installed mirror kept byte-for-byte identical.
+  Follows up code-quality feedback from `platypeeps/rwbp-coordinator` PR #177.
+
 ## 0.64.5 - 2026-08-04
 
 - Three pack-source follow-ups surfaced by the 0.64.4 fleet rollout. All are
