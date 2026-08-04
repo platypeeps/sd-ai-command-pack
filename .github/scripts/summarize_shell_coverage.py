@@ -17,28 +17,42 @@ Exit status:
 
 from __future__ import annotations
 
+import os
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-# Matches the shipped shell scripts regardless of the absolute prefix kcov
-# records, while excluding tempdir copies and unrelated files.
+# Matches the shipped shell scripts by basename, regardless of the absolute
+# prefix kcov records. The subprocess tests run the scripts from many ephemeral
+# tempdir copies, so the same script appears under many different paths; we
+# normalize by basename and union covered line numbers across every copy so the
+# result is a real per-script reach number rather than a per-copy sum.
 _MARKER = "sd-ai-command-pack-"
 
 
 def summarize(cobertura_path: Path) -> tuple[int, int]:
-    """Return (covered_lines, total_lines) for shipped shell in the report."""
+    """Return (covered_lines, total_lines) for shipped shell in the report.
+
+    Executable and covered line numbers are unioned per basename across all
+    copies of each script, so a line reached in any copy counts once.
+    """
     tree = ET.parse(cobertura_path)
-    covered = 0
-    total = 0
+    executable: dict[str, set[int]] = {}
+    covered_lines: dict[str, set[int]] = {}
     for cls in tree.iter("class"):
         filename = cls.get("filename", "")
         if _MARKER not in filename or not filename.endswith(".sh"):
             continue
+        name = os.path.basename(filename)
+        exe = executable.setdefault(name, set())
+        cov = covered_lines.setdefault(name, set())
         for line in cls.iter("line"):
-            total += 1
+            number = int(line.get("number", "0"))
+            exe.add(number)
             if int(line.get("hits", "0")) > 0:
-                covered += 1
+                cov.add(number)
+    total = sum(len(lines) for lines in executable.values())
+    covered = sum(len(lines) for lines in covered_lines.values())
     return covered, total
 
 

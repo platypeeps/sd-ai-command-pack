@@ -467,7 +467,7 @@ jobs:
           SD_AI_COMMAND_PACK_TEST_BASH: ${{ github.workspace }}/.github/scripts/kcov-bash-shim.sh
           SD_AI_COMMAND_PACK_REAL_BASH: /usr/bin/bash
           SD_AI_COMMAND_PACK_KCOV_DIR: ${{ runner.temp }}/kcov-shell
-          SD_AI_COMMAND_PACK_KCOV_INCLUDE: ${{ github.workspace }}/scripts/sd-ai-command-pack-
+          SD_AI_COMMAND_PACK_KCOV_INCLUDE: sd-ai-command-pack-
         run: |
           set -euo pipefail
           mkdir -p "$SD_AI_COMMAND_PACK_KCOV_DIR"

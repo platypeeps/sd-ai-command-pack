@@ -34,9 +34,12 @@ if [ -z "$kcov_dir" ] || ! command -v kcov >/dev/null 2>&1; then
   exec "$real_bash" "$@"
 fi
 
-# Restrict measurement to the canonical shipped shell scripts. Tests that run
-# from tempdir copies fall outside this pattern and are not attributed.
-include_pattern="${SD_AI_COMMAND_PACK_KCOV_INCLUDE:-scripts/sd-ai-command-pack-}"
+# Restrict measurement to the shipped shell scripts by name. kcov matches this
+# as a plain substring against the source path, so use the basename marker
+# rather than a path prefix: the tempdir copies the tests run are then also
+# recorded, and summarize_shell_coverage.py re-collapses copies by basename and
+# filters to .sh.
+include_pattern="${SD_AI_COMMAND_PACK_KCOV_INCLUDE:-sd-ai-command-pack-}"
 
 # Each invocation writes to a unique subdirectory; a later `kcov --merge` step
 # combines them. $$ plus SRANDOM/epoch keeps names distinct across the many

@@ -85,6 +85,11 @@ def fleet_manifest(consumers: list[dict[str, object]]) -> dict[str, object]:
 class InstallTestCase(unittest.TestCase):
     _bash_path: str | None
 
+    # The real bash binary, independent of any coverage-shim override. Tests
+    # that need bash's directory on PATH (not just something to invoke) must use
+    # this: _bash_path may point at the kcov shim, whose directory has no bash.
+    _real_bash_path: str | None
+
     _manifest_files: list[install.PackFile]
 
     # Per-class cache of (template_root, head_oid) for make_housekeeping_repo.
@@ -98,8 +103,9 @@ class InstallTestCase(unittest.TestCase):
         # shim so the bash the subprocess tests spawn runs under coverage.
         # Unset (local runs), fall back to the bash on PATH — identical
         # behaviour to before this override existed.
+        cls._real_bash_path = shutil.which("bash")
         override_bash = os.environ.get("SD_AI_COMMAND_PACK_TEST_BASH")
-        cls._bash_path = override_bash or shutil.which("bash")
+        cls._bash_path = override_bash or cls._real_bash_path
         _, cls._manifest_files = install.load_manifest()
 
     def valid_pack_file(
