@@ -140,9 +140,14 @@ but defines no ordering or transition policy:
   dedicated lightweight Trellis task for this consumer and target release when
   no current task exists. Give its PRD the immutable release identity, managed
   scope, preparation/check commands, and finish-work expectation; bind it to
-  the refresh branch. An unrelated current task, dirty Trellis state, or
-  externally owned checkout means `ownership-skip`; never repurpose another
-  task, stash, reset, clean, or install.
+  the refresh branch. After activation, assert the task's `task.json`
+  `description` is present and non-empty before advancing this stage; an empty
+  or missing description is a checkout-validation failure with an actionable
+  message (re-create the task with a real `--description`), not a silent
+  advance — a belt-and-suspenders guard against an upstream `task.py create`
+  that tolerates an empty description. An unrelated current task, dirty Trellis
+  state, or externally owned checkout means `ownership-skip`; never repurpose
+  another task, stash, reset, clean, or install.
 - `install-update` and `install-audit`: run only the commands printed by
   preflight. The installer, provenance, and audit remain authoritative.
 - `candidate-prepare`, `focused-candidate`, and `local-checks`: run the
