@@ -428,20 +428,32 @@ jobs:
         run: python3 -m pip install --require-hashes -r requirements-dev.txt
 
       - name: Install kcov
-        # kcov was dropped from the Ubuntu 24.04 package repos, so install the
-        # pinned prebuilt release binary and verify its checksum. `kcov
-        # --version` doubles as an ABI smoke test: a runtime-library mismatch
-        # fails here at install rather than silently later.
+        # kcov is no longer packaged for Ubuntu 24.04, and the prebuilt v42
+        # binary links libopcodes-2.38 (binutils 2.38), absent on noble
+        # (binutils 2.42). Build from a pinned kcov commit instead so the
+        # binary is ABI-correct for whatever runner image is current. The
+        # clone is pinned by asserting HEAD equals the expected commit, and
+        # `kcov --version` smoke-tests the built binary.
         env:
-          KCOV_URL: https://github.com/SimonKagstrom/kcov/releases/download/v42/kcov-amd64.tar.gz
-          KCOV_SHA256: 78aa17a5f6d27a867cc0540b1550051591d350423a1a0ef98d63c9ce7cc10f9d
+          KCOV_REPO: https://github.com/SimonKagstrom/kcov.git
+          KCOV_REF: v43
+          KCOV_COMMIT: a39874f938ce13f7a65f253120d1ec946b349ffe
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libdw1 libcurl4
-          curl -fsSL "$KCOV_URL" -o /tmp/kcov.tar.gz
-          echo "${KCOV_SHA256}  /tmp/kcov.tar.gz" | sha256sum -c -
-          sudo tar -C / -xzf /tmp/kcov.tar.gz
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ pkg-config \
+            binutils-dev libcurl4-openssl-dev zlib1g-dev libdw-dev libiberty-dev libssl-dev
+          git clone --depth 1 --branch "$KCOV_REF" "$KCOV_REPO" /tmp/kcov-src
+          got="$(git -C /tmp/kcov-src rev-parse HEAD)"
+          if [ "$got" != "$KCOV_COMMIT" ]; then
+            printf 'error: kcov %s resolved to %s, expected %s\n' \
+              "$KCOV_REF" "$got" "$KCOV_COMMIT" >&2
+            exit 1
+          fi
+          cmake -S /tmp/kcov-src -B /tmp/kcov-build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/kcov-build
+          sudo cmake --install /tmp/kcov-build
           kcov --version
 
       - name: Measure shipped shell coverage
