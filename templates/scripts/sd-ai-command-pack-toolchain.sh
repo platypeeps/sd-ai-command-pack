@@ -304,12 +304,11 @@ doctor_json() {
   local project_check="$1"
   shift
   # cache_paths is built from the lib's cache-env output (CACHE_ENV_KEYS is the
-  # single authority), passed through the environment so adding a cache variable
-  # needs no edit here.
-  SD_AI_COMMAND_PACK_DOCTOR_CACHE_ENV="$CACHE_ENV_OUTPUT" \
+  # single authority), passed as one positional argument so adding a cache
+  # variable needs no edit here.
   PYTHONDONTWRITEBYTECODE=1 "$PYTHON_COMMAND" - \
     "$PYTHON_COMMAND" "$PYTHON_SOURCE" "$PYTHON_VERSION" "$project_check" \
-    "$REPO_ROOT" \
+    "$REPO_ROOT" "$CACHE_ENV_OUTPUT" \
     "$(tool_path_or_empty gh)" "$(tool_path_or_empty node)" \
     "$(tool_path_or_empty uv)" "$(tool_path_or_empty prism)" \
     "$(tool_path_or_empty gito)" "$(tool_path_or_empty shellcheck)" \
@@ -324,6 +323,7 @@ import sys
     python_version,
     project_check,
     repo_root,
+    cache_env,
     gh,
     node,
     uv,
@@ -333,7 +333,7 @@ import sys
     *candidates,
 ) = sys.argv[1:]
 cache_paths = {}
-for line in os.environ.get("SD_AI_COMMAND_PACK_DOCTOR_CACHE_ENV", "").splitlines():
+for line in cache_env.splitlines():
     if not line or "=" not in line:
         continue
     key, _, value = line.partition("=")
