@@ -437,13 +437,25 @@ def _load_check_module():
     import importlib.util
 
     scripts_dir = PACK_ROOT / "scripts"
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
     script = scripts_dir / "sd-ai-command-pack-check.py"
     spec = importlib.util.spec_from_file_location("sd_ai_command_pack_check", script)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {script}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    # Insert the scripts dir only if absent and always remove it afterwards, so
+    # the check module's `from sd_ai_command_pack_lib import ...` resolves during
+    # exec without leaking a permanent sys.path entry that could make the suite
+    # import-order dependent.
+    script_dir = str(scripts_dir)
+    inserted = script_dir not in sys.path
+    if inserted:
+        sys.path.insert(0, script_dir)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if inserted:
+            sys.path.remove(script_dir)
     return module
 
 

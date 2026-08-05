@@ -339,7 +339,7 @@ def _tracked_worktree_digest(
     return digest.hexdigest()
 
 
-def _index_digest(repo: Path) -> str:
+def _index_digest(repo: Path, cache: "_WorktreeHashCache | None" = None) -> str:
     raw_path = _git_bytes(
         repo,
         ["rev-parse", "--git-path", "index"],
@@ -350,7 +350,11 @@ def _index_digest(repo: Path) -> str:
     index_path = Path(os.fsdecode(raw_path))
     if not index_path.is_absolute():
         index_path = repo / index_path
-    return _hash_path(index_path)
+    # Share the run cache so ``.git/index`` — a single but potentially large file
+    # — is not re-read on every per-row snapshot. Its cheap signature moves the
+    # moment git rewrites the index, and the cache-free final snapshot re-hashes
+    # it regardless, so this keeps the snapshot cost flat in the row count.
+    return _hash_path(index_path, cache)
 
 
 def state_snapshot(
@@ -386,7 +390,7 @@ def state_snapshot(
                 context="read git refs",
             )
         ),
-        "index": _index_digest(repo),
+        "index": _index_digest(repo, cache),
         "worktree": _tracked_worktree_digest(repo, cache),
         "guarded": guarded.hexdigest(),
     }

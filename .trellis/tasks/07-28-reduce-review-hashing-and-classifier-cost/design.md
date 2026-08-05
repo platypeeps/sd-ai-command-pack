@@ -199,8 +199,15 @@ at 180→720), comfortably inside AC3's 1.2× bound.
 Both files are shipped payload with `templates/` originals and root mirrors:
 `make sync`, version bump, changelog, candidate restamp.
 
-`_tracked_worktree_digest`'s output format is unchanged, so a digest recorded by
-an older `sd-check` still compares equal against a newer one for the same tree.
+`_tracked_worktree_digest`'s output format *does* change: it now folds each
+regular file's SHA-256 content digest into the tree digest instead of streaming
+raw bytes, so a value computed by an older `sd-check` will not equal a newer one
+for the same tree. This is safe because the tree digest has no cross-version
+consumer — `state_snapshot`'s `worktree`/`index`/`guarded` values and the
+`beforeDigest`/`afterDigest` they feed are compared only within a single run
+(before vs. per-row vs. final), never persisted or matched against a digest from
+another version. (`sd-review`'s own `worktreeDigest` is a separate git-based
+value and is untouched.)
 `ScopeRule`'s equality is unchanged (the new fields are `compare=False`) and its
 hash *value* is unchanged — the explicit `__hash__` returns the same value the
 generated one produced, just cached — so `matches` keying and any pickling of
