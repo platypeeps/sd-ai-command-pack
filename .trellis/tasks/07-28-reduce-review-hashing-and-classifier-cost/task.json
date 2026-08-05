@@ -3,7 +3,7 @@
   "name": "reduce-review-hashing-and-classifier-cost",
   "title": "Cut redundant worktree hashing and payload-size classifier scans",
   "description": "Remove the per-check-row full worktree re-hash in sd-check and the payload-size-scaled fnmatch scans in pr-body-scope, without weakening the mutation guard. Split out of 07-25-reduce-review-tooling-spawns (audit findings A-101, A-105).",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

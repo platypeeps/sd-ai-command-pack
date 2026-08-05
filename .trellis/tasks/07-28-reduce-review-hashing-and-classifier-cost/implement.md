@@ -49,6 +49,19 @@ No shared code between them. Either can be dropped.
 5. Check the literal set first, then the glob tuple, in both matching loops:
    `_classify` (`:506-514`) and the `unmatched` comprehension (`:551-559`).
 
+5b. **Cache the rule hash — the split alone fails AC3.** Benchmarking after
+   steps 3–5 (fixed reps, GC off) still showed `_classify` growing 1.25→1.64×
+   per doubling; `cProfile` pinned it: `hash` was 77% of `_classify`. `_classify`
+   hashes each rule once per matched path and the generated `__hash__` rehashes
+   the O(patterns) `patterns` tuple every call, so classify is O(paths × patterns)
+   through the hash — the split fixed only the glob scan. Add a `compare=False`
+   `_hash` field, compute `hash((label, headings, patterns, include_installed_targets))`
+   once in `__post_init__`, and add a class-body `__hash__` returning it. A
+   class-body `__hash__` overrides the generated one (`has_explicit_hash`); the
+   frozen instance is invariant, so the cached value is O(1) per lookup and equal
+   to the value it replaces. Equality is untouched. Result: flat 0.99–1.02× per
+   doubling at 180/360/720/1440 targets.
+
 6. `make sync`, changelog, version bump.
 
 ### Commit 2 — R1/R2, sd-check worktree hashing
@@ -168,7 +181,10 @@ R3 fields stay out of equality:
 grep -n 'compare=False' scripts/sd-ai-command-pack-pr-body-scope.py
 ```
 
-Expect three — `normalized_patterns` plus the two new fields.
+Expect five — four field definitions (`normalized_patterns`, `literal_patterns`,
+`glob_patterns`, `_hash`) plus one in the explanatory comment. The cached `_hash`
+is `compare=False` so equality stays value-based; the class-body `__hash__`
+returns it.
 
 Snapshot count is unchanged (only its cost should move):
 
@@ -204,7 +220,9 @@ attribution. If AC1 is reported as met, say which of the two it was.
 - AC1 fixtures committed before or with the optimization, never after (step 14).
 - Step 11's granularity decision is in the changelog, not only in this file.
 - R3's new `ScopeRule` fields carry `init=False, compare=False, repr=False`
-  (step 3).
+  (step 3), including the cached `_hash` (step 5b).
+- The cached class-body `__hash__` returns the same value the generated hash did;
+  equality is unchanged (step 5b). Without it AC3 fails — the split alone does not.
 - The literal fast path excludes `*`, `?`, `[`, `]` — not just `/**` (step 4).
 - No re-normalization added to the classify loop (step 1).
 

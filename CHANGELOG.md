@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.64.18 - 2026-08-05
+
+- Cut the payload-size classifier cost in `sd-ai-command-pack-pr-body-scope.py`
+  (A-105, R3). Each `ScopeRule` now partitions its normalized patterns once at
+  construction into a `frozenset` of metacharacter-free literals and a tuple of
+  globs; the classifier tests set membership before iterating the glob matcher,
+  so per-path work tracks the changed diff rather than the installed payload
+  size. Classification output is byte-identical. The root cause of the scaling,
+  found by profiling, was not the glob scan but the dict-key hash: `_classify`
+  uses each frozen `ScopeRule` as a `dict` key and hashes it once per matched
+  path, and the generated dataclass `__hash__` rehashed the whole `patterns`
+  tuple every call — making classify O(paths × patterns). The rule now caches its
+  value hash once in `__post_init__` and returns it from an explicit class-body
+  `__hash__`, collapsing per-lookup hashing to O(1) while leaving equality and the
+  hash *value* unchanged. Measured `_classify` growth over a fixed 50-path diff
+  drops from 2.98× (180→720 installed targets) to a flat 0.99–1.02× per doubling,
+  inside AC3's 1.2× bound.
+
 ## 0.64.17 - 2026-08-05
 
 - Unify the `outcome`/`status` vocabulary across emitted payload envelopes
