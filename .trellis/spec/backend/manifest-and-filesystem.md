@@ -756,8 +756,9 @@ Generated text writers follow the same safety model:
    ToolExecutionPlan`, `run_git(args, *, cwd, timeout, check,
    allowed_returncodes, errors, context)`, `run_gh(args, *, cwd, timeout,
    check, allowed_returncodes, errors, context)`, `git_stdout(args, *, cwd,
-   timeout, errors, context, required)`, and
-   `repo_root(*, fallback_to_cwd=False)`.
+   timeout, errors, context, required)`, `repo_root(*, fallback_to_cwd=False)`,
+   `default_text_file_mode(path)`, and `atomic_write_text(destination, content,
+   *, errors="strict", revalidate=None, mode=None)`.
    `scripts/sd-ai-command-pack-toolchain.sh cache-env` emits the fixed
    allowlisted cache key/value set, while `... run -- COMMAND [ARG]...`
    executes one external argv through that environment and preserves the
@@ -781,7 +782,13 @@ Generated text writers follow the same safety model:
    allowlisted key/value set from `sd-ai-command-pack-toolchain.sh cache-env`;
    they must parse it without `eval` or constructed shell commands. Reusable
    pack-created caches remain after success and ordinary housekeeping does not
-   delete them.
+   delete them. `atomic_write_text` is the single shared durable-write path for
+   installed scripts: it refuses to follow a symlink at the destination, writes
+   through a same-directory temporary file, fsyncs the file and its directory,
+   guards against a cross-filesystem replace (raising rather than a non-atomic
+   copy), and supports an optional `revalidate` callback to re-check the
+   destination just before `os.replace`. Scripts must not reimplement a
+   temp-file/`os.replace` writer of their own.
 4. Validation and error matrix: empty command -> `CommandError`; missing binary
    -> `CommandError` naming the command and context; timeout ->
    `CommandError` naming the command, context, and timeout seconds; checked
