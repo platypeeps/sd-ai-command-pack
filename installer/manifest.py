@@ -30,6 +30,7 @@ class PackFile:
 SUPPORTED_MANIFEST_SCHEMA_VERSION = 1
 KNOWN_MANIFEST_KINDS = frozenset(
     {
+        "agent",
         "command",
         "config",
         "doc",
