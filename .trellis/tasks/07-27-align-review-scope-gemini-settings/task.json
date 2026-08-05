@@ -3,7 +3,7 @@
   "name": "align-review-scope-gemini-settings",
   "title": "Align review-scope classifier for Gemini settings",
   "description": "Keep the shell review-scope copied-path classifier aligned with preflight for .gemini/settings.json.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
