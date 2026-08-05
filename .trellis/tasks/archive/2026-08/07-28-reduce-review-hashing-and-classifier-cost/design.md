@@ -174,15 +174,44 @@ compare=False, repr=False` exactly like `normalized_patterns`.
 "does not end in `/**`". A pattern with any of them goes in the glob tuple, so
 the `/**` branch and fnmatch's character classes keep their current semantics.
 
+**R3, corrected: the literal/glob split alone does not satisfy AC3.** The split
+made the *glob scan* payload-independent (~30–68× faster absolutely, near-flat
+per doubling), but a fixed-reps benchmark still showed `_classify` growing
+1.25→1.64× per doubling. `cProfile` located it: `hash` was **77%** of
+`_classify` — `<string>:__hash__`, the frozen-dataclass hash. `_classify` uses
+each rule as a `dict` key and hashes it once per matched path, and the generated
+`__hash__` rehashes the whole `patterns` tuple (O(patterns)) on every call. So
+classify wall-clock is O(paths × patterns) through the *hash*, independent of the
+match cost the split addressed. Raw `frozenset` membership was provably flat the
+whole time; the growth lived entirely in the dict-key hash.
+
+The fix is an **explicit cached `__hash__`**: `__post_init__` computes the value
+hash once (frozen instance ⇒ invariant) into a `compare=False` `_hash` field, and
+a class-body `__hash__` returns it. A class-body `__hash__` is respected
+(`has_explicit_hash`) over the generated one, so per-lookup hashing collapses to
+O(1). Equality stays value-based on the `compare=True` fields, so equal rules
+still hash equal and `matches` keying is unchanged. Measured: all-hit `_classify`
+at 180/360/720/1440 targets drops to a flat 0.99–1.02× per doubling (was 2.98×
+at 180→720), comfortably inside AC3's 1.2× bound.
+
 ## Compatibility
 
 Both files are shipped payload with `templates/` originals and root mirrors:
 `make sync`, version bump, changelog, candidate restamp.
 
-`_tracked_worktree_digest`'s output format is unchanged, so a digest recorded by
-an older `sd-check` still compares equal against a newer one for the same tree.
-`ScopeRule`'s equality and hash are unchanged because the new fields are
-`compare=False`, so `matches` keying and any pickling of rules behave as before.
+`_tracked_worktree_digest`'s output format *does* change: it now folds each
+regular file's SHA-256 content digest into the tree digest instead of streaming
+raw bytes, so a value computed by an older `sd-check` will not equal a newer one
+for the same tree. This is safe because the tree digest has no cross-version
+consumer — `state_snapshot`'s `worktree`/`index`/`guarded` values and the
+`beforeDigest`/`afterDigest` they feed are compared only within a single run
+(before vs. per-row vs. final), never persisted or matched against a digest from
+another version. (`sd-review`'s own `worktreeDigest` is a separate git-based
+value and is untouched.)
+`ScopeRule`'s equality is unchanged (the new fields are `compare=False`) and its
+hash *value* is unchanged — the explicit `__hash__` returns the same value the
+generated one produced, just cached — so `matches` keying and any pickling of
+rules behave as before.
 
 Independent of `07-25-reduce-review-tooling-spawns` — different files, no shared
 code, either order.

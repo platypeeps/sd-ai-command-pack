@@ -345,5 +345,94 @@ class ToolingBodyPreparationTests(unittest.TestCase):
             self.assertTrue(any("regular file" in item for item in messages))
 
 
+class LiteralGlobSplitTests(unittest.TestCase):
+    """R3: ScopeRule partitions its normalized patterns without changing matches."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.mod = _load_script()
+
+    def _rule(self, *patterns: str):
+        return self.mod.ScopeRule(
+            label="probe", headings=("Probe:",), patterns=tuple(patterns)
+        )
+
+    def test_partition_covers_every_normalized_pattern_exactly_once(self) -> None:
+        rule = self._rule("a/b.json", "a/**", "docs/x?.md", "cfg/[ab].ini")
+        # literals and globs together reconstruct the full normalized set, with
+        # no pattern in both halves.
+        self.assertEqual(
+            set(rule.literal_patterns) | set(rule.glob_patterns),
+            set(rule.normalized_patterns),
+        )
+        self.assertFalse(set(rule.literal_patterns) & set(rule.glob_patterns))
+
+    def test_metacharacter_patterns_route_to_the_glob_tuple(self) -> None:
+        rule = self._rule("plain/literal.txt", "a/**", "q?.md", "c/[ab].ini")
+        self.assertEqual(rule.literal_patterns, frozenset({"plain/literal.txt"}))
+        # "/**", "?", and "[...]" each keep glob semantics — a character class or
+        # single-char wildcard routed into the literal set would match the wrong
+        # paths.
+        self.assertEqual(
+            set(rule.glob_patterns), {"a/**", "q?.md", "c/[ab].ini"}
+        )
+
+    def test_split_matcher_equals_scanning_every_normalized_pattern(self) -> None:
+        rule = self._rule("a/b.json", "a/**", "docs/x?.md", "c/[ab].ini")
+        probes = [
+            "a/b.json",
+            "a/deep/nested.py",
+            "docs/x1.md",
+            "docs/xx.md",
+            "c/a.ini",
+            "c/z.ini",
+            "unrelated/file",
+        ]
+        for path in probes:
+            legacy = any(
+                self.mod._matches_normalized_pattern(path, pattern)
+                for pattern in rule.normalized_patterns
+            )
+            self.assertEqual(
+                self.mod._rule_matches_path(rule, path), legacy, path
+            )
+
+    def test_derived_fields_stay_out_of_equality_and_hashing(self) -> None:
+        left = self._rule("a/b.json", "a/**")
+        right = self.mod.ScopeRule(
+            label="probe", headings=("Probe:",), patterns=("a/b.json", "a/**")
+        )
+        self.assertEqual(left, right)
+        self.assertEqual(hash(left), hash(right))
+        # Usable as a dict key exactly as _classify relies on.
+        self.assertEqual({left: 1}[right], 1)
+
+    def test_hash_is_cached_and_independent_of_pattern_count(self) -> None:
+        # AC3 root cause: _classify hashes each rule once per matched path, so an
+        # O(patterns) dataclass hash makes classify wall-clock grow with the
+        # installed payload size. ScopeRule must ship an explicit cached __hash__
+        # (not the generated one) so per-lookup hashing stays O(1).
+        self.assertIn("__hash__", self.mod.ScopeRule.__dict__)
+        small = self._rule("a/**", "b.md")
+        large = self.mod.ScopeRule(
+            label="probe",
+            headings=("Probe:",),
+            patterns=("a/**", "b.md") + tuple(f"p{i}/**" for i in range(500)),
+        )
+        # The cached value is exactly the value hash of the compare=True fields,
+        # and __hash__ returns it without recomputation.
+        for rule in (small, large):
+            expected = hash(
+                (
+                    rule.label,
+                    rule.headings,
+                    rule.patterns,
+                    rule.include_installed_targets,
+                )
+            )
+            self.assertEqual(rule._hash, expected)
+            self.assertEqual(hash(rule), rule._hash)
+
+
 if __name__ == "__main__":
     unittest.main()

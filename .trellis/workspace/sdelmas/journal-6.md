@@ -1939,3 +1939,43 @@ Unified the emitted-payload verdict vocabulary behind a shared lib-level core, r
 ### Next Steps
 
 - None - task complete
+
+
+## Session 301: Ship 07-28-reduce-review-hashing-and-classifier-cost (A-101 R1/R2 + A-105 R3)
+
+**Date**: 2026-08-05
+**Task**: Ship 07-28-reduce-review-hashing-and-classifier-cost (A-101 R1/R2 + A-105 R3)
+**Branch**: `feat/reduce-review-hashing-classifier-cost`
+
+### Summary
+
+Cut two payload-size-scaled review costs: per-run worktree content-hash cache in sd-check (two full content passes/run, all three mutation classes still caught) and O(1) cached ScopeRule hash in pr-body-scope (classify flat 0.99-1.02x per doubling). Shipped as PR #335, Copilot APPROVED.
+
+### Main Changes
+
+- sd-check: _WorktreeHashCache keys content digest by (st_mode,st_size,st_mtime_ns); final snapshot re-hashes fresh -> exactly two full passes independent of check count
+- pr-body-scope: ScopeRule caches its value hash in __post_init__ and returns it from explicit __hash__, collapsing per-lookup hashing from O(patterns) to O(1)
+- Copilot review fixes: sys.path leak in test loader, cross-version digest note, _index_digest cache threading, ScopeRule equality comment
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `44813e59` | feat: cache per-run worktree content hashes in sd-check (A-101 R1/R2) |
+| `3ec08508` | feat: cut payload-size classifier cost in pr-body-scope (A-105 R3) |
+| `a7c19079` | fix: address Copilot review on PR #335 (A-101 R1/R2) |
+
+### Testing
+
+- [OK] make check: mypy 40 files clean, ruff clean, full suite
+- [OK] WorktreeHashCacheTests (4) + LiteralGlobSplitTests hash lock-in
+- [OK] sd-review coordinator ready on head 89b5e454, Copilot APPROVED, 0 unresolved threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
