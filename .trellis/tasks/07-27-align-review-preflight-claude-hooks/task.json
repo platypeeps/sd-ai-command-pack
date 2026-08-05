@@ -3,7 +3,7 @@
   "name": "align-review-preflight-claude-hooks",
   "title": "Align review-preflight classifier for Claude hooks",
   "description": "Keep the JavaScript preflight copied-path classifier aligned with review scope for .claude/hooks/.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

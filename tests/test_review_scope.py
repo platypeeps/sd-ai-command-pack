@@ -334,6 +334,30 @@ class ReviewScopeTests(InstallTestCase):
         self.assertIn("sd-ai-command-pack-scope-advisory:", result.stdout)
         self.assertIn("the PR body must include", result.stdout)
 
+    def test_claude_hooks_are_scoped_as_copied(self) -> None:
+        """`.claude/hooks/*` is a copied/generated platform surface.
+
+        Paired with the JavaScript assertion in
+        tests/test_review_preflight.py so the shell review-scope classifier and
+        the mjs preflight classifier cannot silently diverge on platform hook
+        paths: a change under `.claude/hooks/` must be scoped identically by
+        both. A `.claude/hooks/` path can match no other scope category, so the
+        advisory firing here proves the copied-path classification.
+        """
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        hook = root / ".claude" / "hooks" / "session-start.py"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text("# baseline\n", encoding="utf-8")
+        self.commit_installed_repo(root)
+        hook.write_text("# baseline\nadjusted\n", encoding="utf-8")
+
+        result = self.run_advisory_scope(root, SD_AI_COMMAND_PACK_SCOPE_CHECK_GH="0")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("sd-ai-command-pack-scope-advisory:", result.stdout)
+        self.assertIn("the PR body must include", result.stdout)
+
     def test_review_scope_advisory_is_silent_when_resolved_body_satisfies(self) -> None:
         """The shipped path: body resolved from gh, not supplied by env."""
         root = self.make_scoped_advisory_repo()

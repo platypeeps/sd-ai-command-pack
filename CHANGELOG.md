@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.64.10 - 2026-08-04
+
+- Classify `.claude/hooks/*` as a copied/generated Trellis runtime surface in
+  the JavaScript review-preflight classifier, matching the shell review-scope
+  classifier that already listed it. Previously a change under `.claude/hooks/`
+  was scoped as copied by the shell classifier but treated as source by the
+  `mjs` preflight, so the two review-scope surfaces disagreed on platform hook
+  paths. Added paired parity coverage (shell advisory + `copiedTemplateKind`)
+  so they cannot silently diverge again for that path. No behavior change for
+  any other surface.
+
 ## 0.64.9 - 2026-08-04
 
 - Register the `fleet-refresh.operator-policy` structured-question decision and

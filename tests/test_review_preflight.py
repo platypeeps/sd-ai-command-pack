@@ -121,6 +121,12 @@ import {
 
 assert.equal(copiedTemplateKind('.trellis/scripts/get_context.py'), 'trellis');
 assert.equal(copiedTemplateKind('.zcode/agents/trellis-check.md'), 'trellis');
+// Platform hook directories are copied/generated. The shell review-scope
+// classifier (scripts/sd-ai-command-pack-review-scope.sh) already lists
+// .claude/hooks/*; this JavaScript side must agree so a hook-path change is
+// scoped identically by both. Paired shell coverage lives in
+// tests/test_review_scope.py::...claude_hooks_are_scoped_as_copied.
+assert.equal(copiedTemplateKind('.claude/hooks/session-start.py'), 'trellis');
 assert.equal(copiedTemplateKind('.agents/skills/sd-review-pr/SKILL.md'), 'sd-ai-command-pack');
 assert.equal(copiedTemplateKind('.qoder/commands/sd-review-pr.md'), 'sd-ai-command-pack');
 assert.equal(copiedTemplateKind('scripts/sd-ai-command-pack-review-scope.sh'), 'sd-ai-command-pack');
