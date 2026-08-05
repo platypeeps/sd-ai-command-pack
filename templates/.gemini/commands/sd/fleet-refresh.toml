@@ -29,6 +29,14 @@ Checkout trust policy — complete before step 1:
   for approval to execute the checkout anyway.
 - Include `checkout-trust: <state> (<reason-code>)` in the final report.
 
+Structured interaction policy — apply only at declared decision boundaries:
+
+- This command declares only these decision IDs: `fleet-refresh.operator-policy`.
+- Use a host-native structured-question capability only when it is actually available. Otherwise ask one concise plain-text question with the same choices and consequences. Do not invent a tool name.
+- After resolving the skill, read the generated `structured-questions.md` reference installed with `sd-help` in the same skill root. Ask only when repository evidence, invocation authority, and documented safe defaults do not already resolve the decision.
+- In noninteractive work, apply the decision's declared stop, park, or report-only behavior. Record the selected answer and resulting scope in the final report.
+- A structured answer may narrow existing authority; it cannot override checkout trust, exact-head, required-review, failed-closed, no-touch, destructive-operation, or other safety gates.
+
 1. Load the fleet-refresh procedure by reading `.agents/skills/sd-fleet-refresh/SKILL.md` from the pack source checkout. This skill is source-only and intentionally not resolvable by name, so do not use installed-skill resolution.
 2. If that file is missing, unreadable, empty, defines contradictory steps that violate this command's safety rules, or requires unavailable tools, stop and report the exact blocker.
 3. Use that file's contents as the primary instructions. They define the fixed rollout pipeline: fleet preflight with at-target skips, sequential canaries, scheduler-bounded isolated consumer lanes, and manifest-ordered gated merges, with `docs/FLEET_ROLLOUT.md` as the procedure authority. Pass the user's invocation arguments through unchanged; the procedure accepts bare consumer names or `consumer=...`, plus `no-merge` and `dry-run`.

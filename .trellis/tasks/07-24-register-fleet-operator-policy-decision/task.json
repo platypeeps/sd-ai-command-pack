@@ -3,7 +3,7 @@
   "name": "register-fleet-operator-policy-decision",
   "title": "Register the fleet operator policy decision",
   "description": "Resolve review finding 1.6.2.1 by registering a bounded fleet operator decision with native structured-question adaptation, safe fallback, and noninteractive parking.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
