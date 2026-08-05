@@ -1333,6 +1333,9 @@ def _artifact_root(repo: Path, value: str | None) -> Path:
         cwd=repo,
         timeout=None,
         binary=True,
+        # Preserve the pre-migration bare-subprocess semantics: the original
+        # call inherited stderr so git's diagnostics surfaced in the terminal.
+        stderr=None,
     )
     if result.returncode != 0:
         raise ReviewInputError("review artifact root must be ignored by Git")

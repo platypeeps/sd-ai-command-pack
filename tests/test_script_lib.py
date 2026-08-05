@@ -358,7 +358,10 @@ class ScriptLibTests(InstallTestCase):
                 encoding="utf-8"
             )
             self.assertIn("run_git_cached", content, name)
-            self.assertNotIn("build_tool_environment", content, name)
+            # No *direct* builder call: a historical mention in a comment is
+            # fine, but the entry point must not invoke build_tool_environment
+            # itself (run_git_cached owns that delegation).
+            self.assertNotIn("build_tool_environment(", content, name)
 
     def test_shared_shell_cache_parser_strips_crlf(self) -> None:
         if self._bash_path is None:

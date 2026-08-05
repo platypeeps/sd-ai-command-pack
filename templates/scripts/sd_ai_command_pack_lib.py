@@ -558,10 +558,12 @@ def run_git_minimal(
 
     Unlike :func:`run_git`/:func:`run_command`, this does not build the external
     tool cache, so it never raises :class:`CacheSetupError`. It only sets
-    ``GIT_TERMINAL_PROMPT=0`` on top of the inherited environment. Defaults
-    reproduce a bare ``subprocess.run(["git", ...], text=True)`` call: no
-    timeout, platform-locale decoding, strict errors, captured ``PIPE`` stderr.
-    Propagates ``OSError``/``TimeoutExpired``; never raises on non-zero exit.
+    ``GIT_TERMINAL_PROMPT=0`` on top of the inherited environment. The process
+    always captures stdout (``PIPE``) and, by default, stderr (``PIPE``); text
+    mode uses platform-locale decoding with strict errors and no timeout. These
+    are capture defaults, not the inherit-streams behavior of a bare
+    ``subprocess.run`` call. Propagates ``OSError``/``TimeoutExpired``; never
+    raises on non-zero exit.
     """
 
     environment = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}

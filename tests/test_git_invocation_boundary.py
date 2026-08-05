@@ -85,8 +85,23 @@ def _tree(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
+def _first_command_arg(node: ast.Call) -> ast.AST | None:
+    """The subprocess command argument, positional (args[0]) or keyword (args=)."""
+
+    if node.args:
+        return node.args[0]
+    for keyword in node.keywords:
+        if keyword.arg == "args":
+            return keyword.value
+    return None
+
+
 def _direct_git_subprocess_calls(tree: ast.Module) -> list[int]:
-    """Line numbers of subprocess.run/Popen calls whose first arg is git-argv."""
+    """Line numbers of subprocess.run/Popen calls whose command arg is git-argv.
+
+    Covers both the positional first argument and the ``args=`` keyword form so
+    ``subprocess.run(args=["git", ...])`` cannot slip past the gate.
+    """
 
     hits: list[int] = []
     for node in ast.walk(tree):
@@ -94,7 +109,8 @@ def _direct_git_subprocess_calls(tree: ast.Module) -> list[int]:
             continue
         if not _is_subprocess_run_or_popen(node.func):
             continue
-        if node.args and _is_git_argv_literal(node.args[0]):
+        command = _first_command_arg(node)
+        if command is not None and _is_git_argv_literal(command):
             hits.append(node.lineno)
     return hits
 
