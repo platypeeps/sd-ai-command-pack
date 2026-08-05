@@ -46,17 +46,35 @@ noninteractive parking.
 
 ## Acceptance Criteria
 
-- [ ] Registry validation recognizes exactly one fleet operator decision and the
+- [x] Registry validation recognizes exactly one fleet operator decision and the
   fleet command declares ownership of it.
-- [ ] Claude-capable output names `AskUserQuestion`; Codex-capable output uses
+  (Import validates 13→14 decisions; `grep -c fleet-refresh.operator-policy
+  installer/registry.py` = 2 — one entry, one binding.)
+- [x] Claude-capable output names `AskUserQuestion`; Codex-capable output uses
   its verified native question capability; neutral and unsupported surfaces do
   not invent either tool name.
-- [ ] Interactive fallback presents equivalent choices and consequences.
-- [ ] Noninteractive, unanswered, stale-head, wrong-release, or mismatched-action
+  (`.claude/commands/sd/fleet-refresh.md` names `AskUserQuestion`; the Gemini
+  toml carries its native question capability; `templates/.agents/skills/
+  sd-fleet-refresh/` names no host tool.)
+- [x] Interactive fallback presents equivalent choices and consequences.
+  (Adapters render the three options and their consequence strings via the
+  shared `structured-questions.md` reference entry.)
+- [x] Noninteractive, unanswered, stale-head, wrong-release, or mismatched-action
   fixtures park without a controller transition or repository mutation.
-- [ ] Routine fleet transitions complete without approval fatigue.
-- [ ] Generator parity, fleet controller tests, interaction-contract tests,
+  (Decision sets `noninteractive="park"`; the controller's existing park and
+  reject paths are covered by `tests/test_fleet_controller.py`
+  — `test_parked_canary_allows_wave_progression_only_with_opt_in`,
+  `test_wrong_release_and_consumer_receipts_are_rejected`,
+  `test_cli_operator_decision_requires_validated_provenance` — unchanged by
+  this task and green under `make check`.)
+- [x] Routine fleet transitions complete without approval fatigue.
+  (The decision surfaces only on a genuine controller operator-decision; the
+  unchanged do-not-ask prose keeps routine retries, polling, receipts, and
+  optional absence non-prompting.)
+- [x] Generator parity, fleet controller tests, interaction-contract tests,
   `make sync`, and `make check` pass.
+  (`make generate` byte-stable, `make sync`, fleet candidate ledger
+  re-validated, `make check` green.)
 
 ## Out Of Scope
 
