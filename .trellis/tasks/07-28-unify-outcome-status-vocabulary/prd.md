@@ -93,21 +93,21 @@ producers." Precisely:
 
 ## Acceptance Criteria
 
-- [ ] R1/R4: no payload in `scripts/` contains a `status` key whose value type
+- [x] R1/R4: no payload in `scripts/` contains a `status` key whose value type
       differs from another `status` key in the same document; asserted by a test
       that walks the emitted shapes, not by inspection.
-- [ ] R2: the per-domain outcome sets are derived from one lib-level definition,
+- [x] R2: the per-domain outcome sets are derived from one lib-level definition,
       and a test fails if a domain declares a verdict absent from the shared core
       without an explicit opt-out.
-- [ ] R3: `"ok"` and `"recorded"` either resolve to a declared enum member or
+- [x] R3: `"ok"` and `"recorded"` either resolve to a declared enum member or
       carry a recorded justification in this PRD.
-- [ ] R5: for one full version, every renamed key is emitted under both names,
+- [x] R5: for one full version, every renamed key is emitted under both names,
       and a fixture consumer written against the old names still passes.
-- [ ] R6: `design.md` lists every reader of every key this task renames, with
+- [x] R6: `design.md` lists every reader of every key this task renames, with
       `file:line` for each.
-- [ ] Template/generated parity holds and `make sync` passes.
-- [ ] `make check` passes.
-- [ ] Changelog + version; deprecations recorded with a `removed_version`; fleet
+- [x] Template/generated parity holds and `make sync` passes.
+- [x] `make check` passes.
+- [x] Changelog + version; deprecations recorded with a `removed_version`; fleet
       rollout via normal refresh.
 
 ## Notes
