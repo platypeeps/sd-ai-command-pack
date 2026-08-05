@@ -195,8 +195,7 @@ prepare_tool_cache_env() {
     key="${key%$'\r'}"
     value="${value%$'\r'}"
     case "$key" in
-      [A-Z_][A-Z0-9_]*) ;;
-      *)
+      "" | *[!A-Z0-9_]* | [!A-Z_]*)
         warn "cache setup returned an unexpected variable: $key"
         return 1
         ;;

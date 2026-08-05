@@ -433,8 +433,7 @@ configure_cache_environment() {
     key="${key%$'\r'}"
     value="${value%$'\r'}"
     case "$key" in
-      [A-Z_][A-Z0-9_]*) ;;
-      *) fail "cache setup returned an unexpected variable: $key" 5 ;;
+      "" | *[!A-Z0-9_]* | [!A-Z_]*) fail "cache setup returned an unexpected variable: $key" 5 ;;
     esac
     [ -n "$value" ] || fail "cache setup returned an empty $key" 5
     export "$key=$value"
