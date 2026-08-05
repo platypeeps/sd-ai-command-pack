@@ -1551,3 +1551,41 @@ Made 'agent' a first-class SD manifest artifact kind gated by a per-platform sub
 ### Next Steps
 
 - None - task complete
+
+
+## Session 291: Register fleet-refresh.operator-policy structured decision (0.64.9)
+
+**Date**: 2026-08-04
+**Task**: Register fleet-refresh.operator-policy structured decision (0.64.9)
+**Branch**: `feat/register-fleet-operator-policy`
+
+### Summary
+
+Registered the fleet-refresh.operator-policy interaction decision and bound it to sd-fleet-refresh, closing the last child of 07-24-correct-sd-skill-contract-drift (finding 1.6.2.1). Registry-side only: the ask/do-not-ask prose already existed. Added the required Structured decisions reference to the authored skill (a shipped surface test enforces it), regenerated adapters, bumped to 0.64.9.
+
+### Main Changes
+
+- installer/registry.py: one static InteractionDecision fleet-refresh.operator-policy (blocked-run-disposition, header 'Fleet policy', noninteractive=park, 3 exclusive dispositions, park recommended+first) plus interaction_decisions binding on the sd-fleet-refresh command row; registration+binding in one commit (validator raises at import on either half).
+- Added a ## Structured decisions section to templates/.agents/skills/sd-fleet-refresh/SKILL.md (and its source-only dev mirror) linking structured-questions.md and naming the decision id; required by test_generated_interaction_reference_and_skills_share_one_contract. R2-R5 prose unchanged (not duplicated).
+- Regenerated fleet-refresh adapters + structured-questions reference; Claude/Gemini name native question tools, neutral skill stays host-agnostic. Version 0.64.8->0.64.9, CHANGELOG, fleet candidate ledger re-validated.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f2a77537` | feat: register fleet-refresh.operator-policy structured decision (0.64.9) |
+
+### Testing
+
+- [OK] Registry import validates 13->14 decisions; grep -c fleet-refresh.operator-policy installer/registry.py = 2
+- [OK] AC2: .claude/commands/sd/fleet-refresh.md names AskUserQuestion; templates skill names no host tool
+- [OK] make generate byte-stable (0 written, closure clean); make sync; make check green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
