@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.64.19 - 2026-08-05
+
+- Consolidate git subprocess invocation into the shared library (A-076).
+  Every git-specific subprocess environment builder now routes through the
+  shared `sd_ai_command_pack_lib` helpers — `run_git_minimal` for the
+  prompt-disabled, cache-free path and `run_git_cached` for the cache-backed
+  path — so no shipped script hand-builds a git-specific environment of its
+  own. Six scripts were migrated off inline git subprocess calls
+  (`review-local`, `surface-check`, `install-audit`, `work-loop`,
+  `fleet-controller`, `fleet-publish`), each preserving its original stream,
+  decoding, and timeout semantics. A new AST boundary test
+  (`test_git_invocation_boundary.py`) enforces the invariant: only the shared
+  library may build a direct git subprocess call, and the migrated files carry
+  no git-argv literal at all. Behavior is unchanged; the payload change is the
+  invocation-site consolidation.
+
 ## 0.64.18 - 2026-08-05
 
 - Cut the per-check-row worktree re-hash in `sd-ai-command-pack-check.py`
