@@ -740,11 +740,21 @@ files is a checkable claim. The source checkout's current manifest version
 can intentionally be newer than the provenance version in a target repo when
 the newer release did not change installed payload bytes; a passing audit
 reports the installed payload provenance version and confirms the vouched
-hashes still match.
+hashes still match. The install audit and `provenance.json` vouch pack-owned
+receipt targets only — the files the installer wrote and recorded in
+`installed-targets.txt`. When a consumer relaxes its ignore policy so a
+Trellis-owned platform adapter becomes newly tracked, that adapter is not added
+to the pack manifest, `installed-targets.txt`, or `provenance.json` to widen the
+vouch; it stays outside the pack-vouched set and is covered instead by the fleet
+review classifier's integration-only eligibility — which forces the normal
+remote-review loop for any changed path missing from the receipt — and by the
+consumer's own integration and readiness checks.
 The copied/generated scope preflight reads
 `.sd-ai-command-pack/installed-targets.txt`, reports changed pack/Trellis
 runtime files, known repository-map files when present, and Trellis workspace
-journal/index files as integration-only review surface. When the GitHub CLI can
+journal/index files as integration-only review surface. Reporting a path here
+marks it for review attention; it never extends the pack audit's vouch to a
+Trellis-owned adapter. When the GitHub CLI can
 resolve a current PR, it checks that the PR body includes a
 `Tooling/generated scope:` section before review cycles spend attention on
 copied or generated surfaces. Markdown headings without the colon, such as

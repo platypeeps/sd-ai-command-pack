@@ -233,14 +233,25 @@ For each `refresh-needed` repo:
 2. Run the printed `python3 install.py <repo> --force --platform ...` command
    from this pack checkout.
 3. Run the printed `python3 scripts/sd-ai-command-pack-install-audit.py --repo
-   <repo> --expected-platform ...` command.
+   <repo> --expected-platform ...` command. This audit vouches pack-owned
+   receipt targets only — the files recorded in `installed-targets.txt` and
+   hashed in `provenance.json`. A consumer that relaxes its ignore policy to
+   newly track a Trellis-owned platform adapter does not thereby add that
+   adapter to the pack receipt or provenance; it stays outside the pack-vouched
+   set.
 4. Run each printed `candidatePrepare` command from the consumer checkout, then
    run the consumer's deterministic full-check and commit only the refresh.
 5. Run the source-side fleet review classifier against the exact base and
    refresh head. Use integration-only review when it qualifies; otherwise use
    the normal configured remote-review loop.
 6. Push, open the PR, inspect existing feedback, and classify every verified
-   finding with the source finding-severity gate before watch or merge.
+   finding with the source finding-severity gate before watch or merge. In the
+   PR body's verification summary, attribute each ownership class to the check
+   that validates it: the install audit and `provenance.json` for pack-owned
+   receipt targets, and the fleet review classifier's integration-only
+   eligibility plus the consumer's own integration and readiness checks for any
+   newly tracked Trellis-owned adapter or consumer-owned path. Do not describe a
+   Trellis-owned adapter as covered by the pack install audit.
 7. Wait for required checks and merge through the consumer housekeeping gate
    only when finding disposition permits the rollout to continue.
 8. Confirm post-merge provenance reads the target version and the audit passes.

@@ -63,6 +63,7 @@ class FleetReviewClassifyTests(InstallTestCase):
         base_targets: list[str] | None = None,
         current_targets: list[str] | None = None,
         product_change: bool = False,
+        newly_tracked: list[str] | None = None,
     ) -> tuple[object, Path, str, Path]:
         classifier = self.load_classifier()
         root = self.make_git_repo_without_trellis()
@@ -91,6 +92,13 @@ class FleetReviewClassifyTests(InstallTestCase):
         self.write_receipt(root, current_targets)
         if product_change:
             (root / "product.txt").write_text("consumer code\n", encoding="utf-8")
+        # Files newly tracked on the refresh branch that are deliberately kept
+        # out of the receipt: a Trellis-owned adapter a consumer un-ignores must
+        # not silently join the pack-vouched set.
+        for path in newly_tracked or []:
+            candidate = root / path
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.write_text(f"newly tracked {path}\n", encoding="utf-8")
         self.run_git(root, "add", ".")
         self.run_git(root, "commit", "-m", "refresh pack")
         return classifier, root, base_commit, self.write_fleet(root)
@@ -170,6 +178,26 @@ class FleetReviewClassifyTests(InstallTestCase):
         self.assertFalse(result.eligible)
         self.assertEqual(result.classification, "remote-review-required")
         self.assertEqual(result.disallowed_paths, ("product.txt",))
+        self.assertIn("consumer-owned or unclassified", result.reasons[0])
+
+    def test_newly_tracked_trellis_adapter_stays_outside_pack_vouch(self) -> None:
+        # A consumer relaxes its ignore policy so a Trellis-owned platform
+        # adapter becomes newly tracked in the refresh diff. Because the pack
+        # installer never wrote it to installed-targets.txt or provenance, it is
+        # not in the receipt-derived allowed set, so the classifier must fall
+        # back to remote review rather than treat it as a pack-vouched target.
+        adapter = ".claude/agents/trellis-implement.md"
+        classifier, root, base_commit, fleet = self.make_refresh(
+            newly_tracked=[adapter],
+        )
+
+        result = self.classify(classifier, root, base_commit, fleet)
+
+        self.assertFalse(result.eligible)
+        self.assertEqual(result.classification, "remote-review-required")
+        self.assertIn(adapter, result.changed_paths)
+        self.assertIn(adapter, result.disallowed_paths)
+        self.assertNotIn(adapter, result.allowed_paths)
         self.assertIn("consumer-owned or unclassified", result.reasons[0])
 
     def test_dirty_tree_requires_remote_review(self) -> None:

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.64.14 - 2026-08-05
+
+- Clarify fleet rollout PR audit scope so pack-owned receipt/provenance
+  coverage is distinguished from Trellis-owned adapter validation. The install
+  audit and `provenance.json` vouch pack-owned receipt targets only (the files
+  in `installed-targets.txt`); a Trellis-owned platform adapter that becomes
+  newly tracked when a consumer relaxes its ignore policy is never added to the
+  pack manifest, receipt, or provenance to widen that vouch — it stays outside
+  the pack-vouched set and is covered by the fleet review classifier's
+  integration-only eligibility (which forces the normal remote-review loop for
+  any changed path missing from the receipt) plus the consumer's own
+  integration/readiness checks. `docs/SD_AI_COMMAND_PACK.md` and
+  `docs/FLEET_ROLLOUT.md` state which check validates each ownership class, and
+  a new `test_newly_tracked_trellis_adapter_stays_outside_pack_vouch` locks the
+  classifier behavior in. Docs only; no shipped-script behavior change.
+
 ## 0.64.13 - 2026-08-04
 
 - Parallelize `sd-status fleet` collection. `collect_fleet` collected each

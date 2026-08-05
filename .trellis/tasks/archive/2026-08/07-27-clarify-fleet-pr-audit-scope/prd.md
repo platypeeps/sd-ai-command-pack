@@ -22,14 +22,20 @@ Clarify fleet rollout PR guidance so pack-owned receipt and provenance coverage 
 
 ## Acceptance Criteria
 
-- [ ] Fleet-generated PR guidance explicitly says that the install audit
-      vouches pack-owned receipt targets only.
-- [ ] When Trellis-owned adapters are newly tracked, the PR guidance identifies
+- [x] Fleet-generated PR guidance explicitly says that the install audit
+      vouches pack-owned receipt targets only. (`docs/SD_AI_COMMAND_PACK.md`
+      provenance paragraph + `docs/FLEET_ROLLOUT.md` Refresh Shape step 3.)
+- [x] When Trellis-owned adapters are newly tracked, the PR guidance identifies
       their owner and the separate integration/readiness checks that cover them.
-- [ ] Tests cover a rollout that exposes previously ignored Claude/Trellis
+      (Same doc edits name the fleet review classifier's integration-only
+      eligibility + the consumer's integration/readiness checks;
+      `FLEET_ROLLOUT.md` step 6 requires the PR verification summary to attribute
+      each ownership class to its validating check.)
+- [x] Tests cover a rollout that exposes previously ignored Claude/Trellis
       adapters without adding those files to pack receipts or provenance.
-- [ ] Existing tooling/generated scope recognition and immutable release
-      evidence continue to pass.
+      (`tests/test_fleet_review_classify.py::test_newly_tracked_trellis_adapter_stays_outside_pack_vouch`.)
+- [x] Existing tooling/generated scope recognition and immutable release
+      evidence continue to pass. (Verified by the full `make check` gate.)
 
 ## Notes
 

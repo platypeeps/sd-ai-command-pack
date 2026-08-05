@@ -1771,3 +1771,37 @@ collect_fleet now maps collect_local over consumers in a bounded ThreadPoolExecu
 ### Next Steps
 
 - Merge PR #330 through housekeeping gate; continue autonomous loop iteration 9.
+
+
+## Session 297: Clarify fleet PR audit scope for Trellis adapters
+
+**Date**: 2026-08-05
+**Task**: Clarify fleet PR audit scope for Trellis adapters
+**Branch**: `feat/clarify-fleet-pr-audit-scope`
+
+### Summary
+
+Distinguished pack-owned receipt/provenance coverage from Trellis-owned adapter validation in fleet rollout PR guidance (SD_AI_COMMAND_PACK.md template+mirror, FLEET_ROLLOUT.md); each ownership class attributed to its validating check. Added a regression test proving a newly-tracked Trellis-owned adapter forces remote-review and stays outside the pack-vouched set. Version 0.64.14.
+
+### Main Changes
+
+- docs+test: install audit/provenance vouch pack-owned receipt targets only; Trellis-owned adapters covered by classifier integration-only eligibility + consumer integration/readiness checks; new test_newly_tracked_trellis_adapter_stays_outside_pack_vouch
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4433ca2d4fe6b32d408dfc078057e941c688e2d7` | feat: clarify fleet PR audit scope for Trellis adapters (0.64.14) |
+
+### Testing
+
+- [OK] make check (green); ./.venv/bin/python3 -m unittest tests.test_fleet_review_classify (14/14 incl new test)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- none — task complete, merged via housekeeping
