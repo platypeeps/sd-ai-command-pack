@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 291
+- **Total Sessions**: 292
 - **Last Active**: 2026-08-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~1589 | Active |
+| `journal-6.md` | ~1629 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 292 | 2026-08-04 | Align review-preflight classifier for .claude/hooks (0.64.10) | `b1ddb073`, `5e791227`, `793ac653` | `feat/align-review-preflight-claude-hooks` |
 | 291 | 2026-08-04 | Register fleet-refresh.operator-policy structured decision (0.64.9) | `f2a77537` | `feat/register-fleet-operator-policy` |
 | 290 | 2026-08-04 | Add agent manifest kind + subagent capability gate (0.64.8) | `799999f1`, `f5501b51`, `02712f7f`, `e9289813`, `6353bf5d`, `0b322f79` | `feat/agent-artifact-kind` |
 | 289 | 2026-08-04 | 07-25-fix-ci-dispatch: per-job dispatch protocol for sd-fix-ci (0.64.7) | `ad63deca`, `a38e4e2e`, `de8adf60`, `21165099` | `feat/sd-fix-ci-dispatch` |

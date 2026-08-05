@@ -1589,3 +1589,43 @@ Registered the fleet-refresh.operator-policy interaction decision and bound it t
 ### Next Steps
 
 - None - task complete
+
+
+## Session 292: Align review-preflight classifier for .claude/hooks (0.64.10)
+
+**Date**: 2026-08-04
+**Task**: Align review-preflight classifier for .claude/hooks (0.64.10)
+**Branch**: `feat/align-review-preflight-claude-hooks`
+
+### Summary
+
+Added .claude/hooks/ to the mjs review-preflight copied-path classifier (isTrellisCopiedPath) so it matches the shell review-scope classifier, which already listed it. Paired parity tests pin both sides. Version 0.64.9 -> 0.64.10; PR #326.
+
+### Main Changes
+
+- mjs: classify .claude/hooks/* as trellis copied path (root + template twin, byte-identical)
+- tests: copiedTemplateKind assertion (preflight) + behavioral shell advisory test (review-scope) as parity pair
+- release: manifest 0.64.10, CHANGELOG, candidate ledger regenerated
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b1ddb073` | feat: classify .claude/hooks as copied in review-preflight (0.64.10) |
+| `5e791227` | chore(task): record branch for align-review-preflight-claude-hooks |
+| `793ac653` | chore(task): archive 07-27-align-review-preflight-claude-hooks |
+
+### Testing
+
+- [OK] make check: exit 0 (Full check complete)
+- [OK] test_review_scope + test_review_preflight: 114 tests, 0 failures
+- [OK] CI Result: pass; Copilot: COMMENTED, 0 findings
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
