@@ -6,9 +6,12 @@ Keep the shell review-scope copied-path classifier aligned with preflight for .g
 
 ## Requirements
 
-- Add `.gemini/settings.json` to the shell review-scope classifier's Trellis/runtime copied-path set.
-- Keep the root script and shipped template byte-aligned.
-- Add focused parity coverage so the shell and JavaScript classifiers cannot silently diverge for platform settings paths.
+- Ensure `.gemini/settings.json` is in the shell review-scope classifier's
+  Trellis/runtime copied-path set. (Already satisfied: it is present in the
+  `is_trellis_runtime_path` settings group and byte-aligned between the root
+  script and shipped template; no classifier change is required.)
+- Add focused parity coverage so the shell and JavaScript classifiers cannot
+  silently diverge for platform settings paths.
 
 ## Acceptance Criteria
 
