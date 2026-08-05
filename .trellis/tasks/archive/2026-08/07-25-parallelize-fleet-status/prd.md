@@ -36,14 +36,26 @@ this repo's source; the SE-side task was retired in favor of this one.
 
 ## Acceptance Criteria
 
-- [ ] Multi-repo fleet status measurably faster. With a bound of W workers over C
+- [x] Multi-repo fleet status measurably faster. With a bound of W workers over C
       consumers the floor is ceil(C/W) waves, not the single worst consumer — state the
       measured before/after wall time and the C and W it was measured at, rather than
       asserting "worst consumer dominates", which only holds when W ≥ C.
-- [ ] A consumer whose `collect_local` raises produces a degraded row and the remaining
-      consumers still report.
-- [ ] Output ordering and content identical to serial for the same inputs.
-- [ ] Changelog + version; fleet rollout via normal refresh.
+      Measured `sd-status fleet` on the configured fleet, C=8 (all present), W=min(8,8)=8:
+      serial 9.71s/9.65s vs parallel 1.78s/1.74s (~5.5×). With W=C the floor is
+      ceil(8/8)=1 wave, so parallel wall ≈ slowest single consumer; measured numbers match.
+- [x] A consumer whose `collect_local` raises produces a degraded row and the remaining
+      consumers still report. `collect_local` wrapped in `try/except Exception` →
+      `status "unavailable"`, `report None`; `KeyboardInterrupt` (BaseException) propagates.
+      `test_fleet_collection_isolates_a_raising_consumer` asserts the degraded row, the
+      other two consumers still `available`, and order preserved.
+- [x] Output ordering and content identical to serial for the same inputs.
+      `ThreadPoolExecutor.map` yields in input order; row assembled from the indexed
+      consumer, not completion order. Existing
+      `test_fleet_report_uses_priority_and_surfaces_stale_and_missing_repos` ordering
+      assertion still passes unchanged.
+- [x] Changelog + version; fleet rollout via normal refresh. `manifest.json`
+      0.64.12→0.64.13, CHANGELOG entry added, `make generate`/`make sync`/candidate-check
+      run (shipped-surface closure clean); `make check` green.
 
 ## Notes
 

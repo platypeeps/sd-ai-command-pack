@@ -1918,6 +1918,84 @@ class StatusTests(InstallTestCase):
         self.assertIn("==> Follow-ups", rendered)
         self.assertIn("F-1 [action]", rendered)
 
+    def test_fleet_collection_isolates_a_raising_consumer(self) -> None:
+        status = self.load_status_module()
+        alpha = self.make_status_repo(pack_version=PACK_VERSION)
+        raiser = self.make_status_repo(pack_version=PACK_VERSION)
+        omega = self.make_status_repo(pack_version=PACK_VERSION)
+        manifest = alpha.parent / "fleet.json"
+        manifest.write_text(
+            json.dumps(
+                fleet_manifest(
+                    [
+                        {
+                            "name": "omega",
+                            "github": "example/omega",
+                            "pathHint": str(omega),
+                            "platforms": ["claude"],
+                            "rolloutPriority": 90,
+                            "candidateTimeoutSeconds": 60,
+                            "candidatePrepare": [],
+                            "candidateChecks": [["bash", "check.sh"]],
+                        },
+                        {
+                            "name": "raiser",
+                            "github": "example/raiser",
+                            "pathHint": str(raiser),
+                            "platforms": ["claude"],
+                            "rolloutPriority": 50,
+                            "candidateTimeoutSeconds": 60,
+                            "candidatePrepare": [],
+                            "candidateChecks": [["bash", "check.sh"]],
+                        },
+                        {
+                            "name": "alpha",
+                            "github": "example/alpha",
+                            "pathHint": str(alpha),
+                            "platforms": ["claude"],
+                            "rolloutPriority": 10,
+                            "candidateTimeoutSeconds": 60,
+                            "candidatePrepare": [],
+                            "candidateChecks": [["bash", "check.sh"]],
+                        },
+                    ]
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        real_collect_local = status.collect_local
+
+        def flaky_collect_local(path, **kwargs):
+            if kwargs.get("github_repo") == "example/raiser":
+                raise RuntimeError("simulated collect_local failure")
+            return real_collect_local(path, **kwargs)
+
+        with mock.patch.object(status, "collect_local", flaky_collect_local):
+            report = status.collect_fleet(
+                PACK_ROOT,
+                fleet_path=manifest,
+                network=False,
+                refs_refreshed=False,
+            )
+
+        rows = report["repositories"]
+        # Registry rollout order (ascending rolloutPriority) is preserved even
+        # though the middle consumer raised.
+        self.assertEqual(
+            [row["name"] for row in rows], ["alpha", "raiser", "omega"]
+        )
+        by_name = {row["name"]: row for row in rows}
+        # The raising consumer is rendered as a degraded row and does not abort
+        # the run; the other two consumers still report.
+        self.assertEqual(by_name["raiser"]["status"], "unavailable")
+        self.assertIsNone(by_name["raiser"]["report"])
+        self.assertEqual(by_name["alpha"]["status"], "available")
+        self.assertIsNotNone(by_name["alpha"]["report"])
+        self.assertEqual(by_name["omega"]["status"], "available")
+        self.assertIsNotNone(by_name["omega"]["report"])
+
     def test_fleet_loader_requires_pack_identity(self) -> None:
         status = self.load_status_module()
         tempdir = tempfile.TemporaryDirectory(prefix="sd-status-pack-")

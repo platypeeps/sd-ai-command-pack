@@ -1737,3 +1737,37 @@ Guard the main scan path's build_review_learning_signal call so unsafe planning 
 ### Next Steps
 
 - Merge PR #329 through housekeeping gate; continue autonomous loop iteration 8.
+
+
+## Session 296: Parallelize sd-status fleet collection (0.64.13)
+
+**Date**: 2026-08-05
+**Task**: Parallelize sd-status fleet collection (0.64.13)
+**Branch**: `feat/parallelize-fleet-status`
+
+### Summary
+
+collect_fleet now maps collect_local over consumers in a bounded ThreadPoolExecutor (min(8,len(consumers))), preserving registry order via input-order map and isolating a raising consumer to a degraded unavailable row.
+
+### Main Changes
+
+- Refactored collect_fleet serial loop into a worker + bounded ThreadPoolExecutor; template edited first, root byte-mirrored.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `42389dc0953bfffbf3a5c0c7ff131721cbe98512` | feat: parallelize sd-status fleet collection (0.64.13) |
+
+### Testing
+
+- [OK] make check MK_EXIT=0; new test_fleet_collection_isolates_a_raising_consumer; existing ordering test unchanged. Measured serial ~9.7s -> parallel ~1.76s (C=8,W=8).
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #330 through housekeeping gate; continue autonomous loop iteration 9.

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.64.13 - 2026-08-04
+
+- Parallelize `sd-status fleet` collection. `collect_fleet` collected each
+  consumer serially, stacking per-repo subprocess and 20s network-timeout
+  latency (a 10-20 repo fleet cost 15-40s). It now maps `collect_local` over
+  the consumers in a bounded `ThreadPoolExecutor` (`min(8, len(consumers))`
+  workers — the useful ceiling tracks git/gh concurrency, not CPU cores),
+  so wall time floors at `ceil(consumers / workers)` waves instead of the
+  serial sum. `ThreadPoolExecutor.map` yields in input order, so registry
+  rollout order and per-row content are unchanged. A consumer whose
+  `collect_local` raises is now isolated to its own degraded `unavailable`
+  row instead of aborting the whole run; `KeyboardInterrupt` still propagates
+  and in-flight subprocesses finish or are killed by their existing
+  per-command timeouts. No cancellation contract, per-command timeout, or
+  output shape changed.
+
 ## 0.64.12 - 2026-08-04
 
 - Bound `sd-review-learnings` unsafe planning changed-path evidence to a

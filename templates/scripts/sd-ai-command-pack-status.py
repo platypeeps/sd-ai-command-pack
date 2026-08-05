@@ -15,6 +15,7 @@ import stat
 import subprocess
 import sys
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -2465,48 +2466,66 @@ def collect_fleet(
         home=home,
     )
     target = resolution.target_version
-    reports: list[dict[str, Any]] = []
-    for consumer in consumers:
+
+    def collect_consumer(consumer: Any) -> dict[str, Any]:
         path = resolution.path_overrides.get(
             consumer.name.casefold(),
             Path(consumer.path_hint).expanduser(),
         )
         if not path.is_dir():
-            reports.append(
-                {
-                    "name": consumer.name,
-                    "github": consumer.github,
-                    "priority": consumer.rollout_priority,
-                    "path": str(path),
-                    "status": "missing",
-                    "report": None,
-                }
-            )
-            continue
-        report = collect_local(
-            path,
-            remote="origin",
-            supplied_default=None,
-            source_branch=None,
-            github_repo=consumer.github,
-            network=network,
-            refs_refreshed=refs_refreshed,
-            expect_clean=False,
-            keep_remote_branch=False,
-            dry_run=False,
-            prior_anomalies=(),
-            target_pack_version=target,
-        )
-        reports.append(
-            {
+            return {
                 "name": consumer.name,
                 "github": consumer.github,
                 "priority": consumer.rollout_priority,
                 "path": str(path),
-                "status": "available" if report else "unavailable",
-                "report": report,
+                "status": "missing",
+                "report": None,
             }
-        )
+        try:
+            report = collect_local(
+                path,
+                remote="origin",
+                supplied_default=None,
+                source_branch=None,
+                github_repo=consumer.github,
+                network=network,
+                refs_refreshed=refs_refreshed,
+                expect_clean=False,
+                keep_remote_branch=False,
+                dry_run=False,
+                prior_anomalies=(),
+                target_pack_version=target,
+            )
+        except Exception:
+            # One unreachable or misbehaving consumer must not abort the whole
+            # fleet run. Render it as a degraded row exactly as an empty
+            # collect_local result does (status "unavailable", no report) so the
+            # remaining consumers still report. KeyboardInterrupt is a
+            # BaseException and is deliberately left to propagate.
+            report = None
+        return {
+            "name": consumer.name,
+            "github": consumer.github,
+            "priority": consumer.rollout_priority,
+            "path": str(path),
+            "status": "available" if report else "unavailable",
+            "report": report,
+        }
+
+    # Fleet status is subprocess-bound (git/gh per consumer) and consumers are
+    # independent, so collect them concurrently in a bounded pool instead of
+    # stacking each consumer's subprocess and network-timeout latency serially.
+    # The useful worker ceiling tracks git/gh concurrency rather than CPU cores;
+    # cap at 8 so a large fleet does not open one subprocess tree per consumer
+    # at once. ThreadPoolExecutor.map yields in input order, so registry
+    # rollout order is preserved without re-sorting.
+    reports: list[dict[str, Any]]
+    if consumers:
+        worker_count = min(8, len(consumers))
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            reports = list(executor.map(collect_consumer, consumers))
+    else:
+        reports = []
     steps = fleet_next_steps(reports, target)
     return {
         "schemaVersion": SCHEMA_VERSION,
