@@ -750,6 +750,23 @@ class AgentGenerationTests(InstallTestCase):
                 'body with a """ fence\n',
             )
 
+    def test_toml_render_rejects_backslash(self) -> None:
+        generator = load_surface_generator()
+        # A lone backslash in a TOML basic/multi-line string is invalid TOML;
+        # reject it in both the description and the body.
+        with self.assertRaisesRegex(generator.GenerationError, "backslash"):
+            generator.render_toml_agent(
+                "sd-fixture",
+                {"name": "sd-fixture", "description": r"path C:\temp"},
+                "body\n",
+            )
+        with self.assertRaisesRegex(generator.GenerationError, "backslash"):
+            generator.render_toml_agent(
+                "sd-fixture",
+                {"name": "sd-fixture", "description": "x"},
+                "regex \\d+ here\n",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -986,6 +986,13 @@ def render_toml_agent(name: str, meta: dict[str, str], body: str) -> str:
     description = meta["description"]
     if '"' in description:
         raise GenerationError(f"agent {name}: description must not contain double quotes")
+    # TOML basic and multi-line basic strings interpret backslash escapes, so a
+    # lone backslash (a regex `\d`, a Windows path) yields invalid or silently
+    # transformed TOML. Reject it, matching the reject-unsafe stance on quotes.
+    if "\\" in description:
+        raise GenerationError(f"agent {name}: description must not contain a backslash")
+    if "\\" in body:
+        raise GenerationError(f"agent {name}: body must not contain a backslash")
     if '"""' in body:
         raise GenerationError(f"agent {name}: body must not contain a TOML string fence")
     sandbox = meta.get("codex-sandbox", DEFAULT_AGENT_SANDBOX_MODE)
