@@ -1180,8 +1180,10 @@ steps. Repo-wide inventory remains context rather than a cleanup blocker.
 Pass `--json` to reserve stdout for one schema-version-1 housekeeping result;
 progress and diagnostics move to stderr. The result embeds the existing PR
 eligibility JSON unchanged, stable coded actions/anomalies, and the complete
-delegated `sd-status --json` report. Its final `outcome.status` is
-`clean|blocked|indeterminate|failed`. When an environment or authority boundary
+delegated `sd-status --json` report. Its final `outcome.verdict` is
+`clean|blocked|indeterminate|failed` (the `outcome.status` alias emits the same
+value for one deprecation release and is dropped in 0.66.0). When an environment
+or authority boundary
 refuses a Git-metadata or KB-refresh write, the result also carries an additive
 `environmentBlocks` array of `environment_blocked` fragments — each naming the
 exact boundary, last verified checkpoint, mutation state, and a bounded,

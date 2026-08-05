@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.64.17 - 2026-08-05
+
+- Unify the `outcome`/`status` vocabulary across emitted payload envelopes
+  (A-077). One rule now holds at the top level of every emitted document: the
+  `outcome` key carries a verdict and `status` is reserved for an embedded
+  sd-status document. `sd_ai_command_pack_lib.py` owns the shared verdict core
+  `VERDICT_CORE = {clean, blocked, skipped, failed}` and a `declare_verdict_domain`
+  helper; the four multi-valued domains (`housekeeping`, `review-local`,
+  `fleet-stage`, `fleet-consumer`) derive their sets from the core with explicit,
+  named opt-outs, so a value cannot silently diverge across payloads while a
+  legitimate domain verdict such as `findings` or `at-target` is still allowed.
+  Declaring a non-core verdict without an opt-out now fails at import time.
+- Resolve the one genuine single-document collision: the housekeeping result's
+  embedded enum `outcome.status` is renamed to `outcome.verdict`, so
+  `result["status"]` (the sd-status document) and `result["outcome"]["verdict"]`
+  (the enum) no longer both spell `status` with different value types. The
+  review-local stage report converges its top-level verdict from `status` onto
+  `outcome`. Both renames ship additively: the old keys are still emitted for one
+  release and are recorded in `DEPRECATED_PAYLOAD_KEYS` with
+  `removed_version 0.66.0`. The shipped `sd-housekeeping` skill prose and
+  `docs/SD_AI_COMMAND_PACK.md` are updated to name `outcome.verdict` in the same
+  change so an agent never follows stale prose. `"ok"`/`"recorded"` keep their
+  distinct spellings with a recorded justification (no consumer reads them). The
+  exact-payload fleet ledger refreshes via the normal release fleet run.
+
 ## 0.64.16 - 2026-08-05
 
 - Consolidate the three copies of `atomic_write_text`/`default_text_file_mode`

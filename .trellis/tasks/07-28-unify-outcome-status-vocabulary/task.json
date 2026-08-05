@@ -3,7 +3,7 @@
   "name": "unify-outcome-status-vocabulary",
   "title": "Unify the outcome and status vocabulary across script payloads",
   "description": "A-077: status means a whole sd-status document in one place and a verdict enum in another, sometimes in the same payload; review-local emits the same value as both outcome and status; bare-string producers use a vocabulary no enum declares.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
