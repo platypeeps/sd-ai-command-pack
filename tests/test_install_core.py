@@ -1773,6 +1773,24 @@ class InstallCoreTests(InstallTestCase):
         )
         install.validate_manifest([file])
 
+    def test_no_agent_rows_for_platforms_without_agent_capability(self) -> None:
+        """The subagent capability gate: a platform whose ``agent_kind`` is
+        None produces zero manifest rows of kind ``agent``. Asserted while the
+        answer is trivially zero (no platform yet carries the capability and no
+        agent source exists) so a later renderer commit cannot weaken it — a
+        capability-None platform must never gain an agent row."""
+        from installer import registry
+
+        _, files = install.load_manifest()
+        agent_platforms = {f.platform for f in files if f.kind == "agent"}
+        for name, info in registry.PLATFORM_REGISTRY.items():
+            if info.agent_kind is None:
+                self.assertNotIn(
+                    name,
+                    agent_platforms,
+                    f"{name} has no agent capability but produced agent rows",
+                )
+
     def test_validate_manifest_rejects_unknown_install_mode(self) -> None:
         file = install.PackFile(
             platform="shared",
