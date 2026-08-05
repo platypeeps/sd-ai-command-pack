@@ -26,7 +26,7 @@ from sd_ai_command_pack_lib import (  # noqa: E402
     CACHE_ROOT_ENV,
     CacheSetupError,
     build_environment_blocked_evidence,
-    build_tool_environment,
+    run_git_cached,
 )
 
 SCHEMA_VERSION = 1
@@ -235,8 +235,19 @@ def compact_text(value: object, *, limit: int = 300) -> str:
 
 
 def run_git(repo: Path, *args: str) -> str | None:
+    # run_git_cached builds the shared cache-backed environment (the former
+    # inline build_tool_environment call) and disables the git credential
+    # prompt; the returned CompletedProcess is inspected below.
     try:
-        environment, _, _ = build_tool_environment(repo=repo)
+        result = run_git_cached(
+            ["-C", str(repo), *args],
+            repo=repo,
+            cwd=None,
+            timeout=20,
+            stderr=subprocess.DEVNULL,
+            encoding="utf-8",
+            errors="strict",
+        )
     except CacheSetupError as error:
         detail = str(error).strip()
         detail = detail.removeprefix("cache setup failed for external tools: ")
@@ -247,18 +258,6 @@ def run_git(repo: Path, *args: str) -> str | None:
                 "outside the repository"
             )
         raise WorkLoopError(f"cache setup failed: {detail}") from error
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(repo), *args],
-            env=environment,
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            encoding="utf-8",
-            errors="strict",
-            timeout=20,
-        )
     except (OSError, UnicodeError, subprocess.TimeoutExpired):
         return None
     return result.stdout.strip() if result.returncode == 0 else None

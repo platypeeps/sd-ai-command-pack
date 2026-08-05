@@ -18,6 +18,12 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import ModuleType
 from typing import Any, Iterable, Mapping, Sequence
 
+_SCRIPT_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+
+from sd_ai_command_pack_lib import run_git_minimal  # noqa: E402
+
 SCHEMA_VERSION = 1
 SUPPORTED_MANIFEST_SCHEMA = 1
 MAX_AUTHORITATIVE_BYTES = 1024 * 1024
@@ -124,13 +130,11 @@ def _load_json(root: Path, relative: str, *, label: str) -> tuple[str, Any]:
 
 def _run_git(root: Path, args: Sequence[str], *, optional: bool = False) -> bytes | None:
     try:
-        result = subprocess.run(
-            ["git", *args],
+        result = run_git_minimal(
+            list(args),
             cwd=root,
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
             timeout=60,
+            binary=True,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         if optional:

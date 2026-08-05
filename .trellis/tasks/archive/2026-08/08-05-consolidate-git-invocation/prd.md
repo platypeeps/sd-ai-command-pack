@@ -75,14 +75,47 @@ shared shapes is optional cleanup, not AC4-required.
 - R5 (optional): collapse the three delegating adapters onto shared shapes with
   a per-script error adapter via `context=`.
 
+## Scope correction — 2026-08-05 (adversarial review → full scope re-plan)
+
+The "two true bypasses" evidence below is **incomplete**. A planning adversarial
+review (host + Codex) found git-subprocess sites across multiple files and five
+blocking concerns (C-1..C-5). The user selected **full scope**: migrate every
+git-**specific** invocation site.
+
+`design.md` and `implement.md` have been rewritten to full scope. The resolved
+inventory is **6 git-specific files / 13 git-argv call sites** to migrate:
+`review-local._git` + `_artifact_root` (×2), `surface-check._run_git` (×1),
+`install-audit.gitignored_paths` (×1), `work-loop.run_git` (×1),
+`fleet-controller` (×3), `fleet-publish` (×5 argv sites via its `run` wrapper),
+plus **3 generic shared-env runners** that are allowlisted rather than migrated
+(`pr-eligibility.run_command`, `status.run_command`,
+`fleet-candidate-check.run_command`). C-1..C-5 dispositions are recorded in
+`design.md` → "Concern ledger disposition". Re-run the planning adversarial
+review before `task.py start`.
+
+The requirements below (R1–R5) are superseded by `design.md`'s R1–R4 and the
+`design.md` AC4 definition; they are retained only for provenance.
+
 ## Acceptance criteria
 
-- AC4: `grep -rnE 'subprocess\.(run|Popen)\(' scripts/*.py` shows git
-  invocations only in `sd_ai_command_pack_lib.py` and work-loop's adapter. No
-  other script builds a git environment.
-- AC-regression: review-local and surface-check git behavior (str/bytes,
-  timeout handling, prompt disabled, no new hard cache-setup dependency in
-  contexts that previously worked) is preserved. Full test suite and template
+- AC4: a committed **AST** boundary test
+  (`tests/test_git_invocation_boundary.py`) — not a raw or git-argv-presence
+  grep — proves that only `sd_ai_command_pack_lib.py` calls
+  `subprocess.run`/`subprocess.Popen` with a git command **literal**. The three
+  generic shared-env runners (`pr-eligibility.py`, `status.py`,
+  `fleet-candidate-check.py`) pass naturally (variable argv) and are documented
+  in an allowlist; library-delegating callers that pass `["git", ...]` to
+  `lib.run_command` (audit-inventory, check.py, review.py, record-session) are
+  the intended consolidated pattern, not violations. All git-specific
+  direct-subprocess sites route through the library helpers (`run_git_minimal` /
+  `run_git_cached`). See `design.md` → "AC4 gate".
+- AC-regression: each migrated caller's exact error/return semantics are
+  preserved — review-local's str/bytes overloads, `TimeoutExpired.stderr`, and
+  escaping spawn `OSError`; surface-check's bytes/`optional`; install-audit's
+  `set()`-on-failure + rc∈{0,1} + NUL stdin; work-loop's `->str|None` swallowing
+  + `errors="strict"` + `CacheSetupError→WorkLoopError` (call sites untouched);
+  fleet-controller's failure-value; fleet-publish's `PublishError`. No new hard
+  cache-setup dependency on the minimal-env paths. Full test suite and template
   parity green.
 
 ## Boundaries
