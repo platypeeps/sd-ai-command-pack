@@ -64,6 +64,12 @@ def _walk_status_keys(
             here = path + (key,)
             if key == "status":
                 yield here, value
+                # Envelope-scoped rule: the top-level ``status`` is the embedded
+                # sd-status document. Treat it opaque so its own nested
+                # per-entity ``status`` fields never masquerade as an
+                # envelope-scoped collision with the ``outcome`` verdict enum.
+                if path == ():
+                    continue
             yield from _walk_status_keys(value, here)
     elif isinstance(document, list):
         for index, item in enumerate(document):
@@ -89,12 +95,47 @@ class VerdictCoreDerivationTests(unittest.TestCase):
             {"housekeeping", "review-local", "fleet-stage", "fleet-consumer"},
         )
 
-    def test_core_members_keep_their_meaning_across_domains(self) -> None:
-        # Every value shared with the core is genuinely a core member, so a
-        # value never means one thing in the core and another in a domain.
+    def test_each_domain_locks_in_its_exact_member_set(self) -> None:
+        # AC2: each producer's vocabulary derives from the core plus explicit
+        # opt-outs. Pin the exact frozen set every domain registers so a silent
+        # drift — adding, dropping, or renaming a verdict — fails loudly here
+        # and forces a conscious update rather than passing tautologically.
+        self.assertEqual(
+            {name: set(members) for name, members in lib.VERDICT_DOMAINS.items()},
+            {
+                "housekeeping": {"clean", "blocked", "indeterminate", "failed"},
+                "review-local": {
+                    "clean",
+                    "findings",
+                    "unavailable",
+                    "failed",
+                    "cancelled",
+                    "skipped",
+                },
+                "fleet-stage": {"passed", "failed", "skipped", "interrupted"},
+                "fleet-consumer": {
+                    "at-target",
+                    "refreshed-merged",
+                    "pr-open",
+                    "skipped",
+                    "failed",
+                    "blocked",
+                },
+            },
+        )
+        # Guard the derivation itself: every non-opted-out member is a core
+        # verdict, so the exact sets above cannot drift away from the core
+        # without a matching opt-out.
+        opt_outs = {
+            "housekeeping": {"indeterminate"},
+            "review-local": {"findings", "unavailable", "cancelled"},
+            "fleet-stage": {"passed", "interrupted"},
+            "fleet-consumer": {"at-target", "refreshed-merged", "pr-open"},
+        }
         for name, members in lib.VERDICT_DOMAINS.items():
-            shared = members & lib.VERDICT_CORE
-            self.assertTrue(shared.issubset(lib.VERDICT_CORE), name)
+            self.assertLessEqual(
+                members - opt_outs[name], lib.VERDICT_CORE, name
+            )
 
     def test_non_core_verdict_without_opt_out_is_rejected(self) -> None:
         with self.assertRaises(lib.VerdictVocabularyError):
@@ -137,10 +178,18 @@ class HousekeepingCollisionTests(unittest.TestCase):
 
     def test_no_two_status_keys_share_a_document_with_different_types(self) -> None:
         result = self._clean_result()
-        # Give the document its real shape: top-level ``status`` is the embedded
-        # sd-status document (a dict), which is the genuine other half of the
-        # historical collision with the ``outcome.status`` enum string.
-        result["status"] = {"schemaVersion": 2, "mode": "local"}
+        # Give the document its realistic shape: top-level ``status`` is the
+        # embedded sd-status document (a dict), which is the genuine other half
+        # of the historical collision with the ``outcome.status`` enum string.
+        # The real sd-status payload carries its own nested ``status`` strings
+        # (its summary field and per-provider state); the envelope-scoped walker
+        # must treat the embedded document as opaque and never surface those as
+        # a collision.
+        result["status"] = {
+            "schemaVersion": 2,
+            "status": "degraded",
+            "providers": [{"id": "git", "status": "available"}],
+        }
         deprecated = _deprecated_status_paths("housekeeping-result")
         canonical = [
             (path, value)
