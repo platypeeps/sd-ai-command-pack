@@ -65,6 +65,12 @@ MAX_CLUSTER_PATH_FAMILIES = 6
 MAX_CLUSTER_EXAMPLES = 3
 MAX_GITHUB_INVENTORY_PAGES = 10
 MAX_GITHUB_REVIEW_COMMENTS = 500
+# GitHub caps a single GraphQL query at 500,000 requested nodes (the product of
+# every `first:` down each path). Each aliased pullRequest below requests at
+# most reviewThreads(first:100) * comments(first:50) + 100 = 5,100 nodes, so a
+# batch of 20 stays near 102,000 nodes — well under the ceiling — while
+# collapsing the review-thread fan-out from N gh subprocesses to ceil(N/20).
+GITHUB_REVIEW_THREAD_BATCH_SIZE = 20
 MIN_PREVENTIVE_ACTION_COUNT = 2
 REPORT_SCHEMA_VERSION = 1
 PLANNING_SIGNAL_SCHEMA_VERSION = 1
@@ -2007,44 +2013,93 @@ query($owner:String!, $name:String!, $endCursor:String) {
     return prs, cutoff, False
 
 
-def _copilot_comments_for_prs(
+# Inner reviewThreads selection shared by the single-PR and aliased-batch
+# queries so their shapes never drift. Whitespace is irrelevant to GraphQL.
+_REVIEW_THREADS_SELECTION = (
+    "reviewThreads(first:100) { "
+    "pageInfo { hasNextPage } "
+    "nodes { isResolved isOutdated path "
+    "comments(first:50) { pageInfo { hasNextPage } "
+    "nodes { author { login } body createdAt } } } }"
+)
+
+
+def _single_pr_review_threads(
     repo_root: Path,
     *,
     owner: str,
     name: str,
-    prs: list[dict[str, Any]],
-) -> tuple[list[PullRequestComment], bool]:
-    query = """
-query($owner:String!, $name:String!, $number:Int!) {
-  repository(owner:$owner, name:$name) {
-    pullRequest(number:$number) {
-      reviewThreads(first:100) {
-        pageInfo { hasNextPage }
-        nodes {
-          isResolved
-          isOutdated
-          path
-          comments(first:50) {
-            pageInfo { hasNextPage }
-            nodes {
-              author { login }
-              body
-              createdAt
-            }
-          }
-        }
-      }
-    }
-  }
-}
-""".strip()
-    comments: list[PullRequestComment] = []
-    truncated = False
-    for pr in prs:
-        pr_obj = _as_dict(pr)
-        number = pr_obj.get("number")
-        if not isinstance(number, int):
-            continue
+    number: int,
+) -> Any:
+    """Fetch one PR's reviewThreads connection with the pre-batch query.
+
+    Raises on a genuine gh failure exactly as the pre-batch code did, so a real
+    per-PR error still surfaces; returns ``None`` only on an unexpected shape.
+    """
+
+    query = (
+        "query($owner:String!, $name:String!, $number:Int!) {"
+        "  repository(owner:$owner, name:$name) {"
+        "    pullRequest(number:$number) {"
+        "      " + _REVIEW_THREADS_SELECTION +
+        "    }"
+        "  }"
+        "}"
+    )
+    payload = _run_gh_json(
+        [
+            "api",
+            "graphql",
+            "-F",
+            f"owner={owner}",
+            "-F",
+            f"name={name}",
+            "-F",
+            f"number={number}",
+            "-f",
+            f"query={query}",
+        ],
+        repo_root,
+    )
+    connection = _dig(payload, "data", "repository", "pullRequest", "reviewThreads")
+    return connection if isinstance(connection, dict) else None
+
+
+def _batch_review_threads(
+    repo_root: Path,
+    *,
+    owner: str,
+    name: str,
+    numbers: list[int],
+) -> dict[int, Any]:
+    """Fetch several PRs' reviewThreads in one aliased GraphQL query.
+
+    Returns ``{pr_number: reviewThreads-connection-or-None}``. A whole-batch
+    failure (gh exits non-zero on a top-level ``errors`` array) or a per-alias
+    partial failure (an alias resolves to ``null``) yields ``None`` for the
+    affected PRs so the caller can retry each one individually — the aliased
+    query widens the failure domain, and this keeps one PR from dropping the
+    rest.
+    """
+
+    alias_by_number: dict[int, str] = {}
+    selections: list[str] = []
+    for index, number in enumerate(numbers):
+        alias = f"pr{index}"
+        alias_by_number[number] = alias
+        # `number` is an int validated by the caller, so embedding it as a
+        # GraphQL literal is injection-safe and avoids per-alias variables.
+        selections.append(
+            f"{alias}: pullRequest(number:{number}) {{ {_REVIEW_THREADS_SELECTION} }}"
+        )
+    query = (
+        "query($owner:String!, $name:String!) {"
+        "  repository(owner:$owner, name:$name) {"
+        "    " + " ".join(selections) +
+        "  }"
+        "}"
+    )
+    try:
         payload = _run_gh_json(
             [
                 "api",
@@ -2053,20 +2108,76 @@ query($owner:String!, $name:String!, $number:Int!) {
                 f"owner={owner}",
                 "-F",
                 f"name={name}",
-                "-F",
-                f"number={number}",
                 "-f",
                 f"query={query}",
             ],
             repo_root,
         )
-        thread_connection = _dig(
-            payload,
-            "data",
-            "repository",
-            "pullRequest",
-            "reviewThreads",
-        )
+    except RuntimeError:
+        return {number: None for number in numbers}
+    repository = _dig(payload, "data", "repository")
+    result: dict[int, Any] = {}
+    for number, alias in alias_by_number.items():
+        node = repository.get(alias) if isinstance(repository, dict) else None
+        connection = node.get("reviewThreads") if isinstance(node, dict) else None
+        result[number] = connection if isinstance(connection, dict) else None
+    return result
+
+
+def _review_thread_connections(
+    repo_root: Path,
+    *,
+    owner: str,
+    name: str,
+    numbers: list[int],
+) -> dict[int, Any]:
+    """Resolve each PR number to its reviewThreads connection.
+
+    Batches unique numbers into ``ceil(N / GITHUB_REVIEW_THREAD_BATCH_SIZE)``
+    aliased queries and individually retries any PR the batch could not
+    resolve, preserving the pre-batch single-PR failure semantics.
+    """
+
+    unique_numbers = list(dict.fromkeys(numbers))
+    connections: dict[int, Any] = {}
+    for start in range(0, len(unique_numbers), GITHUB_REVIEW_THREAD_BATCH_SIZE):
+        batch = unique_numbers[start : start + GITHUB_REVIEW_THREAD_BATCH_SIZE]
+        batched = _batch_review_threads(repo_root, owner=owner, name=name, numbers=batch)
+        for number in batch:
+            connection = batched.get(number)
+            if connection is None:
+                connection = _single_pr_review_threads(
+                    repo_root, owner=owner, name=name, number=number
+                )
+            connections[number] = connection
+    return connections
+
+
+def _copilot_comments_for_prs(
+    repo_root: Path,
+    *,
+    owner: str,
+    name: str,
+    prs: list[dict[str, Any]],
+) -> tuple[list[PullRequestComment], bool]:
+    comments: list[PullRequestComment] = []
+    truncated = False
+    numbered: list[tuple[dict[str, Any], int]] = []
+    for pr in prs:
+        pr_obj = _as_dict(pr)
+        number = pr_obj.get("number")
+        if isinstance(number, int):
+            numbered.append((pr_obj, number))
+    connections = _review_thread_connections(
+        repo_root,
+        owner=owner,
+        name=name,
+        numbers=[number for _, number in numbered],
+    )
+    # Iterate in input PR order so batched output ordering matches the caller's,
+    # not GraphQL alias order.
+    for pr_obj, number in numbered:
+        thread_connection = connections.get(number)
         if not isinstance(thread_connection, dict):
             continue
         page_info = thread_connection.get("pageInfo")

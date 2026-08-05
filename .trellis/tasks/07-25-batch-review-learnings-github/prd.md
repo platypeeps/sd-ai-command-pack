@@ -44,9 +44,17 @@ task optimizes. This task is the tactical fix for current pain only:
 
 ## Acceptance Criteria
 
-- [ ] A run over N PRs makes at most ceil(N/batch) gh calls; identical learnings output on
-      a fixture window.
-- [ ] Changelog + version; note in the generalization task that the collection code moved.
+- [x] A run over N PRs makes at most ceil(N/batch) gh calls; identical learnings output on
+      a fixture window. Batched via `_review_thread_connections` /
+      `_batch_review_threads` (`GITHUB_REVIEW_THREAD_BATCH_SIZE = 20`);
+      `tests/test_review_learnings.py::test_review_threads_are_fetched_in_one_batched_call`
+      asserts N=3 collapses to one gh call in requested order, and the partial-failure,
+      whole-batch-failure, and per-PR-truncation tests pin the widened-failure contract.
+- [x] Changelog + version; note in the generalization task that the collection code moved.
+      `0.64.10 → 0.64.11` (CHANGELOG.md); note added to
+      `07-25-generalize-review-learnings-across-reviewers/prd.md` recording the new
+      `_copilot_comments_for_prs` / `_review_thread_connections` /
+      `_batch_review_threads` / `_single_pr_review_threads` boundaries.
 
 ## Notes
 

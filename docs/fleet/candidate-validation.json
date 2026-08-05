@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-08-05T03:12:17Z",
-  "packVersion": "0.64.10",
-  "payloadDigest": "sha256:6bfd44ecf44629f44a238847915671c9e48d8691a59ed3338c868842041e8124",
+  "validatedAt": "2026-08-05T04:19:21Z",
+  "packVersion": "0.64.11",
+  "payloadDigest": "sha256:be3f09df7aebd8e91aadb8766f8e97da8e2fbec6ae64ec204edda4e79af0ae5e",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "78cf3871c94f33a0bea4337853ee8cf4141e1c24",
+      "baseCommit": "9e9a38f6650845ac87cb309b4859c238d3c5645d",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "94224b8d3ffc3cfecbc29cc5e4e6b3a19730af75",
+      "baseCommit": "f3c635b24e035387bf46ca64d7a790627c676646",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -121,7 +121,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "c39867d46bd2a9a38781792177ae9e7c565ac074",
+      "baseCommit": "092458398223c0014cfa52833f50b75ba14ba714",
       "status": "passed",
       "prepares": [
         [
@@ -149,7 +149,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "3f3f453b69faa052757aa2e8221fb599f60c99cb",
+      "baseCommit": "5a49447ea7d1d2d720f64d25cd38e9b437331a30",
       "status": "passed",
       "prepares": [
         [
