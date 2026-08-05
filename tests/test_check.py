@@ -433,5 +433,112 @@ class CheckTests(InstallTestCase):
         self.assertEqual(report["status"], "unavailable")
 
 
+def _load_check_module():
+    import importlib.util
+
+    scripts_dir = PACK_ROOT / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    script = scripts_dir / "sd-ai-command-pack-check.py"
+    spec = importlib.util.spec_from_file_location("sd_ai_command_pack_check", script)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class WorktreeHashCacheTests(unittest.TestCase):
+    """A-101 R1/R2: the per-run content-hash cache and its detection guarantees.
+
+    These exercise the hashing primitives directly on a plain directory (no git),
+    which is exactly how the guarded-path snapshot walks the tree. The three AC1
+    mutations must each change a *fresh* (cache-free) hash — that is the run's
+    final authoritative snapshot — and the same-size/mtime-restored rewrite must
+    additionally document the run-level granularity trade: a snapshot sharing the
+    pre-mutation cache cannot see it, while the fresh snapshot still does.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.mod = _load_check_module()
+
+    def _dir_with_file(self, contents: bytes = b"AAAA"):
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-check-cache-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name) / "tree"
+        (root / "nested").mkdir(parents=True)
+        target = root / "nested" / "file.bin"
+        target.write_bytes(contents)
+        return root, target
+
+    def test_ordinary_edit_changes_a_fresh_hash(self) -> None:
+        root, target = self._dir_with_file(b"AAAA")
+        before = self.mod._hash_path(root, self.mod._WorktreeHashCache())
+        target.write_bytes(b"AAAA-and-more")  # size changes
+        after = self.mod._hash_path(root, self.mod._WorktreeHashCache())
+        self.assertNotEqual(before, after)
+
+    def test_symlink_retarget_changes_hash_even_with_shared_cache(self) -> None:
+        root, _ = self._dir_with_file()
+        (root / "old").write_bytes(b"x")
+        (root / "new").write_bytes(b"y")
+        link = root / "nested" / "link"
+        link.symlink_to("../old")
+        cache = self.mod._WorktreeHashCache()
+        before = self.mod._hash_path(root, cache)
+        link.unlink()
+        link.symlink_to("../new")
+        # Symlinks are never cached, so the retarget is caught at every snapshot,
+        # including one reusing the pre-mutation cache.
+        self.assertNotEqual(before, self.mod._hash_path(root, cache))
+        self.assertNotEqual(before, self.mod._hash_path(root, self.mod._WorktreeHashCache()))
+
+    def test_same_size_mtime_restored_rewrite_is_caught_only_by_a_fresh_hash(self) -> None:
+        root, target = self._dir_with_file(b"AAAA")
+        original = target.stat()
+        cache = self.mod._WorktreeHashCache()
+        before = self.mod._hash_path(root, cache)  # cold pass fills the cache
+        target.write_bytes(b"BBBB")  # same size
+        os.utime(target, ns=(original.st_atime_ns, original.st_mtime_ns))  # restore mtime
+        self.assertEqual(target.stat().st_size, original.st_size)
+        self.assertEqual(target.stat().st_mtime_ns, original.st_mtime_ns)
+        # Documented trade: a snapshot reusing the pre-mutation cache misses it...
+        self.assertEqual(before, self.mod._hash_path(root, cache))
+        # ...but the run's final, cache-free snapshot re-hashes and still catches it.
+        self.assertNotEqual(before, self.mod._hash_path(root, self.mod._WorktreeHashCache()))
+
+    def test_content_reads_are_two_passes_regardless_of_snapshot_count(self) -> None:
+        # AC2: snapshot content-hashing is flat in the number of rows. Simulate a
+        # run: one cold `before` pass, several cache-reusing per-row snapshots, and
+        # one fresh `final` pass. Only the cold and final passes read file content.
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-check-count-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name) / "tree"
+        root.mkdir(parents=True)
+        file_count = 5
+        for index in range(file_count):
+            (root / f"f{index}.bin").write_bytes(f"content-{index}".encode())
+
+        reads = {"count": 0}
+        original = self.mod._hash_regular_file
+
+        def counting(path, digest):
+            reads["count"] += 1
+            return original(path, digest)
+
+        self.mod._hash_regular_file = counting
+        self.addCleanup(setattr, self.mod, "_hash_regular_file", original)
+
+        run_cache = self.mod._WorktreeHashCache()
+        self.mod._hash_path(root, run_cache)  # cold before
+        for _ in range(4):  # four unchanged per-row snapshots
+            self.mod._hash_path(root, run_cache)
+        self.mod._hash_path(root, self.mod._WorktreeHashCache())  # fresh final
+
+        # Exactly two full passes over the file set: cold + final. The four per-row
+        # snapshots read nothing. A per-row re-hash would make this 6 * file_count.
+        self.assertEqual(reads["count"], 2 * file_count)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,26 @@
 
 ## 0.64.18 - 2026-08-05
 
+- Cut the per-check-row worktree re-hash in `sd-ai-command-pack-check.py`
+  (A-101, R1/R2). Each check run snapshots the tree many times — before the
+  checks, after every executed row, and once at the end — and previously
+  re-read and re-hashed every tracked and guarded file's content on each
+  snapshot, so hashing cost scaled with the number of check rows. A per-run
+  content-hash cache now keys each regular file's content digest by a cheap
+  `(st_mode, st_size, st_mtime_ns)` signature: unchanged files are hashed once
+  and reused across snapshots, so the run performs exactly two full content
+  passes — the cold pass that fills the cache and the deliberately cache-free
+  final pass — regardless of row count. The cache is per-run and never
+  persisted, and no metadata-only or `git status`/index digest is substituted
+  for real content hashing. **Run-level granularity trade:** the cheap
+  signature cannot see a same-size, mtime-preserving rewrite that happens
+  between rows, so a per-row snapshot can miss it and no longer attribute the
+  mutation to a specific check row. The run's final snapshot runs against a
+  fresh cache and re-hashes from scratch, so it still fails the run for all
+  three mutation classes (ordinary edit, symlink retarget, and the same-size
+  mtime-restored rewrite); only per-row attribution for that one case is
+  traded away. Symlinks are always read fresh, so every retarget is still
+  caught at every snapshot.
 - Cut the payload-size classifier cost in `sd-ai-command-pack-pr-body-scope.py`
   (A-105, R3). Each `ScopeRule` now partitions its normalized patterns once at
   construction into a `frozenset` of metacharacter-free literals and a tuple of
