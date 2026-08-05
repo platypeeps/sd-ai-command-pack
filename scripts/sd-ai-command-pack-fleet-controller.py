@@ -1666,9 +1666,6 @@ def _git_evidence(path: Path, expected_checkout_digest: str) -> dict[str, Any]:
     }
     if not result["exists"]:
         return result
-    head = ""
-    branch = ""
-    dirty = ""
     try:
         head_result = run_git_minimal(
             ["-C", str(path), "rev-parse", "HEAD"], timeout=10
@@ -1687,16 +1684,18 @@ def _git_evidence(path: Path, expected_checkout_digest: str) -> dict[str, Any]:
         )
         if dirty_result.returncode != 0:
             return result
-        dirty = dirty_result.stdout
+        # Populate the evidence only once all three probes succeed; every
+        # earlier return leaves the default result untouched, so there is no
+        # partial or misleadingly-defaulted state to reason about.
+        result.update(
+            {
+                "branch": branch or None,
+                "clean": not bool(dirty_result.stdout),
+                "head": head if FULL_SHA_RE.fullmatch(head) else None,
+            }
+        )
     except (OSError, subprocess.SubprocessError):
         return result
-    result.update(
-        {
-            "branch": branch or None,
-            "clean": not bool(dirty),
-            "head": head if FULL_SHA_RE.fullmatch(head) else None,
-        }
-    )
     return result
 
 
