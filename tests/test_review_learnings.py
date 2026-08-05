@@ -95,7 +95,9 @@ class ReviewLearningsTests(InstallTestCase):
             return {
                 "data": {
                     "repository": {
-                        "pullRequest": {
+                        # Batched review-thread queries alias each PR as prN;
+                        # the lone in-window PR is pr0.
+                        "pr0": {
                             "reviewThreads": {
                                 "nodes": [
                                     {
@@ -268,6 +270,201 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertEqual(
             window.comments[0].pr_url,
             "https://github.com/owner/name/pull/42",
+        )
+
+    @staticmethod
+    def _review_threads_connection(
+        body: str, login: str, *, has_next_page: bool = False
+    ) -> dict:
+        connection: dict = {
+            "nodes": [
+                {
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "path": "src/example.py",
+                    "comments": {
+                        "nodes": [
+                            {
+                                "author": {"login": login},
+                                "body": body,
+                                "createdAt": "2026-07-25T00:00:00Z",
+                            }
+                        ]
+                    },
+                }
+            ]
+        }
+        if has_next_page:
+            connection["pageInfo"] = {"hasNextPage": True}
+        return connection
+
+    def test_review_threads_are_fetched_in_one_batched_call(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_batched_call",
+        )
+        calls: list[list[str]] = []
+
+        def fake_run_gh_json(args: list[str], repo_root):
+            calls.append(args)
+            return {
+                "data": {
+                    "repository": {
+                        f"pr{index}": {
+                            "reviewThreads": self._review_threads_connection(
+                                f"comment {number}", module.COPILOT_LOGIN
+                            )
+                        }
+                        for index, number in enumerate((10, 11, 12))
+                    }
+                }
+            }
+
+        with mock.patch.object(module, "_run_gh_json", fake_run_gh_json):
+            window = module.fetch_copilot_review_for_prs(
+                Path("."),
+                pr_numbers=[10, 11, 12],
+                github_repo="owner/name",
+            )
+
+        # Three PRs collapse to a single aliased gh call (ceil(3 / 20)).
+        self.assertEqual(len(calls), 1)
+        # Output ordering follows the requested PR order, not alias order.
+        self.assertEqual(
+            [comment.pr_number for comment in window.comments], [10, 11, 12]
+        )
+
+    def test_batch_partial_failure_retries_only_the_null_alias(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_partial_failure",
+        )
+        calls: list[list[str]] = []
+
+        def fake_run_gh_json(args: list[str], repo_root):
+            calls.append(args)
+            query = next(value for value in args if value.startswith("query="))
+            if "number:$number" in query:
+                # Single-PR retry for the alias that came back null.
+                self.assertTrue(any(value == "number=11" for value in args))
+                return {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "reviewThreads": self._review_threads_connection(
+                                    "retried 11", module.COPILOT_LOGIN
+                                )
+                            }
+                        }
+                    }
+                }
+            # Batch: PR 10 resolves, PR 11's alias is null (partial failure).
+            return {
+                "data": {
+                    "repository": {
+                        "pr0": {
+                            "reviewThreads": self._review_threads_connection(
+                                "batched 10", module.COPILOT_LOGIN
+                            )
+                        },
+                        "pr1": None,
+                    }
+                }
+            }
+
+        with mock.patch.object(module, "_run_gh_json", fake_run_gh_json):
+            window = module.fetch_copilot_review_for_prs(
+                Path("."),
+                pr_numbers=[10, 11],
+                github_repo="owner/name",
+            )
+
+        # One batch call plus exactly one individual retry for the null alias.
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(
+            [comment.pr_number for comment in window.comments], [10, 11]
+        )
+
+    def test_batch_whole_failure_falls_back_to_individual_calls(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_whole_failure",
+        )
+        retried: list[int] = []
+
+        def fake_run_gh_json(args: list[str], repo_root):
+            query = next(value for value in args if value.startswith("query="))
+            if "number:$number" not in query:
+                # gh exits non-zero on a top-level GraphQL errors array.
+                raise RuntimeError("GraphQL: query exceeds max node limit")
+            number = int(
+                next(value for value in args if value.startswith("number=")).split(
+                    "=", 1
+                )[1]
+            )
+            retried.append(number)
+            return {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": self._review_threads_connection(
+                                f"fallback {number}", module.COPILOT_LOGIN
+                            )
+                        }
+                    }
+                }
+            }
+
+        with mock.patch.object(module, "_run_gh_json", fake_run_gh_json):
+            window = module.fetch_copilot_review_for_prs(
+                Path("."),
+                pr_numbers=[10, 11],
+                github_repo="owner/name",
+            )
+
+        self.assertEqual(retried, [10, 11])
+        self.assertEqual(
+            [comment.pr_number for comment in window.comments], [10, 11]
+        )
+
+    def test_batch_preserves_per_pr_truncation(self) -> None:
+        module = self.load_module_from_path(
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_review_learnings_batch_truncation",
+        )
+
+        def fake_run_gh_json(args: list[str], repo_root):
+            return {
+                "data": {
+                    "repository": {
+                        "pr0": {
+                            "reviewThreads": self._review_threads_connection(
+                                "truncated 10",
+                                module.COPILOT_LOGIN,
+                                has_next_page=True,
+                            )
+                        },
+                        "pr1": {
+                            "reviewThreads": self._review_threads_connection(
+                                "complete 11", module.COPILOT_LOGIN
+                            )
+                        },
+                    }
+                }
+            }
+
+        with mock.patch.object(module, "_run_gh_json", fake_run_gh_json):
+            window = module.fetch_copilot_review_for_prs(
+                Path("."),
+                pr_numbers=[10, 11],
+                github_repo="owner/name",
+            )
+
+        # One PR's unread page marks the window truncated without dropping the
+        # other PR's comment.
+        self.assertTrue(window.truncated)
+        self.assertEqual(
+            [comment.pr_number for comment in window.comments], [10, 11]
         )
 
     def test_learnings_neutralize_embedded_managed_markers(self) -> None:

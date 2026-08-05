@@ -2,6 +2,15 @@
 
 > Status: BLOCKED (external) — do not `task.py start`. Requires: stable learning projection from sd-github-review 07-25-publish-finding-adjudication-evidence. Marked 2026-07-25; see Dependencies.
 
+> Note (2026-08-04, task `07-25-batch-review-learnings-github`, v0.64.11): the
+> Copilot-only collection path this task replaces was moved from a per-PR
+> `gh` loop to aliased-batch GraphQL fetching in
+> `_copilot_comments_for_prs` / `_review_thread_connections` /
+> `_batch_review_threads` / `_single_pr_review_threads`. That batching is the
+> tactical, deliberately disposable code this generalization is expected to
+> delete when it restructures collection types — plan the rework against those
+> new function boundaries.
+
 ## Goal
 
 Keep `sd-review-learnings` focused on recurring feedback and preventive

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.64.11 - 2026-08-04
+
+- Batch `sd-review-learnings` review-thread collection into aliased GraphQL
+  queries (up to `GITHUB_REVIEW_THREAD_BATCH_SIZE = 20` PRs per request)
+  instead of one `gh` subprocess per PR, cutting a documented
+  `--github-days 2 --update` run from ~30-45 serial GraphQL spawns to
+  `ceil(N / 20)`. Aliased batching widens the failure domain, so a whole-batch
+  failure (gh exits non-zero on a top-level `errors` array) or a per-alias
+  `null` (partial failure) falls back to the pre-batch single-PR query for the
+  affected PRs — one PR never drops the rest. Per-PR truncation and input
+  ordering are preserved; identical learnings output on a fixed PR window.
+  Tactical fix pending the parked reviewer-generalization rework, which will
+  replace this collection path entirely.
+
 ## 0.64.10 - 2026-08-04
 
 - Classify `.claude/hooks/*` as a copied/generated Trellis runtime surface in

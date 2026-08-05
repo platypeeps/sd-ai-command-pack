@@ -1667,3 +1667,39 @@ Both review-scope classifiers already treat .gemini/settings.json as copied; add
 ### Next Steps
 
 - None - task complete
+
+
+## Session 294: Batch review-learnings GitHub review-thread fetches (0.64.11)
+
+**Date**: 2026-08-04
+**Task**: Batch review-learnings GitHub review-thread fetches (0.64.11)
+**Branch**: `feat/batch-review-learnings-github`
+
+### Summary
+
+Collapsed the per-PR reviewThreads fan-out in sd-review-learnings to ceil(N/20) aliased GraphQL queries with a partial-failure fallback to the single-PR query; per-PR truncation and input ordering preserved. Tactical fix pending the parked reviewer-generalization rework.
+
+### Main Changes
+
+- _copilot_comments_for_prs resolves reviewThreads via _review_thread_connections/_batch_review_threads/_single_pr_review_threads; GITHUB_REVIEW_THREAD_BATCH_SIZE=20
+- Version 0.64.10->0.64.11, changelog, generalization-task boundary note, regenerated surfaces
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c16f980651b7db7edfab82084e3fea2635fbd10f` | feat: batch review-learnings GitHub review-thread fetches (0.64.11) |
+
+### Testing
+
+- [OK] ./.venv/bin/python3 -m unittest tests.test_review_learnings (59 OK)
+- [OK] full-check.sh FC_EXIT=0; review preflight 0 failures; live PR-scoped --dry-run EXIT=0
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #328 via housekeeping gate
