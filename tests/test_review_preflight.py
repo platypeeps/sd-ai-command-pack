@@ -127,6 +127,12 @@ assert.equal(copiedTemplateKind('.zcode/agents/trellis-check.md'), 'trellis');
 // scoped identically by both. Paired shell coverage lives in
 // tests/test_review_scope.py::...claude_hooks_are_scoped_as_copied.
 assert.equal(copiedTemplateKind('.claude/hooks/session-start.py'), 'trellis');
+// Platform settings files are copied/generated. The shell review-scope
+// classifier already lists .gemini/settings.json; the JavaScript side must
+// agree so a settings change is scoped identically by both. Paired shell
+// coverage lives in
+// tests/test_review_scope.py::test_gemini_settings_are_scoped_as_copied.
+assert.equal(copiedTemplateKind('.gemini/settings.json'), 'trellis');
 assert.equal(copiedTemplateKind('.agents/skills/sd-review-pr/SKILL.md'), 'sd-ai-command-pack');
 assert.equal(copiedTemplateKind('.qoder/commands/sd-review-pr.md'), 'sd-ai-command-pack');
 assert.equal(copiedTemplateKind('scripts/sd-ai-command-pack-review-scope.sh'), 'sd-ai-command-pack');
