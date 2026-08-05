@@ -4,9 +4,10 @@
 
 - Add a per-job dispatch protocol to the `sd-fix-ci` skill (Tier 1 pilot of the
   SD dispatch pattern). CI triage now fans out one read-only sub-agent per
-  failing job — each fetching only its own `gh run view -j <job-id>
-  --log-failed` output — so the parent context stops absorbing every job's full
-  log. Workers return a typed `real-code | flake | infra | stale-baseline`
+  failing job — each fetching only its own
+  `gh run view -j <job-id> --log-failed` output — so the parent context stops
+  absorbing every job's full log. Workers return a typed
+  `real-code | flake | infra | stale-baseline`
   classification with quoted evidence and a proposed disposition; the parent
   keeps job enumeration, run-level fact resolution, the shared `max-reruns`
   budget, all fixes/reruns, and the unchanged report contract. On inline
