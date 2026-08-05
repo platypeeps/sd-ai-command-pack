@@ -1629,3 +1629,41 @@ Added .claude/hooks/ to the mjs review-preflight copied-path classifier (isTrell
 ### Next Steps
 
 - None - task complete
+
+
+## Session 293: Add .gemini/settings.json review-scope parity coverage
+
+**Date**: 2026-08-04
+**Task**: Add .gemini/settings.json review-scope parity coverage
+**Branch**: `feat/align-review-scope-gemini-settings`
+
+### Summary
+
+Both review-scope classifiers already treat .gemini/settings.json as copied; added the missing guard (copiedTemplateKind assertion + shell advisory test). Copilot flagged a stale PRD Requirements bullet; reworded it. Tests-only, no version change. PR #327.
+
+### Main Changes
+
+- tests: .gemini/settings.json parity pair (preflight assertion + review-scope behavioral advisory test)
+- docs: reconcile PRD Requirements with already-classified state (Copilot review fix)
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `df3acd01` | test: add .gemini/settings.json review-scope parity coverage |
+| `c07ffac1` | docs: reconcile gemini-settings PRD requirements with discovered state |
+| `eee0f54e` | chore(task): record branch for align-review-scope-gemini-settings |
+
+### Testing
+
+- [OK] make check: exit 0
+- [OK] focused parity tests green; CI Result pass; Copilot finding resolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
