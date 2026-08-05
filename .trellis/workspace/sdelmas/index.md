@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 294
+- **Total Sessions**: 295
 - **Last Active**: 2026-08-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~1704 | Active |
+| `journal-6.md` | ~1739 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 295 | 2026-08-04 | Bound review-learnings unsafe-path diagnostics (0.64.12) | `fc79dc8db1c23744f4234eb15fa4fe1c5b874b6c` | `fix/bound-review-learnings-unsafe-path` |
 | 294 | 2026-08-04 | Batch review-learnings GitHub review-thread fetches (0.64.11) | `c16f980651b7db7edfab82084e3fea2635fbd10f` | `feat/batch-review-learnings-github` |
 | 293 | 2026-08-04 | Add .gemini/settings.json review-scope parity coverage | `df3acd01`, `c07ffac1`, `eee0f54e` | `feat/align-review-scope-gemini-settings` |
 | 292 | 2026-08-04 | Align review-preflight classifier for .claude/hooks (0.64.10) | `b1ddb073`, `5e791227`, `793ac653` | `feat/align-review-preflight-claude-hooks` |

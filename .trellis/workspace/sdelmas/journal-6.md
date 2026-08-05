@@ -1703,3 +1703,37 @@ Collapsed the per-PR reviewThreads fan-out in sd-review-learnings to ceil(N/20) 
 ### Next Steps
 
 - Merge PR #328 via housekeeping gate
+
+
+## Session 295: Bound review-learnings unsafe-path diagnostics (0.64.12)
+
+**Date**: 2026-08-04
+**Task**: Bound review-learnings unsafe-path diagnostics (0.64.12)
+**Branch**: `fix/bound-review-learnings-unsafe-path`
+
+### Summary
+
+Guard the main scan path's build_review_learning_signal call so unsafe planning changed-path inputs surface as a bounded [sd-review-learnings:planning] diagnostic (exit 2, JSON schema-valid) instead of an uncaught ValueError traceback. Narrowed the guard to wrap only the _normalize_planning_changed_paths call per Copilot review.
+
+### Main Changes
+
+- Wrapped _normalize_planning_changed_paths in try/except ValueError -> _print_early_failure(phase=planning) + return 2 on the main scan path; template edited first, root byte-mirrored.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fc79dc8db1c23744f4234eb15fa4fe1c5b874b6c` | fix: scope unsafe-path guard to the normalize call (Copilot review) |
+
+### Testing
+
+- [OK] make check MK_EXIT=0; 61 review-learnings tests OK; two new CLI regression tests for traversal + control-char unsafe paths.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #329 through housekeeping gate; continue autonomous loop iteration 8.

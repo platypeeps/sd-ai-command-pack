@@ -2970,6 +2970,24 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     comments = list(review_window.comments)
+    # Validate the planning changed-path evidence up front so the guard is scoped
+    # to exactly this expected failure. Catching ValueError around the whole
+    # build_review_learning_signal call would also swallow unrelated internal
+    # ValueErrors and mislabel them as planning-path failures. Unsafe evidence
+    # (traversal, control characters, oversized, or over-count) is expected
+    # invalid command evidence, not a crash; its message is a fixed enum that
+    # never echoes the raw path, so it is safe to surface under the phase tag.
+    # The normalized result is idempotent, so build re-normalizes it unchanged.
+    try:
+        changed_paths = _normalize_planning_changed_paths(changed_paths)
+    except ValueError as exc:
+        _print_early_failure(
+            args=args,
+            mode=mode,
+            phase="planning",
+            reason=str(exc),
+        )
+        return 2
     review_learning = build_review_learning_signal(
         comments,
         review_window,

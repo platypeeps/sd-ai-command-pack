@@ -2272,6 +2272,75 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertIn("gh timed out after 120s", stderr.getvalue())
         self.assertNotIn("Traceback", stderr.getvalue())
 
+    def test_review_learnings_main_reports_unsafe_planning_path_without_traceback(
+        self,
+    ) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_unsafe_path_human_test",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-test-")
+        self.addCleanup(tempdir.cleanup)
+        diff_file = Path(tempdir.name) / "unsafe.diff"
+        # A changed path that escapes the repository via traversal survives
+        # _parse_diff and trips the planning changed-path safety bound.
+        diff_file.write_text(
+            "--- a/x\n+++ b/../../etc/passwd\n@@ -1,1 +1,1 @@\n+evil\n",
+            encoding="utf-8",
+        )
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result = module.main(
+                ["--repo-root", tempdir.name, "--diff-from", str(diff_file)]
+            )
+
+        self.assertEqual(result, 2)
+        output = stderr.getvalue()
+        self.assertIn("[sd-review-learnings:planning]", output)
+        self.assertIn("planning changed path is unsafe", output)
+        self.assertNotIn("Traceback", output)
+        # The bounded diagnostic must not echo the raw unsafe path text.
+        self.assertNotIn("passwd", output)
+
+    def test_review_learnings_main_bounds_unsafe_planning_path_in_json(self) -> None:
+        module = self.load_module_from_path(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
+            "sd_ai_command_pack_review_learnings_unsafe_path_json_test",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learnings-test-")
+        self.addCleanup(tempdir.cleanup)
+        diff_file = Path(tempdir.name) / "unsafe.diff"
+        # A control character in the changed path is rejected by the same bound.
+        diff_file.write_text(
+            "--- a/x\n+++ b/e\x01vil\n@@ -1,1 +1,1 @@\n+z\n",
+            encoding="utf-8",
+        )
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = module.main(
+                [
+                    "--repo-root",
+                    tempdir.name,
+                    "--diff-from",
+                    str(diff_file),
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(result, 2)
+        self.assertNotIn("Traceback", stderr.getvalue())
+        # Exactly one bounded, schema-valid failure document on stdout.
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["schemaVersion"], module.REPORT_SCHEMA_VERSION)
+        self.assertEqual(
+            payload["write"]["reason"], "planning changed path is unsafe"
+        )
+        # The raw unsafe control character must not leak into the report.
+        self.assertNotIn("\x01", stdout.getvalue())
+
     def test_review_learnings_script_rejects_invalid_managed_marker_order(
         self,
     ) -> None:
