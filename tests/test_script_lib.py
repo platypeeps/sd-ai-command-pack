@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import stat
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr, redirect_stdout
@@ -682,14 +683,124 @@ class ScriptLibTests(InstallTestCase):
             diagnostic=secret + " " + ("x" * 900),
         )
         diagnostic = fragment["diagnostic"]
+        # Assert the credential BODY alone, never prefix+body as one literal: a
+        # prefix-only substituter that leaves the body behind must fail here.
         self.assertNotIn("s3cr3t", diagnostic)
-        self.assertNotIn("ghp_ABCDEFGH012345678", diagnostic)
-        self.assertNotIn("Bearer aa.bb.cc-DDDD", diagnostic)
+        self.assertNotIn("ABCDEFGH012345678", diagnostic)
+        self.assertNotIn("aa.bb.cc-DDDD", diagnostic)
         self.assertIn("[redacted]@example.com", diagnostic)
         self.assertNotIn("\n", diagnostic)
         self.assertNotIn("\t", diagnostic)
         self.assertLessEqual(len(diagnostic), lib.ENVIRONMENT_DIAGNOSTIC_LIMIT)
         self.assertTrue(diagnostic.endswith("…"))
+
+    def test_environment_evidence_redacts_shared_secret_shapes(self) -> None:
+        # R1/R4: every shape the shared set covers is SUBSTITUTED in the lib
+        # path, with the secret BODY absent and surrounding context preserved.
+        # The github_pat_ case fails on the pre-consolidation redactor (AC2):
+        # gh[pousr]_ excludes the "i" and no other old alternative applied.
+        lib = self.load_lib()
+        cases = [
+            # (input, secret body that must NOT survive, context that must)
+            (
+                "token ghp_ABCDEFGH012345678 here",
+                "ABCDEFGH012345678",
+                ("token", "here"),
+            ),
+            (
+                "auth failed for github_pat_11ABCDE_xyzXYZ0123456789 in remote",
+                "11ABCDE_xyzXYZ0123456789",
+                ("auth failed for", "in remote"),
+            ),
+            (
+                "slack xoxb-1111-2222-abcdefghij done",
+                "xoxb-1111-2222-abcdefghij",
+                ("slack", "done"),
+            ),
+            (
+                "openai sk-ABCDEF0123456789 leaked",
+                "ABCDEF0123456789",
+                ("openai", "leaked"),
+            ),
+            (
+                "password: hunter2trailing next",
+                "hunter2trailing",
+                ("password", "next"),
+            ),
+            (
+                "api_key=SECRETVALUE1234 next",
+                "SECRETVALUE1234",
+                ("api_key", "next"),
+            ),
+        ]
+        for text, body, context in cases:
+            with self.subTest(text=text):
+                out = lib._redact_environment_text(
+                    text, limit=lib.ENVIRONMENT_DIAGNOSTIC_LIMIT
+                )
+                self.assertNotIn(body, out)
+                self.assertIn("[redacted]", out)
+                for fragment in context:
+                    self.assertIn(fragment, out)
+
+    def test_environment_evidence_redacts_pem_private_key_block(self) -> None:
+        # R1: PEM needs a multi-line SPAN, not a header match. A header-only
+        # substituter would leave the entire key body in the diagnostic.
+        lib = self.load_lib()
+        body = "MIIBAAAAKEYMATERIAL0123456789abcdef"
+        text = (
+            "clone failed before "
+            "-----BEGIN RSA PRIVATE KEY-----\n" + body + "\n"
+            "-----END RSA PRIVATE KEY----- and after"
+        )
+        out = lib._redact_environment_text(
+            text, limit=lib.ENVIRONMENT_DIAGNOSTIC_LIMIT
+        )
+        self.assertNotIn(body, out)
+        self.assertNotIn("PRIVATE KEY", out)
+        self.assertIn("before", out)
+        self.assertIn("after", out)
+
+    def test_environment_evidence_preserves_context_around_key_value(self) -> None:
+        # R3: the bounded key-value substituter must not swallow trailing
+        # punctuation. The old fleet detector's \S+ turned
+        # "password: hunter2trailing, then continue" into "[redacted] ..."
+        # -- losing the comma and the key. The bounded form keeps both.
+        lib = self.load_lib()
+        out = lib._redact_environment_text(
+            "password: hunter2trailing, then continue",
+            limit=lib.ENVIRONMENT_DIAGNOSTIC_LIMIT,
+        )
+        self.assertNotIn("hunter2trailing", out)
+        self.assertIn("password:", out)
+        self.assertIn(", then continue", out)
+
+    def test_environment_evidence_redactor_never_weakens(self) -> None:
+        # R7: keep the pre-consolidation lib pattern as TEST-ONLY data and
+        # require every span it redacted is still redacted by the new set --
+        # both the whole match and, decisively, the secret body tail (the
+        # prefix-only-leak regression this task is most likely to introduce).
+        lib = self.load_lib()
+        old = re.compile(
+            r"(?i)(?:bearer\s+|(?:access[_-]?|api[_-]?)?token[=:]\s*|gh[pousr]_)"
+            r"[A-Za-z0-9._\-]{8,}"
+        )
+        corpus = [
+            "clone failed for https://user:s3cr3t@example.com/repo.git "
+            "with token ghp_ABCDEFGH012345678 and Bearer aa.bb.cc-DDDD",
+            "access_token: ghp_ZZZZZZZZ99999999 rejected",
+            "api-token=abcdefgh12345678 boundary",
+            "github_pat_11ABCDE_xyzXYZ0123456789 leaked",
+            "xoxb-1111-2222-abcdefghij and sk-ABCDEF0123456789",
+        ]
+        for text in corpus:
+            with self.subTest(text=text):
+                new_out = lib._redact_environment_text(text, limit=10000)
+                for match in old.finditer(text):
+                    span = match.group(0)
+                    self.assertNotIn(span, new_out)
+                    body = re.search(r"[A-Za-z0-9._-]+$", span).group(0)
+                    self.assertNotIn(body, new_out)
 
     def test_environment_evidence_renders_paths_and_preserves_plain_urls(self) -> None:
         lib = self.load_lib()

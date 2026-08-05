@@ -749,6 +749,16 @@ class FleetTimingTests(InstallTestCase):
             ("see https://github.com/org/repo", "remote URL"),
             ("see git@github.com:org/repo", "remote URL"),
             ("token=ghp_abcdefghijklmnopqrstuvwxyz", "secret-like"),
+            # R4 detector side: every shape the shared set covers still makes
+            # this fail-closed policy REJECT (raise), never silently substitute.
+            ("token ghp_ABCDEFGH012345678", "secret-like"),
+            ("github_pat_11ABCDE_xyzXYZ0123456789", "secret-like"),
+            ("xoxb-1111-2222-abcdefghij", "secret-like"),
+            ("sk-ABCDEF0123456789", "secret-like"),
+            ("Bearer aa.bb.cc-DDDD", "secret-like"),
+            ("password: hunter2value", "secret-like"),
+            ("api_key=SECRETVALUE1234", "secret-like"),
+            ("-----BEGIN RSA PRIVATE KEY-----", "secret-like"),
             ("x" * 501, "exceeds"),
         ):
             with self.subTest(value=value):

@@ -3,7 +3,7 @@
   "name": "consolidate-secret-redactors",
   "title": "Consolidate the two divergent secret redactors behind one shared pattern set",
   "description": "A-069: the environment-blocked redactor in sd_ai_command_pack_lib.py covers only bearer/token/gh[pousr]_ while fleet-timing.py already carries a stronger pattern set. Share the patterns, keep the two consumption policies distinct, extend the test table. Also absorbs the narrowed A-099 residual.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

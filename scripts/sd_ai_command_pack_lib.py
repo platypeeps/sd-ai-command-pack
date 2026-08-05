@@ -494,9 +494,98 @@ _ENVIRONMENT_URL_CREDENTIAL_RE = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*://)[^/@\
 # remote URLs are permitted diagnostic context (design permits "remote URLs with
 # credentials" removal only), so the negative lookbehind deliberately spares them.
 _ENVIRONMENT_FS_PATH_RE = re.compile(r"(?<![A-Za-z0-9:/])/[^\s'\"]+")
-_ENVIRONMENT_SECRET_RE = re.compile(
-    r"(?i)(?:bearer\s+|(?:access[_-]?|api[_-]?)?token[=:]\s*|gh[pousr]_)[A-Za-z0-9._\-]{8,}"
+# --- Shared secret shapes ---------------------------------------------------
+# One definition of "what a secret looks like", consumed by two policies that
+# must NOT be collapsed into one another (see design.md, R2):
+#   * `_redact_environment_text` below SUBSTITUTES  -- fail-open: it must never
+#     drop the diagnostic that recovery depends on, so it returns a bounded,
+#     redacted string and never raises.
+#   * `sd-ai-command-pack-fleet-timing.py` REJECTS   -- fail-closed: it raises
+#     rather than accept secret-shaped operator input into a timing record.
+#
+# Each shape therefore carries two forms:
+#   * a DETECTOR form, which may stay maximally loose -- a bare prefix is
+#     sufficient evidence to refuse input; a false positive only costs an
+#     operator a rejected timing record.
+#   * a SUBSTITUTER form, which must be conservative in extent but complete in
+#     body coverage. A prefix-only substituter is the core hazard: it would
+#     redact only the bare token prefix and leave the token body in the text --
+#     worse than the old redactor. Every substituter row therefore anchors a
+#     body charset and a minimum length (or, for PEM, a bounded multi-line
+#     span). See tests for the concrete token-prefix leak cases.
+_SECRET_TOKEN_BODY = r"[A-Za-z0-9._-]{8,}"
+# (name, detector, substituter). A name prefixed "kv-" keeps its capturing
+# group 1 (the "key:" / "key=" lead-in) and redacts only the value; all other
+# rows redact the whole match. Order is significant for the substituter pass:
+# the PEM span MUST run before the key-value rule, or a PRIVATE KEY header
+# sitting after a "key:" on the same line is partly eaten by the shorter rule.
+_SECRET_SHAPES: tuple[tuple[str, str, str], ...] = (
+    (
+        "pem-private-key",
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+        # Span the whole block to the END footer. The {0,4096}? bound stops an
+        # unterminated header from consuming the rest of the diagnostic.
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]{0,4096}?-----END [A-Z ]*PRIVATE KEY-----",
+    ),
+    (
+        "github-classic",
+        r"gh[pousr]_",
+        r"gh[pousr]_" + _SECRET_TOKEN_BODY,
+    ),
+    (
+        "github-fine-grained",
+        # gh[pousr]_ excludes the "i", so it cannot match github_pat_ at all.
+        r"github_pat_",
+        r"github_pat_" + _SECRET_TOKEN_BODY,
+    ),
+    (
+        "slack",
+        r"xox[baprs]-",
+        r"xox[baprs]-" + _SECRET_TOKEN_BODY,
+    ),
+    (
+        "openai",
+        r"sk-[A-Za-z0-9]",
+        r"sk-" + _SECRET_TOKEN_BODY,
+    ),
+    (
+        "bearer",
+        r"bearer\s+[A-Za-z0-9._-]",
+        r"bearer\s+" + _SECRET_TOKEN_BODY,
+    ),
+    (
+        # Bounded key-value form. The detector's trailing \S+ is greedy across
+        # punctuation; the substituter's value charset stops at whitespace,
+        # comma, and semicolon so surrounding diagnostic context survives (R3).
+        "kv-secret",
+        r"(?:token|password|secret|api[_-]?key)\s*[:=]\s*\S+",
+        r"((?:token|password|secret|api[_-]?key)\s*[:=]\s*)[^\s,;]+",
+    ),
 )
+# Loose detector alternation for the fail-closed reject side.
+_ENVIRONMENT_SECRET_DETECTOR_RE = re.compile(
+    "(?i)(?:" + "|".join(detector for _, detector, _ in _SECRET_SHAPES) + ")"
+)
+# Ordered (pattern, replacement) pairs for the fail-open substitute side.
+_ENVIRONMENT_SECRET_SUBSTITUTIONS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (
+        re.compile("(?i)" + substituter),
+        r"\1[redacted]" if name.startswith("kv-") else "[redacted]",
+    )
+    for name, _, substituter in _SECRET_SHAPES
+)
+
+
+def compiled_secret_detector() -> re.Pattern[str]:
+    """Loose secret DETECTOR alternation for the fail-closed reject policy.
+
+    Seeing a covered prefix is sufficient evidence to refuse input, so this
+    column may over-match; a false positive only costs a rejected record.
+    Callers that must not drop text (diagnostic redaction) use the substituter
+    set instead -- a detector reused under ``.sub()`` would leave secret bodies
+    behind. See ``_redact_environment_text``.
+    """
+    return _ENVIRONMENT_SECRET_DETECTOR_RE
 
 
 class EnvironmentEvidenceError(CommandError):
@@ -516,7 +605,8 @@ def _redact_environment_text(value: object, *, limit: int) -> str:
     URLs without credentials are preserved as diagnostic context."""
     text = "" if value is None else str(value)
     text = _ENVIRONMENT_URL_CREDENTIAL_RE.sub(r"\1[redacted]@", text)
-    text = _ENVIRONMENT_SECRET_RE.sub("[redacted]", text)
+    for pattern, replacement in _ENVIRONMENT_SECRET_SUBSTITUTIONS:
+        text = pattern.sub(replacement, text)
     text = _ENVIRONMENT_FS_PATH_RE.sub("[path]", text)
     text = _ENVIRONMENT_CONTROL_RE.sub(" ", text)
     text = " ".join(text.split())
@@ -685,8 +775,11 @@ def _cache_env_main(argv: Sequence[str]) -> int:
         environment, _, _ = build_tool_environment(repo=args[2])
     except CacheSetupError as error:
         if as_json:
-            evidence = cache_setup_blocked_evidence(
-                error, operation="toolchain cache setup"
+            # validate_environment_blocked_evidence gets its first non-test
+            # caller here: a malformed fragment fails at the producer rather
+            # than reaching toolchain.sh (and an agent) as a plausible blocker.
+            evidence = validate_environment_blocked_evidence(
+                cache_setup_blocked_evidence(error, operation="toolchain cache setup")
             )
             print(json.dumps({"outcome": "blocked", "environmentBlocked": evidence}))
         else:
