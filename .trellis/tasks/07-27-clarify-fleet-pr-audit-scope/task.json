@@ -3,7 +3,7 @@
   "name": "clarify-fleet-pr-audit-scope",
   "title": "Clarify fleet PR audit scope for Trellis adapters",
   "description": "Clarify fleet rollout PR guidance so pack-owned receipt and provenance coverage is distinguished from Trellis-owned shared adapter validation.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
