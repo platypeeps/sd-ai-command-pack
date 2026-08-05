@@ -18,6 +18,12 @@ from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+
+from sd_ai_command_pack_lib import compiled_secret_detector  # noqa: E402
+
 SCHEMA_VERSION = 1
 MAX_STATE_BYTES = 1024 * 1024
 MAX_REASON_LENGTH = 500
@@ -25,11 +31,11 @@ LOCK_WAIT_SECONDS = 5.0
 STALE_LOCK_SECONDS = 60.0
 
 SAFE_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
-SECRET_RE = re.compile(
-    r"(?i)(?:gh[pousr]_|github_pat_|xox[baprs]-|sk-[A-Za-z0-9]"
-    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
-    r"|(?:token|password|secret|api[_-]?key)\s*[:=]\s*\S+)"
-)
+# One shared secret-pattern set, defined once in sd_ai_command_pack_lib. This
+# side consumes the loose DETECTOR alternation and keeps its fail-closed reject
+# policy (raise on a match), never the lib's fail-open substitution. Seeing a
+# covered prefix is sufficient evidence to refuse the input. See design.md, R2.
+SECRET_RE = compiled_secret_detector()
 ABSOLUTE_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9/])(?:~[/\\]|/[A-Za-z0-9._~-]|[A-Za-z]:[/\\]|\\\\\S+)"
 )

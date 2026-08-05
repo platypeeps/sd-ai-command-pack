@@ -81,24 +81,24 @@ requirement to reconcile the two redactors, so neither finding had an owner.
 
 ## Acceptance Criteria
 
-- [ ] R1/R4: one pattern set has one definition site, and a table-driven test
+- [x] R1/R4: one pattern set has one definition site, and a table-driven test
       asserts every covered shape is caught by both consumers — substituted in
       the lib path, rejected in the fleet path.
-- [ ] R1: a diagnostic containing `github_pat_` plus a fine-grained PAT body
+- [x] R1: a diagnostic containing `github_pat_` plus a fine-grained PAT body
       emits no PAT substring in the resulting fragment. This case fails today.
-- [ ] R2: fleet-timing still raises `FleetTimingError` (not a silent
+- [x] R2: fleet-timing still raises `FleetTimingError` (not a silent
       substitution) on secret-like input, and the lib still returns a bounded
       redacted string (not an exception) — asserted separately.
-- [ ] R3: an existing redaction test that keeps surrounding diagnostic context
+- [x] R3: an existing redaction test that keeps surrounding diagnostic context
       still keeps it; no test loses context to greedy matching.
-- [ ] R5: `validate_environment_blocked_evidence` has at least one non-test
+- [x] R5: `validate_environment_blocked_evidence` has at least one non-test
       caller, and a fixture where cache setup fails produces a validated
       `environment_blocked` fragment through `toolchain.sh` rather than only the
       hardcoded prose message.
-- [ ] R6: `scripts/` and `templates/scripts/` copies are identical; `make sync`
+- [x] R6: `scripts/` and `templates/scripts/` copies are identical; `make sync`
       and generated-parity checks pass.
-- [ ] `make check` passes.
-- [ ] Changelog + version; fleet rollout via normal refresh.
+- [x] `make check` passes.
+- [x] Changelog + version; fleet rollout via normal refresh.
 
 ## Notes
 

@@ -52,3 +52,29 @@ skipped     .github/prompts/sd-review-pr.prompt.md (active Trellis github instal
   files.
 - Do not add verbose progress output for simple filesystem copies.
 - Do not print stack traces for expected installer outcomes.
+
+## Secret Redaction: One Shape Table, Two Policies
+
+**Convention**: Secret-like material has exactly one definition site — the
+`_SECRET_SHAPES` table in `scripts/sd_ai_command_pack_lib.py`. Each shape row
+carries a detector regex and a substituter regex; both consumers derive from
+the same source.
+
+**Why**: The two redactors once diverged into separate pattern sets, so a
+fine-grained PAT (`github_pat_` + body) was substituted on one path and leaked
+on the other. A single table is what keeps the covered shapes in lockstep.
+
+- The lib path (`_redact_environment_text`) **substitutes** and never raises —
+  diagnostics must stay printable, so a matched secret becomes `[redacted]`
+  (or `<key>=[redacted]` for key/value shapes) and the bounded string is
+  returned.
+- The fleet-timing path **detects and raises** `FleetTimingError` — timing
+  labels must never carry secret-like input, so a match is a hard stop, not a
+  substitution.
+
+**Don't**: fork the pattern set to add a shape to one consumer only, embed a
+literal token prefix (`gh` + `p_`, `xox` + `b-`) in a comment or test that the
+install secret-marker scan will flag, or write a prefix-only substituter that
+strips the marker but leaves the token body. Add the shape to `_SECRET_SHAPES`
+with both columns; a bounded-span rule (e.g. the PEM block) must run before a
+greedy key/value rule so surrounding context survives.

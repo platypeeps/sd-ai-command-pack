@@ -411,12 +411,26 @@ doctor_human() {
 configure_cache_environment() {
   local helper="$SCRIPT_DIR/sd_ai_command_pack_lib.py"
   local key value count=0
+  local blocked_json recovery
   if [ ! -r "$helper" ]; then
     fail "cache setup failed: shared helper is missing: $helper" 5
   fi
+  # Success path keeps the plain key=value contract: adding --json unconditionally
+  # would switch the success output to JSON too and break the parse loop below.
+  # The failing call's own stderr is suppressed so the operator sees exactly one
+  # bounded line; the structured recoveryAction (captured on the retry below)
+  # carries the diagnostic, replacing the old hardcoded prose without changing
+  # what the operator is told.
   if ! CACHE_ENV_OUTPUT="$(PYTHONDONTWRITEBYTECODE=1 "$PYTHON_COMMAND" \
     "$helper" cache-env --repo "$REPO_ROOT" 2>/dev/null)"; then
-    fail "cache setup failed; set SD_AI_COMMAND_PACK_CACHE_ROOT to a private writable directory outside the repository" 5
+    # Re-invoke only on the already-failing branch (build_tool_environment is
+    # idempotent) to capture the structured, validated environment-blocked
+    # evidence, and fail with its recoveryAction rather than hardcoded prose.
+    blocked_json="$(PYTHONDONTWRITEBYTECODE=1 "$PYTHON_COMMAND" \
+      "$helper" cache-env --repo "$REPO_ROOT" --json 2>/dev/null)"
+    recovery="$(printf '%s' "$blocked_json" | PYTHONDONTWRITEBYTECODE=1 \
+      "$PYTHON_COMMAND" -c 'import json,sys; d=json.load(sys.stdin); print(((d.get("environmentBlocked") or {}).get("recoveryAction") or {}).get("instruction",""))' 2>/dev/null)"
+    fail "cache setup failed: ${recovery:-Set SD_AI_COMMAND_PACK_CACHE_ROOT to a private writable directory outside the repository, then retry toolchain cache setup.}" 5
   fi
   while IFS='=' read -r key value; do
     key="${key%$'\r'}"

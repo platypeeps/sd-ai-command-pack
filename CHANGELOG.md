@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.64.15 - 2026-08-05
+
+- Consolidate the two divergent secret redactors behind one shared shape set.
+  `sd_ai_command_pack_lib.py` and `sd-ai-command-pack-fleet-timing.py` disagreed
+  about what a secret looks like: the lib's `_ENVIRONMENT_SECRET_RE` missed
+  fine-grained GitHub PATs (`github_pat_…` — `gh[pousr]_` excludes the `i`),
+  Slack tokens, `sk-` keys, PEM private-key blocks, and most `key: value`
+  shapes, so those leaked verbatim into agent-visible `environment_blocked`
+  diagnostics. Both consumers now derive from one `_SECRET_SHAPES` table, but
+  keep their asymmetric policies: the lib **substitutes** (fail-open — never
+  drops the diagnostic recovery depends on) and fleet-timing **rejects**
+  (fail-closed — refuses secret-shaped input). Each shape carries a loose
+  detector form and a conservative substituter form with a body charset and a
+  minimum length, so redaction never leaves a secret body behind (a prefix-only
+  substituter would have been worse than the old redactor); the PEM row spans
+  the whole block to its `-----END … PRIVATE KEY-----` footer, and falls back to
+  a bounded span from the `BEGIN` header when the footer is missing so a
+  truncated key body cannot leak; the `sk-` prefix is token-boundary anchored so
+  ordinary hyphenated words are not over-redacted; and the key-value substituter
+  is bounded so surrounding diagnostic context survives.
+- Wire the orphaned `validate_environment_blocked_evidence` and the `cache-env
+  --json` blocked-evidence path into production. `configure_cache_environment`
+  in `sd-ai-command-pack-toolchain.sh` now re-invokes `cache-env --json` on a
+  cache-setup failure (the success path keeps its `key=value` contract intact)
+  and fails with the structured, validated `recoveryAction` instead of a
+  duplicated hardcoded prose string, and stops discarding the underlying
+  `error:` text.
+
 ## 0.64.14 - 2026-08-05
 
 - Clarify fleet rollout PR audit scope so pack-owned receipt/provenance

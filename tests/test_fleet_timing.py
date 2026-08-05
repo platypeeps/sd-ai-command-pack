@@ -749,6 +749,16 @@ class FleetTimingTests(InstallTestCase):
             ("see https://github.com/org/repo", "remote URL"),
             ("see git@github.com:org/repo", "remote URL"),
             ("token=ghp_abcdefghijklmnopqrstuvwxyz", "secret-like"),
+            # R4 detector side: every shape the shared set covers still makes
+            # this fail-closed policy REJECT (raise), never silently substitute.
+            ("token ghp_ABCDEFGH012345678", "secret-like"),
+            ("github_pat_11ABCDE_xyzXYZ0123456789", "secret-like"),
+            ("xoxb-1111-2222-abcdefghij", "secret-like"),
+            ("sk-ABCDEF0123456789", "secret-like"),
+            ("Bearer aa.bb.cc-DDDD", "secret-like"),
+            ("password: hunter2value", "secret-like"),
+            ("api_key=SECRETVALUE1234", "secret-like"),
+            ("-----BEGIN RSA PRIVATE KEY-----", "secret-like"),
             ("x" * 501, "exceeds"),
         ):
             with self.subTest(value=value):
@@ -763,6 +773,12 @@ class FleetTimingTests(InstallTestCase):
         self.assertEqual(
             timing.safe_reason("relative/path reference", "reason"),
             "relative/path reference",
+        )
+        # The bare "sk-" prefix is token-boundary anchored, so an ordinary
+        # hyphenated word whose tail starts "sk-" is not rejected as secret-like.
+        self.assertEqual(
+            timing.safe_reason("task-management window", "reason"),
+            "task-management window",
         )
 
     def test_store_rejects_relative_state_home_and_symlinks(self) -> None:
