@@ -18,7 +18,6 @@ import os
 import re
 import stat
 import sys
-import tempfile
 from pathlib import Path
 from subprocess import CompletedProcess
 from typing import Any, Callable
@@ -31,6 +30,7 @@ from sd_ai_command_pack_lib import (
     REVIEW_FAMILY_REVIEWER_TEST_HARNESS,
     REVIEW_FAMILY_TASK_METADATA,
     CommandError,
+    atomic_write_text,
 )
 from sd_ai_command_pack_lib import (
     run_gh as run_gh_command,
@@ -279,73 +279,8 @@ _ALL_ZERO_GREP_RE = re.compile(r"grep\b[^#\n]*-qv\b[^#\n]*\^0\*\$")
 _LONG_OPTION_CASE_RE = re.compile(r"^\s*(--[a-z][a-z0-9-]*)\)")
 
 
-def default_text_file_mode(destination: Path) -> int:
-    if destination.exists():
-        return destination.stat().st_mode & 0o777
-    current_umask = os.umask(0)
-    try:
-        return 0o666 & ~current_umask
-    finally:
-        os.umask(current_umask)
-
-
 def content_digest(content: bytes) -> str:
     return f"sha256:{hashlib.sha256(content).hexdigest()}"
-
-
-def atomic_write_text(
-    destination: Path,
-    content: str,
-    *,
-    errors: str = "strict",
-    revalidate: Any | None = None,
-    mode: int | None = None,
-) -> None:
-    if destination.is_symlink():
-        raise OSError("target is a symlink")
-    if revalidate is not None:
-        revalidate()
-    temporary_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=destination.parent,
-            prefix=f".{destination.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temporary:
-            temporary_path = Path(temporary.name)
-            temporary.write(content.encode("utf-8", errors=errors))
-            temporary.flush()
-            os.fsync(temporary.fileno())
-        if temporary_path.stat().st_dev != destination.parent.stat().st_dev:
-            raise OSError("atomic update would cross filesystems")
-        if revalidate is not None:
-            revalidate()
-        os.chmod(
-            temporary_path,
-            mode if mode is not None else default_text_file_mode(destination),
-        )
-        if revalidate is not None:
-            revalidate()
-        os.replace(temporary_path, destination)
-        temporary_path = None
-        try:
-            directory_fd = os.open(destination.parent, os.O_RDONLY)
-        except OSError:
-            directory_fd = None
-        if directory_fd is not None:
-            try:
-                os.fsync(directory_fd)
-            except OSError:
-                pass
-            finally:
-                os.close(directory_fd)
-    finally:
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink()
-            except FileNotFoundError:
-                pass
 
 
 @dataclasses.dataclass(frozen=True)

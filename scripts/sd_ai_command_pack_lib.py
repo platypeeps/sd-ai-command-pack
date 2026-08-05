@@ -14,7 +14,7 @@ import tempfile
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 DEFAULT_COMMAND_TIMEOUT = 60
 DEFAULT_GIT_TIMEOUT = 60
@@ -439,6 +439,86 @@ def repo_root(*, fallback_to_cwd: bool = False) -> Path:
     if toplevel is not None:
         return Path(toplevel).resolve()
     return Path.cwd().resolve()
+
+
+# ---------------------------------------------------------------------------
+# Hardened atomic text write
+#
+# One owner for "replace a text file atomically" across the session recorder,
+# knowledge-base refresh, and review-learnings receipt writers. The temporary
+# file is created in the destination's own directory, fsynced, chmod'd to match
+# the destination's effective mode, then renamed into place; the parent
+# directory is fsynced so the rename survives a crash. Every added guard fails
+# by raising rather than by silently writing to the wrong place:
+#   * refuse a symlink destination
+#   * refuse a cross-filesystem replace (os.replace is only atomic within one)
+#   * optional `revalidate` callback re-checked at each TOCTOU-sensitive step
+# ---------------------------------------------------------------------------
+
+
+def default_text_file_mode(destination: Path) -> int:
+    if destination.exists():
+        return destination.stat().st_mode & 0o777
+    current_umask = os.umask(0)
+    try:
+        return 0o666 & ~current_umask
+    finally:
+        os.umask(current_umask)
+
+
+def atomic_write_text(
+    destination: Path,
+    content: str,
+    *,
+    errors: str = "strict",
+    revalidate: Any | None = None,
+    mode: int | None = None,
+) -> None:
+    if destination.is_symlink():
+        raise OSError("target is a symlink")
+    if revalidate is not None:
+        revalidate()
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(content.encode("utf-8", errors=errors))
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        if temporary_path.stat().st_dev != destination.parent.stat().st_dev:
+            raise OSError("atomic update would cross filesystems")
+        if revalidate is not None:
+            revalidate()
+        os.chmod(
+            temporary_path,
+            mode if mode is not None else default_text_file_mode(destination),
+        )
+        if revalidate is not None:
+            revalidate()
+        os.replace(temporary_path, destination)
+        temporary_path = None
+        try:
+            directory_fd = os.open(destination.parent, os.O_RDONLY)
+        except OSError:
+            directory_fd = None
+        if directory_fd is not None:
+            try:
+                os.fsync(directory_fd)
+            except OSError:
+                pass
+            finally:
+                os.close(directory_fd)
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
 
 
 # ---------------------------------------------------------------------------

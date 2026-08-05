@@ -1798,7 +1798,11 @@ class ReviewLearningsTests(InstallTestCase):
         self.addCleanup(tempdir.cleanup)
         target = Path(tempdir.name) / "review-learnings.md"
         events: list[str] = []
-        original_named_temporary_file = module.tempfile.NamedTemporaryFile
+        # atomic_write_text now lives in the shared library and is re-exported by
+        # review-learnings; patch tempfile on the library module the function
+        # actually closes over, not on the importing script.
+        lib_module = sys.modules[module.atomic_write_text.__module__]
+        original_named_temporary_file = lib_module.tempfile.NamedTemporaryFile
 
         def revalidate() -> None:
             events.append("revalidate")
@@ -1809,7 +1813,7 @@ class ReviewLearningsTests(InstallTestCase):
             return original_named_temporary_file(*args, **kwargs)
 
         with mock.patch.object(
-            module.tempfile,
+            lib_module.tempfile,
             "NamedTemporaryFile",
             side_effect=checked_named_temporary_file,
         ):
