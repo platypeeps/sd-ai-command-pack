@@ -121,7 +121,8 @@ class ScopeRule:
         # payload size. Both derived fields carry init=False, compare=False,
         # repr=False (exactly like normalized_patterns) so ScopeRule equality and
         # hashing — it is a frozen dataclass used as a dict key in _classify —
-        # stay driven solely by label/headings/patterns.
+        # stay driven solely by the compare=True fields (label, headings,
+        # patterns, include_installed_targets), never these derived views.
         object.__setattr__(
             self,
             "literal_patterns",
