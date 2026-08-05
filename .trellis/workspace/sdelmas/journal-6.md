@@ -1849,3 +1849,51 @@ Replaced the two divergent secret redactors (lib substituting regex + fleet-timi
 ### Next Steps
 
 - None — task complete; post-archive handoff (merge) owned by sd-housekeeping
+
+
+## Session 299: Consolidate atomic-write and cache-env helpers (A-085, A-080); ship PR #333
+
+**Date**: 2026-08-05
+**Task**: Consolidate atomic-write and cache-env helpers (A-085, A-080); ship PR #333
+**Branch**: `feat/consolidate-shared-script-helpers`
+
+### Summary
+
+Consolidated the atomic_write_text/default_text_file_mode writer and the cache-env key set into the shared library, shipped release 0.64.16, and split the remaining state-root (A-046) and git-invocation (A-076) clusters into dedicated follow-up tasks. Published PR #333 and converged its review loop: deterministic sd-check 8/8, two verified-false gito findings rebutted, and one real Copilot regression (over-permissive cache-key validation glob) fixed. Parent task stays open (planning finalization) because AC1/AC4 are deferred to the child tasks.
+
+### Main Changes
+
+- Consolidated atomic_write_text + default_text_file_mode into sd_ai_command_pack_lib.py (A-085) and repointed record-session, update-spec-kb, and review-learnings onto it
+- Made the cache-env key set data-driven end to end (A-080): CACHE_ENV_KEYS is the single authority, shell paths validate keys generically, arity assertions dropped, doctor human/JSON cache paths parse the lib emission
+- Fixed the A-080 cache-key validator (Copilot review): the case glob [A-Z_][A-Z0-9_]* let malformed keys through via the trailing *; now rejects empty, disallowed-char, and bad-first-char keys, verified in bash and sh
+- Recorded the shared atomic-write lib contract in the backend spec, documented the A-046/A-076 delivery split, and populated the two follow-up task descriptions
+- Released 0.64.16; regenerated version-stamped command surfaces and the fleet candidate ledger
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `06cd2af3` | refactor: consolidate atomic_write_text into shared lib (A-085) |
+| `06c52b2b` | refactor: make cache-env key set data-driven end to end (A-080) |
+| `62ff3afd` | chore: release 0.64.16 (atomic-write + cache-env consolidation) |
+| `53140882` | fix: pass doctor cache-env as positional arg, not a new env var (A-080) |
+| `b7ff12be` | chore: regenerate version-stamped surfaces for 0.64.16 |
+| `f3410469` | docs(spec): record shared atomic-write lib contract; fix split-task descriptions |
+| `48a13b4a` | fix(cache-env): enforce full env-var-name shape on cache keys (Copilot review) |
+| `6965937b` | chore(fleet): regenerate candidate ledger for cache-key validation fix |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest (cache/toolchain/script-lib suites): 93 tests pass
+- [OK] sd-check: 8/8 deterministic gates pass at head 6965937b
+- [OK] cache-key validation verified in bash and sh: 7 real keys + valid edge cases accepted; empty/lowercase/digit-first/punctuation rejected
+- [OK] make generate rc=0; scripts/ and templates/scripts/ byte-identical; shellcheck clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

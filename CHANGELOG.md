@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.64.16 - 2026-08-05
+
+- Consolidate the three copies of `atomic_write_text`/`default_text_file_mode`
+  into `sd_ai_command_pack_lib.py` as the single owner (A-085). The hardened
+  67-line writer from `sd-ai-command-pack-review-learnings.py` — cross-device
+  guard, parent-directory fsync, and an optional `revalidate` TOCTOU callback —
+  now backs the session recorder and knowledge-base writers too, replacing their
+  31-line copies. The two added guards fail by raising `OSError`, the same
+  exception the pre-existing symlink refusal already produced, so no call site
+  needed new error handling.
+- Make the tool-cache environment key set data-driven end to end (A-080).
+  `CACHE_ENV_KEYS` in the library is the single authority, but seven shell sites
+  re-encoded the list: two `case`-glob allowlists, two magic arity assertions
+  (`-ne 7`/`-eq 7`), and the `doctor` JSON heredoc's positional args, its
+  hand-built `cache_paths` dict, and the human-readable `printf` block. All now
+  derive from the library's `cache-env` output — validated generically as an
+  environment-variable name with a non-empty value — so adding a cache variable
+  needs no shell edit. Operator-facing text and `doctor --json` shape are
+  unchanged; verified by adding a dummy eighth key to the library alone and
+  observing it flow through `cache-env`, `doctor --json`, and `doctor`.
+- The remaining two clusters of task `07-28-consolidate-shared-script-helpers`
+  are split into follow-up tasks: state-root resolution (A-046) is a live-state
+  relocation needing a recorded migration decision, and git invocation (A-076)
+  needs a library git path that preserves the minimal-environment,
+  prompt-disabled, binary-capable contract without coupling to cache setup.
+
 ## 0.64.15 - 2026-08-05
 
 - Consolidate the two divergent secret redactors behind one shared shape set.
