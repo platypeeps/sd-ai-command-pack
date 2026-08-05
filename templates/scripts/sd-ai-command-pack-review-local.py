@@ -27,6 +27,7 @@ from sd_ai_command_pack_lib import (
     CacheSetupError,
     build_tool_environment,
     declare_verdict_domain,
+    run_git_minimal,
 )
 
 SCHEMA_VERSION = 1
@@ -546,15 +547,11 @@ def _git(repo: Path, *args: str, binary: Literal[True]) -> bytes: ...
 
 def _git(repo: Path, *args: str, binary: bool = False) -> str | bytes:
     try:
-        result = subprocess.run(
-            ["git", *args],
+        result = run_git_minimal(
+            list(args),
             cwd=repo,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=not binary,
-            check=False,
             timeout=GIT_TIMEOUT_SECONDS,
+            binary=binary,
         )
     except subprocess.TimeoutExpired as error:
         stderr_value = error.stderr
@@ -1331,10 +1328,11 @@ def _artifact_root(repo: Path, value: str | None) -> Path:
             raise ReviewInputError(
                 f"review artifact root cannot traverse a symlink: {current}"
             )
-    result = subprocess.run(
-        ["git", "check-ignore", "-q", "--", str(resolved.relative_to(repo))],
+    result = run_git_minimal(
+        ["check-ignore", "-q", "--", str(resolved.relative_to(repo))],
         cwd=repo,
-        check=False,
+        timeout=None,
+        binary=True,
     )
     if result.returncode != 0:
         raise ReviewInputError("review artifact root must be ignored by Git")

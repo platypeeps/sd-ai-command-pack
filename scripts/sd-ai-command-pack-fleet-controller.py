@@ -27,6 +27,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import sd_ai_command_pack_fleet_lib as fleet_lib  # noqa: E402
+from sd_ai_command_pack_lib import run_git_minimal  # noqa: E402
 
 SCHEMA_VERSION = 2
 REPORT_SCHEMA_VERSION = 1
@@ -1666,27 +1667,24 @@ def _git_evidence(path: Path, expected_checkout_digest: str) -> dict[str, Any]:
     if not result["exists"]:
         return result
     try:
-        head = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        ).stdout.strip()
-        branch = subprocess.run(
-            ["git", "-C", str(path), "branch", "--show-current"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        ).stdout.strip()
-        dirty = subprocess.run(
-            ["git", "-C", str(path), "status", "--porcelain"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        ).stdout
+        head_result = run_git_minimal(
+            ["-C", str(path), "rev-parse", "HEAD"], timeout=10
+        )
+        if head_result.returncode != 0:
+            return result
+        head = head_result.stdout.strip()
+        branch_result = run_git_minimal(
+            ["-C", str(path), "branch", "--show-current"], timeout=10
+        )
+        if branch_result.returncode != 0:
+            return result
+        branch = branch_result.stdout.strip()
+        dirty_result = run_git_minimal(
+            ["-C", str(path), "status", "--porcelain"], timeout=10
+        )
+        if dirty_result.returncode != 0:
+            return result
+        dirty = dirty_result.stdout
     except (OSError, subprocess.SubprocessError):
         return result
     result.update(

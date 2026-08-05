@@ -282,7 +282,7 @@ class WorkLoopTests(InstallTestCase):
 
         with (
             mock.patch.object(
-                module, "build_tool_environment", side_effect=cache_error
+                module, "run_git_cached", side_effect=cache_error
             ),
             mock.patch.object(module.subprocess, "run") as run,
         ):
@@ -304,7 +304,7 @@ class WorkLoopTests(InstallTestCase):
         )
 
         with mock.patch.object(
-            module, "build_tool_environment", side_effect=cache_error
+            module, "run_git_cached", side_effect=cache_error
         ):
             with self.assertRaises(module.WorkLoopError) as raised:
                 module.run_git(root, "status")

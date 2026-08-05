@@ -14,7 +14,7 @@ import tempfile
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Literal, Mapping, Sequence, overload
 
 DEFAULT_COMMAND_TIMEOUT = 60
 DEFAULT_GIT_TIMEOUT = 60
@@ -368,6 +368,7 @@ def build_tool_environment(
             )
         environment[variable] = str(cache_path)
         cache_paths[variable] = cache_path
+    environment.setdefault("GIT_TERMINAL_PROMPT", "0")
     return environment, cache_paths, namespace
 
 
@@ -462,6 +463,185 @@ def run_git(
         allowed_returncodes=allowed_returncodes,
         errors=errors,
         context=context,
+    )
+
+
+def _run_git_process(
+    args: Sequence[str],
+    *,
+    environment: Mapping[str, str],
+    cwd: Path | None,
+    timeout: int | None,
+    binary: bool,
+    input: bytes | None,
+    stderr: int | None,
+    encoding: str | None,
+    errors: str | None,
+) -> subprocess.CompletedProcess:
+    """Run git with a caller-supplied environment, converting nothing.
+
+    Centralizes the git subprocess invocation (argv, environment, stream and
+    decoding options) while letting ``OSError``/``TimeoutExpired`` propagate so
+    each caller keeps its own error policy. Never raises on a non-zero return
+    code. In binary mode ``encoding``/``errors`` are forced to ``None``.
+    """
+
+    return subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        env=dict(environment),
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=stderr,
+        input=input,
+        text=not binary,
+        encoding=None if binary else encoding,
+        errors=None if binary else errors,
+        timeout=timeout,
+    )
+
+
+@overload
+def run_git_minimal(
+    args: Sequence[str],
+    *,
+    cwd: Path | None = ...,
+    timeout: int | None = ...,
+    binary: Literal[False] = ...,
+    input: bytes | None = ...,
+    stderr: int | None = ...,
+    encoding: str | None = ...,
+    errors: str | None = ...,
+) -> subprocess.CompletedProcess[str]: ...
+
+
+@overload
+def run_git_minimal(
+    args: Sequence[str],
+    *,
+    cwd: Path | None = ...,
+    timeout: int | None = ...,
+    binary: Literal[True],
+    input: bytes | None = ...,
+    stderr: int | None = ...,
+    encoding: str | None = ...,
+    errors: str | None = ...,
+) -> subprocess.CompletedProcess[bytes]: ...
+
+
+@overload
+def run_git_minimal(
+    args: Sequence[str],
+    *,
+    cwd: Path | None = ...,
+    timeout: int | None = ...,
+    binary: bool,
+    input: bytes | None = ...,
+    stderr: int | None = ...,
+    encoding: str | None = ...,
+    errors: str | None = ...,
+) -> subprocess.CompletedProcess[Any]: ...
+
+
+def run_git_minimal(
+    args: Sequence[str],
+    *,
+    cwd: Path | None = None,
+    timeout: int | None = None,
+    binary: bool = False,
+    input: bytes | None = None,
+    stderr: int | None = subprocess.PIPE,
+    encoding: str | None = None,
+    errors: str | None = None,
+) -> subprocess.CompletedProcess:
+    """Run git with a minimal, prompt-disabled, cache-free environment.
+
+    Unlike :func:`run_git`/:func:`run_command`, this does not build the external
+    tool cache, so it never raises :class:`CacheSetupError`. It only sets
+    ``GIT_TERMINAL_PROMPT=0`` on top of the inherited environment. Defaults
+    reproduce a bare ``subprocess.run(["git", ...], text=True)`` call: no
+    timeout, platform-locale decoding, strict errors, captured ``PIPE`` stderr.
+    Propagates ``OSError``/``TimeoutExpired``; never raises on non-zero exit.
+    """
+
+    environment = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    return _run_git_process(
+        args,
+        environment=environment,
+        cwd=cwd,
+        timeout=timeout,
+        binary=binary,
+        input=input,
+        stderr=stderr,
+        encoding=encoding,
+        errors=errors,
+    )
+
+
+@overload
+def run_git_cached(
+    args: Sequence[str],
+    *,
+    repo: Path | None,
+    cwd: Path | None = ...,
+    timeout: int | None = ...,
+    binary: Literal[False] = ...,
+    input: bytes | None = ...,
+    stderr: int | None = ...,
+    encoding: str | None = ...,
+    errors: str | None = ...,
+) -> subprocess.CompletedProcess[str]: ...
+
+
+@overload
+def run_git_cached(
+    args: Sequence[str],
+    *,
+    repo: Path | None,
+    cwd: Path | None = ...,
+    timeout: int | None = ...,
+    binary: Literal[True],
+    input: bytes | None = ...,
+    stderr: int | None = ...,
+    encoding: str | None = ...,
+    errors: str | None = ...,
+) -> subprocess.CompletedProcess[bytes]: ...
+
+
+def run_git_cached(
+    args: Sequence[str],
+    *,
+    repo: Path | None,
+    cwd: Path | None = None,
+    timeout: int | None = None,
+    binary: bool = False,
+    input: bytes | None = None,
+    stderr: int | None = subprocess.PIPE,
+    encoding: str | None = None,
+    errors: str | None = None,
+) -> subprocess.CompletedProcess:
+    """Run git with the shared cache-backed environment.
+
+    ``repo`` selects the repository whose cache namespace
+    :func:`build_tool_environment` prepares (and may raise
+    :class:`CacheSetupError`); ``cwd`` is the child process working directory
+    and is independent — callers using ``git -C`` pass ``cwd=None``. Defaults
+    match :func:`run_git_minimal`. Propagates ``CacheSetupError``/``OSError``/
+    ``TimeoutExpired``; never raises on non-zero exit.
+    """
+
+    environment, _, _ = build_tool_environment(repo=repo)
+    environment.setdefault("GIT_TERMINAL_PROMPT", "0")
+    return _run_git_process(
+        args,
+        environment=environment,
+        cwd=cwd,
+        timeout=timeout,
+        binary=binary,
+        input=input,
+        stderr=stderr,
+        encoding=encoding,
+        errors=errors,
     )
 
 

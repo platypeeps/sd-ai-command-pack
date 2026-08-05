@@ -60,6 +60,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Sequence
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from sd_ai_command_pack_lib import run_git_minimal  # noqa: E402
+
 DEFAULT_REPOMIX_SCRIPT = "scripts/update_repomix"
 DEFAULT_REPOMIX_OUTPUT = "docs/repomix-map.md"
 TASK_ROOT = ".trellis/tasks"
@@ -114,14 +120,35 @@ def run(
     return result
 
 
+def git_run(
+    argv: Sequence[str], *, cwd: Path
+) -> subprocess.CompletedProcess[str]:
+    """Run ``git <argv>`` via the shared lib helper, preserving ``run``'s contract.
+
+    Mirrors the former ``run`` git call: stderr merged into stdout, no timeout,
+    and a nonzero exit raises the same ``PublishError`` with the reconstructed
+    ``git ...`` command in the message.
+    """
+
+    result = run_git_minimal(
+        list(argv), cwd=cwd, timeout=None, stderr=subprocess.STDOUT
+    )
+    if result.returncode != 0:
+        detail = (result.stdout or "").strip().splitlines()[-1:] or [""]
+        raise PublishError(
+            f"command failed (git {' '.join(argv)}): {detail[0]}", code=2
+        )
+    return result
+
+
 def git_out(argv: Sequence[str], *, cwd: Path) -> str:
-    return (run(["git", *argv], cwd=cwd).stdout or "").strip()
+    return (git_run(argv, cwd=cwd).stdout or "").strip()
 
 
 def porcelain_paths(cwd: Path) -> list[str]:
     """Return the set of paths that appear dirty in ``git status --porcelain``."""
 
-    raw = run(["git", "status", "--porcelain"], cwd=cwd).stdout or ""
+    raw = git_run(["status", "--porcelain"], cwd=cwd).stdout or ""
     paths: list[str] = []
     for line in raw.splitlines():
         if not line.strip():
@@ -230,8 +257,8 @@ def regenerate_repomix_post_archive(
 
 
 def work_commit(repo: Path, message_file: Path) -> str:
-    run(["git", "add", "-A"], cwd=repo)
-    run(["git", "commit", "-q", "-F", str(message_file)], cwd=repo)
+    git_run(["add", "-A"], cwd=repo)
+    git_run(["commit", "-q", "-F", str(message_file)], cwd=repo)
     return git_out(["rev-parse", "HEAD"], cwd=repo)
 
 
@@ -376,7 +403,7 @@ def publish(args: argparse.Namespace) -> dict[str, object]:
 
     pushed = False
     if not args.no_push:
-        run(["git", "push", "-u", args.remote, args.branch], cwd=repo)
+        git_run(["push", "-u", args.remote, args.branch], cwd=repo)
         pushed = True
 
     return {

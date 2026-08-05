@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-08-05T15:24:48Z",
+  "validatedAt": "2026-08-05T17:39:41Z",
   "packVersion": "0.64.18",
-  "payloadDigest": "sha256:b3a2917f42ce0100ac104f92945b0bb41677f299e42ea30894bd708c3be6aa4a",
+  "payloadDigest": "sha256:5149ac09efbc0f285f59a48b5e91423e1eedd039019420b4ebcd146fa6aca968",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "9349e2b1c261965fbd8d23a2b78459c10d0a9b3e",
+      "baseCommit": "6ac0e06284bafde2162fdd17cf1dce4911239a3c",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "0aabd951fc2b8d95e29490919e04c75bbdee00ed",
+      "baseCommit": "9113c34ac2359a46c3c6f76d3f62d6f29c0648e7",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -121,7 +121,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "0eacc0750208a22d6504632271372f18e9c40e57",
+      "baseCommit": "a4f658f6b2c9297285715e2366cefe9ef56be6c3",
       "status": "passed",
       "prepares": [
         [

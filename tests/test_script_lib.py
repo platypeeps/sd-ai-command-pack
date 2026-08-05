@@ -337,16 +337,28 @@ class ScriptLibTests(InstallTestCase):
             )
             self.assertIn("prepare_tool_cache_env", content, name)
 
+        # Generic shared-env runners call the builder directly.
         for name in (
             "sd-ai-command-pack-status.py",
             "sd-ai-command-pack-pr-eligibility.py",
+        ):
+            content = (install.ROOT / "templates/scripts" / name).read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("build_tool_environment", content, name)
+
+        # A-076 git callers delegate the same cache policy through the shared
+        # run_git_cached helper (which itself calls build_tool_environment)
+        # instead of building a git-specific environment of their own.
+        for name in (
             "sd-ai-command-pack-install-audit.py",
             "sd-ai-command-pack-work-loop.py",
         ):
             content = (install.ROOT / "templates/scripts" / name).read_text(
                 encoding="utf-8"
             )
-            self.assertIn("build_tool_environment", content, name)
+            self.assertIn("run_git_cached", content, name)
+            self.assertNotIn("build_tool_environment", content, name)
 
     def test_shared_shell_cache_parser_strips_crlf(self) -> None:
         if self._bash_path is None:
@@ -566,6 +578,90 @@ class ScriptLibTests(InstallTestCase):
         self.assertIs(result, completed)
         self.assertEqual(run.call_args.args[0], ["gh", "auth", "status"])
         self.assertEqual(run.call_args.kwargs["timeout"], lib.DEFAULT_GH_TIMEOUT)
+
+    def test_run_git_minimal_prepends_git_and_disables_prompt(self) -> None:
+        lib = self.load_lib()
+        completed = subprocess.CompletedProcess(["git", "status"], 0, stdout="ok\n")
+
+        with mock.patch("subprocess.run", return_value=completed) as run:
+            result = lib.run_git_minimal(["status", "--porcelain"], timeout=10)
+
+        self.assertIs(result, completed)
+        self.assertEqual(run.call_args.args[0], ["git", "status", "--porcelain"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 10)
+        self.assertEqual(run.call_args.kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
+        self.assertFalse(run.call_args.kwargs["check"])
+        self.assertTrue(run.call_args.kwargs["text"])
+
+    def test_run_git_minimal_returns_nonzero_without_raising(self) -> None:
+        lib = self.load_lib()
+        completed = subprocess.CompletedProcess(["git", "status"], 1, stdout="")
+
+        with mock.patch("subprocess.run", return_value=completed):
+            result = lib.run_git_minimal(["status"])
+
+        self.assertEqual(result.returncode, 1)
+
+    def test_run_git_minimal_propagates_timeout(self) -> None:
+        lib = self.load_lib()
+
+        with mock.patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["git", "status"], timeout=5),
+        ):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                lib.run_git_minimal(["status"], timeout=5)
+
+    def test_run_git_minimal_binary_disables_decoding(self) -> None:
+        lib = self.load_lib()
+        completed = subprocess.CompletedProcess(["git"], 0, stdout=b"\x00")
+
+        with mock.patch("subprocess.run", return_value=completed) as run:
+            lib.run_git_minimal(
+                ["check-ignore", "-q"],
+                binary=True,
+                encoding="utf-8",
+                errors="strict",
+            )
+
+        self.assertFalse(run.call_args.kwargs["text"])
+        self.assertIsNone(run.call_args.kwargs["encoding"])
+        self.assertIsNone(run.call_args.kwargs["errors"])
+
+    def test_run_git_cached_threads_repo_and_cwd_separately(self) -> None:
+        lib = self.load_lib()
+        completed = subprocess.CompletedProcess(["git"], 0, stdout="")
+        fake_env = {"PATH": "/usr/bin"}
+
+        with mock.patch.object(
+            lib,
+            "build_tool_environment",
+            return_value=(fake_env, {}, "namespace"),
+        ) as build, mock.patch("subprocess.run", return_value=completed) as run:
+            lib.run_git_cached(
+                ["-C", "/repo", "rev-parse", "HEAD"],
+                repo=Path("/repo"),
+                cwd=None,
+                timeout=20,
+            )
+
+        self.assertEqual(build.call_args.kwargs["repo"], Path("/repo"))
+        self.assertEqual(
+            run.call_args.args[0], ["git", "-C", "/repo", "rev-parse", "HEAD"]
+        )
+        self.assertIsNone(run.call_args.kwargs["cwd"])
+        self.assertEqual(run.call_args.kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
+
+    def test_run_git_cached_propagates_cache_setup_error(self) -> None:
+        lib = self.load_lib()
+
+        with mock.patch.object(
+            lib,
+            "build_tool_environment",
+            side_effect=lib.CacheSetupError("no writable cache root"),
+        ):
+            with self.assertRaises(lib.CacheSetupError):
+                lib.run_git_cached(["status"], repo=Path("/repo"))
 
     def test_git_stdout_required_reports_git_failure(self) -> None:
         lib = self.load_lib()
