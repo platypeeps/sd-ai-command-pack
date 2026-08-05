@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.64.9 - 2026-08-04
+
+- Register the `fleet-refresh.operator-policy` structured-question decision and
+  bind it to `sd-fleet-refresh`. The skill prose already specified the ask /
+  do-not-ask rule, the lowest-risk-park recommendation, and the noninteractive
+  park behavior; the gap was purely registry-side, so generated adapters could
+  not expose host-native guidance at that boundary. The decision uses three
+  static, mutually-exclusive dispositions for a blocked campaign — park (default),
+  retry the blocked consumer, or continue without it — with `noninteractive="park"`.
+  Claude and Gemini adapters now name their native question capability;
+  the neutral skill body stays host-agnostic. No controller, receipt-vocabulary,
+  or state-machine change.
+
 ## 0.64.8 - 2026-08-04
 
 - Add `agent` as a first-class manifest artifact kind, gated by a per-platform

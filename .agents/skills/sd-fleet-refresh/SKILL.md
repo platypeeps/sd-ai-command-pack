@@ -31,6 +31,21 @@ flag remains the opt-out. This does not authorize product-code edits, dirty or
 externally owned checkouts, force pushes, default-branch pushes, operator
 decisions, destructive actions, or bypassing controller and lifecycle gates.
 
+## Structured decisions
+
+Read
+[`../sd-help/references/structured-questions.md`](../sd-help/references/structured-questions.md)
+before asking. This skill owns `fleet-refresh.operator-policy`, and asks it only
+when the controller emits a genuine operator decision that leaves mutually
+exclusive dispositions for a blocked campaign — park it, retry the blocked
+consumer, or continue without it. Recommend the lowest-risk park option, bind
+the answer to the exact campaign, consumer, release, and head/PR, and never let
+a response broaden consumer scope or invent a controller transition. Routine
+retries, polling, receipts, optional absence, deterministic transitions, and
+actions already authorized by campaign policy never prompt; a noninteractive or
+unanswered decision records `operator-decision` and parks without advancing
+state.
+
 ## When to use
 
 - Run from the `sd-ai-command-pack` source checkout after its immutable

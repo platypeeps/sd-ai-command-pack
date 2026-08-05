@@ -735,6 +735,35 @@ INTERACTION_DECISIONS: tuple[InteractionDecision, ...] = (
             ),
         ),
     ),
+    InteractionDecision(
+        "fleet-refresh.operator-policy",
+        "blocked-run-disposition",
+        "Fleet policy",
+        "How should this blocked fleet campaign proceed?",
+        (
+            _option(
+                "Park the campaign",
+                "Stops here and records the blocker against this campaign. "
+                "Nothing is dispatched; the release and every consumer keep "
+                "their current state. Resume needs a fresh run.",
+                recommended=True,
+            ),
+            _option(
+                "Retry the blocked consumer",
+                "Re-runs the same already-authorized action against the same "
+                "consumer, release, and head. Correct when the blocker was "
+                "transient — a timeout or an unreadable API response. Repeats "
+                "the failure if the cause is persistent.",
+            ),
+            _option(
+                "Continue without the blocked consumer",
+                "Proceeds with the remaining consumers and leaves the blocked "
+                "one out of this campaign. The fleet ends partially rolled out "
+                "and the excluded consumer needs its own later campaign.",
+            ),
+        ),
+        noninteractive="park",
+    ),
 )
 
 
@@ -862,6 +891,7 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
         # name, so the default "Resolve `<skill>` skill by name" anchor is
         # absent; anchor the checkout-trust injection on the file-read step.
         injection_anchor=r"^1\. Load the fleet-refresh procedure by reading `[^`]+`",
+        interaction_decisions=("fleet-refresh.operator-policy",),
     ),
     CommandInfo(
         "sd-test-gaps", "test-gaps", "verification-improvement", mutates_local=True
