@@ -888,10 +888,207 @@ def _is_command_shaped(entry: dict[str, object]) -> bool:
     return False
 
 
+# --- Agents (subagent artifact kind) -------------------------------------
+#
+# Agents are a source class of their own, not derived from a command. A
+# canonical neutral Markdown source at templates/.agents/agents/<name>.md fans
+# out to every platform whose registry row carries the subagent capability
+# (agent_kind + agent_target_pattern). Wave 1 is claude + codex + gemini; the
+# capable set is read from the registry, so a later platform is an additive
+# registry row, never an edit here. Shipping with zero agent sources is a valid
+# state: the functions below then return no rows and no rendered files, and the
+# manifest is byte-identical.
+AGENT_SOURCE_DIR = "templates/.agents/agents"
+AGENT_NAME_PREFIX = "sd-"
+# gemini runs subagents without per-tool confirmation, so an agent's tool set is
+# constrained at generation time rather than trusted at run time.
+GEMINI_AGENT_TOOL_ALLOWLIST = frozenset(
+    {"Read", "Grep", "Glob", "Edit", "Write", "Bash"}
+)
+# Pack subagents default to read-only; a source may widen this with a
+# `codex-sandbox:` frontmatter key when a writing agent exists. The value is
+# interpolated into a TOML basic string, so it is constrained to Codex's known
+# sandbox modes both to reject unsupported values and to block quote/backslash
+# injection into the rendered twin.
+DEFAULT_AGENT_SANDBOX_MODE = "read-only"
+AGENT_SANDBOX_MODES = frozenset(
+    {"read-only", "workspace-write", "danger-full-access"}
+)
+
+
+def agent_capable_platforms() -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            name
+            for name, info in PLATFORM_REGISTRY.items()
+            if info.agent_kind and info.agent_target_pattern
+        )
+    )
+
+
+def _parse_agent_source(name: str) -> tuple[dict[str, str], str]:
+    source = PACK_ROOT / f"{AGENT_SOURCE_DIR}/{name}.md"
+    try:
+        text = source.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise GenerationError(f"cannot read agent source {source}: {exc}") from exc
+    if not text.startswith("---\n"):
+        raise GenerationError(f"{source}: missing YAML frontmatter")
+    end = text.find("\n---\n\n", 3)
+    if end == -1:
+        raise GenerationError(f"{source}: missing frontmatter terminator")
+    meta: dict[str, str] = {}
+    for line in text[4:end].splitlines():
+        if ": " in line:
+            key, _, value = line.partition(": ")
+            meta[key.strip()] = value.strip()
+    body = text[end + len("\n---\n\n") :]
+    if not body.endswith("\n"):
+        raise GenerationError(f"{source}: body must end with a newline")
+    for required in ("name", "description"):
+        if not meta.get(required):
+            raise GenerationError(f"{source}: missing frontmatter {required}")
+    if meta["name"] != name:
+        raise GenerationError(
+            f"{source}: frontmatter name {meta['name']!r} must match filename {name!r}"
+        )
+    return meta, body
+
+
+def _agent_tools(meta: dict[str, str]) -> list[str]:
+    return [token.strip() for token in meta.get("tools", "").split(",") if token.strip()]
+
+
+def _agent_source_names() -> list[str]:
+    directory = PACK_ROOT / AGENT_SOURCE_DIR
+    if not directory.is_dir():
+        return []
+    names: list[str] = []
+    for path in sorted(directory.glob("*.md")):
+        name = path.stem
+        if not name.startswith(AGENT_NAME_PREFIX):
+            raise GenerationError(
+                f"agent source {path} must be named '{AGENT_NAME_PREFIX}<role>': a "
+                f"'trellis-*' name lands inside the Trellis-local agent glob and "
+                f"stops being pack-managed"
+            )
+        names.append(name)
+    return names
+
+
+def validate_gemini_agent(name: str, meta: dict[str, str]) -> None:
+    disallowed = [
+        tool for tool in _agent_tools(meta) if tool not in GEMINI_AGENT_TOOL_ALLOWLIST
+    ]
+    if disallowed:
+        raise GenerationError(
+            f"agent {name}: gemini runs subagents without per-tool confirmation, so "
+            f"tools must be within {sorted(GEMINI_AGENT_TOOL_ALLOWLIST)}; "
+            f"disallowed: {disallowed}"
+        )
+
+
+def render_toml_agent(name: str, meta: dict[str, str], body: str) -> str:
+    description = meta["description"]
+    if '"' in description:
+        raise GenerationError(f"agent {name}: description must not contain double quotes")
+    # TOML basic and multi-line basic strings interpret backslash escapes, so a
+    # lone backslash (a regex `\d`, a Windows path) yields invalid or silently
+    # transformed TOML. Reject it, matching the reject-unsafe stance on quotes.
+    if "\\" in description:
+        raise GenerationError(f"agent {name}: description must not contain a backslash")
+    if "\\" in body:
+        raise GenerationError(f"agent {name}: body must not contain a backslash")
+    if '"""' in body:
+        raise GenerationError(f"agent {name}: body must not contain a TOML string fence")
+    sandbox = meta.get("codex-sandbox", DEFAULT_AGENT_SANDBOX_MODE)
+    if sandbox not in AGENT_SANDBOX_MODES:
+        allowed = ", ".join(sorted(AGENT_SANDBOX_MODES))
+        raise GenerationError(
+            f"agent {name}: codex-sandbox must be one of {allowed}"
+        )
+    return (
+        f'name = "{name}"\n'
+        f'description = "{description}"\n'
+        f'sandbox_mode = "{sandbox}"\n'
+        f"\n"
+        f'developer_instructions = """\n'
+        f'{body}"""\n'
+    )
+
+
+def _agent_manifest_entries(name: str) -> list[dict[str, str]]:
+    meta, _ = _parse_agent_source(name)
+    canonical = f"{AGENT_SOURCE_DIR}/{name}.md"
+    entries: list[dict[str, str]] = [
+        {
+            "platform": "shared",
+            "kind": "agent",
+            "source": canonical,
+            "target": f".agents/agents/{name}.md",
+            "install": "always",
+        }
+    ]
+    for platform in agent_capable_platforms():
+        info = PLATFORM_REGISTRY[platform]
+        if info.agent_kind == "markdown":
+            if platform == "gemini":
+                validate_gemini_agent(name, meta)
+            source = canonical
+            filename = f"{name}.md"
+        elif info.agent_kind == "toml":
+            source = f"templates/{info.directory}/agents/{name}.toml"
+            filename = f"{name}.toml"
+        else:
+            raise GenerationError(
+                f"agent {name}: unsupported agent_kind {info.agent_kind!r} "
+                f"for platform {platform}"
+            )
+        entries.append(
+            {
+                "platform": platform,
+                "kind": "agent",
+                "source": source,
+                "target": cast(str, info.agent_target_pattern).format(filename=filename),
+                "anchor": info.directory,
+            }
+        )
+    return entries
+
+
+def derived_agent_entries() -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for name in _agent_source_names():
+        entries.extend(_agent_manifest_entries(name))
+    return entries
+
+
+def generate_agent_adapters() -> dict[str, str]:
+    # Only non-Markdown dialects need a rendered twin; Markdown platforms
+    # (claude, gemini) install the canonical source verbatim.
+    outputs: dict[str, str] = {}
+    for name in _agent_source_names():
+        meta, body = _parse_agent_source(name)
+        for platform in agent_capable_platforms():
+            info = PLATFORM_REGISTRY[platform]
+            if info.agent_kind == "toml":
+                twin = f"templates/{info.directory}/agents/{name}.toml"
+                outputs[twin] = render_toml_agent(name, meta, body)
+    return outputs
+
+
+def _is_agent_shaped(entry: dict[str, object]) -> bool:
+    return entry.get("kind") == "agent"
+
+
 def generate_manifest_text() -> str:
     raw = manifest_object()
     raw_files = cast(list[dict[str, object]], raw["files"])
-    static = [entry for entry in raw_files if not _is_command_shaped(entry)]
+    static = [
+        entry
+        for entry in raw_files
+        if not _is_command_shaped(entry) and not _is_agent_shaped(entry)
+    ]
     derived = [
         entry
         for command in COMMAND_REGISTRY
@@ -900,6 +1097,7 @@ def generate_manifest_text() -> str:
             command.name, command.short, command.target_families
         )
     ]
+    derived += derived_agent_entries()
     files = static + derived
     seen: dict[str, str] = {}
     for entry in files:
@@ -940,6 +1138,7 @@ def generate_surfaces() -> dict[str, str]:
     outputs = generate_neutral_adapters()
     outputs.update(generate_adapters())
     outputs.update(generate_source_only_dev_adapters(outputs))
+    outputs.update(generate_agent_adapters())
     outputs[HELP_CATALOG_PATH] = generate_command_catalog()
     outputs[STRUCTURED_QUESTION_REFERENCE_PATH] = (
         generate_structured_question_reference()

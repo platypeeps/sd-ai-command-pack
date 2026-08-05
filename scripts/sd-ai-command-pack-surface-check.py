@@ -389,7 +389,7 @@ def _manifest_entries(root: Path, registry: ModuleType) -> tuple[str, list[dict[
     known_platforms = set(registry.PLATFORM_REGISTRY)
     known_platforms.add("shared")
     known_kinds = {
-        "command", "config", "doc", "managed-block", "prompt", "script", "skill", "workflow"
+        "agent", "command", "config", "doc", "managed-block", "prompt", "script", "skill", "workflow"
     }
     entries: list[dict[str, str]] = []
     seen_targets: dict[str, str] = {}

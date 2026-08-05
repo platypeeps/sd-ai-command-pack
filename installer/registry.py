@@ -24,6 +24,19 @@ class PlatformInfo:
     trellis_local_only: tuple[str, ...] = ()
     command_kind: str | None = None
     command_target_pattern: str | None = None
+    # Subagent capability, modeled on command_kind/command_target_pattern above
+    # rather than on structured_question_tool (which names a runtime tool and
+    # carries no target path). agent_kind names the rendered dialect
+    # ("markdown" | "toml" | "json"); agent_target_pattern is the install path
+    # with a {filename} slot (e.g. ".claude/agents/{filename}"). Both None means
+    # the platform has no native agent support and produces zero agent rows by
+    # construction, via the pair-gate
+    # `if not info.agent_kind or not info.agent_target_pattern`. kiro's JSON
+    # dialect (".kiro/agents/{filename}") is the known future shape, deferred
+    # until a kiro agent exists; zcode carries two agent directories, so a later
+    # dual target must not be precluded by this single-string field.
+    agent_kind: str | None = None
+    agent_target_pattern: str | None = None
     structured_question_tool: str | None = None
 
 
@@ -78,6 +91,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".claude/skills/trellis-*/",
         ),
         structured_question_tool="AskUserQuestion",
+        agent_kind="markdown",
+        agent_target_pattern=".claude/agents/{filename}",
     ),
     "codebuddy": PlatformInfo(
         directory=".codebuddy",
@@ -123,6 +138,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".codex/hooks/",
         ),
         structured_question_tool="request_user_input",
+        agent_kind="toml",
+        agent_target_pattern=".codex/agents/{filename}",
     ),
     "cursor": PlatformInfo(
         directory=".cursor",
@@ -222,6 +239,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".gemini/agents/trellis-*.md",
             ".gemini/settings.json",
         ),
+        agent_kind="markdown",
+        agent_target_pattern=".gemini/agents/{filename}",
     ),
     "github": PlatformInfo(
         directory=".github",

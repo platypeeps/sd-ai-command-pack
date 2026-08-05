@@ -34,12 +34,41 @@ natively supports agent files (~10 of 17).
 
 ## Acceptance Criteria
 
-- [ ] Installer round-trip (install, status, check, audit, remove) works for agent rows;
+- [x] Installer round-trip (install, status, check, audit, remove) works for agent rows;
       capability-`none` platforms receive none; invariant tests pass.
-- [ ] Renderer outputs validated per dialect; partition-regenerate and byte-stability
-      checks cover agents.
-- [ ] Wrinkle dispositions (R4) each have a recorded decision + test where applicable.
-- [ ] Version bump + changelog; maintainer docs updated.
+      (`kind: agent` validates through the kind-agnostic path;
+      `test_no_agent_rows_for_platforms_without_agent_capability` locks the gate;
+      `make check` green.)
+- [x] Renderer outputs validated per dialect; partition-regenerate and byte-stability
+      checks cover agents. (Fixture suite `AgentGenerationTests` covers Markdown
+      fan-out + TOML twin; `make generate` byte-stable — zero shipped agent rows.)
+- [x] Wrinkle dispositions (R4) each have a recorded decision + test where applicable.
+      (gemini tool allowlist — tested; `sd-` prefix enforcement — tested; codex
+      sandbox default `read-only`; cursor gets no wave-1 rows and copilot's 30k cap
+      are recorded in the maintainer spec for wave 2.)
+- [x] Version bump + changelog; maintainer docs updated. (0.64.8; CHANGELOG;
+      `.trellis/spec/backend/manifest-and-filesystem.md` "Subagent Artifact Kind".)
+
+## Verification disposition
+
+- Wave 1 landed as **claude + codex + gemini** (design measurement 1: the only
+  platforms triple-confirmed across parent design, registry reservations, and
+  files on disk). R1's `none` list was not encoded verbatim; the capable set is
+  read from the registry so later platforms are additive rows (R6).
+- **Not verified by any check here:** that claude, codex, or gemini actually
+  *load* a rendered `sd-*` agent — every gate is structural (row exists, bytes
+  stable, dialect parses). Live host dispatch has no fixture in this repo. The
+  copilot 30,000-char cap likewise has nothing to measure until wave 2. Both are
+  stated rather than implied as tested.
+- **Design/implement reconciliation:** `design.md` mandates zero real agent
+  sources / zero rows as the shipping state; `implement.md`'s commit-3
+  "`['claude','codex','gemini','shared']`" snippet describes the *fixture*-driven
+  row set, exercised in `AgentGenerationTests`, not the shipped manifest (which
+  has zero agent rows). Both hold.
+- SE cross-program parser (Risk #4): `07-25-audit-registry-snapshot-contract`
+  landed in se-ai-command-pack; the change is additive keyword-default fields
+  that its name-based reader ignores unless named, and this repo ships no
+  registry snapshot to regenerate.
 
 ## Dependencies / order
 

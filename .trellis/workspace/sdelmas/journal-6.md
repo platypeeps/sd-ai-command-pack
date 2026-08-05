@@ -1506,3 +1506,48 @@ Tier 1 pilot of the SD dispatch pattern: sd-fix-ci fans out one read-only sub-ag
 ### Next Steps
 
 - None - task complete
+
+
+## Session 290: Add agent manifest kind + subagent capability gate (0.64.8)
+
+**Date**: 2026-08-04
+**Task**: Add agent manifest kind + subagent capability gate (0.64.8)
+**Branch**: `feat/agent-artifact-kind`
+
+### Summary
+
+Made 'agent' a first-class SD manifest artifact kind gated by a per-platform subagent capability (claude/codex/gemini wave 1), read from the registry so later platforms are additive rows. Ships zero agent bodies, so the manifest and every generated surface stay byte-identical. Hardened the Codex TOML renderer to reject backslashes, and pinned the sd-review local stage to the clean gito reviewer (dropping the flaky non-deterministic prism).
+
+### Main Changes
+
+- Registered 'agent' in KNOWN_MANIFEST_KINDS + both byte-identical surface-check mirrors; kinds stay descriptive not dispatching
+- Added agent_kind + agent_target_pattern to PlatformInfo (modeled on command_kind), gating agent rows to zero by construction
+- Generator renders per-platform agents (markdown verbatim, codex TOML twin, gemini tool allowlist), rejects non-sd- names; capable set read from registry
+- render_toml_agent now rejects backslashes in description/body (TOML basic strings interpret escapes) alongside the existing quote/fence guards
+- Added .sd-ai-command-pack/review.json pinning sd-review local stage to gito; dropped flaky prism (consistent with full-check's PRISM=0 default)
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `799999f1` | feat: register agent manifest kind (1/3) |
+| `f5501b51` | feat: add subagent capability gate to PlatformInfo (2/3) |
+| `02712f7f` | feat: render subagent artifacts for wave-1 platforms (3/3) |
+| `e9289813` | chore(task): mark agent-artifact-kind acceptance criteria and disposition |
+| `6353bf5d` | fix: reject backslashes in agent TOML description and body |
+| `0b322f79` | chore(review): disable flaky prism local reviewer, keep gito |
+
+### Testing
+
+- [OK] make check green (installer 100% coverage, surface drift clean, version gate 0.64.7->0.64.8, changelog matched, candidate ledger valid)
+- [OK] AgentGenerationTests 6/6 (markdown fan-out, TOML twin, sd- enforcement, gemini allowlist, backslash rejection)
+- [OK] sd-review scope=pr: 8/8 deterministic checks pass, gito clean, review status ready
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

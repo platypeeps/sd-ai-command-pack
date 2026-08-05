@@ -1757,6 +1757,40 @@ class InstallCoreTests(InstallTestCase):
         ):
             install.validate_manifest([file])
 
+    def test_validate_manifest_accepts_agent_kind(self) -> None:
+        """The ``agent`` artifact kind is registered, so a well-formed agent
+        row validates rather than raising ``unknown kind 'agent'``. Rows for
+        this kind are produced once a platform carries an agent capability;
+        the kind itself is descriptive and flows through the kind-agnostic
+        install/status/check/remove path unchanged."""
+        file = install.PackFile(
+            platform="shared",
+            kind="agent",
+            source=install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md",
+            target=Path("agents/example.md"),
+            anchor=None,
+            install=install.ALWAYS_INSTALL,
+        )
+        install.validate_manifest([file])
+
+    def test_no_agent_rows_for_platforms_without_agent_capability(self) -> None:
+        """The subagent capability gate: a platform whose ``agent_kind`` is
+        None produces zero manifest rows of kind ``agent``. Asserted while the
+        answer is trivially zero (no platform yet carries the capability and no
+        agent source exists) so a later renderer commit cannot weaken it — a
+        capability-None platform must never gain an agent row."""
+        from installer import registry
+
+        _, files = install.load_manifest()
+        agent_platforms = {f.platform for f in files if f.kind == "agent"}
+        for name, info in registry.PLATFORM_REGISTRY.items():
+            if info.agent_kind is None:
+                self.assertNotIn(
+                    name,
+                    agent_platforms,
+                    f"{name} has no agent capability but produced agent rows",
+                )
+
     def test_validate_manifest_rejects_unknown_install_mode(self) -> None:
         file = install.PackFile(
             platform="shared",

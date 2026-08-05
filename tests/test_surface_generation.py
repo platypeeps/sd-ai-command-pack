@@ -15,6 +15,7 @@ sys = _support.sys
 unittest = _support.unittest
 Path = _support.Path
 install = _support.install
+mock = _support.mock
 PACK_ROOT = _support.PACK_ROOT
 InstallTestCase = _support.InstallTestCase
 registry = importlib.import_module("installer.registry")
@@ -649,6 +650,149 @@ class SurfaceGenerationTests(InstallTestCase):
 
         self.assertEqual({entry["target"] for entry in entries}, expected_targets)
         self.assertEqual(len(entries), len(expected_targets))
+
+
+class AgentGenerationTests(InstallTestCase):
+    """The subagent artifact kind: a canonical Markdown agent fans out to the
+    capable wave-1 platforms (claude, codex, gemini) plus the shared row, with
+    codex rendered to TOML. Exercised through a fixture source because the pack
+    ships zero real agent bodies (those belong to 07-25-worker-agents)."""
+
+    FIXTURE = (
+        "---\n"
+        "name: sd-fixture\n"
+        "description: Fixture agent for renderer coverage.\n"
+        "tools: Read, Grep, Glob\n"
+        "---\n"
+        "\n"
+        "You are a fixture agent. Do the fixture work.\n"
+    )
+
+    def _generator_with_agent(self, tmp: Path, body: str = FIXTURE):
+        generator = load_surface_generator()
+        agents_dir = tmp / generator.AGENT_SOURCE_DIR
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        (agents_dir / "sd-fixture.md").write_text(body, encoding="utf-8")
+        return generator, agents_dir
+
+    def test_zero_sources_produce_no_agent_rows(self) -> None:
+        generator = load_surface_generator()
+        self.assertEqual(generator.agent_capable_platforms(), ("claude", "codex", "gemini"))
+        self.assertEqual(generator.derived_agent_entries(), [])
+        self.assertEqual(generator.generate_agent_adapters(), {})
+
+    def test_fixture_agent_fans_out_to_wave_one(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            generator, _ = self._generator_with_agent(tmp)
+            with mock.patch.object(generator, "PACK_ROOT", tmp):
+                entries = generator.derived_agent_entries()
+                adapters = generator.generate_agent_adapters()
+
+        by_platform = {entry["platform"]: entry for entry in entries}
+        self.assertEqual(set(by_platform), {"shared", "claude", "codex", "gemini"})
+        self.assertTrue(all(entry["kind"] == "agent" for entry in entries))
+        # Shared + Markdown platforms install the canonical source verbatim.
+        self.assertEqual(
+            by_platform["shared"]["source"],
+            f"{generator.AGENT_SOURCE_DIR}/sd-fixture.md",
+        )
+        self.assertEqual(by_platform["shared"]["target"], ".agents/agents/sd-fixture.md")
+        self.assertEqual(by_platform["claude"]["target"], ".claude/agents/sd-fixture.md")
+        self.assertEqual(by_platform["gemini"]["target"], ".gemini/agents/sd-fixture.md")
+        self.assertEqual(
+            by_platform["claude"]["source"],
+            f"{generator.AGENT_SOURCE_DIR}/sd-fixture.md",
+        )
+        # codex is the TOML dialect: a rendered twin, not the canonical Markdown.
+        self.assertEqual(by_platform["codex"]["target"], ".codex/agents/sd-fixture.toml")
+        self.assertEqual(
+            by_platform["codex"]["source"], "templates/.codex/agents/sd-fixture.toml"
+        )
+        twin = adapters["templates/.codex/agents/sd-fixture.toml"]
+        self.assertIn('name = "sd-fixture"', twin)
+        self.assertIn('sandbox_mode = "read-only"', twin)
+        self.assertIn('developer_instructions = """', twin)
+        self.assertIn("fixture work", twin)
+
+    def test_non_sd_agent_name_is_rejected(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            generator = load_surface_generator()
+            agents_dir = tmp / generator.AGENT_SOURCE_DIR
+            agents_dir.mkdir(parents=True, exist_ok=True)
+            (agents_dir / "trellis-fixture.md").write_text(self.FIXTURE, encoding="utf-8")
+            with mock.patch.object(generator, "PACK_ROOT", tmp):
+                with self.assertRaisesRegex(generator.GenerationError, "trellis-"):
+                    generator.derived_agent_entries()
+
+    def test_gemini_tools_must_be_within_allowlist(self) -> None:
+        import tempfile
+
+        wide = self.FIXTURE.replace("tools: Read, Grep, Glob", "tools: Read, WebFetch")
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            generator, _ = self._generator_with_agent(tmp, body=wide)
+            with mock.patch.object(generator, "PACK_ROOT", tmp):
+                with self.assertRaisesRegex(generator.GenerationError, "gemini"):
+                    generator.derived_agent_entries()
+
+    def test_toml_render_rejects_string_fence_in_body(self) -> None:
+        generator = load_surface_generator()
+        with self.assertRaisesRegex(generator.GenerationError, "TOML string fence"):
+            generator.render_toml_agent(
+                "sd-fixture",
+                {"name": "sd-fixture", "description": "x"},
+                'body with a """ fence\n',
+            )
+
+    def test_toml_render_rejects_backslash(self) -> None:
+        generator = load_surface_generator()
+        # A lone backslash in a TOML basic/multi-line string is invalid TOML;
+        # reject it in both the description and the body.
+        with self.assertRaisesRegex(generator.GenerationError, "backslash"):
+            generator.render_toml_agent(
+                "sd-fixture",
+                {"name": "sd-fixture", "description": r"path C:\temp"},
+                "body\n",
+            )
+        with self.assertRaisesRegex(generator.GenerationError, "backslash"):
+            generator.render_toml_agent(
+                "sd-fixture",
+                {"name": "sd-fixture", "description": "x"},
+                "regex \\d+ here\n",
+            )
+
+    def test_toml_render_validates_sandbox_mode(self) -> None:
+        generator = load_surface_generator()
+        # A codex-sandbox value outside the known set is rejected; this both
+        # blocks unsupported modes and prevents quote/backslash injection into
+        # the rendered TOML sandbox_mode value.
+        with self.assertRaisesRegex(generator.GenerationError, "codex-sandbox"):
+            generator.render_toml_agent(
+                "sd-fixture",
+                {
+                    "name": "sd-fixture",
+                    "description": "x",
+                    "codex-sandbox": 'read-only" evil = "1',
+                },
+                "body\n",
+            )
+        # A known mode renders without error.
+        rendered = generator.render_toml_agent(
+            "sd-fixture",
+            {
+                "name": "sd-fixture",
+                "description": "x",
+                "codex-sandbox": "workspace-write",
+            },
+            "body\n",
+        )
+        self.assertIn('sandbox_mode = "workspace-write"', rendered)
 
 
 if __name__ == "__main__":

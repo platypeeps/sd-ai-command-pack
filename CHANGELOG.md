@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.64.8 - 2026-08-04
+
+- Add `agent` as a first-class manifest artifact kind, gated by a per-platform
+  subagent capability (`agent_kind` + `agent_target_pattern` on `PlatformInfo`,
+  modeled on the existing `command_kind` pair). Platforms without the capability
+  produce zero agent rows by construction; the capable wave-1 set is claude,
+  codex, and gemini, read from the registry so later platforms are additive
+  rows. The generator renders Markdown agents verbatim, renders codex to a TOML
+  twin, enforces the `sd-` name prefix (a `trellis-*` name would leave pack
+  management), and constrains gemini's tool set. Plumbing only: the pack ships
+  zero agent bodies, so the manifest is byte-identical until an agent source
+  exists.
+
 ## 0.64.7 - 2026-08-04
 
 - Add a per-job dispatch protocol to the `sd-fix-ci` skill (Tier 1 pilot of the

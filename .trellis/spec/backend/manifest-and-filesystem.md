@@ -35,6 +35,45 @@ Reference files:
 - `installer/manifest.py`, `PackFile`
 - `installer/manifest.py`, `load_manifest()`
 
+### Subagent Artifact Kind
+
+The `agent` kind is a first-class artifact gated by a per-platform capability,
+modeled on the `command_kind` / `command_target_pattern` pair (not on
+`structured_question_tool`). A platform supports agents only when its
+`PlatformInfo` row carries both `agent_kind` (`"markdown"` | `"toml"` |
+`"json"`) and `agent_target_pattern`; the pair-gate
+`if not info.agent_kind or not info.agent_target_pattern` yields zero rows by
+construction for every other platform. Adding a platform is an additive
+registry row, never an edit to the generator — the capable set is read from the
+registry (`agent_capable_platforms()`). Wave 1 is claude + codex + gemini.
+
+Kinds are descriptive, not dispatching: `agent` rows flow through install,
+status, check, audit, and remove with no per-kind branch, exactly like `skill`.
+The kind is registered in three places that must stay in sync —
+`installer/manifest.py` `KNOWN_MANIFEST_KINDS` and the byte-identical
+`known_kinds` set in both `scripts/sd-ai-command-pack-surface-check.py` and its
+`templates/` mirror.
+
+Generation rules (`.github/scripts/generate-command-surfaces.py`):
+
+- Canonical sources live at `templates/.agents/agents/<name>.md` (neutral
+  Markdown + YAML frontmatter). Every pack agent name **must** start with `sd-`;
+  a `trellis-*` name lands inside the Trellis-local agent glob and stops being
+  pack-managed. The generator raises `GenerationError` on a non-`sd-` name.
+- Markdown platforms (claude, gemini) install the canonical source verbatim; the
+  gemini emitter also asserts the agent's tools are within a fixed allowlist,
+  because gemini runs subagents without per-tool confirmation.
+- The `toml` dialect (codex) renders a twin at `templates/.codex/agents/<name>.toml`
+  with the body as a `developer_instructions` string (default
+  `sandbox_mode = "read-only"`).
+- Agent paths are **not** added to `trellis_local_only`; pack agents must stay
+  pack-managed and removable.
+
+Shipping zero agent sources is a valid state — the derivation returns no rows
+and no rendered twins, and the manifest is byte-identical. The first named
+agents belong to `07-25-worker-agents`, which consumes this kind, field, and
+naming rule.
+
 ## Release Payload Gate
 
 Any pull request that changes shipped payload must carry the release ledger
