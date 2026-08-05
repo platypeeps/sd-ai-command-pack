@@ -91,6 +91,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".claude/skills/trellis-*/",
         ),
         structured_question_tool="AskUserQuestion",
+        agent_kind="markdown",
+        agent_target_pattern=".claude/agents/{filename}",
     ),
     "codebuddy": PlatformInfo(
         directory=".codebuddy",
@@ -136,6 +138,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".codex/hooks/",
         ),
         structured_question_tool="request_user_input",
+        agent_kind="toml",
+        agent_target_pattern=".codex/agents/{filename}",
     ),
     "cursor": PlatformInfo(
         directory=".cursor",
@@ -235,6 +239,8 @@ PLATFORM_REGISTRY: dict[str, PlatformInfo] = {
             ".gemini/agents/trellis-*.md",
             ".gemini/settings.json",
         ),
+        agent_kind="markdown",
+        agent_target_pattern=".gemini/agents/{filename}",
     ),
     "github": PlatformInfo(
         directory=".github",
