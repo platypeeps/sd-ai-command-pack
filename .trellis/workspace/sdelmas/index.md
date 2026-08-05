@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 289
+- **Total Sessions**: 290
 - **Last Active**: 2026-08-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~1506 | Active |
+| `journal-6.md` | ~1551 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 290 | 2026-08-04 | Add agent manifest kind + subagent capability gate (0.64.8) | `799999f1`, `f5501b51`, `02712f7f`, `e9289813`, `6353bf5d`, `0b322f79` | `feat/agent-artifact-kind` |
 | 289 | 2026-08-04 | 07-25-fix-ci-dispatch: per-job dispatch protocol for sd-fix-ci (0.64.7) | `ad63deca`, `a38e4e2e`, `de8adf60`, `21165099` | `feat/sd-fix-ci-dispatch` |
 | 288 | 2026-08-04 | Release 0.64.5 — sibling-loader + fleet-publish hardening (A/B/C) | `386a7e82` | `feat/0.64.5-followup-hardening` |
 | 287 | 2026-08-04 | 0.64.5 planning gate CLOSED (Option A) — held before implementation | `be12f4d8` | `main` |
