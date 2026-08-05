@@ -1464,3 +1464,45 @@ Implemented + released 0.64.5 (branch feat/0.64.5-followup-hardening). A: siblin
 ### Next Steps
 
 - None - task complete
+
+
+## Session 289: 07-25-fix-ci-dispatch: per-job dispatch protocol for sd-fix-ci (0.64.7)
+
+**Date**: 2026-08-04
+**Task**: 07-25-fix-ci-dispatch: per-job dispatch protocol for sd-fix-ci (0.64.7)
+**Branch**: `feat/sd-fix-ci-dispatch`
+
+### Summary
+
+Tier 1 pilot of the SD dispatch pattern: sd-fix-ci fans out one read-only sub-agent per failing CI job (per-job log fetch), parent keeps enumeration/reruns/report. Section in skill body (audit-repo house template), thin adapters unchanged, trust restated not re-derived, fan-out bounded to waves of six. Shipped as release 0.64.7 with fleet candidate re-validated across 8 consumers.
+
+### Main Changes
+
+- Added ## Dispatch protocol to templates/.agents/skills/sd-fix-ci/SKILL.md; per-job gh run view -j <job-id> --log-failed replaces whole-run fetch
+- Worker contract (read-only, typed class + quoted evidence + proposed disposition); parent owns run-level facts, shared max-reruns budget, all fixes/reruns; report contract unchanged
+- Trust restated in one line (checkout-trust count=1, no generator-owned classifier duplicated); fan-out bounded to waves of at most six workers
+- Release 0.64.7: manifest bump, CHANGELOG, catalog regen, dogfood mirror sync, fleet candidate ledger re-validated across 8 consumers
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ad63deca` | feat: add per-job dispatch protocol to sd-fix-ci (0.64.7) |
+| `a38e4e2e` | docs: keep sd-fix-ci log-fetch command on one inline code span |
+| `de8adf60` | chore(task): record branch for 07-25-fix-ci-dispatch finalization |
+| `21165099` | chore(task): archive 07-25-fix-ci-dispatch |
+
+### Testing
+
+- [OK] make check green (shipped-surface closure clean, version gate 0.64.6->0.64.7, changelog heading, candidate ledger valid)
+- [OK] make generate byte-stable (2nd run no diff); checkout-trust count=1; no classifier tokens in any SKILL.md
+- [OK] sd-review scope=pr ready (check passed, local clean); CI all green; Copilot 1 finding fixed (a38e4e2e) + thread resolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
