@@ -194,3 +194,28 @@ step 8's gate and it is a judgement call, not a check.
 Each commit reverts independently. Commit 3 is the exception: once state has been
 written under the new root, reverting orphans it in the other direction. That
 asymmetry is the argument for choosing the read-through fallback in step 8.
+
+## Delivery status (2026-08-05)
+
+Delivered in release 0.64.16:
+
+- **Commit 1 — A-085, atomic write.** `atomic_write_text` /
+  `default_text_file_mode` consolidated into `sd_ai_command_pack_lib.py`;
+  record-session and update-spec-kb repointed. AC3 met (one definition, in the
+  lib). Shipped.
+- **Commit 2 — A-080, cache-env contract.** All seven shell key-set sites made
+  data-driven; arity assertions dropped; doctor JSON/human cache paths derived
+  from the lib emission. AC2 verified literally (dummy eighth key flows through
+  with no shell edit). Shipped.
+
+Split into dedicated follow-up tasks — implementation revealed each is a
+behavior-changing library-contract change, not a mechanical consolidation:
+
+- **Commit 3 — A-046, state root → `08-05-consolidate-state-root-resolution`.**
+  Unifying resolution relocates live fleet locks/campaign state for users with
+  `SD_AI_COMMAND_PACK_STATE_HOME` set; it needs a recorded migration decision
+  (read-through fallback recommended). AC1 owned there.
+- **Commit 4 — A-076, git invocation → `08-05-consolidate-git-invocation`.**
+  The lib's `run_git` forces cache setup and sets no `GIT_TERMINAL_PROMPT`;
+  migrating the review-local / surface-check bypasses needs a new minimal,
+  prompt-disabled, binary-capable lib git path first. AC4 owned there.
