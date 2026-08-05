@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.64.12 - 2026-08-04
+
+- Bound `sd-review-learnings` unsafe planning changed-path evidence to a
+  phase-tagged diagnostic instead of an uncaught `ValueError` traceback. The
+  main scan path's `build_review_learning_signal` call was unguarded, so a
+  `--github-pr N --dry-run` run over a diff whose changed path escaped the
+  repository (traversal, control characters, oversized, or over-count) exited
+  with a Python traceback (observed in `platypeeps/people-profiles` PR #3). It
+  now routes that expected invalid-evidence failure through the existing
+  `_print_early_failure` emitter under the `sd-review-learnings:planning`
+  phase, matching the already-guarded `--planning-attempt` path: a stable
+  diagnostic that never echoes the raw unsafe path, the documented failure exit
+  code, and a schema-valid bounded report in `--json` mode. Added CLI
+  regression coverage for traversal (human mode) and control-character (JSON
+  mode) inputs.
+
 ## 0.64.11 - 2026-08-04
 
 - Batch `sd-review-learnings` review-thread collection into aliased GraphQL

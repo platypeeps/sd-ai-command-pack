@@ -2970,15 +2970,29 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     comments = list(review_window.comments)
-    review_learning = build_review_learning_signal(
-        comments,
-        review_window,
-        changed_paths=changed_paths,
-        requested=bool(args.github_days or args.github_pr),
-        source="live" if (args.github_days or args.github_pr) else "not-requested",
-        snapshot_text=plan.existing_text,
-        snapshot_exists=plan.exists,
-    )
+    try:
+        review_learning = build_review_learning_signal(
+            comments,
+            review_window,
+            changed_paths=changed_paths,
+            requested=bool(args.github_days or args.github_pr),
+            source="live" if (args.github_days or args.github_pr) else "not-requested",
+            snapshot_text=plan.existing_text,
+            snapshot_exists=plan.exists,
+        )
+    except ValueError as exc:
+        # Unsafe planning changed-path evidence (traversal, control characters,
+        # oversized, or over-count) is expected invalid command evidence, not a
+        # crash. The message is a fixed enum that never echoes the raw path, so
+        # it is safe to surface under the phase tag. The planning-attempt path
+        # above already guards its own collector call the same way.
+        _print_early_failure(
+            args=args,
+            mode=mode,
+            phase="planning",
+            reason=str(exc),
+        )
+        return 2
     if not args.json:
         for finding in findings:
             print(finding.render())

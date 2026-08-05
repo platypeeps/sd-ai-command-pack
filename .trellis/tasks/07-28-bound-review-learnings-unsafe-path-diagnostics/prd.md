@@ -34,15 +34,24 @@ Convert unsafe planning changed-path inputs from an uncaught ValueError into a b
 
 ## Acceptance Criteria
 
-- [ ] Human mode reports the unsafe planning evidence with a stable
+- [x] Human mode reports the unsafe planning evidence with a stable
   `sd-review-learnings` phase tag, exits with the documented failure code, and
-  prints no traceback.
-- [ ] JSON mode returns one bounded schema-valid failure document and the same
-  failure exit code.
-- [ ] Regression tests cover representative unsafe inputs without reproducing
-  their raw unsafe values in output.
-- [ ] Existing valid planning-signal tests continue to pass.
-- [ ] Template/root byte parity and `make check` pass.
+  prints no traceback. Guarded the main scan path's `build_review_learning_signal`
+  call with `except ValueError -> _print_early_failure(phase="planning")` +
+  `return 2`; `test_review_learnings_main_reports_unsafe_planning_path_without_traceback`
+  asserts the `[sd-review-learnings:planning]` tag, exit 2, and no traceback.
+- [x] JSON mode returns one bounded schema-valid failure document and the same
+  failure exit code. `test_review_learnings_main_bounds_unsafe_planning_path_in_json`
+  parses stdout as one doc, asserts `schemaVersion == REPORT_SCHEMA_VERSION`,
+  `write.reason`, and exit 2.
+- [x] Regression tests cover representative unsafe inputs without reproducing
+  their raw unsafe values in output. Traversal (`b/../../etc/passwd`, human) and
+  control-character (`b/e\x01vil`, JSON) inputs; both assert the raw value is
+  absent from output.
+- [x] Existing valid planning-signal tests continue to pass. Full module: 61
+  tests OK.
+- [x] Template/root byte parity and `make check` pass. Template edited first,
+  root byte-mirrored (diff -q clean).
 
 ## Out of Scope
 

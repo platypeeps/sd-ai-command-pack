@@ -3,7 +3,7 @@
   "name": "bound-review-learnings-unsafe-path-diagnostics",
   "title": "Bound review-learnings unsafe-path diagnostics",
   "description": "Convert unsafe planning changed-path inputs from an uncaught ValueError into a bounded phase-specific diagnostic with focused regression coverage.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
