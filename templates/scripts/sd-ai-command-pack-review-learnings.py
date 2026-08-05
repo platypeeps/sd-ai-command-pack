@@ -2970,22 +2970,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     comments = list(review_window.comments)
+    # Validate the planning changed-path evidence up front so the guard is scoped
+    # to exactly this expected failure. Catching ValueError around the whole
+    # build_review_learning_signal call would also swallow unrelated internal
+    # ValueErrors and mislabel them as planning-path failures. Unsafe evidence
+    # (traversal, control characters, oversized, or over-count) is expected
+    # invalid command evidence, not a crash; its message is a fixed enum that
+    # never echoes the raw path, so it is safe to surface under the phase tag.
+    # The normalized result is idempotent, so build re-normalizes it unchanged.
     try:
-        review_learning = build_review_learning_signal(
-            comments,
-            review_window,
-            changed_paths=changed_paths,
-            requested=bool(args.github_days or args.github_pr),
-            source="live" if (args.github_days or args.github_pr) else "not-requested",
-            snapshot_text=plan.existing_text,
-            snapshot_exists=plan.exists,
-        )
+        changed_paths = _normalize_planning_changed_paths(changed_paths)
     except ValueError as exc:
-        # Unsafe planning changed-path evidence (traversal, control characters,
-        # oversized, or over-count) is expected invalid command evidence, not a
-        # crash. The message is a fixed enum that never echoes the raw path, so
-        # it is safe to surface under the phase tag. The planning-attempt path
-        # above already guards its own collector call the same way.
         _print_early_failure(
             args=args,
             mode=mode,
@@ -2993,6 +2988,15 @@ def main(argv: list[str] | None = None) -> int:
             reason=str(exc),
         )
         return 2
+    review_learning = build_review_learning_signal(
+        comments,
+        review_window,
+        changed_paths=changed_paths,
+        requested=bool(args.github_days or args.github_pr),
+        source="live" if (args.github_days or args.github_pr) else "not-requested",
+        snapshot_text=plan.existing_text,
+        snapshot_exists=plan.exists,
+    )
     if not args.json:
         for finding in findings:
             print(finding.render())
