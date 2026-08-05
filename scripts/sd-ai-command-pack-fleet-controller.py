@@ -1666,6 +1666,9 @@ def _git_evidence(path: Path, expected_checkout_digest: str) -> dict[str, Any]:
     }
     if not result["exists"]:
         return result
+    head = ""
+    branch = ""
+    dirty = ""
     try:
         head_result = run_git_minimal(
             ["-C", str(path), "rev-parse", "HEAD"], timeout=10

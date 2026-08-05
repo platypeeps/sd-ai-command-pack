@@ -235,6 +235,9 @@ def compact_text(value: object, *, limit: int = 300) -> str:
 
 
 def run_git(repo: Path, *args: str) -> str | None:
+    # run_git_cached builds the shared cache-backed environment (the former
+    # inline build_tool_environment call) and disables the git credential
+    # prompt; the returned CompletedProcess is inspected below.
     try:
         result = run_git_cached(
             ["-C", str(repo), *args],
