@@ -523,9 +523,13 @@ _SECRET_SHAPES: tuple[tuple[str, str, str], ...] = (
     (
         "pem-private-key",
         r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
-        # Span the whole block to the END footer. The {0,4096}? bound stops an
-        # unterminated header from consuming the rest of the diagnostic.
-        r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]{0,4096}?-----END [A-Z ]*PRIVATE KEY-----",
+        # Prefer the terminated span to the END footer (minimal, so it stops at
+        # the first footer). When no footer sits within the bound -- a truncated
+        # or unterminated key -- fall back to a bounded span from the header so
+        # the body is still redacted instead of leaking. The {0,4096} bound caps
+        # how much trailing diagnostic an unterminated header can consume.
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----"
+        r"(?:[\s\S]{0,4096}?-----END [A-Z ]*PRIVATE KEY-----|[\s\S]{0,4096})",
     ),
     (
         "github-classic",
@@ -545,8 +549,11 @@ _SECRET_SHAPES: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "openai",
-        r"sk-[A-Za-z0-9]",
-        r"sk-" + _SECRET_TOKEN_BODY,
+        # The leading (?<![A-Za-z0-9]) keeps "sk-" from matching mid-word, so an
+        # ordinary hyphenated word ("task-management" -> "sk-management") is not
+        # redacted by the lib nor spuriously rejected by fleet-timing.
+        r"(?<![A-Za-z0-9])sk-[A-Za-z0-9]",
+        r"(?<![A-Za-z0-9])sk-" + _SECRET_TOKEN_BODY,
     ),
     (
         "bearer",

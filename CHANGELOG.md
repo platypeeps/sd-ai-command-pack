@@ -15,8 +15,11 @@
   detector form and a conservative substituter form with a body charset and a
   minimum length, so redaction never leaves a secret body behind (a prefix-only
   substituter would have been worse than the old redactor); the PEM row spans
-  the whole block to its `-----END … PRIVATE KEY-----` footer, and the
-  key-value substituter is bounded so surrounding diagnostic context survives.
+  the whole block to its `-----END … PRIVATE KEY-----` footer, and falls back to
+  a bounded span from the `BEGIN` header when the footer is missing so a
+  truncated key body cannot leak; the `sk-` prefix is token-boundary anchored so
+  ordinary hyphenated words are not over-redacted; and the key-value substituter
+  is bounded so surrounding diagnostic context survives.
 - Wire the orphaned `validate_environment_blocked_evidence` and the `cache-env
   --json` blocked-evidence path into production. `configure_cache_environment`
   in `sd-ai-command-pack-toolchain.sh` now re-invokes `cache-env --json` on a

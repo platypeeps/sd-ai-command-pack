@@ -802,6 +802,49 @@ class ScriptLibTests(InstallTestCase):
                     body = re.search(r"[A-Za-z0-9._-]+$", span).group(0)
                     self.assertNotIn(body, new_out)
 
+    def test_environment_evidence_openai_prefix_requires_token_boundary(self) -> None:
+        # The bare "sk-" prefix must only match at a token boundary. Without the
+        # leading (?<![A-Za-z0-9]) guard, ordinary hyphenated words whose tail
+        # starts "sk-" ("task-management" -> "sk-management") were over-redacted
+        # by the lib and spuriously rejected by the fleet detector.
+        lib = self.load_lib()
+        detector = lib.compiled_secret_detector()
+        for benign in (
+            "task-management-summary",
+            "mask-alignment-data",
+            "risk-assessment-done",
+        ):
+            with self.subTest(benign=benign):
+                out = lib._redact_environment_text(
+                    benign, limit=lib.ENVIRONMENT_DIAGNOSTIC_LIMIT
+                )
+                self.assertEqual(out, benign)
+                self.assertIsNone(detector.search(benign))
+        for real in ("sk-abcdefghij012345", "token sk-proj-abcd1234efgh"):
+            with self.subTest(real=real):
+                out = lib._redact_environment_text(
+                    real, limit=lib.ENVIRONMENT_DIAGNOSTIC_LIMIT
+                )
+                self.assertIn("[redacted]", out)
+                self.assertNotIn("abcd", out)
+                self.assertIsNotNone(detector.search(real))
+
+    def test_environment_evidence_redacts_unterminated_pem_block(self) -> None:
+        # A truncated / unterminated PRIVATE KEY (no END footer within the bound)
+        # must still have its body redacted from the fail-open lib path, not just
+        # detected by the fail-closed fleet path. The END-anchored span alone
+        # left the key body in the diagnostic.
+        lib = self.load_lib()
+        body = "MIIBSECRETKEYMATERIAL0123456789abcdef"
+        text = "cfg: -----BEGIN RSA PRIVATE KEY-----\n" + body + "\nMOREKEY tail"
+        out = lib._redact_environment_text(
+            text, limit=lib.ENVIRONMENT_DIAGNOSTIC_LIMIT
+        )
+        self.assertNotIn(body, out)
+        self.assertNotIn("PRIVATE KEY", out)
+        self.assertIn("[redacted]", out)
+        self.assertIsNotNone(lib.compiled_secret_detector().search(text))
+
     def test_environment_evidence_renders_paths_and_preserves_plain_urls(self) -> None:
         lib = self.load_lib()
         fragment = lib.build_environment_blocked_evidence(

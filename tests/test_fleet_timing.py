@@ -774,6 +774,12 @@ class FleetTimingTests(InstallTestCase):
             timing.safe_reason("relative/path reference", "reason"),
             "relative/path reference",
         )
+        # The bare "sk-" prefix is token-boundary anchored, so an ordinary
+        # hyphenated word whose tail starts "sk-" is not rejected as secret-like.
+        self.assertEqual(
+            timing.safe_reason("task-management window", "reason"),
+            "task-management window",
+        )
 
     def test_store_rejects_relative_state_home_and_symlinks(self) -> None:
         timing = self.load_timing()
