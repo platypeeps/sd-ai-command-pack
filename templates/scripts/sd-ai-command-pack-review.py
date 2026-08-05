@@ -1819,7 +1819,9 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     local = state["local"]
     if not isinstance(local, dict):
         raise ReviewError("local review state is invalid")
-    local_status = local.get("status")
+    # Prefer the canonical ``outcome`` verdict key; fall back to the deprecated
+    # ``status`` alias for the dual-emit window (A-077).
+    local_status = local.get("outcome", local.get("status"))
     if local_status == "findings":
         return 1, _report(
             state=state,

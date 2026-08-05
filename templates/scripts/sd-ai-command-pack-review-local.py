@@ -26,6 +26,7 @@ from sd_ai_command_pack_lib import (
     REVIEW_FINDING_FAMILY_IDS,
     CacheSetupError,
     build_tool_environment,
+    declare_verdict_domain,
 )
 
 SCHEMA_VERSION = 1
@@ -55,8 +56,13 @@ SHELL_EXECUTABLES = frozenset({"bash", "dash", "fish", "ksh", "sh", "zsh"})
 CODE_STRING_EXECUTABLES = frozenset(
     {"node", "nodejs", "perl", "python", "python3", "ruby"}
 )
-OUTCOMES = frozenset(
-    {"clean", "findings", "unavailable", "failed", "cancelled", "skipped"}
+# The local review verdict vocabulary as an explicit extension of the shared
+# core (A-077): ``clean``/``failed``/``skipped`` are core; ``findings``,
+# ``unavailable`` and ``cancelled`` are this domain's declared opt-outs.
+OUTCOMES = declare_verdict_domain(
+    "review-local",
+    {"clean", "findings", "unavailable", "failed", "cancelled", "skipped"},
+    opt_out={"findings", "unavailable", "cancelled"},
 )
 TERMINAL_FAILURES = frozenset({"unavailable", "failed", "cancelled"})
 FINDING_SEVERITY_RANK = {"unspecified": 0, "low": 1, "medium": 2, "high": 3}
@@ -2058,10 +2064,15 @@ def _remote_summary(receipt: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _report(receipt: Mapping[str, Any], *, reused: bool) -> dict[str, Any]:
+    outcome = receipt["outcome"]
     return {
         "schemaVersion": 1,
         "command": "sd-review-local-stage",
-        "status": receipt["outcome"],
+        # ``outcome`` is the verdict envelope key (A-077); ``status`` is the
+        # deprecated alias emitting the identical value for the dual-emit
+        # window (removed_version 0.66.0, see DEPRECATED_PAYLOAD_KEYS).
+        "outcome": outcome,
+        "status": outcome,
         "run": "reused" if reused else "executed",
         "receipt": receipt,
         "remoteSummary": _remote_summary(receipt),
@@ -2072,7 +2083,8 @@ def _invalid_report(message: str) -> dict[str, Any]:
     return {
         "schemaVersion": 1,
         "command": "sd-review-local-stage",
-        "status": "invalid",
+        "outcome": "invalid",
+        "status": "invalid",  # deprecated alias of ``outcome`` (A-077)
         "diagnostic": _bounded(message),
     }
 
@@ -2081,13 +2093,14 @@ def _cancelled_report() -> dict[str, Any]:
     return {
         "schemaVersion": 1,
         "command": "sd-review-local-stage",
-        "status": "cancelled",
+        "outcome": "cancelled",
+        "status": "cancelled",  # deprecated alias of ``outcome`` (A-077)
         "diagnostic": "local review stage cancelled by signal",
     }
 
 
 def _print_human(report: Mapping[str, Any]) -> None:
-    print(f"Local review stage: {report['status']}")
+    print(f"Local review stage: {report['outcome']}")
     if report.get("diagnostic"):
         print(f"Diagnostic: {report['diagnostic']}")
         return

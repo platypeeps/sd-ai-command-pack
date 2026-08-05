@@ -93,21 +93,21 @@ producers." Precisely:
 
 ## Acceptance Criteria
 
-- [ ] R1/R4: no payload in `scripts/` contains a `status` key whose value type
+- [x] R1/R4: no payload in `scripts/` contains a `status` key whose value type
       differs from another `status` key in the same document; asserted by a test
       that walks the emitted shapes, not by inspection.
-- [ ] R2: the per-domain outcome sets are derived from one lib-level definition,
+- [x] R2: the per-domain outcome sets are derived from one lib-level definition,
       and a test fails if a domain declares a verdict absent from the shared core
       without an explicit opt-out.
-- [ ] R3: `"ok"` and `"recorded"` either resolve to a declared enum member or
+- [x] R3: `"ok"` and `"recorded"` either resolve to a declared enum member or
       carry a recorded justification in this PRD.
-- [ ] R5: for one full version, every renamed key is emitted under both names,
+- [x] R5: for one full version, every renamed key is emitted under both names,
       and a fixture consumer written against the old names still passes.
-- [ ] R6: `design.md` lists every reader of every key this task renames, with
+- [x] R6: `design.md` lists every reader of every key this task renames, with
       `file:line` for each.
-- [ ] Template/generated parity holds and `make sync` passes.
-- [ ] `make check` passes.
-- [ ] Changelog + version; deprecations recorded with a `removed_version`; fleet
+- [x] Template/generated parity holds and `make sync` passes.
+- [x] `make check` passes.
+- [x] Changelog + version; deprecations recorded with a `removed_version`; fleet
       rollout via normal refresh.
 
 ## Notes
@@ -147,3 +147,27 @@ producers." Precisely:
   output. Same shape, sibling producer. The Evidence item 3 point survives.
 - Planning complete 2026-07-28: `design.md` and `implement.md` added.
   `design.md` carries the R6 consumer enumeration.
+- **R3 resolution (recorded justification), 2026-08-05.** `"ok"`
+  (`sd_ai_command_pack_lib.py` `cache-env --json` success) and `"recorded"`
+  (`record-session.py` success) keep their distinct spellings. Both are already
+  emitted under the correct verdict *key* (`outcome`); R3 concerns their
+  *values*. Each of these payloads is a two-state signal — a domain-local
+  success token plus the shared-core `blocked` — not a multi-valued verdict, and
+  neither success token is read by any consumer: the `cache-env` shell consumer
+  (`toolchain.sh:configure_cache_environment`) only reads
+  `environmentBlocked.recoveryAction.instruction` on the failure branch and
+  parses success as plain `key=value`, never JSON; grep across `scripts/**`,
+  `.github/scripts/**` and `installer/**` finds no reader of
+  `outcome == "ok"`/`"recorded"`. Mapping them onto the core would therefore be a
+  value change to an unconsumed field with no vocabulary-sharing benefit, so they
+  are documented here rather than renamed. Their shared failure verdict
+  (`blocked`) already aligns with `VERDICT_CORE`.
+- **Implementation complete 2026-08-05.** Shared core `VERDICT_CORE =
+  {clean, blocked, skipped, failed}` plus `declare_verdict_domain(...)` live in
+  `sd_ai_command_pack_lib.py`; the four multi-valued domains
+  (`housekeeping`, `review-local`, `fleet-stage`, `fleet-consumer`) derive from
+  it with explicit opt-outs. Housekeeping's `outcome.status` enum is renamed to
+  `outcome.verdict` (dual-emitting `status`); review-local's report envelope
+  renames its top-level verdict `status` to `outcome` (dual-emitting `status`).
+  Both deprecated aliases are registered in `DEPRECATED_PAYLOAD_KEYS` with
+  `removed_version 0.66.0`. Shipped skill/doc prose updated in the same change.

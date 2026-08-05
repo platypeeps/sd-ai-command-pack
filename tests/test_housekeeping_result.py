@@ -97,7 +97,10 @@ class HousekeepingResultTests(unittest.TestCase):
         result = result_builder.build_result(self.args(eligibility_input=path))
 
         self.assertEqual(result["schemaVersion"], 1)
-        self.assertEqual(result["outcome"], {"status": "clean", "reasonCodes": []})
+        self.assertEqual(
+            result["outcome"],
+            {"verdict": "clean", "status": "clean", "reasonCodes": []},
+        )
         self.assertEqual(result["eligibility"]["pullRequest"]["number"], 42)
         self.assertEqual(result["status"], self.status)
         self.assertEqual(result["actions"][0]["code"], "branch_switched")
@@ -231,7 +234,11 @@ class HousekeepingResultTests(unittest.TestCase):
         )
         self.assertEqual(
             result["outcome"],
-            {"status": "failed", "reasonCodes": ["status_unavailable"]},
+            {
+                "verdict": "failed",
+                "status": "failed",
+                "reasonCodes": ["status_unavailable"],
+            },
         )
 
     def test_status_anomalies_block_even_without_shell_anomaly(self) -> None:

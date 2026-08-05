@@ -22,7 +22,10 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
-from sd_ai_command_pack_lib import compiled_secret_detector  # noqa: E402
+from sd_ai_command_pack_lib import (  # noqa: E402
+    compiled_secret_detector,
+    declare_verdict_domain,
+)
 
 SCHEMA_VERSION = 1
 MAX_STATE_BYTES = 1024 * 1024
@@ -65,10 +68,20 @@ STAGES = (
     "post-merge-audit",
 )
 STAGE_ORDER = {name: index for index, name in enumerate(STAGES)}
-STAGE_OUTCOMES = frozenset({"passed", "failed", "skipped", "interrupted"})
+# Fleet verdict vocabularies as explicit extensions of the shared core (A-077).
+# A stage legitimately spells success ``passed`` and a consumer legitimately
+# reports ``at-target``; those domain-specific verdicts are declared opt-outs of
+# the core rather than a silent divergence.
+STAGE_OUTCOMES = declare_verdict_domain(
+    "fleet-stage",
+    {"passed", "failed", "skipped", "interrupted"},
+    opt_out={"passed", "interrupted"},
+)
 STAGE_REASON_REQUIRED = frozenset({"failed", "skipped", "interrupted"})
-CONSUMER_OUTCOMES = frozenset(
-    {"at-target", "refreshed-merged", "pr-open", "skipped", "failed", "blocked"}
+CONSUMER_OUTCOMES = declare_verdict_domain(
+    "fleet-consumer",
+    {"at-target", "refreshed-merged", "pr-open", "skipped", "failed", "blocked"},
+    opt_out={"at-target", "refreshed-merged", "pr-open"},
 )
 CONSUMER_REASON_REQUIRED = frozenset({"skipped", "failed", "blocked"})
 CONSUMER_REASON_FORBIDDEN = frozenset({"at-target", "refreshed-merged"})

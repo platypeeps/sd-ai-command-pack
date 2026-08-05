@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-6.md`
-- **Total Sessions**: 299
+- **Total Sessions**: 300
 - **Last Active**: 2026-08-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~1896 | Active |
+| `journal-6.md` | ~1939 | Active |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +34,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 300 | 2026-08-05 | Unify outcome/status verdict vocabulary (A-077, PR #334) | `850a988e`, `8f235728`, `cd9cb6d2`, `4a759cad` | `feat/unify-outcome-status-vocabulary` |
 | 299 | 2026-08-05 | Consolidate atomic-write and cache-env helpers (A-085, A-080); ship PR #333 | `06cd2af3`, `06c52b2b`, `62ff3afd`, `53140882`, `b7ff12be`, `f3410469`, `48a13b4a`, `6965937b` | `feat/consolidate-shared-script-helpers` |
 | 298 | 2026-08-05 | Consolidate secret redactors behind one shared shape table | `e4cbf61f`, `34976fc8`, `8762a547`, `06dd2aca`, `62e7cd5d` | `feat/consolidate-secret-redactors` |
 | 297 | 2026-08-05 | Clarify fleet PR audit scope for Trellis adapters | `4433ca2d4fe6b32d408dfc078057e941c688e2d7` | `feat/clarify-fleet-pr-audit-scope` |

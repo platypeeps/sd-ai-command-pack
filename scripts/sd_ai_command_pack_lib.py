@@ -34,6 +34,84 @@ REVIEW_FINDING_FAMILY_IDS = (
     REVIEW_FAMILY_REVIEWER_TEST_HARNESS,
     REVIEW_FAMILY_OTHER,
 )
+
+# ---------------------------------------------------------------------------
+# Shared verdict vocabulary (A-077)
+# ---------------------------------------------------------------------------
+# One naming rule across emitted payload envelopes: the top-level ``outcome``
+# key holds a verdict; the top-level ``status`` key is reserved for an embedded
+# sd-status document. ``VERDICT_CORE`` is the set of verdict values that mean
+# the same thing in every domain that emits them (``failed`` appears in more
+# than two domains; ``clean``/``blocked``/``skipped`` each appear in two with a
+# compatible meaning). Per-domain verdict sets are derived from the core through
+# ``declare_verdict_domain``: every value a domain emits that is absent from the
+# core must be listed in that call's explicit ``opt_out`` (``findings``,
+# ``at-target`` and friends), so a shared value cannot silently diverge while a
+# legitimate domain-specific value is still permitted. Declaring a non-core
+# verdict without opting it out raises at import time, and
+# ``tests/test_verdict_vocabulary.py`` re-asserts the guarantee.
+VERDICT_CORE = frozenset({"clean", "blocked", "skipped", "failed"})
+
+# Populated at import time by ``declare_verdict_domain`` calls in each producer.
+VERDICT_DOMAINS: dict[str, frozenset[str]] = {}
+
+
+class VerdictVocabularyError(ValueError):
+    """Raised when a domain declares a verdict outside the shared core."""
+
+
+def declare_verdict_domain(
+    name: str, members: Iterable[str], *, opt_out: Iterable[str] = ()
+) -> frozenset[str]:
+    """Register a per-domain verdict set derived from ``VERDICT_CORE``.
+
+    Every member absent from ``VERDICT_CORE`` must appear in ``opt_out``;
+    otherwise the declaration raises ``VerdictVocabularyError`` so a drifted
+    vocabulary fails loudly at the producer rather than silently diverging
+    across payloads. ``opt_out`` may not name a core verdict (that would hide a
+    core member behind a redundant opt-out). Returns the frozen member set and
+    records it under ``name`` in ``VERDICT_DOMAINS``.
+    """
+
+    member_set = frozenset(members)
+    opt_out_set = frozenset(opt_out)
+    redundant = opt_out_set & VERDICT_CORE
+    if redundant:
+        raise VerdictVocabularyError(
+            f"verdict domain {name!r} opts out core verdicts: "
+            + ", ".join(sorted(redundant))
+        )
+    undeclared = member_set - VERDICT_CORE - opt_out_set
+    if undeclared:
+        raise VerdictVocabularyError(
+            f"verdict domain {name!r} declares non-core verdicts without opt-out: "
+            + ", ".join(sorted(undeclared))
+        )
+    VERDICT_DOMAINS[name] = member_set
+    return member_set
+
+
+# Payload envelope keys renamed under A-077 and kept alive additively for one
+# dual-emit window (R5). Each entry names the producer, the deprecated key's
+# path inside its document, the canonical replacement, and the release that may
+# drop it. The AC1 shape walker excludes these deprecated paths when checking
+# that no two ``status`` keys in one document carry different value types, and
+# the compat fixtures assert every alias is still emitted for the whole window.
+DEPRECATED_PAYLOAD_KEYS: tuple[dict[str, Any], ...] = (
+    {
+        "producer": "housekeeping-result",
+        "path": ("outcome", "status"),
+        "replacement": ("outcome", "verdict"),
+        "removed_version": "0.66.0",
+    },
+    {
+        "producer": "review-local-stage",
+        "path": ("status",),
+        "replacement": ("outcome",),
+        "removed_version": "0.66.0",
+    },
+)
+
 CACHE_ROOT_ENV = "SD_AI_COMMAND_PACK_CACHE_ROOT"
 CACHE_ENV_KEYS = (
     "XDG_CACHE_HOME",

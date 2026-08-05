@@ -84,12 +84,20 @@ which happens to have the same `{status, reasonCodes}` shape. The point survives
 a bare `status` is an enum here and a document there — but eligibility is a
 sibling producer of that shape, not a consumer of housekeeping's.
 
-### review-local report
+### review-local report top-level verdict (renamed `status` -> `outcome`)
+
+| reader | what it reads | disposition |
+|---|---|---|
+| `scripts/sd-ai-command-pack-review.py:1822` | `local.get("status")` — the report envelope verdict | migrated to `local.get("outcome", local.get("status"))` |
+| `scripts/sd-ai-command-pack-review-local.py:_print_human` | `report["status"]` human line | migrated to `report["outcome"]` |
+| `tests/test_review_stage.py` (multiple) | `report["status"]` assertions | unchanged; the deprecated alias keeps them green for the window |
+
+Not renamed (nested per-entity state, kept per the envelope rule):
 
 | reader | what it reads |
 |---|---|
-| `scripts/sd-ai-command-pack-review.py:837` | `receipt.get("outcome")` |
-| `scripts/sd-ai-command-pack-review.py:1577` | re-emits `"status": row.get("status")` |
+| `scripts/sd-ai-command-pack-review.py:837` | `receipt.get("outcome")` — receipt-level verdict, already `outcome` |
+| `scripts/sd-ai-command-pack-review.py:1577` | re-emits `"status": row.get("status")` — per-provider attempt state inside `providers[]` |
 
 Every `.agents/skills/**` path above ships to **11 platform roots** via
 `manifest.json`, so each prose reference is eleven files after `make sync`.

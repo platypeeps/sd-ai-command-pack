@@ -739,7 +739,10 @@ class HousekeepingTests(InstallTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["schemaVersion"], 1)
         self.assertEqual(payload["kind"], "housekeeping")
-        self.assertEqual(payload["outcome"], {"reasonCodes": [], "status": "clean"})
+        self.assertEqual(
+            payload["outcome"],
+            {"reasonCodes": [], "verdict": "clean", "status": "clean"},
+        )
         self.assertEqual(payload["status"]["mode"], "local")
         self.assertIsNone(payload["eligibility"])
         action_codes = {item["code"] for item in payload["actions"]}
