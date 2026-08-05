@@ -767,6 +767,33 @@ class AgentGenerationTests(InstallTestCase):
                 "regex \\d+ here\n",
             )
 
+    def test_toml_render_validates_sandbox_mode(self) -> None:
+        generator = load_surface_generator()
+        # A codex-sandbox value outside the known set is rejected; this both
+        # blocks unsupported modes and prevents quote/backslash injection into
+        # the rendered TOML sandbox_mode value.
+        with self.assertRaisesRegex(generator.GenerationError, "codex-sandbox"):
+            generator.render_toml_agent(
+                "sd-fixture",
+                {
+                    "name": "sd-fixture",
+                    "description": "x",
+                    "codex-sandbox": 'read-only" evil = "1',
+                },
+                "body\n",
+            )
+        # A known mode renders without error.
+        rendered = generator.render_toml_agent(
+            "sd-fixture",
+            {
+                "name": "sd-fixture",
+                "description": "x",
+                "codex-sandbox": "workspace-write",
+            },
+            "body\n",
+        )
+        self.assertIn('sandbox_mode = "workspace-write"', rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

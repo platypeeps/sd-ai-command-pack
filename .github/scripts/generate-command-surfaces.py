@@ -906,8 +906,14 @@ GEMINI_AGENT_TOOL_ALLOWLIST = frozenset(
     {"Read", "Grep", "Glob", "Edit", "Write", "Bash"}
 )
 # Pack subagents default to read-only; a source may widen this with a
-# `codex-sandbox:` frontmatter key when a writing agent exists.
+# `codex-sandbox:` frontmatter key when a writing agent exists. The value is
+# interpolated into a TOML basic string, so it is constrained to Codex's known
+# sandbox modes both to reject unsupported values and to block quote/backslash
+# injection into the rendered twin.
 DEFAULT_AGENT_SANDBOX_MODE = "read-only"
+AGENT_SANDBOX_MODES = frozenset(
+    {"read-only", "workspace-write", "danger-full-access"}
+)
 
 
 def agent_capable_platforms() -> tuple[str, ...]:
@@ -996,6 +1002,11 @@ def render_toml_agent(name: str, meta: dict[str, str], body: str) -> str:
     if '"""' in body:
         raise GenerationError(f"agent {name}: body must not contain a TOML string fence")
     sandbox = meta.get("codex-sandbox", DEFAULT_AGENT_SANDBOX_MODE)
+    if sandbox not in AGENT_SANDBOX_MODES:
+        allowed = ", ".join(sorted(AGENT_SANDBOX_MODES))
+        raise GenerationError(
+            f"agent {name}: codex-sandbox must be one of {allowed}"
+        )
     return (
         f'name = "{name}"\n'
         f'description = "{description}"\n'
