@@ -7,8 +7,8 @@
 ## Current Status
 
 <!-- @@@auto:current-status -->
-- **Active File**: `journal-6.md`
-- **Total Sessions**: 301
+- **Active File**: `journal-7.md`
+- **Total Sessions**: 302
 - **Last Active**: 2026-08-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-6.md` | ~1979 | Active |
+| `journal-7.md` | ~48 | Active |
+| `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
 | `journal-3.md` | ~1982 | Archived |
@@ -34,6 +35,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 302 | 2026-08-05 | Consolidate git invocation into shared lib (A-076) | `c3f246df`, `ab494ef8`, `948f3aa4`, `65dc3058`, `83a7da59`, `a10a15f4` | `feat/consolidate-git-invocation` |
 | 301 | 2026-08-05 | Ship 07-28-reduce-review-hashing-and-classifier-cost (A-101 R1/R2 + A-105 R3) | `44813e59`, `3ec08508`, `a7c19079` | `feat/reduce-review-hashing-classifier-cost` |
 | 300 | 2026-08-05 | Unify outcome/status verdict vocabulary (A-077, PR #334) | `850a988e`, `8f235728`, `cd9cb6d2`, `4a759cad` | `feat/unify-outcome-status-vocabulary` |
 | 299 | 2026-08-05 | Consolidate atomic-write and cache-env helpers (A-085, A-080); ship PR #333 | `06cd2af3`, `06c52b2b`, `62ff3afd`, `53140882`, `b7ff12be`, `f3410469`, `48a13b4a`, `6965937b` | `feat/consolidate-shared-script-helpers` |
