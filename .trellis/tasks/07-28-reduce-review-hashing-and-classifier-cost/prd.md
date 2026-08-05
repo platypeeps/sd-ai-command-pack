@@ -51,7 +51,7 @@ P2/P3 · S/M · Plausible, performance dimension. Neither had an owner before th
 
 ## Acceptance Criteria
 
-- [ ] R1/R2: `sd-check` produces the same mutation-guard verdicts — including
+- [x] R1/R2: `sd-check` produces the same mutation-guard verdicts — including
       positive detection of a mid-run same-size content rewrite with `mtime_ns`
       restored, a symlink retarget, and an ordinary edit — while performing at most
       **two** full content hashes per run in the unmutated case, independent of the
@@ -65,13 +65,13 @@ P2/P3 · S/M · Plausible, performance dimension. Neither had an owner before th
       first snapshot and one authoritative hash at the last: exactly two, never
       more. The win is unchanged and is the point of R1 — today's cost is N+1 full
       hashes for N checks, and flatness in N is what the next criterion measures.
-- [ ] R1: a repository fixture with N configured checks shows snapshot cost flat in
+- [x] R1: a repository fixture with N configured checks shows snapshot cost flat in
       N rather than linear, measured against the current ~113 ms × (N+1) baseline.
-- [ ] R3: `pr-body-scope` classification is byte-identical on a fixture diff, and a
+- [x] R3: `pr-body-scope` classification is byte-identical on a fixture diff, and a
       benchmark over a fixed 50-path diff at 180 / 360 / 720 installed targets shows
       wall-clock growth no worse than 1.2x across each doubling.
-- [ ] `make check` passes.
-- [ ] Changelog + version; fleet rollout via normal refresh.
+- [x] `make check` passes.
+- [x] Changelog + version; fleet rollout via normal refresh.
 
 ## Notes
 
