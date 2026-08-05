@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.64.7 - 2026-08-04
+
+- Add a per-job dispatch protocol to the `sd-fix-ci` skill (Tier 1 pilot of the
+  SD dispatch pattern). CI triage now fans out one read-only sub-agent per
+  failing job — each fetching only its own
+  `gh run view -j <job-id> --log-failed` output — so the parent context stops
+  absorbing every job's full log. Workers return a typed
+  `real-code | flake | infra | stale-baseline`
+  classification with quoted evidence and a proposed disposition; the parent
+  keeps job enumeration, run-level fact resolution, the shared `max-reruns`
+  budget, all fixes/reruns, and the unchanged report contract. On inline
+  platforms the fallback collapses to today's sequential pass with an identical
+  outcome (R5). Fan-out is bounded to waves of at most six concurrent workers,
+  and each dispatch prompt restates the command's already-resolved
+  `checkout-trust` state without duplicating the generator-owned classifier.
+
 ## 0.64.6 - 2026-08-04
 
 - Simplify completion-successor anchor assignment in

@@ -27,11 +27,11 @@ result, so the parent context stops absorbing every job's full log output.
 
 ## Acceptance Criteria
 
-- [ ] sd-fix-ci canonical body carries the dispatch section; `make generate` byte-stable
+- [x] sd-fix-ci canonical body carries the dispatch section; `make generate` byte-stable
       across all platform adapters; catalog regenerated.
-- [ ] Worker result contract documented in the command body; classifications unchanged.
-- [ ] Trust restatement present in the dispatch protocol text.
-- [ ] Version bump + dated changelog entry per repo rules.
+- [x] Worker result contract documented in the command body; classifications unchanged.
+- [x] Trust restatement present in the dispatch protocol text.
+- [x] Version bump + dated changelog entry per repo rules.
 
 ## Dependencies / order
 
