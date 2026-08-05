@@ -1897,3 +1897,45 @@ Consolidated the atomic_write_text/default_text_file_mode writer and the cache-e
 ### Next Steps
 
 - None - task complete
+
+
+## Session 300: Unify outcome/status verdict vocabulary (A-077, PR #334)
+
+**Date**: 2026-08-05
+**Task**: Unify outcome/status verdict vocabulary (A-077, PR #334)
+**Branch**: `feat/unify-outcome-status-vocabulary`
+
+### Summary
+
+Unified the emitted-payload verdict vocabulary behind a shared lib-level core, resolving the two top-level status/outcome type collisions (housekeeping result document vs outcome enum; review-local report envelope) while keeping deprecated aliases dual-emitted for one release.
+
+### Main Changes
+
+- Added VERDICT_CORE + declare_verdict_domain to the shared lib; each producer (housekeeping, review-local, fleet-stage, fleet-consumer) derives its verdict set from the core with explicit opt-outs, import-time drift raises VerdictVocabularyError.
+- Housekeeping result now emits outcome.verdict (canonical) with outcome.status as a deprecated alias (removed_version 0.66.0); review-local report envelope converges on top-level outcome with a status alias; the review.py consumer migrated to local.get('outcome', local.get('status')).
+- Strengthened tests per Copilot review: scoped the status-key walker to treat the top-level embedded sd-status document as opaque (envelope-scoped collision rule) and replaced a tautological domain test with exact per-domain member-set lock-ins plus a core-derivation guard.
+- Recorded R3 justification (ok/recorded kept) and the R6 consumer file:line table; stamped 0.64.17, changelog, and regenerated the fleet candidate-validation payload digest.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `850a988e` | feat: unify outcome/status verdict vocabulary behind a shared core (A-077) |
+| `8f235728` | test: strengthen verdict-vocabulary tests (Copilot review) |
+| `cd9cb6d2` | docs(task): mark A-077 acceptance criteria satisfied |
+| `4a759cad` | chore(task): record branch for unify-outcome-status-vocabulary finalization |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_verdict_vocabulary — 12 tests OK
+- [OK] make check — EXIT=0 (full suite + surface generation green)
+- [OK] sd-review scope=pr — ready, sd-check 8/8, exactHeadReady at cd9cb6d2 (local doc finding verified false and rebutted; remote router absent)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
