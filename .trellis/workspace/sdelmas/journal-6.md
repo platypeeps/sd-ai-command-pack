@@ -1805,3 +1805,47 @@ Distinguished pack-owned receipt/provenance coverage from Trellis-owned adapter 
 ### Next Steps
 
 - none — task complete, merged via housekeeping
+
+
+## Session 298: Consolidate secret redactors behind one shared shape table
+
+**Date**: 2026-08-05
+**Task**: Consolidate secret redactors behind one shared shape table
+**Branch**: `feat/consolidate-secret-redactors`
+
+### Summary
+
+Replaced the two divergent secret redactors (lib substituting regex + fleet-timing detector) with one shared _SECRET_SHAPES table carrying detector and substituter columns per shape; the lib substitutes and never raises, fleet-timing detects and raises. Fixed the fine-grained PAT leak, wired validate_environment_blocked_evidence into toolchain cache-setup failure (R5), and hardened two Copilot findings: sk- token-boundary anchoring and an unterminated-PEM fallback span.
+
+### Main Changes
+
+- One _SECRET_SHAPES definition site; both consumers derive from it (lib substitutes, fleet-timing raises)
+- Fixed fine-grained github_pat_ leak and sk- mid-word over-redaction (token-boundary anchor)
+- PEM substituter falls back to a bounded span from BEGIN when the END footer is missing, so truncated key bodies cannot leak
+- R5: configure_cache_environment routes cache-setup failure through validate_environment_blocked_evidence with structured recoveryAction
+- Captured single-shape-table redaction convention in logging-guidelines.md spec
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e4cbf61f` | feat: consolidate secret redactors behind one shared shape table (0.64.15) |
+| `34976fc8` | docs(spec): capture single-shape-table secret-redaction convention |
+| `8762a547` | fix: harden secret redactor for word-boundary and unterminated PEM (Copilot review) |
+| `06dd2aca` | chore(task): record branch for consolidate-secret-redactors finalization |
+| `62e7cd5d` | chore(task): archive 07-28-consolidate-secret-redactors |
+
+### Testing
+
+- [OK] make check: MK_EXIT=0, Full check complete, shipped-surface closure clean (17 paths)
+- [OK] ScriptLibTests 45 ok incl new openai-boundary + unterminated-PEM tests; FleetTimingTests 28 ok
+- [OK] sd-review scope=pr attempt 2 ready, local (gito) clean; Copilot round 2 no new comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None — task complete; post-archive handoff (merge) owned by sd-housekeeping
