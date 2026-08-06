@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tooling/index.md", "reason": "The check must confirm both preflight copies stayed identical and that the change went through the documented pre-edit path rather than adding a parallel repository-read surface."}
+{"file": ".trellis/spec/guides/index.md", "reason": "R3 forbids raising the false-failure rate. These verification rules -- verify each finding against source, and treat under-claiming as the loop-ending failure -- are the standard for judging the before/after failure-set comparison."}
