@@ -1519,6 +1519,34 @@ class ReviewScopeTests(InstallTestCase):
             schema["properties"]["required"]["items"]["additionalProperties"]
         )
 
+    # Copied Trellis surfaces plus bulk bookkeeping stay out of local review.
+    GITO_TRELLIS_REQUIRED_EXCLUSIONS = (
+        ".trellis/.template-hashes.json",
+        ".trellis/.version",
+        ".trellis/scripts/**",
+        ".trellis/agents/**",
+        ".trellis/tasks/archive/**",
+        ".trellis/workspace/**",
+    )
+    # Any of these takes the authored delivery documents back out of scope. A
+    # diff confined to them then reaches the provider empty, which reads as a
+    # provider failure and blocks the review stage outright.
+    GITO_TRELLIS_FORBIDDEN_EXCLUSIONS = (
+        ".trellis/**",
+        ".trellis/tasks/**",
+        ".trellis/spec/**",
+    )
+
+    def assert_gito_trellis_exclusion_is_narrow(self, config_text: str) -> None:
+        block = re.search(r"exclude_files\s*=\s*\[(.*?)\]", config_text, re.DOTALL)
+        self.assertIsNotNone(block, "gito config must declare exclude_files")
+        patterns = re.findall(r'"([^"]+)"', block.group(1))
+
+        for pattern in self.GITO_TRELLIS_REQUIRED_EXCLUSIONS:
+            self.assertIn(pattern, patterns)
+        for pattern in self.GITO_TRELLIS_FORBIDDEN_EXCLUSIONS:
+            self.assertNotIn(pattern, patterns)
+
     def test_gito_config_templates_are_installed(self) -> None:
         config_files = [
             file
@@ -1535,8 +1563,8 @@ class ReviewScopeTests(InstallTestCase):
         self.assertEqual(config_files[0].install, install.IF_NOT_EXISTS)
         config_text = config_files[0].source.read_text(encoding="utf-8")
         self.assertIn("exclude_files = [", config_text)
-        self.assertIn('".trellis/**"', config_text)
         self.assertIn("[prompt_vars]", config_text)
+        self.assert_gito_trellis_exclusion_is_narrow(config_text)
         self.assert_no_secret_markers(config_files[0].source)
 
         self.assertEqual(len(env_files), 1)

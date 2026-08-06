@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.64.21 - 2026-08-06
+
+- Narrow the Gito local-review exclusion for `.trellis/`. The single
+  `".trellis/**"` entry excluded every Trellis path, including the authored
+  delivery documents the repository owns. A change confined to task or spec
+  Markdown therefore left the provider an empty diff: Gito exited 0 without a
+  structured report, `sd-review` classified that as a provider failure, and —
+  because an absent optional router requires a *clean* local receipt — the
+  review stage could not complete by any combination of `local=` and `remote=`
+  controls. Observed on PR #339, whose four changed paths were all under
+  `.trellis/tasks/`.
+
+  The exclusion is now the copied/generated boundary rather than the whole
+  directory, matching `isTrellisCopiedPath` in the review preflight:
+
+  - still excluded: `.trellis/.template-hashes.json`, `.trellis/.version`,
+    `.trellis/scripts/**`, `.trellis/agents/**` (copied Trellis surfaces), plus
+    `.trellis/tasks/archive/**` and `.trellis/workspace/**` (bulk bookkeeping —
+    1450 archived files and append-only journals, where review spend buys
+    nothing).
+  - now reviewable: active `.trellis/tasks/**` artifacts and `.trellis/spec/**`.
+
+  Consequence to expect: task- and spec-only changes now cost a local provider
+  round they previously skipped, and Gito may raise findings on PRD, design,
+  implementation-plan, and spec prose it never saw before.
+
+  `.gito/config.toml` installs `if-not-exists`, so an existing consumer keeps
+  its current file; apply the same narrowing by hand to opt in.
+
 ## 0.64.20 - 2026-08-06
 
 - Consolidate user-local state-root resolution into the shared library (A-046).
