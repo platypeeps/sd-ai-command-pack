@@ -418,6 +418,7 @@ def _ensure_timing_state_dir(path: Path) -> None:
 
     try:
         _lib_ensure_private_directory(path, label="timing state directory")
+        # No ``reference``: this module has never named the path in these messages.
     except CommandError as error:
         raise FleetTimingError(str(error)) from error
 

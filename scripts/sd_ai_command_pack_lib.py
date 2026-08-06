@@ -292,7 +292,7 @@ def resolve_state_root(
     return resolved_home / ".local" / "state" / "sd-ai-command-pack"
 
 
-def ensure_private_directory(path: Path, *, label: str) -> Path:
+def ensure_private_directory(path: Path, *, label: str, reference: str | None = None) -> Path:
     """Create ``path`` as a private 0700 directory, refusing symlinks.
 
     Distinct from :func:`_ensure_private_directory`, which additionally enforces
@@ -300,16 +300,22 @@ def ensure_private_directory(path: Path, *, label: str) -> Path:
     A failing ``mkdir`` is always re-raised as :class:`CommandError` chaining the
     originating ``OSError`` as ``__cause__``, so callers can rebuild their own
     structured evidence without losing it.
+
+    ``reference`` is the caller-chosen path rendering appended to the symlink and
+    unusable diagnostics; callers that redact host paths pass ``path.name``, and
+    callers that name no path at all omit it. The library never picks a
+    rendering of its own, so no consumer's redaction posture changes here.
     """
 
+    suffix = f": {reference}" if reference else ""
     if path.is_symlink():
-        raise CommandError(f"{label} must not be a symlink: {path}")
+        raise CommandError(f"{label} must not be a symlink{suffix}")
     try:
         path.mkdir(mode=0o700, parents=True, exist_ok=True)
     except OSError as error:
         raise CommandError(f"cannot create {label}: {error}") from error
     if path.is_symlink() or not path.is_dir():
-        raise CommandError(f"{label} is unusable: {path}")
+        raise CommandError(f"{label} is unusable{suffix}")
     try:
         path.chmod(0o700)
     except OSError:

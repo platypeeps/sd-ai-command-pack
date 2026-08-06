@@ -367,7 +367,7 @@ def _ensure_state_dir(path: Path) -> None:
     """
 
     try:
-        _lib_ensure_private_directory(path, label="state directory")
+        _lib_ensure_private_directory(path, label="state directory", reference=str(path))
     except CommandError as error:
         cause = error.__cause__
         if isinstance(cause, OSError):

@@ -210,6 +210,44 @@ class StateRootBehaviorTest(unittest.TestCase):
                     with self.assertRaisesRegex(error, "must not be a symlink"):
                         module.ensure_private_directory(link)
 
+    def test_each_module_keeps_its_own_path_redaction_posture(self) -> None:
+        """The lib never picks a path rendering; the caller's `reference` does.
+
+        recovery-artifacts never puts a host absolute path in a user-facing
+        diagnostic, and fleet-timing names no path at all. Delegation must not
+        quietly widen either.
+        """
+
+        import tempfile
+
+        work_loop = _load("a046_work_loop_redact", "sd-ai-command-pack-work-loop.py")
+        recovery = _load("a046_recovery_redact", "sd-ai-command-pack-recovery-artifacts.py")
+        timing = _load("a046_timing_redact", "sd-ai-command-pack-fleet-timing.py")
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw)
+            (base / "real").mkdir()
+            link = base / "link"
+            link.symlink_to(base / "real")
+
+            with self.assertRaises(work_loop.WorkLoopError) as full:
+                work_loop.ensure_private_directory(link)
+            self.assertEqual(
+                str(full.exception), f"state directory must not be a symlink: {link}"
+            )
+
+            with self.assertRaises(recovery.RecoveryError) as redacted:
+                recovery.ensure_private_directory(link)
+            self.assertEqual(
+                str(redacted.exception), "state directory must not be a symlink: link"
+            )
+            self.assertNotIn(str(base), str(redacted.exception))
+
+            with self.assertRaises(timing.FleetTimingError) as bare:
+                timing.ensure_private_directory(link)
+            self.assertEqual(
+                str(bare.exception), "timing state directory must not be a symlink"
+            )
+
     def test_unwritable_parent_keeps_structured_work_loop_evidence(self) -> None:
         """The ``environment_blocked`` fragment survives delegation unchanged."""
 

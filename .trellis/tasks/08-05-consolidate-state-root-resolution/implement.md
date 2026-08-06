@@ -28,8 +28,10 @@ Payload edits land in `templates/scripts/` and reach `scripts/` via `make sync`
       recovery-artifacts pass `"state directory"`, fleet-timing passes
       `"timing state directory"`. The symlink message must keep the literal
       substring `must not be a symlink` — `tests/test_fleet_timing.py:643,667`
-      assert it. Recovery-artifacts' message widens from `path.name` to the
-      full path; no test asserts that form.
+      assert it. A `reference` argument carries the caller's path rendering so
+      each module keeps its redaction posture byte-for-byte: work-loop the full
+      path, recovery-artifacts `path.name` (that module never puts a host
+      absolute path in a diagnostic), fleet-timing no path at all.
 - [x] Do not reuse the private `_ensure_private_directory` (`:227`); its
       uid/permission checks would change behavior at state call sites.
 - [x] `make sync`, then confirm `scripts/sd_ai_command_pack_lib.py` matches.

@@ -162,10 +162,12 @@ def _ensure_state_dir(path: Path) -> None:
 
     The previous local implementation let a raw ``OSError`` from ``mkdir``
     escape; delegating closes that gap without changing any other behavior.
+    ``reference=path.name`` keeps this module's convention of never putting a
+    host absolute path in a user-facing diagnostic.
     """
 
     try:
-        _lib_ensure_private_directory(path, label="state directory")
+        _lib_ensure_private_directory(path, label="state directory", reference=path.name)
     except CommandError as error:
         raise RecoveryError(str(error)) from error
 
