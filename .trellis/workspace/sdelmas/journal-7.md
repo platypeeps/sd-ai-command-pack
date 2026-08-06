@@ -176,3 +176,43 @@ Recorded a second occurrence of the sd-review cached-failed-check defect, this t
 ### Next Steps
 
 - None - task complete
+
+
+## Session 306: File local-provider-empty-scope planning task
+
+**Date**: 2026-08-06
+**Task**: File local-provider-empty-scope planning task
+**Branch**: `chore/task-local-provider-empty-scope`
+
+### Summary
+
+Filed the Trellis planning task for sd-review misclassifying an all-excluded local diff as a provider failure, then converged it through PR #341 review: curated the task's context manifests and resolved a Copilot readability finding on the task description.
+
+### Main Changes
+
+- Added .trellis/tasks/08-06-local-provider-empty-scope with a PRD covering R1-R4, the three-row control table, and the empty-vs-real provider duration evidence (1308 ms vs 15384 ms)
+- Curated implement.jsonl and check.jsonl with the tooling and guides spec indexes, replacing the scaffold placeholder that gito flagged
+- Reworded the task.json description so the provider, not its configuration, is the subject of 'exits 0' (Copilot finding)
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0ec11bc6` | chore(task): add local-provider-empty-scope planning task |
+| `d14b84a8` | chore(task): curate context manifests for local-provider-empty-scope |
+| `84b9a483` | chore(task): clarify local-provider-empty-scope description |
+
+### Testing
+
+- [OK] sd-review scope=pr attempt 3: status ready, check passed, exactHeadReady true, gito local outcome clean
+- [OK] jsonl manifests: all 4 entries parse as JSON and every referenced spec path exists
+- [OK] task.json parses as valid JSON after the description rewrite
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
