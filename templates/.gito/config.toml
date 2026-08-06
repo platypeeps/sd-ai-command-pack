@@ -17,7 +17,17 @@ exclude_files = [
   ".git/**",
   ".pytest_cache/**",
   ".obsidian-kb/**",
-  ".trellis/**",
+  # .trellis mixes copied Trellis tooling with repo-owned delivery documents.
+  # Exclude only the copied surfaces -- the same boundary the review preflight's
+  # isTrellisCopiedPath uses -- plus bulk bookkeeping, so a task-only or
+  # spec-only change still leaves a non-empty local review scope instead of
+  # failing the provider with an empty diff.
+  ".trellis/.template-hashes.json",
+  ".trellis/.version",
+  ".trellis/scripts/**",
+  ".trellis/agents/**",
+  ".trellis/tasks/archive/**",
+  ".trellis/workspace/**",
   ".ruff_cache/**",
   ".venv/**",
   ".sd-ai-command-pack/**",

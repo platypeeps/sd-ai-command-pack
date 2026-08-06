@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-08-06T11:38:08Z",
-  "packVersion": "0.64.20",
-  "payloadDigest": "sha256:06d635444cc52e4241578f0a72e85579d8384d02e28a4a99c1d1bdf6c43efa88",
+  "validatedAt": "2026-08-06T12:48:26Z",
+  "packVersion": "0.64.21",
+  "payloadDigest": "sha256:1a40b53fd7d64b0ea88ba373c284798079e3921ab93404129abaaaf7a0b184a1",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "505875355f054394f02274c5eae0d43c90c2b4d6",
+      "baseCommit": "9dee8894da1279dc053928c7377cec3e12cc5d41",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "b2765f49ff408eb64e7b909a0e2e43ae6cca8998",
+      "baseCommit": "93451eb10737568d378e63cc2da33cf918869662",
       "status": "passed",
       "prepares": [
         [
@@ -121,7 +121,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "c161bbdfd547fcfce5653d25463b9d00ca6d4eb1",
+      "baseCommit": "2c1f50d46727f6182dd7e1be1652852eacc43f8f",
       "status": "passed",
       "prepares": [
         [

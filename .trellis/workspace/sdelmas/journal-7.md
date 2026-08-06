@@ -90,3 +90,47 @@ Replaced four forked copies of resolve_state_root/ensure_private_directory with 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 304: Record the sd-review receipt-pinning defect and narrow the Gito .trellis exclusion
+
+**Date**: 2026-08-06
+**Task**: Record the sd-review receipt-pinning defect and narrow the Gito .trellis exclusion
+**Branch**: `chore/task-review-check-receipt-pinning`
+
+### Summary
+
+Filed the planning task for the sd-review coordinator caching a failed sd-check receipt, then fixed the Gito exclusion that made that very task's PR unreviewable.
+
+### Main Changes
+
+- Added planning task 08-06-review-check-receipt-pinning (PRD only) documenting that scripts/sd-ai-command-pack-review.py:1796 recomputes the typed sd-check only when the stored result is None, so a failed result is cached and replayed for the same head-derived attempt ID.
+- Narrowed the Gito .trellis exclusion from a blanket .trellis/** to the copied/generated boundary the review preflight defines in isTrellisCopiedPath, plus .trellis/tasks/archive/** and .trellis/workspace/**. Active task and spec documents are now reviewable.
+- Bumped the pack to 0.64.21 with a CHANGELOG entry covering the behavior change and the if-not-exists install caveat for existing consumers.
+- Rewrote test_gito_config_templates_are_installed, which pinned the old blanket entry by substring, to assert the narrowed contract from both sides.
+- Applied two verified Copilot findings: qualified review.py path references to scripts/sd-ai-command-pack-review.py and reworded a non-standard word in the task title.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dde46efd` | chore(task): add review-check-receipt-pinning planning task |
+| `8fcf05e2` | fix(review): narrow the Gito .trellis exclusion to copied surfaces |
+| `a407f75f` | docs(task): qualify review.py paths and reword the task title |
+
+### Testing
+
+- [OK] make check exit 0
+- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures, 0 warnings
+- [OK] sd-review scope=pr at a407f75f: ready, check passed, gito clean 7133ms 0 findings, exactHeadReady true
+- [OK] negative control: the rewritten assertion rejects the old blanket .trellis/** configuration
+- [OK] CI on 8fcf05e2: unittest 3.10/3.13, macos, lint, security, Shell coverage, Release payload gate all SUCCESS
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
