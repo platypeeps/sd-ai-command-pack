@@ -216,3 +216,42 @@ Filed the Trellis planning task for sd-review misclassifying an all-excluded loc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 307: File preflight-bare-filename-references planning task
+
+**Date**: 2026-08-06
+**Task**: File preflight-bare-filename-references planning task
+**Branch**: `chore/task-preflight-bare-filename-references`
+
+### Summary
+
+Filed the third and last Trellis task from the 2026-08-06 audit: the review preflight never validates a bare-filename documentation reference, so a reference that names a tracked file by filename alone can rot silently. Converged through PR #342, correcting a base_branch seeded from the feature branch.
+
+### Main Changes
+
+- Added .trellis/tasks/08-06-preflight-bare-filename-references with a PRD recording the verified eligibility table, R1-R4 plus N1, the blocking-gate false-failure constraint, five open design questions, and six acceptance criteria
+- Curated implement.jsonl and check.jsonl against the tooling and guides spec indexes at creation time, so the scaffold placeholder never reached review
+- Corrected task.json base_branch from the feature branch to main (Copilot finding); task.py create seeds it from the current checkout
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `77bdf7dd` | chore(task): add preflight-bare-filename-references planning task |
+| `5779c242` | fix(task): point preflight-bare-filename-references base_branch at main |
+
+### Testing
+
+- [OK] shouldCheckDocumentationPathReference called directly on all five PRD table rows: every eligibility value matches the PRD
+- [OK] review-preflight: 0 failures, 0 warnings (initially 3 failures -- the PRD's own code-span list of enumerated filenames named three files absent from this repository)
+- [OK] sd-review scope=pr attempt 2: status ready, check passed, exactHeadReady true, gito local outcome clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
