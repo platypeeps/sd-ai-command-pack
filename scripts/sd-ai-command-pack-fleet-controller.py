@@ -27,7 +27,10 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import sd_ai_command_pack_fleet_lib as fleet_lib  # noqa: E402
-from sd_ai_command_pack_lib import run_git_minimal  # noqa: E402
+from sd_ai_command_pack_lib import CommandError, run_git_minimal  # noqa: E402
+from sd_ai_command_pack_lib import (  # noqa: E402
+    resolve_state_root as _lib_resolve_state_root,
+)
 
 SCHEMA_VERSION = 2
 REPORT_SCHEMA_VERSION = 1
@@ -329,11 +332,21 @@ def _json_bytes(value: Mapping[str, Any]) -> bytes:
     return payload
 
 
-def default_state_home() -> Path:
-    configured = os.environ.get("XDG_STATE_HOME")
-    if configured:
-        return Path(configured).expanduser() / "sd-ai-command-pack/fleet-campaigns"
-    return Path.home() / ".local/state/sd-ai-command-pack/fleet-campaigns"
+def _default_campaign_root() -> Path:
+    """Return the campaign subdirectory of the shared user-local state root.
+
+    ``resolve_state_root`` skips a relative ``XDG_STATE_HOME`` and falls through
+    to the home root; this module has always rejected that outright, so the
+    check is kept here to preserve the ``FleetControllerError``.
+    """
+
+    configured = os.environ.get("XDG_STATE_HOME", "").strip()
+    if configured and not Path(configured).expanduser().is_absolute():
+        raise FleetControllerError("state home must be an absolute path")
+    try:
+        return _lib_resolve_state_root() / "fleet-campaigns"
+    except CommandError as error:
+        raise FleetControllerError(str(error)) from error
 
 
 class CampaignStore:
@@ -341,7 +354,7 @@ class CampaignStore:
         self.repo = repo.expanduser().resolve()
         self.campaign = safe_token(campaign, "campaign")
         self.repository_digest = _digest_path(self.repo)
-        root = (state_home or default_state_home()).expanduser()
+        root = (state_home or _default_campaign_root()).expanduser()
         if not root.is_absolute():
             raise FleetControllerError("state home must be an absolute path")
         if root.is_symlink():

@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.64.20 - 2026-08-06
+
+- Consolidate user-local state-root resolution into the shared library (A-046).
+  `resolve_state_root` and `ensure_private_directory` now exist exactly once, in
+  `sd_ai_command_pack_lib`, and the four modules that owned private state
+  (`work-loop`, `recovery-artifacts`, `fleet-timing`, `fleet-controller`) bind
+  thin wrappers that restate the shared failure in their own error type. Every
+  existing call site is untouched. A new AST boundary test
+  (`test_state_root_boundary.py`) enforces the single-definition invariant.
+
+  Two behavior changes follow from the shared ladder:
+
+  - `SD_AI_COMMAND_PACK_STATE_HOME` now moves *every* private state surface,
+    not only the work-loop ledger. `fleet-timing` and `fleet-controller`
+    previously ignored it.
+  - `recovery-artifacts`' directory creation no longer lets a raw `OSError`
+    escape; it raises `RecoveryError` like every other failure in that module.
+
+  **Operator action — one-time state move.** The fleet subdirectories change
+  root when the resolved root changes. Nothing is read from the old location;
+  there is no fallback path. Perform the move with **no fleet operation in
+  flight** (no active campaign, no running timing run).
+
+  On POSIX with `SD_AI_COMMAND_PACK_STATE_HOME` unset, nothing moves — the
+  `XDG_STATE_HOME` and home rungs resolve to the same place as before.
+
+  If you set `SD_AI_COMMAND_PACK_STATE_HOME=<new-root>`:
+
+  ```sh
+  mkdir -p "<new-root>"
+  mv ~/.local/state/sd-ai-command-pack/fleet-timing "<new-root>/fleet-timing"
+  mv ~/.local/state/sd-ai-command-pack/fleet-campaigns "<new-root>/fleet-campaigns"
+  # Rollback — reverse both moves:
+  # mv "<new-root>/fleet-timing" ~/.local/state/sd-ai-command-pack/fleet-timing
+  # mv "<new-root>/fleet-campaigns" ~/.local/state/sd-ai-command-pack/fleet-campaigns
+  ```
+
+  On **Windows the campaign state moves even with the variable unset**:
+  `default_state_home` had no local-app-data branch, so campaign state lived
+  under the home root while every other surface used `%LOCALAPPDATA%`. It now
+  follows the shared ladder to
+  `%LOCALAPPDATA%\sd-ai-command-pack\state\fleet-campaigns`, so move
+  `%USERPROFILE%\.local\state\sd-ai-command-pack\fleet-campaigns` there
+  (and reverse it to roll back).
+
 ## 0.64.19 - 2026-08-05
 
 - Consolidate git subprocess invocation into the shared library (A-076).

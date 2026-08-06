@@ -13,7 +13,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from os import PathLike
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Iterable, Literal, Mapping, Sequence, overload
 
 DEFAULT_COMMAND_TIMEOUT = 60
@@ -113,6 +113,7 @@ DEPRECATED_PAYLOAD_KEYS: tuple[dict[str, Any], ...] = (
 )
 
 CACHE_ROOT_ENV = "SD_AI_COMMAND_PACK_CACHE_ROOT"
+STATE_HOME_ENV = "SD_AI_COMMAND_PACK_STATE_HOME"
 CACHE_ENV_KEYS = (
     "XDG_CACHE_HOME",
     "PYTHONPYCACHEPREFIX",
@@ -241,6 +242,79 @@ def _ensure_private_directory(path: Path, *, label: str) -> Path:
             )
     if not os.access(path, os.W_OK | os.X_OK):
         raise CacheSetupError(f"{label} is not writable: {path}")
+    return path
+
+
+def resolve_state_root(
+    *,
+    environ: Mapping[str, str] | None = None,
+    home: Path | None = None,
+    os_name: str | None = None,
+    state_home: Path | None = None,
+) -> Path:
+    """Return the user-local private state root shared by every shipped script.
+
+    The ladder is: explicit ``state_home``, ``SD_AI_COMMAND_PACK_STATE_HOME``,
+    ``XDG_STATE_HOME``, the Windows local-app-data location, then the home
+    fallback. Callers wrap :class:`CommandError` in their own error type.
+    """
+
+    if state_home is not None:
+        candidate = state_home.expanduser()
+        if not candidate.is_absolute():
+            raise CommandError("state home must be an absolute path")
+        return candidate
+    env = os.environ if environ is None else environ
+    override = env.get(STATE_HOME_ENV, "").strip()
+    if override:
+        path = Path(override).expanduser()
+        if not path.is_absolute():
+            raise CommandError(f"{STATE_HOME_ENV} must be an absolute path")
+        return path
+    xdg = env.get("XDG_STATE_HOME", "").strip()
+    if xdg:
+        path = Path(xdg).expanduser()
+        if path.is_absolute():
+            return path / "sd-ai-command-pack"
+    platform_name = os.name if os_name is None else os_name
+    if platform_name == "nt":
+        local_app_data = env.get("LOCALAPPDATA", "").strip()
+        if local_app_data:
+            windows_path = PureWindowsPath(local_app_data)
+            if windows_path.is_absolute():
+                # Path uses Windows semantics on Windows. Normalizing separators
+                # also keeps os_name-injected portability tests deterministic.
+                path = Path(str(windows_path).replace("\\", "/"))
+                return path / "sd-ai-command-pack" / "state"
+    resolved_home = (home or Path.home()).expanduser()
+    if not resolved_home.is_absolute():
+        raise CommandError("home directory must resolve to an absolute path")
+    return resolved_home / ".local" / "state" / "sd-ai-command-pack"
+
+
+def ensure_private_directory(path: Path, *, label: str) -> Path:
+    """Create ``path`` as a private 0700 directory, refusing symlinks.
+
+    Distinct from :func:`_ensure_private_directory`, which additionally enforces
+    uid ownership and a strict permission mask appropriate to cache namespaces.
+    A failing ``mkdir`` is always re-raised as :class:`CommandError` chaining the
+    originating ``OSError`` as ``__cause__``, so callers can rebuild their own
+    structured evidence without losing it.
+    """
+
+    if path.is_symlink():
+        raise CommandError(f"{label} must not be a symlink: {path}")
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as error:
+        raise CommandError(f"cannot create {label}: {error}") from error
+    if path.is_symlink() or not path.is_dir():
+        raise CommandError(f"{label} is unusable: {path}")
+    try:
+        path.chmod(0o700)
+    except OSError:
+        # Permission tightening is best-effort on filesystems without chmod support.
+        pass
     return path
 
 

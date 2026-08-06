@@ -3,7 +3,7 @@
   "name": "consolidate-state-root-resolution",
   "title": "Consolidate state-root resolution into shared lib (A-046)",
   "description": "Make work-loop and fleet state resolve to one state root through a single resolve_state_root / ensure_private_directory contract in the shared library (AC1 of parent 07-28-consolidate-shared-script-helpers). Blocking migration decision (recommended: read-through legacy fallback) must be recorded before implementation because unifying relocates live fleet locks and campaign state.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

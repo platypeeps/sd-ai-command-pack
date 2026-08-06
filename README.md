@@ -484,7 +484,7 @@ schema-version-1 result; human output remains the default for direct shell use.
 | `SD_AI_COMMAND_PACK_TOOLCHAIN_PLATFORM` | Advanced/test override for toolchain platform detection. | `uname -s` |
 | `SD_AI_COMMAND_PACK_TOOLCHAIN_HOMEBREW_PREFIXES` | Advanced/test override for colon-separated Homebrew Python prefixes. | `/opt/homebrew:/usr/local` |
 | `SD_AI_COMMAND_PACK_REPO_ROOT` | Advanced/test override for the repository root inspected by the toolchain helper. | Git top-level directory |
-| `SD_AI_COMMAND_PACK_STATE_HOME` | Absolute user-local root for resumable autonomous work-loop ledgers and locks. | XDG state, Windows local app data, or `~/.local/state/sd-ai-command-pack` |
+| `SD_AI_COMMAND_PACK_STATE_HOME` | Absolute user-local root for every private state surface: autonomous work-loop ledgers and locks, recovery receipts, fleet timing state, and fleet campaign state. | XDG state, Windows local app data, or `~/.local/state/sd-ai-command-pack` |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND` | Extra repo-local preflight command for full-check. | unset |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_PACKAGE_SCRIPTS` | Package scripts to run when a compatible package runner is available. | `typecheck lint test:unit test:integration build test:e2e` |
 | `SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS` | Boolean flag to skip all package-script checks. | unset |

@@ -140,9 +140,13 @@ commands or GitHub mutations itself.
 
 Campaign state is a private atomic file written outside every repository at
 `<state-home>/<repo-sha256>/<campaign>.json`, with a sibling `<campaign>.lock`.
-`<state-home>` is `$XDG_STATE_HOME/sd-ai-command-pack/fleet-campaigns` when
-`XDG_STATE_HOME` is set, otherwise
-`~/.local/state/sd-ai-command-pack/fleet-campaigns`; `<repo-sha256>` is the
+`<state-home>` is the shared user-local state root plus `fleet-campaigns`. That
+root resolves through one ladder for every pack surface:
+`SD_AI_COMMAND_PACK_STATE_HOME` when set to an absolute path, then
+`$XDG_STATE_HOME/sd-ai-command-pack`, then the Windows
+`%LOCALAPPDATA%\sd-ai-command-pack\state`, then
+`~/.local/state/sd-ai-command-pack`. A relative `XDG_STATE_HOME` is still
+rejected outright. `<repo-sha256>` is the
 SHA-256 of the resolved absolute source root, so the same campaign ID against
 two different source checkouts never collides. The hidden `--state-home`
 override exists only for tests. If a campaign action ID is lost mid-rollout, it

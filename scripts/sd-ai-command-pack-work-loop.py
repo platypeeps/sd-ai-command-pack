@@ -24,9 +24,17 @@ sys.dont_write_bytecode = True
 # This import must follow the bytecode guard for direct entrypoint invocation.
 from sd_ai_command_pack_lib import (  # noqa: E402
     CACHE_ROOT_ENV,
+    STATE_HOME_ENV,
     CacheSetupError,
+    CommandError,
     build_environment_blocked_evidence,
     run_git_cached,
+)
+from sd_ai_command_pack_lib import (  # noqa: E402
+    ensure_private_directory as _lib_ensure_private_directory,
+)
+from sd_ai_command_pack_lib import (  # noqa: E402
+    resolve_state_root as _lib_resolve_state_root,
 )
 
 SCHEMA_VERSION = 1
@@ -35,7 +43,6 @@ MAX_HISTORY = 20
 MAX_NOTES = 50
 DEFAULT_STALE_LOCK_SECONDS = 15 * 60
 TERMINAL_LOCK_NAME = "terminal-reconcile.lock.json"
-STATE_HOME_ENV = "SD_AI_COMMAND_PACK_STATE_HOME"
 FOCUS_FIELDS = frozenset({"priority", "package", "task", "status", "scope"})
 FOCUS_PREFIX_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):(.*)$", re.DOTALL)
 WORD_RE = re.compile(r"[A-Za-z0-9_.-]+")
@@ -326,38 +333,23 @@ def repository_identity(repo: Path, *, remote: str | None = None) -> dict[str, s
     }
 
 
-def resolve_state_root(
+def _state_root(
     *,
     environ: Mapping[str, str] | None = None,
     home: Path | None = None,
     os_name: str | None = None,
 ) -> Path:
-    env = os.environ if environ is None else environ
-    override = env.get(STATE_HOME_ENV, "").strip()
-    if override:
-        path = Path(override).expanduser()
-        if not path.is_absolute():
-            raise WorkLoopError(f"{STATE_HOME_ENV} must be an absolute path")
-        return path
-    xdg = env.get("XDG_STATE_HOME", "").strip()
-    if xdg:
-        path = Path(xdg).expanduser()
-        if path.is_absolute():
-            return path / "sd-ai-command-pack"
-    platform_name = os.name if os_name is None else os_name
-    if platform_name == "nt":
-        local_app_data = env.get("LOCALAPPDATA", "").strip()
-        if local_app_data:
-            windows_path = PureWindowsPath(local_app_data)
-            if windows_path.is_absolute():
-                # Path uses Windows semantics on Windows. Normalizing separators
-                # also keeps os_name-injected portability tests deterministic.
-                path = Path(str(windows_path).replace("\\", "/"))
-                return path / "sd-ai-command-pack" / "state"
-    resolved_home = (home or Path.home()).expanduser()
-    if not resolved_home.is_absolute():
-        raise WorkLoopError("home directory must resolve to an absolute path")
-    return resolved_home / ".local" / "state" / "sd-ai-command-pack"
+    """Resolve the shared state root, restating failures as ``WorkLoopError``."""
+
+    try:
+        return _lib_resolve_state_root(environ=environ, home=home, os_name=os_name)
+    except CommandError as error:
+        raise WorkLoopError(str(error)) from error
+
+
+# Bound by assignment, not a second ``def``: the shared library owns the single
+# definition, and every existing call site keeps using this module-level name.
+resolve_state_root = _state_root
 
 
 def state_paths(identity: Mapping[str, str], state_root: Path) -> tuple[Path, Path]:
@@ -365,22 +357,27 @@ def state_paths(identity: Mapping[str, str], state_root: Path) -> tuple[Path, Pa
     return directory / "state.json", directory / "lock.json"
 
 
-def ensure_private_directory(path: Path) -> None:
-    if path.is_symlink():
-        raise WorkLoopError(f"state directory must not be a symlink: {path}")
+def _ensure_state_dir(path: Path) -> None:
+    """Create the private state directory, keeping this module's error types.
+
+    A failing ``mkdir`` must stay a ``StatePersistenceError`` — it subclasses
+    ``OSError`` deliberately and carries the structured ``environment_blocked``
+    evidence that the skills read — so the originating error is recovered from
+    the library exception's ``__cause__`` and re-wrapped unchanged.
+    """
+
     try:
-        path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    except OSError as error:
-        raise _user_state_blocked(
-            "prepare the work-loop state directory", "state-directory", error
-        ) from error
-    if path.is_symlink() or not path.is_dir():
-        raise WorkLoopError(f"state directory is unusable: {path}")
-    try:
-        path.chmod(0o700)
-    except OSError:
-        # Permission tightening is best-effort on filesystems without chmod support.
-        pass
+        _lib_ensure_private_directory(path, label="state directory")
+    except CommandError as error:
+        cause = error.__cause__
+        if isinstance(cause, OSError):
+            raise _user_state_blocked(
+                "prepare the work-loop state directory", "state-directory", cause
+            ) from cause
+        raise WorkLoopError(str(error)) from error
+
+
+ensure_private_directory = _ensure_state_dir
 
 
 def _reject_secret_keys(value: object, *, path: str = "state") -> None:
