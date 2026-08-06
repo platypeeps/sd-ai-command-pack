@@ -1046,10 +1046,10 @@ def build_report(repo: Path, config_path: Path) -> dict[str, object]:
                     "non-deterministic and never shipped; "
                     + str(row.get("diagnostic", ""))
                 ),
-                remediation=cast("str | None", row.get("remediation")),
-                exit_code=cast("int | None", row.get("exitCode")),
-                command=cast("dict[str, object] | None", row.get("command")),
-                duration_ms=cast("int", row.get("durationMs") or 0),
+                remediation=cast(str | None, row.get("remediation")),
+                exit_code=cast(int | None, row.get("exitCode")),
+                command=cast(dict[str, object] | None, row.get("command")),
+                duration_ms=cast(int, row.get("durationMs") or 0),
             )
         return row
 

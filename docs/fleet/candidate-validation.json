@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-08-06T14:48:31Z",
+  "validatedAt": "2026-08-06T15:05:36Z",
   "packVersion": "0.64.22",
-  "payloadDigest": "sha256:24f1cfb6a2a91c5d251703bc27189c92ae53e1dc59029ea4c899ce7a775ce93d",
+  "payloadDigest": "sha256:847608056f9365ac82f0041054bade4ff9624d2e0264a5d3231157febeb355bb",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "ba5769f513002774be247250e8d67a0cc2016752",
+      "baseCommit": "c877136823efe2c7b0f082ef61b40330b954507c",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "97bf7b3045b117b9232700ec704f80a396b998d3",
+      "baseCommit": "a55d5294af97962f1c1bd344e52bd6e7587bc8f5",
       "status": "passed",
       "prepares": [],
       "checks": [
