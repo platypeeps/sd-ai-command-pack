@@ -76,9 +76,10 @@ Observed sequence on PR #338:
 
 - Should re-evaluation be unconditional for a non-`passed` check, time-bounded,
   or keyed to a worktree digest? `_worktree_digest` already exists at
-  `review.py:555` but is currently computed only for non-PR scopes
-  (`review.py:1706`), and `.obsidian-kb` is gitignored, so whether it is inside
-  that digest needs verifying before it can be used as the invalidation key.
+  `scripts/sd-ai-command-pack-review.py:555` but is currently computed only for
+  non-PR scopes (`scripts/sd-ai-command-pack-review.py:1706`), and
+  `.obsidian-kb` is gitignored, so whether it is inside that digest needs
+  verifying before it can be used as the invalidation key.
 - Is re-running `sd-check` cheap enough to simply never cache a failure? Its
   observed duration on this repository should be measured, not assumed.
 - Do the other cached phases (`local`, `capability`, `remoteReceipt`) have the

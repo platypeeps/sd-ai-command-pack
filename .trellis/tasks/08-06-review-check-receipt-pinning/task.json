@@ -1,7 +1,7 @@
 {
   "id": "review-check-receipt-pinning",
   "name": "review-check-receipt-pinning",
-  "title": "sd-review pins a failed sd-check receipt to the head, making worktree-local repairs unclearable",
+  "title": "sd-review pins a failed sd-check receipt to the head, so worktree-local repairs never clear",
   "description": "The sd-review coordinator stores its typed deterministic sd-check result and only recomputes it when the stored value is null, so a failed check is cached and replayed for the same attempt ID. Worktree-local, gitignored failures such as knowledge.obsidian-kb can never clear, because their documented remediation produces no commit and therefore no new head. Define and implement an invalidation rule that lets a repaired non-passing check re-evaluate without weakening the gate or reusing --attempt as the key.",
   "status": "planning",
   "dev_type": null,
