@@ -2,7 +2,7 @@
   "id": "review-check-receipt-pinning",
   "name": "review-check-receipt-pinning",
   "title": "sd-review pins a failed sd-check receipt to the head, so out-of-commit repairs never clear",
-  "description": "The sd-review coordinator stores its typed deterministic sd-check result and only recomputes it when the stored value is null, so a failed check is cached and replayed for the same attempt ID. Any check reading state the head does not cover is then unclearable, because repairing that state produces no commit and therefore no new attempt ID. Two occurrences are recorded: knowledge.obsidian-kb reading gitignored worktree state (PR #338), and pack.review-scope reading the pull request body over the GitHub API (PR #339). Define and implement an invalidation rule that lets a repaired non-passing check re-evaluate without weakening the gate, without reusing --attempt as the key, and without assuming the repaired state is local.",
+  "description": "The sd-review coordinator stores its typed deterministic sd-check result and only recomputes it when the stored value is null, so a failed check is cached and replayed for the same attempt ID. Any check reading state the head does not cover can then never be cleared, because repairing that state produces no commit and therefore no new attempt ID. Two occurrences are recorded: knowledge.obsidian-kb reading gitignored worktree state (PR #338), and pack.review-scope reading the pull request body over the GitHub API (PR #339). Define and implement an invalidation rule that lets a repaired non-passing check re-evaluate without weakening the gate, without reusing --attempt as the key, and without assuming the repaired state is local.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
