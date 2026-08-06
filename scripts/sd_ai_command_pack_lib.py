@@ -313,7 +313,12 @@ def ensure_private_directory(path: Path, *, label: str, reference: str | None = 
     try:
         path.mkdir(mode=0o700, parents=True, exist_ok=True)
     except OSError as error:
-        raise CommandError(f"cannot create {label}: {error}") from error
+        # ``str(error)`` embeds the absolute target (``[Errno 13] Permission
+        # denied: '/…'``), which would defeat a caller's redaction posture. Only
+        # ``strerror`` reaches the message; the full ``OSError`` stays on
+        # ``__cause__`` for callers that build structured evidence from it.
+        detail = error.strerror or type(error).__name__
+        raise CommandError(f"cannot create {label}: {detail}") from error
     if path.is_symlink() or not path.is_dir():
         raise CommandError(f"{label} is unusable{suffix}")
     try:

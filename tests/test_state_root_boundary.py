@@ -188,7 +188,11 @@ class StateRootBehaviorTest(unittest.TestCase):
             environ={"LOCALAPPDATA": r"C:\Users\example\AppData\Local"},
             os_name="nt",
         )
-        self.assertEqual(str(resolved), "C:/Users/example/AppData/Local/sd-ai-command-pack/state")
+        # ``as_posix()``, not ``str()``: on Windows ``Path`` stringifies with
+        # backslashes, and the canonical normalization is the point of the branch.
+        self.assertEqual(
+            resolved.as_posix(), "C:/Users/example/AppData/Local/sd-ai-command-pack/state"
+        )
 
     def test_symlink_state_directory_keeps_each_module_error_type(self) -> None:
         import tempfile
@@ -247,6 +251,19 @@ class StateRootBehaviorTest(unittest.TestCase):
             self.assertEqual(
                 str(bare.exception), "timing state directory must not be a symlink"
             )
+
+            # A blocked mkdir must not leak the target either: str(OSError)
+            # embeds it, so only strerror reaches the message.
+            base.chmod(0o500)
+            try:
+                with self.assertRaises(recovery.RecoveryError) as blocked:
+                    recovery.ensure_private_directory(base / "denied")
+                self.assertNotIn(str(base), str(blocked.exception))
+                self.assertEqual(
+                    str(blocked.exception), "cannot create state directory: Permission denied"
+                )
+            finally:
+                base.chmod(0o700)
 
     def test_unwritable_parent_keeps_structured_work_loop_evidence(self) -> None:
         """The ``environment_blocked`` fragment survives delegation unchanged."""
