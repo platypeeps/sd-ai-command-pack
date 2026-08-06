@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tooling/index.md", "reason": "Ownership boundary for shipped review tooling: which scripts are pack-owned, which carry a templates/ mirror that must stay byte-identical, and the pre-edit checklist that applies before changing them."}
+{"file": ".trellis/spec/guides/index.md", "reason": "The repository's rules for AI-review outcomes: false-positive budget, verify-against-source requirement, and the under-claiming failure mode. This task changes how one review outcome is classified, so the new classification must not become another way to under-claim."}
