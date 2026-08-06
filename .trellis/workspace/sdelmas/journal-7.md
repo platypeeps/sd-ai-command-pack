@@ -134,3 +134,45 @@ Filed the planning task for the sd-review coordinator caching a failed sd-check 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 305: Broaden the receipt-pinning task to out-of-commit state
+
+**Date**: 2026-08-06
+**Task**: Broaden the receipt-pinning task to out-of-commit state
+**Branch**: `chore/broaden-review-receipt-pinning-prd`
+
+### Summary
+
+Recorded a second occurrence of the sd-review cached-failed-check defect, this time on remote PR state rather than gitignored worktree state, and adjusted the PRD's scope, open questions, and acceptance criteria to match.
+
+### Main Changes
+
+- Added occurrence 2 to the PRD: pack.review-scope reads the pull request body over the GitHub API, so restoring the recognized Tooling/generated scope heading could not clear the pinned failure at head b4b6f028; only a fresh --artifact-root produced a live pass.
+- Restated the goal as mutable state outside the commit rather than worktree-local gitignored state, since the two occurrences repair local and remote state respectively.
+- Flagged against the open question proposing worktree-digest keying that such a key cannot cover occurrence 2 at all.
+- Added an acceptance criterion for the PR-body case and widened the regression requirement to both observed sequences.
+- Recorded that the --artifact-root workaround discards the whole attempt's durable state, including any paid provider round the receipt would have reused.
+- Applied one verified Copilot finding: replaced the nonstandard word reintroduced in the task description.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7952d9eb` | docs(task): broaden receipt-pinning scope to out-of-commit state |
+| `556a7160` | docs(task): replace nonstandard "unclearable" in the description |
+
+### Testing
+
+- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures, 0 warnings
+- [OK] sd-review scope=pr at 556a7160: ready, check passed, gito clean 5952ms 0 findings, exactHeadReady true
+- [OK] task.json parses as valid JSON; zero remaining occurrences of the flagged word
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

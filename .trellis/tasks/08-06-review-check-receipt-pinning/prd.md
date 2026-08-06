@@ -3,8 +3,8 @@
 ## Goal
 
 Let the `sd-review` coordinator re-run its typed deterministic `sd-check` when a
-previously failing check covered a **worktree-local, gitignored** condition that
-has since been repaired, without requiring a new commit or a throwaway
+previously failing check covered **mutable state outside the commit** that has
+since been repaired, without requiring a new commit or a throwaway
 `--artifact-root`.
 
 ## Problem
@@ -32,13 +32,20 @@ the identical stale diagnostic, while the same command run by hand exited 0.
 ### Why this is more than an inconvenience
 
 Most deterministic checks fail on committed content, so the natural fix moves the
-head and mints a new attempt ID. But `knowledge.obsidian-kb` checks
-`.obsidian-kb/`, which is **gitignored**. Its documented remediation — "run
-sd-update-spec or `python3 scripts/sd-ai-command-pack-update-spec-kb.py`" —
-produces no commit, so it can never clear the pinned receipt. The check's own
-remediation is unreachable through the coordinator.
+head and mints a new attempt ID. The trap is any check that reads state the head
+does not cover: repairing that state produces no commit, so it can never clear
+the pinned receipt, and the check's own remediation becomes unreachable through
+the coordinator.
 
-Observed sequence on PR #338:
+Two such checks are already known, and they fail this way for different reasons —
+this is a property of the caching rule, not of one check.
+
+#### Occurrence 1 — gitignored worktree state (PR #338)
+
+`knowledge.obsidian-kb` checks `.obsidian-kb/`, which is **gitignored**. Its
+documented remediation is "run sd-update-spec or
+`python3 scripts/sd-ai-command-pack-update-spec-kb.py`", which touches no tracked
+file.
 
 1. `task.py archive` moved the task, making the KB stale (917 of 920 copies).
 2. `sd-review --attempt 3` ran `sd-check`, which failed on `knowledge.obsidian-kb`,
@@ -46,6 +53,27 @@ Observed sequence on PR #338:
 3. `update-spec-kb.py` repaired the KB; `--check` exited 0 with `conflicts: none`.
 4. Attempts 3, 4, and 5 still returned the byte-identical stale diagnostic.
 5. Only a fresh `--artifact-root` produced a live re-run, which passed.
+
+#### Occurrence 2 — remote GitHub state (PR #339)
+
+`pack.review-scope` reads the **pull request body** through the GitHub API. That
+state lives entirely off the checkout, so no local edit and no commit can mint a
+new attempt ID for it.
+
+1. The PR body was rewritten and lost the recognized `Tooling/generated scope:`
+   heading, so `pack.review-scope` failed with "tooling/generated files changed,
+   but the PR body does not include a recognized tooling/generated scope
+   section".
+2. `gh pr edit --body-file` restored the heading; `gh pr view --json body`
+   confirmed it live on the PR.
+3. Re-running `sd-review` at the same head `b4b6f028` replayed the identical
+   stale diagnostic.
+4. Only a fresh `--artifact-root` produced a live re-run, which passed
+   (`check: passed`, `ready`, `exactHeadReady: true`).
+
+The two occurrences bracket the problem: one repairs local untracked state, the
+other repairs remote state. Neither is reachable by moving the head, and a design
+keyed only to a worktree digest would fix the first and miss the second.
 
 ## Requirements
 
@@ -79,7 +107,10 @@ Observed sequence on PR #338:
   `scripts/sd-ai-command-pack-review.py:555` but is currently computed only for
   non-PR scopes (`scripts/sd-ai-command-pack-review.py:1706`), and
   `.obsidian-kb` is gitignored, so whether it is inside that digest needs
-  verifying before it can be used as the invalidation key.
+  verifying before it can be used as the invalidation key. Note that a
+  worktree-digest key cannot cover occurrence 2 at all: the PR body is remote
+  state and changes without touching the worktree. A rule that handles both
+  occurrences cannot be keyed to any local digest.
 - Is re-running `sd-check` cheap enough to simply never cache a failure? Its
   observed duration on this repository should be measured, not assumed.
 - Do the other cached phases (`local`, `capability`, `remoteReceipt`) have the
@@ -94,15 +125,23 @@ Observed sequence on PR #338:
       assertion that the check subprocess runs once across two invocations.
 - [ ] No new path can report `check: passed` without the check process exiting 0
       in that run or in a reused passing result.
-- [ ] A regression test covers the exact PR #338 sequence: fail, repair
-      out-of-band, re-invoke, observe pass.
+- [ ] A failing `pack.review-scope` check, repaired by editing the pull request
+      body alone with no local change at all, clears on the next `sd-review`
+      invocation for the same head and the same artifact root.
+- [ ] Regression tests cover both observed sequences — PR #338 (repair local
+      gitignored state) and PR #339 (repair remote PR state) — each as fail,
+      repair out-of-band, re-invoke, observe pass.
 - [ ] `.agents/skills/sd-review/SKILL.md` describes the actual invalidation rule.
 
 ## Notes
 
-- Source: A-046 iteration on 2026-08-06, PR #338. The workaround used there was a
-  throwaway `--artifact-root`, which re-ran the gate live and passed
-  (`check: passed`, `local: clean`, `exactHeadReady: true`).
+- Source: A-046 iteration on 2026-08-06, PR #338. Occurrence 2 was hit later the
+  same day while shipping this very task on PR #339. Both used the same
+  workaround — a throwaway `--artifact-root`, which re-ran the gate live and
+  passed (`check: passed`, `local: clean`, `exactHeadReady: true`).
+- The workaround is not free: a fresh artifact root discards the whole attempt's
+  durable state, so every phase re-runs, including any paid local provider round
+  the receipt would otherwise have reused.
 - Complex enough to need `design.md` and `implement.md` before `task.py start`:
   the invalidation rule is a real design choice with a correctness constraint
   (R3) on either side of it.
