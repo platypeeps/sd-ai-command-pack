@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-08-06T12:48:26Z",
-  "packVersion": "0.64.21",
-  "payloadDigest": "sha256:1a40b53fd7d64b0ea88ba373c284798079e3921ab93404129abaaaf7a0b184a1",
+  "validatedAt": "2026-08-06T14:48:31Z",
+  "packVersion": "0.64.22",
+  "payloadDigest": "sha256:24f1cfb6a2a91c5d251703bc27189c92ae53e1dc59029ea4c899ce7a775ce93d",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "9dee8894da1279dc053928c7377cec3e12cc5d41",
+      "baseCommit": "ba5769f513002774be247250e8d67a0cc2016752",
       "status": "passed",
       "prepares": [
         [
@@ -149,7 +149,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "802eb46bb34e6bb878ccb4f70fb228bcb360678d",
+      "baseCommit": "d2162a814870922cf0e16405f80f56e16e02f714",
       "status": "passed",
       "prepares": [
         [
