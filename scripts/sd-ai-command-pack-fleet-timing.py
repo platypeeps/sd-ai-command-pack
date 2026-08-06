@@ -15,7 +15,7 @@ import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import Any
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,8 +23,15 @@ if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
 from sd_ai_command_pack_lib import (  # noqa: E402
+    CommandError,
     compiled_secret_detector,
     declare_verdict_domain,
+)
+from sd_ai_command_pack_lib import (  # noqa: E402
+    ensure_private_directory as _lib_ensure_private_directory,
+)
+from sd_ai_command_pack_lib import (  # noqa: E402
+    resolve_state_root as _lib_resolve_state_root,
 )
 
 SCHEMA_VERSION = 1
@@ -387,40 +394,36 @@ def repository_digest(repo: Path) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
-def resolve_state_root(state_home: Path | None = None) -> Path:
-    if state_home is not None:
-        candidate = state_home.expanduser()
-        if not candidate.is_absolute():
-            raise FleetTimingError("state home must be an absolute path")
-        return candidate
-    xdg = os.environ.get("XDG_STATE_HOME", "").strip()
-    if xdg:
-        candidate = Path(xdg).expanduser()
-        if candidate.is_absolute():
-            return candidate / "sd-ai-command-pack"
-    if os.name == "nt":
-        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
-        if local_app_data and PureWindowsPath(local_app_data).is_absolute():
-            return Path(local_app_data) / "sd-ai-command-pack" / "state"
-    home = Path.home().expanduser()
-    if not home.is_absolute():
-        raise FleetTimingError("home directory must resolve to an absolute path")
-    return home / ".local" / "state" / "sd-ai-command-pack"
+def _state_root(state_home: Path | None = None) -> Path:
+    """Resolve the shared state root, restating failures as ``FleetTimingError``.
+
+    ``state_home`` stays positional: ``timing_store`` passes it positionally.
+    Delegating also gains this module the ``SD_AI_COMMAND_PACK_STATE_HOME``
+    override it previously lacked.
+    """
+
+    try:
+        return _lib_resolve_state_root(state_home=state_home)
+    except CommandError as error:
+        raise FleetTimingError(str(error)) from error
 
 
-def ensure_private_directory(path: Path) -> None:
-    if path.is_symlink():
-        raise FleetTimingError("timing state directory must not be a symlink")
+# Bound by assignment, not a second ``def``: the shared library owns the single
+# definition, and every existing call site keeps using this module-level name.
+resolve_state_root = _state_root
+
+
+def _ensure_timing_state_dir(path: Path) -> None:
+    """Create the private timing directory, keeping ``FleetTimingError``."""
+
     try:
-        path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    except OSError as exc:
-        raise FleetTimingError(f"cannot create timing state directory: {exc}") from exc
-    if path.is_symlink() or not path.is_dir():
-        raise FleetTimingError("timing state directory is unusable")
-    try:
-        path.chmod(0o700)
-    except OSError:
-        pass
+        _lib_ensure_private_directory(path, label="timing state directory")
+        # No ``reference``: this module has never named the path in these messages.
+    except CommandError as error:
+        raise FleetTimingError(str(error)) from error
+
+
+ensure_private_directory = _ensure_timing_state_dir
 
 
 @dataclass(frozen=True)

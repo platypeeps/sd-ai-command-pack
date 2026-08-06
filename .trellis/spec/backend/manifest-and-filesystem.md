@@ -757,8 +757,10 @@ Generated text writers follow the same safety model:
    allowed_returncodes, errors, context)`, `run_gh(args, *, cwd, timeout,
    check, allowed_returncodes, errors, context)`, `git_stdout(args, *, cwd,
    timeout, errors, context, required)`, `repo_root(*, fallback_to_cwd=False)`,
-   `default_text_file_mode(path)`, and `atomic_write_text(destination, content,
-   *, errors="strict", revalidate=None, mode=None)`.
+   `default_text_file_mode(path)`, `atomic_write_text(destination, content,
+   *, errors="strict", revalidate=None, mode=None)`, `STATE_HOME_ENV`,
+   `resolve_state_root(*, environ=None, home=None, os_name=None,
+   state_home=None)`, and `ensure_private_directory(path, *, label, reference=None)`.
    `scripts/sd-ai-command-pack-toolchain.sh cache-env` emits the fixed
    allowlisted cache key/value set, while `... run -- COMMAND [ARG]...`
    executes one external argv through that environment and preserves the
@@ -788,7 +790,25 @@ Generated text writers follow the same safety model:
    guards against a cross-filesystem replace (raising rather than a non-atomic
    copy), and supports an optional `revalidate` callback to re-check the
    destination just before `os.replace`. Scripts must not reimplement a
-   temp-file/`os.replace` writer of their own.
+   temp-file/`os.replace` writer of their own. `resolve_state_root` is likewise
+   the single user-local state-root ladder: explicit `state_home`, then an
+   absolute `SD_AI_COMMAND_PACK_STATE_HOME`, then an absolute `XDG_STATE_HOME`
+   plus `sd-ai-command-pack`, then the Windows `LOCALAPPDATA` branch plus
+   `sd-ai-command-pack/state`, then `~/.local/state/sd-ai-command-pack`. That
+   one variable therefore moves every private state surface — work-loop ledgers,
+   recovery receipts, fleet timing state, and fleet campaign state — and each
+   consumer appends only its own subdirectory. `ensure_private_directory`
+   refuses a symlink before and after `mkdir(mode=0o700, parents=True,
+   exist_ok=True)`, tightens the mode best-effort, and never lets a raw
+   `OSError` escape. Its `reference` argument is the caller-chosen path
+   rendering appended to the symlink and unusable diagnostics, so each consumer
+   keeps its own redaction posture: full path, `path.name` for modules that never
+   put a host absolute path in a diagnostic, or omitted entirely. The library
+   never picks a rendering of its own. Scripts must not re-fork either function:
+   they bind a
+   private wrapper to the module-level name by assignment, restating
+   `CommandError` in their own error type, so exactly one `def` of each exists
+   across `scripts/*.py`.
 4. Validation and error matrix: empty command -> `CommandError`; missing binary
    -> `CommandError` naming the command and context; timeout ->
    `CommandError` naming the command, context, and timeout seconds; checked
@@ -801,7 +821,15 @@ Generated text writers follow the same safety model:
    controlled cache-setup diagnostic naming `SD_AI_COMMAND_PACK_CACHE_ROOT` as
    the corrective option. Cache paths must be absolute and outside the
    repository, private namespace creation must be concurrency-safe, and raw
-   repository paths must never appear in namespace names.
+   repository paths must never appear in namespace names. For state roots: a
+   relative `state_home` or `SD_AI_COMMAND_PACK_STATE_HOME` -> `CommandError`
+   restated by the caller; a relative `XDG_STATE_HOME` -> skipped by the ladder,
+   so a consumer that must reject it (fleet-controller) checks it itself and
+   keeps raising its own error; a non-absolute home -> `CommandError`; a symlink
+   or unusable state directory -> `CommandError`; a blocked `mkdir` ->
+   `CommandError` chaining the originating `OSError` as `__cause__`, which the
+   work-loop wrapper recovers to keep raising `StatePersistenceError` with its
+   structured `environment_blocked` evidence.
 5. Good, base, and bad cases: good scripts call `run_git(["status"], context=...)`
    or `run_gh(["pr", "view"], context=...)` and report the helper's
    user-facing error; a base successful command returns the original completed
@@ -822,7 +850,10 @@ Generated text writers follow the same safety model:
    supported cache variables, credential preservation, relative/repository/
    symlink/non-directory/private-permission rejection, concurrent creation,
    fixed shell export keys, provider non-invocation after setup failure, and a
-   stubbed GitHub CLI cache write outside the repository.
+   stubbed GitHub CLI cache write outside the repository. State-root changes
+   additionally require an AST boundary test asserting exactly one `def` of each
+   consolidated function across `scripts/*.py`, plus per-consumer error-type
+   preservation and exact resolved paths for the injected and default roots.
 7. Wrong vs correct:
 
    ```text
@@ -837,6 +868,10 @@ Generated text writers follow the same safety model:
 
    Wrong: export UV_CACHE_DIR="$REPO_ROOT/.cache/uv"
    Correct: prepare_tool_cache_env
+
+   Wrong: def resolve_state_root(...): <a fourth copy of the ladder>
+   Correct: def _state_root(...): return lib.resolve_state_root(...)
+            resolve_state_root = _state_root
    ```
 
 ## Plan-Before-Apply And Concurrency
