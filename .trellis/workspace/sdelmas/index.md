@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 303
+- **Total Sessions**: 304
 - **Last Active**: 2026-08-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~89 | Active |
+| `journal-7.md` | ~132 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 304 | 2026-08-06 | Record the sd-review receipt-pinning defect and narrow the Gito .trellis exclusion | `dde46efd`, `8fcf05e2`, `a407f75f` | `chore/task-review-check-receipt-pinning` |
 | 303 | 2026-08-06 | Consolidate user-local state-root resolution into the shared lib (A-046) | `acfdda2a`, `d85f9c6a` | `feat/consolidate-state-root-resolution` |
 | 302 | 2026-08-05 | Consolidate git invocation into shared lib (A-076) | `c3f246df`, `ab494ef8`, `948f3aa4`, `65dc3058`, `83a7da59`, `a10a15f4` | `feat/consolidate-git-invocation` |
 | 301 | 2026-08-05 | Ship 07-28-reduce-review-hashing-and-classifier-cost (A-101 R1/R2 + A-105 R3) | `44813e59`, `3ec08508`, `a7c19079` | `feat/reduce-review-hashing-classifier-cost` |
