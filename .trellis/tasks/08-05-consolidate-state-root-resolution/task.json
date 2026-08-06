@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-08-05",
   "completedAt": null,
-  "branch": null,
+  "branch": "feat/consolidate-state-root-resolution",
   "base_branch": "feat/consolidate-shared-script-helpers",
   "worktree_path": null,
   "commit": null,
