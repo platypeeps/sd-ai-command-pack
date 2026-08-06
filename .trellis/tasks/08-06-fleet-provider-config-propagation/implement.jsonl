@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tooling/index.md", "reason": "Ownership boundary for pack-shipped tooling and the templates/ mirror duty; the installer and any release-time digest generation live inside that boundary."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Defines manifest.json file-entry semantics and the install policies, which is the contract this change extends -- if-not-exists must keep meaning what it means for a customized consumer."}
