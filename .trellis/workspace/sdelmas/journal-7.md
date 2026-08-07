@@ -292,3 +292,39 @@ Filed the second audit gap: task.py create records the branch the author is stan
 ### Next Steps
 
 - None - task complete
+
+
+## Session 309: File fleet-provider-config-propagation planning task
+
+**Date**: 2026-08-06
+**Task**: File fleet-provider-config-propagation planning task
+**Branch**: `chore/task-fleet-gito-exclusion-propagation`
+
+### Summary
+
+Filed the highest-value gap from the post-0.64.21 audit: the two if-not-exists provider configs have no delivery path for a corrected shipped default, so the Gito exclusion fix reached this repository and none of the six fleet consumers.
+
+### Main Changes
+
+- Added .trellis/tasks/08-06-fleet-provider-config-propagation with the measured per-consumer exclusion counts, R1-R4 plus N1, five open design questions, and six acceptance criteria covering .gito/config.toml and .prism/rules.json alike
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2303e982` | chore(task): add fleet-provider-config-propagation planning task |
+
+### Testing
+
+- [OK] Measured: 6 of 7 fleet repositories still carry the blanket ".trellis/**" entry; only sd-ai-command-pack is narrowed
+- [OK] Measured: all six consumer configs are byte-identical to templates/.gito/config.toml at 0.64.20, so no local customization is at stake today
+- [OK] Measured: exactly 2 of 776 manifest entries use install: if-not-exists
+- [OK] review-preflight: 0 failures, 0 warnings; sd-review scope=pr: ready, check passed, gito clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
