@@ -534,3 +534,42 @@ Moved the 'When Closing Out a Task Whose Work Already Landed' guide section out 
 ### Next Steps
 
 - File the provenance-stamp contamination defect: a gitignored stamp written by one branch blocks sd-check on every other branch in the same working copy, with an error naming a version absent from the checkout.
+
+
+## Session 315: File the session-followups sweep-and-act loop
+
+**Date**: 2026-08-07
+**Task**: File the session-followups sweep-and-act loop
+**Branch**: `chore/task-session-followups`
+
+### Summary
+
+Filed 08-06-session-followups after a sweep of this session found twelve evidence-backed items that nothing in the pack would have captured, and resolved two of its design questions up front rather than deferring them.
+
+### Main Changes
+
+- Filed the task with a motivation table of ten items that leaked from one session - unshipped scratchpad content, branches pushed with no PR, defects observed repeatedly and never filed, documented procedures that failed as written. They are the acceptance fixtures, not illustrations.
+- Resolved write ownership in the PRD instead of deferring it: each knowledge sink has exactly one writer, the command owns Trellis tasks, and it reaches docs/review-learnings.md only by invoking sd-review-learnings --update. The two commands partition by evidence type, so review comments stay with review-learnings and everything else lands here.
+- Restricted fix-now to sinks with no other owner, never tracked content. A command that sweeps a session, judges something actionable, and edits tracked files directly is a route for unreviewed changes to reach the tree without passing the gates the rest of the pack enforces.
+- Proved the cost while filing it: a task directory holding a 147-line PRD plus design.md and implement.md was deleted from the working tree between the sweep that found it and the git add two commands later, unrecoverable because it had never been committed.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `be24aa86` | chore(task): file session-followups sweep-and-act loop |
+
+### Testing
+
+- [OK] sd-review scope=pr on 350: ready, check passed, local receipt clean, 0 findings in 4117 ms
+- [OK] Copilot round 1 on be24aa86: 4/4 files reviewed, no comments, 0 unresolved threads
+- [OK] CI on be24aa86: 9 SUCCESS, 2 SKIPPED, 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Give 08-06-session-followups a design.md and implement.md; the session-boundary question blocks reproducibility and cannot be settled from repository evidence alone.
