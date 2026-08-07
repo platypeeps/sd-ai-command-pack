@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tooling/index.md", "reason": "Verify the audit diagnostic follows tooling remediation conventions."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Pre-Modification Rule: the version string appears in more than one artifact."}
