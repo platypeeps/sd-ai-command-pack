@@ -116,13 +116,13 @@ other two were split mid-implementation into follow-up tasks that inherited two
 of the criteria and were themselves completed. Nothing was outstanding; nobody
 closed it, because no single task's history showed the whole picture.
 
-Checking which commits had landed by grepping commit messages for the finding
-IDs reported `A-046` as shipped by `dde46efd` — but that commit is a *different*
-task's, and the only reason it matched is that its body says "Records the
-sd-review coordinator defect found while shipping A-046". The conclusion
-happened to be right; the evidence was not. A message-grep searches prose
-written by whoever typed the commit, which includes cross-references to work
-the commit does not contain.
+Grepping commit messages for the finding IDs is the obvious way to check what
+landed. It reported `A-046` as shipped by `dde46efd` — but that commit is a
+*different* task's, and the only reason it matched is that its body says
+"Records the sd-review coordinator defect found while shipping A-046". The
+conclusion happened to be right; the evidence was not. A message-grep searches
+prose written by whoever typed the commit, which includes cross-references to
+work the commit does not contain.
 
 - [ ] Deciding whether a change landed → verify against the tree (the symbol
       exists at the expected path, the old copies are gone), not against
