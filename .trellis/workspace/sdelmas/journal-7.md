@@ -413,7 +413,48 @@ Documented that codex exec must redirect stdin from /dev/null in the background 
 - None - task complete
 
 
-## Session 312: Close out consolidate-shared-script-helpers
+## Session 312: Stop excluding .trellis/workspace from the Gito review scope
+
+**Date**: 2026-08-06
+**Task**: Stop excluding .trellis/workspace from the Gito review scope
+**Branch**: `fix/gito-scope-finalization-empty-diff`
+
+### Summary
+
+Every Trellis finalization PR reached the local review provider with an empty diff, which the coordinator reported as a provider failure and which no public sd-review control could clear. Narrowed the exclusion list so the journal and its index stay reviewable.
+
+### Main Changes
+
+- Removed .trellis/workspace/** from .gito/config.toml exclude_files and its template twin. With .trellis/tasks/archive/** also excluded, the two globs covered 100% of a finalization range: a completion bundle is an archive move plus a journal session, a planning bundle is journal-only.
+- Kept .trellis/tasks/archive/** excluded. The journal is the only path every finalization touches, so un-excluding it makes the whole class non-empty by construction, while an archive move would re-send whole historical documents to a paid provider.
+- Moved the glob from GITO_TRELLIS_REQUIRED_EXCLUSIONS to GITO_TRELLIS_FORBIDDEN_EXCLUSIONS in tests/test_review_scope.py, which had pinned the old contract, so the new one is pinned from both sides.
+- Bumped the pack to 0.64.24 for the shipped config payload and recorded that this is the exclusion-list layer, not the coordinator defect that task 08-06-local-provider-empty-scope owns.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `af5eb018` | fix(review): stop excluding .trellis/workspace from the Gito review scope |
+
+### Testing
+
+- [OK] make check exit 0; 66, 103, 132, 85, and 61 tests across five suites, all OK
+- [OK] test_gito_config_templates_are_installed passes against the new contract
+- [OK] release version gate 0.64.23 -> 0.64.24 with matching CHANGELOG heading
+- [OK] sd-review scope=pr on PR #347: ready, check passed, local receipt clean
+- [OK] Copilot on af5eb018: 10/10 files reviewed, no comments, no suppressed entries
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 313: Close out consolidate-shared-script-helpers
 
 **Date**: 2026-08-06
 **Task**: Close out consolidate-shared-script-helpers
@@ -429,7 +470,7 @@ Archived the repository's only in_progress Trellis task after verifying all five
 - Established that a git log --grep for finding IDs is unsound evidence: A-046 matched dde46efd only because that commit's body cross-references it while describing a different task's work.
 - Corrected the close-out's provenance claim after Copilot's suppressed review comment: commits 1-2 shipped under this task, but commits 3-4 were split into 08-05-consolidate-state-root-resolution and 08-05-consolidate-git-invocation, which own AC1 and AC4 and are themselves completed.
 - Drafted a 'When Closing Out a Task Whose Work Already Landed' section for .trellis/spec/guides/index.md, then moved it off this branch: a completion finalization delta must contain only bookkeeping paths, and final-bundle rejected the spec file with bundle_scope_invalid ("finalization delta contains a non-bookkeeping path"). The archive commit landed before the spec work here, so no captured base could both include the archive move and exclude the spec file; without force-push the fix is to ship the guide separately.
-
+- Renumbered this session from 312 to 313 when merging main: PR #347 took 312 first because this branch was blocked on its Gito scope fix. add_session.py numbers from the working tree alone, so both branches independently claimed 312 - the fourth live instance of the defect task 08-06-upstream-add-session-numbering files.
 
 ### Git Commits
 

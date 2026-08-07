@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.64.24 - 2026-08-06
+
+- Stop excluding `.trellis/workspace/**` from the Gito local-review scope.
+  0.64.21 narrowed the blanket `.trellis/**` exclusion so a task-only or
+  spec-only change would still reach the provider with a non-empty diff, but it
+  kept `.trellis/workspace/**` out of scope alongside `.trellis/tasks/archive/**`
+  as bulk bookkeeping. Those two globs are precisely what a finalization commit
+  range consists of: a completion bundle is an archive move plus a journal
+  session, and a planning bundle is journal-only. Every finalization PR
+  therefore reached Gito with nothing in scope, which exits 0 without a
+  structured report and surfaces as `local provider failure blocks remote
+  routing` — with no public combination of `local=` and `remote=` able to
+  complete, because an absent optional router requires a *clean* local receipt.
+  Observed on PR #346, whose eight changed paths were all under
+  `.trellis/tasks/archive/**` or `.trellis/workspace/**`. The journal and its
+  index are the only paths every finalization touches, so keeping them
+  reviewable makes that class of PR non-empty by construction; the diff is one
+  appended session rather than the whole file, unlike the archive move, which
+  re-sends whole historical documents and stays excluded. Moves the glob from
+  the test's required-exclusion list to its forbidden list so the contract is
+  pinned from both sides.
+- Note: this is the exclusion-list layer, not the underlying defect. Task
+  `08-06-local-provider-empty-scope` records that an all-excluded diff should be
+  a distinct typed outcome rather than a provider failure — a property of the
+  coordinator that no exclusion list can fix for every repository.
+
 ## 0.64.23 - 2026-08-06
 
 - Require `< /dev/null` on the `codex exec` invocation in the planning
