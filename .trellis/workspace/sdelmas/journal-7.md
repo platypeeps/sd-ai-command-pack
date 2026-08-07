@@ -257,10 +257,84 @@ Filed the third and last Trellis task from the 2026-08-06 audit: the review pref
 - None - task complete
 
 
-## Session 308: Rebase and land the external-symlink KB advisory fix (PR #321)
+## Session 308: File task-create-base-branch-seed planning task
+
+**Date**: 2026-08-06
+**Task**: File task-create-base-branch-seed planning task
+**Branch**: `chore/task-task-create-base-branch-seed`
+
+### Summary
+
+Filed the second audit gap: task.py create records the branch the author is standing on as base_branch, which names the PR target. A survey found one such record merged on 2026-07-30 and unnoticed for a week, and PR #342 reached a paid review round with the same defect after a clean preflight.
+
+### Main Changes
+
+- Added .trellis/tasks/08-06-task-create-base-branch-seed recording the seeding line, the three preflight base_branch rules and why each misses a fresh root record, R1-R4, and six acceptance criteria including a regression replay of PR #342's record
+- Framed the upstream-versus-pack-local split as the first design decision: the seeding defect is in vendored Trellis, the detection is pack-local in review-preflight.mjs
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1b728f09` | chore(task): add task-create-base-branch-seed planning task |
+
+### Testing
+
+- [OK] Surveyed all 45 active task records: 43 name main; exceptions are 07-30-upstream-task-start-branch-recording (fix/silence-satisfied-scope-advisory) and this task's own record, corrected by hand
+- [OK] Verified the three cited preflight line references resolve to the non-empty rule, the branch-differs rule, and the child-task allowed-targets rule
+- [OK] review-preflight: 0 failures, 0 warnings; sd-review scope=pr: ready, check passed, gito clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 309: File fleet-provider-config-propagation planning task
+
+**Date**: 2026-08-06
+**Task**: File fleet-provider-config-propagation planning task
+**Branch**: `chore/task-fleet-gito-exclusion-propagation`
+
+### Summary
+
+Filed the highest-value gap from the post-0.64.21 audit: the two if-not-exists provider configs have no delivery path for a corrected shipped default, so the Gito exclusion fix reached this repository and none of the six fleet consumers.
+
+### Main Changes
+
+- Added .trellis/tasks/08-06-fleet-provider-config-propagation with the measured per-consumer exclusion counts, R1-R4 plus N1, five open design questions, and six acceptance criteria covering .gito/config.toml and .prism/rules.json alike
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2303e982` | chore(task): add fleet-provider-config-propagation planning task |
+
+### Testing
+
+- [OK] Measured: 6 of 7 fleet repositories still carry the blanket ".trellis/**" entry; only sd-ai-command-pack is narrowed
+- [OK] Measured: all six consumer configs are byte-identical to templates/.gito/config.toml at 0.64.20, so no local customization is at stake today
+- [OK] Measured: exactly 2 of 776 manifest entries use install: if-not-exists
+- [OK] review-preflight: 0 failures, 0 warnings; sd-review scope=pr: ready, check passed, gito clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 310: Rebase and land the external-symlink KB advisory fix (PR #321)
 
 **Date**: 2026-08-06
 **Task**: Rebase and land the external-symlink KB advisory fix (PR #321)
+**Branch**: `codex/kb-advisory-external-symlink`
 
 ### Summary
 
@@ -271,7 +345,7 @@ PR #321 had sat 121 commits behind main since 2026-08-04, holding the only branc
 - Rebased codex/kb-advisory-external-symlink onto dede0ae8; only docs/fleet/candidate-validation.json and the version-stamped catalogs conflicted, while check.py, its templates mirror, and tests/test_check.py auto-merged
 - Reapplied the release stamp for 0.64.22 -- the branch's original 0.64.6 bump predated the current line by 15 releases -- and regenerated catalogs, the installed manifest mirror, and the fleet candidate ledger
 - Unquoted the four cast() type expressions to match repo convention (Copilot suppressed comment); its stated reason was wrong, since mypy resolves string forward references in cast(), but the consistency point held
-
+- Merged origin/main after PR #344 and PR #343 landed, renumbering this session from 308 to 310 because both of those branches had already claimed the intervening numbers
 
 ### Git Commits
 
