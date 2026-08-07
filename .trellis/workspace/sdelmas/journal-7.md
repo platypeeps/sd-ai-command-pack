@@ -697,3 +697,46 @@ The 222-line PRD for upstream session numbering existed nowhere in the repositor
 ### Next Steps
 
 - None - task complete
+
+
+## Session 319: Close three helper defaults that fight the pack's own gates
+
+**Date**: 2026-08-07
+**Task**: Close three helper defaults that fight the pack's own gates
+**Branch**: `fix/pack-helper-defaults-and-guards`
+
+### Summary
+
+Three shipped helpers each produced a wrong or destructive result on their documented invocation, all surfaced in one downstream shipping session. record-session without --commit wrote add_session.py's planning-session placeholder, which the final-bundle validator then rejected with journal_commit_missing: the documented command produced an artifact the documented validator always refuses. It now derives the unrecorded work commits on HEAD, stopping at the first commit a journal already cites and skipping commits confined to .trellis/workspace, and declines whenever the answer is not obvious. pr-eligibility never derived a repository slug, reporting github_repository_unavailable with a diagnostic claiming an attempt that never happened, on every repository with an SSH remote; it now derives from git remote get-url with a parser held to byte-for-byte parity with the housekeeping.sh shell twin. review-learnings rendered its managed block wholesale from whatever GitHub scope the run requested, so --github-pr N, the form sd-ship Stage 2b prescribes, replaced a repository-wide snapshot with one PR's clusters; a narrowing update is now refused by name, with --allow-narrowing to accept it deliberately. Merged main and reconciled the release: this branch had claimed 0.64.25, which 0.64.26 took while PR #355 merged, so the entry is republished as 0.64.27.
+
+### Main Changes
+
+- record-session: derive unrecorded work commits when --commit is omitted, bounded by the last cited commit and excluding .trellis/workspace-only commits; --commit - still asserts genuinely none
+- pr-eligibility: derive the GitHub slug from git remote get-url with byte-for-byte parity to housekeeping.sh's github_repo_from_remote_url, and report the derived slug as evidence
+- review-learnings: refuse an update that would delete clusters already in the tracked snapshot, naming them, with --allow-narrowing as the deliberate override; scan and --dry-run unaffected
+- Merged origin/main and resolved seven version-bearing conflicts, republishing the entry as 0.64.27 after 0.64.26 was taken
+- Regenerated docs/fleet/candidate-validation.json against every fleet consumer for the changed payload
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6559ac89` | fix: close three helper defaults that fight the pack's own gates |
+| `237805e3` | docs: record the narrowing guard and refresh generated evidence |
+| `45d7a12a` | chore(release): bump to 0.64.25 for the helper-default fixes |
+
+### Testing
+
+- [OK] full unit suite: Ran 1603 tests, OK
+- [OK] release version gate: manifest 0.64.26 -> 0.64.27 with matching top heading '## 0.64.27 - 2026-08-07'
+- [OK] candidate ledger: valid for the current pack payload and fleet
+- [OK] template twin pairs compared: 205; shipped-surface closure clean across 48 changed paths
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

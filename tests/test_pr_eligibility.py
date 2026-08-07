@@ -896,5 +896,73 @@ class PrEligibilityTests(unittest.TestCase):
         self.assertEqual(fields[2], "42")
 
 
+class GithubSlugDerivationTests(unittest.TestCase):
+    """The probe must accept every remote URL the merge gate accepts.
+
+    ``sd-ai-command-pack-housekeeping.sh`` resolves the slug from the remote,
+    so a repository with an SSH remote merges fine while this probe reported
+    ``github_repository_unavailable`` with a diagnostic claiming derivation had
+    been attempted. These cases are the shell twin's four accepted prefixes.
+    """
+
+    def test_accepts_every_form_the_shell_twin_accepts(self) -> None:
+        for url, expected in (
+            ("git@github.com:owner/repo.git", "owner/repo"),
+            ("ssh://git@github.com/owner/repo.git", "owner/repo"),
+            ("https://github.com/owner/repo", "owner/repo"),
+            ("https://github.com/owner/repo/", "owner/repo"),
+            ("http://github.com/owner/repo.git", "owner/repo"),
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(
+                    eligibility.github_slug_from_remote_url(url), expected
+                )
+
+    def test_rejects_non_github_and_malformed_urls(self) -> None:
+        for url in (
+            "git@gitlab.com:owner/repo.git",
+            "https://github.com/owner/repo/extra",
+            "https://github.com/owner",
+            "",
+        ):
+            with self.subTest(url=url):
+                self.assertIsNone(eligibility.github_slug_from_remote_url(url))
+
+    def test_derives_from_remote_when_slug_is_absent(self) -> None:
+        calls: list[list[str]] = []
+
+        def runner(args, cwd, timeout):  # noqa: ANN001, ARG001
+            calls.append(list(args))
+            return eligibility.CommandResult(0, "git@github.com:owner/repo.git\n")
+
+        self.assertEqual(
+            eligibility.derive_github_slug(Path("/repo"), "origin", runner),
+            "owner/repo",
+        )
+        self.assertEqual(calls, [["git", "remote", "get-url", "origin"]])
+
+    def test_derivation_failure_yields_none_not_an_exception(self) -> None:
+        def failing(args, cwd, timeout):  # noqa: ANN001, ARG001
+            return eligibility.CommandResult(128, "")
+
+        self.assertIsNone(
+            eligibility.derive_github_slug(Path("/repo"), "origin", failing)
+        )
+
+        def control_chars(args, cwd, timeout):  # noqa: ANN001, ARG001
+            return eligibility.CommandResult(0, "git@github.com:own\x01er/repo\n")
+
+        self.assertIsNone(
+            eligibility.derive_github_slug(Path("/repo"), "origin", control_chars)
+        )
+
+    def test_missing_remote_name_is_not_derivable(self) -> None:
+        def unreached(args, cwd, timeout):  # noqa: ANN001, ARG001
+            raise AssertionError("git must not run without a remote name")
+
+        self.assertIsNone(eligibility.derive_github_slug(Path("/repo"), None, unreached))
+        self.assertIsNone(eligibility.derive_github_slug(Path("/repo"), "", unreached))
+
+
 if __name__ == "__main__":
     unittest.main()

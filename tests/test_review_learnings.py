@@ -2587,5 +2587,73 @@ class ReviewLearningsTests(InstallTestCase):
         self.assertNotIn("dangling-link", diff_text)
 
 
+class ManagedBlockNarrowingTests(InstallTestCase):
+    """A narrowly scoped run must not silently delete the wider snapshot.
+
+    The managed block is rendered wholesale from whatever GitHub scope the run
+    requested, so ``--github-pr N`` — the form the post-cycle learning pass
+    uses — renders a block holding only that PR's clusters. Writing it replaces
+    a repository-wide snapshot with one PR's signals.
+    """
+
+    def _module(self, name: str):  # noqa: ANN202
+        return self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            name,
+        )
+
+    def _block(self, module, categories: list[str]) -> str:  # noqa: ANN001
+        lines = [module.MANAGED_START, "#### Historical Signal Clusters"]
+        lines.extend(
+            f"- **Name** (`{slug}`): 12 historical comment(s) across 12 "
+            "normalized signature(s); PRs #1"
+            for slug in categories
+        )
+        lines.append(module.MANAGED_END)
+        return "\n".join(lines) + "\n"
+
+    def test_narrowing_the_scope_is_detected_as_a_deletion(self) -> None:
+        module = self._module("sd_review_learnings_narrowing")
+        wide = self._block(module, ["task-metadata", "boundary-validation", "other"])
+        narrow = self._block(module, ["task-metadata"])
+        self.assertEqual(
+            module.managed_block_categories(wide),
+            {"task-metadata", "boundary-validation", "other"},
+        )
+        self.assertEqual(
+            module.dropped_cluster_categories(wide, narrow),
+            ["boundary-validation", "other"],
+        )
+
+    def test_unchanged_and_widening_rewrites_drop_nothing(self) -> None:
+        module = self._module("sd_review_learnings_widening")
+        wide = self._block(module, ["task-metadata", "other"])
+        wider = self._block(module, ["task-metadata", "other", "new-category"])
+        self.assertEqual(module.dropped_cluster_categories(wide, wide), [])
+        self.assertEqual(module.dropped_cluster_categories(wide, wider), [])
+
+    def test_absent_or_unterminated_block_yields_no_categories(self) -> None:
+        module = self._module("sd_review_learnings_no_block")
+        self.assertEqual(module.managed_block_categories("# Review Learnings\n"), set())
+        unterminated = module.MANAGED_START + "\n- **N** (`x`): 1 historical comment\n"
+        self.assertEqual(module.managed_block_categories(unterminated), set())
+
+    def test_allow_narrowing_requires_an_update_mode(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py"),
+                "--allow-narrowing",
+            ],
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn(
+            "--allow-narrowing requires --update or --update-external",
+            result.stderr,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

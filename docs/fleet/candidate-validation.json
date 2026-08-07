@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-08-07T15:07:27Z",
-  "packVersion": "0.64.26",
-  "payloadDigest": "sha256:b4589206a24dce64cc6408377f7a2475be547cf000afb06794d3922a5618d294",
+  "validatedAt": "2026-08-07T15:53:17Z",
+  "packVersion": "0.64.27",
+  "payloadDigest": "sha256:6c97d3716e191907ed6192cc949f35edbc367a730e7c8c65a04a405e59d86a55",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "af3000b16db6970d8b8973ce38dfb717536c5670",
+      "baseCommit": "7459234c024034562d5a82eb85401f513dc62297",
       "status": "passed",
       "prepares": [
         [
@@ -149,7 +149,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "c42b5743732ddecb070f46719f241dac2575ef1d",
+      "baseCommit": "a15f6ce2368f014454fe0f7e0f3df8f3460f9f92",
       "status": "passed",
       "prepares": [
         [

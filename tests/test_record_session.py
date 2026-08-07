@@ -77,6 +77,87 @@ class RecordSessionTests(InstallTestCase):
         # name and must never surface.
         self.assertNotIn(Path(".trellis/workspace/dev/journal-1.md"), journals)
 
+    def test_derive_work_commits_picks_unrecorded_non_workspace_commits(self) -> None:
+        """Omitting --commit must not produce a session the validator rejects.
+
+        ``add_session.py`` writes "(No commits - planning session)" with no
+        hash, and the pack's own final-bundle validator then fails that session
+        with ``journal_commit_missing``. Derivation closes that gap: it stops at
+        the first commit a journal already cites, and skips commits confined to
+        the workspace so journal and index commits never nominate themselves.
+        """
+        recorder = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-record-session.py",
+            "sd_record_session_derive",
+        )
+        root = self.make_repo()
+        previous = os.getcwd()
+        self.addCleanup(os.chdir, previous)
+        os.chdir(root)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+
+        def head() -> str:
+            return subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+
+        def commit(message: str, path: str, body: str) -> str:
+            target = root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(body, encoding="utf-8")
+            self.run_git(root, "add", "-A")
+            self.run_git(root, "commit", "-m", message)
+            return head()
+
+        seed = commit("seed work", "work-1.txt", "one\n")
+        journal = root / ".trellis/workspace/dev/journal-1.md"
+        journal.parent.mkdir(parents=True, exist_ok=True)
+        journal.write_text(
+            "| Hash | Message |\n|------|---------|\n"
+            f"| `{seed[:7]}` | seed work |\n",
+            encoding="utf-8",
+        )
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "chore: record journal")
+        first = commit("real work one", "work-2.txt", "two\n")
+        second = commit("real work two", "work-3.txt", "three\n")
+        commit("chore: bookkeeping", ".trellis/workspace/dev/index.md", "note\n")
+
+        self.assertEqual(recorder.recorded_commit_hashes(), {seed[:7]})
+        # Oldest first, journal and workspace-only commits excluded, and the
+        # walk stops at the already-recorded seed.
+        self.assertEqual(recorder.derive_work_commits(), [first, second])
+
+    def test_derive_work_commits_declines_when_the_answer_is_not_obvious(self) -> None:
+        recorder = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-record-session.py",
+            "sd_record_session_derive_edges",
+        )
+        root = self.make_repo()
+        previous = os.getcwd()
+        self.addCleanup(os.chdir, previous)
+        os.chdir(root)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        (root / "work.txt").write_text("one\n", encoding="utf-8")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "seed work")
+
+        # No journal cites anything, so there is no boundary to walk back to.
+        self.assertEqual(recorder.derive_work_commits(), [])
+
+        journal = root / ".trellis/workspace/dev/journal-1.md"
+        journal.parent.mkdir(parents=True, exist_ok=True)
+        journal.write_text("| `0123456` | unrelated |\n", encoding="utf-8")
+        # A recorded hash absent from this history never terminates the walk,
+        # so every commit would be a false candidate.
+        self.assertEqual(recorder.derive_work_commits(), [])
+
     def test_record_session_wrapper_writes_complete_entry(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)

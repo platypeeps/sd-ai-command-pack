@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.64.27 - 2026-08-07
+
+- Close three helper defaults that fight the pack's own gates. Each produced a
+  wrong or destructive result on its documented invocation; all three surfaced
+  in a single downstream shipping session.
+- `record-session`: recording a session without `--commit` wrote
+  `add_session.py`'s "(No commits - planning session)" placeholder, and the
+  final-bundle validator then rejected that same session with
+  `journal_commit_missing`. The documented command produced an artifact the
+  documented validator always refuses. Omitting `--commit` now derives the
+  unrecorded work commits on HEAD — stopping at the first commit a journal
+  already cites, and skipping commits confined to `.trellis/workspace` so
+  journal and index commits never nominate themselves. It declines, preserving
+  the previous behavior, whenever the answer is not obvious: nothing to record,
+  git unavailable, no recorded boundary inside the scan window, or more
+  candidates than one session plausibly covers. `--commit -` still asserts
+  "genuinely none".
+- `pr-eligibility`: the probe never derived a repository slug. It reported
+  `github_repository_unavailable` with the diagnostic "could not derive GitHub
+  repo from origin" — claiming an attempt that never happened — on every
+  repository with an SSH remote, including ones whose merge gate resolves the
+  slug fine, since `housekeeping.sh` has carried
+  `github_repo_from_remote_url` all along. The probe now derives from
+  `git remote get-url` with a parser held to byte-for-byte parity with that
+  shell twin, `${slug%.git}` then `${slug%/}` ordering included, and reports
+  the derived slug in its evidence.
+- `review-learnings`: the managed block is rendered wholesale from whatever
+  GitHub scope the run requested, so `--github-pr N` — the form `sd-ship`'s
+  Stage 2b prescribes for the post-cycle pass — renders a block holding only
+  that PR's clusters. Applying it replaced a repository-wide snapshot with one
+  PR's signals; observed against a real snapshot, five clusters and 38
+  task-metadata comments would have collapsed to a single comment. An update
+  that would delete clusters already recorded in the snapshot is now refused,
+  naming them, with `--allow-narrowing` to accept the deletion deliberately.
+  Scan and `--dry-run` are unaffected, so the documented Stage 2b invocation
+  never trips it.
+
 ## 0.64.26 - 2026-08-07
 
 - Give verified-false local review findings a rebuttal channel. `sd-review`

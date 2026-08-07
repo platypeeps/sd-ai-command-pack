@@ -726,6 +726,50 @@ def classify_non_clean_merge_state(
     return generic
 
 
+def github_slug_from_remote_url(url: str) -> str | None:
+    """Parse an owner/repo slug out of a GitHub remote URL.
+
+    Mirrors ``github_repo_from_remote_url`` in
+    ``sd-ai-command-pack-housekeeping.sh``; the two must accept the same URL
+    forms, or a repository whose merge gate resolves the slug fine still gets
+    ``github_repository_unavailable`` from this probe.
+    """
+    prefixes = (
+        "git@github.com:",
+        "ssh://git@github.com/",
+        "https://github.com/",
+        "http://github.com/",
+    )
+    slug = None
+    for prefix in prefixes:
+        if url.startswith(prefix):
+            slug = url[len(prefix) :]
+            break
+    if slug is None:
+        return None
+    # Same order as the shell twin's ${slug%.git} then ${slug%/}; reversing it
+    # would make the two accept different URLs.
+    slug = slug.removesuffix(".git").removesuffix("/")
+    if not GITHUB_SLUG_RE.fullmatch(slug):
+        return None
+    return slug
+
+
+def derive_github_slug(repo: Path, remote: object, runner: Runner) -> str | None:
+    """Resolve the slug from ``git remote get-url <remote>``, or None."""
+    if not isinstance(remote, str) or not remote:
+        return None
+    result = runner(
+        ["git", "remote", "get-url", remote], repo, COMMAND_TIMEOUT_SECONDS
+    )
+    if result.returncode != 0:
+        return None
+    url = result.stdout.strip()
+    if not url or CONTROL_RE.search(url):
+        return None
+    return github_slug_from_remote_url(url)
+
+
 def evaluate_dependency_request(
     request: Mapping[str, Any],
     *,
@@ -766,6 +810,8 @@ def evaluate_dependency_request(
             now(),
         )
     slug = request.get("githubRepository")
+    if not isinstance(slug, str):
+        slug = derive_github_slug(repo, request.get("remote"), runner)
     if not isinstance(slug, str):
         return invalid_result(
             request,
@@ -1147,6 +1193,9 @@ def evaluate_request(
             )
 
     slug = request["githubRepository"]
+    if slug is None:
+        slug = derive_github_slug(repo, request["remote"], runner)
+        evidence["repository"]["githubSlug"] = slug
     if slug is None:
         return finish(
             "indeterminate",
