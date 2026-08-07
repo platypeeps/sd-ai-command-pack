@@ -411,3 +411,165 @@ Documented that codex exec must redirect stdin from /dev/null in the background 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 312: Stop excluding .trellis/workspace from the Gito review scope
+
+**Date**: 2026-08-06
+**Task**: Stop excluding .trellis/workspace from the Gito review scope
+**Branch**: `fix/gito-scope-finalization-empty-diff`
+
+### Summary
+
+Every Trellis finalization PR reached the local review provider with an empty diff, which the coordinator reported as a provider failure and which no public sd-review control could clear. Narrowed the exclusion list so the journal and its index stay reviewable.
+
+### Main Changes
+
+- Removed .trellis/workspace/** from .gito/config.toml exclude_files and its template twin. With .trellis/tasks/archive/** also excluded, the two globs covered 100% of a finalization range: a completion bundle is an archive move plus a journal session, a planning bundle is journal-only.
+- Kept .trellis/tasks/archive/** excluded. The journal is the only path every finalization touches, so un-excluding it makes the whole class non-empty by construction, while an archive move would re-send whole historical documents to a paid provider.
+- Moved the glob from GITO_TRELLIS_REQUIRED_EXCLUSIONS to GITO_TRELLIS_FORBIDDEN_EXCLUSIONS in tests/test_review_scope.py, which had pinned the old contract, so the new one is pinned from both sides.
+- Bumped the pack to 0.64.24 for the shipped config payload and recorded that this is the exclusion-list layer, not the coordinator defect that task 08-06-local-provider-empty-scope owns.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `af5eb018` | fix(review): stop excluding .trellis/workspace from the Gito review scope |
+
+### Testing
+
+- [OK] make check exit 0; 66, 103, 132, 85, and 61 tests across five suites, all OK
+- [OK] test_gito_config_templates_are_installed passes against the new contract
+- [OK] release version gate 0.64.23 -> 0.64.24 with matching CHANGELOG heading
+- [OK] sd-review scope=pr on PR #347: ready, check passed, local receipt clean
+- [OK] Copilot on af5eb018: 10/10 files reviewed, no comments, no suppressed entries
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 313: Close out consolidate-shared-script-helpers
+
+**Date**: 2026-08-06
+**Task**: Close out consolidate-shared-script-helpers
+**Branch**: `chore/close-consolidate-shared-script-helpers`
+
+### Summary
+
+Archived the repository's only in_progress Trellis task after verifying all five acceptance criteria against the tree, and recorded the verification rule as a thinking guide.
+
+### Main Changes
+
+- Verified all five acceptance criteria of 07-28-consolidate-shared-script-helpers against the working tree rather than commit messages, then archived it to .trellis/tasks/archive/2026-08/ with status completed.
+- Established that a git log --grep for finding IDs is unsound evidence: A-046 matched dde46efd only because that commit's body cross-references it while describing a different task's work.
+- Corrected the close-out's provenance claim after Copilot's suppressed review comment: commits 1-2 shipped under this task, but commits 3-4 were split into 08-05-consolidate-state-root-resolution and 08-05-consolidate-git-invocation, which own AC1 and AC4 and are themselves completed.
+- Drafted a 'When Closing Out a Task Whose Work Already Landed' section for .trellis/spec/guides/index.md, then moved it off this branch: a completion finalization delta must contain only bookkeeping paths, and final-bundle rejected the spec file with bundle_scope_invalid ("finalization delta contains a non-bookkeeping path"). The archive commit landed before the spec work here, so no captured base could both include the archive move and exclude the spec file; without force-push the fix is to ship the guide separately.
+- Renumbered this session from 312 to 313 when merging main: PR #347 took 312 first because this branch was blocked on its Gito scope fix. add_session.py numbers from the working tree alone, so both branches independently claimed 312 - the fourth live instance of the defect task 08-06-upstream-add-session-numbering files.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b4eb2d9f` | chore(task): archive 07-28-consolidate-shared-script-helpers |
+| `e3ac3f32` | docs(spec): record the verify-against-the-tree rule for task close-outs |
+| `50095bcf` | fix(task): correct how the close-out describes what this task delivered |
+
+### Testing
+
+- [OK] make check exit 0; 66, 103, 132, and 85 tests across four suites, all OK
+- [OK] Review preflight: 0 failure(s), 0 warning(s)
+- [OK] sd-review scope=pr attempt 2: status ready, check passed, local receipt clean
+- [OK] Copilot round 2 on head 50095bcf: no new comments, no suppressed entries, commit_id equals head
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 314: Ship the task close-out verification guide
+
+**Date**: 2026-08-07
+**Task**: Ship the task close-out verification guide
+**Branch**: `docs/guide-close-out-verification`
+
+### Summary
+
+Moved the 'When Closing Out a Task Whose Work Already Landed' guide section out of scratchpad and into the spec, where it had been stranded for three sessions after being pulled off PR #346 to keep that completion delta bookkeeping-only.
+
+### Main Changes
+
+- Added the guide section to .trellis/spec/guides/index.md: verify whether a change landed against the tree rather than git log --grep, and read a task's own implement.md before claiming it delivered something, because scope splits are recorded there and not in task.json.
+- Rewrote the evidence sentence after Copilot flagged a garden path - 'for the finding IDs reported' parses first as 'the IDs that were reported', so the grep had to become the explicit subject. Wrong sentence to make people re-read in a section about reading evidence carefully.
+- Root-caused an sd-check blocker that had nothing to do with this PR: .sd-ai-command-pack/provenance.json is gitignored and had been stamped 0.64.25 by a concurrent session's installer run, so every branch in this working copy audited its 0.64.24 files against 0.64.25 digests. Re-running the installer restamped the one gitignored file and cleared all three drift errors.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fdc9b315` | docs(spec): record the verify-against-the-tree rule for task close-outs |
+| `cf9938d2` | docs(spec): make the grep the subject of the evidence sentence |
+
+### Testing
+
+- [OK] make check not re-run; the branch changes one spec file and CI reported 9 SUCCESS, 2 SKIPPED, 0 failures
+- [OK] install audit after restamp: 0 errors, 8 pre-existing legacy-reference warnings
+- [OK] sd-review scope=pr on 351: ready, check passed, local receipt clean, 0 findings in 7320 ms
+- [OK] Copilot round 2 on cf9938d2: no new comments, 0 unresolved threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- File the provenance-stamp contamination defect: a gitignored stamp written by one branch blocks sd-check on every other branch in the same working copy, with an error naming a version absent from the checkout.
+
+
+## Session 315: File the session-followups sweep-and-act loop
+
+**Date**: 2026-08-07
+**Task**: File the session-followups sweep-and-act loop
+**Branch**: `chore/task-session-followups`
+
+### Summary
+
+Filed 08-06-session-followups after a sweep of this session found twelve evidence-backed items that nothing in the pack would have captured, and resolved two of its design questions up front rather than deferring them.
+
+### Main Changes
+
+- Filed the task with a motivation table of ten items that leaked from one session - unshipped scratchpad content, branches pushed with no PR, defects observed repeatedly and never filed, documented procedures that failed as written. They are the acceptance fixtures, not illustrations.
+- Resolved write ownership in the PRD instead of deferring it: each knowledge sink has exactly one writer, the command owns Trellis tasks, and it reaches docs/review-learnings.md only by invoking sd-review-learnings --update. The two commands partition by evidence type, so review comments stay with review-learnings and everything else lands here.
+- Restricted fix-now to sinks with no other owner, never tracked content. A command that sweeps a session, judges something actionable, and edits tracked files directly is a route for unreviewed changes to reach the tree without passing the gates the rest of the pack enforces.
+- Proved the cost while filing it: a task directory holding a 147-line PRD plus design.md and implement.md was deleted from the working tree between the sweep that found it and the git add two commands later, unrecoverable because it had never been committed.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `be24aa86` | chore(task): file session-followups sweep-and-act loop |
+
+### Testing
+
+- [OK] sd-review scope=pr on 350: ready, check passed, local receipt clean, 0 findings in 4117 ms
+- [OK] Copilot round 1 on be24aa86: 4/4 files reviewed, no comments, 0 unresolved threads
+- [OK] CI on be24aa86: 9 SUCCESS, 2 SKIPPED, 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Give 08-06-session-followups a design.md and implement.md; the session-boundary question blocks reproducibility and cannot be settled from repository evidence alone.
