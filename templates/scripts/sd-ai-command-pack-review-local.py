@@ -19,7 +19,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal, Mapping, Sequence, overload
+from typing import Any, Literal, Mapping, MutableMapping, Sequence, overload
 from urllib.parse import urlsplit
 
 from sd_ai_command_pack_lib import (
@@ -71,6 +71,10 @@ FINDING_FAMILY_IDS = REVIEW_FINDING_FAMILY_IDS
 FINDING_DISPOSITIONS = frozenset(
     {"outstanding", "fix", "fixed", "rebutted", "resolved"}
 )
+# The caller-supplied disposition vocabulary, deliberately the same single
+# value the remote channel accepts. Rebutting records a verified judgement
+# that a reported finding is not real; it never deletes the finding.
+LOCAL_DISPOSITION_VALUES = frozenset({"rebutted"})
 FAMILY_AUDIT_DIMENSIONS = {
     "task-metadata": (
         "identity-fields",
@@ -1855,13 +1859,101 @@ def _aggregate_outcome(attempts: Sequence[Mapping[str, Any]]) -> str:
     return "failed"
 
 
+def _parse_local_dispositions(values: Sequence[str]) -> dict[str, str]:
+    dispositions: dict[str, str] = {}
+    for value in values:
+        identifier, separator, disposition = value.rpartition("=")
+        if (
+            not separator
+            or not identifier
+            or len(identifier) > 240
+            or any(ord(character) < 32 for character in identifier)
+            or disposition not in LOCAL_DISPOSITION_VALUES
+        ):
+            raise ReviewInputError("local dispositions must use <stable-id>=rebutted")
+        if identifier in dispositions:
+            raise ReviewInputError("local disposition ids must be unique")
+        dispositions[identifier] = disposition
+    return dispositions
+
+
+def _apply_local_dispositions(
+    findings: Sequence[MutableMapping[str, Any]],
+    dispositions: Mapping[str, str],
+) -> dict[str, str]:
+    """Record caller rebuttals against findings already present in the receipt.
+
+    An id that matches no finding is an error rather than a no-op: it is almost
+    always a stale id copied from an earlier head, and silently accepting it
+    would open the gate for a finding nobody actually reviewed.
+    """
+
+    if not dispositions:
+        return {}
+    known = {str(item.get("id")): item for item in findings}
+    unknown = sorted(set(dispositions) - set(known))
+    if unknown:
+        raise ReviewInputError(
+            "local disposition ids match no finding at this head: "
+            + ", ".join(unknown[:8])
+        )
+    applied: dict[str, str] = {}
+    for identifier, disposition in dispositions.items():
+        known[identifier]["disposition"] = disposition
+        applied[identifier] = disposition
+    return applied
+
+
+def _redispose_receipt(
+    receipt: MutableMapping[str, Any],
+    dispositions: Mapping[str, str],
+    local_policy: str,
+) -> None:
+    """Apply rebuttals to a stored receipt and recompute what they affect.
+
+    Provider evidence is left exactly as recorded; only the caller-owned
+    disposition fields and the gate derived from them change.
+    """
+
+    findings = receipt.get("findings")
+    if not isinstance(findings, list):
+        raise ReviewInputError("stored local review receipt has no findings list")
+    applied = _apply_local_dispositions(findings, dispositions)
+    outstanding = sum(
+        1
+        for item in findings
+        if isinstance(item, Mapping) and item.get("disposition") == "outstanding"
+    )
+    disposition = receipt.get("disposition")
+    if not isinstance(disposition, dict):
+        raise ReviewInputError("stored local review receipt has no disposition block")
+    disposition["outstanding"] = outstanding
+    recorded = dict(disposition.get("localDispositions") or {})
+    recorded.update(applied)
+    disposition["localDispositions"] = recorded
+    plan = receipt.get("plan")
+    family_gate = plan.get("familyGate", {}) if isinstance(plan, Mapping) else {}
+    receipt["remoteGate"] = _remote_gate(
+        str(receipt.get("outcome")),
+        outstanding,
+        local_policy,
+        family_gate,
+        findings_present=bool(findings),
+    )
+
+
 def _remote_gate(
     outcome: str,
     outstanding: int,
     local_policy: str,
     family_gate: Mapping[str, Any],
+    *,
+    findings_present: bool = True,
 ) -> dict[str, Any]:
-    if outstanding or outcome == "findings":
+    # A provider that reports ``findings`` but lists none has given evidence
+    # nobody can inspect or rebut, so it still blocks. Otherwise the count of
+    # findings left outstanding is what decides: rebutted ones do not gate.
+    if outstanding or (outcome == "findings" and not findings_present):
         return {"state": "blocked", "reason": "actionable-local-findings"}
     family_state = family_gate.get("state")
     if family_state in {"sibling-audit-required", "round-extension-required"}:
@@ -1918,7 +2010,9 @@ def execute(
     local_policy: str,
     fix_policy: str,
     allow_reuse: bool,
+    dispositions: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, Any], bool]:
+    supplied = dict(dispositions or {})
     identity = _receipt_identity(target, plan)
     receipt_path = artifact_root / "receipts" / f"{identity}.json"
     if allow_reuse and receipt_path.exists():
@@ -1932,6 +2026,12 @@ def execute(
             raise ReviewInputError(
                 "stored local review receipt failed exact-match validation"
             )
+        if supplied:
+            # A rebuttal is the caller's judgement about evidence already in the
+            # receipt, not new evidence, so it applies to a reused receipt
+            # without re-running any provider.
+            _redispose_receipt(reusable, supplied, local_policy)
+            _atomic_json(receipt_path, reusable)
         return reusable, True
     run_dir = artifact_root / "runs" / attempt_id
     selected_ids = [
@@ -1996,6 +2096,7 @@ def execute(
         attempts = []
     attempts.sort(key=lambda item: str(item["provider"]["id"]))
     findings = _normalize_findings(attempts)
+    applied = _apply_local_dispositions(findings, supplied)
     outstanding = sum(1 for item in findings if item["disposition"] == "outstanding")
     outcome = _aggregate_outcome(attempts)
     limitations = [
@@ -2016,9 +2117,14 @@ def execute(
             "outstanding": outstanding,
             "fixPolicy": fix_policy,
             "maximumFixCommitsBeforeRemote": 1,
+            "localDispositions": applied,
         },
         "remoteGate": _remote_gate(
-            outcome, outstanding, local_policy, plan["familyGate"]
+            outcome,
+            outstanding,
+            local_policy,
+            plan["familyGate"],
+            findings_present=bool(findings),
         ),
         "confidence": {"granted": outcome == "clean", "limitations": limitations},
         "createdAt": time.time(),
@@ -2128,6 +2234,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         default="first",
     )
     parser.add_argument("--finding-family", action="append", default=[])
+    parser.add_argument("--local-disposition", action="append", default=[])
     parser.add_argument("--family-evidence")
     parser.add_argument("--bookkeeping-evidence")
     parser.add_argument("--attempt-id", required=True)
@@ -2221,6 +2328,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 local_policy=args.local_policy,
                 fix_policy=args.fix,
                 allow_reuse=not args.no_reuse,
+                dispositions=_parse_local_dispositions(args.local_disposition),
             )
             report = _report(receipt, reused=reused)
             code = (
