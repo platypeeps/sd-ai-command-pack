@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Final-bundle validation lives with the bookkeeping scripts described here."}
+{"file": ".trellis/spec/tooling/index.md", "reason": "Reason-code and receipt conventions the validator must keep."}
