@@ -371,3 +371,43 @@ PR #321 had sat 121 commits behind main since 2026-08-04, holding the only branc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 311: Land the Codex stdin-redirect contract and bump 0.64.23 (PR #345)
+
+**Date**: 2026-08-06
+**Task**: Land the Codex stdin-redirect contract and bump 0.64.23 (PR #345)
+**Branch**: `docs/codex-lane-stdin-hang`
+
+### Summary
+
+Documented that codex exec must redirect stdin from /dev/null in the background adversarial-review lane, then cleared the release payload gate the shipped-surface change tripped.
+
+### Main Changes
+
+- Documented that the background `codex exec` lane must redirect stdin from /dev/null, along with the near-zero-CPU signature that distinguishes the hang from a real failure and the rule that a hung lane must not be reported as failed
+- Merged origin/main after PR #321 landed; the only conflict was docs/fleet/candidate-validation.json, a generated fleet ledger, resolved by taking main's copy and regenerating rather than hand-merging
+- Bumped 0.64.22 to 0.64.23 with a CHANGELOG entry: the planning adversarial-review contract is a shipped surface, so the doc change alone failed the release payload gate with "release version drift: shipped payload changed without manifest version bump"
+- Authored the PR body's Tooling/generated scope section by hand; pr-body-scope.py --prepare-tooling-body correctly declined because the diff is not generated-only
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4f27104f` | docs(review): require stdin redirection on the Codex adversarial-review lane |
+| `f82c15b4` | chore(release): bump to 0.64.23 for the Codex stdin-redirect contract |
+
+### Testing
+
+- [OK] review-preflight: 0 failures, 0 warnings
+- [OK] sd-review scope=pr: ready, check passed, local clean, 0 findings, exactHeadReady true
+- [OK] Rebutted Copilot's split-code-span finding: rendered the exact two lines through GitHub's /markdown API and got one <code> element with the newline collapsed to a space, matching CommonMark 6.1
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
