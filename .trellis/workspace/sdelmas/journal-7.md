@@ -452,3 +452,45 @@ Every Trellis finalization PR reached the local review provider with an empty di
 ### Next Steps
 
 - None - task complete
+
+
+## Session 313: Close out consolidate-shared-script-helpers
+
+**Date**: 2026-08-06
+**Task**: Close out consolidate-shared-script-helpers
+**Branch**: `chore/close-consolidate-shared-script-helpers`
+
+### Summary
+
+Archived the repository's only in_progress Trellis task after verifying all five acceptance criteria against the tree, and recorded the verification rule as a thinking guide.
+
+### Main Changes
+
+- Verified all five acceptance criteria of 07-28-consolidate-shared-script-helpers against the working tree rather than commit messages, then archived it to .trellis/tasks/archive/2026-08/ with status completed.
+- Established that a git log --grep for finding IDs is unsound evidence: A-046 matched dde46efd only because that commit's body cross-references it while describing a different task's work.
+- Corrected the close-out's provenance claim after Copilot's suppressed review comment: commits 1-2 shipped under this task, but commits 3-4 were split into 08-05-consolidate-state-root-resolution and 08-05-consolidate-git-invocation, which own AC1 and AC4 and are themselves completed.
+- Drafted a 'When Closing Out a Task Whose Work Already Landed' section for .trellis/spec/guides/index.md, then moved it off this branch: a completion finalization delta must contain only bookkeeping paths, and final-bundle rejected the spec file with bundle_scope_invalid ("finalization delta contains a non-bookkeeping path"). The archive commit landed before the spec work here, so no captured base could both include the archive move and exclude the spec file; without force-push the fix is to ship the guide separately.
+- Renumbered this session from 312 to 313 when merging main: PR #347 took 312 first because this branch was blocked on its Gito scope fix. add_session.py numbers from the working tree alone, so both branches independently claimed 312 - the fourth live instance of the defect task 08-06-upstream-add-session-numbering files.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b4eb2d9f` | chore(task): archive 07-28-consolidate-shared-script-helpers |
+| `e3ac3f32` | docs(spec): record the verify-against-the-tree rule for task close-outs |
+| `50095bcf` | fix(task): correct how the close-out describes what this task delivered |
+
+### Testing
+
+- [OK] make check exit 0; 66, 103, 132, and 85 tests across four suites, all OK
+- [OK] Review preflight: 0 failure(s), 0 warning(s)
+- [OK] sd-review scope=pr attempt 2: status ready, check passed, local receipt clean
+- [OK] Copilot round 2 on head 50095bcf: no new comments, no suppressed entries, commit_id equals head
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

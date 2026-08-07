@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 312
+- **Total Sessions**: 313
 - **Last Active**: 2026-08-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~450 | Active |
+| `journal-7.md` | ~496 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 313 | 2026-08-06 | Close out consolidate-shared-script-helpers | `b4eb2d9f`, `e3ac3f32`, `50095bcf` | `chore/close-consolidate-shared-script-helpers` |
 | 312 | 2026-08-06 | Stop excluding .trellis/workspace from the Gito review scope | `af5eb018` | `fix/gito-scope-finalization-empty-diff` |
 | 311 | 2026-08-06 | Land the Codex stdin-redirect contract and bump 0.64.23 (PR #345) | `4f27104f`, `f82c15b4` | `docs/codex-lane-stdin-hang` |
 | 310 | 2026-08-06 | Rebase and land the external-symlink KB advisory fix (PR #321) | `7865666c`, `d219bec5`, `b22e2a05`, `2b670088` | `codex/kb-advisory-external-symlink` |
