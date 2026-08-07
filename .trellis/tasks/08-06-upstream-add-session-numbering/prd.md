@@ -17,7 +17,7 @@ one branch existed.
 
 `.trellis/scripts/add_session.py:482`:
 
-```python
+```text
 current_session = get_current_session(index_file)
 new_session = current_session + 1
 ```
@@ -50,7 +50,7 @@ The collision is invisible until merge. Nothing warns at record time.
 `generate_session_content` (`.trellis/scripts/add_session.py:205`) interpolates
 the caller's text under headings it emits itself:
 
-```python
+```text
 ### Main Changes
 
 {extra_content}
@@ -90,7 +90,7 @@ The empty first heading is what it read.
 The same function builds the table by splitting on commas with no inspection of
 what each hash is:
 
-```python
+```text
 for c in commit.split(","):
     c = c.strip()
     commit_table += f"\n| `{c}` | (see git log) |"
