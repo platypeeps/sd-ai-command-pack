@@ -272,6 +272,7 @@ Filed the second audit gap: task.py create records the branch the author is stan
 - Added .trellis/tasks/08-06-task-create-base-branch-seed recording the seeding line, the three preflight base_branch rules and why each misses a fresh root record, R1-R4, and six acceptance criteria including a regression replay of PR #342's record
 - Framed the upstream-versus-pack-local split as the first design decision: the seeding defect is in vendored Trellis, the detection is pack-local in review-preflight.mjs
 
+
 ### Git Commits
 
 | Hash | Message |
