@@ -3345,6 +3345,48 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(stopped["status"], "stopped")
         self.assertEqual(stopped["phase"], "stopped")
 
+    def test_mutate_state_released_lock_allowance_is_scoped_to_status(self) -> None:
+        # Pin the contract at the function boundary too, so a CLI refactor
+        # cannot quietly widen or drop it.
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, state_path, lock_path = self.make_state(module, root, state_root)
+        allowance = module.LOCK_RELEASING_STATUSES
+        self.assertEqual(allowance, frozenset({"paused"}))
+
+        # Active status, no lock: a hard error even with the allowance passed.
+        lock_path.unlink()
+        with self.assertRaises(module.WorkLoopError) as active:
+            module.mutate_state(
+                root,
+                state["runId"],
+                lambda item: None,
+                state_root=state_root,
+                released_lock_statuses=allowance,
+            )
+        self.assertIn("lock.json", str(active.exception))
+
+        # Paused status, no lock: the documented handback, so the mutation runs.
+        state["status"] = "paused"
+        module.atomic_write_json(state_path, state)
+        mutated = module.mutate_state(
+            root,
+            state["runId"],
+            lambda item: item.__setitem__("stopReason", "retired while paused"),
+            state_root=state_root,
+            released_lock_statuses=allowance,
+        )
+        self.assertEqual(mutated["stopReason"], "retired while paused")
+
+        # Paused status, no lock, but no allowance passed: still an error, so
+        # the default stays strict for every other caller of mutate_state.
+        with self.assertRaises(module.WorkLoopError) as default_strict:
+            module.mutate_state(
+                root, state["runId"], lambda item: None, state_root=state_root
+            )
+        self.assertIn("lock.json", str(default_strict.exception))
+
     def test_cli_stop_still_requires_a_lock_for_an_active_run(self) -> None:
         # The released-lock allowance is scoped to `paused`. An active run whose
         # lock vanished is still a fault, not a documented handback.

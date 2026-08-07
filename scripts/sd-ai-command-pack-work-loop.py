@@ -57,7 +57,7 @@ SECRET_KEY_RE = re.compile(
 STATUSES = frozenset({"active", "paused", "stopped", "completed"})
 # Statuses that release the ownership lock as part of reaching them, so a later
 # mutation must not demand one back. `pause` is the only such status today.
-PAUSED_STATUSES = frozenset({"paused"})
+LOCK_RELEASING_STATUSES = frozenset({"paused"})
 # Historical ledgers may still record ``designs``. New runs expose one public
 # controller mode and express design selection through ``selector`` instead.
 LEDGER_MODES = frozenset({"backlog", "designs"})
@@ -3166,7 +3166,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.run_id,
                 stop,
                 state_root=state_root,
-                released_lock_statuses=PAUSED_STATUSES,
+                released_lock_statuses=LOCK_RELEASING_STATUSES,
             )
             _loaded, _path, lock_path, _identity = load_state_for_repo(
                 args.repo, state_root=state_root
