@@ -55,6 +55,9 @@ SECRET_KEY_RE = re.compile(
     r"(?:token|secret|password|credential|api[_-]?key)", re.IGNORECASE
 )
 STATUSES = frozenset({"active", "paused", "stopped", "completed"})
+# Statuses that release the ownership lock as part of reaching them, so a later
+# mutation must not demand one back. `pause` is the only such status today.
+PAUSED_STATUSES = frozenset({"paused"})
 # Historical ledgers may still record ``designs``. New runs expose one public
 # controller mode and express design selection through ``selector`` instead.
 LEDGER_MODES = frozenset({"backlog", "designs"})
@@ -1676,13 +1679,25 @@ def mutate_state(
     callback: Callable[[dict[str, Any]], None],
     *,
     state_root: Path | None = None,
+    released_lock_statuses: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
+    """Apply ``callback`` to the run's state under its ownership lock.
+
+    ``released_lock_statuses`` names the persisted statuses whose lock the run
+    is *expected* to have handed back, so an absent lock is the documented
+    outcome rather than a fault. ``pause`` releases the lock by design, and a
+    later ``stop`` on that same paused run must still be able to retire it. Any
+    other missing lock stays an error: this narrows the ownership check for one
+    known-released state, it does not make the lock optional.
+    """
     state, state_path, lock_path, _identity = load_state_for_repo(
         repo, state_root=state_root
     )
     if state["runId"] != run_id:
         raise WorkLoopError(f"state belongs to run {state['runId']}, not {run_id}")
-    require_lock(lock_path, run_id)
+    lock_was_released = state["status"] in released_lock_statuses and not lock_path.exists()
+    if not lock_was_released:
+        require_lock(lock_path, run_id)
     callback(state)
     now = utc_now()
     state["updatedAt"] = now
@@ -3144,7 +3159,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "resumePhase": None,
                 }
 
-            state = mutate_state(args.repo, args.run_id, stop, state_root=state_root)
+            # A paused run has already handed its lock back, so retiring it must
+            # not require re-taking one.
+            state = mutate_state(
+                args.repo,
+                args.run_id,
+                stop,
+                state_root=state_root,
+                released_lock_statuses=PAUSED_STATUSES,
+            )
             _loaded, _path, lock_path, _identity = load_state_for_repo(
                 args.repo, state_root=state_root
             )

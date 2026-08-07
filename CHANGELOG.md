@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.64.25 - 2026-08-06
+
+- Let `stop` retire a paused work-loop run. `pause` releases the ownership lock
+  by design, but `stop` reached `require_lock` through `mutate_state` and
+  demanded one back, so a paused run could not be stopped at all — it failed
+  with `work-loop state does not exist: .../lock.json`, naming the lock file
+  through the generic state-read error. The only way out was a
+  `start --run-id` resume purely to re-take a lock that the very next command
+  would drop again, which also flips the run back to `active` and rewrites the
+  checkpoint on the way through. Observed retiring run
+  `d23a9c7f5f7447fd8ec5059776ed27f7` in a consumer repository.
+  `mutate_state` now takes `released_lock_statuses`, and `stop` passes the one
+  status whose lock the run is *expected* to have handed back. The allowance is
+  deliberately narrow: an absent lock is tolerated only when the persisted
+  status is already `paused`, so an active run whose lock vanished still fails
+  exactly as before. Covered from both sides — a paused run stops cleanly, and
+  an active run with a deleted lock still exits 2.
+
 ## 0.64.24 - 2026-08-06
 
 - Stop excluding `.trellis/workspace/**` from the Gito local-review scope.
