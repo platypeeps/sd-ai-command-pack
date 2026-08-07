@@ -420,6 +420,132 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(finding["disposition"], "outstanding")
         self.assertEqual(report["receipt"]["remoteGate"]["state"], "blocked")
 
+    def test_rebutted_local_finding_clears_the_gate_but_stays_visible(self) -> None:
+        root = self.make_repo()
+        self.write_config(root, modes=("finding", "clean"))
+
+        first = self.run_stage(root, "rebuttal", "--local", "prism")
+        blocked = self.report(first)
+        self.assertEqual(first.returncode, 1, first.stdout)
+        self.assertEqual(blocked["receipt"]["remoteGate"]["state"], "blocked")
+        self.assertEqual(
+            blocked["receipt"]["remoteGate"]["reason"], "actionable-local-findings"
+        )
+        identifier = blocked["receipt"]["findings"][0]["id"]
+
+        second = self.run_stage(
+            root,
+            "rebuttal",
+            "--local",
+            "prism",
+            "--local-disposition",
+            f"{identifier}=rebutted",
+        )
+        cleared = self.report(second)
+        receipt = cleared["receipt"]
+
+        self.assertNotEqual(receipt["remoteGate"]["state"], "blocked")
+        self.assertEqual(receipt["disposition"]["outstanding"], 0)
+        self.assertEqual(
+            receipt["disposition"]["localDispositions"], {identifier: "rebutted"}
+        )
+        # The finding is dispositioned, never deleted: the evidence a reviewer
+        # would need to audit the rebuttal has to survive it.
+        self.assertEqual(len(receipt["findings"]), 1)
+        self.assertEqual(receipt["findings"][0]["id"], identifier)
+        self.assertEqual(receipt["findings"][0]["disposition"], "rebutted")
+
+    def test_local_disposition_rejects_an_id_matching_no_finding(self) -> None:
+        root = self.make_repo()
+        self.write_config(root, modes=("finding", "clean"))
+        self.run_stage(root, "unknown-id", "--local", "prism")
+
+        result = self.run_stage(
+            root,
+            "unknown-id",
+            "--local",
+            "prism",
+            "--local-disposition",
+            "0000000000000000=rebutted",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("match no finding", result.stdout)
+
+    def test_local_disposition_rejects_unsupported_grammar(self) -> None:
+        root = self.make_repo()
+        self.write_config(root, modes=("finding", "clean"))
+
+        for index, token in enumerate(("abc=dismissed", "abc", "=rebutted")):
+            with self.subTest(token=token):
+                result = self.run_stage(
+                    root,
+                    f"grammar-{index}",
+                    "--local",
+                    "prism",
+                    "--local-disposition",
+                    token,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("<stable-id>=rebutted", result.stdout)
+
+    def test_duplicate_local_disposition_ids_are_rejected(self) -> None:
+        root = self.make_repo()
+        self.write_config(root, modes=("finding", "clean"))
+
+        result = self.run_stage(
+            root,
+            "duplicate-id",
+            "--local",
+            "prism",
+            "--local-disposition",
+            "abc=rebutted",
+            "--local-disposition",
+            "abc=rebutted",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unique", result.stdout)
+
+    def test_rebuttal_does_not_carry_to_a_different_head(self) -> None:
+        root = self.make_repo()
+        self.write_config(root, modes=("finding", "clean"))
+        first = self.report(self.run_stage(root, "head-one", "--local", "prism"))
+        identifier = first["receipt"]["findings"][0]["id"]
+
+        moved = root / "src/app.py"
+        moved.write_text("seed\nchanged after the rebuttal\n", encoding="utf-8")
+        self.run_git(root, "add", "src/app.py")
+        self.run_git(root, "commit", "-m", "move the head")
+
+        # Finding ids are stable by construction (path, line, summary), because
+        # the family-audit machinery matches findings across rounds by id. So
+        # the protection against a stale rebuttal is not that the id changes:
+        # it is that the receipt is keyed per target, and the disposition is a
+        # per-invocation argument never stored against a later head.
+        moved_result = self.run_stage(root, "head-two", "--local", "prism")
+        moved_receipt = self.report(moved_result)["receipt"]
+
+        self.assertEqual(moved_result.returncode, 1, moved_result.stdout)
+        self.assertEqual(moved_receipt["disposition"]["outstanding"], 1)
+        self.assertEqual(moved_receipt["disposition"].get("localDispositions"), {})
+        self.assertEqual(moved_receipt["findings"][0]["disposition"], "outstanding")
+        self.assertEqual(moved_receipt["remoteGate"]["state"], "blocked")
+
+        # Re-supplying it on the new head is allowed, but it takes a deliberate
+        # act by the caller rather than inheritance from the previous head.
+        again = self.report(
+            self.run_stage(
+                root,
+                "head-two",
+                "--local",
+                "prism",
+                "--local-disposition",
+                f"{identifier}=rebutted",
+            )
+        )["receipt"]
+        self.assertEqual(again["disposition"]["outstanding"], 0)
+
     def test_builtin_adapters_parse_native_reports_and_avoid_gito_filter(self) -> None:
         root = self.make_repo()
         log = self.write_builtin_config(root)

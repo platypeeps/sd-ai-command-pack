@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.64.25 - 2026-08-07
+## 0.64.27 - 2026-08-07
 
 - Close three helper defaults that fight the pack's own gates. Each produced a
   wrong or destructive result on its documented invocation; all three surfaced
@@ -36,6 +36,28 @@
   naming them, with `--allow-narrowing` to accept the deletion deliberately.
   Scan and `--dry-run` are unaffected, so the documented Stage 2b invocation
   never trips it.
+
+## 0.64.26 - 2026-08-07
+
+- Give verified-false local review findings a rebuttal channel. `sd-review`
+  instructs the caller to verify every finding and to rebut rather than comply
+  when one is wrong, but only the remote stage could act on that:
+  `--remote-disposition <id>=rebutted` had no local counterpart. A local
+  provider false positive therefore held `remoteGate:
+  actionable-local-findings` shut with no way past it short of editing the file
+  the provider misread. `--local-disposition <stable-id>=rebutted` closes that,
+  with the same grammar and the same single accepted value. A rebutted finding
+  stays in the receipt as `rebutted` under `disposition.localDispositions`, so
+  the judgement remains auditable; the gate now blocks on findings left
+  outstanding rather than on the provider's aggregate outcome, while a provider
+  reporting findings but listing none still blocks. An id matching no finding
+  at that head is an error rather than a silent no-op, because stale ids copied
+  from an earlier head are the way this would otherwise go wrong. Observed on
+  PR #353, whose diff is four `.trellis/tasks/` files and no code at all: the
+  provider read the PRD's quoted `add_session.py` excerpts as the PR's own
+  source and re-reported the documented defects as new ones, then reported a
+  misspelling of a word spelled correctly at the cited line and absent from the
+  repository entirely.
 
 ## 0.64.24 - 2026-08-06
 
