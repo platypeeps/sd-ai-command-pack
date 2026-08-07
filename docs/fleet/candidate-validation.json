@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-08-07T03:22:20Z",
+  "validatedAt": "2026-08-07T13:35:57Z",
   "packVersion": "0.64.24",
-  "payloadDigest": "sha256:06c6728fd7acea2e434f0aeaf721fd6fadb2c6b119c130e22beba655f55ccd18",
+  "payloadDigest": "sha256:ddae3878596fe9ced36b4b10c9746f26a10febc136b4b395b5ff54abca391dda",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "6b99b08907042d1a7c1e81b90c53be2b7a3f71f8",
+      "baseCommit": "00084f48b5f3bc6cbf30444e4e74f528e5c60851",
       "status": "passed",
       "prepares": [
         [
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "8c85c09477d4c5afbefc77e4ba9de0c47108bffe",
+      "baseCommit": "af3000b16db6970d8b8973ce38dfb717536c5670",
       "status": "passed",
       "prepares": [
         [
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "e6175f8729b436f693ee94929262387ef27e82ae",
+      "baseCommit": "a487b283363012ea316f9c88e7b2deb641e02356",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "b27352880b82472e9cfab19f7fe5115dd7324e30",
+      "baseCommit": "25a0c34f16c66c4f9e522383ab6f395d51ecda88",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "fcf2f273c25cd6974edf4788fa23a1677e48554d",
+      "baseCommit": "cb8ed82e17b0aa20bda2d9435617dd8b94a48a63",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -149,7 +149,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "680f29fb887ae5ca8bb2deff5dc3da0f90ae1c23",
+      "baseCommit": "d8b17160005d49f54fec2c56a460ee10830326d2",
       "status": "passed",
       "prepares": [
         [
