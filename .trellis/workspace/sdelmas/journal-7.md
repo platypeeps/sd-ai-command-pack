@@ -428,7 +428,7 @@ Archived the repository's only in_progress Trellis task after verifying all five
 - Verified all five acceptance criteria of 07-28-consolidate-shared-script-helpers against the working tree rather than commit messages, then archived it to .trellis/tasks/archive/2026-08/ with status completed.
 - Established that a git log --grep for finding IDs is unsound evidence: A-046 matched dde46efd only because that commit's body cross-references it while describing a different task's work.
 - Corrected the close-out's provenance claim after Copilot's suppressed review comment: commits 1-2 shipped under this task, but commits 3-4 were split into 08-05-consolidate-state-root-resolution and 08-05-consolidate-git-invocation, which own AC1 and AC4 and are themselves completed.
-- Added a 'When Closing Out a Task Whose Work Already Landed' section to .trellis/spec/guides/index.md, including that an empty task.json children array means no parent/child link, not that no scope left the task.
+- Drafted a 'When Closing Out a Task Whose Work Already Landed' section for .trellis/spec/guides/index.md, then moved it off this branch: a completion finalization delta must contain only bookkeeping paths, and final-bundle rejected the spec file with bundle_scope_invalid ("finalization delta contains a non-bookkeeping path"). The archive commit landed before the spec work here, so no captured base could both include the archive move and exclude the spec file; without force-push the fix is to ship the guide separately.
 
 
 ### Git Commits
