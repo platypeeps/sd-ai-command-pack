@@ -14,7 +14,7 @@ import sys
 import time
 from collections import Counter
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence, cast
 
 from sd_ai_command_pack_lib import (
     CacheSetupError,
@@ -712,6 +712,25 @@ def _result_row(
     }
 
 
+def _is_external_symlink(kb_root: Path, repo: Path) -> bool:
+    """True iff ``kb_root`` is a symlink whose resolved target is outside ``repo``.
+
+    An external-symlinked ``.obsidian-kb`` points at a live, gitignored,
+    never-shipped vault whose freshness mutates independently of HEAD, so its
+    ``--check`` result is non-deterministic and must be advisory rather than a
+    blocking gate. An in-repo symlink (target resolves under the repo) or a real
+    tracked directory stays deterministic against HEAD and keeps blocking. A
+    broken link resolves (``strict=False``) to its declared target path, so an
+    external broken link is treated as external and an in-repo broken link keeps
+    blocking so the breakage surfaces.
+    """
+    if not kb_root.is_symlink():
+        return False
+    target = kb_root.resolve(strict=False)
+    repo_root = repo.resolve()
+    return repo_root != target and repo_root not in target.parents
+
+
 def _executable_available(command: str, cwd: Path, environment: Mapping[str, str]) -> bool:
     if "/" in command or "\\" in command:
         candidate = Path(command)
@@ -1004,13 +1023,35 @@ def build_report(repo: Path, config_path: Path) -> dict[str, object]:
                 diagnostic="Obsidian KB exists but its read-only freshness helper is missing",
                 remediation="reinstall the command pack, then run sd-update-spec",
             )
-        return command_row(
+        row = command_row(
             "knowledge.obsidian-kb",
             (sys.executable, str(helper), "--check"),
             remediation=(
                 "run sd-update-spec or python3 scripts/sd-ai-command-pack-update-spec-kb.py"
             ),
         )
+        # Advisory downgrade: an external-symlinked .obsidian-kb points at a live
+        # external vault (gitignored, never shipped) whose freshness is
+        # non-deterministic, so a transient failure must not gate a merge. An
+        # in-repo symlink or a tracked directory keeps blocking (see
+        # _is_external_symlink). "skipped" is absent from AGGREGATE_PRECEDENCE,
+        # so the downgraded row never contributes to the blocking verdict.
+        if _is_external_symlink(kb_root, repo) and row.get("status") == "failed":
+            return _result_row(
+                "knowledge.obsidian-kb",
+                "builtin",
+                "skipped",
+                diagnostic=(
+                    "advisory: external-symlinked .obsidian-kb drift is "
+                    "non-deterministic and never shipped; "
+                    + str(row.get("diagnostic", ""))
+                ),
+                remediation=cast(str | None, row.get("remediation")),
+                exit_code=cast(int | None, row.get("exitCode")),
+                command=cast(dict[str, object] | None, row.get("command")),
+                duration_ms=cast(int, row.get("durationMs") or 0),
+            )
+        return row
 
     def review_scope_row() -> dict[str, object]:
         helper = repo / "scripts/sd-ai-command-pack-review-scope.sh"

@@ -292,3 +292,82 @@ Filed the second audit gap: task.py create records the branch the author is stan
 ### Next Steps
 
 - None - task complete
+
+
+## Session 309: File fleet-provider-config-propagation planning task
+
+**Date**: 2026-08-06
+**Task**: File fleet-provider-config-propagation planning task
+**Branch**: `chore/task-fleet-gito-exclusion-propagation`
+
+### Summary
+
+Filed the highest-value gap from the post-0.64.21 audit: the two if-not-exists provider configs have no delivery path for a corrected shipped default, so the Gito exclusion fix reached this repository and none of the six fleet consumers.
+
+### Main Changes
+
+- Added .trellis/tasks/08-06-fleet-provider-config-propagation with the measured per-consumer exclusion counts, R1-R4 plus N1, five open design questions, and six acceptance criteria covering .gito/config.toml and .prism/rules.json alike
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2303e982` | chore(task): add fleet-provider-config-propagation planning task |
+
+### Testing
+
+- [OK] Measured: 6 of 7 fleet repositories still carry the blanket ".trellis/**" entry; only sd-ai-command-pack is narrowed
+- [OK] Measured: all six consumer configs are byte-identical to templates/.gito/config.toml at 0.64.20, so no local customization is at stake today
+- [OK] Measured: exactly 2 of 776 manifest entries use install: if-not-exists
+- [OK] review-preflight: 0 failures, 0 warnings; sd-review scope=pr: ready, check passed, gito clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 310: Rebase and land the external-symlink KB advisory fix (PR #321)
+
+**Date**: 2026-08-06
+**Task**: Rebase and land the external-symlink KB advisory fix (PR #321)
+**Branch**: `codex/kb-advisory-external-symlink`
+
+### Summary
+
+PR #321 had sat 121 commits behind main since 2026-08-04, holding the only branch the housekeeping gate flagged as an anomaly. Rebased it onto current main, reapplied the release stamp for 0.64.22, and converged the review loop.
+
+### Main Changes
+
+- Rebased codex/kb-advisory-external-symlink onto dede0ae8; only docs/fleet/candidate-validation.json and the version-stamped catalogs conflicted, while check.py, its templates mirror, and tests/test_check.py auto-merged
+- Reapplied the release stamp for 0.64.22 -- the branch's original 0.64.6 bump predated the current line by 15 releases -- and regenerated catalogs, the installed manifest mirror, and the fleet candidate ledger
+- Unquoted the four cast() type expressions to match repo convention (Copilot suppressed comment); its stated reason was wrong, since mypy resolves string forward references in cast(), but the consistency point held
+- Merged origin/main after PR #344 and PR #343 landed, renumbering this session from 308 to 310 because both of those branches had already claimed the intervening numbers
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7865666c` | fix(check): downgrade external-symlinked .obsidian-kb freshness to advisory |
+| `d219bec5` | fix(check): converge review — cast KB advisory row values, bump to 0.64.6 |
+| `b22e2a05` | chore(release): restamp KB advisory fix for 0.64.22 |
+| `2b670088` | style(check): use bare type expressions in the KB advisory casts |
+
+### Testing
+
+- [OK] Negative control: reverting templates/scripts/sd-ai-command-pack-check.py to main fails test_external_symlink_kb_failure_is_advisory_skipped and test_is_external_symlink_discriminates_by_resolved_target, so both genuinely exercise the fix
+- [OK] make check: 640 tests across nine suites, all OK, exit 0
+- [OK] mypy scripts/sd-ai-command-pack-check.py: Success, no issues found
+- [OK] diff scripts/ vs templates/scripts/ check.py: identical
+- [OK] sd-review scope=pr pr=321: status ready, check passed, exactHeadReady true, gito clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
