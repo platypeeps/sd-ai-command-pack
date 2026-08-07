@@ -255,3 +255,40 @@ Filed the third and last Trellis task from the 2026-08-06 audit: the review pref
 ### Next Steps
 
 - None - task complete
+
+
+## Session 308: File task-create-base-branch-seed planning task
+
+**Date**: 2026-08-06
+**Task**: File task-create-base-branch-seed planning task
+**Branch**: `chore/task-task-create-base-branch-seed`
+
+### Summary
+
+Filed the second audit gap: task.py create records the branch the author is standing on as base_branch, which names the PR target. A survey found one such record merged on 2026-07-30 and unnoticed for a week, and PR #342 reached a paid review round with the same defect after a clean preflight.
+
+### Main Changes
+
+- Added .trellis/tasks/08-06-task-create-base-branch-seed recording the seeding line, the three preflight base_branch rules and why each misses a fresh root record, R1-R4, and six acceptance criteria including a regression replay of PR #342's record
+- Framed the upstream-versus-pack-local split as the first design decision: the seeding defect is in vendored Trellis, the detection is pack-local in review-preflight.mjs
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1b728f09` | chore(task): add task-create-base-branch-seed planning task |
+
+### Testing
+
+- [OK] Surveyed all 45 active task records: 43 name main; exceptions are 07-30-upstream-task-start-branch-recording (fix/silence-satisfied-scope-advisory) and this task's own record, corrected by hand
+- [OK] Verified the three cited preflight line references resolve to the non-empty rule, the branch-differs rule, and the child-task allowed-targets rule
+- [OK] review-preflight: 0 failures, 0 warnings; sd-review scope=pr: ready, check passed, gito clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

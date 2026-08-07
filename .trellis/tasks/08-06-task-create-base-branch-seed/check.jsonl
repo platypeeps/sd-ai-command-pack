@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tooling/index.md", "reason": "The check must confirm both preflight copies stayed identical and that the new rule reused the existing default-branch resolution rather than adding a second one."}
+{"file": ".trellis/spec/guides/index.md", "reason": "R3 requires the child-task rule survive the new root-task rule. These verification rules -- verify each finding against source, and treat under-claiming as the loop-ending failure -- are the standard for judging that the child path was actually exercised, not assumed intact."}
