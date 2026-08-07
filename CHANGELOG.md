@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.64.23 - 2026-08-06
+
+- Require `< /dev/null` on the `codex exec` invocation in the planning
+  adversarial-review contract. In a background Bash task stdin is not a TTY, so
+  `codex exec` treats it as piped input, prints `Reading additional input from
+  stdin...`, and blocks indefinitely on a write that never arrives. It burns no
+  CPU while hung, so the run reads as slow rather than stuck, and its fully
+  buffered output means it emits nothing at all. Documents the near-zero-CPU
+  signature that distinguishes the trap from a genuine failure, notes that a
+  working foreground probe does not clear the background lane, and states that
+  reporting such a run as `Codex: failed` records an absent second opinion as an
+  attempted one.
+
 ## 0.64.22 - 2026-08-06
 
 - Downgrade `sd-check`'s `knowledge.obsidian-kb` freshness row to advisory when

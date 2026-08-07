@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-08-06T15:05:36Z",
-  "packVersion": "0.64.22",
-  "payloadDigest": "sha256:847608056f9365ac82f0041054bade4ff9624d2e0264a5d3231157febeb355bb",
+  "validatedAt": "2026-08-07T01:09:44Z",
+  "packVersion": "0.64.23",
+  "payloadDigest": "sha256:0402e0dc0b33da459e0c982fc8077a0f8ac9384ac4a7019ddacd2b32196a8937",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "c877136823efe2c7b0f082ef61b40330b954507c",
+      "baseCommit": "a023e4f9f10183569de1f0dde6a54070b4302cda",
       "status": "passed",
       "prepares": [
         [
@@ -86,7 +86,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "93451eb10737568d378e63cc2da33cf918869662",
+      "baseCommit": "b27352880b82472e9cfab19f7fe5115dd7324e30",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "a55d5294af97962f1c1bd344e52bd6e7587bc8f5",
+      "baseCommit": "b1156ebba272ca53a64c481a8a41498d48d1939d",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -149,7 +149,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "d2162a814870922cf0e16405f80f56e16e02f714",
+      "baseCommit": "285e79f756d883ade6c5115c3ec7f14487c7c82f",
       "status": "passed",
       "prepares": [
         [
