@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 309
+- **Total Sessions**: 310
 - **Last Active**: 2026-08-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~330 | Active |
+| `journal-7.md` | ~373 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 310 | 2026-08-06 | Rebase and land the external-symlink KB advisory fix (PR #321) | `7865666c`, `d219bec5`, `b22e2a05`, `2b670088` | `codex/kb-advisory-external-symlink` |
 | 309 | 2026-08-06 | File fleet-provider-config-propagation planning task | `2303e982` | `chore/task-fleet-gito-exclusion-propagation` |
 | 308 | 2026-08-06 | File task-create-base-branch-seed planning task | `1b728f09` | `chore/task-task-create-base-branch-seed` |
 | 307 | 2026-08-06 | File preflight-bare-filename-references planning task | `77bdf7dd`, `5779c242` | `chore/task-preflight-bare-filename-references` |

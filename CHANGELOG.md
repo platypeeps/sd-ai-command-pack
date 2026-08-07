@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.64.22 - 2026-08-06
+
+- Downgrade `sd-check`'s `knowledge.obsidian-kb` freshness row to advisory when
+  `.obsidian-kb` is an absolute symlink to a vault outside the repository. That
+  vault is gitignored, never shipped, and mutates independently of repo HEAD, so
+  `update-spec-kb.py --check` fails non-deterministically against it — and the
+  review coordinator memoizes the transient failure against a state key that
+  excludes the gitignored artifact, false-blocking a merge gate whose GitHub
+  checks are green. Observed on `platypeeps/anomaly-metric-creator` #316 and
+  #325.
+- The downgrade is narrow. A new `_is_external_symlink(kb_root, repo)` helper is
+  true only when `kb_root` is a symlink whose `resolve(strict=False)` target
+  lands outside the repository tree. Only a *failing* row for such a path
+  becomes a non-blocking `skipped`, preserving its original `diagnostic`,
+  `remediation`, `exitCode`, `command`, and `durationMs`; `skipped` is absent
+  from `AGGREGATE_PRECEDENCE`, so it never contributes to the blocking verdict.
+  A passing row stays `passed`. In-repo symlinks and real tracked directories
+  are deterministic against HEAD and keep blocking, which also closes the
+  `is_symlink()`-alone hole. A broken link resolves to its declared target:
+  external becomes advisory, in-repo keeps blocking so the breakage surfaces.
+
 ## 0.64.21 - 2026-08-06
 
 - Narrow the Gito local-review exclusion for `.trellis/`. The single
