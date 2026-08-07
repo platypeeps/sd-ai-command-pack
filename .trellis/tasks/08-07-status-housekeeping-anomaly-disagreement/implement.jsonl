@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tooling/index.md", "reason": "Status collector and housekeeping result schemas that must agree."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Shared classification code path for branch inventory."}

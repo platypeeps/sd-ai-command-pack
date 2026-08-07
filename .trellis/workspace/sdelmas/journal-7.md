@@ -573,3 +573,88 @@ Filed 08-06-session-followups after a sweep of this session found twelve evidenc
 ### Next Steps
 
 - Give 08-06-session-followups a design.md and implement.md; the session-boundary question blocks reproducibility and cannot be settled from repository evidence alone.
+
+
+## Session 316: File four toolchain defects observed while shipping #350, #351, #353
+
+**Date**: 2026-08-07
+**Task**: File four toolchain defects observed while shipping #350, #351, #353
+**Branch**: `chore/task-file-session-defects`
+
+### Summary
+
+Filed four P2 Trellis planning tasks capturing defects hit during the session: a gitignored provenance file stamped by a concurrent session blocking sd-check clone-wide, journal-only-recovery rejecting the merge commit that the collision-avoidance sequence requires, the missing local counterpart to --remote-disposition, and sd-status reporting no anomalies where sd-housekeeping blocks on status_anomalies. Each PRD carries the reproduction as it happened, with reason codes and file/line evidence. Also filled all eight spec manifests with real index paths rather than leaving task.py scaffold placeholders.
+
+### Main Changes
+
+- Filed .trellis/tasks/08-07-provenance-concurrent-session-collision (blocks sd-check on every branch in the clone; CI never sees it)
+- Filed .trellis/tasks/08-07-planning-recovery-rejects-merge-commit (documented practice triggers the validator refusal)
+- Filed .trellis/tasks/08-07-local-finding-rebuttal-channel (a verified-false local finding blocks the gate permanently)
+- Filed .trellis/tasks/08-07-status-housekeeping-anomaly-disagreement (one state, two verdicts, from the same embedded collector)
+- Filled all eight implement.jsonl/check.jsonl manifests with verified TOOLING/GUIDES/BACKEND spec index paths
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cf447280` | chore(task): file four defects found while shipping #350, #351, #353 |
+| `e35005ff` | chore(task): fill spec manifests instead of leaving scaffold placeholders |
+
+### Testing
+
+- [OK] git diff --name-status main...HEAD returns only the four task directories
+- [OK] every spec path cited in the eight manifests verified to exist
+- [OK] sd-review scope=pr on #354 reached ready after the manifests were filled
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 317: Give verified-false local review findings a rebuttal channel
+
+**Date**: 2026-08-07
+**Task**: Give verified-false local review findings a rebuttal channel
+**Branch**: `fix/local-finding-rebuttal-channel`
+
+### Summary
+
+sd-review tells the caller to verify every finding and rebut rather than comply when it is wrong, but only the remote stage could act on that: --remote-disposition had no local counterpart, so a local provider false positive held remoteGate: actionable-local-findings shut with no way past it short of editing the file the provider misread. Adds --local-disposition <stable-id>=rebutted with the same grammar and the same single accepted value, forwarded by the coordinator to the local stage. A rebutted finding stays in the receipt with disposition rebutted; the gate now blocks on findings left outstanding rather than on the provider's aggregate outcome, and a provider reporting findings while listing none still blocks. An id matching no finding at that head is an error, not a silent no-op. Found on PR #353, whose diff is four .trellis/tasks/ files and no code: the local provider read source quoted inside the PRD as the PR's own code, then reported a misspelling for a word spelled correctly at the cited line and absent from the repository.
+
+### Main Changes
+
+- Added --local-disposition to sd-ai-command-pack-review-local.py: LOCAL_DISPOSITION_VALUES, _parse_local_dispositions, _apply_local_dispositions, _redispose_receipt
+- Reworked _remote_gate to block on outstanding findings rather than the aggregate outcome, keeping the empty-findings case blocking
+- Forwarded the flag from the sd-ai-command-pack-review.py coordinator; both scripts/ and templates/scripts/ mirrors kept byte-identical
+- Documented the third coordinator-only evidence flag in all three sd-review SKILL.md copies
+- Bumped the pack to 0.64.26 with a CHANGELOG entry and regenerated the fleet candidate ledger for the changed payload
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e78e0ad2` | fix(review): give verified-false local findings a rebuttal channel |
+| `ebb74c21` | chore(fleet): refresh candidate ledger for the review payload change |
+| `0676ed8a` | chore(release): bump to 0.64.26 for the local rebuttal channel |
+
+### Testing
+
+- [OK] tests.test_review_stage 46 tests, 5 new, covering rebuttal visibility, unknown-id rejection, grammar rejection, duplicate ids, and per-head scoping
+- [OK] combined run of test_review_controller, test_review_local, test_verdict_vocabulary, test_generated_parity, test_pack_drift: 175 tests
+- [OK] ruff check scripts templates/scripts tests: All checks passed!
+- [OK] release payload gate: manifest 0.64.24 -> 0.64.26 with matching CHANGELOG heading; candidate ledger valid
+- [OK] end-to-end on #353: gate moved from blocked/actionable-local-findings to eligible/local-stage-terminal with the finding retained as rebutted
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
