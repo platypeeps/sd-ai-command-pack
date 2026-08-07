@@ -573,3 +573,44 @@ Filed 08-06-session-followups after a sweep of this session found twelve evidenc
 ### Next Steps
 
 - Give 08-06-session-followups a design.md and implement.md; the session-boundary question blocks reproducibility and cannot be settled from repository evidence alone.
+
+
+## Session 316: File four toolchain defects observed while shipping #350, #351, #353
+
+**Date**: 2026-08-07
+**Task**: File four toolchain defects observed while shipping #350, #351, #353
+**Branch**: `chore/task-file-session-defects`
+
+### Summary
+
+Filed four P2 Trellis planning tasks capturing defects hit during the session: a gitignored provenance file stamped by a concurrent session blocking sd-check clone-wide, journal-only-recovery rejecting the merge commit that the collision-avoidance sequence requires, the missing local counterpart to --remote-disposition, and sd-status reporting no anomalies where sd-housekeeping blocks on status_anomalies. Each PRD carries the reproduction as it happened, with reason codes and file/line evidence. Also filled all eight spec manifests with real index paths rather than leaving task.py scaffold placeholders.
+
+### Main Changes
+
+- Filed .trellis/tasks/08-07-provenance-concurrent-session-collision (blocks sd-check on every branch in the clone; CI never sees it)
+- Filed .trellis/tasks/08-07-planning-recovery-rejects-merge-commit (documented practice triggers the validator refusal)
+- Filed .trellis/tasks/08-07-local-finding-rebuttal-channel (a verified-false local finding blocks the gate permanently)
+- Filed .trellis/tasks/08-07-status-housekeeping-anomaly-disagreement (one state, two verdicts, from the same embedded collector)
+- Filled all eight implement.jsonl/check.jsonl manifests with verified TOOLING/GUIDES/BACKEND spec index paths
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cf447280` | chore(task): file four defects found while shipping #350, #351, #353 |
+| `e35005ff` | chore(task): fill spec manifests instead of leaving scaffold placeholders |
+
+### Testing
+
+- [OK] git diff --name-status main...HEAD returns only the four task directories
+- [OK] every spec path cited in the eight manifests verified to exist
+- [OK] sd-review scope=pr on #354 reached ready after the manifests were filled
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
