@@ -3353,7 +3353,10 @@ class WorkLoopTests(InstallTestCase):
         state_root = root.parent / "state"
         state, state_path, lock_path = self.make_state(module, root, state_root)
         allowance = module.LOCK_RELEASING_STATUSES
-        self.assertEqual(allowance, frozenset({"paused"}))
+        # `stop` releases the lock unconditionally, so every status it can set
+        # ends lockless -- not just `paused`.
+        self.assertEqual(allowance, frozenset({"paused", "stopped", "completed"}))
+        self.assertNotIn("active", allowance)
 
         # Active status, no lock: a hard error even with the allowance passed.
         lock_path.unlink()
@@ -3386,6 +3389,43 @@ class WorkLoopTests(InstallTestCase):
                 root, state["runId"], lambda item: None, state_root=state_root
             )
         self.assertIn("lock.json", str(default_strict.exception))
+
+    def test_cli_reconcile_recovers_a_stopped_run_whose_lock_was_released(self) -> None:
+        # `references/run-recovery.md` routes a stopped run to `reconcile`, but
+        # `stop` had already released the lock and `reconcile` demanded one, so
+        # the documented recovery path could not be walked at all. Found while
+        # reconciling a real retired run:
+        #   error: work-loop state does not exist: .../work-loops/<hash>/lock.json
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, _state_path, lock_path = self.make_state(module, root, state_root)
+
+        stopped_result, stopped_out = self._stop(
+            module, root, state_root, state["runId"], "stopped"
+        )
+        self.assertEqual(stopped_result, 0, stopped_out)
+        self.assertFalse(lock_path.exists(), "stop must release the lock")
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "reconcile",
+                    "--repo",
+                    str(root),
+                    "--run-id",
+                    state["runId"],
+                    "--observed-phase",
+                    "stopped",
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(result, 0, stdout.getvalue())
+        self.assertEqual(json.loads(stdout.getvalue())["phase"], "stopped")
 
     def test_cli_stop_still_requires_a_lock_for_an_active_run(self) -> None:
         # The released-lock allowance is scoped to `paused`. An active run whose

@@ -11,12 +11,19 @@
   would drop again, which also flips the run back to `active` and rewrites the
   checkpoint on the way through. Observed retiring run
   `d23a9c7f5f7447fd8ec5059776ed27f7` in a consumer repository.
-  `mutate_state` now takes `released_lock_statuses`, and `stop` passes the one
-  status whose lock the run is *expected* to have handed back. The allowance is
-  deliberately narrow: an absent lock is tolerated only when the persisted
-  status is already `paused`, so an active run whose lock vanished still fails
-  exactly as before. Covered from both sides — a paused run stops cleanly, and
-  an active run with a deleted lock still exits 2.
+  `mutate_state` now takes `released_lock_statuses`, and the commands that act
+  on an already-unlocked run pass it.
+- The same defect blocked `reconcile`, which is worse: `references/run-recovery.md`
+  routes a stopped or red run *to* `reconcile`, so the documented recovery path
+  could not be walked at all. Reconciling a real retired run failed with the
+  same `work-loop state does not exist: .../lock.json`. `reconcile` now passes
+  the allowance too.
+- `stop` runs `release_lock` unconditionally after its mutation, so every
+  status it can set — `paused`, `stopped`, and `completed` — ends lockless, not
+  just `paused`. `LOCK_RELEASING_STATUSES` names all three. `active` is
+  deliberately absent: a live run still owns its lock, so an active run whose
+  lock vanished still fails exactly as before, and omitting the parameter keeps
+  the strict default for every other `mutate_state` caller.
 
 ## 0.64.24 - 2026-08-06
 
