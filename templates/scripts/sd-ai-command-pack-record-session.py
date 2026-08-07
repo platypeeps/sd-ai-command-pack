@@ -57,6 +57,10 @@ ADD_SESSION = Path(".trellis/scripts/add_session.py")
 WORKSPACE = ".trellis/workspace"
 PLACEHOLDERS = ("(Add details)", "(Add test results)", "(see git log)")
 SESSION_HEADING_RE = re.compile(r"^## Session \d+: (.+)$", re.MULTILINE)
+# Commit-table cells: | `b371f91` | subject |
+JOURNAL_COMMIT_CELL_RE = re.compile(r"\|\s*`([0-9a-f]{7,40})`\s*\|")
+MAX_DERIVED_COMMIT_SCAN = 200
+MAX_DERIVED_COMMITS = 25
 
 
 def run_git(*args: str) -> subprocess.CompletedProcess:
@@ -73,6 +77,71 @@ def commit_subject(commit_hash: str) -> str | None:
     # A valid commit can carry an empty subject (--allow-empty-message);
     # only a failed lookup means the hash is unknown.
     return subject[0] if subject else "(empty subject)"
+
+
+def recorded_commit_hashes() -> set[str]:
+    """Every commit hash already cited by a journal commit table."""
+    recorded: set[str] = set()
+    for journal in Path(WORKSPACE).glob("*/journal*.md"):
+        try:
+            text = journal.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        recorded.update(JOURNAL_COMMIT_CELL_RE.findall(text))
+    return recorded
+
+
+def derive_work_commits() -> list[str]:
+    """Unrecorded work commits reachable from HEAD, oldest first.
+
+    ``add_session.py`` writes "(No commits - planning session)" whenever no
+    hash is supplied, and the pack's own final-bundle validator then rejects
+    that session with ``journal_commit_missing`` — two pack surfaces
+    disagreeing by default, so the documented invocation produces an artifact
+    the documented validator always refuses.
+
+    Deriving the obvious answer removes the trap without guessing. A commit
+    counts only when no journal already cites it and it changes something
+    outside the workspace, so journal and index commits never nominate
+    themselves. ``--commit -`` still asserts "genuinely none".
+
+    Returns an empty list whenever the answer is not obvious — nothing to
+    record, git unavailable, no recorded boundary inside the scan window, or
+    more candidates than one session plausibly covers — leaving the previous
+    behavior intact rather than inventing a commit list.
+    """
+    result = run_git(
+        "log", f"--max-count={MAX_DERIVED_COMMIT_SCAN}", "--format=%H", "HEAD"
+    )
+    if result.returncode != 0:
+        return []
+    recorded = recorded_commit_hashes()
+    if not recorded:
+        return []
+    candidates: list[str] = []
+    for full_hash in result.stdout.split():
+        if any(full_hash.startswith(short) for short in recorded):
+            break
+        candidates.append(full_hash)
+    else:
+        # Never reached a recorded commit inside the scan window, so the
+        # boundary is unknown and these may reach back into ancient history.
+        return []
+    work: list[str] = []
+    for full_hash in candidates:
+        files = run_git(
+            "show", "--name-only", "--format=", "--end-of-options", full_hash, "--"
+        )
+        if files.returncode != 0:
+            return []
+        paths = [line for line in files.stdout.splitlines() if line.strip()]
+        if paths and all(path.startswith(f"{WORKSPACE}/") for path in paths):
+            continue
+        work.append(full_hash)
+    if len(work) > MAX_DERIVED_COMMITS:
+        return []
+    work.reverse()
+    return work
 
 
 def current_git_branch() -> str | None:
@@ -258,7 +327,14 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument("--title", required=True)
     parser.add_argument("--summary", required=True)
-    parser.add_argument("--commit", default="", help="Comma-separated commit hashes")
+    parser.add_argument(
+        "--commit",
+        default="",
+        help=(
+            "Comma-separated commit hashes. Omit to derive the unrecorded work "
+            "commits on HEAD; pass '-' to record a session with no commits."
+        ),
+    )
     parser.add_argument(
         "--change",
         action="append",
@@ -311,10 +387,21 @@ def main(argv: list[str]) -> int:
         return 2
 
     commit_arg = args.commit.strip()
-    if commit_arg == "-":
+    asserted_no_commits = commit_arg == "-"
+    if asserted_no_commits:
         # add_session.py's explicit no-commits sentinel.
         commit_arg = ""
     hashes = [h.strip() for h in commit_arg.split(",") if h.strip()]
+    if not hashes and not asserted_no_commits:
+        hashes = derive_work_commits()
+        if hashes and not args.json:
+            print(
+                f"[sd-record-session] --commit not given; recording "
+                f"{len(hashes)} unrecorded work commit(s): "
+                f"{', '.join(h[:7] for h in hashes)}. "
+                "Pass --commit - to record a session with no commits.",
+                file=sys.stderr,
+            )
     seen_hashes: set[str] = set()
     for commit_hash in hashes:
         if commit_hash.startswith("-"):

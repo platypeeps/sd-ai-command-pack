@@ -2309,6 +2309,33 @@ def render_target_update(existing: str, block: str, *, target: Path) -> str:
     return updated
 
 
+_CLUSTER_CATEGORY_RE = re.compile(r"\(`([a-z0-9-]+)`\): \d+ historical comment")
+
+
+def managed_block_categories(text: str) -> set[str]:
+    """Historical-cluster category slugs inside the managed block, if any."""
+    start = text.find(MANAGED_START)
+    if start < 0:
+        return set()
+    end = text.find(MANAGED_END, start + len(MANAGED_START))
+    if end < 0:
+        return set()
+    return set(_CLUSTER_CATEGORY_RE.findall(text[start:end]))
+
+
+def dropped_cluster_categories(existing: str, updated: str) -> list[str]:
+    """Categories the rewrite would delete from the tracked snapshot.
+
+    The managed block is rendered wholesale from whatever GitHub scope the run
+    requested, so a narrowly scoped run — notably the ``--github-pr N``
+    post-cycle pass — renders a block containing only that scope's clusters.
+    Writing it replaces a repository-wide snapshot with a single PR's signals
+    and silently destroys every other cluster. Callers use this to refuse the
+    write rather than discover the loss in a later diff.
+    """
+    return sorted(managed_block_categories(existing) - managed_block_categories(updated))
+
+
 def apply_target_update(
     plan: TargetPlan,
     updated: str,
@@ -2564,6 +2591,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Exceptionally update an explicitly confirmed external target.",
     )
     parser.add_argument(
+        "--allow-narrowing",
+        action="store_true",
+        help=(
+            "Permit a write that deletes historical clusters already recorded "
+            "in the snapshot. Without it, such a write is refused; a narrowly "
+            "scoped run (notably --github-pr) otherwise replaces the "
+            "repository-wide snapshot with one scope's signals."
+        ),
+    )
+    parser.add_argument(
         "--confirmed-external-target",
         metavar="ABSOLUTE_PATH",
         help=(
@@ -2674,6 +2711,14 @@ def main(argv: list[str] | None = None) -> int:
             mode=mode,
             phase="setup",
             reason=planning_error,
+        )
+        return 2
+    if args.allow_narrowing and not (args.update or args.update_external):
+        _print_early_failure(
+            args=args,
+            mode=mode,
+            phase="setup",
+            reason="--allow-narrowing requires --update or --update-external",
         )
         return 2
     if args.dry_run and (args.update or args.update_external):
@@ -2981,6 +3026,35 @@ def main(argv: list[str] | None = None) -> int:
     proposed_changes = int(updated_digest != plan.before_digest)
 
     if args.update or args.update_external:
+        dropped = dropped_cluster_categories(plan.existing_text or "", updated)
+        if dropped and not args.allow_narrowing:
+            reason = (
+                "refusing to write: this run's scope renders a managed block that "
+                f"drops {len(dropped)} historical cluster(s) already recorded in the "
+                f"snapshot ({', '.join(dropped)}). A narrowly scoped run — notably "
+                "--github-pr — renders only that scope's clusters, so writing it "
+                "replaces the repository-wide snapshot. Re-run without narrowing the "
+                "GitHub scope, or pass --allow-narrowing to accept the deletion."
+            )
+            report = _report_payload(
+                mode=mode,
+                plan=plan,
+                findings=findings,
+                comments=comments,
+                review_window=review_window,
+                proposed_changes=proposed_changes,
+                applied_changes=0,
+                write_status="blocked",
+                wrote=False,
+                before_digest=plan.before_digest,
+                after_digest=plan.before_digest,
+                review_learning=review_learning,
+                reason=reason,
+            )
+            if not args.json:
+                print(f"[sd-review-learnings:update] {reason}", file=sys.stderr)
+            _print_report(report, json_output=args.json)
+            return 2
         try:
             wrote = apply_target_update(
                 plan,
