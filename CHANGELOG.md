@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.64.25 - 2026-08-07
 
 - Close three helper defaults that fight the pack's own gates. Each produced a
   wrong or destructive result on its documented invocation; all three surfaced
