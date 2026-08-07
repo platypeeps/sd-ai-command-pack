@@ -111,13 +111,18 @@ Enforcement lives in `templates/.agents/skills/sd-review-pr/SKILL.md` steps 4 an
 
 Adopted 2026-08-06, from `.trellis/tasks/archive/2026-08/07-28-consolidate-shared-script-helpers`.
 That task sat `in_progress` with five unchecked acceptance criteria long after
-all four of its planned commits had merged. Checking which had landed by
-grepping commit messages for the finding IDs reported `A-046` as shipped by
-`dde46efd` — but that commit is a *different* task's, and the only reason it
-matched is that its body says "Records the sd-review coordinator defect found
-while shipping A-046". The conclusion happened to be right; the evidence was
-not. A message-grep searches prose written by whoever typed the commit, which
-includes cross-references to work the commit does not contain.
+the work was done — two of its four planned commits shipped under it, and the
+other two were split mid-implementation into follow-up tasks that inherited two
+of the criteria and were themselves completed. Nothing was outstanding; nobody
+closed it, because no single task's history showed the whole picture.
+
+Checking which commits had landed by grepping commit messages for the finding
+IDs reported `A-046` as shipped by `dde46efd` — but that commit is a *different*
+task's, and the only reason it matched is that its body says "Records the
+sd-review coordinator defect found while shipping A-046". The conclusion
+happened to be right; the evidence was not. A message-grep searches prose
+written by whoever typed the commit, which includes cross-references to work
+the commit does not contain.
 
 - [ ] Deciding whether a change landed → verify against the tree (the symbol
       exists at the expected path, the old copies are gone), not against
@@ -133,6 +138,16 @@ includes cross-references to work the commit does not contain.
 - [ ] Task looks done → confirm it has no children (`subtasks`, `children`, and
       nested task dirs all empty) before archiving. A parent archived over open
       children strands them outside the active root.
+- [ ] About to write "this task delivered X" → read its own `implement.md` to
+      the end first. Scope splits get recorded there, not in `task.json`: this
+      task's `subtasks` and `children` were both empty while `implement.md:211`
+      said two of its four commits had moved to separate tasks. An empty
+      `children` array means "no Trellis parent/child link", not "no scope ever
+      left this task".
+- [ ] A criterion is satisfied by work that landed under a *different* task →
+      say so, and name that task. "Verified against the tree" and "delivered
+      here" are two different claims; an archived PRD that blurs them misleads
+      the next reader about what this task actually did.
 
 ---
 
