@@ -494,3 +494,43 @@ Archived the repository's only in_progress Trellis task after verifying all five
 ### Next Steps
 
 - None - task complete
+
+
+## Session 314: Ship the task close-out verification guide
+
+**Date**: 2026-08-07
+**Task**: Ship the task close-out verification guide
+**Branch**: `docs/guide-close-out-verification`
+
+### Summary
+
+Moved the 'When Closing Out a Task Whose Work Already Landed' guide section out of scratchpad and into the spec, where it had been stranded for three sessions after being pulled off PR #346 to keep that completion delta bookkeeping-only.
+
+### Main Changes
+
+- Added the guide section to .trellis/spec/guides/index.md: verify whether a change landed against the tree rather than git log --grep, and read a task's own implement.md before claiming it delivered something, because scope splits are recorded there and not in task.json.
+- Rewrote the evidence sentence after Copilot flagged a garden path - 'for the finding IDs reported' parses first as 'the IDs that were reported', so the grep had to become the explicit subject. Wrong sentence to make people re-read in a section about reading evidence carefully.
+- Root-caused an sd-check blocker that had nothing to do with this PR: .sd-ai-command-pack/provenance.json is gitignored and had been stamped 0.64.25 by a concurrent session's installer run, so every branch in this working copy audited its 0.64.24 files against 0.64.25 digests. Re-running the installer restamped the one gitignored file and cleared all three drift errors.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fdc9b315` | docs(spec): record the verify-against-the-tree rule for task close-outs |
+| `cf9938d2` | docs(spec): make the grep the subject of the evidence sentence |
+
+### Testing
+
+- [OK] make check not re-run; the branch changes one spec file and CI reported 9 SUCCESS, 2 SKIPPED, 0 failures
+- [OK] install audit after restamp: 0 errors, 8 pre-existing legacy-reference warnings
+- [OK] sd-review scope=pr on 351: ready, check passed, local receipt clean, 0 findings in 7320 ms
+- [OK] Copilot round 2 on cf9938d2: no new comments, 0 unresolved threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- File the provenance-stamp contamination defect: a gitignored stamp written by one branch blocks sd-check on every other branch in the same working copy, with an error naming a version absent from the checkout.
