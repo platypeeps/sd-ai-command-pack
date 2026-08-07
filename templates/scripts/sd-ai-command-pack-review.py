@@ -50,6 +50,7 @@ LOCAL_VALUES = frozenset({"auto", "all", "none"})
 REMOTE_VALUES = frozenset({"auto", "cheap", "deep", "copilot", "none"})
 FIX_VALUES = frozenset({"auto", "ask", "none"})
 REMOTE_DISPOSITION_VALUES = frozenset({"rebutted"})
+LOCAL_DISPOSITION_VALUES = frozenset({"rebutted"})
 CAPABILITY_STATES = frozenset(
     {"ready", "absent", "invalid", "incompatible", "unavailable", "skipped"}
 )
@@ -162,6 +163,31 @@ def _receipt_latency(receipt: Mapping[str, Any]) -> int | None:
         minimum=0,
         maximum=MAX_REMOTE_LATENCY_MS,
     )
+
+
+def _parse_local_dispositions(values: Sequence[str]) -> dict[str, str]:
+    """Validate ``<stable-id>=rebutted`` pairs for the local review stage.
+
+    Deliberately the same grammar and the same single accepted value as the
+    remote channel below: a caller who has verified a finding is false should
+    not have to learn two vocabularies depending on which provider raised it.
+    """
+
+    dispositions: dict[str, str] = {}
+    for value in values:
+        identifier, separator, disposition = value.rpartition("=")
+        if (
+            not separator
+            or not identifier
+            or len(identifier) > 240
+            or any(ord(character) < 32 for character in identifier)
+            or disposition not in LOCAL_DISPOSITION_VALUES
+        ):
+            raise ReviewError("local dispositions must use <stable-id>=rebutted")
+        if identifier in dispositions:
+            raise ReviewError("local disposition ids must be unique")
+        dispositions[identifier] = disposition
+    return dispositions
 
 
 def _parse_remote_dispositions(values: Sequence[str]) -> dict[str, str]:
@@ -717,6 +743,10 @@ def _run_local(
     ]
     for family in args.finding_family:
         command.extend(("--finding-family", family))
+    for identifier, disposition in _parse_local_dispositions(
+        args.local_disposition
+    ).items():
+        command.extend(("--local-disposition", f"{identifier}={disposition}"))
     if args.family_evidence:
         command.extend(("--family-evidence", args.family_evidence))
     if args.bookkeeping_evidence:
@@ -1665,6 +1695,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--finding-family", action="append", default=[])
     parser.add_argument("--family-evidence")
     parser.add_argument("--bookkeeping-evidence")
+    parser.add_argument("--local-disposition", action="append", default=[])
     parser.add_argument("--remote-disposition", action="append", default=[])
     parser.add_argument("--attempt", type=int, default=1)
     parser.add_argument("--round-extension-authorized", action="store_true")
