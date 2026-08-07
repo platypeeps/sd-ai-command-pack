@@ -658,3 +658,42 @@ sd-review tells the caller to verify every finding and rebut rather than comply 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 318: Rescue the stranded upstream-add-session-numbering planning task
+
+**Date**: 2026-08-07
+**Task**: Rescue the stranded upstream-add-session-numbering planning task
+**Branch**: `chore/task-upstream-add-session-numbering`
+
+### Summary
+
+The 222-line PRD for upstream session numbering existed nowhere in the repository except on a branch sitting 18 commits behind main, unpushed and with no PR. This publishes it. The PRD documents three upstream add_session.py defects with file and line evidence: the session number is derived from the working tree rather than from published history, so two concurrent sessions mint the same number (D1, add_session.py:482, get_current_session at :96); the Main Changes section is unfillable by the generator itself (D2, generate_session_content at :205); and the commit table is emitted without resolving commit subjects (D3). Also retags the quoted add_session.py excerpts from python to text, because the local review provider read source quoted inside the PRD as this PR's own code and re-reported the three documented defects as new findings against the PRD.
+
+### Main Changes
+
+- Published .trellis/tasks/08-06-upstream-add-session-numbering with its 222-line PRD, task.json, and both spec manifests
+- Retagged three fenced blocks from python to text so quoted upstream source is not read as this PR's code
+- Merged main to drop the rebuttal-channel payload delta this branch had carried, leaving the diff at four task files
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ba784960` | chore(task): add upstream-add-session-numbering planning task |
+| `9668c73a` | docs(task): tag quoted add_session.py excerpts as text, not python |
+
+### Testing
+
+- [OK] git diff --stat origin/main...HEAD returns only the four task-directory files, 254 insertions
+- [OK] every add_session.py path and line cited in the PRD verified against the upstream file
+- [OK] the three local-provider findings at prd.md:21/54/94 cleared after the fence retag
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
