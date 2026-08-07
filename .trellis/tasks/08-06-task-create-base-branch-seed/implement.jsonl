@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tooling/index.md", "reason": "Owns review-preflight.mjs: the mandatory pre-edit checklist, the primitives to reuse before adding new task-record traversal, and the scripts/ plus templates/scripts/ byte-identical mirror duty."}
+{"file": ".trellis/spec/tooling/bookkeeping-validator.md", "reason": "Documents the structural gotchas in that file, including the rules for adding a top-level const -- which resolving a default branch once per run is likely to need."}
