@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-08-07T01:09:44Z",
-  "packVersion": "0.64.23",
-  "payloadDigest": "sha256:0402e0dc0b33da459e0c982fc8077a0f8ac9384ac4a7019ddacd2b32196a8937",
+  "validatedAt": "2026-08-07T03:22:20Z",
+  "packVersion": "0.64.24",
+  "payloadDigest": "sha256:06c6728fd7acea2e434f0aeaf721fd6fadb2c6b119c130e22beba655f55ccd18",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
@@ -46,7 +46,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "a023e4f9f10183569de1f0dde6a54070b4302cda",
+      "baseCommit": "e6175f8729b436f693ee94929262387ef27e82ae",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "b1156ebba272ca53a64c481a8a41498d48d1939d",
+      "baseCommit": "fcf2f273c25cd6974edf4788fa23a1677e48554d",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -149,7 +149,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "285e79f756d883ade6c5115c3ec7f14487c7c82f",
+      "baseCommit": "680f29fb887ae5ca8bb2deff5dc3da0f90ae1c23",
       "status": "passed",
       "prepares": [
         [

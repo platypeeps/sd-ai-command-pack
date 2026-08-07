@@ -1526,15 +1526,21 @@ class ReviewScopeTests(InstallTestCase):
         ".trellis/scripts/**",
         ".trellis/agents/**",
         ".trellis/tasks/archive/**",
-        ".trellis/workspace/**",
     )
     # Any of these takes the authored delivery documents back out of scope. A
     # diff confined to them then reaches the provider empty, which reads as a
     # provider failure and blocks the review stage outright.
+    #
+    # .trellis/workspace/** belongs here rather than above. The journal and its
+    # index are the only paths every finalization touches -- a completion bundle
+    # is an archive move plus a journal session, a planning bundle is
+    # journal-only -- so excluding them leaves exactly the finalization PRs with
+    # an empty diff.
     GITO_TRELLIS_FORBIDDEN_EXCLUSIONS = (
         ".trellis/**",
         ".trellis/tasks/**",
         ".trellis/spec/**",
+        ".trellis/workspace/**",
     )
 
     def assert_gito_trellis_exclusion_is_narrow(self, config_text: str) -> None:
