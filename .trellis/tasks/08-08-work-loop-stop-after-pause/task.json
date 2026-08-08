@@ -3,7 +3,7 @@
   "name": "work-loop-stop-after-pause",
   "title": "work-loop stop and reconcile fail on a run whose lock was already released",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
