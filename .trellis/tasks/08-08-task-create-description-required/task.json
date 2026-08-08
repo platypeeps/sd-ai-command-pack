@@ -2,7 +2,7 @@
   "id": "task-create-description-required",
   "name": "task-create-description-required",
   "title": "task.py create warns about an empty description that the archive gate later refuses",
-  "description": "task.py create emits a non-fatal warning for an empty description, but review-preflight.mjs:3348 refuses that same record at the pre-archive gate, so the documented create path produces an artifact the documented gate always rejects. Make the description required at create.",
+  "description": "task.py create emits a non-fatal warning for an empty description, but scripts/sd-ai-command-pack-review-preflight.mjs:3348 refuses that same record at the pre-archive gate, so the documented create path produces an artifact the documented gate always rejects. Make the description required at create.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
