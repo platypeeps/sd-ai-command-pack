@@ -1500,3 +1500,38 @@ Filed 08-07-pack-gitignore-pycache, recording that the distributed gitignore omi
 ### Next Steps
 
 - Design the gitignore addition and the installer test that proves consumers stay clean
+
+
+## Session 340: File the sd-ship resume KB gap and record a third pinning occurrence
+
+**Date**: 2026-08-08
+**Task**: File the sd-ship resume KB gap and record a third pinning occurrence
+**Branch**: `task/08-07-ship-resume-kb-gap`
+
+### Summary
+
+Filed 08-07-ship-resume-kb-gap, recording that an sd-ship resume skips the KB refresh its first pass owns, plus a third observed version-pinning occurrence
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-ship-resume-kb-gap with prd.md, task.json, and the check/implement manifests, using the full script path for every KB helper reference
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e9159916` | docs(task): file the sd-ship resume KB gap and record a third pinning occurrence |
+| `692d893d` | docs(task): use the full script path for every KB helper reference |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Design where the resume path re-enters the KB refresh without repeating housekeeping's own
