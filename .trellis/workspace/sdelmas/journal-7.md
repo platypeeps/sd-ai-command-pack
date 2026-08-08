@@ -740,3 +740,39 @@ Three shipped helpers each produced a wrong or destructive result on their docum
 ### Next Steps
 
 - None - task complete
+
+
+## Session 320: File the codex review round-budget increase
+
+**Date**: 2026-08-07
+**Task**: File the codex review round-budget increase
+**Branch**: `chore/file-codex-review-round-budget`
+
+### Summary
+
+Filed a Trellis task to raise the planning adversarial-review budget from three automatic rounds to five and to make exhaustion a request for permission to continue rather than a mandatory stop.
+
+### Main Changes
+
+- Filed 08-07-codex-review-round-budget with the five-round budget, the permission-to-continue exit, and the per-request scoping rule.
+- Recorded the journal-6.md:1411 honesty caveat as evidence the three-round cap already bound before convergence, shipping a change the Codex lane never saw.
+- Kept the material-conflict escalation and the unresolved-blocker gate explicitly unchanged.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d9b1b926bab86b79b8256958d24287295e99481e` | fix(task): target main, not the filing branch |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
