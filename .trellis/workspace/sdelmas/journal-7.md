@@ -1466,3 +1466,37 @@ Filed 08-07-preflight-planning-branch-gap, recording that preflight skips the pl
 ### Next Steps
 
 - Design the branch-null enforcement and a test that fails without it
+
+
+## Session 339: File the distributed gitignore Python-cache omission
+
+**Date**: 2026-08-08
+**Task**: File the distributed gitignore Python-cache omission
+**Branch**: `chore/pack-gitignore-pycache-task`
+
+### Summary
+
+Filed 08-07-pack-gitignore-pycache, recording that the distributed gitignore omits Python cache directories, so consumers see __pycache__ as untracked
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-pack-gitignore-pycache with prd.md, task.json, and the check/implement manifests
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ecfafe24` | chore(task): file the distributed gitignore Python-cache omission |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Design the gitignore addition and the installer test that proves consumers stay clean
