@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tooling/index.md", "reason": "Scopes review-preflight.mjs work, requires reading the target function and its callers before adding traversal logic, and pins the mirror diff this fix must keep clean."}
+{"file": ".trellis/spec/tooling/bookkeeping-validator.md", "reason": "Documents this file's structural gotchas and the accumulated safety properties, including bounded ranges, that a repo-wide manifest sweep must not narrow."}
