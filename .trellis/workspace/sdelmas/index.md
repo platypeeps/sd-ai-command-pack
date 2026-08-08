@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 343
+- **Total Sessions**: 344
 - **Last Active**: 2026-08-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~1646 | Active |
+| `journal-7.md` | ~1683 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 344 | 2026-08-08 | File the sd-review memoized-check defect found from a consumer | `aaf7c710`, `4cd89b5e`, `8a72d5fb`, `765c0f74` | `task/08-07-review-check-stale-cache` |
 | 343 | 2026-08-08 | Plan the codex provider lane ahead of metered local review | `6b7cc41f`, `e3abb7a9`, `3ed66203` | `task/08-07-default-local-review-lanes` |
 | 342 | 2026-08-08 | File the CI preflight full-mode coverage gap and refresh the base_branch survey | `7c9c0075`, `0f4a8eb3`, `f75b44f2`, `e10483d9` | `task/08-07-ci-preflight-mode-gap` |
 | 341 | 2026-08-08 | File the divergent plan-only and executed report payload shapes | `c7e77f15`, `04d7a678` | `chore/file-plan-only-payload-shape` |

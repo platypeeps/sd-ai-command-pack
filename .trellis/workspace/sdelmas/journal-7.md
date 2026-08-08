@@ -1644,3 +1644,40 @@ Filed 08-07-default-local-review-lanes, planning the codex provider lane before 
 ### Next Steps
 
 - Reconcile R1 and AC5/AC6 with the opt-in decision recorded in 08-07-plugin-review-provider-lanes
+
+
+## Session 344: File the sd-review memoized-check defect found from a consumer
+
+**Date**: 2026-08-08
+**Task**: File the sd-review memoized-check defect found from a consumer
+**Branch**: `task/08-07-review-check-stale-cache`
+
+### Summary
+
+Filed 08-07-review-check-stale-cache, recording that sd-review gates on a memoized check result while its inputs are read live, so the gate can pass on stale evidence
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-review-check-stale-cache with prd.md, task.json, and the check/implement manifests, addressing adversarial review, recording base_branch as main per Copilot review, and citing the consumer's guard tests as a cross-repo location
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `aaf7c710` | chore(task): file sd-review memoized-check defect found from a consumer |
+| `4cd89b5e` | fix(task): address adversarial review of the stale-check task |
+| `8a72d5fb` | fix(task): record base_branch as main per Copilot review on PR #358 |
+| `765c0f74` | fix(task): cite the consumer's guard tests as a cross-repo location |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Design the cache invalidation or live re-read that makes the gate agree with its inputs
