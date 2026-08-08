@@ -1331,3 +1331,37 @@ Filed 08-07-preflight-base-diagnosis, recording that final-bundle's diagnosis po
 ### Next Steps
 
 - Design the corrected diagnosis message and its regression test
+
+
+## Session 335: File the record-session merge-commit derivation defect
+
+**Date**: 2026-08-08
+**Task**: File the record-session merge-commit derivation defect
+**Branch**: `chore/file-record-session-merge-commit`
+
+### Summary
+
+Filed 08-07-record-session-merge-commit, recording that record-session derives merge commits as work commits, which the planning receipt then rejects as non-linear
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-record-session-merge-commit with prd.md, task.json, and the check/implement manifests
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6d656c03` | chore(task): file record-session merge-commit derivation defect |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Decide whether record-session should filter merge commits or the receipt should tolerate them
