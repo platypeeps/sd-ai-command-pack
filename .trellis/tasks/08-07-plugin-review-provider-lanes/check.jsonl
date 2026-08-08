@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Outcome aggregation rules that make unavailable a terminal failure, which the eligibility gate must avoid triggering."}
+{"file": ".trellis/spec/tooling/index.md", "reason": "Receipt and disclosure expectations used to assert ran / skipped-not-installed / failed are distinguishable."}

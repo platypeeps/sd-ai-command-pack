@@ -1004,3 +1004,76 @@ update-mode requirements retained in full.
 ### Next Steps
 
 - None - task complete
+
+
+## Session 327: Make third-party model reviewers opt-in rather than automatic on installation
+
+**Date**: 2026-08-08
+**Task**: Make third-party model reviewers opt-in rather than automatic on installation
+**Branch**: `chore/file-plugin-review-lanes`
+
+### Summary
+
+Promoted opt-in to normative requirements 15-22 and closed the requiredProviders bypass
+
+### Main Changes
+
+Made third-party model reviewers opt-in rather than automatic on installation.
+Promoted opt-in from a recommendation in "Open decisions" to normative
+requirements 15-22 in `08-07-plugin-review-provider-lanes`.
+
+The mechanism is grounded in verified code rather than proposed from scratch.
+Shipping the providers `enabled: false` does not work: eligibility filters on
+`enabled` before every selection branch (`review-local.py:1214`), so a disabled
+provider is unreachable rather than off-by-default, and `local=gemini` raises
+`requested local provider is unavailable or ineligible` instead of reviewing.
+`enabled` conflates permission with default selection; opt-in needs them split.
+
+One hole would have made the whole mechanism decorative:
+`selected.extend(by_id[item] for item in required ...)` at `:1276` force-adds
+`policy.requiredProviders` after every selection branch, so an opt-in provider
+named there runs on every review regardless. Requirement 21 rejects that
+combination during configuration validation.
+
+The Codex adversarial lane found two blocking issues in the first draft, both
+confirmed and fixed. The sharpest: the draft made `allowedDataHandling` both
+the default-deny consent switch and an un-widenable ceiling, which makes the
+per-machine overlay impossible to use -- the only way to opt in would be
+editing the fleet-propagated file the overlay exists to avoid. A ceiling and a
+default-off switch cannot be the same field, so `allowedDataHandling` stays a
+prohibition with unchanged defaults and consent moved to the default-selection
+property and the overlay. It also caught that "byte-identical receipts" is
+unsatisfiable once `_digest(config)` changes.
+
+That lane's first run returned a Trellis triage question instead of a review --
+the repository's own SessionStart rule hijacked the prompt. It is prompt-
+fragile and worth knowing about.
+
+Recorded two cross-cutting findings. `08-07-default-local-review-lanes` (#364)
+contradicts opt-in as written: its R1 gives codex `costTier: "none"` so it is
+selected ahead of everything on cost, and its AC5/AC6 require execution on
+presence alone. Flagged on that PR. Separately, two Codex lanes already ship
+this behaviour -- `planning-adversarial-review.md:42` and
+`sd-review-local/SKILL.md:166` -- gated on `command -v codex` with no consent
+check, across 15 tracked paths including templates mirrors, docs, and tests.
+That needs its own task and is recorded as out of scope here.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a669d9c0` | (see git log) |
+| `5221ca18` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
