@@ -1077,3 +1077,46 @@ That needs its own task and is recorded as out of scope here.
 ### Next Steps
 
 - None - task complete
+
+
+## Session 328: Let work-loop stop and reconcile act on a run whose lock was already released
+
+**Date**: 2026-08-08
+**Task**: Let work-loop stop and reconcile act on a run whose lock was already released
+**Branch**: `fix/work-loop-stop-after-pause`
+
+### Summary
+
+pause releases the work-loop ownership lock by design, but stop and reconcile reached require_lock through mutate_state and demanded one back. A paused run could not be stopped, and reconcile — the route references/run-recovery.md sends a stopped or red run to — could not be walked at all. mutate_state now takes released_lock_statuses; stop and reconcile pass LOCK_RELEASING_STATUSES.
+
+### Main Changes
+
+- mutate_state takes released_lock_statuses; an absent lock is the documented outcome for exactly those statuses and an error everywhere else
+- LOCK_RELEASING_STATUSES names paused, stopped, and completed — every status stop can persist — and deliberately excludes active
+- stop and reconcile pass the allowance; every other mutate_state caller keeps the strict default
+- Merged 64 commits of main, resolved the version/generated conflicts, and bumped the pack to 0.64.28
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8549cdc9` | fix(work-loop): let stop retire a run that pause already unlocked |
+| `a779a256` | refactor(work-loop): name the constant for the contract, not the status |
+| `7132bd84` | fix(work-loop): unblock reconcile, and name every lock-releasing status |
+| `910194ff` | chore(task): record the work-loop lock-release task for PR #349 |
+| `9acf535d` | chore(task): start the work-loop lock-release task |
+| `7ffcbd4e` | chore(task): describe the work-loop lock-release task |
+
+### Testing
+
+- [OK] tests/test_work_loop.py: 107 tests, OK
+- [OK] Release payload gate: passed, 0.64.27 -> 0.64.28 across 8 fleet consumers
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #349 through the sd-housekeeping gate
