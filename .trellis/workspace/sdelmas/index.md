@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 327
+- **Total Sessions**: 328
 - **Last Active**: 2026-08-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~1121 | Active |
+| `journal-7.md` | ~1159 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 330 | 2026-08-08 | Correct the housekeeping anomaly task premise to a difference of mode | `189d4e8e` | `chore/housekeeping-anomaly-evidence` |
 | 328 | 2026-08-08 | Let work-loop stop and reconcile act on a run whose lock was already released | `8549cdc9`, `a779a256`, `7132bd84`, `910194ff`, `9acf535d`, `7ffcbd4e` | `fix/work-loop-stop-after-pause` |
 | 327 | 2026-08-08 | Make third-party model reviewers opt-in rather than automatic on installation | `a669d9c0`, `5221ca18` | `chore/file-plugin-review-lanes` |
 | 326 | 2026-08-08 | Revert the sd-propose-pack-task rename and refile as an add-only planning bundle | `699aabf8` | `chore/file-sd-submit-pack-task-v2` |
