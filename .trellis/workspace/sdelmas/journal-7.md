@@ -1432,3 +1432,37 @@ Filed 08-07-claude-skill-surface-gap, recording that the shipped Claude skill su
 ### Next Steps
 
 - Design the resolution-guidance text and the surface-generation test that enforces it
+
+
+## Session 338: File the preflight planning branch-null gap
+
+**Date**: 2026-08-08
+**Task**: File the preflight planning branch-null gap
+**Branch**: `chore/file-preflight-planning-branch-gap`
+
+### Summary
+
+Filed 08-07-preflight-planning-branch-gap, recording that preflight skips the planning branch-null rule it reports as checked
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-preflight-planning-branch-gap with prd.md, task.json, and the check/implement manifests
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `87550146` | chore(task): file preflight skipping the planning branch-null rule |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Design the branch-null enforcement and a test that fails without it
