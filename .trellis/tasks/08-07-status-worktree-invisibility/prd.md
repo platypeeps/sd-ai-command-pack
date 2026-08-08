@@ -10,7 +10,7 @@ actually free.
 
 The status collector has no worktree inventory. Not an incomplete one — none:
 
-```bash
+```text
 $ grep -in "worktree" scripts/sd-ai-command-pack-status.py
 $
 ```
@@ -21,7 +21,7 @@ delegates to the recovery-artifacts helper's read-only classifier. That helper
 deliberately ignores worktrees it does not own
 (`scripts/sd-ai-command-pack-recovery-artifacts.py:818-865`):
 
-```python
+```text
 """Report pack-shaped artifacts that lack a receipt; never adopt or delete.
 
 Genuine user stashes and worktrees (no pack marker, outside the pack
