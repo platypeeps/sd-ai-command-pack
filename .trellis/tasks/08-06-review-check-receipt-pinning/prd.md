@@ -71,9 +71,37 @@ new attempt ID for it.
 4. Only a fresh `--artifact-root` produced a live re-run, which passed
    (`check: passed`, `ready`, `exactHeadReady: true`).
 
-The two occurrences bracket the problem: one repairs local untracked state, the
-other repairs remote state. Neither is reachable by moving the head, and a design
-keyed only to a worktree digest would fix the first and miss the second.
+#### Occurrence 3 — the same shape in a consumer repository (PR #361)
+
+Recorded because it establishes two things the first two occurrences could not:
+the defect is not specific to this repository, and the documented escape hatch
+is broader than stated above.
+
+Hit in `platypeeps/anomaly-metric-creator` on 2026-08-07, shipping PR #361
+through `sd-ship`. Same check as occurrence 1 (`knowledge.obsidian-kb`), same
+sequence:
+
+1. Two `.trellis/spec/` files changed on the branch, so the gitignored
+   `.obsidian-kb` copies went stale. `sd-review` failed on
+   `knowledge.obsidian-kb` with `copies: 477` and two named conflicts.
+2. `sd-ai-command-pack-update-spec-kb.py` repaired it live: `copies: 479`,
+   `conflicts: none`.
+3. Re-running `sd-review` at the unchanged head `2b8f031` replayed the
+   byte-identical stale diagnostic — still `copies: 477`, still the same two
+   conflicts — while the helper reported the repaired state.
+
+**A fresh `--attempt-id` cleared it,** without discarding the artifact root.
+That contradicts the "only a fresh `--artifact-root`" claim recorded for
+occurrences 1 and 2, and it localizes the cache key: the stored result is keyed
+on the attempt ID, and `--attempt-id` overrides that ID directly, so it is a
+strictly cheaper escape than a throwaway artifact root. Whether the earlier two
+occurrences would also have cleared this way was never tested; the workaround
+note below should be read as "the workaround that was tried", not "the only one
+that works".
+
+The three occurrences bracket the problem: two repair local untracked state, one
+repairs remote state. None is reachable by moving the head, and a design keyed
+only to a worktree digest would fix the local ones and miss the remote one.
 
 ## Requirements
 
@@ -131,6 +159,10 @@ keyed only to a worktree digest would fix the first and miss the second.
 - [ ] Regression tests cover both observed sequences — PR #338 (repair local
       gitignored state) and PR #339 (repair remote PR state) — each as fail,
       repair out-of-band, re-invoke, observe pass.
+- [ ] The design records whether `--attempt-id` is a sanctioned escape hatch or
+      an accident of the cache key, and the skill text agrees with that answer.
+      Occurrence 3 used it successfully where the notes claim only
+      `--artifact-root` works, so the two cannot both stand as written.
 - [ ] `.agents/skills/sd-review/SKILL.md` describes the actual invalidation rule.
 
 ## Notes
