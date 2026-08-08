@@ -16,6 +16,16 @@
 > AC9 surface set, and an AC7 baseline command missing the required
 > `--attempt-id`.
 >
+> Round 3 also left three concerns open, because fixing them in-round would have
+> exceeded the review contract's three-round maximum. They were applied
+> afterwards on explicit instruction and are now closed: **C-17**, the
+> `ensembleProviders` absent-key default injecting `codex` into configs that do
+> not define it (fixed by deriving the default from the configured identifiers —
+> see "The absent-key default must be *derived*, not literal"); **C-18**, AC7
+> reading fields at the JSON root that only exist under `.receipt` /
+> `.plan`; and **C-19**, a missing `codex` binary failing the default shell run
+> (see "A missing `codex` binary must not fail the run").
+>
 > This document reflects the corrected design. Where a rejected approach is
 > instructive it is kept under "Rejected alternatives" rather than deleted.
 
@@ -203,15 +213,46 @@ POLICY_KEYS` raises `"review policy must use only supported fields"` (`:507`,
    present downstream and selection never has to branch on absence;
 4. a default supplied by `_default_config()`.
 
-Back-compat: a repository with an existing `.sd-ai-command-pack/review.json`
-omits the key. Because `_default_config()` does not apply to that file, the
-normalizer — not the default config — must supply `["codex", "gito", "prism"]`
-when the key is absent. Getting this backwards yields an empty ensemble and a
-silently skipped substantive review, which is worse than the literal being
-replaced. Members that name a provider the configuration does not define are an
-input error, matching `requiredProviders`; members that name a provider which is
-defined but not currently eligible are simply filtered out, which is what makes
-the codex entry harmless on a machine without the CLI.
+### The absent-key default must be *derived*, not literal (C-17)
+
+A repository with an existing `.sd-ai-command-pack/review.json` omits the key,
+and `_default_config()` does not apply to that file — so the **normalizer**
+supplies the default, not the default config.
+
+An earlier draft said the normalizer should supply the literal
+`["codex", "gito", "prism"]`. That is wrong, and it contradicts this design's
+own compatibility claim. Members are validated against the configured provider
+ids the way `requiredProviders` is (`:519-525`), and configured ids come solely
+from the consumer's own provider list (`:502-505`). A repository defining only
+`prism` and `gito` — the shape of the fixture at
+`tests/test_review_stage.py:66-109` — would get `codex` injected, fail the
+unknown-id check, and hard-error on **every run**. The change would break every
+custom-configured consumer.
+
+The default must therefore be derived from the configuration in hand:
+
+```python
+ENSEMBLE_DEFAULT_ORDER = ("codex", "gito", "prism")
+# when policy.ensembleProviders is absent:
+default_ensemble = [i for i in ENSEMBLE_DEFAULT_ORDER if i in identifiers]
+```
+
+| Configuration | Derived default | Matches today? |
+| --- | --- | --- |
+| shipped default (codex, gito, prism) | `["codex","gito","prism"]` | new behavior, intended |
+| legacy custom (prism, gito) | `["gito","prism"]` | yes — identical to the literal it replaces |
+| custom with only `argv` providers | `[]` | yes — `[p for p in eligible if p.identifier in {"prism","gito"}]` is also empty today |
+
+The empty case is pre-existing behavior, not a regression introduced here. Do
+not "fix" it by falling back to every eligible provider — that is the
+`list(eligible)` mistake rejected above, and it would sweep in custom `argv`
+providers.
+
+An **explicit** `ensembleProviders` stays strictly validated: a member naming a
+provider the configuration does not define is an input error, because the author
+chose it deliberately. A member naming a provider that is defined but not
+currently eligible is simply filtered out — that is what makes the `codex` entry
+harmless on a machine without the CLI.
 
 This:
 
@@ -387,6 +428,40 @@ says "update `--help`" misses it.
 through `SD_AI_COMMAND_PACK_REVIEW_LOCAL_CODEX_COMMAND` keeps that override
 after `codex` becomes builtin, because the custom branch still wins. Moving the
 builtin `case` ahead of it would silently break those consumers.
+
+### A missing `codex` binary must not fail the run (C-19)
+
+`run_prism_reviews` (`:530-538`) and `run_gito_review` (`:591-599`) are
+identical in shape: read `..._MODE` (default `required`), `is_disabled` → warn
+and return, `! have <x>` → warn, `mark_overall_failure`, return.
+
+`run_codex_review` must **not** copy that. Codex is in the new default tool set,
+so under the required shape every machine without the Codex CLI — which is most
+of them — starts failing a command that passes today. That is exactly the
+degradation AC7 guards against in the stage, arriving instead through the shell.
+
+There is no `optional` tier to reach for: `is_disabled` recognizes only
+`0|false|FALSE|no|NO|skip|none`, so the string `optional` currently falls
+through and behaves as required. The tier has to be introduced, as a sibling
+predicate rather than an extension of `is_disabled` — `optional` means "run if
+present", and folding it into the disable list would skip Codex on the machines
+that *do* have it.
+
+| Mode | `codex` present | `codex` absent |
+| --- | --- | --- |
+| `optional` (new default for codex) | runs | warn, return, **no** `mark_overall_failure` |
+| `required` (prism/gito default, unchanged) | runs | warn, `mark_overall_failure` |
+| `0`/`false`/`no`/`skip`/`none` | skipped | skipped |
+
+Prism and gito keep `required`. A consumer that wants the Codex lane enforced
+sets `SD_AI_COMMAND_PACK_REVIEW_LOCAL_CODEX_MODE=required` and gets the failure
+back, which is also what makes the mode testable: the absent-binary run must
+exit 0 by default and non-zero under `required`. Asserting only the first would
+pass against a lane that was never wired up.
+
+Scope handling follows `run_gito_review`, which already reads
+`REVIEW_LOCAL_SCOPE`: `all` reviews the tree, anything else reviews the diff
+against the base.
 
 The **shell** entrypoint has **no `--plan-only` flag** — its parser accepts only `--all`,
 `--codebase`, `--full`, `--full-codebase`, `--help`/`-h`, `--list-tools`,

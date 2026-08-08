@@ -44,15 +44,31 @@ provider, so the baseline is deterministic, free, and offline.
 `--attempt-id` is **required** (`:2240`). `--scope` takes
 `changes|branch|codebase|pr` (`SCOPES`, `:51`) — not the internal target scopes:
 
+`--attempt-id` must differ per invocation, or the reuse path returns a cached
+receipt instead of planning afresh. Capture all three scopes — low-risk and
+substantive-risk paths select differently and a single scope proves only one of
+them. `tests/test_review_stage.py:204-229` shows the same invocation shape:
+
 ```bash
-env PATH="$NOCODEX_PATH" python3 templates/scripts/sd-ai-command-pack-review-local.py \
-  --repo . --scope changes --base main --attempt-id ac7-before --plan-only --json \
-  > .build/ac7/plan-before.json
+for s in changes branch codebase; do
+  env PATH="$NOCODEX_PATH" python3 templates/scripts/sd-ai-command-pack-review-local.py \
+    --repo . --scope "$s" --base main --attempt-id "ac7-before-$s" --plan-only --json \
+    > ".build/ac7/plan-before-$s.json"
+done
 ```
 
-Repeat for `--scope branch` and `--scope codebase`; low-risk and
-substantive-risk paths select differently and a single scope proves only one of
-them. `tests/test_review_stage.py:204-229` shows the same invocation shape.
+`--plan-only` proves selection but never runs a provider, so it cannot show
+per-attempt status or the aggregate outcome — the fields AC7 most needs. Capture
+one **executed** baseline too:
+
+```bash
+env PATH="$NOCODEX_PATH" python3 templates/scripts/sd-ai-command-pack-review-local.py \
+  --repo . --scope changes --base main --attempt-id ac7-run-before --json \
+  > .build/ac7/run-before.json; echo "exit=$?"
+```
+
+Record that exit code. Step 8 re-runs every one of these commands with
+`-after` ids and diffs the pair.
 
 **Two scope vocabularies exist and must not be conflated.** The CLI takes
 `changes|branch|codebase|pr` (`:51`). The provider `scopes` field and
@@ -237,13 +253,24 @@ error.
 - [ ] `review-local.py:149` — add `"ensembleProviders"` to `POLICY_KEYS`.
   Without this, `set(policy) - POLICY_KEYS` at `:507` raises
   `"review policy must use only supported fields"`.
-- [ ] `review-local.py:519-530` — parse it with `_string_list`, reject members
-  that are not configured provider ids the way `requiredProviders` does, and
-  emit it into `normalized_policy` **defaulting to
-  `["codex", "gito", "prism"]` when absent**. The default belongs here, not in
-  `_default_config()`: a repository with its own `.sd-ai-command-pack/review.json`
-  never sees `_default_config()`, and a missing default would give it an empty
-  ensemble and a silently skipped substantive review.
+- [ ] Add `ENSEMBLE_DEFAULT_ORDER = ("codex", "gito", "prism")` at module level.
+- [ ] `review-local.py:519-530` — parse `ensembleProviders` with `_string_list`,
+  reject members that are not configured provider ids the way
+  `requiredProviders` does, and emit it into `normalized_policy`. When the key is
+  **absent**, default to the order **intersected with the configured ids**:
+  `[i for i in ENSEMBLE_DEFAULT_ORDER if i in identifiers]`.
+
+  Not the bare literal. A repository with its own `.sd-ai-command-pack/review.json`
+  never sees `_default_config()`; injecting `codex` into a config that does not
+  define it fails the very unknown-id check added on the line above, and the
+  configuration hard-errors on every run. That would break every
+  custom-configured consumer — the opposite of this task's compatibility goal.
+
+  A legacy config defining `prism` and `gito` derives `["gito", "prism"]`, which
+  is exactly the literal being replaced. A config with only `argv` providers
+  derives `[]`, which is also today's behavior — `[p for p in eligible if
+  p.identifier in {"prism","gito"}]` is empty for it too. Do **not** fall back to
+  every eligible provider in that case; that is the rejected `list(eligible)`.
 - [ ] `review-local.py:_default_config()` — include the key explicitly so the
   shipped default is readable rather than implicit.
 - [ ] `review-local.py:1257-1263` — remove the `{"prism", "gito"}` literal and
@@ -273,9 +300,20 @@ Then prove the back-compat path:
 python3 -m pytest tests/test_review_local.py tests/test_review_stage.py -q 2>&1 | tail -3
 ```
 
-Add a case feeding a config whose `policy` omits `ensembleProviders` and assert
-the normalized policy comes back with all three ids — an empty ensemble is the
-failure mode this step exists to prevent, and it fails silently.
+Three cases, because one default value is wrong for all of them:
+
+- [ ] shipped default config, key omitted → `["codex", "gito", "prism"]`
+- [ ] a config defining only `prism` and `gito` (the
+  `tests/test_review_stage.py:66-109` fixture shape), key omitted →
+  `["gito", "prism"]`, and the configuration **loads without error**. This is
+  the C-17 regression test: a literal default injects `codex`, trips the
+  unknown-id check, and hard-errors here.
+- [ ] a config with only `argv` providers, key omitted → `[]` and no error,
+  matching today's behavior.
+
+An empty ensemble for a config that *does* define `gito`/`prism` is the silent
+failure this step exists to prevent; an empty ensemble for a config that defines
+neither is correct and pre-existing.
 
 ## Step 7 — the shell entrypoint
 
@@ -297,6 +335,56 @@ Seven sites, plus the runner. Enumerate; do not work from `--help`:
 - [ ] `:732`, `:735` — add a `codex)` arm to the per-tool `case`.
 - [ ] `:753`, `:757` — add the `if [ "$NEED_CODEX" -eq 1 ]` execution guard.
 - [ ] Add `run_codex_review` alongside `run_prism_reviews` / `run_gito_review`.
+  Its contract is specified below — it is deliberately **not** a copy of the
+  other two.
+
+### `run_codex_review` — a missing CLI must not fail the run (C-19)
+
+`run_prism_reviews` (`:530-538`) and `run_gito_review` (`:591-599`) share one
+shape: read `..._MODE` defaulting to `required`, `is_disabled` → warn and
+return, `! have <x>` → warn **and `mark_overall_failure`**, return.
+
+Codex must not use that shape. `codex` ships in the default tool set, so under
+the existing shape every machine without the Codex CLI — most of them — starts
+failing a command that passes today. That is the same regression AC7 exists to
+prevent, arriving through the shell instead of the stage.
+
+- [ ] Introduce an `optional` tier. **It does not exist yet**: `is_disabled`
+  matches only `0|false|FALSE|no|NO|skip|none`, and everything else — including
+  the string `optional` — falls through to required-like handling. Add a sibling
+  predicate rather than extending `is_disabled`; `optional` means "run if
+  present", not "do not run", and folding it into the disable list would skip
+  Codex even where it *is* installed.
+
+  ```sh
+  is_optional() { case "${1:-}" in optional|OPTIONAL|soft) return 0 ;; *) return 1 ;; esac; }
+  ```
+
+- [ ] Default `SD_AI_COMMAND_PACK_REVIEW_LOCAL_CODEX_MODE` to `optional`, not
+  `required`. Prism and gito keep `required`; do not touch their defaults.
+
+- [ ] On missing binary, branch on the mode:
+
+  ```sh
+  if ! have codex; then
+    if is_optional "$mode"; then
+      warn "Codex CLI not found on PATH; skipping the Codex lane."
+      return
+    fi
+    warn "Codex is required for $(review_command_name) but was not found on PATH."
+    mark_overall_failure
+    return
+  fi
+  ```
+
+  The `is_optional` arm returns **without** `mark_overall_failure` — that single
+  omission is the whole of C-19. Setting the mode to `required` explicitly must
+  still fail, so a consumer that depends on the lane can enforce it.
+
+- [ ] Scope handling: model it on `run_gito_review`, which already reads
+  `REVIEW_LOCAL_SCOPE`. `all` (from `--all`/`--codebase`/`--full`) reviews the
+  whole tree; anything else reviews the diff against the base. Do not invent a
+  third scope token — the shell's vocabulary is fixed by its arg parser.
 
 **Do not move the custom-command lookup.** `configured_command_for_tool` is
 consulted at `:723-728`, *before* the builtin `case`. A consumer already running
@@ -310,12 +398,18 @@ Validation — invoke it with a stub. The **shell** entrypoint has no
 script at `review-local.py:2246` — that is the flag Step 0 uses. Do not carry it
 across to the shell.)
 
+Redirect to the log and `cat` it afterwards. Do **not** pipe into `tee` and read
+`$?` — in a pipeline `$?` is the *last* command's status, so it reports `tee`'s
+success and the assertion passes no matter what the script returned. (`bash` can
+use `${PIPESTATUS[0]}` instead; redirection is simpler and portable.)
+
 ```bash
 stub="$(mktemp -d)"
 printf '#!/bin/sh\necho STUB-CODEX-RAN >&2\nexit 0\n' > "$stub/codex"
 chmod +x "$stub/codex"
 env PATH="$stub:$PATH" bash templates/scripts/sd-ai-command-pack-review-local.sh codex \
-  2>&1 | tee "$stub/log"; echo "exit=$?"
+  > "$stub/log" 2>&1; rc=$?; cat "$stub/log"; echo "exit=$rc"
+[ "$rc" -eq 0 ] || echo "FAIL: stub run should exit 0, got $rc"
 grep -q 'STUB-CODEX-RAN' "$stub/log" || echo 'FAIL: codex was never invoked'
 grep -q "No command configured for local review tool 'codex'" "$stub/log" \
   && echo 'FAIL: still hitting the unconfigured-tool branch'
@@ -327,6 +421,21 @@ The `--list-tools` check is necessary but not sufficient on its own: that
 function is a hardcoded `printf` independent of dispatch and can be right while
 dispatch is missing. The stub invocation is the load-bearing check.
 
+Then prove the optional-mode contract with the binary genuinely absent — the
+case C-19 is about. Reuse `NOCODEX_PATH` from Step 0:
+
+```bash
+env PATH="$NOCODEX_PATH" bash templates/scripts/sd-ai-command-pack-review-local.sh \
+  > "$stub/nocodex.log" 2>&1; rc=$?; echo "exit=$rc"
+[ "$rc" -eq 0 ] || echo "FAIL: missing codex must not fail the default run (C-19), got $rc"
+env PATH="$NOCODEX_PATH" SD_AI_COMMAND_PACK_REVIEW_LOCAL_CODEX_MODE=required \
+  bash templates/scripts/sd-ai-command-pack-review-local.sh > /dev/null 2>&1; rc=$?
+[ "$rc" -ne 0 ] || echo 'FAIL: mode=required must still fail when codex is absent'
+```
+
+Both halves are required. The first alone passes if the lane was never wired up
+at all; the second proves the mode is actually consulted.
+
 ## Step 8 — tests
 
 - [ ] AC5: stub `codex` on `PATH`, low-risk worktree review → `codex` runs,
@@ -337,34 +446,77 @@ dispatch is missing. The stub invocation is the load-bearing check.
 - [ ] AC7: no `codex` on `PATH` → rerun the Step 0 commands with the same
   `NOCODEX_PATH` and compare against `.build/ac7/`.
 
-  Compare **behavior**, and exclude the three identity fields that necessarily
-  change (`configurationDigest`, `policyDigest`, `receiptId`) — a raw diff fails
-  on them for the wrong reason and invites loosening the assertion until it
-  passes:
+  **The two payloads have different shapes, and no plan field lives at the JSON
+  root in either one.** The executed report does carry `schemaVersion`,
+  `command`, `outcome`, `status`, `run` and `remoteSummary` at the root — but
+  every field AC7 compares sits one level down.
+
+  | | `--plan-only` (`:2310-2317`) | executed (`_report`, `:2173-2185`) |
+  | --- | --- | --- |
+  | plan fields | `.plan.*` | `.receipt.plan.*` |
+  | provider ids | `.plan.providers[].id` | `.receipt.plan.providers[].id` |
+  | policy id | `.plan.policyId` | `.receipt.plan.policyId` |
+  | digests | `.plan.configurationDigest`, `.plan.policyDigest` | `.receipt.plan.configurationDigest`, `.receipt.plan.policyDigest` |
+  | per-attempt status | *absent — nothing ran* | `.receipt.attempts[].status` |
+  | aggregate outcome | *absent*; `.status` is `"planned"` | `.receipt.outcome` |
+  | identity | *absent* | `.receipt.receiptId` |
+
+  `providers` is a list of objects (`_provider_row`), so compare `[].id`, not
+  the rows — `timeoutSeconds` and `version` are noise for this assertion.
+
+  Plan-level comparison, from the Step 0 `--plan-only` baselines:
 
   ```bash
-  jq -S 'del(.configurationDigest,.policyDigest,.receiptId)
-         | {providers: .providers, policyId: .policyId, outcome: .outcome}' \
-    .build/ac7/receipt-before.json > .build/ac7/before.norm
-  jq -S 'del(.configurationDigest,.policyDigest,.receiptId)
-         | {providers: .providers, policyId: .policyId, outcome: .outcome}' \
-    .build/ac7/receipt-after.json > .build/ac7/after.norm
-  diff .build/ac7/before.norm .build/ac7/after.norm && echo "AC7 behavior identical"
+  norm_plan() { jq -S '{providers: [.plan.providers[].id], policyId: .plan.policyId}' "$1"; }
+  for s in changes branch codebase; do
+    norm_plan ".build/ac7/plan-before-$s.json" > ".build/ac7/$s.before"
+    norm_plan ".build/ac7/plan-after-$s.json"  > ".build/ac7/$s.after"
+    diff ".build/ac7/$s.before" ".build/ac7/$s.after" || { echo "AC7 FAIL: $s"; exit 1; }
+  done
+  echo "AC7 plan identical across all three scopes"
+  ```
+
+  Execution-level comparison, which is the one that covers attempt status:
+
+  ```bash
+  norm_run() {
+    jq -S '{providers: [.receipt.plan.providers[].id],
+            policyId:  .receipt.plan.policyId,
+            outcome:   .receipt.outcome,
+            attempts:  [.receipt.attempts[] | {id: .provider.id, status: .status}]}' "$1"
+  }
+  diff <(norm_run .build/ac7/run-before.json) <(norm_run .build/ac7/run-after.json) \
+    && echo "AC7 execution identical"
   ```
 
   Then assert the identity change is real and well-formed, so it is proven
   intentional rather than assumed absent:
 
   ```bash
-  jq -r .configurationDigest .build/ac7/receipt-before.json > .build/ac7/d1
-  jq -r .configurationDigest .build/ac7/receipt-after.json  > .build/ac7/d2
-  ! diff -q .build/ac7/d1 .build/ac7/d2 && grep -Eqx '[0-9a-f]{64}' .build/ac7/d2 \
+  d1=$(jq -r .receipt.plan.configurationDigest .build/ac7/run-before.json)
+  d2=$(jq -r .receipt.plan.configurationDigest .build/ac7/run-after.json)
+  [ "$d1" != "$d2" ] && printf '%s' "$d2" | grep -Eqx '[0-9a-f]{64}' \
     && echo "configurationDigest changed once, still 64-hex"
   ```
 
-  Adjust the `jq` paths to the receipt's actual shape. The rule, not the
-  expression, is the requirement: provider list, policy id, and outcome
-  identical; digests different.
+  Guard against reading a field that does not exist — `jq -r` on a missing path
+  prints `null`, and two `null`s compare equal, so a wrong path reports a false
+  pass. Assert non-null before comparing:
+
+  ```bash
+  for f in .build/ac7/run-*.json; do
+    jq -e '.receipt.plan.policyId != null and (.receipt.attempts | length) > 0' "$f" \
+      > /dev/null || { echo "FAIL: $f has no receipt payload — wrong jq path or wrong flags"; exit 1; }
+  done
+  ```
+
+- [ ] AC7 must also exercise the coordinator, not only the stage. The regression
+  being prevented is `review.py:1889-1895` returning exit 3 with
+  `status="failed"` when `local_status in {"unavailable","failed","cancelled"}`.
+  Run `sd-ai-command-pack-review.py` with no `codex` on `PATH` and assert the
+  exit code is **not** 3 and the reported status is not `failed`. The stage-level
+  diff cannot show this: the stage can look identical while the coordinator still
+  rejects its outcome.
 - [ ] AC2: assert the two default configs agree on provider ids and cost tiers.
 - [ ] `tests/test_review_stage.py:1115-1118` — the exact-set assertion
   `["gito", "prism"]` for `substantive-ensemble` becomes
