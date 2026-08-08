@@ -1365,3 +1365,37 @@ Filed 08-07-record-session-merge-commit, recording that record-session derives m
 ### Next Steps
 
 - Decide whether record-session should filter merge commits or the receipt should tolerate them
+
+
+## Session 336: File the superseded-workflow-run eligibility defect
+
+**Date**: 2026-08-08
+**Task**: File the superseded-workflow-run eligibility defect
+**Branch**: `task/08-07-eligibility-superseded-runs`
+
+### Summary
+
+Filed 08-07-eligibility-superseded-runs, recording that pr-eligibility counts superseded workflow runs when judging whether a head's checks are green
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-eligibility-superseded-runs with prd.md, task.json, and the check/implement manifests
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a3397782` | docs(task): file the superseded-workflow-run eligibility defect |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Design the run-selection rule that ignores superseded runs for the current head
