@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tooling/bookkeeping-validator.md", "reason": "Conventions for the pack's validator and probe scripts, including how additive-only diagnostics and reason codes are expected to behave."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "The decision spans the probe's result contract, the retryable/indeterminate pair, and the sd-ship watch coordinator that consumes it; this guide covers reasoning across that boundary."}
