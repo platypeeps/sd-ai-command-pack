@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 342
+- **Total Sessions**: 343
 - **Last Active**: 2026-08-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~1609 | Active |
+| `journal-7.md` | ~1647 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 343 | 2026-08-08 | Plan the codex provider lane ahead of metered local review | `6b7cc41f`, `1917953c`, `a8d17dd6`, `e3abb7a9`, `3ed66203` | `task/08-07-default-local-review-lanes` |
 | 342 | 2026-08-08 | File the CI preflight full-mode coverage gap and refresh the base_branch survey | `7c9c0075`, `0f4a8eb3`, `f75b44f2`, `e10483d9` | `task/08-07-ci-preflight-mode-gap` |
 | 341 | 2026-08-08 | File the divergent plan-only and executed report payload shapes | `c7e77f15`, `04d7a678` | `chore/file-plan-only-payload-shape` |
 | 340 | 2026-08-08 | File the sd-ship resume KB gap and record a third pinning occurrence | `e9159916`, `692d893d` | `task/08-07-ship-resume-kb-gap` |
