@@ -1122,6 +1122,43 @@ pause releases the work-loop ownership lock by design, but stop and reconcile re
 - Merge PR #349 through the sd-housekeeping gate
 
 
+## Session 329: File the Codex lane consent gate as a planning task
+
+**Date**: 2026-08-08
+**Task**: File the Codex lane consent gate as a planning task
+**Branch**: `chore/file-codex-lane-consent`
+
+### Summary
+
+Both shipped Codex review lanes launch on a successful capability probe alone, with no consent step anywhere in the path. 08-07-plugin-review-provider-lanes settled that rule for the planned provider mechanism and left these two live surfaces to their own task; this is that task. Filed 08-08-codex-lane-consent-gate with 13 requirements, adopting the precedent rather than inventing a second consent system.
+
+### Main Changes
+
+- Filed 08-08-codex-lane-consent-gate: consent is per lane, not per tool and not global; absent consent resolves to the existing skipped path
+- Specified the consent signal concretely — path under the user state root, schema, reader, grant and revoke — because 'consent is recorded' is otherwise unfalsifiable
+- Reading the consent record fails closed on missing, unparseable, wrong-schema, unreadable, or non-regular file
+- Recorded the 14 real surfaces carrying the capability gate, and the rejected shared-per-tool alternative so it is not reopened
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3d8abb41` | chore(task): gate the shipped Codex review lanes on consent |
+| `26f58f8b` | chore(task): make consent per lane and specify the signal |
+
+### Testing
+
+- [OK] Codex adversarial review: 7 concerns raised, each verified against code; confirmed ones fixed before commit
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Design the consent record schema and reader for 08-08-codex-lane-consent-gate
+
 ## Session 330: Correct the housekeeping anomaly task premise to a difference of mode
 
 **Date**: 2026-08-08
