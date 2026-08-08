@@ -35,12 +35,26 @@ The premise in that comment — "PRDs/specs describe current state" — is where
 breaks. A PRD describing current state routinely needs to name a path that is
 currently *absent*, and saying so is the whole point of the sentence.
 
-### `main` is red right now
+### `main` was red, and which CI lane you took decided whether you saw it
 
 ```
 FAIL .trellis/tasks/08-07-distributed-gitignore-python-cache/prd.md:98 references missing path scripts/check_review_readiness.sh.
 FAIL .trellis/tasks/08-07-distributed-gitignore-python-cache/prd.md:132 references missing path scripts/__pycache__/y.pyc.
 ```
+
+Both were fixed on 2026-08-08 by removing the backticks, purely to unblock CI;
+requirement 4 below requires replacing that workaround with the real mechanism.
+
+The routing is worth recording. Two pushes of the same branch, same defect:
+
+| Push | Classified | Preflight | Result |
+| --- | --- | --- | --- |
+| `f3ea4dd6` | `mode=full` | skipped | green |
+| `398ae8f0` | `mode=bookkeeping` | ran | red |
+
+Nothing about the offending content differed. `08-07-ci-preflight-full-mode-gap`
+owns that routing defect; it is named here because it is why these two failures
+survived on `main` at all.
 
 Both are false positives, and the first is self-refuting — the sentence
 containing the path says the file is not here:
@@ -117,8 +131,11 @@ coherently, and whichever lands second must not re-open what the first closed.
    not acceptable.
 3. `optionalReferencePaths` keeps working unchanged for what it is actually for:
    paths that are optional everywhere, such as generated artifacts.
-4. The two live `main` failures are fixed using the new mechanism, and `main`
-   returns to a clean preflight.
+4. The two references in `08-07-distributed-gitignore-python-cache/prd.md` are
+   converted from the current backtick-stripping workaround to the new marker.
+   That workaround was applied on 2026-08-08 to unblock CI (see below) and is the
+   same degradation this document applies to itself; both must be reverted
+   together.
 5. Genuine rot still fails. Marking one reference must not weaken the check for
    any other reference to the same path in the same file or elsewhere.
 6. The change lands in `templates/scripts/sd-ai-command-pack-review-preflight.mjs`
