@@ -180,6 +180,46 @@ the head it evaluated, it simply never looked. And the head guaranteed to be
 routed `full` is the first one — which every pull request has, and which some
 have only one of.
 
+### There is no post-merge net either
+
+The reasonable assumption is that a defect merging unvalidated gets caught by the
+`push` run on `main` — the action gate at `:137` only applies to `pull_request`
+events, so a push is free to classify `bookkeeping`. It does not happen. The
+three most recent `main` push runs at the time of writing — 31196858902
+(`4378d37b`), 31194382584 (`cdc17dd1`), 31193550256 (`15df0841`) — each show
+`Validate bookkeeping head = skipped`, read from the jobs API. A merge commit
+does not satisfy the classifier's base-identity and prior-evidence conditions, so
+it degrades to `full` like everything else.
+
+Content that merges unvalidated is therefore never validated, before or after.
+
+### Measured blast radius, at the time of filing
+
+This is not a latent risk awaiting a future pull request. Of twelve open pull
+requests in this repository, five have exactly one commit and one `Tests` run —
+so their only head is the `opened` head — and every one of them is `CLEAN` and
+mergeable:
+
+| PR | Files | All under `.trellis/`? | `Validate bookkeeping head` |
+|---|---|---|---|
+| #363 | 4 | yes | skipped |
+| #362 | 12 | yes | skipped |
+| #359 | 4 | yes | skipped |
+| #357 | 4 | yes | skipped |
+| #356 | 4 | yes | skipped |
+
+Every one is a planning-artifact filing — precisely the content the preflight's
+Trellis and documentation-reference checks exist to validate — and not one of
+them has been validated by CI. Any of them can be merged today, and nothing
+downstream will look at it afterwards.
+
+Do not treat the specific numbers as durable: the set changes as pull requests
+open, merge, and receive second pushes, and the count must be re-derived rather
+than quoted at implementation time. What is durable is the shape — a pull request
+that is authored once, opened, reviewed, and merged without a second push never
+has its Trellis content validated, and single-commit planning filings are the
+normal case in this repository, not an edge case.
+
 ## Requirements
 
 - The preflight's validation must run on any head whose diff touches the paths
