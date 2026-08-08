@@ -50,7 +50,8 @@ file.
 1. `task.py archive` moved the task, making the KB stale (917 of 920 copies).
 2. `sd-review --attempt 3` ran `sd-check`, which failed on `knowledge.obsidian-kb`,
    and stored that failure.
-3. `update-spec-kb.py` repaired the KB; `--check` exited 0 with `conflicts: none`.
+3. `scripts/sd-ai-command-pack-update-spec-kb.py` repaired the KB; `--check`
+   exited 0 with `conflicts: none`.
 4. Attempts 3, 4, and 5 still returned the byte-identical stale diagnostic.
 5. Only a fresh `--artifact-root` produced a live re-run, which passed.
 
@@ -84,8 +85,8 @@ sequence:
 1. Two `.trellis/spec/` files changed on the branch, so the gitignored
    `.obsidian-kb` copies went stale. `sd-review` failed on
    `knowledge.obsidian-kb` with `copies: 477` and two named conflicts.
-2. `sd-ai-command-pack-update-spec-kb.py` repaired it live: `copies: 479`,
-   `conflicts: none`.
+2. `scripts/sd-ai-command-pack-update-spec-kb.py` repaired it live:
+   `copies: 479`, `conflicts: none`.
 3. Re-running `sd-review` at the unchanged head `2b8f031` replayed the
    byte-identical stale diagnostic — still `copies: 477`, still the same two
    conflicts — while the helper reported the repaired state.
@@ -146,9 +147,10 @@ only to a worktree digest would fix the local ones and miss the remote one.
 
 ## Acceptance Criteria
 
-- [ ] A failing `knowledge.obsidian-kb` check, repaired by `update-spec-kb.py`
-      alone with no new commit, clears on the next `sd-review` invocation for the
-      same head and the same artifact root.
+- [ ] A failing `knowledge.obsidian-kb` check, repaired by
+      `scripts/sd-ai-command-pack-update-spec-kb.py` alone with no new commit,
+      clears on the next `sd-review` invocation for the same head and the same
+      artifact root.
 - [ ] A passing check on an unchanged head is still reused, proven by an
       assertion that the check subprocess runs once across two invocations.
 - [ ] No new path can report `check: passed` without the check process exiting 0

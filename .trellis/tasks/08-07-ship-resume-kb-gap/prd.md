@@ -143,8 +143,8 @@ either leaves the other intact.
 
 - Source: shipping `08-07-capture-ship-review-learnings` on PR #361 in
   `platypeeps/anomaly-metric-creator`, 2026-08-07. The chain merged cleanly, but
-  only after a manual `update-spec-kb.py` run that no stage in the resumed path
-  would have performed.
+  only after a manual `scripts/sd-ai-command-pack-update-spec-kb.py` run that
+  no stage in the resumed path would have performed.
 - Distinct from `08-06-review-check-receipt-pinning` and
   `08-07-review-check-stale-cache`, both of which concern a *repaired* check not
   clearing. Both defects fired on this one invocation, in sequence, which is why
