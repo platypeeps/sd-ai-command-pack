@@ -1158,3 +1158,39 @@ Both shipped Codex review lanes launch on a successful capability probe alone, w
 ### Next Steps
 
 - Design the consent record schema and reader for 08-08-codex-lane-consent-gate
+
+## Session 330: Correct the housekeeping anomaly task premise to a difference of mode
+
+**Date**: 2026-08-08
+**Task**: Correct the housekeeping anomaly task premise to a difference of mode
+**Branch**: `chore/housekeeping-anomaly-evidence`
+
+### Summary
+
+The task claimed sd-status and sd-housekeeping disagree about one body of evidence. That premise was wrong: housekeeping invokes the collector with --expect-clean, and strict_anomalies is appended only under expect_clean, so advisory and strict are deliberately different modes rather than two readings of one result. Retitled the task to name the real defect — leftover local branches block every housekeeping run as a strict anomaly — and recorded the correction instead of building on the false premise.
+
+### Main Changes
+
+- Recorded the correction: this is a difference of mode, not a contradiction; housekeeping.sh:1132 passes --expect-clean and status.py:2066 appends strict_anomalies only under it
+- Named the exact line the verdict turns on — housekeeping-result.py:237 reads status.anomalies from the embedded collector result, and :255-259 turns it into blocked
+- Replaced the vague reproduction claim with seven verified reproductions on 2026-08-07/08 and the real 14-branch list
+- Declared the dependency on merged 08-07-status-worktree-invisibility and narrowed the exit-zero criterion to the leftover-branch condition
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `189d4e8e` | chore(task): correct the premise and add seven reproductions |
+
+### Testing
+
+- [OK] Codex adversarial review: blocker 3 invalidated the task's central premise; verified against code and recorded as a correction
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Answer open question 1 in design.md: which surface is wrong
