@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 319
+- **Total Sessions**: 322
 - **Last Active**: 2026-08-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~739 | Active |
+| `journal-7.md` | ~885 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,10 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 323 | 2026-08-07 | File the sd-status worktree blind spot | `a8ed88a7`, `82970640` | `chore/file-status-worktree-invisibility` |
+| 322 | 2026-08-07 | Integrate main into the codex round-budget filing branch | `1c6faf5b`, `d9b1b926` | `chore/file-codex-review-round-budget` |
+| 321 | 2026-08-07 | File the codex review round-budget increase | `d9b1b926bab86b79b8256958d24287295e99481e` | `chore/file-codex-review-round-budget` |
+| 320 | 2026-08-07 | File three fail-open defects found auditing hoa-manager | `b7a4afd891aadc0a8c2104c0df413ea89618da3c` | `chore/file-hoa-manager-fail-open-defects` |
 | 319 | 2026-08-07 | Close three helper defaults that fight the pack's own gates | `6559ac89`, `237805e3`, `45d7a12a` | `fix/pack-helper-defaults-and-guards` |
 | 318 | 2026-08-07 | Rescue the stranded upstream-add-session-numbering planning task | `ba784960`, `9668c73a` | `chore/task-upstream-add-session-numbering` |
 | 317 | 2026-08-07 | Give verified-false local review findings a rebuttal channel | `e78e0ad2`, `ebb74c21`, `0676ed8a` | `fix/local-finding-rebuttal-channel` |
