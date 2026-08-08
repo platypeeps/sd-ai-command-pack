@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 340
+- **Total Sessions**: 341
 - **Last Active**: 2026-08-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~1537 | Active |
+| `journal-7.md` | ~1572 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 341 | 2026-08-08 | File the divergent plan-only and executed report payload shapes | `c7e77f15`, `04d7a678` | `chore/file-plan-only-payload-shape` |
 | 340 | 2026-08-08 | File the sd-ship resume KB gap and record a third pinning occurrence | `e9159916`, `692d893d` | `task/08-07-ship-resume-kb-gap` |
 | 339 | 2026-08-08 | File the distributed gitignore Python-cache omission | `ecfafe24` | `chore/pack-gitignore-pycache-task` |
 | 338 | 2026-08-08 | File the preflight planning branch-null gap | `87550146` | `chore/file-preflight-planning-branch-gap` |
