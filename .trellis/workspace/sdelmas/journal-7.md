@@ -1399,3 +1399,36 @@ Filed 08-07-eligibility-superseded-runs, recording that pr-eligibility counts su
 ### Next Steps
 
 - Design the run-selection rule that ignores superseded runs for the current head
+
+
+## Session 337: File the Claude skill-surface resolution-guidance gap
+
+**Date**: 2026-08-08
+**Task**: File the Claude skill-surface resolution-guidance gap
+
+### Summary
+
+Filed 08-07-claude-skill-surface-gap, recording that the shipped Claude skill surfaces omit the resolution guidance their adapters assume
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-claude-skill-surface-gap with prd.md, task.json, and the check/implement manifests
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6b3d47ee` | chore(task): file the Claude skill-surface resolution-guidance gap |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Design the resolution-guidance text and the surface-generation test that enforces it

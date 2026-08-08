@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 336
+- **Total Sessions**: 337
 - **Last Active**: 2026-08-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~1401 | Active |
+| `journal-7.md` | ~1434 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 337 | 2026-08-08 | File the Claude skill-surface resolution-guidance gap | `6b3d47ee` | `-` |
 | 336 | 2026-08-08 | File the superseded-workflow-run eligibility defect | `a3397782` | `task/08-07-eligibility-superseded-runs` |
 | 335 | 2026-08-08 | File the record-session merge-commit derivation defect | `6d656c03` | `chore/file-record-session-merge-commit` |
 | 334 | 2026-08-08 | File the final-bundle wrong-base diagnosis defect | `1ce4e97b` | `chore/file-preflight-base-diagnosis` |
