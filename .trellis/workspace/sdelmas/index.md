@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 324
-- **Last Active**: 2026-08-07
+- **Total Sessions**: 325
+- **Last Active**: 2026-08-08
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~958 | Active |
+| `journal-7.md` | ~1006 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 326 | 2026-08-08 | Revert the sd-propose-pack-task rename and refile as an add-only planning bundle | `699aabf8` | `chore/file-sd-submit-pack-task-v2` |
 | 325 | 2026-08-07 | File the uncurated task-manifest gap | `6a0f47e1` | `chore/file-task-context-never-curated` |
 | 324 | 2026-08-07 | File the missing task.py rename command | `06df9e51`, `8bcb4054` | `chore/file-upstream-task-rename` |
 | 323 | 2026-08-07 | File the sd-status worktree blind spot | `a8ed88a7`, `82970640` | `chore/file-status-worktree-invisibility` |

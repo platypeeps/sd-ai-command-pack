@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tooling/index.md", "reason": "Surface-drift and command-catalog gates that verify the new command is registered everywhere."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Test conventions for asserting the caller's checkout is unchanged across success and failure paths."}
