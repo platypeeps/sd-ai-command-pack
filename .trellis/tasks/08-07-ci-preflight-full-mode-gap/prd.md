@@ -160,6 +160,21 @@ classification is known without reading the step summary. `CI Result` was
 `success`. So a pull request consisting exclusively of Trellis records had those
 records validated by nothing, and the required check said so was fine.
 
+Pushing the correction to that same pull request then produced the other side of
+the control, on one branch, with only the event action differing:
+
+| Run | Head | Action | Mode | `Validate bookkeeping head` | `CI Result` |
+|---|---|---|---|---|---|
+| 31233436772 | `7c9c0075` | opened | full | skipped | success |
+| 31233932809 | `0f4a8eb3` | synchronize | bookkeeping | ran, success | success |
+
+On the second head every expensive job — `unittest`, `Shell coverage`, `lint`,
+`security`, `Release payload gate` — reported `skipped`, and the coverage
+tooling, validation, and coverage report steps all ran. This is a stronger
+demonstration than PR #358 because there is no content confound in either
+direction: the same branch, validated on one head and not on the other, decided
+solely by whether the event was an open or a push.
+
 That is the failure mode stated exactly: the required check is not wrong about
 the head it evaluated, it simply never looked. And the head guaranteed to be
 routed `full` is the first one — which every pull request has, and which some
