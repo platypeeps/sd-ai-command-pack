@@ -956,3 +956,51 @@ Filed a Trellis task recording that nothing ever requires a task's spec manifest
 ### Next Steps
 
 - None - task complete
+
+
+## Session 326: Revert the sd-propose-pack-task rename and refile as an add-only planning bundle
+
+**Date**: 2026-08-08
+**Task**: Revert the sd-propose-pack-task rename and refile as an add-only planning bundle
+**Branch**: `chore/file-sd-submit-pack-task-v2`
+
+### Summary
+
+Refiled the sd-submit-pack-task planning task add-only after the rename blocked #361's planning bundle
+
+### Main Changes
+
+Filed `08-07-sd-submit-pack-task`: a command that files a new pack task or
+revises an existing one end to end -- private worktree, branch, task-directory
+edit, commit, push, PR -- without touching the caller's checkout.
+
+Replaces #361, which carried the same content but renamed the task directory
+mid-history. A planning bundle may not delete or move a task artifact, so that
+branch could not be finalized:
+
+    planning_task_deletion: commit 61280a44 deletes, renames, or copies a task artifact
+
+The net diff against main was add-only, but the gate reads per commit, and a
+revert commit is another rename. Since main has neither directory, the fix was
+a fresh add-only branch rather than a revert: original name restored across the
+directory, task.json id/name/title, the manifests, and the prd.md H1, with the
+update-mode requirements retained in full.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `699aabf8` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
