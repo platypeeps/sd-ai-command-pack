@@ -62,8 +62,23 @@ every consumer without Codex. Preventing that is a requirement, not a nicety.
   that yields findings carrying real content in the fields the existing
   normalizer reads.
 - R3. Make the `codex` provider **ineligible** when the Codex CLI is not
-  present, so selection never picks it and behavior for consumers without the
-  CLI is byte-identical to today.
+  present, so selection never picks it and consumers without the CLI keep
+  today's *provider selection, execution, and outcome*.
+
+  This is deliberately narrower than "no change at all", which is not
+  achievable. `configurationDigest` is `_digest(config)` over the whole
+  configuration object including `providers` (`review-local.py:2293`), so adding
+  an entry to `_default_config()` changes it for every consumer on the default
+  config regardless of whether the provider is ever eligible. That flows into
+  `policyDigest` (`:1309`), the receipt (`:1978`), and the router evidence field
+  (`review.py:950`). The change is confined to identity: nothing in the pack
+  reuses a receipt by digest, and the router validates
+  `localReview.configurationDigest` as a 64-hex string
+  (`sd-github-review src/protocol.js:437-439`) without ever comparing its value
+  — evidence eligibility is decided by `outcome`, `confidence`, and
+  `dispositionCounts.unresolved` (`src/router.js:163-165`). So previously issued
+  receipts stop matching a freshly computed digest once, which is the correct
+  signal for "the review configuration changed", not a regression to hide.
 - R4. Replace the hardcoded `{"prism", "gito"}` ensemble literal with a
   configuration-derived, explicitly bounded set — not an unbounded "everything
   eligible", which would silently promote `auto` substantive review to `all` for
@@ -117,9 +132,45 @@ every consumer without Codex. Preventing that is a requirement, not a nicety.
 - Nothing the adapter needs at run time may live under `config/`. That directory
   is consumer-owned, not a pack-installed surface: there is no
   `templates/config/` and `manifest.json` declares no `config/` install target.
-- The shell entrypoint has per-tool dispatch and state, not a generic loop
-  (`review-local.sh:702`, `:730`). An unrecognized tool token falls through to
-  the unknown-tool branch and exits 2.
+- `policy` is strictly validated against a closed key set:
+  `if not isinstance(policy, dict) or set(policy) - POLICY_KEYS` raises
+  `"review policy must use only supported fields"` (`review-local.py:507`,
+  with `POLICY_KEYS` at `:149`). A new `ensembleProviders` key must be added to
+  `POLICY_KEYS`, must be normalized into `normalized_policy` alongside
+  `allowedDataHandling` and `requiredProviders` (`:526-530`) so it is present
+  even when omitted, and must validate its members against the configured
+  provider ids the way `requiredProviders` does at `:519-525`. Omitting the
+  `POLICY_KEYS` registration makes every configuration carrying the key a hard
+  input error.
+- The runtime availability check is
+  `shutil.which(argv[0], path=environment.get("PATH"))` (`review-local.py:1677`),
+  and R3's gate must agree with it. The gate cannot reuse either input: at
+  `:1211-1215` planning has not run `_expand_argv`, a builtin provider's `argv`
+  is `[]` (`:402`), and `build_tool_environment` is not called until `:2077`.
+  The gate therefore needs an explicit adapter→executable map. The two `PATH`
+  values agree today because `build_tool_environment`
+  (`sd_ai_command_pack_lib.py:402`) copies `os.environ` and overrides only
+  `CACHE_ENV_KEYS` and `GIT_TERMINAL_PROMPT` — a test must hold that true rather
+  than the design assuming it.
+- The unmapped-exit-code outcome is **`failed`**, not `unavailable`, and it is
+  not configurable: `provider.outcome_by_exit.get(exit_code, "failed")`
+  (`review-local.py:1716`). `outcomeByExitCode` is additionally capped at 32
+  entries (`:450-452`). So the adapter cannot choose its own fallback outcome;
+  it can only enumerate the codes it knows. `failed` is the correct conservative
+  default anyway — the requirement is that no unmapped code maps to `clean` or
+  `findings`, which the built-in default already guarantees.
+- The shell entrypoint has per-tool dispatch and state, not a generic loop.
+  Adding a tool touches seven sites, not the three a `--help` reading suggests:
+  `list_tools()`, the `usage()` heredoc (`:196-197`), the default tool set
+  (`:643`), state init (`:702-703`), the `all|default` alias branch
+  (`:717-718`), the per-tool `case` (`:732`, `:735`), and the execution guards
+  (`:753`, `:757`). An unrecognized token reaches the `*)` branch, warns
+  `"No command configured for local review tool '<name>'"`, and sets
+  `OVERALL_STATUS=2`.
+- `configured_command_for_tool` is consulted **before** the builtin `case`
+  (`:723-728`), so a consumer who already sets
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_CODEX_COMMAND` keeps their override after
+  `codex` becomes builtin. That ordering must not be changed.
 - **Release policy is CI-enforced.** `CONTRIBUTING.md:136-142`: any change to
   `templates/**` or `docs/SD_AI_COMMAND_PACK.md` requires a `manifest.json`
   version bump and a matching top `CHANGELOG.md` heading; a `Release payload
@@ -144,21 +195,41 @@ every consumer without Codex. Preventing that is a requirement, not a nicety.
   `codex` and does **not** execute `prism` or `gito`.
 - [ ] AC6. With a stub `codex` on `PATH`, a substantive-risk review executes
   `codex` **and** the metered ensemble providers.
-- [ ] AC7. With **no** `codex` on `PATH`, the stage behaves exactly as it does
-  on `origin/main`: the metered providers run, the review does not fail, and
-  `review.py` does not return exit 3. This must be demonstrated by running the
-  same scenario against both revisions and comparing, not by asserting a
+- [ ] AC7. With **no** `codex` on `PATH`, the stage's *behavior* matches
+  `origin/main`: the same metered providers are selected and executed, the same
+  aggregate outcome is produced, and `review.py` does not return exit 3. Compare
+  against a baseline captured from the unmodified tree rather than against a
   hand-written expectation.
-- [ ] AC8. `bash templates/scripts/...review-local.sh codex` actually dispatches
-  Codex rather than hitting the unknown-tool branch, and
-  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS` unset selects the free lane.
+
+  The comparison must **exclude** `configurationDigest`, `policyDigest`, and
+  `receiptId`. Those necessarily change per R3 and a diff that includes them
+  fails for the wrong reason — which would push an implementer toward loosening
+  the assertion until it passes. Compare the plan's `providers` list, `policyId`,
+  each attempt's `status`, and the aggregate `outcome`; assert separately that
+  `configurationDigest` differs from the baseline and is still a 64-hex string,
+  so the identity change is proven intentional rather than incidental.
+- [ ] AC8. `bash templates/scripts/...review-local.sh codex`, run with a stub
+  `codex` first on `PATH`, invokes that stub and does **not** emit
+  `No command configured for local review tool 'codex'`. There is no
+  `--plan-only` flag on the shell entrypoint — the only options its parser accepts
+  are `--all/--codebase/--full/--full-codebase`, `--help/-h`, `--list-tools`,
+  `--diff/--changed`, `--scope[=]`, and `--`. `--list-tools` must also list
+  `codex`, but that alone does not satisfy this criterion: `list_tools()` is a
+  hardcoded `printf` block independent of dispatch, so it can be right while
+  dispatch is still missing. With `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS` unset
+  the default set includes `codex`.
 - [ ] AC9. Every template surface describing Codex as an additive or peer
   *review* lane is corrected, and the two lanes are named distinctly. The
-  surface set is enumerated with `grep -rln -i codex templates/`, then each hit
-  classified as local-review lane, planning-adversarial-review lane, or an
-  unrelated `.codex/` directory listing. Hits in
-  `templates/docs/SD_AI_COMMAND_PACK.md` at the local-review sections (`:861`,
-  `:1819`) are in scope; the planning-review mention (`:32`) is not.
+  surface set is enumerated with `grep -rln -i codex templates/` — 16 files,
+  most of them false positives — then each hit classified as local-review lane,
+  planning-adversarial-review lane, or unrelated. In
+  `templates/docs/SD_AI_COMMAND_PACK.md` the in-scope text is `:862-878`
+  (current-diff peer lane) and `:1821-1826` under the `### Local Review`
+  heading at `:1819`. Out of scope: `:32-35` and the entire
+  `### Planning Artifact Review` section `:1798-1817`, which is a different
+  feature; and `:1951`, `:1955`, `:2134-2137`, `:2162`, `:2240`, which are
+  `codex/<slug>` branch names, `.codex/` directory listings, and platform-adapter
+  references.
 - [ ] AC10. `manifest.json` version is bumped, its description no longer
   promises "Prism/Gito defaults", and the top `CHANGELOG.md` heading matches.
 - [ ] AC11. `make check` passes: `make test`, `make lint`, `make audit`,
@@ -185,3 +256,111 @@ every consumer without Codex. Preventing that is a requirement, not a nicety.
 - The user-global Claude Code hook that auto-requests Copilot on push. It lives
   in `~/.claude/settings.json`, belongs to no repository, and is reported
   separately.
+
+## Adversarial review ledger
+
+Three automatic rounds, the maximum the project contract permits.
+
+| ID | Round | Concern | Disposition |
+| --- | --- | --- | --- |
+| C-1 | 1 | Edits targeted root `scripts/`; `templates/**` is source of truth | Fixed |
+| C-2 | 1 | Naive add regresses every consumer without the Codex CLI to exit 3 | Fixed — eligibility gate |
+| C-3 | 1 | Schema used `title`/`details`; normalizer reads `summary`/`family` | Fixed |
+| C-4 | 1 | `selected = list(eligible)` sweeps in custom `argv` providers | Fixed — bounded `ensembleProviders` |
+| C-5 | 1 | Version bump declared out of scope, but CI-enforced | Fixed — in scope |
+| C-6 | 1 | Runtime schema planned under `config/`, not a pack surface | Fixed — per-attempt materialization |
+| C-7 | 1 | Native and provider Codex lanes conflated | Fixed |
+| C-8 | 2 | "byte-identical" false; `configurationDigest` necessarily changes | Fixed — R3/AC7 reworded |
+| C-9 | 2 | `--plan-only` asserted on the shell entrypoint, which has no such flag | Fixed |
+| C-10 | 2 | `ensembleProviders` needed `POLICY_KEYS` registration and normalization | Fixed |
+| C-11 | 2 | `_read_json`(object) does not compose with `_parse_argv_payload`(bytes) | Fixed — shared helper |
+| C-12 | 2 | Unmapped exit default is `failed` (`:1716`), not `unavailable` | Fixed |
+| C-13 | 2 | Exit-code probe ran outside a git repo without `-C`/`--skip-git-repo-check` | Fixed |
+| C-14 | 3 | Gate cannot reuse `argv[0]` or the provider `PATH` at plan time | Fixed — explicit adapter→executable map |
+| C-15 | 3 | AC9 surface set unenumerated; 12 of 16 grep hits unclassified | Fixed — full classification |
+| C-16 | 3 | Two scope vocabularies conflated (`SCOPES` vs `target["scope"]`) | Fixed |
+| C-17 | 3 | `ensembleProviders` absent-key default breaks custom configs | **OPEN** — see below |
+| C-18 | 3 | AC7 `jq` paths read the root; the receipt is nested under `.receipt` | **OPEN** — see below |
+| C-19 | 3 | Shell runner has no missing-CLI contract; AC8 probe reads `tee`'s status | **OPEN** — see below |
+
+## Open blocking concerns — round 3, UNRESOLVED
+
+The project adversarial-review contract permits at most two remediation rounds
+(three automatic rounds total). Rounds 1 and 2 were reviewed and remediated.
+Round 3's Codex lane produced the three concerns below. They are **not fixed**,
+because fixing them would be a fourth automatic round. They are recorded here so
+the next session starts from them, and **this plan is not approved for
+implementation** until they are resolved by human judgment.
+
+Each was verified against this checkout; none is speculative.
+
+### C-R3-1 — the `ensembleProviders` absent-key default breaks custom configs
+
+`design.md` and `implement.md` (Step 6) say an absent `policy.ensembleProviders`
+normalizes to `["codex", "gito", "prism"]`, and that members must be configured
+provider ids (mirroring `requiredProviders` at `review-local.py:519-525`).
+
+Those two rules contradict each other. Provider ids come only from the
+consumer's own provider list (`:502-505`). A repository with its own
+`.sd-ai-command-pack/review.json` defining just `prism` and `gito` — the shape
+of the fixture at `tests/test_review_stage.py:66-109` — would get `codex`
+injected as a default, fail the unknown-id check, and hard-error on every run.
+That directly contradicts this design's own compatibility claim that custom
+configurations do not inherit the new provider.
+
+Identified direction, not applied: the absent-key default must be derived from
+the configuration in hand — the builtin ensemble names intersected with the ids
+actually defined, e.g. `[i for i in ("codex","gito","prism") if i in ids]`. That
+yields `["gito","prism"]` for a legacy custom config and all three for the
+shipped default. Explicit members stay strictly validated.
+
+This is the concern that most needs a decision: it is the difference between a
+compatible change and one that breaks every custom-configured consumer.
+
+### C-R3-2 — the AC7 baseline commands and jq paths are wrong
+
+Two separate defects:
+
+1. Step 0's receipt-capture used `--scope worktree` and omitted the required
+   `--attempt-id`. Running it verbatim exits 2 with
+   `argument --scope: invalid choice: 'worktree'`. The CLI vocabulary is
+   `changes|branch|codebase|pr` (`:51`, `:2227`); `--attempt-id` is required
+   (`:2240`). **This one was corrected in the round-3 host lane** — Step 0 now
+   uses `--scope changes --attempt-id ... --plan-only`.
+2. The AC7 `jq` expressions read `providers`, `policyId`, and the digests from
+   the JSON root. On an executed run the payload is nested: `_report`
+   (`:2173-2185`) wraps everything under `.receipt`, with attempts at
+   `.receipt.attempts`, plan fields at `.receipt.plan`, and identity at
+   `.receipt.receiptId`. The `--plan-only` payload (`:2310`) is a *different*
+   shape — `{status, target, plan}` at the root. The plan uses one set of paths
+   for both. **Not corrected.**
+
+Also unaddressed: the comparison never asserts each attempt's `status`, which
+`prd.md`'s AC7 wording requires, and never exercises the coordinator's exit-3
+condition at `review.py:1889-1895` — the exact failure R3 exists to prevent.
+
+### C-R3-3 — the shell runner has no missing-CLI contract, and its probe is broken
+
+Step 7 says to add `run_codex_review` but does not specify its scoped command
+construction or its behavior when the CLI is absent. The existing builtin
+runners treat a missing executable as an overall failure —
+`review-local.sh:535-538` (prism) and `:596-599` (gito) both call
+`mark_overall_failure`. Mirroring that pattern while adding `codex` to the
+default tool set would make the default set fail for every consumer without the
+Codex CLI: precisely the regression R3 exists to prevent, reintroduced through
+the shell instead of the Python.
+
+Identified direction, not applied: the shell already has a per-tool
+`SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_MODE` with an `is_disabled` check
+(`:530-533`). Codex should default to an optional mode so a missing CLI warns
+and returns **without** `mark_overall_failure`.
+
+Separately, the AC8 probe is invalid as written:
+
+```bash
+... review-local.sh codex 2>&1 | tee "$stub/log"; echo "exit=$?"
+```
+
+`$?` after a pipeline is `tee`'s status, not the script's. It must use
+`${PIPESTATUS[0]}` or drop the pipe. As written the probe proves only that some
+codex command ran, not that the runner succeeded.

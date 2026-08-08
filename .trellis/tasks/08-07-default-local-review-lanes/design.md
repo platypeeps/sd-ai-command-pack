@@ -1,9 +1,23 @@
 # Design — default to local subscription review lanes
 
-> **Revision note.** An adversarial review of the first draft found eight
-> defects, seven blocking. This document reflects the corrected design. Where a
-> rejected approach is instructive it is kept under "Rejected alternatives"
-> rather than deleted.
+> **Revision note.** Two adversarial review rounds. Round 1 found eight defects,
+> seven blocking. Round 2 found six more, all verified against the source:
+> the false "byte-identical" claim (`configurationDigest` necessarily changes),
+> a `--plan-only` flag the shell entrypoint does not have, an unspecified `POLICY_KEYS`
+> registration and back-compat default for `ensembleProviders`, an API mismatch
+> between `_read_json` and `_parse_argv_payload`, an unmapped-exit fallback of
+> `failed` rather than the asserted `unavailable`, and an exit-code probe that
+> would have measured the wrong code path outside a git repository.
+>
+> Round 3 found four more: a second scope vocabulary
+> (`SCOPES` at `:51` is `changes|branch|codebase|pr`, not the internal
+> `worktree|branch_delta|codebase`), the eligibility gate's inability to reuse
+> `argv[0]` or the provider `PATH` at plan time, an unenumerated
+> AC9 surface set, and an AC7 baseline command missing the required
+> `--attempt-id`.
+>
+> This document reflects the corrected design. Where a rejected approach is
+> instructive it is kept under "Rejected alternatives" rather than deleted.
 
 ## Where the edits go
 
@@ -62,9 +76,79 @@ eligible = [
 
 Add an availability predicate to that filter for adapters that name a required
 executable. When `shutil.which("codex")` is `None`, the codex provider is not
-eligible, so no selection path can pick it, and the resulting behavior is
-**byte-identical to `origin/main`** — prism is once again the cheapest eligible
-provider.
+eligible, so no selection path can pick it — prism is once again the cheapest
+eligible provider.
+
+### The predicate must agree with the runtime check
+
+`_run_provider` does its own availability test at `:1677`:
+
+```python
+executable = shutil.which(argv[0], path=environment.get("PATH"))
+```
+
+Two properties of that line constrain the gate.
+
+**It resolves against the provider environment, not `os.environ`.** Today those
+are the same `PATH`: `build_tool_environment` (`sd_ai_command_pack_lib.py:402`)
+starts from `dict(os.environ)` and overrides only `CACHE_ENV_KEYS` and
+`GIT_TERMINAL_PROMPT` — it never touches `PATH`. So a gate calling plain
+`shutil.which("codex")` agrees with the runtime today. Record that as the
+*reason* it is safe, not as a coincidence: if `build_tool_environment` ever
+sanitizes `PATH`, the gate would pass while the runtime reported `unavailable`,
+and the exact regression this design exists to prevent comes back silently. Add
+a test asserting the two resolve identically rather than relying on inspection.
+
+**The gate cannot reuse `argv[0]`.** Eligibility is computed at `:1211-1215`,
+during planning; `_expand_argv` has not run yet, and a builtin provider's
+configured `argv` is `[]` (`:402`), so there is no `argv[0]` to read. And
+`build_tool_environment` is not called until `:2077`, after selection — so the
+gate has no provider environment available either.
+
+The predicate therefore needs an explicit **adapter → required executable** map
+in the module (`{"codex": "codex"}`, with `prism`/`gito`/`argv` absent and so
+unconstrained), consulted by identifier. Deriving the executable from `argv` at
+plan time is not possible, and calling `build_tool_environment` a second time
+during planning would duplicate cache setup for no benefit.
+
+### What "no behavior change" does and does not cover
+
+The gate preserves **provider selection, execution, and outcome**. It does not
+and cannot preserve **receipt identity**, and an earlier draft of this design
+claimed "byte-identical to `origin/main`", which is false.
+
+`configuration_digest=_digest(config)` (`:2293`) hashes the entire configuration
+object, `providers` included. Adding an entry to `_default_config()` changes it
+for every consumer on the default config whether or not the provider is ever
+eligible — eligibility is computed later, at `:1211-1215`, from the already
+hashed config. The changed digest then propagates:
+
+| Site | Field |
+| --- | --- |
+| `review-local.py:1307` | `plan["configurationDigest"]` |
+| `review-local.py:1309` | `plan["policyDigest"] = _digest(plan)` |
+| `review-local.py:1978` | receipt `policyDigest` |
+| `review.py:950` | router evidence `configurationDigest` |
+
+Adding `policy.ensembleProviders` to the default policy changes it a second
+time, for the same reason.
+
+This is contained, and checked rather than assumed:
+
+- **Nothing in the pack reuses a receipt by digest.** `grep -n
+  "reuse\|cached\|stale" templates/scripts/sd-ai-command-pack-review.py` returns
+  nothing. There is no cache to invalidate.
+- **The router never compares the value.** `src/protocol.js:437-439` validates
+  `localReview.configurationDigest` as a 64-hex string and carries it; route
+  lowering at `src/router.js:163-165` keys on `outcome`, `confidence`, and
+  `dispositionCounts.unresolved`. (The `configurationDigest` in
+  `src/review-plan-authorization.js` is the routed-review lane catalog's, a
+  different field with the same name.)
+
+So the honest claim — the one the PRD and the AC now make — is that a consumer
+without the Codex CLI runs the same providers and gets the same outcome, and
+that their receipts carry a new identity once. A review-configuration change
+*should* produce a new configuration digest; suppressing it would be the bug.
 
 Why this beats adding a retry-next-provider fallback:
 
@@ -106,7 +190,30 @@ is wrong, for a reason worth recording:
 **Accepted fix: a bounded, configuration-derived set.** Add
 `policy.ensembleProviders`, defaulting to the three builtin ids
 `["codex", "gito", "prism"]`. Selection filters `eligible` by membership in that
-list. This:
+list.
+
+`policy` is strictly validated against a closed key set — `set(policy) -
+POLICY_KEYS` raises `"review policy must use only supported fields"` (`:507`,
+`POLICY_KEYS` at `:149`) — so the key needs four things, not one:
+
+1. registration in `POLICY_KEYS`, or every config carrying it is rejected;
+2. parsing through `_string_list` and validation of each member against the
+   configured provider ids, exactly as `requiredProviders` does at `:519-525`;
+3. normalization into `normalized_policy` (`:526-530`) so the key is always
+   present downstream and selection never has to branch on absence;
+4. a default supplied by `_default_config()`.
+
+Back-compat: a repository with an existing `.sd-ai-command-pack/review.json`
+omits the key. Because `_default_config()` does not apply to that file, the
+normalizer — not the default config — must supply `["codex", "gito", "prism"]`
+when the key is absent. Getting this backwards yields an empty ensemble and a
+silently skipped substantive review, which is worse than the literal being
+replaced. Members that name a provider the configuration does not define are an
+input error, matching `requiredProviders`; members that name a provider which is
+defined but not currently eligible are simply filtered out, which is what makes
+the codex entry harmless on a machine without the CLI.
+
+This:
 
 - removes the literal from the selection code, so it cannot drift as a *code*
   constant (AC4);
@@ -202,17 +309,42 @@ every finding's content, leaving a receipt full of findings all summarized as
 
 Add a `codex` branch reading `attempt_dir/codex-review.json` via
 `_read_json(path, limit=MAX_OUTPUT_BYTES, ...)` — the bounded reader
-`_gito_payload` uses at `:1557` — then apply the validation
-`_parse_argv_payload` performs (`:1515-1522`): `status` in `OUTCOMES`,
-`findings` a list within `MAX_FINDINGS`. Return `None` on any mismatch; that is
-the existing contract for "provider produced nothing usable".
+`_gito_payload` uses at `:1557`.
+
+**The two readers are not interchangeable.** `_read_json` is
+`(path: Path, *, limit, label) -> object` (`:358`); `_parse_argv_payload` is
+`(stdout: bytes) -> dict | None` (`:1515`). The codex output arrives as a file,
+not on stdout, so `_parse_argv_payload` cannot be called on the `_read_json`
+result — it would be handed a parsed object where it expects raw bytes. The
+correct shape is to factor the *validation* body of `_parse_argv_payload`
+(`:1515-1522`: `status` in `OUTCOMES`, `findings` a list within `MAX_FINDINGS`)
+into a helper taking the already-parsed object, and have both call sites use it.
+That keeps one validation rule rather than a second copy that drifts.
+
+Return `None` on any mismatch; that is the existing contract for "provider
+produced nothing usable".
 
 ### Exit-code mapping
 
-`0 -> clean`. Everything unmapped must default to `unavailable`, never `clean`
-and never `findings` — a `findings` outcome from a crashed reviewer would be
-silently empty and read as a clean review. The concrete non-zero codes must be
-**observed** against the installed CLI during implementation, not assumed.
+`0 -> clean`. Concrete non-zero codes must be **observed** against the installed
+CLI during implementation, not assumed.
+
+The unmapped-code fallback is **not** the adapter's to choose. `:1716` is
+
+```python
+status_value = provider.outcome_by_exit.get(exit_code, "failed")
+```
+
+so anything absent from `outcomeByExitCode` becomes `failed`, and an earlier
+draft of this design was wrong to assert it should be `unavailable` — that would
+require a code change nobody needs. `failed` already satisfies the actual
+requirement: no unmapped code may become `clean` or `findings`, because a
+`findings` outcome from a crashed reviewer would carry an empty finding list and
+read as a clean review.
+
+`outcomeByExitCode` is capped at 32 entries (`:450-452`), which is ample for an
+observed set and is a reason not to speculatively enumerate codes.
+
 Findings presence comes from the parsed payload, not the exit code.
 
 ### `dataHandling`
@@ -229,14 +361,40 @@ only forbids a builtin adapter that *supplies* argv.
 ## Problem 4 — the shell entrypoint
 
 `review-local.sh` does not have a generic tool loop. It carries per-tool state
-and dispatch (`:702`, `:730`) for prism and gito only, and an unrecognized token
-falls through to the unknown-tool branch with exit 2. So changing the default
-list at `:643` and the aliases at `:196-197` would make the default set
-*immediately fail*.
+and dispatch for prism and gito only, and an unrecognized token reaches the `*)`
+branch, warns `"No command configured for local review tool '<name>'"`, and sets
+`OVERALL_STATUS=2`. So changing the default list at `:643` and the aliases at
+`:196-197` alone would make the default set *immediately fail*.
 
-The shell work is therefore: add codex dispatch and its state alongside the
-existing two, then update `:643`, `:196-197`, and `--help`. AC8 verifies by
-invoking the tool, not by reading the help text.
+Seven sites, enumerated rather than remembered:
+
+| Site | What it is |
+| --- | --- |
+| `list_tools()` | hardcoded `printf` block behind `--list-tools` |
+| `:196-197` | the `usage()` heredoc's tool table and `all`/`default` alias text |
+| `:643` | `raw_tools="${SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS:-prism gito}"` |
+| `:702-703` | `NEED_PRISM=0` / `NEED_GITO=0` state init |
+| `:717-718` | the `all\|default` alias branch |
+| `:732`, `:735` | the per-tool `case` arms |
+| `:753`, `:757` | the `if [ "$NEED_X" -eq 1 ]` execution guards |
+
+plus a new `run_codex_review` alongside `run_prism_reviews` and
+`run_gito_review`. `list_tools()` is separate from `usage()`, so a plan that
+says "update `--help`" misses it.
+
+**Preserve the override ordering.** `configured_command_for_tool` is consulted
+*before* the builtin `case` (`:723-728`). A consumer who already runs Codex
+through `SD_AI_COMMAND_PACK_REVIEW_LOCAL_CODEX_COMMAND` keeps that override
+after `codex` becomes builtin, because the custom branch still wins. Moving the
+builtin `case` ahead of it would silently break those consumers.
+
+The **shell** entrypoint has **no `--plan-only` flag** — its parser accepts only `--all`,
+`--codebase`, `--full`, `--full-codebase`, `--help`/`-h`, `--list-tools`,
+`--diff`/`--changed`, `--scope[=]`, and `--`. AC8 therefore verifies by running
+the script with a stub `codex` first on `PATH` and asserting the stub was
+invoked and the "No command configured" warning is absent. `--list-tools`
+listing `codex` is necessary but not sufficient: it is a hardcoded `printf`
+independent of dispatch, so it can be correct while dispatch is still missing.
 
 ## Problem 5 — the duplicated default config
 
@@ -286,11 +444,16 @@ pack as shipping "Prism/Gito defaults" and must be updated.
 ## Compatibility and rollback
 
 - Consumers pick this up on their next pack install.
-- A repository with its own `.sd-ai-command-pack/review.json` is unaffected —
-  `_default_config()` applies only when that file is absent. Those consumers opt
-  in by adding the provider themselves; the documentation must say so.
-- A consumer without the Codex CLI sees no behavior change at all, by
-  construction (Problem 1).
+- A repository with its own `.sd-ai-command-pack/review.json` does not get the
+  new provider — `_default_config()` applies only when that file is absent.
+  Those consumers opt in by adding the provider themselves; the documentation
+  must say so. They *do* get the `ensembleProviders` default from the policy
+  normalizer, which is why that default lives there rather than in
+  `_default_config()`.
+- A consumer without the Codex CLI runs the same providers and gets the same
+  outcome, by construction (Problem 1). Their `configurationDigest`,
+  `policyDigest`, and `receiptId` change once, because the review configuration
+  genuinely changed; see "What 'no behavior change' does and does not cover".
 - Rollback is a revert. No migration, no persisted state, no schema version
   change.
 
