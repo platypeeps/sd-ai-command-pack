@@ -846,3 +846,40 @@ Merged main into chore/file-codex-review-round-budget and resolved a live sessio
 ### Next Steps
 
 - None - task complete
+
+
+## Session 323: File the sd-status worktree blind spot
+
+**Date**: 2026-08-07
+**Task**: File the sd-status worktree blind spot
+**Branch**: `chore/file-status-worktree-invisibility`
+
+### Summary
+
+Filed a Trellis task recording that the sd-status collector has no worktree inventory, so a branch checked out in another worktree is indistinguishable from a free one.
+
+### Main Changes
+
+- Filed 08-07-status-worktree-invisibility: grep for worktree in the status collector returns zero matches, and its only nearby path delegates to a receipt-scoped classifier that deliberately ignores foreign worktrees.
+- Kept the recovery-artifacts ownership semantics explicitly unchanged; the task adds a separate read-only inventory rather than adopting artifacts.
+- Retagged the PRD's fenced blocks to text after review, matching the repository convention that keeps quoted evidence from being read as the PR's own code.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a8ed88a7` | chore(task): file the sd-status worktree blind spot |
+| `82970640` | chore(task): retag PRD fences to text |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
