@@ -1,4 +1,4 @@
-# Plan-only and executed local-review reports have divergent payload shapes
+# PARKED: Plan-only and executed local-review reports have divergent payload shapes
 
 ## Goal
 

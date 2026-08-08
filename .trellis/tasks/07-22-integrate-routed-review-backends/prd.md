@@ -425,3 +425,39 @@ requirements continue from R35 and do not renumber existing references.)
 - Embedding provider runtimes or remote provider credentials in the pack.
 - Automatically learning routing policy from unbounded telemetry in v1.
 - Merging or archiving either repository.
+
+## Deferred features (2026-08-08 consolidation)
+
+The 2026-08-08 backlog consolidation dropped the review-operator group —
+blocked on sd-github-review v2 contracts that are parked/dropped in that
+repo's own consolidation (9,390 of its 13,136 src LOC unreachable from the
+Action entrypoint). Recorded here so the ideas are recoverable if the v2
+governance direction is ever revived (content in git history under
+`.trellis/tasks/<dir>/`):
+
+- 07-25-add-routed-review-operator-ux — operator CLI umbrella (~19 planned
+  subcommands), with children: 07-25-add-sd-review-budget-operations,
+  07-25-add-sd-review-configuration-operations,
+  07-25-add-sd-review-data-operations,
+  07-25-add-sd-review-finding-adjudication-operations.
+- 07-25-add-multi-reviewer-learning-and-effectiveness-analysis — with
+  children 07-25-add-review-effectiveness-command and
+  07-25-generalize-review-learnings-across-reviewers (the latter would have
+  deleted batching that shipped in v0.64.11).
+- 07-25-publish-local-review-attestations — attestation publication for local
+  review runs.
+
+## Rescope (2026-08-08)
+
+Backlog-consolidation rescope: this program closes when
+07-24-remove-retired-review-surfaces lands, PLUS the two pack-side contract
+items from the 2026-08-08 collaboration review:
+
+- Accept `supportedContractMajors` from the router's discovery descriptor,
+  so the pack can negotiate contract versions instead of hard-pinning.
+- Emit `riskClass` and changed-path count in the v1 route request, so the
+  pack classifies and the router prices the review.
+
+Priority moved P1 to P2. No other scope survives; the v2 governance surface
+this program once targeted is parked/dropped in sd-github-review's own
+consolidation.

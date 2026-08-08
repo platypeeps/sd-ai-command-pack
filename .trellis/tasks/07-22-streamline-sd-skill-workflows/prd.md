@@ -242,3 +242,8 @@ merge eligibility without mutating the PR.
 - Combining distinct Trellis lifecycle commands solely because their prose is
   similar.
 - Opening an upstream Trellis pull request without separate explicit approval.
+
+## Rescope (2026-08-08)
+
+Closure ledger only: record which of this program's rounds shipped and
+close. No new streamlining rounds are authorized; priority moved P1 to P3.

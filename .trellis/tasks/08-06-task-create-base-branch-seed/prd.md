@@ -1,4 +1,4 @@
-# task.py create records the current branch as the PR target
+# Harden task.py create: base-branch seed and description requirement
 
 ## Goal
 
@@ -131,8 +131,8 @@ default branch, which is exactly the record `task.py create` produces.
   detection is pack-local (`review-preflight.mjs`). The pack-local half can land
   immediately and catches every future occurrence, including ones created by an
   unpatched upstream. Whether the upstream half is filed here, filed as a
-  separate parked task in the style of
-  `.trellis/tasks/07-30-upstream-task-start-branch-recording`, or reported
+  separate parked task in the style of the former upstream branch-recording
+  task (preserved at `.trellis/tasks/08-08-upstream-handoff-register/research/07-30-upstream-task-start-branch-recording.md`), or reported
   upstream first is the first decision.
 - What should `task.py create` record instead — the repository default branch
   resolved from the remote HEAD, the merge-base branch, or nothing at all,
@@ -182,9 +182,52 @@ default branch, which is exactly the record `task.py create` produces.
 - Source: audit on 2026-08-06. The Copilot comment on PR #342 is the primary
   evidence; the seeding line was then read directly and confirmed to be
   unconditional.
-- `.trellis/tasks/07-30-upstream-task-start-branch-recording` is adjacent but
+- The former upstream branch-recording task (absorbed 2026-08-08 into
+  `.trellis/tasks/08-08-upstream-handoff-register`) is adjacent but
   distinct: it covers `task.py start` never writing `branch`. This task covers
   `task.py create` writing the wrong `base_branch`. Neither subsumes the other.
 - Complex enough to need `design.md` and `implement.md` before `task.py start`:
   the upstream-versus-pack split is a real decision, and R2 and R3 constrain each
   other.
+
+## Absorbed: 08-08-task-create-description-required (2026-08-08 consolidation)
+
+That task filed the adjacent `cmd_create` defect: `task.py create` writes an
+empty description as a warning (`task_store.py:300-314`) that the pre-archive
+gate refuses as fatal (`review-preflight.mjs:3348` requires non-empty
+`title`/`description`). Observed blocking PR #376 finalization
+(`task_metadata_invalid ... field description must be a non-empty string`).
+The title has the same hole (`"   " --slug x` passes the truthiness test at
+`task_store.py:207`), and the two emptiness predicates diverge on U+FEFF /
+U+0085 (Python `str.strip()` vs JS `String.trim()`).
+
+Carried acceptance criteria (description-refusal set):
+
+- `task.py create "<title>"` with no `--description` exits nonzero, names the
+  flag, and leaves no new directory under `.trellis/tasks/` (validation
+  precedes `ensure_tasks_dir` at `task_store.py:236`).
+- `--description "   "` fails identically; `create "   " --slug <valid>`
+  fails on the blank title.
+- The emptiness predicate is stated explicitly and a test covers the divergent
+  characters, failing if creation and the gate classify any differently.
+- Existing empty-description records are backfilled from their own prd.md; a
+  survey of active records reports zero empty descriptions.
+- No documented in-repository invocation omits the description; the gate rule
+  at `:3348` is NOT relaxed.
+
+Decision already made (do not reopen): a non-empty description becomes
+required at create. An upstream empty-description rejection task is filed in
+the Trellis fork; this task owns pack-side backfill, caller migration, and the
+shared predicate. Survivor retitled accordingly: "Harden task.py create:
+base-branch seed and description requirement".
+
+## Rescope (2026-08-08)
+
+Upstream Trellis >=0.6.8 (delivered by 08-08-trellis-upgrade) resolves the
+repo default branch at create time, but still falls back to the checked-out
+branch with only a warning when resolution fails. This task therefore
+RETAINS its deterministic-gate requirement — reject wrong root-task
+`base_branch` values — as pack-local work, plus post-upgrade verification
+that the seeded value is correct on this repo and fleet consumers, plus
+tracking the upstream empty-description fix filed in the Trellis fork (see
+the Absorbed section above).

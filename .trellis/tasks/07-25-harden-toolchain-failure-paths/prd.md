@@ -53,3 +53,9 @@ Defects live in this repo's source; the SE-side bundle task was retired in favor
 - The `se-ai-command-pack` reference pattern in R2 is a deliberate cross-repository
   citation and does not resolve in this checkout. It is the one non-historical entry the
   citation sweep reports; leave it.
+
+## Rescope (2026-08-08)
+
+R1 is already satisfied in the shipped toolchain resolver; remaining scope
+is R2 only. Verify R1 with a pointer to the shipped behavior before starting
+R2 work.

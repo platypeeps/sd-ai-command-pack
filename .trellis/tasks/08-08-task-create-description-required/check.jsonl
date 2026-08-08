@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/tooling/bookkeeping-validator.md", "reason": "Check that the creation-time emptiness predicate matches the validator's rule on the divergent characters, and that no second source of truth was introduced."}
-{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Check that every updated task.py create invocation changed in source and installed mirror together, with no drift."}

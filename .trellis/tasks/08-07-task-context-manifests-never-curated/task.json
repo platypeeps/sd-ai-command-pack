@@ -1,7 +1,7 @@
 {
   "id": "task-context-manifests-never-curated",
   "name": "task-context-manifests-never-curated",
-  "title": "Nothing ever requires a task's spec manifests to be curated, so sub-agents dispatch with no spec context",
+  "title": "PARKED: Nothing ever requires a task's spec manifests to be curated, so sub-agents dispatch with no spec context",
   "description": "Preflight deliberately exempts a lone pristine _example scaffold at every status, so a task can be planned, started, implemented, and archived with uncurated manifests. Sub-agent dispatch reads those manifests first, so the degradation is silent.",
   "status": "planning",
   "dev_type": null,

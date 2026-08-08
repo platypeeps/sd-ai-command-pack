@@ -111,3 +111,9 @@ Full contract (remains parked until R1 has evidence):
   install instruction, not an observed break.
 - The title still reads PARKED because the majority of the task is. Rename it if
   and when R1-R4 become actionable.
+
+## Rescope (2026-08-08)
+
+R5/R6 (pin freshness fix) are live; R1-R4 are parked. Priority set P3.
+08-08-trellis-upgrade supersedes the version-drift portion of this task's
+motivation; what remains is the compatibility-contract surface only.

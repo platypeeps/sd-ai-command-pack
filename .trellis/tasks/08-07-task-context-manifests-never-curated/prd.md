@@ -1,4 +1,4 @@
-# Nothing ever requires a task's spec manifests to be curated, so sub-agents dispatch with no spec context
+# PARKED: Nothing ever requires a task's spec manifests to be curated, so sub-agents dispatch with no spec context
 
 ## Goal
 

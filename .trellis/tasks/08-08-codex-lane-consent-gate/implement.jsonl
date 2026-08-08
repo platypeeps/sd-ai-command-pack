@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Adapter and twin-mirror rules governing the shipped skill/contract surfaces that carry the Codex gate."}
-{"file": ".trellis/spec/tooling/index.md", "reason": "Surface-drift and release-gate rules that a source-plus-templates change must satisfy."}
-{"file": ".trellis/spec/guides/index.md", "reason": "Skill and contract authoring conventions for editing the gating prose in both lanes."}

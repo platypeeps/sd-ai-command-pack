@@ -1,4 +1,4 @@
-# Add gemini and kimi as opt-in parallel local review providers when installed as plugins
+# PARKED: Add gemini and kimi as opt-in parallel local review providers when installed as plugins
 
 ## Goal
 

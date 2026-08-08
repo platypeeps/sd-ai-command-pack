@@ -92,3 +92,8 @@ sd-fleet-refresh (per-repo workers inside controller waves).
   title order: cleanest first, and the only commit that changes a serialization sentence
   last. AC4's conformance note is three entries — two conformances and one recorded
   divergence.
+
+## Rescope (2026-08-08)
+
+Parked; surviving scope is the sd-update-deps piece only. R4 is dropped per
+this task's own notes.

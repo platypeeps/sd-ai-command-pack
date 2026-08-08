@@ -1,7 +1,7 @@
 {
   "id": "local-finding-rebuttal-channel",
   "name": "local-finding-rebuttal-channel",
-  "title": "Verified-false local review findings have no rebuttal channel",
+  "title": "PARKED: Verified-false local review findings have no rebuttal channel",
   "description": "sd-review offers --remote-disposition but no local equivalent, so a local provider false positive blocks the remote gate permanently with no way to record a verified rebuttal.",
   "status": "planning",
   "dev_type": null,

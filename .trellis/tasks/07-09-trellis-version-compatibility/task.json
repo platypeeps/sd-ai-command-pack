@@ -7,7 +7,7 @@
   "dev_type": null,
   "scope": null,
   "package": null,
-  "priority": null,
+  "priority": "P3",
   "creator": "sdelmas",
   "assignee": "sdelmas",
   "createdAt": "2026-07-09",

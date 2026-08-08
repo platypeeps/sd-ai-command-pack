@@ -199,3 +199,30 @@ for the one artifact whose entire purpose is naming files to load.
   unchanged.
 - Reconciling the documentation-reference check's own false positives on prose
   that deliberately names absent paths. Separate defect, separate task.
+
+## Absorbed: 08-07-preflight-manifest-lane-zero-inspected (2026-08-08 consolidation)
+
+That task filed the selection-rule half of the same lane: the task-context
+manifest lane passes when it inspected zero files
+(`templates/scripts/sd-ai-command-pack-review-preflight.mjs:3738-3743`), and a
+manifest owned by a task that stays in `planning` is structurally unreachable
+unless someone edits the manifest itself (`:3691-3695`). Observed:
+`platypeeps/hoa-manager` carries 20 invalid manifests (71% of its populated
+set) that the lane has never inspected; `platypeeps/loadsmith` shows the same
+shape at current pack 0.64.27.
+
+Carried acceptance criteria:
+
+- A repository containing an invalid manifest cannot produce a green result
+  from this lane, regardless of whether that manifest is in the change set.
+- The zero-inspected message names why nothing was inspected and is
+  distinguishable from a genuine no-manifests-exist repository.
+- A test fixture with an invalid manifest owned by a `planning` task fails
+  the lane.
+
+Carried open question this task's design MUST answer (unresolved scope
+conflict, not a duplicate claim): the source demands invalid manifests
+*outside the change set* be reachable — a repo-wide sweep — while this task is
+currently diff-scoped by declared non-goal. Decide sweep vs delta-scope (and
+any migration for repositories already carrying violations) explicitly in
+design.md; do not let the non-goal silently discard the requirement.

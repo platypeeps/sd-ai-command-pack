@@ -1,4 +1,4 @@
-# Ship SD commands as cross-platform sub-agents
+# PARKED: Ship SD commands as cross-platform sub-agents
 
 Status: ACCEPTED as parent task (user, 2026-07-25). Requirements R1-R7 are binding.
 Delivery is decomposed into child tasks (see Task map); the parent owns the source

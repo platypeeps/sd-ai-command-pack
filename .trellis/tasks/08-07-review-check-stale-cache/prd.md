@@ -222,3 +222,32 @@ holding a consumer back from every other fix in those 23 releases.
   design. The one genuine alternative, downgrading the check to advisory, is named
   under Out of scope with its reason rather than explored here; if it is preferred,
   that reopens the task as a design question and wants a `design.md`.
+
+## Absorbed: 08-06-review-check-receipt-pinning (2026-08-08 consolidation)
+
+That task filed the same defect from the coordinator side: a stored `check`
+result whose status is not `passed` is replayed indefinitely
+(`scripts/sd-ai-command-pack-review.py:1796` caches a failed result exactly
+like a passing one; `--attempt N` does not escape because the attempt ID
+derives from head plus controls).
+
+Carried as regression evidence only — three observed occurrences, each as
+fail / repair out-of-band / re-invoke / observe pass:
+
+- PR #338: `knowledge.obsidian-kb` failed on gitignored `.obsidian-kb/` state;
+  repaired by `scripts/sd-ai-command-pack-update-spec-kb.py` with no commit;
+  attempts 3, 4, 5 replayed the byte-identical stale diagnostic
+  (`attemptId review-2b627e56c0dd09b5851e97dd`); only a fresh
+  `--artifact-root` re-ran live and passed.
+- PR #339: `pack.review-scope` failed on the pull request body (remote state);
+  repaired via `gh pr edit --body-file`; re-run at the same head `b4b6f028`
+  replayed the stale diagnostic; fresh `--artifact-root` passed.
+- PR #361 (`platypeeps/anomaly-metric-creator`): same `knowledge.obsidian-kb`
+  shape in a consumer repo; a fresh `--attempt-id` cleared it, localizing the
+  cache key to the attempt ID.
+
+Regression tests must cover the local-gitignored and remote-PR-body sequences.
+Policy conflict resolved at consolidation: the source's cached-pass-reuse AC
+("a passing check on an unchanged head is still reused") is superseded by this
+task's recompute contract — recompute wins, correctness over reuse. Do not
+resurrect the reuse AC.

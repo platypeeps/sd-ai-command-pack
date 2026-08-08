@@ -1,3 +1,0 @@
-{"file": ".trellis/tasks/07-25-publish-local-review-attestations/research/contract-mapping.md", "reason": "Verify setup selection, exact-head evidence, privacy, replay, zero reviewer dispatch, unified command ownership, and reporting boundaries."}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify focused and full-gate coverage, typed outcomes, and template/root consistency."}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify generated skill and adapter parity without a duplicate public command."}

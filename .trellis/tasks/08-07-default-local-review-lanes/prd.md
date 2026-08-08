@@ -353,3 +353,42 @@ redirects instead of piping, and AC8 gained both halves of the mode contract —
 absent binary must exit 0 by default, and must exit non-zero under
 `SD_AI_COMMAND_PACK_REVIEW_LOCAL_CODEX_MODE=required`. The first alone would
 pass against a lane that was never wired up.
+
+## Absorbed: 08-08-codex-lane-consent-gate (2026-08-08 consolidation)
+
+That task established consent-not-capability gating for the two shipped Codex
+lanes (planning adversarial review at
+`.claude/sd-ai-command-pack/planning-adversarial-review.md:41-44`; local
+review at `.agents/skills/sd-review-local/SKILL.md:166`). Both currently
+launch on a successful capability probe alone — "can this run?" answering
+"should this run?" — sending planning artifacts or diffs to a third party
+because a CLI happens to be installed. This task, which owns the local-review
+provider surface, inherits the full acceptance set; the consent decision
+shape (per-lane records under `SD_AI_COMMAND_PACK_STATE_HOME`, fail-closed
+reads) comes from 08-07-plugin-review-provider-lanes requirements 15-22.
+
+Carried acceptance criteria (both the planning-review and local-review lanes):
+
+- With `codex` installed, compatible, and no consent recorded: neither lane
+  launches a `codex` process, and both report a skip naming absent consent
+  rather than absent capability.
+- With `codex` installed, compatible, and consent recorded: both lanes behave
+  exactly as today.
+- With `codex` absent and consent recorded: both lanes report the
+  not-installed skip, unchanged.
+- A planning run that skips Codex for lack of consent still performs the host
+  adversarial review and still refuses to proceed past an unresolved blocking
+  concern.
+- No skipped lane — for any of the three reasons — is reported or summarized
+  as Codex approval.
+- Consent recorded on one machine does not appear in any tracked file and does
+  not reach another consumer through fleet propagation.
+- Consent for one lane does not enable the other; no single record enables
+  both.
+- A consent record that is missing, unparseable, wrong-schema, unreadable, or
+  not a regular file yields *no consent* and a successful run — never an error,
+  never an optimistic grant.
+- Whether consent is machine-wide or per repository is stated in design.md
+  with a rationale, and the implemented behaviour matches.
+- Source and `templates/` copies identical after the change; surface-generation
+  and review tests pass against the new gate.

@@ -171,3 +171,30 @@ coherently, and whichever lands second must not re-open what the first closed.
   `08-07-ci-preflight-full-mode-gap`.
 - Auditing every existing PRD for other false positives beyond the two on `main`.
   Fix those two; file anything else the fix surfaces.
+
+## Absorbed: 08-06-preflight-bare-filename-references (2026-08-08 consolidation)
+
+That task covered the eligibility half of the same documentation
+path-reference check: `shouldCheckDocumentationPathReference`
+(`scripts/sd-ai-command-pack-review-preflight.mjs:4443`) validates a reference
+only when it is one of eight enumerated top-level files or begins with one of
+26 directory prefixes — a bare filename naming a tracked file (`review.py:555`,
+`manifest.json`, `CHANGELOG.md`) is silently unchecked. On PR #339 preflight
+passed while Copilot flagged two unqualified `review.py` references — a paid
+remote round doing work the deterministic gate should do free.
+
+Carried as an explicit **phase-2 requirement, sequenced strictly after this
+task's absent-path escape hatch lands** (the tasks are complementary: escape
+hatch first, widening second — widening eligibility before the escape hatch
+exists would raise the false-failure rate the source's own R3 forbids):
+
+- R1: a code-span/markdown-link bare filename matching a tracked file under an
+  existing checked prefix must be validated — passing when the file exists,
+  failing when it does not.
+- R2: an ambiguous bare filename (matching tracked files in more than one
+  directory) must not be reported as missing.
+- R3: the current corpus must produce the same failure set before and after,
+  except genuinely broken references.
+- R4: whatever the rule declines to check stays declined for a stated,
+  inspectable reason. Foreign-repository references stay out of scope
+  (operator decision 2026-08-07; name the owning repository in prose instead).

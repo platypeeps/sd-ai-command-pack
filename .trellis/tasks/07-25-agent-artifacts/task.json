@@ -1,7 +1,7 @@
 {
   "id": "agent-artifacts",
   "name": "agent-artifacts",
-  "title": "Ship SD commands as cross-platform sub-agents",
+  "title": "PARKED: Ship SD commands as cross-platform sub-agents",
   "description": "Parent task for shipping SD commands as capability-gated cross-platform sub-agents: agents authored once as neutral Markdown plus frontmatter, rendered per platform, and delivered through the existing registry, generator, manifest, and installer path without adding a new layer. Owns requirements R1-R7 and the cross-child acceptance criteria; implementation belongs to its four children and this task is never started directly.",
   "status": "planning",
   "dev_type": null,
