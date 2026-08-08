@@ -2,7 +2,7 @@
   "id": "status-housekeeping-anomaly-disagreement",
   "name": "status-housekeeping-anomaly-disagreement",
   "title": "Leftover local branches block every housekeeping run as a strict anomaly",
-  "description": "The same repository state yields anomalies none from the status collector and verdict blocked with status_anomalies from housekeeping.",
+  "description": "Leftover local branches are a strict anomaly, so housekeeping \u2014 which invokes the status collector with --expect-clean \u2014 returns blocked with status_anomalies on every run in a repository that keeps branches around, while ordinary sd-status reports them as expected clean state. A verdict that is blocked on every clean merge carries no information.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
