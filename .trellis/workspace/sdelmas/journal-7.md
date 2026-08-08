@@ -883,3 +883,40 @@ Filed a Trellis task recording that the sd-status collector has no worktree inve
 ### Next Steps
 
 - None - task complete
+
+
+## Session 324: File the missing task.py rename command
+
+**Date**: 2026-08-07
+**Task**: File the missing task.py rename command
+**Branch**: `chore/file-upstream-task-rename`
+
+### Summary
+
+Filed a Trellis task for a task.py rename subcommand, after renaming a task by hand exposed that linkage fields store directory names while id stores the slug.
+
+### Main Changes
+
+- Filed 08-07-upstream-task-rename: renaming means git mv plus rewriting task.json id, name, and title and the prd.md H1, with parent and children storing directory names so every reference dangles.
+- Recorded that validateBookkeepingTopology detects the breakage only later, at review or merge time, attributed to whatever change is in flight.
+- Retagged the PRD's json fence to text preventively, the same class as the review finding on the worktree-visibility PR.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `06df9e51` | chore(task): file the missing task.py rename command |
+| `8bcb4054` | chore(task): retag PRD fences to text |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
