@@ -20,10 +20,25 @@ Executed run — `_report`, `:2173-2185`:
   "outcome": "...",
   "status": "...",
   "run": "executed",
-  "receipt": { "plan": {...}, "attempts": [...], "receiptId": "...", "outcome": "..." },
+  "receipt": {
+    "schemaVersion": 1,
+    "receiptId": "...",
+    "attemptId": "...",
+    "target": {...},
+    "plan": {...},
+    "outcome": "...",
+    "attempts": [...],
+    "findings": [...],
+    "disposition": {...}
+  },
   "remoteSummary": {...}
 }
 ```
+
+Note that the executed report is not wholly nested: `schemaVersion`, `command`,
+`outcome`, `status`, `run` and `remoteSummary` stay at the root. What moves is
+`target`, `plan` and everything per-attempt — which is precisely the set a
+comparison harness needs. Receipt fields are as constructed at `:2107-2116`.
 
 Plan-only — `:2310-2317`:
 
@@ -129,12 +144,13 @@ outright, at the cost of asserting a receipt that does not exist.
   produced it, a consumer can determine the mode by reading a field that is
   present in both shapes. Demonstrate with a single `jq` expression that
   returns a correct, non-null answer for both inputs.
-- **AC2** — The executed payload's existing paths are unchanged:
-  `.receipt.plan.providers[].id`, `.receipt.plan.policyId`,
-  `.receipt.plan.configurationDigest`, `.receipt.plan.policyDigest`,
-  `.receipt.attempts[].status`, `.receipt.attempts[].provider.id`,
-  `.receipt.outcome`, `.receipt.receiptId`. Assert each is non-null on a real
-  executed run, not by reading the source.
+- **AC2** — The executed payload's existing paths are unchanged. Root:
+  `.schemaVersion`, `.command`, `.outcome`, `.status`, `.run`, `.remoteSummary`.
+  Nested: `.receipt.target`, `.receipt.plan.providers[].id`,
+  `.receipt.plan.policyId`, `.receipt.plan.configurationDigest`,
+  `.receipt.plan.policyDigest`, `.receipt.attempts[].status`,
+  `.receipt.attempts[].provider.id`, `.receipt.outcome`, `.receipt.receiptId`.
+  Assert each is non-null on a real executed run, not by reading the source.
 - **AC3** — `tests/test_review_stage.py` passes unmodified, or every
   modification is justified as an intended contract change rather than a test
   bent to fit.
