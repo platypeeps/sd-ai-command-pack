@@ -1535,3 +1535,38 @@ Filed 08-07-ship-resume-kb-gap, recording that an sd-ship resume skips the KB re
 ### Next Steps
 
 - Design where the resume path re-enters the KB refresh without repeating housekeeping's own
+
+
+## Session 341: File the divergent plan-only and executed report payload shapes
+
+**Date**: 2026-08-08
+**Task**: File the divergent plan-only and executed report payload shapes
+**Branch**: `chore/file-plan-only-payload-shape`
+
+### Summary
+
+Filed 08-07-plan-only-payload-shape, recording that the plan-only and executed report payloads diverge in shape, so one consumer cannot read both
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-plan-only-payload-shape with prd.md, task.json, and the check/implement manifests, with Copilot review findings applied
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c7e77f15` | chore(task): file divergent plan-only and executed report payload shapes |
+| `04d7a678` | docs(task): apply Copilot review findings to the payload-shape filing |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Design the single payload shape both modes emit and the contract test that pins it
