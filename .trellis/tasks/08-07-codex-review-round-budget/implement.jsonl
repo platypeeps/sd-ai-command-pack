@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "Authoring conventions for the pack's prose contracts, which this task edits directly."}
+{"file": ".trellis/spec/tooling/index.md", "reason": "Twin-mirror and shipped-surface rules governing the .claude/ and templates/.claude/ copies that must stay byte-identical."}

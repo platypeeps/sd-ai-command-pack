@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Forbids collapsing a non-success outcome into a success-shaped result, which is what the empty-clusters branch does when no query ran."}

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tooling/index.md", "reason": "Trellis task-store conventions and the preflight bookkeeping topology rules a rename must keep satisfied."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Python conventions for the task.py subcommand and the atomic multi-file rewrite it performs."}
