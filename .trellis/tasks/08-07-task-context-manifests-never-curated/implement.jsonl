@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tooling/index.md", "reason": "Preflight bookkeeping rules and the existing lone-scaffold exemption this task must leave intact."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Sub-agent dispatch and task-context reading order, where an unfilled manifest currently degrades silently."}
