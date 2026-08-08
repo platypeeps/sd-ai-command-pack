@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 321
-- **Last Active**: 2026-08-07
+- **Total Sessions**: 338
+- **Last Active**: 2026-08-08
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~848 | Active |
+| `journal-7.md` | ~1468 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,22 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 338 | 2026-08-08 | File the preflight planning branch-null gap | `87550146` | `chore/file-preflight-planning-branch-gap` |
+| 337 | 2026-08-08 | File the Claude skill-surface resolution-guidance gap | `6b3d47ee` | `-` |
+| 336 | 2026-08-08 | File the superseded-workflow-run eligibility defect | `a3397782` | `task/08-07-eligibility-superseded-runs` |
+| 335 | 2026-08-08 | File the record-session merge-commit derivation defect | `6d656c03` | `chore/file-record-session-merge-commit` |
+| 334 | 2026-08-08 | File the final-bundle wrong-base diagnosis defect | `1ce4e97b` | `chore/file-preflight-base-diagnosis` |
+| 333 | 2026-08-08 | Convert issue #348 into the pr-eligibility stale-BLOCKED task | `b15cc5e0` | `chore/file-pr-eligibility-stale-blocked` |
+| 332 | 2026-08-08 | Backfill the empty task descriptions the archive gate requires | `97f026dd` | `chore/backfill-empty-task-descriptions` |
+| 331 | 2026-08-08 | File the task.py create metadata gate mismatch | `da6b00605f543557f75e5bb1e3f5e298af7e0fed` | `chore/file-task-create-description-required` |
+| 330 | 2026-08-08 | Correct the housekeeping anomaly task premise to a difference of mode | `189d4e8e` | `chore/housekeeping-anomaly-evidence` |
+| 329 | 2026-08-08 | File the Codex lane consent gate as a planning task | `3d8abb41`, `26f58f8b` | `chore/file-codex-lane-consent` |
+| 328 | 2026-08-08 | Let work-loop stop and reconcile act on a run whose lock was already released | `8549cdc9`, `a779a256`, `7132bd84`, `910194ff`, `9acf535d`, `7ffcbd4e` | `fix/work-loop-stop-after-pause` |
+| 327 | 2026-08-08 | Make third-party model reviewers opt-in rather than automatic on installation | `a669d9c0`, `5221ca18` | `chore/file-plugin-review-lanes` |
+| 326 | 2026-08-08 | Revert the sd-propose-pack-task rename and refile as an add-only planning bundle | `699aabf8` | `chore/file-sd-submit-pack-task-v2` |
+| 325 | 2026-08-07 | File the uncurated task-manifest gap | `6a0f47e1` | `chore/file-task-context-never-curated` |
+| 324 | 2026-08-07 | File the missing task.py rename command | `06df9e51`, `8bcb4054` | `chore/file-upstream-task-rename` |
+| 323 | 2026-08-07 | File the sd-status worktree blind spot | `a8ed88a7`, `82970640` | `chore/file-status-worktree-invisibility` |
 | 322 | 2026-08-07 | Integrate main into the codex round-budget filing branch | `1c6faf5b`, `d9b1b926` | `chore/file-codex-review-round-budget` |
 | 321 | 2026-08-07 | File the codex review round-budget increase | `d9b1b926bab86b79b8256958d24287295e99481e` | `chore/file-codex-review-round-budget` |
 | 320 | 2026-08-07 | File three fail-open defects found auditing hoa-manager | `b7a4afd891aadc0a8c2104c0df413ea89618da3c` | `chore/file-hoa-manager-fail-open-defects` |

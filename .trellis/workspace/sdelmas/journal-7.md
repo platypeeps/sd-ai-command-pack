@@ -846,3 +846,623 @@ Merged main into chore/file-codex-review-round-budget and resolved a live sessio
 ### Next Steps
 
 - None - task complete
+
+
+## Session 323: File the sd-status worktree blind spot
+
+**Date**: 2026-08-07
+**Task**: File the sd-status worktree blind spot
+**Branch**: `chore/file-status-worktree-invisibility`
+
+### Summary
+
+Filed a Trellis task recording that the sd-status collector has no worktree inventory, so a branch checked out in another worktree is indistinguishable from a free one.
+
+### Main Changes
+
+- Filed 08-07-status-worktree-invisibility: grep for worktree in the status collector returns zero matches, and its only nearby path delegates to a receipt-scoped classifier that deliberately ignores foreign worktrees.
+- Kept the recovery-artifacts ownership semantics explicitly unchanged; the task adds a separate read-only inventory rather than adopting artifacts.
+- Retagged the PRD's fenced blocks to text after review, matching the repository convention that keeps quoted evidence from being read as the PR's own code.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a8ed88a7` | chore(task): file the sd-status worktree blind spot |
+| `82970640` | chore(task): retag PRD fences to text |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 324: File the missing task.py rename command
+
+**Date**: 2026-08-07
+**Task**: File the missing task.py rename command
+**Branch**: `chore/file-upstream-task-rename`
+
+### Summary
+
+Filed a Trellis task for a task.py rename subcommand, after renaming a task by hand exposed that linkage fields store directory names while id stores the slug.
+
+### Main Changes
+
+- Filed 08-07-upstream-task-rename: renaming means git mv plus rewriting task.json id, name, and title and the prd.md H1, with parent and children storing directory names so every reference dangles.
+- Recorded that validateBookkeepingTopology detects the breakage only later, at review or merge time, attributed to whatever change is in flight.
+- Retagged the PRD's json fence to text preventively, the same class as the review finding on the worktree-visibility PR.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `06df9e51` | chore(task): file the missing task.py rename command |
+| `8bcb4054` | chore(task): retag PRD fences to text |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 325: File the uncurated task-manifest gap
+
+**Date**: 2026-08-07
+**Task**: File the uncurated task-manifest gap
+**Branch**: `chore/file-task-context-never-curated`
+
+### Summary
+
+Filed a Trellis task recording that nothing ever requires a task's spec manifests to be curated, so sub-agents can dispatch with no spec context and no signal that they did.
+
+### Main Changes
+
+- Filed 08-07-task-context-manifests-never-curated, keeping the deliberate lone-scaffold preflight exemption intact and targeting the gap it leaves at every later boundary.
+- Measured the scale: 54 of 102 manifest files across 27 of 52 active task directories still carry the generated scaffold.
+- Recommended advisory surfacing plus a gate at task.py start, explicitly not at completion, which is the late failure the exemption was written to prevent.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6a0f47e1` | chore(task): file the uncurated task-manifest gap |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 326: Revert the sd-propose-pack-task rename and refile as an add-only planning bundle
+
+**Date**: 2026-08-08
+**Task**: Revert the sd-propose-pack-task rename and refile as an add-only planning bundle
+**Branch**: `chore/file-sd-submit-pack-task-v2`
+
+### Summary
+
+Refiled the sd-submit-pack-task planning task add-only after the rename blocked #361's planning bundle
+
+### Main Changes
+
+Filed `08-07-sd-submit-pack-task`: a command that files a new pack task or
+revises an existing one end to end -- private worktree, branch, task-directory
+edit, commit, push, PR -- without touching the caller's checkout.
+
+Replaces #361, which carried the same content but renamed the task directory
+mid-history. A planning bundle may not delete or move a task artifact, so that
+branch could not be finalized:
+
+    planning_task_deletion: commit 61280a44 deletes, renames, or copies a task artifact
+
+The net diff against main was add-only, but the gate reads per commit, and a
+revert commit is another rename. Since main has neither directory, the fix was
+a fresh add-only branch rather than a revert: original name restored across the
+directory, task.json id/name/title, the manifests, and the prd.md H1, with the
+update-mode requirements retained in full.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `699aabf8` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 327: Make third-party model reviewers opt-in rather than automatic on installation
+
+**Date**: 2026-08-08
+**Task**: Make third-party model reviewers opt-in rather than automatic on installation
+**Branch**: `chore/file-plugin-review-lanes`
+
+### Summary
+
+Promoted opt-in to normative requirements 15-22 and closed the requiredProviders bypass
+
+### Main Changes
+
+Made third-party model reviewers opt-in rather than automatic on installation.
+Promoted opt-in from a recommendation in "Open decisions" to normative
+requirements 15-22 in `08-07-plugin-review-provider-lanes`.
+
+The mechanism is grounded in verified code rather than proposed from scratch.
+Shipping the providers `enabled: false` does not work: eligibility filters on
+`enabled` before every selection branch (`review-local.py:1214`), so a disabled
+provider is unreachable rather than off-by-default, and `local=gemini` raises
+`requested local provider is unavailable or ineligible` instead of reviewing.
+`enabled` conflates permission with default selection; opt-in needs them split.
+
+One hole would have made the whole mechanism decorative:
+`selected.extend(by_id[item] for item in required ...)` at `:1276` force-adds
+`policy.requiredProviders` after every selection branch, so an opt-in provider
+named there runs on every review regardless. Requirement 21 rejects that
+combination during configuration validation.
+
+The Codex adversarial lane found two blocking issues in the first draft, both
+confirmed and fixed. The sharpest: the draft made `allowedDataHandling` both
+the default-deny consent switch and an un-widenable ceiling, which makes the
+per-machine overlay impossible to use -- the only way to opt in would be
+editing the fleet-propagated file the overlay exists to avoid. A ceiling and a
+default-off switch cannot be the same field, so `allowedDataHandling` stays a
+prohibition with unchanged defaults and consent moved to the default-selection
+property and the overlay. It also caught that "byte-identical receipts" is
+unsatisfiable once `_digest(config)` changes.
+
+That lane's first run returned a Trellis triage question instead of a review --
+the repository's own SessionStart rule hijacked the prompt. It is prompt-
+fragile and worth knowing about.
+
+Recorded two cross-cutting findings. `08-07-default-local-review-lanes` (#364)
+contradicts opt-in as written: its R1 gives codex `costTier: "none"` so it is
+selected ahead of everything on cost, and its AC5/AC6 require execution on
+presence alone. Flagged on that PR. Separately, two Codex lanes already ship
+this behaviour -- `planning-adversarial-review.md:42` and
+`sd-review-local/SKILL.md:166` -- gated on `command -v codex` with no consent
+check, across 15 tracked paths including templates mirrors, docs, and tests.
+That needs its own task and is recorded as out of scope here.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a669d9c0` | (see git log) |
+| `5221ca18` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 328: Let work-loop stop and reconcile act on a run whose lock was already released
+
+**Date**: 2026-08-08
+**Task**: Let work-loop stop and reconcile act on a run whose lock was already released
+**Branch**: `fix/work-loop-stop-after-pause`
+
+### Summary
+
+pause releases the work-loop ownership lock by design, but stop and reconcile reached require_lock through mutate_state and demanded one back. A paused run could not be stopped, and reconcile — the route references/run-recovery.md sends a stopped or red run to — could not be walked at all. mutate_state now takes released_lock_statuses; stop and reconcile pass LOCK_RELEASING_STATUSES.
+
+### Main Changes
+
+- mutate_state takes released_lock_statuses; an absent lock is the documented outcome for exactly those statuses and an error everywhere else
+- LOCK_RELEASING_STATUSES names paused, stopped, and completed — every status stop can persist — and deliberately excludes active
+- stop and reconcile pass the allowance; every other mutate_state caller keeps the strict default
+- Merged 64 commits of main, resolved the version/generated conflicts, and bumped the pack to 0.64.28
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8549cdc9` | fix(work-loop): let stop retire a run that pause already unlocked |
+| `a779a256` | refactor(work-loop): name the constant for the contract, not the status |
+| `7132bd84` | fix(work-loop): unblock reconcile, and name every lock-releasing status |
+| `910194ff` | chore(task): record the work-loop lock-release task for PR #349 |
+| `9acf535d` | chore(task): start the work-loop lock-release task |
+| `7ffcbd4e` | chore(task): describe the work-loop lock-release task |
+
+### Testing
+
+- [OK] tests/test_work_loop.py: 107 tests, OK
+- [OK] Release payload gate: passed, 0.64.27 -> 0.64.28 across 8 fleet consumers
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #349 through the sd-housekeeping gate
+
+
+## Session 329: File the Codex lane consent gate as a planning task
+
+**Date**: 2026-08-08
+**Task**: File the Codex lane consent gate as a planning task
+**Branch**: `chore/file-codex-lane-consent`
+
+### Summary
+
+Both shipped Codex review lanes launch on a successful capability probe alone, with no consent step anywhere in the path. 08-07-plugin-review-provider-lanes settled that rule for the planned provider mechanism and left these two live surfaces to their own task; this is that task. Filed 08-08-codex-lane-consent-gate with 13 requirements, adopting the precedent rather than inventing a second consent system.
+
+### Main Changes
+
+- Filed 08-08-codex-lane-consent-gate: consent is per lane, not per tool and not global; absent consent resolves to the existing skipped path
+- Specified the consent signal concretely — path under the user state root, schema, reader, grant and revoke — because 'consent is recorded' is otherwise unfalsifiable
+- Reading the consent record fails closed on missing, unparseable, wrong-schema, unreadable, or non-regular file
+- Recorded the 14 real surfaces carrying the capability gate, and the rejected shared-per-tool alternative so it is not reopened
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3d8abb41` | chore(task): gate the shipped Codex review lanes on consent |
+| `26f58f8b` | chore(task): make consent per lane and specify the signal |
+
+### Testing
+
+- [OK] Codex adversarial review: 7 concerns raised, each verified against code; confirmed ones fixed before commit
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Design the consent record schema and reader for 08-08-codex-lane-consent-gate
+
+## Session 330: Correct the housekeeping anomaly task premise to a difference of mode
+
+**Date**: 2026-08-08
+**Task**: Correct the housekeeping anomaly task premise to a difference of mode
+**Branch**: `chore/housekeeping-anomaly-evidence`
+
+### Summary
+
+The task claimed sd-status and sd-housekeeping disagree about one body of evidence. That premise was wrong: housekeeping invokes the collector with --expect-clean, and strict_anomalies is appended only under expect_clean, so advisory and strict are deliberately different modes rather than two readings of one result. Retitled the task to name the real defect — leftover local branches block every housekeeping run as a strict anomaly — and recorded the correction instead of building on the false premise.
+
+### Main Changes
+
+- Recorded the correction: this is a difference of mode, not a contradiction; housekeeping.sh:1132 passes --expect-clean and status.py:2066 appends strict_anomalies only under it
+- Named the exact line the verdict turns on — housekeeping-result.py:237 reads status.anomalies from the embedded collector result, and :255-259 turns it into blocked
+- Replaced the vague reproduction claim with seven verified reproductions on 2026-08-07/08 and the real 14-branch list
+- Declared the dependency on merged 08-07-status-worktree-invisibility and narrowed the exit-zero criterion to the leftover-branch condition
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `189d4e8e` | chore(task): correct the premise and add seven reproductions |
+
+### Testing
+
+- [OK] Codex adversarial review: blocker 3 invalidated the task's central premise; verified against code and recorded as a correction
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Answer open question 1 in design.md: which surface is wrong
+
+
+## Session 331: File the task.py create metadata gate mismatch
+
+**Date**: 2026-08-08
+**Task**: File the task.py create metadata gate mismatch
+**Branch**: `chore/file-task-create-description-required`
+
+### Summary
+
+Filed 08-08-task-create-description-required after PR #376's finalization was blocked by an empty description that task.py create had accepted. The PRD covers both title and description, the --slug bypass, and the str.strip()/String.trim() divergence.
+
+### Main Changes
+
+- Added .trellis/tasks/08-08-task-create-description-required with prd.md, task.json, and spec manifests
+- Recorded the --slug bypass of the title truthiness test at task_store.py:207 and the 77 callers that omit --description
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `da6b00605f543557f75e5bb1e3f5e298af7e0fed` | chore(task): file the task.py create metadata gate mismatch |
+
+### Testing
+
+- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs -- 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 332: Backfill the empty task descriptions the archive gate requires
+
+**Date**: 2026-08-08
+**Task**: Backfill the empty task descriptions the archive gate requires
+**Branch**: `chore/backfill-empty-task-descriptions`
+
+### Summary
+
+Filled the three empty task.json description fields that block the Trellis archive gate, sourcing each from its own prd.md
+
+### Main Changes
+
+- Filled the empty description on .trellis/tasks/07-25-agent-artifacts, 07-25-harden-toolchain-failure-paths, and 07-25-reduce-review-tooling-spawns from each task's own prd.md
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `97f026dd` | chore(task): backfill the descriptions the archive gate requires |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures, 1 advisory warning
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge the remaining open PRs serially, each updated onto the new main
+
+
+## Session 333: Convert issue #348 into the pr-eligibility stale-BLOCKED task
+
+**Date**: 2026-08-08
+**Task**: Convert issue #348 into the pr-eligibility stale-BLOCKED task
+**Branch**: `chore/file-pr-eligibility-stale-blocked`
+
+### Summary
+
+Filed 08-08-pr-eligibility-stale-blocked-review, recording that merge_blocked_review is a terminal verdict derived from one possibly-stale mergeStateStatus read
+
+### Main Changes
+
+- Added .trellis/tasks/08-08-pr-eligibility-stale-blocked-review with a prd.md that verifies the issue's analysis against classify_non_clean_merge_state and names the retryable-indeterminate alternative
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b15cc5e0` | chore(task): convert issue #348 into a Trellis task |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Answer open question 1 in design.md: re-query inside the probe, or retryable-indeterminate for the caller
+
+
+## Session 334: File the final-bundle wrong-base diagnosis defect
+
+**Date**: 2026-08-08
+**Task**: File the final-bundle wrong-base diagnosis defect
+**Branch**: `chore/file-preflight-base-diagnosis`
+
+### Summary
+
+Filed 08-07-preflight-base-diagnosis, recording that final-bundle's diagnosis points at the wrong base when the caller passes a merge-base instead of the last work commit
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-preflight-base-diagnosis with prd.md, task.json, and the check/implement manifests
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1ce4e97b` | chore(task): file final-bundle wrong-base diagnosis defect |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Design the corrected diagnosis message and its regression test
+
+
+## Session 335: File the record-session merge-commit derivation defect
+
+**Date**: 2026-08-08
+**Task**: File the record-session merge-commit derivation defect
+**Branch**: `chore/file-record-session-merge-commit`
+
+### Summary
+
+Filed 08-07-record-session-merge-commit, recording that record-session derives merge commits as work commits, which the planning receipt then rejects as non-linear
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-record-session-merge-commit with prd.md, task.json, and the check/implement manifests
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6d656c03` | chore(task): file record-session merge-commit derivation defect |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Decide whether record-session should filter merge commits or the receipt should tolerate them
+
+
+## Session 336: File the superseded-workflow-run eligibility defect
+
+**Date**: 2026-08-08
+**Task**: File the superseded-workflow-run eligibility defect
+**Branch**: `task/08-07-eligibility-superseded-runs`
+
+### Summary
+
+Filed 08-07-eligibility-superseded-runs, recording that pr-eligibility counts superseded workflow runs when judging whether a head's checks are green
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-eligibility-superseded-runs with prd.md, task.json, and the check/implement manifests
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a3397782` | docs(task): file the superseded-workflow-run eligibility defect |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Design the run-selection rule that ignores superseded runs for the current head
+
+
+## Session 337: File the Claude skill-surface resolution-guidance gap
+
+**Date**: 2026-08-08
+**Task**: File the Claude skill-surface resolution-guidance gap
+
+### Summary
+
+Filed 08-07-claude-skill-surface-gap, recording that the shipped Claude skill surfaces omit the resolution guidance their adapters assume
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-claude-skill-surface-gap with prd.md, task.json, and the check/implement manifests
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6b3d47ee` | chore(task): file the Claude skill-surface resolution-guidance gap |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Design the resolution-guidance text and the surface-generation test that enforces it
+
+
+## Session 338: File the preflight planning branch-null gap
+
+**Date**: 2026-08-08
+**Task**: File the preflight planning branch-null gap
+**Branch**: `chore/file-preflight-planning-branch-gap`
+
+### Summary
+
+Filed 08-07-preflight-planning-branch-gap, recording that preflight skips the planning branch-null rule it reports as checked
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-preflight-planning-branch-gap with prd.md, task.json, and the check/implement manifests
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `87550146` | chore(task): file preflight skipping the planning branch-null rule |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Design the branch-null enforcement and a test that fails without it
