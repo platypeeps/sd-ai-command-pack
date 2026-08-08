@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.64.28 - 2026-08-08
+
+- Let `stop` retire a paused work-loop run. `pause` releases the ownership lock
+  by design, but `stop` reached `require_lock` through `mutate_state` and
+  demanded one back, so a paused run could not be stopped at all — it failed
+  with `work-loop state does not exist: .../lock.json`, naming the lock file
+  through the generic state-read error. The only way out was a
+  `start --run-id` resume purely to re-take a lock that the very next command
+  would drop again, which also flips the run back to `active` and rewrites the
+  checkpoint on the way through. Observed retiring run
+  `d23a9c7f5f7447fd8ec5059776ed27f7` in a consumer repository.
+  `mutate_state` now takes `released_lock_statuses`, and the commands that act
+  on an already-unlocked run pass it.
+- The same defect blocked `reconcile`, which is worse: `references/run-recovery.md`
+  routes a stopped or red run *to* `reconcile`, so the documented recovery path
+  could not be walked at all. Reconciling a real retired run failed with the
+  same `work-loop state does not exist: .../lock.json`. `reconcile` now passes
+  the allowance too.
+- `stop` runs `release_lock` unconditionally after its mutation, so every
+  status it can set — `paused`, `stopped`, and `completed` — ends lockless, not
+  just `paused`. `LOCK_RELEASING_STATUSES` names all three. `active` is
+  deliberately absent: a live run still owns its lock, so an active run whose
+  lock vanished still fails exactly as before, and omitting the parameter keeps
+  the strict default for every other `mutate_state` caller.
+
 ## 0.64.27 - 2026-08-07
 
 - Close three helper defaults that fight the pack's own gates. Each produced a

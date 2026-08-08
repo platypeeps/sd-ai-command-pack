@@ -101,6 +101,17 @@ declared eligible becomes a false failure in a blocking gate.
   room for the new class.
 - The gate is blocking. A rule that cannot hold R3 is not shippable, however
   correct it is in principle.
+- The rule must not try to resolve a reference that names a file in a *different*
+  repository. Recorded as an operator decision on 2026-08-07: CI does not require
+  cross-repository plumbing or checks. A reference of that kind cannot be
+  validated from this checkout, and acquiring the ability to validate it would
+  mean fetching or trusting a foreign tree from a blocking gate — a much larger
+  change than this task's eligibility rule, and one nobody has asked for.
+- Because the rule declines that class, the author-side convention is the whole
+  remedy and belongs in R4's "stated reason" rather than in code: name the owning
+  repository in prose and do not write the foreign path as a bare
+  repository-relative code span. The check has no way to distinguish such a span
+  from a local path that has rotted, and it is right to fail it.
 
 ## Open questions (resolve in design)
 
@@ -144,6 +155,17 @@ declared eligible becomes a false failure in a blocking gate.
 - Related but separate: `.trellis/tasks/08-06-review-check-receipt-pinning` and
   `.trellis/tasks/08-06-local-provider-empty-scope` also came out of that audit.
   Neither touches this function.
+- The foreign-repository class above was found the hard way on 2026-08-07. PR #358
+  described a test class living in the consumer repository `se-ai-command-pack`
+  and wrote its location as a bare code span under this repository's `tests/`
+  prefix. That made the reference eligible, it resolved to nothing here, and the
+  gate failed — correctly. It was fixed in `765c0f74` by naming the owning
+  repository in prose instead, which is the convention the new constraint
+  records. The eligibility rule behaved exactly as designed; only the reference
+  was wrong.
+- Adjacent but distinct: `.trellis/tasks/08-07-ci-preflight-full-mode-gap` covers
+  *when* this check runs in CI — it currently runs in one classifier mode only.
+  That task does not change eligibility, and this one does not change scheduling.
 - Complex enough to need `design.md` and `implement.md` before `task.py start`:
   R1 and R3 pull against each other, and the resolution source is a real choice
   with a per-run cost (N1).
