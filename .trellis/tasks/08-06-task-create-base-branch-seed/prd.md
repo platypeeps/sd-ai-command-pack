@@ -25,11 +25,18 @@ created from the default branch.
 
 ### Why that is the uncommon case here
 
-The SD flow gives a task scaffold its own branch: the review preflight permits
-at most one Trellis task directory per diff, so filing a task means creating a
-branch, creating the task on it, and opening a pull request. Every task created
-that way gets its own feature branch recorded as the target it should be merged
-*into*.
+The SD flow gives a task scaffold its own branch: a diff spanning more than one
+Trellis task directory draws a review preflight *warning* — `warn(...)` at
+`scripts/sd-ai-command-pack-review-preflight.mjs:4172-4176`, not a failure, so
+more than one directory is permitted and merely discouraged — and the convention
+that follows from it is to file each task on its own branch and open a pull
+request. Every task created that way gets its own feature branch recorded as the
+target it should be merged *into*.
+
+The warning is a nudge, not a gate, so it is a convention rather than a forcing
+function. That weakens the causal story slightly and is worth stating plainly:
+the branch-per-task habit is why the defect fires so reliably, but nothing
+mechanically compels it.
 
 Both tasks filed on 2026-08-06 hit it:
 
@@ -39,18 +46,40 @@ Both tasks filed on 2026-08-06 hit it:
   deterministic gate with 0 failures and 0 warnings, and was caught by a paid
   Copilot round. Fixed in `5779c242`.
 
-It is not new, and not confined to this week. Surveying every active task record
-gives 43 of 45 recording `main`, with two exceptions:
+A third dated occurrence, 2026-08-07: `08-07-review-check-stale-cache` was
+created from `task/08-07-review-check-stale-cache`, recorded that branch, and
+reached PR #358 still holding it, where a paid Copilot round flagged it. Fixed in
+`8a72d5fb`. That is the second time this defect has passed the deterministic gate
+and then been caught by a paid review round — PR #342 was the first — which is
+the exact cost R2 exists to remove.
 
-- `07-30-upstream-task-start-branch-recording` records
-  `fix/silence-satisfied-scope-advisory` — a root task, authored 2026-07-30,
-  already merged to `main` carrying a feature branch as its stated PR target.
-- this task's own record, created the same way and corrected by hand before
-  its pull request opened.
+It is not new, not confined to one week, and the stored population is growing. A
+survey on 2026-08-06 gave 43 of 45 active records recording `main`, with two
+exceptions: `07-30-upstream-task-start-branch-recording`, and this task's own
+record, corrected by hand before its pull request opened.
+
+Re-running that survey against `origin/main` on 2026-08-07 gives **45 of 51
+recording `main`, with six exceptions**. All six are root tasks — confirmed by
+reading `parent` on each record, every one `None` — so not one of them is the
+legitimate stacked-child shape R3 protects:
+
+| Task | Recorded `base_branch` | Refs matching that branch |
+|---|---|---|
+| `07-30-upstream-task-start-branch-recording` | `fix/silence-satisfied-scope-advisory` | 0 |
+| `08-06-session-followups` | `fix/work-loop-stop-after-pause` | 2 |
+| `08-07-local-finding-rebuttal-channel` | `chore/task-file-session-defects` | 0 |
+| `08-07-planning-recovery-rejects-merge-commit` | `chore/task-file-session-defects` | 0 |
+| `08-07-provenance-concurrent-session-collision` | `chore/task-file-session-defects` | 0 |
+| `08-07-status-housekeeping-anomaly-disagreement` | `chore/task-file-session-defects` | 0 |
+
+Five of the six name a branch with no matching ref locally or on the remote, so
+they are dead references. Four of those five share one branch — the signature of
+a single session filing four tasks from one feature branch with none of them
+caught, which is the failure at scale rather than one slip.
 
 So the value is wrong roughly whenever a task is filed through the normal SD
-flow, and at least one wrong record has already been merged and sat unnoticed
-for a week.
+flow; the exception set tripled in a day; and at least one wrong record has been
+merged and sat unnoticed for over a week.
 
 ### Why the deterministic gate did not catch it
 
@@ -113,12 +142,15 @@ default branch, which is exactly the record `task.py create` produces.
 - How is "the default branch" resolved inside the check, and what happens in a
   checkout with no remote? The preflight already resolves a default branch
   elsewhere; reusing that surface is preferable to adding a second one.
-- The R4 survey is already done: 43 of 45 active records name `main`, and
-  `07-30-upstream-task-start-branch-recording` names
-  `fix/silence-satisfied-scope-advisory`. Open question is what to do with that
-  one — correct it to `main`, or treat it as the exception mechanism's first
-  case. Correcting it is only safe if nothing reads the field for that record's
-  history.
+- The R4 survey has been run twice and moved: two exceptions on 2026-08-06, six
+  on 2026-08-07, five of them dead references, four of those sharing one branch.
+  The open question is no longer "what to do with that one record" but what the
+  disposition rule is for a set that grows every session: correct each to `main`,
+  or build the exemption mechanism first and enrol them. Correcting a record is
+  only safe if nothing reads the field for that record's history, and that has
+  been checked for none of the five new ones. Whichever route is chosen, the
+  survey must be re-run at implementation time — a table this task carries will
+  be stale again by then.
 
 ## Acceptance Criteria
 
@@ -128,10 +160,17 @@ default branch, which is exactly the record `task.py create` produces.
 - [ ] A root task record whose `base_branch` is the default branch passes.
 - [ ] A child task record targeting the active branch still passes, proving the
       rule at `scripts/sd-ai-command-pack-review-preflight.mjs:3241` is intact.
-- [ ] Running the new rule over all current active task records reports exactly
-      the known non-default record,
-      `07-30-upstream-task-start-branch-recording`, and that record has been
-      corrected or exempted before the rule is allowed to block.
+- [ ] **Before remediation:** running the new rule over the active task records
+      reports exactly the set a freshly re-run survey identifies, and no others.
+      Re-run the survey at implementation time rather than trusting the table
+      above — the set went from two records to six in one day, so a stale copy of
+      it will make this criterion pass while records still fail.
+- [ ] **After remediation:** every record in that set has been corrected or
+      granted a recorded exemption, and the rule then reports nothing. These are
+      two separate criteria on purpose: a population that still produces the
+      survey's failure set has not been remediated, and a remediated population
+      cannot still produce it, so one criterion asserting both at once is not
+      satisfiable at any single moment.
 - [ ] Replaying PR #342's original record — `base_branch` set to
       `chore/task-preflight-bare-filename-references` — fails the gate, as a
       regression test against the observed occurrence.
