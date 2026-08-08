@@ -100,33 +100,48 @@ shared; the surface differs.
 3. Consent is recorded per machine, under the existing user state root named
    above, and never in a tracked file that fleet propagation would carry to
    other consumers.
-4. Consent is per lane or per tool, not a single global "external reviewers"
-   switch that a future lane would silently inherit. Consenting to planning
-   review is not consenting to shipping diffs from a different command.
+4. Consent is **per lane**. A single global "external reviewers" switch is
+   forbidden, and so is one shared per-tool record: consenting to planning
+   review is not consenting to ship diffs from a different command, even though
+   both reach the same vendor. A lane added later inherits nothing.
+5. The consent signal is concretely specified before implementation, because
+   "consent is recorded" is otherwise unfalsifiable. `resolve_state_root`
+   returns a directory and nothing more (`sd_ai_command_pack_lib.py:248`), and
+   the surface footprint below contains no runtime consent helper to call. The
+   task must define the file path under the state root, its schema and lane
+   keys, the reader, and how consent is granted and revoked.
+6. Reading the consent record **fails closed**. Missing file, unparseable
+   content, unexpected schema version, unreadable permissions, or a path that is
+   a symlink or non-regular file all resolve to *no consent* — never to an error
+   that blocks the run, and never to an optimistic grant.
+7. Consent scope over repositories is explicit. A record under the user state
+   root is machine-wide by construction, so the task states whether granting
+   consent once enables the lane in **every** repository on that machine or only
+   in named ones. Machine-wide is defensible; arriving there by accident is not.
 
 ### Reporting
 
-5. *Skipped because not installed*, *skipped because incompatible*, and
+8. *Skipped because not installed*, *skipped because incompatible*, and
    *skipped because no consent was recorded* are distinguishable in the
    report. A reader must not have to guess whether the CLI is missing or merely
    unconsented, because the remedies differ.
-6. The existing rule "Do not claim Codex approval when its optional CLI lane is
+9. The existing rule "Do not claim Codex approval when its optional CLI lane is
    skipped or fails" extends unchanged to a no-consent skip. A skipped lane
    never becomes evidence of review.
-7. When `codex` is installed and compatible but unconsented, the report emits
-   one advisory line naming what would enable it. Consent that nobody can
-   discover is indistinguishable from a removed feature. Advisory only: never a
-   prompt, never a blocker.
+10. When `codex` is installed and compatible but unconsented, the report emits
+    one advisory line naming what would enable it. Consent that nobody can
+    discover is indistinguishable from a removed feature. Advisory only: never a
+    prompt, never a blocker.
 
 ### Scope of the change
 
-8. The host's own adversarial review remains mandatory and unchanged. This task
-   gates the Codex lane, not the review obligation; a run without Codex still
-   performs the host review the contract requires.
-9. Source and `templates/` twin mirrors change together. The gating text lives
-   in both, and a change to one alone is drift the release gates are built to
-   catch.
-10. Generated command surfaces and the tests that assert this behaviour are
+11. The host's own adversarial review remains mandatory and unchanged. This task
+    gates the Codex lane, not the review obligation; a run without Codex still
+    performs the host review the contract requires.
+12. Source and `templates/` twin mirrors change together. The gating text lives
+    in both, and a change to one alone is drift the release gates are built to
+    catch.
+13. Generated command surfaces and the tests that assert this behaviour are
     updated in the same change: `.github/scripts/generate-command-surfaces.py`,
     `tests/test_claude_planning_review.py`, `tests/test_review_local.py`, and
     `tests/test_surface_generation.py` all encode the current
@@ -178,18 +193,26 @@ generation and test gates behind it, not a one-file edit.
   Codex approval.
 - Consent recorded on one machine does not appear in any tracked file and does
   not reach another consumer through fleet propagation.
-- Consent for one lane does not enable the other.
+- Consent for one lane does not enable the other, and no single record enables
+  both.
+- A consent record that is missing, unparseable, wrong-schema, unreadable, or
+  not a regular file yields *no consent* and a successful run, never an error
+  and never an optimistic grant.
+- Whether consent is machine-wide or per repository is stated in `design.md`
+  with a rationale, and the implemented behaviour matches that statement.
 - Source and `templates/` copies are identical after the change, and the
   surface-generation and review tests pass against the new gate.
 
 ## Open decisions
 
-**Whether the two lanes share one consent record or hold separate ones.**
-Requirement 4 forbids a single global switch, but `codex`-the-tool holding one
-record used by both lanes is a defensible middle position: it is one vendor and
-one egress destination. Recommendation: one record per tool, keyed so a second
-tool or a third lane must add its own, which satisfies requirement 4 without
-making an operator consent twice to the same vendor.
+**Whether per-lane consent is too granular — resolved: no, keep it per lane.**
+A shared per-tool record was considered on the grounds that both lanes reach one
+vendor and one egress destination. It is rejected because the lanes send
+different things at different times: the planning lane sends planning artifacts
+during ordinary task editing, and `sd-review-local` sends diffs during an
+explicit review. An operator may well want the first and not the second, and a
+shared record makes that inexpressible. Requirement 4 is normative; this entry
+records the rejected alternative so it is not reopened.
 
 **Whether an unconsented lane should be silent or advisory by default.**
 Requirement 7 specifies advisory. If that proves noisy on machines where the
