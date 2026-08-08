@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 338
+- **Total Sessions**: 339
 - **Last Active**: 2026-08-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~1468 | Active |
+| `journal-7.md` | ~1502 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 339 | 2026-08-08 | File the distributed gitignore Python-cache omission | `ecfafe24` | `chore/pack-gitignore-pycache-task` |
 | 338 | 2026-08-08 | File the preflight planning branch-null gap | `87550146` | `chore/file-preflight-planning-branch-gap` |
 | 337 | 2026-08-08 | File the Claude skill-surface resolution-guidance gap | `6b3d47ee` | `-` |
 | 336 | 2026-08-08 | File the superseded-workflow-run eligibility defect | `a3397782` | `task/08-07-eligibility-superseded-runs` |
