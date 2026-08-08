@@ -225,3 +225,33 @@ for surfacing it more loudly.
 
 Filed 2026-08-07. The concrete cost is recorded above: five reports, one
 stranded 222-line PRD, recovered as PR #353.
+
+## Absorbed: 08-08-housekeeping-worktree-held-default-branch (2026-08-08 consolidation)
+
+That task documented the third member of this anomaly family: a default branch
+held by another worktree makes `git switch` fail
+(`scripts/sd-ai-command-pack-housekeeping.sh:475-480`), producing two opaque
+anomalies (`default_branch_switch_failed`, `branch_switch_incomplete`) and a
+`blocked` verdict even though every merge action succeeded.
+
+Carried evidence: 14 pull requests merged through the housekeeping gate in one
+session on 2026-08-08 (#358–#379) every one reporting the same anomaly pair;
+PR #358 captured verbatim:
+
+```text
+verdict: blocked ['default_branch_switch_failed', 'branch_switch_incomplete']
+actions: ['kb_refreshed', 'remote_refs_refreshed', 'pull_request_eligible', 'pull_request_merged', 'pull_request_merge_confirmed']
+```
+
+Carried acceptance criterion (exact-verdict form): a test asserts
+`outcome.verdict == "clean"` — the exact value, not merely "not blocked",
+since `failed` and `indeterminate` are also valid verdicts
+(`housekeeping-result.py:47-49`) and would pass a negative assertion — for a
+merge whose every action succeeded, with both anomaly codes still present and
+the expected `outcome.reasonCodes` pinned. The classifier discrimination this
+needs (a non-blocking anomaly class or an explicit allow-list of codes, since
+`add_anomaly` carries no severity field and
+`sd-ai-command-pack-housekeeping-result.py:255` blocks on any anomaly) is part
+of this task's design space. Worktree-aware diagnosis (naming the holding
+worktree path, carrying git stderr into the anomaly message within
+`validate_event` limits) rides along as reporting requirements.

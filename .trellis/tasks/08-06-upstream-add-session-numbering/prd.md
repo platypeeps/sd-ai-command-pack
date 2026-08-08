@@ -220,3 +220,10 @@ decision. The two tasks should resolve it the same way.
 - Complex enough to need `design.md` and `implement.md` before `task.py start`:
   the numbering scheme is a real choice with a compatibility cost against every
   existing journal, and R1 pulls against N1.
+
+## Note (2026-08-08 consolidation)
+
+D3 (merge-commit derivation) resolution is delegated to
+08-08-merge-commit-policy, which owns the single decision resolving the
+planning-recovery vs record-session vs D3 contradiction. Do not resolve D3
+independently here.

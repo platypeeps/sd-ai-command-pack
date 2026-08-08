@@ -115,3 +115,7 @@ Added 2026-07-28 — findings this task already owned but did not cover:
   `07-28-reduce-review-hashing-and-classifier-cost`. They are hashing and matching
   cost, not spawn cost, and widened this task past its title. No shared code, so the
   two tasks can land in either order.
+
+## Rescope (2026-08-08)
+
+R1/R2/R4 only; R3 is dropped (its batching target shipped in v0.64.11).

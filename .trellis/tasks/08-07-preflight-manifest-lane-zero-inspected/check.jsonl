@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/tooling/index.md", "reason": "Names the required quality-check commands for this file, including the unittest suite and the scripts-versus-templates mirror diff."}
-{"file": ".trellis/spec/tooling/bookkeeping-validator.md", "reason": "Acceptance must not silently narrow this validator's existing safety properties while widening what the lane inspects."}

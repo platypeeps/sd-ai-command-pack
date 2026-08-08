@@ -1,4 +1,0 @@
-{"file": ".trellis/tasks/07-25-publish-local-review-attestations/research/contract-mapping.md", "reason": "Preserve unified command ownership, the router-owned contract boundary, exact-head idempotency, and trust limitations."}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail closed for invalid setup, stale heads, conflicting evidence, and ambiguous publication."}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Preserve typed review state, bounded receipts, exact-head identities, and generated/root parity."}
-{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Keep the shared sd-review skill authoritative and platform adapters thin."}

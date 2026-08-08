@@ -89,3 +89,9 @@ descriptions with installable, tool-restricted definitions on supporting platfor
 - Commit order is **sd-audit-refuter → sd-audit-reviewer → sd-ci-triager → R6 sentences**,
   not the listing order: smallest contract first, and the triager waits on
   `07-25-fix-ci-dispatch` being reviewed since it copies that task's result contract.
+
+## Rescope (2026-08-08)
+
+Park note corrected: the original blocker task is archived; this remains
+parked by choice, not by dependency. Revisit after 08-08-parallel-work-backlog
+ships, which covers the concurrency need this task anticipated.

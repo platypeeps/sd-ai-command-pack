@@ -29,3 +29,18 @@ Decide whether ~600 lines of security-sensitive CI glue repay the minutes they s
 - **A-041 re-derived 2026-07-28 and confirmed exactly as stated.** `.githooks/pre-push:54` and `.github/scripts/check-main-push-scope.sh:71` each allow `.trellis/tasks/*`, `.trellis/workspace/*`, `.trellis/audit/*`; `bookkeeping_ci_scope.py:26` allows only the first two. The copies also differ mechanically — shell `case` globs versus Python string prefixes — so unifying the value does not unify the matching semantics.
 - Composes with `07-28-measure-unmeasured-runtime-surface` R1: logic moved from inline workflow bash into `.github/scripts/*.py` becomes coverage-measured; logic left in a `run:` block never can be.
 - Created from the 2026-07-28 repo audit with explicit user consent via the `audit.followups` decision. Planning complete 2026-07-28: `design.md` and `implement.md` added.
+
+## Absorbed: 07-29-resolve-evidence-run-id-through-api (2026-08-08 consolidation)
+
+That task hardened one member of this trust stack: the `ci-scope` publish gate
+accepts any positive integer as `evidenceRunId` (`tests.yml:105-106`); the fix
+would resolve it against the GitHub API in a trusted step, with failures
+routing through `select_full` (never `exit 1`). Its widen-vs-narrow decision
+and workflow-block test-harness constraint are recorded in its original prd.md
+(recoverable via git history at
+`.trellis/tasks/07-29-resolve-evidence-run-id-through-api/`).
+
+Consolidation note: this work is **moot if the stack is retired** — nothing
+reads `needs.ci-scope.outputs.evidence_run_id` today, so nothing gates on the
+value. Decide retain-vs-retire for the fast-lane trust stack FIRST; only if
+retained does the evidenceRunId hardening enter this task's scope.
