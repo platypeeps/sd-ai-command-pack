@@ -13,7 +13,7 @@
   "createdAt": "2026-08-07",
   "completedAt": null,
   "branch": null,
-  "base_branch": "chore/file-sd-submit-pack-task",
+  "base_branch": "main",
   "worktree_path": null,
   "commit": null,
   "pr_url": null,

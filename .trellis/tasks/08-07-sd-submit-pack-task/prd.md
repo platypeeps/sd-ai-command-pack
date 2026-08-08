@@ -78,6 +78,14 @@ making it a command instead of a habit.
    submitted task: it is a documented review finding, and the scaffold is
    present in a large fraction of existing tasks precisely because nobody
    removes it.
+9. `base_branch` is corrected to the default branch before the commit.
+   `task.py create` seeds it from the current branch, so filing from a worktree
+   on a filing branch records that branch as the PR target — wrong, and caught
+   by review on both PRs that filed these two tasks. Because this command always
+   runs on a purpose-made branch, it would reproduce the defect on every single
+   invocation unless it calls `task.py set-base-branch <dir> <default>`. The
+   underlying defect is `08-06-task-create-base-branch-seed`; this command must
+   not wait for it.
 
 ### Publishing
 
@@ -109,6 +117,8 @@ making it a command instead of a habit.
   PRs with no interference and no worktree collision.
 - The submitted task contains no `_example` placeholder line.
 - The created branch is based on `origin/main` even when local `main` is ahead.
+- The submitted task's `base_branch` is the default branch, never the filing
+  branch, verified by reading `task.json` after a run.
 - A run against a checkout with no `.trellis/.developer` fails before creating
   anything, naming `init_developer.py`.
 - The command never merges, and never pushes to the default branch.
