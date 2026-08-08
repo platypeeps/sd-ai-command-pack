@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Says to validate prerequisites before writing files and never to collapse a conflict into success; this defect writes over existing state without either check."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Local filesystem conventions the ledger's atomic write and state-root resolution follow, which any archive-the-outgoing-state option must not break."}

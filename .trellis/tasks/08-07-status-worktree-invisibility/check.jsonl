@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tooling/index.md", "reason": "Read-only guarantees the status surface must preserve, including receipt and artifact non-mutation."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Test conventions for asserting classifier output is unchanged and no receipt is written."}

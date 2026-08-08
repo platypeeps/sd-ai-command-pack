@@ -3299,6 +3299,153 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(paused["checkpoint"]["target"], "wait for operator")
         self.assertIsNone(paused["checkpoint"]["resumePhase"])
 
+    def _stop(self, module, root: Path, state_root: Path, run_id: str, status: str):
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "stop",
+                    "--repo",
+                    str(root),
+                    "--run-id",
+                    run_id,
+                    "--status",
+                    status,
+                    "--reason",
+                    f"operator {status}",
+                    "--json",
+                ]
+            )
+        return result, stdout.getvalue()
+
+    def test_cli_stop_retires_a_paused_run_whose_lock_was_released(self) -> None:
+        # `pause` releases the lock by design, so requiring one back made a
+        # paused run unstoppable: `stop` failed with "work-loop state does not
+        # exist: .../lock.json", and the only way out was a `start --run-id`
+        # resume purely to re-take a lock about to be dropped again.
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, _state_path, lock_path = self.make_state(module, root, state_root)
+
+        paused_result, paused_out = self._stop(
+            module, root, state_root, state["runId"], "paused"
+        )
+        self.assertEqual(paused_result, 0, paused_out)
+        self.assertEqual(json.loads(paused_out)["status"], "paused")
+        self.assertFalse(lock_path.exists(), "pause must release the lock")
+
+        stopped_result, stopped_out = self._stop(
+            module, root, state_root, state["runId"], "stopped"
+        )
+        self.assertEqual(stopped_result, 0, stopped_out)
+        stopped = json.loads(stopped_out)
+        self.assertEqual(stopped["status"], "stopped")
+        self.assertEqual(stopped["phase"], "stopped")
+
+    def test_mutate_state_released_lock_allowance_is_scoped_to_status(self) -> None:
+        # Pin the contract at the function boundary too, so a CLI refactor
+        # cannot quietly widen or drop it.
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, state_path, lock_path = self.make_state(module, root, state_root)
+        allowance = module.LOCK_RELEASING_STATUSES
+        # `stop` releases the lock unconditionally, so every status it can set
+        # ends lockless -- not just `paused`.
+        self.assertEqual(allowance, frozenset({"paused", "stopped", "completed"}))
+        self.assertNotIn("active", allowance)
+
+        # Active status, no lock: a hard error even with the allowance passed.
+        lock_path.unlink()
+        with self.assertRaises(module.WorkLoopError) as active:
+            module.mutate_state(
+                root,
+                state["runId"],
+                lambda item: None,
+                state_root=state_root,
+                released_lock_statuses=allowance,
+            )
+        self.assertIn("lock.json", str(active.exception))
+
+        # Paused status, no lock: the documented handback, so the mutation runs.
+        state["status"] = "paused"
+        module.atomic_write_json(state_path, state)
+        mutated = module.mutate_state(
+            root,
+            state["runId"],
+            lambda item: item.__setitem__("stopReason", "retired while paused"),
+            state_root=state_root,
+            released_lock_statuses=allowance,
+        )
+        self.assertEqual(mutated["stopReason"], "retired while paused")
+
+        # Paused status, no lock, but no allowance passed: still an error, so
+        # the default stays strict for every other caller of mutate_state.
+        with self.assertRaises(module.WorkLoopError) as default_strict:
+            module.mutate_state(
+                root, state["runId"], lambda item: None, state_root=state_root
+            )
+        self.assertIn("lock.json", str(default_strict.exception))
+
+    def test_cli_reconcile_recovers_a_stopped_run_whose_lock_was_released(self) -> None:
+        # `references/run-recovery.md` routes a stopped run to `reconcile`, but
+        # `stop` had already released the lock and `reconcile` demanded one, so
+        # the documented recovery path could not be walked at all. Found while
+        # reconciling a real retired run:
+        #   error: work-loop state does not exist: .../work-loops/<hash>/lock.json
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, _state_path, lock_path = self.make_state(module, root, state_root)
+
+        stopped_result, stopped_out = self._stop(
+            module, root, state_root, state["runId"], "stopped"
+        )
+        self.assertEqual(stopped_result, 0, stopped_out)
+        self.assertFalse(lock_path.exists(), "stop must release the lock")
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            result = module.main(
+                [
+                    "--state-home",
+                    str(state_root),
+                    "reconcile",
+                    "--repo",
+                    str(root),
+                    "--run-id",
+                    state["runId"],
+                    "--observed-phase",
+                    "stopped",
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(result, 0, stdout.getvalue())
+        self.assertEqual(json.loads(stdout.getvalue())["phase"], "stopped")
+
+    def test_cli_stop_still_requires_a_lock_for_an_active_run(self) -> None:
+        # The released-lock allowance is scoped to `paused`. An active run whose
+        # lock vanished is still a fault, not a documented handback.
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, _state_path, lock_path = self.make_state(module, root, state_root)
+        self.assertEqual(state["status"], "active")
+        lock_path.unlink()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result, _out = self._stop(
+                module, root, state_root, state["runId"], "stopped"
+            )
+
+        self.assertEqual(result, 2)
+        self.assertIn("lock.json", stderr.getvalue())
+
     def test_cli_checkpoint_updates_legacy_human_target_without_owner(self) -> None:
         module = self.load_module()
         root = self.make_repo()
