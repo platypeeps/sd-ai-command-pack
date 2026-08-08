@@ -758,12 +758,82 @@ Filed three Trellis defect tasks recording fail-open behaviour found while audit
 - Filed preflight-manifest-lane-zero-inspected: the manifest lane reports success with zero files inspected.
 - Filed review-learnings-unqueried-absence-claim: absence is claimed from a query that never ran.
 
-
 ### Git Commits
 
 | Hash | Message |
 |------|---------|
 | `b7a4afd891aadc0a8c2104c0df413ea89618da3c` | chore(task): file three fail-open defects found auditing hoa-manager |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 321: File the codex review round-budget increase
+
+**Date**: 2026-08-07
+**Task**: File the codex review round-budget increase
+**Branch**: `chore/file-codex-review-round-budget`
+
+### Summary
+
+Filed a Trellis task to raise the planning adversarial-review budget from three automatic rounds to five and to make exhaustion a request for permission to continue rather than a mandatory stop.
+
+### Main Changes
+
+- Filed 08-07-codex-review-round-budget with the five-round budget, the permission-to-continue exit, and the per-request scoping rule.
+- Recorded the journal-6.md:1411 honesty caveat as evidence the three-round cap already bound before convergence, shipping a change the Codex lane never saw.
+- Kept the material-conflict escalation and the unresolved-blocker gate explicitly unchanged.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d9b1b926bab86b79b8256958d24287295e99481e` | fix(task): target main, not the filing branch |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 322: Integrate main into the codex round-budget filing branch
+
+**Date**: 2026-08-07
+**Task**: Integrate main into the codex round-budget filing branch
+**Branch**: `chore/file-codex-review-round-budget`
+
+### Summary
+
+Merged main into chore/file-codex-review-round-budget and resolved a live session-number collision: both branches had independently claimed Session 320, the exact defect filed as upstream-add-session-numbering.
+
+### Main Changes
+
+- Renumbered this branch's entry to Session 321 and kept main's Session 320 intact, in both the journal and the sibling index.
+- Reconstructed both sessions' Git Commits, Testing, and Status blocks, which the append collision had merged into one shared tail.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1c6faf5b` | chore(task): file the codex review round-budget increase |
+| `d9b1b926` | fix(task): target main, not the filing branch |
 
 ### Testing
 
