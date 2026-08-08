@@ -1570,3 +1570,40 @@ Filed 08-07-plan-only-payload-shape, recording that the plan-only and executed r
 ### Next Steps
 
 - Design the single payload shape both modes emit and the contract test that pins it
+
+
+## Session 342: File the CI preflight full-mode coverage gap and refresh the base_branch survey
+
+**Date**: 2026-08-08
+**Task**: File the CI preflight full-mode coverage gap and refresh the base_branch survey
+**Branch**: `task/08-07-ci-preflight-mode-gap`
+
+### Summary
+
+Filed 08-07-ci-preflight-full-mode-gap, recording that full mode skips the preflight gate entirely, with the measured blast radius and the absent post-merge net
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-ci-preflight-full-mode-gap with prd.md, task.json, and the check/implement manifests, correcting the full-mode cause to the event action and recording the both-sides control observed on this branch
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7c9c0075` | chore(task): file CI preflight full-mode coverage gap and refresh base_branch survey |
+| `0f4a8eb3` | fix(task): correct the full-mode cause to the event action, reproduced by this PR |
+| `f75b44f2` | docs(task): record the both-sides control observed on this branch |
+| `e10483d9` | docs(task): record the measured blast radius and the absent post-merge net |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Design a preflight lane that runs in full mode without doubling bookkeeping-mode cost
