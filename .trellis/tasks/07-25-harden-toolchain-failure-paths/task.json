@@ -2,7 +2,7 @@
   "id": "harden-toolchain-failure-paths",
   "name": "harden-toolchain-failure-paths",
   "title": "Harden toolchain failure paths",
-  "description": "",
+  "description": "Bound two unbounded failure paths in the vendored automation scripts. Housekeeping's review-thread GraphQL pagination gains a page cap or a repeated-endCursor break so a misbehaving cursor skips auto-merge instead of spinning forever, and the work loop's atomic_write_json adopts the descriptor-ownership handoff so except-cleanup cannot close a descriptor fdopen already owns.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
