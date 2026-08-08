@@ -1229,3 +1229,37 @@ Filed 08-08-task-create-description-required after PR #376's finalization was bl
 ### Next Steps
 
 - None - task complete
+
+
+## Session 332: Backfill the empty task descriptions the archive gate requires
+
+**Date**: 2026-08-08
+**Task**: Backfill the empty task descriptions the archive gate requires
+**Branch**: `chore/backfill-empty-task-descriptions`
+
+### Summary
+
+Filled the three empty task.json description fields that block the Trellis archive gate, sourcing each from its own prd.md
+
+### Main Changes
+
+- Filled the empty description on .trellis/tasks/07-25-agent-artifacts, 07-25-harden-toolchain-failure-paths, and 07-25-reduce-review-tooling-spawns from each task's own prd.md
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `97f026dd` | chore(task): backfill the descriptions the archive gate requires |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures, 1 advisory warning
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge the remaining open PRs serially, each updated onto the new main
