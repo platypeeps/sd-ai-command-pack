@@ -1607,3 +1607,40 @@ Filed 08-07-ci-preflight-full-mode-gap, recording that full mode skips the prefl
 ### Next Steps
 
 - Design a preflight lane that runs in full mode without doubling bookkeeping-mode cost
+
+
+## Session 343: Plan the codex provider lane ahead of metered local review
+
+**Date**: 2026-08-08
+**Task**: Plan the codex provider lane ahead of metered local review
+**Branch**: `task/08-07-default-local-review-lanes`
+
+### Summary
+
+Filed 08-07-default-local-review-lanes, planning the codex provider lane before metered local review, converged through three adversarial review rounds
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-default-local-review-lanes with prd.md, task.json, and the check/implement manifests, resolving round-3 concerns C-17, C-18, and C-19 and noting the attempt-record shape and existing sort in the AC7 comparison
+- Commits 1917953c and a8d17dd6 are part of this branch but are omitted from the citation above: 1917953c transiently set branch on the planning task, and a8d17dd6 is its child, so the planning bundle rejects both as invalid planning states
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6b7cc41f` | docs(task): plan codex provider lane ahead of metered local review |
+| `e3abb7a9` | docs(task): resolve round-3 open concerns C-17, C-18, C-19 |
+| `3ed66203` | docs(task): note attempt-record shape and existing sort in the AC7 comparison |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Reconcile R1 and AC5/AC6 with the opt-in decision recorded in 08-07-plugin-review-provider-lanes
