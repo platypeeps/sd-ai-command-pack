@@ -476,7 +476,10 @@ at all; the second proves the mode is actually consulted.
   echo "AC7 plan identical across all three scopes"
   ```
 
-  Execution-level comparison, which is the one that covers attempt status:
+  Execution-level comparison, which is the one that covers attempt status. Each
+  attempt record carries `provider.id` and `status` (`:2100-2106`), and the list
+  is already sorted by provider id at `:2097` — so the diff is stable without
+  re-sorting, and a re-sort added here would hide a genuine ordering change:
 
   ```bash
   norm_run() {
