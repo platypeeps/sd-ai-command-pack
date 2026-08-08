@@ -1629,10 +1629,14 @@ Filed 08-07-default-local-review-lanes, planning the codex provider lane before 
 | Hash | Message |
 |------|---------|
 | `6b7cc41f` | docs(task): plan codex provider lane ahead of metered local review |
-| `1917953c` | docs(task): apply adversarial review rounds 2 and 3 to local-review-lane planning |
 | `a8d17dd6` | docs(task): clear branch on the planning task per Copilot review |
 | `e3abb7a9` | docs(task): resolve round-3 open concerns C-17, C-18, C-19 |
 | `3ed66203` | docs(task): note attempt-record shape and existing sort in the AC7 comparison |
+
+Commit `1917953c` is part of this branch but is omitted from the list above: it
+transiently set `branch` on the planning task, which is not a valid planning
+state, so citing it makes the planning bundle invalid. `a8d17dd6` cleared the
+field again after Copilot flagged it.
 
 ### Testing
 
