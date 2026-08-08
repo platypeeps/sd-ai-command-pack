@@ -99,8 +99,9 @@ write the helper is a design decision and not a requirement.
 
 It persists the fresh report without regressing the phase on resume, and leaves
 the local and remote stages memoized because their inputs *are* captured by
-`worktreeDigest`/head. It ships with five guard tests
-(`tests/test_review_coordinator.py::ResolveCheckTest`), and that commit records
+`worktreeDigest`/head. It ships with five guard tests — `ResolveCheckTest` in
+that repository's `test_review_coordinator.py`, under its `tests/` tree, not a
+path in this one — and that commit records
 `test_stale_cached_failure_is_recomputed_fresh` as proven to fail against the
 pre-fix caching. That is the consumer's own criterion numbering in `bc01bc2`, not
 this PRD's — do not map them onto each other.
