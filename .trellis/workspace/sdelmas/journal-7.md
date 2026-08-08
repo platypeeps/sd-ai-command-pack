@@ -810,3 +810,39 @@ Filed a Trellis task to raise the planning adversarial-review budget from three 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 322: Integrate main into the codex round-budget filing branch
+
+**Date**: 2026-08-07
+**Task**: Integrate main into the codex round-budget filing branch
+**Branch**: `chore/file-codex-review-round-budget`
+
+### Summary
+
+Merged main into chore/file-codex-review-round-budget and resolved a live session-number collision: both branches had independently claimed Session 320, the exact defect filed as upstream-add-session-numbering.
+
+### Main Changes
+
+- Renumbered this branch's entry to Session 321 and kept main's Session 320 intact, in both the journal and the sibling index.
+- Reconstructed both sessions' Git Commits, Testing, and Status blocks, which the append collision had merged into one shared tail.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1c6faf5b` | chore(task): file the codex review round-budget increase |
+| `d9b1b926` | fix(task): target main, not the filing branch |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
