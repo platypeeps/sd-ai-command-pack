@@ -5,7 +5,9 @@
 Make the review preflight's validation run against the content it validates,
 rather than only against heads the scope classifier happened to route down the
 cheap lane. A head that changes `.trellis/**` must have that change validated
-whether or not it also changes code.
+whether or not the classifier routed it `full` — including the initial head of a
+pull request, which is always routed `full` and is therefore never validated
+today.
 
 The classifier itself is correct and stays. What is wrong is which lane the
 validation is attached to.
@@ -53,9 +55,43 @@ head. That was confirmed in two independent review passes.
 The precise claim is therefore: **in `full` mode nothing validates the exact head**.
 The preflight's documentation path references, personal absolute paths,
 changed-task-metadata, task-topology, journal-record, and task-context-manifest
-checks are never applied to the content under review. A head that changes code
-*and* `.trellis/**` is classified `full`, so its `.trellis/**` content ships
-unvalidated while the same script runs repeatedly next door on invented trees.
+checks are never applied to the content under review. The same script runs
+repeatedly next door on invented trees while the content under review ships
+unvalidated.
+
+### What actually forces `full`, which is not what the diff contains
+
+The intuitive story — a head classified `full` because it changes code as well as
+`.trellis/**` — is not the dominant cause and should not be the one this task
+rests on. The classifier's first gate is the event action, before any diff is
+examined:
+
+```bash
+write_full_result "bootstrap_full"
+if [ "$EVENT_NAME" = "pull_request" ] && [ "$EVENT_ACTION" != "synchronize" ]; then
+  select_full "pull_request_action_not_synchronize"
+fi
+```
+
+(`.github/workflows/tests.yml:136-139`). The workflow triggers on `pull_request`
+with no `types:` filter (`:3`), so the actions it receives are `opened`,
+`synchronize`, and `reopened`. Only `synchronize` survives that gate.
+
+**Therefore the initial head of every pull request is classified `full` and is
+never validated, whatever it contains.** A pull request whose diff is nothing
+but `.trellis/tasks/**` records — the case the preflight exists for — is still
+`full` on open. Validation happens only if someone later pushes again to the
+same pull request, which is an accident of authoring rhythm, not a property of
+the content. A pull request opened correct-looking and merged without a second
+push is never validated at all.
+
+The eleven remaining `select_full` reason codes (`:141`-`:182`) are all
+degradation paths — unsupported event, invalid commit identity, prior classifier
+missing, unsafe, or not base-identical — so `bookkeeping` additionally requires
+trustworthy evidence from the predecessor head. That is deliberate and is not
+the defect. The defect is that the *validation* was attached to the mode rather
+than to the content, so every one of those safety fallbacks silently disables
+validation as a side effect.
 
 ### The naming invites the wrong assumption
 
@@ -80,22 +116,54 @@ PR #358 carried a `prd.md` reference to a repository-relative path that does not
 exist here. The reference is present, once, in both of two consecutive heads —
 verified by reading the file at each commit — and the runs disagree:
 
-| Run | Head | Mode | `Validate bookkeeping head` | Conclusion |
-|---|---|---|---|---|
-| 31229940165 | `4cd89b5e` | full | skipped | **success** |
-| 31230376921 | `8a72d5fb` | bookkeeping | failure | failure |
+| Run | Head | Action | Mode | `Validate bookkeeping head` | Conclusion |
+|---|---|---|---|---|---|
+| 31229940165 | `4cd89b5e` | opened | full | skipped | **success** |
+| 31230376921 | `8a72d5fb` | synchronize | bookkeeping | failure | failure |
 
-Both figures were read from the Actions API, not from a run page. The reference
-itself is byte-identical across the two heads — same line 103, same content hash
-— and was removed in `765c0f74`. The heads are not otherwise identical:
-`8a72d5fb` also corrected a `base_branch` in the same task's `task.json`. That
-difference is unrelated to the reference and does not affect the comparison, but
-saying the heads "differ only in mode" would be false. Had the second head not
-happened to classify `bookkeeping`, the reference would have merged.
+Both figures were read from the Actions API, not from a run page. The action
+column is derived from run creation time against the pull request's own
+`created_at`: PR #358 was created at `00:23:07Z` and run 31229940165 at
+`00:23:10Z`, three seconds later, so that run is the `opened` event; run
+31230376921 was created at `00:32:18Z`, nine minutes after open, so it is a
+`synchronize`. This matches the gate at `:137` exactly and is the mechanism,
+not a coincidence of what each diff touched.
+
+The reference itself is byte-identical across the two heads — same line 103,
+same content hash — and was removed in `765c0f74`. The heads are not otherwise
+identical: `8a72d5fb` also corrected a `base_branch` in the same task's
+`task.json`. That difference is unrelated to the reference and does not affect
+the comparison, but saying the heads "differ only in mode" would be false. Had
+the author not happened to push a second time, the reference would have merged.
+
+### Reproduced by the pull request that filed this task
+
+PR #365 — the pull request carrying this PRD — is a cleaner instance, because it
+has no content confound at all. Its diff is seven files, every one of them under
+`.trellis/tasks/`, and nothing else. It was created at `01:46:20Z`; its only
+`Tests` run, 31233436772 on head `7c9c0075`, was created at `01:46:23Z`, so it
+is the `opened` event. The `CI scope` job's step conclusions, read from the jobs
+API:
+
+```
+2. Check out exact event head              = success
+4. Classify exact-head CI scope            = success
+5. Install review preflight coverage tooling = skipped
+6. Validate bookkeeping head               = skipped
+7. Report review preflight JavaScript coverage = skipped
+8. Summarize CI scope                      = success
+```
+
+`unittest` (three legs), `Shell coverage`, `lint`, `security`, and
+`Release payload gate` all ran and all succeeded, which is how the `full`
+classification is known without reading the step summary. `CI Result` was
+`success`. So a pull request consisting exclusively of Trellis records had those
+records validated by nothing, and the required check said so was fine.
 
 That is the failure mode stated exactly: the required check is not wrong about
-the head it evaluated, it simply never looked. And the head most likely to be
-routed `full` is the one carrying the most content.
+the head it evaluated, it simply never looked. And the head guaranteed to be
+routed `full` is the first one — which every pull request has, and which some
+have only one of.
 
 ## Requirements
 
@@ -125,6 +193,12 @@ routed `full` is the one carrying the most content.
       reference fails `CI Result`. Demonstrated on a real pull request, with the
       classified mode read from the run and shown to be `full` — not asserted,
       and not shown by a local run.
+- [ ] Specifically, the **initial** head of a newly opened pull request carrying
+      the defect fails `CI Result`, with the triggering action shown to be
+      `opened`. This is the criterion that actually closes the gap: it is the
+      guaranteed-`full` case (`.github/workflows/tests.yml:137-139`), it is the
+      one every pull request has, and a fix demonstrated only on a `synchronize`
+      head would leave it open while looking green.
 - [ ] A head classified `bookkeeping` with the same defect still fails, proving
       the existing coverage was not traded away for the new coverage.
 - [ ] A head classified `full` with no `.trellis/**` and no documentation change
@@ -174,6 +248,18 @@ routed `full` is the one carrying the most content.
   the next with the same defect present in both. Every line number, mode, and
   run conclusion above was read from the working tree at `origin/main` or from
   the Actions API in that pass.
+- Corrected on 2026-08-07 after PR #365 was opened, by that pull request's own
+  CI. The PRD as first written attributed `full` classification to diff content
+  — "a head that changes code *and* `.trellis/**`" — which is not the dominant
+  cause. The classifier's first gate is the event action
+  (`.github/workflows/tests.yml:137-139`), so every `opened` head is `full`
+  regardless of its diff. PR #365 proved it against itself: a diff of nothing but
+  `.trellis/tasks/**` was classified `full`, its validation step skipped, and
+  `CI Result` reported success. The finding is therefore broader than filed —
+  every pull request's first head is unvalidated — and the original framing would
+  have let a fix be demonstrated on a `synchronize` head while leaving the real
+  case open, which is why an acceptance criterion now names the `opened` action
+  explicitly.
 - The archived task that introduced the split is
   `07-24-add-bookkeeping-only-ci-fast-lane`, with follow-ups
   `07-27-republish-bookkeeping-ci-fast-lane-linear` and

@@ -2,7 +2,7 @@
   "id": "ci-preflight-full-mode-gap",
   "name": "ci-preflight-full-mode-gap",
   "title": "CI runs the review preflight only in bookkeeping mode, so a full-mode head merges unvalidated",
-  "description": "The review preflight's exact-head validation runs only under the bookkeeping classifier mode, so a full-mode head never has its documentation-path, task-metadata, or journal content validated. Full mode does execute the script -- repeatedly in the unittest suite, always against synthetic fixture trees, never against the event head. Demonstrated on PR #358: the same broken reference passed on a full head and failed on the next bookkeeping head.",
+  "description": "The review preflight's exact-head validation runs only under the bookkeeping classifier mode, so a full-mode head never has its documentation-path, task-metadata, or journal content validated. The classifier's first gate is the event action, not the diff (tests.yml:137-139), so every pull request's INITIAL head is full and is never validated whatever it contains; validation happens only on a later synchronize push. Full mode does execute the script -- repeatedly in the unittest suite, always against synthetic fixture trees, never against the event head. Demonstrated on PR #358 (opened head passed, next synchronize head failed on the same reference) and reproduced by PR #365, whose diff was nothing but .trellis/tasks/** and whose validation step was skipped with CI Result success.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
