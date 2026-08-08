@@ -246,7 +246,7 @@ needs those separated.
     selected.extend(by_id[item] for item in required if item not in selected_ids)
     ```
 
-    That line (`sd-ai-command-pack-review-local.py:1275`) runs *after* every
+    That line (`sd-ai-command-pack-review-local.py:1276`) runs *after* every
     selection branch, including `explicit-provider`, so a `requiredProviders`
     entry overrides whatever selection decided. An opt-in provider named there
     would run on every review, and `review.json` is a tracked, fleet-propagated
