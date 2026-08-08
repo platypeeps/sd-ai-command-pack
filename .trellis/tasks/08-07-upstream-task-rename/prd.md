@@ -32,7 +32,7 @@ Done exactly that way on 2026-08-07 to rename `08-07-sd-submit-pack-task` to
 Linkage fields store **directory names**, while `id` stores the slug. From a
 live parent/child pair:
 
-```json
+```text
 // 07-22-streamline-sd-skill-workflows/task.json
 { "id": "streamline-sd-skill-workflows",
   "children": ["07-22-evaluate-sd-github-review-consolidation",
