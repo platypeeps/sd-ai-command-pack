@@ -1681,3 +1681,39 @@ Filed 08-07-review-check-stale-cache, recording that sd-review gates on a memoiz
 ### Next Steps
 
 - Design the cache invalidation or live re-read that makes the gate agree with its inputs
+
+
+## Session 345: File six defects surfaced by the 14-PR merge batch
+
+**Date**: 2026-08-08
+**Task**: File six defects surfaced by the 14-PR merge batch
+**Branch**: `chore/file-manifest-existence-and-shell-coverage-lane`
+
+### Summary
+
+Filed five Trellis planning tasks for defects found while merging PRs #358-#379, and deleted a sixth draft as a duplicate of 07-30-recover-bookkeeping-repair-sessions. Also un-backticked two deliberately absent path references that were failing preflight on main. Six adversarial-review rounds across two batches, 44 concerns, all addressed; review disproved the kcov-shim hypothesis, relocated the developer-identity fix to its owning resolver, and reclassified the housekeeping verdict change as a classifier change with a cross-task dependency.
+
+### Main Changes
+
+- Added .trellis/tasks/08-08-manifest-reference-existence, 08-08-shell-coverage-lane-failures, 08-08-preflight-absent-path-prose, 08-08-housekeeping-worktree-held-default-branch, and 08-08-developer-identity-not-in-worktrees; removed backticks from two deliberately absent path references in 08-07-distributed-gitignore-python-cache/prd.md to clear a preflight false positive.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f3ea4dd6` | docs: file two defects found while merging the PR batch |
+| `398ae8f0` | docs: file three more defects surfaced by the merge batch |
+| `16cbc0a5` | fix: unblock preflight by un-backticking two deliberately absent paths |
+
+### Testing
+
+- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs reports 0 failures; Tests and Copilot Code Review both green on head 16cbc0a5.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

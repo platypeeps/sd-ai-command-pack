@@ -95,7 +95,7 @@ error: SD AI command-pack files changed without updating .sd-ai-command-pack/pro
 It was closed unmerged in favour of this task.
 
 **Scope boundary, stated precisely.** The gate that fires is
-`scripts/check_review_readiness.sh` in loadsmith, which is **not** a pack-
+scripts/check_review_readiness.sh in loadsmith, which is **not** a pack-
 distributed file — it does not exist under `templates/` in this repository. So
 this task is not responsible for that script's behaviour and must not be read as
 a request to change it. What is in scope is the observation it produces: the
@@ -129,7 +129,7 @@ pack ships, independent of how many consumers find it awkward to patch locally.
   uses `**/__pycache__/`, and an earlier draft of this PRD asserted the two
   differ in what they match. **They do not.** Tested directly in a scratch
   repository: a root `.gitignore` containing either form ignores both
-  `scripts/__pycache__/y.pyc` and `a/b/scripts/__pycache__/x.pyc`, and
+  scripts/__pycache__/y.pyc and `a/b/scripts/__pycache__/x.pyc`, and
   `git status --porcelain --ignored` is byte-identical between them. A pattern
   with no internal slash matches at every depth, so the leading `**/` is
   redundant here. Pick one form, say which existing file it matches, and do not
