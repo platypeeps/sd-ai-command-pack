@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 345
+- **Total Sessions**: 346
 - **Last Active**: 2026-08-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~1719 | Active |
+| `journal-7.md` | ~1758 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 346 | 2026-08-08 | Recover the incremental-base gap into 08-07-ci-preflight-full-mode-gap | `0ad13504` | `chore/preflight-incremental-base-gap-2` |
 | 345 | 2026-08-08 | File six defects surfaced by the 14-PR merge batch | `f3ea4dd6`, `398ae8f0`, `16cbc0a5` | `chore/file-manifest-existence-and-shell-coverage-lane` |
 | 344 | 2026-08-08 | File the sd-review memoized-check defect found from a consumer | `aaf7c710`, `4cd89b5e`, `8a72d5fb`, `765c0f74` | `task/08-07-review-check-stale-cache` |
 | 343 | 2026-08-08 | Plan the codex provider lane ahead of metered local review | `6b7cc41f`, `e3abb7a9`, `3ed66203` | `task/08-07-default-local-review-lanes` |

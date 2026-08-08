@@ -1717,3 +1717,46 @@ Filed five Trellis planning tasks for defects found while merging PRs #358-#379,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 346: Recover the incremental-base gap into 08-07-ci-preflight-full-mode-gap
+
+**Date**: 2026-08-08
+**Task**: Recover the incremental-base gap into 08-07-ci-preflight-full-mode-gap
+**Branch**: `chore/preflight-incremental-base-gap-2`
+
+### Summary
+
+Recovered a stranded PRD rewrite from a scratchpad worktree and landed it as PR #381, widening 08-07-ci-preflight-full-mode-gap from one gap (which CI lane runs the preflight) to two (which diff that lane is pointed at). Converged through three adversarial review rounds in this run, host lane plus Codex, with zero blocking findings and ten concerns addressed.
+
+### Main Changes
+
+- Added gap 2 to the PRD: SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF is BEFORE_SHA (tests.yml:253), the PR's own previous pushed head, so the three diff-scoped failing checks plus the baseline-dependent share of journal validation see only the newest push.
+- Established that gap 2 survives a gap-1-only fix, via the parent/child cross-push construction: the untouched parent task.json is never collected (:2984-2986), the deleted child's record is skipped as missing (:2991-2994), and topology is keyed off changed paths in both work sets (:3075, :3113).
+- Corrected five false absolutes, including 'content that merges unvalidated is never validated' - disproved by this repository on 2026-08-08, when two broken references on main surfaced via an unrelated branch's bookkeeping head.
+- Added four acceptance criteria for requirements that had none, three of which were satisfiable by prose alone, and widened the path-family criterion from 'at least one more' to a full enumeration after it proved unsatisfiable as first written.
+- Widened the journal check's characterization: unchangedFromBaseline also gates the contradictory-validation fallbacks (:4991-5003), so the baseline-dependent share is larger than 'historical edits' suggests.
+- Re-synced task.json's description twice, where a PRD correction invalidated the summary that cited it.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0ad13504` | docs(task): add the incremental-base gap to ci-preflight-full-mode-gap |
+
+### Testing
+
+- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs: 0 failure(s), 0 warning(s)
+- [OK] Every file:line citation in the PRD re-verified against source (tests.yml, bookkeeping_ci_scope.py, review-preflight.mjs, review-scope.sh, archived design.md); five were off by a line or a range and were corrected
+- [OK] Check bucketing re-derived from runCheck at :229-241: 4 repo-wide-failing + 3 diff-scoped-failing + 1 hybrid + 3 diff-scoped-advisory + 1 independently-based = 12, name for name
+- [OK] Codex adversarial review rounds 1-3: Blocking none in every round
+- [OK] PR #381 head 0ad13504: Tests success, Running Copilot Code Review success, zero inline findings
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
