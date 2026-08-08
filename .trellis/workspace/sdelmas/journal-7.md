@@ -1194,3 +1194,72 @@ The task claimed sd-status and sd-housekeeping disagree about one body of eviden
 ### Next Steps
 
 - Answer open question 1 in design.md: which surface is wrong
+
+
+## Session 331: File the task.py create metadata gate mismatch
+
+**Date**: 2026-08-08
+**Task**: File the task.py create metadata gate mismatch
+**Branch**: `chore/file-task-create-description-required`
+
+### Summary
+
+Filed 08-08-task-create-description-required after PR #376's finalization was blocked by an empty description that task.py create had accepted. The PRD covers both title and description, the --slug bypass, and the str.strip()/String.trim() divergence.
+
+### Main Changes
+
+- Added .trellis/tasks/08-08-task-create-description-required with prd.md, task.json, and spec manifests
+- Recorded the --slug bypass of the title truthiness test at task_store.py:207 and the 77 callers that omit --description
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `da6b00605f543557f75e5bb1e3f5e298af7e0fed` | chore(task): file the task.py create metadata gate mismatch |
+
+### Testing
+
+- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs -- 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 332: Backfill the empty task descriptions the archive gate requires
+
+**Date**: 2026-08-08
+**Task**: Backfill the empty task descriptions the archive gate requires
+**Branch**: `chore/backfill-empty-task-descriptions`
+
+### Summary
+
+Filled the three empty task.json description fields that block the Trellis archive gate, sourcing each from its own prd.md
+
+### Main Changes
+
+- Filled the empty description on .trellis/tasks/07-25-agent-artifacts, 07-25-harden-toolchain-failure-paths, and 07-25-reduce-review-tooling-spawns from each task's own prd.md
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `97f026dd` | chore(task): backfill the descriptions the archive gate requires |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures, 1 advisory warning
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge the remaining open PRs serially, each updated onto the new main

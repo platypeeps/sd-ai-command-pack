@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 328
+- **Total Sessions**: 332
 - **Last Active**: 2026-08-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~1196 | Active |
+| `journal-7.md` | ~1265 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 332 | 2026-08-08 | Backfill the empty task descriptions the archive gate requires | `97f026dd` | `chore/backfill-empty-task-descriptions` |
+| 331 | 2026-08-08 | File the task.py create metadata gate mismatch | `da6b00605f543557f75e5bb1e3f5e298af7e0fed` | `chore/file-task-create-description-required` |
 | 330 | 2026-08-08 | Correct the housekeeping anomaly task premise to a difference of mode | `189d4e8e` | `chore/housekeeping-anomaly-evidence` |
 | 329 | 2026-08-08 | File the Codex lane consent gate as a planning task | `3d8abb41`, `26f58f8b` | `chore/file-codex-lane-consent` |
 | 328 | 2026-08-08 | Let work-loop stop and reconcile act on a run whose lock was already released | `8549cdc9`, `a779a256`, `7132bd84`, `910194ff`, `9acf535d`, `7ffcbd4e` | `fix/work-loop-stop-after-pause` |
