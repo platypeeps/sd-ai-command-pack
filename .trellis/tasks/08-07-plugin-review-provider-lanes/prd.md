@@ -43,15 +43,39 @@ discovery, no plugin manifest reader, and no notion of a tool being present
 
 Nor do these two tools exist as reviewers today:
 
-- `gemini` appears only as a **platform adapter surface** — `.gemini/commands/sd/**`,
-  `.gemini/skills/**` — that is, a place the pack *installs command files into*.
-  That is the opposite direction from a review provider and must not be
-  confused with one.
-- `kimi` appears nowhere in the repository.
+- `gemini` exists only as a **platform adapter surface**. The tracked
+  directories are `.gemini/agents/`, `.gemini/commands/sd/`,
+  `.gemini/commands/trellis/`, and `.gemini/hooks/` — places the pack
+  *installs command files into*. That is the opposite direction from a review
+  provider and must not be confused with one. There is no `.gemini/skills/`
+  directory in this repository, despite `sd-ai-command-pack-pr-body-scope.py`
+  listing such a pattern; that entry is a scope glob, not evidence of an
+  existing path.
+- `kimi` has no tool surface, no provider definition, and no executable
+  integration. It appears exactly once in the repository, in
+  `07-25-add-multi-reviewer-learning-and-effectiveness-analysis/prd.md:27`, and
+  that mention is a constraint rather than an integration — see Related work.
 
 So the work is: two provider definitions, plus the detection mechanism that
 decides whether each one is present, plus the gating that makes absence a
 non-event.
+
+## Related work
+
+`07-25-add-multi-reviewer-learning-and-effectiveness-analysis` (parked) already
+sets a design constraint that governs this task:
+
+```text
+- Support variable-length cheap/deep reviewer sets generically without
+  hard-coding Copilot, Kimi, Qwen, providers, models, or exactly two reviewers.
+```
+
+This task names `gemini` and `kimi` as **configuration entries**, which is what
+the provider schema is for. It must not name them in the *mechanism*: detection
+enumerates the plugin surface rather than matching known names (requirement 2),
+and selection treats them as ordinary providers rather than special cases
+(requirement 5). Read together, the two tasks agree — the reviewer set stays
+variable-length and generic, and these two are simply members of it.
 
 ## The failure this must not cause
 
