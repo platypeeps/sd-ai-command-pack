@@ -1297,3 +1297,37 @@ Filed 08-08-pr-eligibility-stale-blocked-review, recording that merge_blocked_re
 ### Next Steps
 
 - Answer open question 1 in design.md: re-query inside the probe, or retryable-indeterminate for the caller
+
+
+## Session 334: File the final-bundle wrong-base diagnosis defect
+
+**Date**: 2026-08-08
+**Task**: File the final-bundle wrong-base diagnosis defect
+**Branch**: `chore/file-preflight-base-diagnosis`
+
+### Summary
+
+Filed 08-07-preflight-base-diagnosis, recording that final-bundle's diagnosis points at the wrong base when the caller passes a merge-base instead of the last work commit
+
+### Main Changes
+
+- Added .trellis/tasks/08-07-preflight-base-diagnosis with prd.md, task.json, and the check/implement manifests
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1ce4e97b` | chore(task): file final-bundle wrong-base diagnosis defect |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Design the corrected diagnosis message and its regression test
