@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 333
+- **Total Sessions**: 334
 - **Last Active**: 2026-08-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~1299 | Active |
+| `journal-7.md` | ~1333 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 334 | 2026-08-08 | File the final-bundle wrong-base diagnosis defect | `1ce4e97b` | `chore/file-preflight-base-diagnosis` |
 | 333 | 2026-08-08 | Convert issue #348 into the pr-eligibility stale-BLOCKED task | `b15cc5e0` | `chore/file-pr-eligibility-stale-blocked` |
 | 332 | 2026-08-08 | Backfill the empty task descriptions the archive gate requires | `97f026dd` | `chore/backfill-empty-task-descriptions` |
 | 331 | 2026-08-08 | File the task.py create metadata gate mismatch | `da6b00605f543557f75e5bb1e3f5e298af7e0fed` | `chore/file-task-create-description-required` |
