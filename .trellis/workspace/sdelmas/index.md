@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 322
+- **Total Sessions**: 323
 - **Last Active**: 2026-08-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~885 | Active |
+| `journal-7.md` | ~922 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 324 | 2026-08-07 | File the missing task.py rename command | `06df9e51`, `8bcb4054` | `chore/file-upstream-task-rename` |
 | 323 | 2026-08-07 | File the sd-status worktree blind spot | `a8ed88a7`, `82970640` | `chore/file-status-worktree-invisibility` |
 | 322 | 2026-08-07 | Integrate main into the codex round-budget filing branch | `1c6faf5b`, `d9b1b926` | `chore/file-codex-review-round-budget` |
 | 321 | 2026-08-07 | File the codex review round-budget increase | `d9b1b926bab86b79b8256958d24287295e99481e` | `chore/file-codex-review-round-budget` |
