@@ -1263,3 +1263,37 @@ Filled the three empty task.json description fields that block the Trellis archi
 ### Next Steps
 
 - Merge the remaining open PRs serially, each updated onto the new main
+
+
+## Session 333: Convert issue #348 into the pr-eligibility stale-BLOCKED task
+
+**Date**: 2026-08-08
+**Task**: Convert issue #348 into the pr-eligibility stale-BLOCKED task
+**Branch**: `chore/file-pr-eligibility-stale-blocked`
+
+### Summary
+
+Filed 08-08-pr-eligibility-stale-blocked-review, recording that merge_blocked_review is a terminal verdict derived from one possibly-stale mergeStateStatus read
+
+### Main Changes
+
+- Added .trellis/tasks/08-08-pr-eligibility-stale-blocked-review with a prd.md that verifies the issue's analysis against classify_non_clean_merge_state and names the retryable-indeterminate alternative
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b15cc5e0` | chore(task): convert issue #348 into a Trellis task |
+
+### Testing
+
+- [OK] scripts/sd-ai-command-pack-review-preflight.mjs: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Answer open question 1 in design.md: re-query inside the probe, or retryable-indeterminate for the caller
