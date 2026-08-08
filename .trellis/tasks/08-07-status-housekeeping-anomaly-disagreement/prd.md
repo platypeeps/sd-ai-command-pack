@@ -23,16 +23,17 @@ adversarial review on 2026-08-08 caught it.
 
 `sd-housekeeping` does invoke the installed collector rather than computing its
 own inventory — but it invokes it with `--expect-clean`
-(`sd-ai-command-pack-housekeeping.sh:1132`), and that flag changes what the
-collector produces:
+(`scripts/sd-ai-command-pack-housekeeping.sh:1132`), and that flag changes
+what the collector produces:
 
 - `strict_anomalies(...)` is appended only under `expect_clean`
-  (`sd-ai-command-pack-status.py:2066`), and "extra local branches remain" is
-  one of its entries (`:1682`);
+  (`scripts/sd-ai-command-pack-status.py:2066`), and "extra local branches
+  remain" is one of its entries (`scripts/sd-ai-command-pack-status.py:1682`);
 - the process exits nonzero only under that flag —
   `return 1 if args.expect_clean and local_report["anomalies"] else 0`
-  (`:2701`);
-- an ordinary status run passes `expect_clean=False` (`:2493`).
+  (`scripts/sd-ai-command-pack-status.py:2701`);
+- an ordinary status run passes `expect_clean=False`
+  (`scripts/sd-ai-command-pack-status.py:2493`).
 
 So a bare `sd-status` and housekeeping's embedded call are the same collector in
 two deliberately different modes: advisory and strict. "Extra local branches" is
@@ -105,11 +106,12 @@ elif eligibility_status == "blocked" or event_codes or status_anomalies:
 ```
 
 `status_anomalies` is read from the **embedded collector result**
-(`status.get("anomalies", [])` at `:237`), not from housekeeping's own
-`anomalies` argument. The `and not event_codes` guard is what produces the
-signature shape: housekeeping's own list is empty, so the only reason code
-appended is `status_anomalies`, and a reader looking at `anomalies: []` sees a
-`blocked` verdict with no visible cause.
+(`status.get("anomalies", [])` at
+`scripts/sd-ai-command-pack-housekeeping-result.py:237`), not from
+housekeeping's own `anomalies` argument. The `and not event_codes` guard is
+what produces the signature shape: housekeeping's own list is empty, so the
+only reason code appended is `status_anomalies`, and a reader looking at
+`anomalies: []` sees a `blocked` verdict with no visible cause.
 
 That is worth stating precisely, because the natural description — "blocked with
 an empty anomalies list" — is true of the top-level `anomalies` key and
