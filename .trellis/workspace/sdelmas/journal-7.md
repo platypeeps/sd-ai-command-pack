@@ -1194,3 +1194,38 @@ The task claimed sd-status and sd-housekeeping disagree about one body of eviden
 ### Next Steps
 
 - Answer open question 1 in design.md: which surface is wrong
+
+
+## Session 331: File the task.py create metadata gate mismatch
+
+**Date**: 2026-08-08
+**Task**: File the task.py create metadata gate mismatch
+**Branch**: `chore/file-task-create-description-required`
+
+### Summary
+
+Filed 08-08-task-create-description-required after PR #376's finalization was blocked by an empty description that task.py create had accepted. The PRD covers both title and description, the --slug bypass, and the str.strip()/String.trim() divergence.
+
+### Main Changes
+
+- Added .trellis/tasks/08-08-task-create-description-required with prd.md, task.json, and spec manifests
+- Recorded the --slug bypass of the title truthiness test at task_store.py:207 and the 77 callers that omit --description
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `da6b00605f543557f75e5bb1e3f5e298af7e0fed` | chore(task): file the task.py create metadata gate mismatch |
+
+### Testing
+
+- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs -- 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
