@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "Enumerate from the filesystem rather than confirming the expected string."}
+{"file": ".trellis/spec/tooling/index.md", "reason": "Verify no housekeeping merge or deletion gate weakened."}

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 313
-- **Last Active**: 2026-08-06
+- **Total Sessions**: 326
+- **Last Active**: 2026-08-08
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~496 | Active |
+| `journal-7.md` | ~1079 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,20 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 327 | 2026-08-08 | Make third-party model reviewers opt-in rather than automatic on installation | `a669d9c0`, `5221ca18` | `chore/file-plugin-review-lanes` |
+| 326 | 2026-08-08 | Revert the sd-propose-pack-task rename and refile as an add-only planning bundle | `699aabf8` | `chore/file-sd-submit-pack-task-v2` |
+| 325 | 2026-08-07 | File the uncurated task-manifest gap | `6a0f47e1` | `chore/file-task-context-never-curated` |
+| 324 | 2026-08-07 | File the missing task.py rename command | `06df9e51`, `8bcb4054` | `chore/file-upstream-task-rename` |
+| 323 | 2026-08-07 | File the sd-status worktree blind spot | `a8ed88a7`, `82970640` | `chore/file-status-worktree-invisibility` |
+| 322 | 2026-08-07 | Integrate main into the codex round-budget filing branch | `1c6faf5b`, `d9b1b926` | `chore/file-codex-review-round-budget` |
+| 321 | 2026-08-07 | File the codex review round-budget increase | `d9b1b926bab86b79b8256958d24287295e99481e` | `chore/file-codex-review-round-budget` |
+| 320 | 2026-08-07 | File three fail-open defects found auditing hoa-manager | `b7a4afd891aadc0a8c2104c0df413ea89618da3c` | `chore/file-hoa-manager-fail-open-defects` |
+| 319 | 2026-08-07 | Close three helper defaults that fight the pack's own gates | `6559ac89`, `237805e3`, `45d7a12a` | `fix/pack-helper-defaults-and-guards` |
+| 318 | 2026-08-07 | Rescue the stranded upstream-add-session-numbering planning task | `ba784960`, `9668c73a` | `chore/task-upstream-add-session-numbering` |
+| 317 | 2026-08-07 | Give verified-false local review findings a rebuttal channel | `e78e0ad2`, `ebb74c21`, `0676ed8a` | `fix/local-finding-rebuttal-channel` |
+| 316 | 2026-08-07 | File four toolchain defects observed while shipping #350, #351, #353 | `cf447280`, `e35005ff` | `chore/task-file-session-defects` |
+| 315 | 2026-08-07 | File the session-followups sweep-and-act loop | `be24aa86` | `chore/task-session-followups` |
+| 314 | 2026-08-07 | Ship the task close-out verification guide | `fdc9b315`, `cf9938d2` | `docs/guide-close-out-verification` |
 | 313 | 2026-08-06 | Close out consolidate-shared-script-helpers | `b4eb2d9f`, `e3ac3f32`, `50095bcf` | `chore/close-consolidate-shared-script-helpers` |
 | 312 | 2026-08-06 | Stop excluding .trellis/workspace from the Gito review scope | `af5eb018` | `fix/gito-scope-finalization-empty-diff` |
 | 311 | 2026-08-06 | Land the Codex stdin-redirect contract and bump 0.64.23 (PR #345) | `4f27104f`, `f82c15b4` | `docs/codex-lane-stdin-hang` |

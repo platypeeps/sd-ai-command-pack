@@ -320,6 +320,14 @@ harness quality, and uncategorized evidence. Cluster summaries retain counts,
 PRs, path families, observed dates, and bounded examples, and explicitly report
 truncation. Preventive actions appear only for detected recurring categories.
 
+The managed block is rendered wholesale from whatever GitHub scope the run
+requested, so a narrowly scoped run renders a block holding only that scope's
+clusters. Stage 2b's `--dry-run` never writes, but the same `--github-pr`
+invocation combined with `--update` would replace a repository-wide snapshot
+with one PR's signals. An update that would delete clusters already recorded in
+the snapshot is refused and names them; `--allow-narrowing` accepts the
+deletion deliberately.
+
 The routed-review workflow may invoke the same scanner once per attempt with
 `--planning-attempt ID --json`, an explicit `--github-repo`, and either a
 bounded `--github-days` window or repeated `--github-pr`. The schema-version-1

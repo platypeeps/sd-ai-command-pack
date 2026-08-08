@@ -494,3 +494,586 @@ Archived the repository's only in_progress Trellis task after verifying all five
 ### Next Steps
 
 - None - task complete
+
+
+## Session 314: Ship the task close-out verification guide
+
+**Date**: 2026-08-07
+**Task**: Ship the task close-out verification guide
+**Branch**: `docs/guide-close-out-verification`
+
+### Summary
+
+Moved the 'When Closing Out a Task Whose Work Already Landed' guide section out of scratchpad and into the spec, where it had been stranded for three sessions after being pulled off PR #346 to keep that completion delta bookkeeping-only.
+
+### Main Changes
+
+- Added the guide section to .trellis/spec/guides/index.md: verify whether a change landed against the tree rather than git log --grep, and read a task's own implement.md before claiming it delivered something, because scope splits are recorded there and not in task.json.
+- Rewrote the evidence sentence after Copilot flagged a garden path - 'for the finding IDs reported' parses first as 'the IDs that were reported', so the grep had to become the explicit subject. Wrong sentence to make people re-read in a section about reading evidence carefully.
+- Root-caused an sd-check blocker that had nothing to do with this PR: .sd-ai-command-pack/provenance.json is gitignored and had been stamped 0.64.25 by a concurrent session's installer run, so every branch in this working copy audited its 0.64.24 files against 0.64.25 digests. Re-running the installer restamped the one gitignored file and cleared all three drift errors.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fdc9b315` | docs(spec): record the verify-against-the-tree rule for task close-outs |
+| `cf9938d2` | docs(spec): make the grep the subject of the evidence sentence |
+
+### Testing
+
+- [OK] make check not re-run; the branch changes one spec file and CI reported 9 SUCCESS, 2 SKIPPED, 0 failures
+- [OK] install audit after restamp: 0 errors, 8 pre-existing legacy-reference warnings
+- [OK] sd-review scope=pr on 351: ready, check passed, local receipt clean, 0 findings in 7320 ms
+- [OK] Copilot round 2 on cf9938d2: no new comments, 0 unresolved threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- File the provenance-stamp contamination defect: a gitignored stamp written by one branch blocks sd-check on every other branch in the same working copy, with an error naming a version absent from the checkout.
+
+
+## Session 315: File the session-followups sweep-and-act loop
+
+**Date**: 2026-08-07
+**Task**: File the session-followups sweep-and-act loop
+**Branch**: `chore/task-session-followups`
+
+### Summary
+
+Filed 08-06-session-followups after a sweep of this session found twelve evidence-backed items that nothing in the pack would have captured, and resolved two of its design questions up front rather than deferring them.
+
+### Main Changes
+
+- Filed the task with a motivation table of ten items that leaked from one session - unshipped scratchpad content, branches pushed with no PR, defects observed repeatedly and never filed, documented procedures that failed as written. They are the acceptance fixtures, not illustrations.
+- Resolved write ownership in the PRD instead of deferring it: each knowledge sink has exactly one writer, the command owns Trellis tasks, and it reaches docs/review-learnings.md only by invoking sd-review-learnings --update. The two commands partition by evidence type, so review comments stay with review-learnings and everything else lands here.
+- Restricted fix-now to sinks with no other owner, never tracked content. A command that sweeps a session, judges something actionable, and edits tracked files directly is a route for unreviewed changes to reach the tree without passing the gates the rest of the pack enforces.
+- Proved the cost while filing it: a task directory holding a 147-line PRD plus design.md and implement.md was deleted from the working tree between the sweep that found it and the git add two commands later, unrecoverable because it had never been committed.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `be24aa86` | chore(task): file session-followups sweep-and-act loop |
+
+### Testing
+
+- [OK] sd-review scope=pr on 350: ready, check passed, local receipt clean, 0 findings in 4117 ms
+- [OK] Copilot round 1 on be24aa86: 4/4 files reviewed, no comments, 0 unresolved threads
+- [OK] CI on be24aa86: 9 SUCCESS, 2 SKIPPED, 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Give 08-06-session-followups a design.md and implement.md; the session-boundary question blocks reproducibility and cannot be settled from repository evidence alone.
+
+
+## Session 316: File four toolchain defects observed while shipping #350, #351, #353
+
+**Date**: 2026-08-07
+**Task**: File four toolchain defects observed while shipping #350, #351, #353
+**Branch**: `chore/task-file-session-defects`
+
+### Summary
+
+Filed four P2 Trellis planning tasks capturing defects hit during the session: a gitignored provenance file stamped by a concurrent session blocking sd-check clone-wide, journal-only-recovery rejecting the merge commit that the collision-avoidance sequence requires, the missing local counterpart to --remote-disposition, and sd-status reporting no anomalies where sd-housekeeping blocks on status_anomalies. Each PRD carries the reproduction as it happened, with reason codes and file/line evidence. Also filled all eight spec manifests with real index paths rather than leaving task.py scaffold placeholders.
+
+### Main Changes
+
+- Filed .trellis/tasks/08-07-provenance-concurrent-session-collision (blocks sd-check on every branch in the clone; CI never sees it)
+- Filed .trellis/tasks/08-07-planning-recovery-rejects-merge-commit (documented practice triggers the validator refusal)
+- Filed .trellis/tasks/08-07-local-finding-rebuttal-channel (a verified-false local finding blocks the gate permanently)
+- Filed .trellis/tasks/08-07-status-housekeeping-anomaly-disagreement (one state, two verdicts, from the same embedded collector)
+- Filled all eight implement.jsonl/check.jsonl manifests with verified TOOLING/GUIDES/BACKEND spec index paths
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cf447280` | chore(task): file four defects found while shipping #350, #351, #353 |
+| `e35005ff` | chore(task): fill spec manifests instead of leaving scaffold placeholders |
+
+### Testing
+
+- [OK] git diff --name-status main...HEAD returns only the four task directories
+- [OK] every spec path cited in the eight manifests verified to exist
+- [OK] sd-review scope=pr on #354 reached ready after the manifests were filled
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 317: Give verified-false local review findings a rebuttal channel
+
+**Date**: 2026-08-07
+**Task**: Give verified-false local review findings a rebuttal channel
+**Branch**: `fix/local-finding-rebuttal-channel`
+
+### Summary
+
+sd-review tells the caller to verify every finding and rebut rather than comply when it is wrong, but only the remote stage could act on that: --remote-disposition had no local counterpart, so a local provider false positive held remoteGate: actionable-local-findings shut with no way past it short of editing the file the provider misread. Adds --local-disposition <stable-id>=rebutted with the same grammar and the same single accepted value, forwarded by the coordinator to the local stage. A rebutted finding stays in the receipt with disposition rebutted; the gate now blocks on findings left outstanding rather than on the provider's aggregate outcome, and a provider reporting findings while listing none still blocks. An id matching no finding at that head is an error, not a silent no-op. Found on PR #353, whose diff is four .trellis/tasks/ files and no code: the local provider read source quoted inside the PRD as the PR's own code, then reported a misspelling for a word spelled correctly at the cited line and absent from the repository.
+
+### Main Changes
+
+- Added --local-disposition to sd-ai-command-pack-review-local.py: LOCAL_DISPOSITION_VALUES, _parse_local_dispositions, _apply_local_dispositions, _redispose_receipt
+- Reworked _remote_gate to block on outstanding findings rather than the aggregate outcome, keeping the empty-findings case blocking
+- Forwarded the flag from the sd-ai-command-pack-review.py coordinator; both scripts/ and templates/scripts/ mirrors kept byte-identical
+- Documented the third coordinator-only evidence flag in all three sd-review SKILL.md copies
+- Bumped the pack to 0.64.26 with a CHANGELOG entry and regenerated the fleet candidate ledger for the changed payload
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e78e0ad2` | fix(review): give verified-false local findings a rebuttal channel |
+| `ebb74c21` | chore(fleet): refresh candidate ledger for the review payload change |
+| `0676ed8a` | chore(release): bump to 0.64.26 for the local rebuttal channel |
+
+### Testing
+
+- [OK] tests.test_review_stage 46 tests, 5 new, covering rebuttal visibility, unknown-id rejection, grammar rejection, duplicate ids, and per-head scoping
+- [OK] combined run of test_review_controller, test_review_local, test_verdict_vocabulary, test_generated_parity, test_pack_drift: 175 tests
+- [OK] ruff check scripts templates/scripts tests: All checks passed!
+- [OK] release payload gate: manifest 0.64.24 -> 0.64.26 with matching CHANGELOG heading; candidate ledger valid
+- [OK] end-to-end on #353: gate moved from blocked/actionable-local-findings to eligible/local-stage-terminal with the finding retained as rebutted
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 318: Rescue the stranded upstream-add-session-numbering planning task
+
+**Date**: 2026-08-07
+**Task**: Rescue the stranded upstream-add-session-numbering planning task
+**Branch**: `chore/task-upstream-add-session-numbering`
+
+### Summary
+
+The 222-line PRD for upstream session numbering existed nowhere in the repository except on a branch sitting 18 commits behind main, unpushed and with no PR. This publishes it. The PRD documents three upstream add_session.py defects with file and line evidence: the session number is derived from the working tree rather than from published history, so two concurrent sessions mint the same number (D1, add_session.py:482, get_current_session at :96); the Main Changes section is unfillable by the generator itself (D2, generate_session_content at :205); and the commit table is emitted without resolving commit subjects (D3). Also retags the quoted add_session.py excerpts from python to text, because the local review provider read source quoted inside the PRD as this PR's own code and re-reported the three documented defects as new findings against the PRD.
+
+### Main Changes
+
+- Published .trellis/tasks/08-06-upstream-add-session-numbering with its 222-line PRD, task.json, and both spec manifests
+- Retagged three fenced blocks from python to text so quoted upstream source is not read as this PR's code
+- Merged main to drop the rebuttal-channel payload delta this branch had carried, leaving the diff at four task files
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ba784960` | chore(task): add upstream-add-session-numbering planning task |
+| `9668c73a` | docs(task): tag quoted add_session.py excerpts as text, not python |
+
+### Testing
+
+- [OK] git diff --stat origin/main...HEAD returns only the four task-directory files, 254 insertions
+- [OK] every add_session.py path and line cited in the PRD verified against the upstream file
+- [OK] the three local-provider findings at prd.md:21/54/94 cleared after the fence retag
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 319: Close three helper defaults that fight the pack's own gates
+
+**Date**: 2026-08-07
+**Task**: Close three helper defaults that fight the pack's own gates
+**Branch**: `fix/pack-helper-defaults-and-guards`
+
+### Summary
+
+Three shipped helpers each produced a wrong or destructive result on their documented invocation, all surfaced in one downstream shipping session. record-session without --commit wrote add_session.py's planning-session placeholder, which the final-bundle validator then rejected with journal_commit_missing: the documented command produced an artifact the documented validator always refuses. It now derives the unrecorded work commits on HEAD, stopping at the first commit a journal already cites and skipping commits confined to .trellis/workspace, and declines whenever the answer is not obvious. pr-eligibility never derived a repository slug, reporting github_repository_unavailable with a diagnostic claiming an attempt that never happened, on every repository with an SSH remote; it now derives from git remote get-url with a parser held to byte-for-byte parity with the housekeeping.sh shell twin. review-learnings rendered its managed block wholesale from whatever GitHub scope the run requested, so --github-pr N, the form sd-ship Stage 2b prescribes, replaced a repository-wide snapshot with one PR's clusters; a narrowing update is now refused by name, with --allow-narrowing to accept it deliberately. Merged main and reconciled the release: this branch had claimed 0.64.25, which 0.64.26 took while PR #355 merged, so the entry is republished as 0.64.27.
+
+### Main Changes
+
+- record-session: derive unrecorded work commits when --commit is omitted, bounded by the last cited commit and excluding .trellis/workspace-only commits; --commit - still asserts genuinely none
+- pr-eligibility: derive the GitHub slug from git remote get-url with byte-for-byte parity to housekeeping.sh's github_repo_from_remote_url, and report the derived slug as evidence
+- review-learnings: refuse an update that would delete clusters already in the tracked snapshot, naming them, with --allow-narrowing as the deliberate override; scan and --dry-run unaffected
+- Merged origin/main and resolved seven version-bearing conflicts, republishing the entry as 0.64.27 after 0.64.26 was taken
+- Regenerated docs/fleet/candidate-validation.json against every fleet consumer for the changed payload
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6559ac89` | fix: close three helper defaults that fight the pack's own gates |
+| `237805e3` | docs: record the narrowing guard and refresh generated evidence |
+| `45d7a12a` | chore(release): bump to 0.64.25 for the helper-default fixes |
+
+### Testing
+
+- [OK] full unit suite: Ran 1603 tests, OK
+- [OK] release version gate: manifest 0.64.26 -> 0.64.27 with matching top heading '## 0.64.27 - 2026-08-07'
+- [OK] candidate ledger: valid for the current pack payload and fleet
+- [OK] template twin pairs compared: 205; shipped-surface closure clean across 48 changed paths
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 320: File three fail-open defects found auditing hoa-manager
+
+**Date**: 2026-08-07
+**Task**: File three fail-open defects found auditing hoa-manager
+**Branch**: `chore/file-hoa-manager-fail-open-defects`
+
+### Summary
+
+Filed three Trellis defect tasks recording fail-open behaviour found while auditing the hoa-manager consumer, including the P1 work-loop start path that discards a stopped run's ledger.
+
+### Main Changes
+
+- Filed work-loop-start-discards-stopped-ledger (P1): start gates every resume path on status in {active, paused}, so a stopped run silently overwrites the ledger.
+- Filed preflight-manifest-lane-zero-inspected: the manifest lane reports success with zero files inspected.
+- Filed review-learnings-unqueried-absence-claim: absence is claimed from a query that never ran.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b7a4afd891aadc0a8c2104c0df413ea89618da3c` | chore(task): file three fail-open defects found auditing hoa-manager |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 321: File the codex review round-budget increase
+
+**Date**: 2026-08-07
+**Task**: File the codex review round-budget increase
+**Branch**: `chore/file-codex-review-round-budget`
+
+### Summary
+
+Filed a Trellis task to raise the planning adversarial-review budget from three automatic rounds to five and to make exhaustion a request for permission to continue rather than a mandatory stop.
+
+### Main Changes
+
+- Filed 08-07-codex-review-round-budget with the five-round budget, the permission-to-continue exit, and the per-request scoping rule.
+- Recorded the journal-6.md:1411 honesty caveat as evidence the three-round cap already bound before convergence, shipping a change the Codex lane never saw.
+- Kept the material-conflict escalation and the unresolved-blocker gate explicitly unchanged.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d9b1b926bab86b79b8256958d24287295e99481e` | fix(task): target main, not the filing branch |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 322: Integrate main into the codex round-budget filing branch
+
+**Date**: 2026-08-07
+**Task**: Integrate main into the codex round-budget filing branch
+**Branch**: `chore/file-codex-review-round-budget`
+
+### Summary
+
+Merged main into chore/file-codex-review-round-budget and resolved a live session-number collision: both branches had independently claimed Session 320, the exact defect filed as upstream-add-session-numbering.
+
+### Main Changes
+
+- Renumbered this branch's entry to Session 321 and kept main's Session 320 intact, in both the journal and the sibling index.
+- Reconstructed both sessions' Git Commits, Testing, and Status blocks, which the append collision had merged into one shared tail.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1c6faf5b` | chore(task): file the codex review round-budget increase |
+| `d9b1b926` | fix(task): target main, not the filing branch |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 323: File the sd-status worktree blind spot
+
+**Date**: 2026-08-07
+**Task**: File the sd-status worktree blind spot
+**Branch**: `chore/file-status-worktree-invisibility`
+
+### Summary
+
+Filed a Trellis task recording that the sd-status collector has no worktree inventory, so a branch checked out in another worktree is indistinguishable from a free one.
+
+### Main Changes
+
+- Filed 08-07-status-worktree-invisibility: grep for worktree in the status collector returns zero matches, and its only nearby path delegates to a receipt-scoped classifier that deliberately ignores foreign worktrees.
+- Kept the recovery-artifacts ownership semantics explicitly unchanged; the task adds a separate read-only inventory rather than adopting artifacts.
+- Retagged the PRD's fenced blocks to text after review, matching the repository convention that keeps quoted evidence from being read as the PR's own code.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a8ed88a7` | chore(task): file the sd-status worktree blind spot |
+| `82970640` | chore(task): retag PRD fences to text |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 324: File the missing task.py rename command
+
+**Date**: 2026-08-07
+**Task**: File the missing task.py rename command
+**Branch**: `chore/file-upstream-task-rename`
+
+### Summary
+
+Filed a Trellis task for a task.py rename subcommand, after renaming a task by hand exposed that linkage fields store directory names while id stores the slug.
+
+### Main Changes
+
+- Filed 08-07-upstream-task-rename: renaming means git mv plus rewriting task.json id, name, and title and the prd.md H1, with parent and children storing directory names so every reference dangles.
+- Recorded that validateBookkeepingTopology detects the breakage only later, at review or merge time, attributed to whatever change is in flight.
+- Retagged the PRD's json fence to text preventively, the same class as the review finding on the worktree-visibility PR.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `06df9e51` | chore(task): file the missing task.py rename command |
+| `8bcb4054` | chore(task): retag PRD fences to text |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 325: File the uncurated task-manifest gap
+
+**Date**: 2026-08-07
+**Task**: File the uncurated task-manifest gap
+**Branch**: `chore/file-task-context-never-curated`
+
+### Summary
+
+Filed a Trellis task recording that nothing ever requires a task's spec manifests to be curated, so sub-agents can dispatch with no spec context and no signal that they did.
+
+### Main Changes
+
+- Filed 08-07-task-context-manifests-never-curated, keeping the deliberate lone-scaffold preflight exemption intact and targeting the gap it leaves at every later boundary.
+- Measured the scale: 54 of 102 manifest files across 27 of 52 active task directories still carry the generated scaffold.
+- Recommended advisory surfacing plus a gate at task.py start, explicitly not at completion, which is the late failure the exemption was written to prevent.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6a0f47e1` | chore(task): file the uncurated task-manifest gap |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 326: Revert the sd-propose-pack-task rename and refile as an add-only planning bundle
+
+**Date**: 2026-08-08
+**Task**: Revert the sd-propose-pack-task rename and refile as an add-only planning bundle
+**Branch**: `chore/file-sd-submit-pack-task-v2`
+
+### Summary
+
+Refiled the sd-submit-pack-task planning task add-only after the rename blocked #361's planning bundle
+
+### Main Changes
+
+Filed `08-07-sd-submit-pack-task`: a command that files a new pack task or
+revises an existing one end to end -- private worktree, branch, task-directory
+edit, commit, push, PR -- without touching the caller's checkout.
+
+Replaces #361, which carried the same content but renamed the task directory
+mid-history. A planning bundle may not delete or move a task artifact, so that
+branch could not be finalized:
+
+    planning_task_deletion: commit 61280a44 deletes, renames, or copies a task artifact
+
+The net diff against main was add-only, but the gate reads per commit, and a
+revert commit is another rename. Since main has neither directory, the fix was
+a fresh add-only branch rather than a revert: original name restored across the
+directory, task.json id/name/title, the manifests, and the prd.md H1, with the
+update-mode requirements retained in full.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `699aabf8` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 327: Make third-party model reviewers opt-in rather than automatic on installation
+
+**Date**: 2026-08-08
+**Task**: Make third-party model reviewers opt-in rather than automatic on installation
+**Branch**: `chore/file-plugin-review-lanes`
+
+### Summary
+
+Promoted opt-in to normative requirements 15-22 and closed the requiredProviders bypass
+
+### Main Changes
+
+Made third-party model reviewers opt-in rather than automatic on installation.
+Promoted opt-in from a recommendation in "Open decisions" to normative
+requirements 15-22 in `08-07-plugin-review-provider-lanes`.
+
+The mechanism is grounded in verified code rather than proposed from scratch.
+Shipping the providers `enabled: false` does not work: eligibility filters on
+`enabled` before every selection branch (`review-local.py:1214`), so a disabled
+provider is unreachable rather than off-by-default, and `local=gemini` raises
+`requested local provider is unavailable or ineligible` instead of reviewing.
+`enabled` conflates permission with default selection; opt-in needs them split.
+
+One hole would have made the whole mechanism decorative:
+`selected.extend(by_id[item] for item in required ...)` at `:1276` force-adds
+`policy.requiredProviders` after every selection branch, so an opt-in provider
+named there runs on every review regardless. Requirement 21 rejects that
+combination during configuration validation.
+
+The Codex adversarial lane found two blocking issues in the first draft, both
+confirmed and fixed. The sharpest: the draft made `allowedDataHandling` both
+the default-deny consent switch and an un-widenable ceiling, which makes the
+per-machine overlay impossible to use -- the only way to opt in would be
+editing the fleet-propagated file the overlay exists to avoid. A ceiling and a
+default-off switch cannot be the same field, so `allowedDataHandling` stays a
+prohibition with unchanged defaults and consent moved to the default-selection
+property and the overlay. It also caught that "byte-identical receipts" is
+unsatisfiable once `_digest(config)` changes.
+
+That lane's first run returned a Trellis triage question instead of a review --
+the repository's own SessionStart rule hijacked the prompt. It is prompt-
+fragile and worth knowing about.
+
+Recorded two cross-cutting findings. `08-07-default-local-review-lanes` (#364)
+contradicts opt-in as written: its R1 gives codex `costTier: "none"` so it is
+selected ahead of everything on cost, and its AC5/AC6 require execution on
+presence alone. Flagged on that PR. Separately, two Codex lanes already ship
+this behaviour -- `planning-adversarial-review.md:42` and
+`sd-review-local/SKILL.md:166` -- gated on `command -v codex` with no consent
+check, across 15 tracked paths including templates mirrors, docs, and tests.
+That needs its own task and is recorded as out of scope here.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a669d9c0` | (see git log) |
+| `5221ca18` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
