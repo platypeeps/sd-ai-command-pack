@@ -203,7 +203,12 @@ def existing_session_journals(journals: list[Path], title: str) -> list[Path]:
 
 
 def replace_section(block: str, heading: str, lines: list[str]) -> str | None:
-    """Replace the body under `heading` in the session block; None if absent."""
+    """Replace the body under `heading` in the session block; None if absent.
+
+    Trellis <=0.6.7 always scaffolds every section heading; >=0.6.14 omits a
+    section entirely when it has no content, so absence is an expected layout
+    difference handled by ``replace_or_insert_section``, not an error here.
+    """
     head = f"{heading}\n"
     start = block.find(head)
     if start == -1:
@@ -213,6 +218,14 @@ def replace_section(block: str, heading: str, lines: list[str]) -> str | None:
     if end == -1:
         end = len(block)
     return block[:body_at] + "\n" + "\n".join(lines) + "\n" + block[end:]
+
+
+def replace_or_insert_section(block: str, heading: str, lines: list[str]) -> str:
+    """Replace the section body, or append the whole section when absent."""
+    patched = replace_section(block, heading, lines)
+    if patched is not None:
+        return patched
+    return block.rstrip("\n") + f"\n\n{heading}\n\n" + "\n".join(lines) + "\n"
 
 
 def patch_last_session(
@@ -257,16 +270,14 @@ def patch_last_session(
 
         block = row_re.sub(_row_replacement, block, count=1)
 
-    patched = replace_section(block, "### Testing", tests)
-    if patched is None:
-        return f"missing Testing section in the new entry in {journal}"
-    block = patched
+    # Trellis >=0.6.14 omits sections that were scaffolded empty by <=0.6.7,
+    # so insert the section when the heading is absent instead of failing.
+    # Testing is patched before Next Steps so an insertion of both keeps the
+    # upstream section order (Testing above Next Steps).
+    block = replace_or_insert_section(block, "### Testing", tests)
 
     if next_steps:
-        patched = replace_section(block, "### Next Steps", next_steps)
-        if patched is None:
-            return f"missing Next Steps section in the new entry in {journal}"
-        block = patched
+        block = replace_or_insert_section(block, "### Next Steps", next_steps)
 
     remaining = [p for p in PLACEHOLDERS if p in block]
     if remaining:

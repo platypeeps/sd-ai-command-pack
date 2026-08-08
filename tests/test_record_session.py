@@ -755,15 +755,19 @@ class RecordSessionTests(InstallTestCase):
         variant = root / ".trellis/scripts/add_session.py"
         source = variant.read_text(encoding="utf-8")
         self.assertIn("(see git log)", source)
+        source = source.replace("(see git log)", "prefilled subject")
+        # Trellis <=0.6.7 seeds a DEFAULT_TESTING placeholder the variant
+        # rewords; >=0.6.14 omits empty sections and has no such constant.
         current_testing_default = (
             'DEFAULT_TESTING = "- Validation was not recorded for this session."'
         )
         variant_testing_default = (
             'DEFAULT_TESTING = "- Validation not recorded for this session."'
         )
-        self.assertIn(current_testing_default, source)
-        source = source.replace("(see git log)", "prefilled subject")
-        source = source.replace(current_testing_default, variant_testing_default)
+        if current_testing_default in source:
+            source = source.replace(
+                current_testing_default, variant_testing_default
+            )
         variant.write_text(source, encoding="utf-8")
 
         def run(*args: str) -> subprocess.CompletedProcess:
