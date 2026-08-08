@@ -2,7 +2,7 @@
   "id": "work-loop-stop-after-pause",
   "name": "work-loop-stop-after-pause",
   "title": "work-loop stop and reconcile fail on a run whose lock was already released",
-  "description": "",
+  "description": "pause releases the work-loop ownership lock by design, but stop and reconcile reached require_lock through mutate_state and demanded one back, so a paused run could not be stopped and the documented reconcile recovery route could not be walked. mutate_state now takes released_lock_statuses and those two commands pass it.",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,
