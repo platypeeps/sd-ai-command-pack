@@ -920,3 +920,39 @@ Filed a Trellis task for a task.py rename subcommand, after renaming a task by h
 ### Next Steps
 
 - None - task complete
+
+
+## Session 325: File the uncurated task-manifest gap
+
+**Date**: 2026-08-07
+**Task**: File the uncurated task-manifest gap
+**Branch**: `chore/file-task-context-never-curated`
+
+### Summary
+
+Filed a Trellis task recording that nothing ever requires a task's spec manifests to be curated, so sub-agents can dispatch with no spec context and no signal that they did.
+
+### Main Changes
+
+- Filed 08-07-task-context-manifests-never-curated, keeping the deliberate lone-scaffold preflight exemption intact and targeting the gap it leaves at every later boundary.
+- Measured the scale: 54 of 102 manifest files across 27 of 52 active task directories still carry the generated scaffold.
+- Recommended advisory surfacing plus a gate at task.py start, explicitly not at completion, which is the late failure the exemption was written to prevent.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6a0f47e1` | chore(task): file the uncurated task-manifest gap |
+
+### Testing
+
+- [OK] planning-only change; no executable payload touched
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
